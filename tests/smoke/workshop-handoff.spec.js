@@ -33,10 +33,12 @@ test('Workshop consumes retained source after navigation with a fresh Authoring 
     source.archives[0].bytes = Uint8Array.from(source.archives[0].bytes);
     return createWorkshopHandoffStore().save(source);
   }, source());
+  // Leave the storage-origin document before opening the handoff. Changing
+  // only its fragment is same-document navigation and does not boot Workshop.
+  await page.goto('about:blank');
   await page.goto(`/workshop.html#source=${token}`);
-  // The smoke static server canonicalizes .html paths; both delivery forms
-  // must discard the one-use token after consuming it.
-  await expect(page).toHaveURL(/\/workshop(?:\.html)?$/);
+  // The newly mounted document must discard the token after consuming it.
+  await expect(page).toHaveURL(/\/workshop\.html$/);
   await page.locator('#workshop-files').selectOption(WORKSHOP_WORLD);
   await expect(page.locator('#workshop-source')).toHaveValue(WORKSHOP_WORLD_TEXT.replaceAll('\r\n', '\n'));
   await expect(page.locator('#workshop-undo')).toBeDisabled();

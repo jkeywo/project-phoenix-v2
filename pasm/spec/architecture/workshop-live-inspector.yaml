@@ -160,6 +160,7 @@ entities:
         - "[ai] Every window.__host* GM write is bound to a refusal rather than left undefined. An undefined global crashes a panel on first press and leaves 'can this mutate the run?' answerable only by reading every panel; one list answers it, and a Test that somehow acquired a route fails a test rather than quietly working."
         - "[ai] The surface follows the RUNTIME's reported view, never the request that asked for it, so a refused switch cannot leave the page claiming a view the run is not drawing. The runtime refuses a ship the run does not have."
         - "[ai] For an authored multi-ship world, Test selects one controlled ship slot and one of its allowed hulls. The ordinary reservation freeze launches every other Backfill slot and omits Absent slots. The existing observer selector reads every present player ship in the disposable run, while selection of another controlled slot requires a new Test. Legacy available_ships worlds retain the one-ship selection and source bytes."
+        - "[ai] Issue #1558 sends ship-slot changes through the runtime exact-source Edit operation and the shared Workshop acceptance owner. The form plans only changed scalar and offer operations; retained hull tables keep their labels, comments and source spelling. The runtime restores the source BOM before matching unchanged line endings. Hull eligibility comes from the ordinary composed Test catalogue over captured base, ordered packs and draft, with the winning source labelled in the form; dependencies remain immutable and are not copied into the editable archive. A shared form-request fixture exercises real runtime edits and native save/reload into Test, including claimed, Backfill and Absent slots."
         - "[ai] The omniscient view is mounted ISOLATED. The ordinary GM workspace fetches the private-feedback manifest, the cue catalogue and every sample they name the moment it mounts — project assets outside the capture, which the Test isolation smoke spec caught in CI. An isolated mount gives feedback audio a silent output with no manifest and mounts no audition; every projection panel is unchanged, so the view stays the real console rather than a trimmed copy."
     architecture:
       kind: presentation-adapter
@@ -178,6 +179,7 @@ entities:
         - gui/workshop-test-panel.js
         - editor/workshop-test-runtime.js
         - editor/workshop-slot-authoring.js
+        - editor/workshop-acceptance.js
         - gui/workshop-slot-authoring-panel.js
         - editor/workshop-test-child.js
         - scripts/gm-console-markup.mjs
@@ -189,6 +191,7 @@ entities:
         - npx vitest run tests/client/workshop-test-view.test.js
         - npx vitest run editor/tests/workshop-test-child.test.js tests/client/workshop-test-panel.test.js
         - npx vitest run editor/tests/workshop-slot-authoring.test.js tests/client/workshop-slot-authoring-panel.test.js
+        - cargo test --lib --features host workshop_slot_form
 
   - component: workshop-test-script-trace
     core:

@@ -323,8 +323,13 @@ pub fn edit(source: &str, request: &EditRequest) -> Result<String, String> {
     for edit in &request.edits {
         apply(&mut document, &request.document_path, edit)?;
     }
-    let result =
-        keep_final_newline_convention(source, restore_line_endings(source, &document.to_string()));
+    let mut emitted = document.to_string();
+    // toml_edit consumes a source BOM. Restore it before line matching, or the
+    // unchanged first line also loses its own newline convention.
+    if source.starts_with('\u{feff}') && !emitted.starts_with('\u{feff}') {
+        emitted.insert(0, '\u{feff}');
+    }
+    let result = keep_final_newline_convention(source, restore_line_endings(source, &emitted));
     Document::parse(result.as_str()).map_err(|error| error.to_string())?;
     Ok(result)
 }
@@ -923,6 +928,31 @@ mod tests {
 
     fn key(text: &str) -> Segment {
         Segment::Key(text.into())
+    }
+
+    #[test]
+    fn workshop_slot_form_requests_preserve_exact_source() {
+        for (name, request) in crate::core::codec::workshop_slot_edit_fixtures() {
+            let source = &request.expected_source;
+            let after = edit(source, &request).unwrap();
+            if name == "label" {
+                assert_eq!(
+                    after,
+                    source.replace(
+                        "label='Original' # label tail\r\n",
+                        "label=\"Changed\" # label tail\n"
+                    )
+                );
+            } else {
+                assert!(after.starts_with(source));
+                let world = crate::world::config::parse_world(&after).unwrap();
+                assert_eq!(world.ship_slots[2].id, "wing");
+                assert_eq!(
+                    world.ship_slots[2].ships[0].template_path,
+                    "assets/entities/base.toml"
+                );
+            }
+        }
     }
 
     fn request(document_path: &str, source: &str, edits: Vec<Edit>) -> EditRequest {

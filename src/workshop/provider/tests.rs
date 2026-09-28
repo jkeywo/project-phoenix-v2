@@ -1316,6 +1316,105 @@ const TEST_HULL: &str = "class='lancer'\nname='Test hull'\n\
 [[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
 
 #[test]
+fn workshop_slot_form_dependency_hull_survives_native_save_reload_and_test() {
+    let fixture = Fixture::new();
+    fs::remove_file(fixture.root.join("assets/scenarios.toml")).unwrap();
+    fs::write(fixture.root.join("scenarios.toml"), "[pack]\nformat=1\nid='slot-test'\nversion='1.0.0'\nname='Slots'\n[pack.requires]\ncontent_id='phoenix-base'\ncontent_epoch=1\n[[scenario]]\nid='mission'\nworld='assets/worlds/mission.toml'\n").unwrap();
+    let (_, request) = crate::core::codec::workshop_slot_edit_fixtures()
+        .into_iter()
+        .find(|(name, _)| name == "add")
+        .unwrap();
+    fs::write(
+        fixture.root.join(&request.document_path),
+        &request.expected_source,
+    )
+    .unwrap();
+    let dependencies = WorkshopDependencies {
+        base_files: BTreeMap::from([
+            (
+                "assets/scenarios.toml".into(),
+                "[content]\nid='phoenix-base'\nepoch=1\n".into(),
+            ),
+            (
+                "assets/entities/base.toml".into(),
+                "includes=['fragment.toml']\ntags=['ship']\nclass='lancer'\n".into(),
+            ),
+            (
+                "assets/entities/fragment.toml".into(),
+                TEST_HULL.replacen("class='lancer'\n", "", 1),
+            ),
+        ]),
+        ..Default::default()
+    };
+    let mut provider = NativeWorkshopProvider::open(
+        WorkspaceKind::Mod,
+        &fixture.root,
+        &fixture.recovery,
+        dependencies.clone(),
+    )
+    .unwrap();
+    let after = document::edit(&request.expected_source, &request).unwrap();
+    let mut files = provider.baseline.clone();
+    files.insert(request.document_path.clone(), after.as_bytes().to_vec());
+    let saved = provider
+        .apply(Operation::Save {
+            files,
+            expected_revision: provider.revision.clone(),
+        })
+        .unwrap();
+    assert!(matches!(saved, Response::Saved { .. }), "{saved:?}");
+    drop(provider);
+    let provider = NativeWorkshopProvider::open(
+        WorkspaceKind::Mod,
+        &fixture.root,
+        &fixture.recovery,
+        dependencies,
+    )
+    .unwrap();
+    assert_eq!(provider.baseline[&request.document_path], after.as_bytes());
+    assert!(!provider.baseline.contains_key("assets/entities/base.toml"));
+    assert!(!fixture.root.join("assets/entities/base.toml").exists());
+    let sources = provider.assets.compact(&provider.baseline).unwrap();
+    let catalog = provider
+        .test_catalog(BTreeMap::from([(request.document_path.clone(), after)]))
+        .unwrap();
+    assert_eq!(catalog.ships, ["assets/entities/base.toml"]);
+    assert_eq!(
+        catalog.slots[&request.document_path][0].ships,
+        ["assets/entities/base.toml"]
+    );
+    let selection = crate::workshop::test_protocol::TestSelection {
+        world: request.document_path,
+        slot: Some("wing".into()),
+        ship: "assets/entities/base.toml".into(),
+        seed: 42,
+    };
+    let captured = provider
+        .prepare_test(sources, selection.clone(), None)
+        .unwrap();
+    let world = crate::world::config::parse_world(
+        std::str::from_utf8(&captured.files[&selection.world]).unwrap(),
+    )
+    .unwrap();
+    let roster = crate::ship_slots::FrozenShipSlots::for_workshop_test(
+        &world.ship_slots,
+        "wing",
+        &selection.ship,
+    )
+    .unwrap();
+    assert_eq!(roster.0.len(), 2);
+    assert_eq!(roster.0[0].slot_id, "support");
+    assert_eq!(
+        roster.0[0].source,
+        crate::ship_slots::LaunchSource::Backfill
+    );
+    assert_eq!(roster.0[1].slot_id, "wing");
+    assert_eq!(roster.0[1].source, crate::ship_slots::LaunchSource::Claimed);
+    assert_eq!(roster.0[1].hull, selection.ship);
+    assert!(captured.files.contains_key("assets/entities/fragment.toml"));
+}
+
+#[test]
 fn test_catalog_resolves_read_only_hulls_and_unsaved_include_edits_without_binary_materialization()
 {
     let fixture = Fixture::new();

@@ -1,4 +1,4 @@
-import { applySlotOperation, inspectSlots, slotWorlds } from '../editor/workshop-slot-authoring.js';
+import { applySlotOperation, inspectSlots, slotWorlds, slotHullCatalogue } from '../editor/workshop-slot-authoring.js';
 import { has, t } from './strings.js';
 
 /** Exact-source mission ship slots, checked by the same runtime gate as Save. */
@@ -31,8 +31,13 @@ export function mountWorkshopSlotAuthoring({ root, provider, runtime, draft: get
     label(unclaimed, 'workshop.slot.unclaimed'), unclaimed, add, update, remove, status);
   if (attach) root.append(section);
 
-  let disposed = false, generation = 0;
-  const offered = () => (getDraft()?.paths() || []).filter(path => path.startsWith('assets/entities/') && path.endsWith('.toml'));
+  let disposed = false, generation = 0, catalogueGeneration = 0, hulls = [], cataloguePending = false;
+  let catalogueDraft = null, catalogueRevision = -1;
+  const hullLabel = path => {
+    const origin = hulls.find(hull => hull.path === path)?.origin;
+    return origin ? `${path} (${origin.kind === 'draft' ? t('workshop.entity.origin_draft')
+      : t('workshop.entity.origin_dependency', { origin: origin.id || 'base' })})` : path;
+  };
   const selectedRow = () => { try { return inspectSlots(getDraft(), world.value).find(row => row.id === slots.value); } catch { return null; } };
   function show(textId, refused = false, detail = '') {
     status.textContent = [t(textId), detail].filter(Boolean).join(' ');
@@ -40,17 +45,17 @@ export function mountWorkshopSlotAuthoring({ root, provider, runtime, draft: get
     if (refused) status.focus();
   }
   function controls() {
-    const held = busy() || !getDraft() || !world.value;
+    const held = busy() || cataloguePending || !getDraft() || !world.value;
     for (const control of section.querySelectorAll('input,select,button')) control.disabled = held;
     update.disabled = remove.disabled = held || !selectedRow();
   }
   function paintRow() {
     const row = selectedRow();
     id.value = row?.id || ''; name.value = row?.label || '';
-    const shipPaths = offered();
-    ships.replaceChildren(...shipPaths.map(path => option(path)));
+    const shipPaths = hulls.map(hull => hull.path);
+    ships.replaceChildren(...shipPaths.map(path => option(path, hullLabel(path))));
     for (const choice of ships.options) choice.selected = row?.ships.includes(choice.value) || false;
-    defaultShip.replaceChildren(...(row?.ships || shipPaths).map(path => option(path)));
+    defaultShip.replaceChildren(...(row?.ships || shipPaths).map(path => option(path, hullLabel(path))));
     defaultShip.value = row?.default_ship || defaultShip.options[0]?.value || '';
     unclaimed.value = row?.unclaimed || 'backfill';
     controls();
@@ -67,12 +72,30 @@ export function mountWorkshopSlotAuthoring({ root, provider, runtime, draft: get
     world.replaceChildren(...slotWorlds(getDraft()).map(path => option(path)));
     world.value = slotWorlds(getDraft()).includes(previous) ? previous : (world.options[0]?.value || '');
     paintSlots();
+    const draft = getDraft(), revision = draft?.sourceRevision;
+    if (draft === catalogueDraft && revision === catalogueRevision) return;
+    catalogueDraft = draft; catalogueRevision = revision;
+    const token = ++catalogueGeneration;
+    hulls = []; cataloguePending = Boolean(draft); paintRow();
+    if (!draft) return;
+    void slotHullCatalogue({ draft, provider, runtime }).then(value => {
+      if (disposed || token !== catalogueGeneration || getDraft() !== draft || draft.sourceRevision !== revision) return;
+      hulls = value; cataloguePending = false; paintRow();
+    }).catch(error => {
+      if (disposed || token !== catalogueGeneration || getDraft() !== draft || draft.sourceRevision !== revision) return;
+      catalogueDraft = null; catalogueRevision = -1;
+      cataloguePending = false; controls();
+      show('workshop.slot.refused', true, String(error?.message || error));
+    });
   }
-  function rowValue() { return { id: id.value.trim(), label: name.value.trim(),
-    ships: [...ships.selectedOptions].map(node => node.value), default_ship: defaultShip.value,
-    unclaimed: unclaimed.value }; }
+  function rowValue() {
+    const selected = [...ships.selectedOptions].map(node => node.value), prior = selectedRow()?.ships || [];
+    return { id: id.value.trim(), label: name.value.trim(),
+      ships: [...prior.filter(path => selected.includes(path)), ...selected.filter(path => !prior.includes(path))],
+      default_ship: defaultShip.value, unclaimed: unclaimed.value };
+  }
   async function apply(type) {
-    if (busy() || !getDraft() || !world.value) return;
+    if (busy() || cataloguePending || !getDraft() || !world.value) return;
     const draft = getDraft(), path = world.value, token = ++generation;
     const target = slots.value, operation = { type, target, row: rowValue() };
     if (type === 'remove' && !target) return;
@@ -92,8 +115,8 @@ export function mountWorkshopSlotAuthoring({ root, provider, runtime, draft: get
   slots.addEventListener('change', paintRow);
   ships.addEventListener('change', () => { const selected = [...ships.selectedOptions].map(node => node.value);
     const previous = defaultShip.value;
-    defaultShip.replaceChildren(...selected.map(path => option(path)));
+    defaultShip.replaceChildren(...selected.map(path => option(path, hullLabel(path))));
     defaultShip.value = selected.includes(previous) ? previous : (selected[0] || ''); });
   refresh();
-  return { node: section, refresh, dispose() { disposed = true; generation += 1; section.remove(); } };
+  return { node: section, refresh, dispose() { disposed = true; generation += 1; catalogueGeneration += 1; section.remove(); } };
 }

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "label",
+    "source": "﻿# Keep BOM\r\n[global]\ntitle='Fleet'\r\n[[ship_slot]] # lead\nid='lead'\r\n# slot comment\nlabel='Original' # label tail\r\ndefault_ship='assets/entities/base.toml'\n[[ship_slot.ships]] # offered\r\ntemplate_path='assets/entities/base.toml'\nlabel='Hull label' # preserve\r\n[[entity]]\nid='beacon'\ntemplate_path='assets/entities/beacon.toml'\n",
+    "operation": {"type":"update","target":"lead","row":{"id":"lead","label":"Changed","default_ship":"assets/entities/base.toml","ships":["assets/entities/base.toml"],"unclaimed":"backfill"}},
+    "edits": [{"op":"set","path":["ship_slot",0,"label"],"value_source":"\"Changed\""}]
+  },
+  {
+    "name": "add",
+    "source": "# Unchanged\r\n[global]\r\ntitle='Fleet'\r\n[[entity]]\r\nid='support-spawn'\r\ntemplate_path='assets/entities/base.toml'\r\nspawn_on='game_start'\r\n[[entity]]\r\nid='reserve-spawn'\r\ntemplate_path='assets/entities/base.toml'\r\nspawn_on='game_start'\r\n[[entity]]\r\nid='wing-spawn'\r\ntemplate_path='assets/entities/base.toml'\r\nspawn_on='game_start'\r\n[[ship_slot]]\r\nid='support'\r\ndefault_ship='assets/entities/base.toml'\r\nunclaimed='backfill'\r\n[[ship_slot.ships]]\r\ntemplate_path='assets/entities/base.toml'\r\n[[ship_slot]]\r\nid='reserve'\r\ndefault_ship='assets/entities/base.toml'\r\nunclaimed='absent'\r\n[[ship_slot.ships]]\r\ntemplate_path='assets/entities/base.toml'\r\n",
+    "operation": {"type":"add","row":{"id":"wing","label":"Wing","default_ship":"assets/entities/base.toml","ships":["assets/entities/base.toml"],"unclaimed":"absent"}},
+    "edits": [
+      {"op":"append_table","path":["ship_slot"],"fields":[["id","\"wing\""],["label","\"Wing\""],["default_ship","\"assets/entities/base.toml\""],["unclaimed","\"absent\""]]},
+      {"op":"append_table","path":["ship_slot",2,"ships"],"fields":[["template_path","\"assets/entities/base.toml\""]]}
+    ]
+  }
+]

@@ -248,6 +248,33 @@ pub fn decode_workshop_edit(value: &str) -> Result<crate::workshop::document::Ed
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
+pub fn workshop_slot_edit_fixtures() -> Vec<(String, crate::workshop::document::EditRequest)> {
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        name: String,
+        source: String,
+        edits: Vec<crate::workshop::document::Edit>,
+    }
+    let fixtures: Vec<Fixture> = serde_json::from_str(include_str!(
+        "../../tests/fixtures/workshop-slot-edits.json"
+    ))
+    .expect("valid shared Workshop slot fixtures");
+    fixtures
+        .into_iter()
+        .map(|fixture| {
+            (
+                fixture.name,
+                crate::workshop::document::EditRequest {
+                    document_path: "assets/worlds/mission.toml".into(),
+                    expected_source: fixture.source,
+                    edits: fixture.edits,
+                },
+            )
+        })
+        .collect()
+}
+
 /// The composition edit group a Workshop panel applies to one member (issue #1475).
 pub fn decode_workshop_composition_request(
     value: &str,

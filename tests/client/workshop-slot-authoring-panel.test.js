@@ -21,9 +21,19 @@ describe('Workshop slot editor controls', () => {
   afterEach(() => mounted?.dispose());
   it('edits an authored slot with labelled keyboard controls and runtime checked feedback', async () => {
     document.body.innerHTML = '<main id="root"></main>';
-    const current = draft(), changed = vi.fn(), runtime = { validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
+    const current = draft(), changed = vi.fn(), runtime = {
+      dependencies: async () => ({ base_files: {}, packs: [] }), testCatalog: async () => ({ ships: [lead, wing] }),
+      edit: vi.fn(async (_source, request) => {
+        expect(request.edits).toEqual([
+          { op: 'set', path: ['ship_slot', 0, 'default_ship'], value_source: JSON.stringify(wing) },
+          { op: 'put', path: ['ship_slot', 0, 'unclaimed'], value_source: '"absent"' },
+          { op: 'append_table', path: ['ship_slot', 0, 'ships'], fields: [['template_path', JSON.stringify(wing)]] },
+        ]);
+        return `[global]\ntitle='Fleet'\n[[ship_slot]]\nid='lead'\ndefault_ship = "${wing}"\nunclaimed = "absent"\n[[ship_slot.ships]]\ntemplate_path='${lead}'\n[[ship_slot.ships]]\ntemplate_path='${wing}'\n`;
+      }), validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
     mounted = mountWorkshopSlotAuthoring({ root: document.getElementById('root'), draft: () => current,
       runtime, busy: () => false, setBusy: vi.fn(), changed });
+    await eventually(() => expect(document.getElementById('workshop-slot-ships').options).toHaveLength(2));
     for (const input of document.querySelectorAll('#workshop-slot-authoring input,#workshop-slot-authoring select')) {
       expect(document.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
     }
@@ -38,5 +48,35 @@ describe('Workshop slot editor controls', () => {
     expect(current.read(world)).toContain('unclaimed = "absent"');
     expect(runtime.validate).toHaveBeenCalledOnce();
     expect(document.getElementById('workshop-slot-status').getAttribute('role')).toBe('status');
+  });
+
+  it('shows base and retained-pack hull origins from runtime eligibility without copying them', async () => {
+    document.body.innerHTML = '<main id="root"></main>';
+    const current = draft(), base = 'assets/entities/base.toml', retained = 'assets/entities/retained.toml';
+    const runtime = { dependencies: async () => ({ base_files: { [base]: 'class="lancer"' },
+      packs: [{ id: 'retained-pack', files: { [retained]: 'includes=["base.toml"]' } }] }),
+    testCatalog: async () => ({ ships: [base, retained] }) };
+    mounted = mountWorkshopSlotAuthoring({ root: document.getElementById('root'), draft: () => current,
+      runtime, busy: () => false, setBusy() {} });
+    await eventually(() => expect(document.getElementById('workshop-slot-ships').options).toHaveLength(2));
+    const choices = [...document.getElementById('workshop-slot-ships').options];
+    expect(choices.map(option => option.value)).toEqual([base, retained]);
+    expect(choices[0].textContent).toContain('base');
+    expect(choices[1].textContent).toContain('retained-pack');
+    expect(current.paths()).not.toContain(base);
+    expect(current.canUndo()).toBe(false);
+  });
+
+  it('retries a failed catalogue on refresh without requiring a source edit', async () => {
+    document.body.innerHTML = '<main id="root"></main>';
+    const current = draft(), runtime = { dependencies: async () => ({ base_files: {}, packs: [] }),
+      testCatalog: vi.fn().mockRejectedValueOnce(new Error('temporary catalogue failure')).mockResolvedValue({ ships: [lead, wing] }) };
+    mounted = mountWorkshopSlotAuthoring({ root: document.getElementById('root'), draft: () => current,
+      runtime, busy: () => false, setBusy() {} });
+    await eventually(() => expect(document.getElementById('workshop-slot-status').textContent).toContain('temporary catalogue failure'));
+    mounted.refresh();
+    await eventually(() => expect(document.getElementById('workshop-slot-ships').options).toHaveLength(2));
+    expect(document.getElementById('workshop-slot-ships').disabled).toBe(false);
+    expect(current.canUndo()).toBe(false);
   });
 });

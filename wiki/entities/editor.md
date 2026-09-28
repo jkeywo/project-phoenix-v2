@@ -197,7 +197,11 @@ than a separate Workshop mock.
 
 The mission ship slot panel in `gui/workshop-slot-authoring-panel.js` edits the
 selected world source through `editor/workshop-slot-authoring.js`. It validates a
-candidate with the ordinary Workshop runtime before recording one undo entry.
+candidate through the shared acceptance owner before recording one undo entry.
+The runtime exact-source editor changes only selected fields and offers, retaining
+comments, BOMs, unchanged line endings and per-hull labels (#1558). The hull list
+uses Test's composed runtime catalogue and labels each winning draft, base or
+retained-pack source; selecting a dependency hull does not copy it into the draft.
 The Test catalogue in `src/workshop/test_source.rs` exposes each authored
 slot's hull choices; `src/ship_slots.rs` freezes one Test-controlled slot and
 the other slots' Backfill or Absent decisions. Browser and native Test adapters
@@ -477,10 +481,11 @@ mounted, while every projection panel is unchanged.
 
 The surface follows the runtime's reported view rather than the request that
 asked for it, so a refused switch cannot leave the page claiming a view the run
-is not drawing; the runtime refuses a ship the run does not have. A Test today
-has one player ship, because the disposable boot keeps the default solo roster —
-multi-ship Test authoring is #1153 — but the selector reads whatever player
-ships the run actually has, so it needs no change when that arrives.
+is not drawing; the runtime refuses a ship the run does not have. In an authored
+multi-ship world, Test controls the selected slot and hull. The ordinary roster
+freeze launches the other Backfill slots and omits Absent slots. The observer
+selector lists every present player ship; changing the controlled slot starts a
+new Test. Legacy worlds retain their single-hull Test selection.
 
 The same captured run supplies its exact unsaved `[[gm_role_preset]]` and typed
 widget descriptors through `wasm_get_gm_role_presets`, the export used by the

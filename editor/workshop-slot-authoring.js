@@ -1,8 +1,10 @@
 import { parse } from 'smol-toml';
-import { WorkshopDocument } from './workshop-document.js';
+import { acceptWorkshopChanges } from './workshop-acceptance.js';
 
 const quote = value => JSON.stringify(String(value));
-const nlOf = text => text.includes('\r\n') ? '\r\n' : '\n';
+const parseWorld = source => parse(source.replace(/^\uFEFF/, ''));
+const textMembers = draft => Object.fromEntries(draft.paths().filter(path => /\.(toml|rhai)$/.test(path) && typeof draft.read(path) === 'string')
+  .map(path => [path, draft.read(path)]));
 
 export function slotWorlds(draft) {
   return (draft?.paths() || []).filter(path => path.startsWith('assets/worlds/') && path.endsWith('.toml')
@@ -10,95 +12,87 @@ export function slotWorlds(draft) {
 }
 
 export function inspectSlots(draft, path) {
-  const world = parse(draft.read(path));
+  const world = parseWorld(draft.read(path));
   return (world.ship_slot || []).map(slot => ({ id: slot.id, label: slot.label || '',
     ships: (slot.ships || []).map(ship => ship.template_path), default_ship: slot.default_ship,
     unclaimed: slot.unclaimed || 'backfill' }));
 }
 
-function tableHeaders(source) {
-  const headers = [];
-  let mode = 'normal', offset = 0;
-  for (const line of source.split(/(?<=\n)/)) {
-    if (mode === 'normal') {
-      const header = line.trimEnd().match(/^[ \t]*(?:\[\[([^\]\r\n]+)\]\]|\[([^\]\r\n]+)\])(?:[ \t]*(?:#.*)?)?$/);
-      if (header) headers.push({ name: header[1] || header[2], start: offset });
+/** Eligibility is the ordinary Test catalogue's composed runtime answer.
+ * Origins describe the winning source, never grant editing rights to it. */
+export async function slotHullCatalogue({ draft, provider, runtime, dependencies }) {
+  const files = textMembers(draft), project = draft.kind === 'project';
+  const source = dependencies || await runtime.dependencies();
+  const effective = {}, origins = new Map();
+  const add = (members, origin) => {
+    for (const [path, text] of Object.entries(members || {})) {
+      if (typeof text !== 'string') continue;
+      effective[path] = text; origins.set(path, origin);
     }
-    for (let i = 0; i < line.length; i += 1) {
-      const three = line.slice(i, i + 3), char = line[i];
-      if (mode === 'normal') {
-        if (char === '#') break;
-        if (three === '"""') { mode = 'multi-basic'; i += 2; }
-        else if (three === "'''") { mode = 'multi-literal'; i += 2; }
-        else if (char === '"') mode = 'basic';
-        else if (char === "'") mode = 'literal';
-      } else if (mode === 'basic') {
-        if (char === '\\') i += 1;
-        else if (char === '"') mode = 'normal';
-      } else if (mode === 'literal') {
-        if (char === "'") mode = 'normal';
-      } else if (mode === 'multi-basic') {
-        if (char === '\\') i += 1;
-        else if (three === '"""') { mode = 'normal'; i += 2; }
-      } else if (three === "'''") { mode = 'normal'; i += 2; }
-    }
-    offset += line.length;
+  };
+  if (!project) {
+    add(source.base_files, { kind: 'base' });
+    for (const pack of source.packs || []) add(pack.files, { kind: 'pack', id: pack.id });
   }
-  return headers;
+  add(files, { kind: 'draft' });
+  const catalog = provider?.test?.catalog ? await provider.test.catalog(files) : await runtime.testCatalog(effective);
+  return catalog.ships.filter(path => origins.has(path)).map(path => ({ path, origin: origins.get(path) }));
 }
 
-function slotRanges(source) {
-  const headers = tableHeaders(source);
-  return headers.filter(row => row.name === 'ship_slot').map(row => ({ start: row.start,
-    end: headers.find(next => next.start > row.start && next.name !== 'ship_slot.ships')?.start ?? source.length }));
-}
-
-function renderSlot(row, nl, priorOffers = []) {
-  const lines = ['[[ship_slot]]', `id = ${quote(row.id)}`];
-  if (row.label) lines.push(`label = ${quote(row.label)}`);
-  lines.push(`default_ship = ${quote(row.default_ship)}`, `unclaimed = ${quote(row.unclaimed)}`);
-  for (const path of row.ships) {
-    lines.push('', '[[ship_slot.ships]]', `template_path = ${quote(path)}`);
-    const prior = priorOffers.find(offer => offer.template_path === path);
-    if (prior?.label) lines.push(`label = ${quote(prior.label)}`);
-  }
-  return lines.join(nl) + nl + nl;
-}
-
-export function prepareSlotOperation(draft, path, operation) {
+/** Plan semantic changes only. The runtime's exact-source editor owns all TOML
+ * spans, quoting, comments and line endings; unchanged fields have no edit. */
+export function prepareSlotOperation(draft, path, operation, hulls) {
   const before = draft.read(path);
   if (typeof before !== 'string') throw new Error('workshop.slot.error_world');
-  const parsed = parse(before);
-  const existing = inspectSlots(draft, path), ranges = slotRanges(before), nl = nlOf(before);
-  if (ranges.length !== existing.length) throw new Error('workshop.slot.error_source');
+  const slots = parseWorld(before).ship_slot || [], existing = inspectSlots(draft, path);
   const index = existing.findIndex(row => row.id === operation.target);
+  if (!['add', 'update', 'remove'].includes(operation.type)) throw new Error('workshop.slot.error_operation');
   if (operation.type !== 'add' && index < 0) throw new Error('workshop.slot.error_select');
-  if (operation.type === 'add' && existing.some(row => row.id === operation.row?.id)) throw new Error('workshop.slot.error_duplicate');
-  const row = operation.row;
+  const row = operation.row && { ...operation.row, label: operation.row.label || '' };
   if (operation.type !== 'remove') {
     if (!row || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(row.id || '')) throw new Error('workshop.slot.error_id');
+    const offered = new Set(hulls.map(hull => hull.path));
     if (!Array.isArray(row.ships) || !row.ships.length || new Set(row.ships).size !== row.ships.length
-      || row.ships.some(value => !value || !draft.paths().includes(value))) throw new Error('workshop.slot.error_ships');
+      || row.ships.some(value => !offered.has(value))) throw new Error('workshop.slot.error_ships');
     if (!row.ships.includes(row.default_ship)) throw new Error('workshop.slot.error_default');
     if (!['backfill', 'absent'].includes(row.unclaimed)) throw new Error('workshop.slot.error_policy');
-    if (existing.some((item, i) => i !== index && item.id === row.id)) throw new Error('workshop.slot.error_duplicate');
+    if (existing.some((item, i) => (operation.type === 'add' || i !== index) && item.id === row.id)) throw new Error('workshop.slot.error_duplicate');
   }
-  let after;
-  if (operation.type === 'add') after = before + (before.endsWith(nl) ? nl : nl + nl) + renderSlot(row, nl);
-  else if (operation.type === 'update') after = before.slice(0, ranges[index].start)
-    + renderSlot(row, nl, parsed.ship_slot[index].ships) + before.slice(ranges[index].end);
-  else if (operation.type === 'remove') after = before.slice(0, ranges[index].start) + before.slice(ranges[index].end);
-  else throw new Error('workshop.slot.error_operation');
-  return { path, before, after };
+  const edits = [], append = (path, fields) => edits.push({ op: 'append_table', path,
+    fields: Object.entries(fields).map(([key, value]) => [key, quote(value)]) });
+  if (operation.type === 'remove') edits.push({ op: 'remove', path: ['ship_slot', index] });
+  else if (operation.type === 'add') {
+    append(['ship_slot'], { id: row.id, ...(row.label ? { label: row.label } : {}),
+      default_ship: row.default_ship, unclaimed: row.unclaimed });
+    for (const ship of row.ships) append(['ship_slot', slots.length, 'ships'], { template_path: ship });
+  } else {
+    const base = ['ship_slot', index], prior = slots[index];
+    for (const key of ['id', 'label', 'default_ship', 'unclaimed']) {
+      if (row[key] === existing[index][key]) continue;
+      edits.push(key === 'label' && !row.label ? { op: 'remove', path: [...base, key] }
+        : { op: Object.hasOwn(prior, key) ? 'set' : 'put', path: [...base, key], value_source: quote(row[key]) });
+    }
+    // Retained offers keep their full authored tables, including labels and
+    // comments. Removing in reverse keeps subsequent paths stable.
+    for (let i = prior.ships.length - 1; i >= 0; i--) {
+      if (!row.ships.includes(prior.ships[i].template_path)) edits.push({ op: 'remove', path: [...base, 'ships', i] });
+    }
+    for (const ship of row.ships) {
+      if (!prior.ships.some(offer => offer.template_path === ship)) append([...base, 'ships'], { template_path: ship });
+    }
+  }
+  return { document_path: path, expected_source: before, edits };
 }
 
 export async function applySlotOperation({ draft, provider, runtime, path, operation, current = () => true }) {
-  const revision = draft.sourceRevision, change = prepareSlotOperation(draft, path, operation);
-  const candidate = provider?.restoreDocument ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
-  candidate.apply([change]);
-  const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
-  if (!report?.accepted) { const error = new Error('workshop.slot.error_runtime'); error.report = report; throw error; }
-  if (!current() || draft.sourceRevision !== revision || draft.read(path) !== change.before) throw new Error('workshop.slot.error_stale');
-  draft.apply([change]);
+  const selected = structuredClone(operation);
+  const { report } = await acceptWorkshopChanges({ draft, provider, runtime, current,
+    stale: 'workshop.slot.error_stale', refused: 'workshop.slot.error_runtime', prepare: async (captured, dependencies) => {
+      const hulls = await slotHullCatalogue({ draft: captured, provider, runtime, dependencies });
+      const request = prepareSlotOperation(captured, path, selected, hulls);
+      if (!request.edits.length) return [];
+      const after = await runtime.edit(request.expected_source, request);
+      return [{ path, before: request.expected_source, after }];
+    } });
   return report;
 }

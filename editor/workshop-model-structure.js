@@ -1,5 +1,5 @@
 import { parse, stringify } from 'smol-toml';
-import { WorkshopDocument } from './workshop-document.js';
+import { acceptWorkshopChanges } from './workshop-acceptance.js';
 import { modelDocuments } from './workshop-models.js';
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -331,18 +331,17 @@ export function prepareModelStructureOperation(draft, dependencies, operation) {
 }
 
 export async function applyModelStructureOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {
-  const revision = draft.sourceRevision, effective = dependencies || await runtime.dependencies();
-  const prepared = prepareModelStructureOperation(draft, effective, operation);
-  const candidate = provider?.restoreDocument ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
-  candidate.apply(prepared.changes);
-  for (const entry of modelDocuments(candidate.paths())) for (const item of entry.variants) {
-    validateModelStructure(item.path, candidate.read(item.path), candidate, effective);
-  }
-  const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
-  if (!report?.accepted) { const error = new Error('runtime-validation-refused'); error.report = report; throw error; }
-  if (!current() || draft.sourceRevision !== revision || prepared.changes.some(change => draft.read(change.path) !== (change.before ?? undefined))) {
-    throw new Error('model-structure-stale');
-  }
-  draft.apply(prepared.changes);
-  return { changes: prepared.changes, selected: prepared.selected, report };
+  const operationCopy = structuredClone(operation);
+  let selected;
+  const { changes, report } = await acceptWorkshopChanges({ draft, provider, runtime, dependencies, current,
+    stale: 'model-structure-stale', prepare: (captured, effective) => {
+      const prepared = prepareModelStructureOperation(captured, effective, operationCopy);
+      selected = prepared.selected;
+      return prepared.changes;
+    }, inspect: (candidate, effective) => {
+      for (const entry of modelDocuments(candidate.paths())) for (const item of entry.variants) {
+        validateModelStructure(item.path, candidate.read(item.path), candidate, effective);
+      }
+    } });
+  return { changes, selected, report };
 }

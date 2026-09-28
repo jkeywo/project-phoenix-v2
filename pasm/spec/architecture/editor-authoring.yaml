@@ -52,6 +52,8 @@ entities:
       confidence: confirmed
       title: Workshop Validation Service
       summary: Validates the exact candidate through the ordinary runtime parsers, composition and script compiler before save, export, preview or Test; refused operations leave the draft unchanged.
+      rationale:
+        - "[ai] Issue #1557 extends the shared acceptWorkshopChanges owner from Ship and Entity forms to script creation/edit, spatial edits and model structure. Domain preparation and inspection stay in those modules; provider-aware capture, whole-draft revision and dependency freshness, runtime acceptance and one grouped history adoption are shared. Script preparation explicitly needs no dependency lookup and keeps its localised refusal and boolean no-op result. Raw Source editing remains separate so an author can repair incomplete source."
     architecture:
       kind: authoring-validator
       authority: local
@@ -60,8 +62,8 @@ entities:
       produces: [editor-validation-state]
     implementation:
       status: declared
-      paths: [editor/workshop-runtime.js, src/workshop/mod.rs, editor/validation.js]
-      tests: [cargo test, npm run test:editor]
+      paths: [editor/workshop-runtime.js, src/workshop/mod.rs, editor/validation.js, editor/workshop-acceptance.js]
+      tests: [cargo test, npm run test:editor, npx vitest run editor/tests/workshop-form-acceptance.test.js]
 
   - component: editor-objective-instance-authoring
     core:

@@ -4,7 +4,7 @@ import { WorkshopDocument } from './workshop-document.js';
  * before any asynchronous preparation; neither preparation nor validation may
  * borrow the changing live draft. Provider capabilities remain explicit. */
 export async function acceptWorkshopChanges({ draft, provider, runtime, dependencies,
-  prepare, inspect, current = () => true, stale = 'stale-workshop-operation' }) {
+  prepare, inspect, current = () => true, stale = 'stale-workshop-operation', refused = 'runtime-validation-refused' }) {
   const revision = draft.sourceRevision;
   const fresh = () => {
     if (!current() || draft.sourceRevision !== revision) throw new Error(stale);
@@ -14,7 +14,8 @@ export async function acceptWorkshopChanges({ draft, provider, runtime, dependen
     ? provider.restoreDocument(draft.snapshot()) : WorkshopDocument.restore(draft.snapshot());
   const supplied = dependencies;
   const suppliedSource = supplied && JSON.stringify(supplied);
-  const captured = supplied || await runtime.dependencies();
+  // null explicitly marks preparation that does not read dependencies.
+  const captured = supplied === null ? null : supplied || await runtime.dependencies();
   fresh();
   const dependencySource = JSON.stringify(captured);
   const effective = structuredClone(captured);
@@ -25,13 +26,14 @@ export async function acceptWorkshopChanges({ draft, provider, runtime, dependen
   };
   const changes = await prepare(candidate, effective);
   unchanged();
+  if (!changes.length) return { changes, applied: false, report: null };
   candidate.apply(changes);
   const inspection = inspect?.(candidate, effective);
   const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
   unchanged();
   if (!report?.accepted) {
-    const error = new Error('runtime-validation-refused'); error.report = report; throw error;
+    const error = new Error(refused); error.report = report; throw error;
   }
-  draft.apply(changes);
-  return { changes, report, inspection };
+  const applied = draft.apply(changes);
+  return { changes, applied, report, inspection };
 }

@@ -11366,6 +11366,50 @@ fn ai_torpedo_auto_fire_stops_firing_when_rating_switches_to_std() {
     );
 }
 
+#[test]
+fn cruiser_screen_rung_fires_torpedoes_while_tactical_is_held() {
+    let mut app = torpedo_ai_test_app();
+    let station = crate::core::messages::StationId("tactical".into());
+    {
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register("screen-crew".into(), "Tactical".into())
+            .unwrap();
+        sessions.0.set_station("screen-crew", Some(station.clone()));
+    }
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap()
+    .ship_config
+    .unwrap();
+    let ship = local_ship(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::ship_plugin::ShipConfigComponent(config.clone()));
+    crate::ship::rating::apply_rating(
+        &config,
+        &station,
+        "Screen",
+        &mut app
+            .world_mut()
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(ship)
+            .unwrap()
+            .0,
+    );
+    set_tactical_station_rating(&mut app, "Screen");
+    set_weapons_target(&mut app, Some("screen-target".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "screen-target", 0.0, -30.0);
+    let out = tick(&mut app);
+    assert!(
+        out.iter()
+            .any(|message| matches!(&message.msg, ServerMessage::TorpedoLaunched { .. })),
+        "an occupied Screen rung must enable the existing torpedo auto-fire policy"
+    );
+}
+
 // ── Fine-Tactical decomposition tests (issue #512) ─────────────────────
 //
 // Every new fine SystemId, blackboard, and gate has coverage here. The

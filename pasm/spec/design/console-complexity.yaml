@@ -11,6 +11,7 @@ entities:
         - "Simplified means a limited AI — the fine-system policy runtime with authority scoped to that system — drives the full model from summary-surface settings, preserving AI/human symmetry; detailed means direct control of the full model."
         - "[ai] The initial runtime proves Simplified through Repair: the holder sets standing or named-system priorities while the existing AI exclusively dispatches and recalls teams. Other kinds require a summary-intent adapter before a rung may leave them simplified; validation refuses unsupported modes rather than enabling competing human and AI actuator writers."
         - "[ai] Authored order remains most-detailed first, preserving legacy first-rating defaults and visiting-station ordering. The picker displays the reverse ordinal of those authored rungs; Backfill is zero. Omitted detailed_systems preserves legacy direct control for every non-automated system."
+        - "[ai] Cruiser #1083 uses only supported controls, per the 2026-09-29 user instruction: Captain and Science have two rungs, Helm and Tactical three, Engineering four, and human-seeking Comms/Navigation/Command one. No new behavior is added to reach the typical three-to-five range. Scenario floor tests exercise the resolver input; world-authored family/kind selectors remain #1067."
     game_design:
       must_not_be: [derived arithmetically from system counts instead of authored, changed by a player who does not hold the station]
 

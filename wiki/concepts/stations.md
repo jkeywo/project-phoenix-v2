@@ -42,6 +42,15 @@ rejects simplified kinds without a summary-intent adapter. The old Science
 phaser helper had no production caller: current Science renders Sensors and
 Shields; Tactical's live automation cue reads phaser-bank control sources.
 
+The Alliance Cruiser authors supported ladders in `assets/entities/alliance_cruiser.toml`:
+Captain and Science have two rungs, Helm and Tactical three, and Engineering
+four. Comms, Navigation and Command retain one direct-control rung under their
+human-seeking placement. Tactical's Screen rung opts into the existing held-seat
+torpedo auto-fire rule; Engineering's Guided rung uses Simplified Repair.
+`ship::cruiser_rating_tests` covers distinct monotone bundles, the pure floor
+overlay, roster ratings and live changes. World-authored floor selectors remain
+separate work under #1067; these tests do not imply that vocabulary is delivered.
+
 Lobby message results reach both loaded-Ship components through
 `LobbyResultApplier::apply` in `src/lobby/result_application.rs`. Before the
 LocalShip exists, pending Lobby choices remain in `SessionManager`; no temporary

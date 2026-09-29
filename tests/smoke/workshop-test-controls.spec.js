@@ -69,6 +69,7 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
   await expect(page.locator('#workshop-test-world')).toBeDisabled();
   const nativeView = page.frameLocator('iframe[src$="workshop-native-test.html"]');
   await expect(nativeView.locator('img#canvas')).toBeVisible();
+  expect((await page.locator('iframe[src$="workshop-native-test.html"]').boundingBox()).height).toBeGreaterThanOrEqual(384);
   await expect.poll(() => nativeView.locator('img#canvas').evaluate(image => image.naturalWidth)).toBe(1);
   await page.locator('#workshop-test-view').selectOption('game-master');
   await expect(nativeView.locator('#test-gm')).toBeVisible();

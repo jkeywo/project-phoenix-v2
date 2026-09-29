@@ -15,7 +15,7 @@ export function createNativeWorkshopTestView({ mount, title = '' }) {
         clear(); identity = next;
         const current = doc.createElement('iframe');
         current.title = title;
-        current.style.cssText = 'width:100%;height:100%;border:0;display:block';
+        current.className = 'workshop-test-viewscreen';
         current.src = new URL('../workshop-native-test.html', import.meta.url).href;
         current.addEventListener('load', () => { if (frame === current) publish(); });
         frame = current; mount.append(current);

@@ -1,6 +1,7 @@
 import { definitionsSnapshot, snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
 import { rootsForm, newRoot, moveRoot, offeredShips, planScenarioEdits, worldForm, extraWorldChoices, planExtraWorldEdits,
   worldSlugPath, worldTitle, refusalMessage, refusalStringId } from '../editor/workshop-composition.js';
+import { scriptReferenceForms, applyScriptReference } from '../editor/workshop-script-references.js';
 import { t } from './strings.js';
 
 const PREFIX = 'workshop-composition';
@@ -11,9 +12,9 @@ const PREFIX = 'workshop-composition';
  * compose call per member per Apply that the runtime either lands as exact
  * source or refuses — a missing, cyclic, duplicate or disallowed reference
  * never reaches the draft. Dependency worlds are listed read-only with their
- * origin; script-driven load and unload references are listed, not edited.
+ * origin; literal script load/unload targets use exact-source validated edits.
  * The selections are local presentation, never simulation inputs. */
-export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, changed, win, attach = true }) {
+export function mountWorkshopComposition({ root, runtime, provider, draft, busy, setBusy, changed, win, attach = true }) {
   const doc = root.ownerDocument;
   const node = (tag, id, attrs = {}) => {
     const value = doc.createElement(tag);
@@ -332,8 +333,10 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
     addRow.append(labelled('workshop.composition.add_extra', addSelect), addSelect, addButton);
     extras.append(list, addRow);
     worldFormNode.append(extras);
-    // Script-driven references are read-only here: editing Rhai is #1478's.
+    // Runtime references include dependencies and computed forms; supported draft
+    // literals additionally receive exact-source target controls below.
     const refs = fieldset('workshop.composition.script_refs');
+    refs.append(node('p', 'workshop.composition.script_edit_hint'));
     const refList = node('ul', null, { id: `${PREFIX}-script-refs` });
     for (const ref of current.script_refs || []) {
       const row = node('li');
@@ -346,6 +349,34 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
       refList.append(row);
     }
     if (!refList.children.length) refList.append(node('li', 'workshop.composition.no_script_refs'));
+    if (current.origin === 'draft') {
+      const referenceForms = scriptReferenceForms(draft(), current.path);
+      referenceForms.forEach((reference, index) => {
+        const row = node('li');
+        const target = node('select', null, { id: `${PREFIX}-script-${index}-target` });
+        const worlds = draftFirst(choices().worlds);
+        const known = worlds.some(entry => entry.path === reference.path);
+        target.replaceChildren(...(known ? [] : [option(reference.path, reference.path)]), ...worlds.map(worldOption));
+        target.value = reference.path;
+        const label = `${reference.unit.label}:${reference.line} — ${t(reference.kind === 'load'
+          ? 'workshop.composition.ref_load' : 'workshop.composition.ref_unload')}`;
+        const apply = node('button', 'workshop.composition.apply', { type: 'button', id: `${PREFIX}-script-${index}-apply`,
+          'aria-label': `${t('workshop.composition.apply')}: ${label}` });
+        apply.addEventListener('click', () => {
+          if (busy() || apply.disabled || !fresh()) return;
+          const read = reading, selectedDraft = draft(), path = target.value;
+          void guarded(async () => {
+            const result = await applyScriptReference({ draft: selectedDraft, provider, runtime, reference, path,
+              current: () => !disposed && snapshotIsCurrent(read, draft()) });
+            if (result.applied) changed(reference.unit.documentPath);
+            show(result.applied ? 'workshop.changed' : 'workshop.composition.unchanged');
+            await reload({ announce: false }).catch(() => {});
+          }, () => focusFirst(`script-${index}-target`, 'world'));
+        });
+        row.append(labelled(null, target, label), target, apply);
+        refList.append(row);
+      });
+    }
     refs.append(refList);
     worldFormNode.append(refs);
   }
@@ -423,11 +454,11 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
     if (announce) show('workshop.composition.refreshed');
   }
 
-  async function guarded(action) {
+  async function guarded(action, after = () => {}) {
     setBusy(true);
     try { await action(); }
     catch (error) { if (!disposed) show(knownId(error), true, { detail: error?.detail ?? '' }); }
-    finally { if (!disposed) { setBusy(false); refresh(); } }
+    finally { if (!disposed) { setBusy(false); refresh(); after(); } }
   }
 
   /** ONE compose call for ONE member, then ONE draft edit. The draft is never

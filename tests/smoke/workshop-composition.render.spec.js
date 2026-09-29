@@ -28,6 +28,10 @@ template_path = "${SHIP}"
 template_path = "${SHIP}"
 id = "player-ship"
 spawn_on = "game_start"
+[script]
+setup = '''
+fn load_layer(ctx) { ctx.effects.load_world("${CHILD}"); }
+'''
 `;
 // A layer's entities spawn with the layer, so the child authors no `spawn_on`:
 // an extra world is applied through apply_loaded_layer, which spawns only the
@@ -111,6 +115,19 @@ test('the composition panel composes a child world through the real runtime and 
     await byId(page, 'world').selectOption(WORLD);
     await expect(byId(page, 'extra-worlds')).not.toContainText(CHILD);
 
+    // A keyboard-applied literal target edit goes through the same exact
+    // candidate validator. It changes only the selected call's literal, and
+    // remains a single undo entry before the static-composition exercise.
+    await byId(page, 'script-0-target').selectOption(LOOP);
+    await byId(page, 'script-0-apply').focus();
+    await page.keyboard.press('Enter');
+    await expect(byId(page, 'script-0-target')).toBeFocused();
+    expect(await sourceOf(page, WORLD)).toBe(ROOT_TEXT.replace(CHILD, LOOP));
+    await page.locator('#workshop-undo').click();
+    await expect.poll(() => sourceOf(page, WORLD)).toBe(ROOT_TEXT);
+    await revealWorkshopPanel(page, 'composition');
+    await byId(page, 'refresh').click();
+    await byId(page, 'world').selectOption(WORLD);
     // Criterion 3, through the real runtime: the loop world already lists the
     // root, so composing it closes a cycle. The refusal names the rule and the
     // root's source is exactly what it was.
@@ -132,7 +149,7 @@ test('the composition panel composes a child world through the real runtime and 
     await byId(page, 'add-extra').selectOption(CHILD);
     await byId(page, 'add-extra-button').click();
     await byId(page, 'apply-world').click();
-    await expect.poll(() => sourceOf(page, WORLD)).toContain(CHILD);
+    await expect.poll(() => sourceOf(page, WORLD)).toContain('extra_worlds');
     const composed = await sourceOf(page, WORLD);
     // Every authored line survived, and one press undoes the whole edit.
     expect(composed).toContain('# Keep this comment on the root world');

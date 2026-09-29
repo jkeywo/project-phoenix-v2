@@ -167,6 +167,12 @@ The Composition tool patches a selected world's top-level `extra_worlds` array
 and the selected manifest's root scenario blocks without reserializing either
 file. It inventories Rhai and TOML load/unload references and labels each world
 as editable draft, immutable base content or immutable retained-pack content.
+`editor/workshop-script-references.js` adds target selectors for single-literal
+Rhai load/unload calls in editable inline and sibling scripts. It maps decoded
+inline offsets back to their original TOML string boundaries and patches only
+the selected literal, preserving unrelated escapes and commentary. Computed
+paths, template-string scripts and ambiguous inline payload locations stay with
+the Scripts tool; dependency scripts have no editable target controls.
 Each add or remove is first applied to a private candidate copy, checked for
 missing, cyclic, duplicate and disallowed references, and passed through the
 same runtime validator used by Test, browser export and native save. Only an

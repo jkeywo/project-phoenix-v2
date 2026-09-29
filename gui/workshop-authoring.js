@@ -255,7 +255,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
-  compositionPanel = mountWorkshopComposition({ root, attach: false, runtime, win, draft: () => draft,
+  compositionPanel = mountWorkshopComposition({ root, attach: false, runtime, provider, win, draft: () => draft,
     busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
     setBusy(value) { pendingValidation = value; refresh(); },
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });

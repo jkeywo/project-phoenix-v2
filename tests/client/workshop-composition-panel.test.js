@@ -428,3 +428,38 @@ it('labels every control, gives every button text and every group a legend, and 
   expect(byId('findings').querySelector('li').textContent).toContain(t('workshop.severity.error'));
   expect(byId('members').querySelector('[data-origin="base"]').textContent).toContain('base');
 });
+
+it('authors a script literal with labelled native controls and restores focus after acceptance', async () => {
+  const source = `${worldSource}\n[script]\nsetup = '''\nfn later(ctx) { ctx.effects.load_world("${CHILD}"); }\n'''\n`;
+  draft.edit(WORLD, source);
+  runtime.validate = vi.fn(async (_archive, candidate) => {
+    expect(candidate.read(WORLD)).toContain(`load_world("${BASE}")`);
+    expect(draft.read(WORLD)).toBe(source);
+    return { accepted: true };
+  });
+  await read();
+  const target = byId('script-0-target');
+  expect(document.querySelector(`label[for="${target.id}"]`).textContent).toContain('[script.setup]');
+  expect([...target.options].find(option => option.value === BASE).textContent).toContain('(base)');
+  target.value = BASE; change(target);
+  byId('script-0-apply').click(); await settled();
+  expect(runtime.validate).toHaveBeenCalledTimes(1);
+  expect(draft.read(WORLD)).toBe(source.replace(CHILD + '");', BASE + '");'));
+  expect(changed).toHaveBeenCalledWith(WORLD);
+  expect(document.activeElement).toBe(byId('script-0-target'));
+  draft.undo(); expect(draft.read(WORLD)).toBe(source);
+});
+
+it('keeps script targets unchanged on runtime refusal and disables stale controls', async () => {
+  const source = `${worldSource}\n[script]\nsetup = 'fn later(ctx) { ctx.effects.unload_world("${CHILD}"); }'\n`;
+  draft.edit(WORLD, source);
+  runtime.validate = vi.fn(async () => ({ accepted: false, findings: [{ message: 'Missing target' }] }));
+  await read();
+  byId('script-0-target').value = BASE;
+  byId('script-0-apply').click(); await settled();
+  expect(byId('status').getAttribute('role')).toBe('alert');
+  expect(draft.read(WORLD)).toBe(source);
+  draft.edit(WORLD, source + '# changed elsewhere\n'); panel.refresh();
+  expect(byId('script-0-target').disabled).toBe(true);
+  expect(byId('script-0-apply').disabled).toBe(true);
+});

@@ -4,7 +4,8 @@
 //! Composition is authored in three places: the manifest's `[[scenario]]`
 //! roots, each world's `extra_worlds`, and script-driven `load_world` /
 //! `unload_world` references. The first two are edited here; the third is
-//! LISTED with its origin and validated, because editing Rhai is #1478's.
+//! listed with its origin and validated. The shared Workshop script-reference
+//! form edits literal Rhai targets through the ordinary exact-candidate validator.
 //!
 //! Unlike the definition forms (#1474), a composition edit is checked
 //! cross-file at edit time and REFUSED with the source untouched: a missing,

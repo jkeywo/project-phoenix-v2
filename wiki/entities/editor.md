@@ -2,8 +2,8 @@
 title: Workshop Authoring
 type: entity
 tags: [workshop, editor, tooling, scenario, entity, models, mod]
-sources: [workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-objective-snippet.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-scripts-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/test_source.rs, src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/delivery/args.rs, src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
-updated: 2026-09-27
+sources: [workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-objective-snippet.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/workshop-native-test-view.js, gui/workshop-native-test-document.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-scripts-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/test_source.rs, src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/native_host/workshop/test_frames.rs, src/native_host/workshop/test_render.rs, src/delivery/args.rs, src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
+updated: 2026-09-29
 ---
 
 # Workshop Authoring
@@ -115,7 +115,7 @@ reopens and activates findings or source in desktop and narrow projection withou
 changing validation authority or entering dependency reads into document history.
 Settings replace only the relevant Accessibility or binding field in the existing
 private operator profile and apply Accessibility effects immediately. The native
-profile sanitizer mirrors the browser's version-7 panel registry and migration.
+profile sanitizer mirrors the browser's version-11 panel registry and migration.
 Each stored version is sanitized against the vocabulary that version had, so a panel
 registered later can only enter through migration, never out of an older tree;
 its private Workshop bridge publishes only the already-captured textual dependency
@@ -157,8 +157,9 @@ authority and carries no private operator profile or live runtime state.
 Source and binary file additions/replacements use the same chronological history.
 Binary members, including GLB and MP3, never pass through a text decoder. Undo of
 an addition removes that member; undo back to the original source set restores
-the complete original ZIP container. Pack validation still refuses binary members
-until the runtime asset overlay is implemented. A loaded pack can enter through
+the complete original ZIP container. Runtime asset overlays retain binary members
+through validation, captured previews and disposable Test. A loaded pack can enter
+through
 `createBrowserWorkshopProvider` as an immutable source archive with separately
 snapshotted dependencies; the selected pack is removed from the other-pack list.
 The dependency viewer is read-only and never adds those files to the editable pack.
@@ -280,7 +281,15 @@ hull and seed selection. The child has no delivery listener or crew transport.
 The child pins both filesystem and Bevy asset roots to that stage. Runtime
 shader support is captured read-only alongside the authored snapshot; there is
 no fallback to current project files. The native Live layout store is disabled.
-Inherited pipes carry only typed clock/visibility controls and current status.
+Inherited pipes carry typed controls/status and bounded presentation records.
+`native_host/workshop/test_render.rs` captures the ordinary offscreen 3D/UI
+composite at 960×540 with at most ten captures per second and bounded pending
+work. `test_frames.rs` publishes only the latest PNG and ordinary GM/HUD
+projection payloads at private per-run loopback URLs. The docked native Test
+document consumes those resources through `workshop-native-test-view.js` and
+`workshop-native-test-document.js`, reusing the ordinary read-only GM workspace.
+Stop, restart, failure and pane retirement withdraw the URLs; each new run owns
+a fresh document. The child creates no separate OS window.
 The native host's ordinary solo launch assigns every Station Backfill.
 
 `workshop/test_clock.rs` feeds the ordinary fixed schedules: Pause holds the virtual clock,
@@ -326,9 +335,12 @@ the browser save APIs refuse access. Returning to a hidden held iframe shows
 it before awaiting the next clock acknowledgement, because browsers may
 suspend animation frames while it is hidden.
 
-Role preview and remaining specialised entity/definition panels
-remain M6 continuation work. The existing editor/viewer remain until
-the parity workflow is delivered.
+Role/widget authoring and Test role preview, specialised entity/definition
+panels, and editor/viewer redirects are implemented. Human golden-workflow and
+dock acceptance remain open; the runbooks are
+[#1487](../../docs/acceptance/1487-m6-golden-workflow.md) and
+[#1514](../../docs/acceptance/1514-docked-workspace.md). Their observation cells
+remain unrun, including native hardware coverage and the coordinated M5 exit.
 
 ## Validation boundary
 

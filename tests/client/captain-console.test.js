@@ -245,6 +245,7 @@ describe('courier captain renderStation', () => {
       teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
       damaged: [{ id: 'y' }],
       external_dispatch: null,
+      summary: false,
     });
   });
 

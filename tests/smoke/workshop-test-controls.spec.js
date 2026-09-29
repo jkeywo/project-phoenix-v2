@@ -10,6 +10,12 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
   const errors = [], sockets = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('websocket', socket => sockets.push(socket.url()));
+  await page.route('**/workshop-test-frame/smoke/view.png', route => route.fulfill({
+    contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'),
+  }));
+  await page.route('**/workshop-test-frame/smoke/presentation.json', route => route.fulfill({
+    json: { sequence: 1, channels: {}, role_presets: '[]' },
+  }));
   await page.route('**/workshop.html', async route => {
     const response = await route.fetch();
     const html = await response.text();
@@ -33,12 +39,15 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
         worlds: [world], ships: ['assets/entities/read-only-base-hull.toml'], layers: { [world]: [] },
       } };
       if (request.op === 'test-start') {
-        run = { running: true, starting: false, paused: false, tick: 0, multiplier: 1, selection: request.selection };
+        run = { running: true, starting: false, paused: false, tick: 0, multiplier: 1, selection: request.selection,
+          frame_url: `${location.origin}/workshop-test-frame/smoke/view.png`,
+          presentation_url: `${location.origin}/workshop-test-frame/smoke/presentation.json`, view: { view: 'ship', entity: null } };
         response = { status: 'test', run };
       }
       if (request.op === 'test-control') {
         if (request.control.command === 'pause') run = { ...run, paused: true };
         if (request.control.command === 'step') run = { ...run, tick: run.tick + 1 };
+        if (request.control.command === 'view') run = { ...run, view: request.control.view };
         response = { status: 'test', run };
       }
       if (request.op === 'test-stop') { run = null; response = { status: 'test', run }; }
@@ -58,6 +67,16 @@ test('built Workshop Test controls keep Authoring exclusive and fit 200% text', 
   await expect(page.locator('#workshop-models')).toBeHidden();
   await expect(page.locator('#workshop-test-authoring')).toBeVisible();
   await expect(page.locator('#workshop-test-world')).toBeDisabled();
+  const nativeView = page.frameLocator('iframe[src$="workshop-native-test.html"]');
+  await expect(nativeView.locator('img#canvas')).toBeVisible();
+  await expect.poll(() => nativeView.locator('img#canvas').evaluate(image => image.naturalWidth)).toBe(1);
+  await page.locator('#workshop-test-view').selectOption('game-master');
+  await expect(nativeView.locator('#test-gm')).toBeVisible();
+  await expect(nativeView.locator('img#canvas')).toBeHidden();
+  expect(await nativeView.locator('body').evaluate(() => window.__hostLocalGm())).toBeNull();
+  expect(await nativeView.locator('body').evaluate(() => {
+    try { window.__hostSetNpcDoctrine(); return false; } catch { return true; }
+  })).toBe(true);
   await page.locator('#workshop-test-pause').click();
   await page.locator('#workshop-test-step').click();
   await expect(page.locator('#workshop-test-status')).toContainText(ts('workshop.test_held', { tick: '1' }));

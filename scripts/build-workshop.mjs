@@ -20,7 +20,7 @@ const editorModules = [
   'workshop-presets', 'workshop-scripts', 'workshop-script-references', 'workshop-objective-snippet', 'workshop-localisation', 'workshop-slot-authoring', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate',
-  'workshop-test-frame', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot', 'workshop-test-breakpoint',
+  'workshop-test-frame', 'workshop-native-test-view', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot', 'workshop-test-breakpoint',
 ];
 await mkdir(path.join(out, 'editor'), { recursive: true });
 await mkdir(path.join(out, 'assets', 'strings'), { recursive: true });
@@ -39,8 +39,11 @@ await copyFile(path.join(root, 'viewer.html'), path.join(out, 'viewer.html'));
 const testPage = await readFile(path.join(root, 'workshop-test.html'), 'utf8');
 const GM_SLOT = '<!--gm-console-->';
 if (!testPage.includes(GM_SLOT)) throw new Error('workshop-test.html has no GM console slot');
-await writeFile(path.join(out, 'workshop-test.html'),
-  testPage.replace(GM_SLOT, gmConsoleMarkup(await readFile(path.join(root, 'server.html'), 'utf8'))), 'utf8');
+const composedTestPage = testPage.replace(GM_SLOT, gmConsoleMarkup(await readFile(path.join(root, 'server.html'), 'utf8')));
+await writeFile(path.join(out, 'workshop-test.html'), composedTestPage, 'utf8');
+await writeFile(path.join(out, 'workshop-native-test.html'), composedTestPage
+  .replace('<canvas id="canvas"></canvas>', '<img id="canvas" style="object-fit:contain" alt="">')
+  .replace('gui/workshop-test-boot.js', 'gui/workshop-native-test-boot.js'), 'utf8');
 await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
 await copyFile(path.join(root, 'assets/strings/strings.csv'), path.join(out, 'assets/strings/strings.csv'));
 for (const name of editorModules) {

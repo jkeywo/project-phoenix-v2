@@ -299,7 +299,8 @@ fn read_faction(
     })
 }
 
-/// The `[[system]]` owners of a hull, by system id; `None` is an ownerless
+/// The authored and synthesised shield-arc system owners of a hull, by id.
+/// `None` is an ownerless
 /// (`ai_only`) system, which no station's rung may automate.
 fn system_owners(root: &Table) -> BTreeMap<String, Option<String>> {
     let mut owners = BTreeMap::new();
@@ -311,6 +312,40 @@ fn system_owners(root: &Table) -> BTreeMap<String, Option<String>> {
             owners
                 .entry(id.to_owned())
                 .or_insert_with(|| string_field(system, "station").map(str::to_owned));
+        }
+    }
+    // Entity loading synthesises arc systems from shield_arc blocks. Mirror
+    // their existing ownership rule so ratings can reference those live ids.
+    let shields_system = root
+        .get("system")
+        .and_then(Item::as_array_of_tables)
+        .and_then(|systems| {
+            systems.iter().find(|system| {
+                string_field(*system, "kind") == Some(crate::ship::system_registry::SHIELDS_KIND)
+            })
+        });
+    let has_shields_station = shields_system.is_some()
+        || root
+            .get("station")
+            .and_then(Item::as_array_of_tables)
+            .is_some_and(|stations| {
+                stations
+                    .iter()
+                    .any(|station| string_field(station, "id") == Some("shields"))
+            });
+    let owner = has_shields_station.then(|| {
+        shields_system
+            .and_then(|system| string_field(system, "station"))
+            .unwrap_or("shields")
+            .to_owned()
+    });
+    if let Some(arcs) = root.get("shield_arc").and_then(Item::as_array_of_tables) {
+        for arc in arcs.iter() {
+            if let Some(id) =
+                string_field(arc, "id").and_then(crate::ship::system_registry::shield_arc_system_id)
+            {
+                owners.entry(id.0).or_insert_with(|| owner.clone());
+            }
         }
     }
     owners

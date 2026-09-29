@@ -641,3 +641,49 @@ fn value_checks_follow_the_runtime_types() {
         check_table_fields(HULL_PATH, &rating_path, &[("name".into(), "\"\"".into())]).is_err()
     );
 }
+
+#[test]
+fn shield_arc_rating_references_follow_runtime_ownership() {
+    for (station, system, expected_owner) in [
+        (
+            "science",
+            "[[system]]\nid='shields'\nkind='shields'\nstation='science'\n",
+            Some("science"),
+        ),
+        ("shields", "", Some("shields")),
+        ("science", "", None),
+    ] {
+        let source = format!("[[station]]\nid='{station}'\n[[station.rating]]\nname='Guard'\nautomated_systems=['shield-arc-fore']\n{system}[[shield_arc]]\nid='fore'\n");
+        let document = Document::parse(&source).unwrap();
+        assert_eq!(
+            system_owners(document.as_table()).get("shield-arc-fore"),
+            Some(&expected_owner.map(str::to_owned))
+        );
+        let report = findings(&files(&[(HULL_PATH, &source)]), &BTreeMap::new());
+        assert!(
+            !report
+                .iter()
+                .any(|finding| finding.category == "rating-unknown-system"),
+            "{report:?}"
+        );
+        assert_eq!(
+            report
+                .iter()
+                .any(|finding| finding.category == "rating-unowned-system"),
+            expected_owner.is_none(),
+            "{report:?}"
+        );
+    }
+}
+
+#[test]
+fn authored_cruiser_guard_passes_station_rating_reference_validation() {
+    let source = include_str!("../../../assets/entities/alliance_cruiser.toml");
+    let report = findings(&files(&[(HULL_PATH, source)]), &BTreeMap::new());
+    assert!(
+        !report
+            .iter()
+            .any(|finding| finding.category.starts_with("rating-")),
+        "{report:?}"
+    );
+}

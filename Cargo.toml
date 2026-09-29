@@ -215,7 +215,7 @@ perf = []
 # now DEPENDS on `server` instead of standing alone: without that dependency
 # `--no-default-features --features host` compiles a `main` that names a module
 # which is not there, a combination CI never builds and nothing would catch.
-host = ["server", "dep:tungstenite", "dep:windows", "dep:windows-future", "dep:cpal"]
+host = ["server", "dep:image", "dep:tungstenite", "dep:windows", "dep:windows-future", "dep:cpal"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because
@@ -262,8 +262,8 @@ phoenix-math = { path = "crates/phoenix-math" }
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
 # Bevy's public schedule-build-pass signature, on every simulation host.
 indexmap = { version = "2.14.0", default-features = false }
-# PNG encoding for the `capture-billboard` tool (optional; enabled by the
-# `capture` feature). Matches the version Bevy already resolves.
+# PNG encoding for native Workshop Test and capture-billboard (optional;
+# enabled by host/capture). Matches the version Bevy already resolves.
 image = { version = "0.25", optional = true }
 # Main-world ↔ render-world channel for the headless capture readback, as in
 # Bevy's headless_renderer example (optional; `capture` feature).

@@ -407,7 +407,10 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
             .map(|(path, bytes)| (path.as_str(), bytes.as_slice())),
     );
     for (path, bytes) in files {
-        if !path.ends_with(".toml") && !path.ends_with(".rhai") {
+        if !path.ends_with(".toml")
+            && !path.ends_with(".rhai")
+            && path != "assets/strings/strings.csv"
+        {
             if let Err(error) = crate::world::pack_asset_validation::validate_member(
                 path,
                 bytes,

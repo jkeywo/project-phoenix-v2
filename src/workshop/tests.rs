@@ -962,3 +962,33 @@ fn save_validation_rejects_instance_ties_across_composed_worlds() {
     }
     assert!(findings[0].line.is_some());
 }
+
+#[test]
+fn project_string_table_is_utf8_source_not_a_binary_runtime_asset() {
+    let path = "assets/strings/strings.csv";
+    let mut files = BTreeMap::from([
+        (
+            "assets/scenarios.toml".into(),
+            b"[content]\nid='phoenix-base'\nepoch=1\n[[scenario]]\nid='probe'\nworld='assets/worlds/probe.toml'\n".to_vec(),
+        ),
+        (
+            "assets/worlds/probe.toml".into(),
+            b"[global]\ntitle='Probe'\n".to_vec(),
+        ),
+        (path.into(), b"id,en\nworkshop.test_heading,Test\n".to_vec()),
+    ]);
+    let report = validate_project(&files);
+    assert!(report.accepted, "{:?}", report.findings);
+    files.insert(path.into(), vec![0xff]);
+    assert!(validate_project(&files)
+        .findings
+        .iter()
+        .any(|finding| finding.file == path && finding.category == "runtime-source-invalid"));
+    files.insert(path.into(), b"id,en\n".to_vec());
+    files.insert("assets/strings/unknown.csv".into(), b"anything".to_vec());
+    assert!(validate_project(&files)
+        .findings
+        .iter()
+        .any(|finding| finding.file == "assets/strings/unknown.csv"
+            && finding.category == "invalid-runtime-asset"));
+}

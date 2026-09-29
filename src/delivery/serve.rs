@@ -488,7 +488,9 @@ pub fn route(
             }
             // A retired or unknown preview member is absent. Never let its
             // logical asset path fall through to the static client tree.
-            if path.starts_with("/workshop-preview-capture/") {
+            if path.starts_with("/workshop-preview-capture/")
+                || path.starts_with("/workshop-test-frame/")
+            {
                 return Route::NotFound {
                     detail: "no such member in the captured Workshop preview",
                 };
@@ -1875,6 +1877,34 @@ ships = [\"assets/entities/alliance_destroyer.toml\"]
                 !matches!(r, Route::NotFound { .. }),
                 "{path} is what this host exists to serve to a phone: {r:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_frames_are_private_mutable_and_retired_routes_never_fall_through() {
+        let fx = Fixture::new("test-frames", MANIFEST);
+        let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
+        let bundled = ClientSource::Bundled { dir: "dist".into() };
+        let documents = HostedDocuments::default();
+        for path in [
+            "/workshop-test-frame/nonce/view.png",
+            "/workshop-test-frame/nonce/presentation.json",
+        ] {
+            documents.publish_bytes(path, vec![1, 2], "application/octet-stream", false);
+            let req = request(&format!("GET {path} HTTP/1.1\r\n"));
+            assert!(matches!(
+                route(&req, &content, &bundled, &documents, PeerOrigin::Loopback),
+                Route::Hosted { .. }
+            ));
+            assert!(matches!(
+                route(&req, &content, &bundled, &documents, PeerOrigin::Remote),
+                Route::NotFound { .. }
+            ));
+            documents.withdraw(path);
+            assert!(matches!(
+                route(&req, &content, &bundled, &documents, PeerOrigin::Loopback),
+                Route::NotFound { .. }
+            ));
         }
     }
 

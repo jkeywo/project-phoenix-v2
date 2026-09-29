@@ -138,7 +138,7 @@ fn disposable_native_test_controls_one_authored_slot_and_runs_other_present_slot
 /// inherited-pipe clock path through its ordinary native renderer.
 #[cfg(feature = "host")]
 #[test]
-#[ignore = "opens the intended interactive Test Viewscreen; requires a native display"]
+#[ignore = "requires a native GPU adapter for the real offscreen child and pipe transport"]
 #[allow(clippy::disallowed_methods)] // Private test directory, never simulation identity.
 fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
     use project_phoenix::{
@@ -185,7 +185,15 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
     let Source::Text(original) = &files[world] else {
         panic!("world must remain exact text")
     };
-    let authored = format!("# Unsaved disposable Test smoke\n{original}");
+    let authored = format!(
+        r#"# Unsaved disposable Test smoke
+{original}
+[[gm_role_preset]]
+id = "test-native-role"
+label = "workshop.test_heading"
+panels = ["gm-map-panel", "gm-activity"]
+"#
+    );
     files.insert(world.into(), Source::Text(authored.clone()));
     let snapshot = provider
         .prepare_test(
@@ -204,10 +212,12 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
         .files
         .contains_key("assets/shaders/reference_grid.wgsl"));
     let stages = private.0.join("runs");
-    let mut process = TestProcess::start(
+    let documents = project_phoenix::delivery::serve::HostedDocuments::default();
+    let mut process = TestProcess::start_with_delivery(
         std::path::Path::new(env!("CARGO_BIN_EXE_phoenix-host")),
         &stages,
         snapshot,
+        Some((documents.clone(), "http://127.0.0.1:7".into())),
     )
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -218,6 +228,74 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
             break;
         }
         assert!(Instant::now() < deadline, "native Test did not finish boot");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let frame_path = process
+        .status()
+        .frame_url
+        .unwrap()
+        .strip_prefix("http://127.0.0.1:7")
+        .unwrap()
+        .to_owned();
+    let presentation_path = process
+        .status()
+        .presentation_url
+        .unwrap()
+        .strip_prefix("http://127.0.0.1:7")
+        .unwrap()
+        .to_owned();
+    loop {
+        let state = process.status();
+        assert!(state.running, "native Test failed: {:?}", state.error);
+        let drawn = documents.resource(&frame_path).is_some_and(|frame| {
+            let pixels = image::load_from_memory(&frame.body).unwrap().into_rgba8();
+            let (width, height) = pixels.dimensions();
+            let mut colours = std::collections::HashSet::new();
+            let mut brightest = 0;
+            for y in height * 3 / 10..height * 7 / 10 {
+                for x in width * 3 / 10..width * 7 / 10 {
+                    let px = pixels.get_pixel(x, y).0;
+                    brightest = brightest.max(*px[..3].iter().max().unwrap());
+                    if colours.len() < 8 {
+                        colours.insert(px);
+                    }
+                }
+            }
+            colours.len() > 1 && brightest > 16
+        });
+        if drawn {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "native dock transport never received a lit non-flat scene"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    process
+        .control(TestControl::View {
+            view: project_phoenix::workshop::test_protocol::TestView::GameMaster,
+        })
+        .unwrap();
+    loop {
+        if documents
+            .resource(&presentation_path)
+            .is_some_and(|resource| {
+                let payload =
+                    project_phoenix::core::codec::decode_workshop_test_presentation(&resource.body)
+                        .unwrap();
+                payload.channels.contains_key("gm_entity")
+                    && payload.channels.contains_key("hud")
+                    && payload.role_presets.contains("test-native-role")
+            })
+        {
+            break;
+        }
+        assert!(process.status().running);
+        assert!(
+            Instant::now() < deadline,
+            "native dock did not receive GM/HUD/captured role projections"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
     let paused = process.control(TestControl::Pause {}).unwrap();
@@ -236,6 +314,8 @@ fn actual_test_host_starts_unsaved_source_steps_and_retires_its_stage() {
     );
     assert!(process.control(TestControl::Resume {}).unwrap().running);
     drop(process);
+    assert!(documents.resource(&frame_path).is_none());
+    assert!(documents.resource(&presentation_path).is_none());
     assert_eq!(std::fs::read_dir(&stages).unwrap().count(), 0);
     assert!(
         !std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(world))

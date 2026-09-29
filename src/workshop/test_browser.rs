@@ -175,6 +175,8 @@ fn publish_status(
     use crate::core::messages::GamePhase;
     EDGE.with(|edge| {
         edge.borrow_mut().status = Some(TestStatus {
+            frame_url: None,
+            presentation_url: None,
             running: true,
             starting: matches!(phase.get(), GamePhase::Lobby | GamePhase::Loading),
             paused: clock.paused,

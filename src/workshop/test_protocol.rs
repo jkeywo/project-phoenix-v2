@@ -226,6 +226,11 @@ pub struct Launch {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TestStatus {
+    /// Private native presentation route; absent in browser Tests and never persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_url: Option<String>,
     pub running: bool,
     pub starting: bool,
     pub paused: bool,
@@ -251,6 +256,8 @@ pub struct TestStatus {
 impl TestStatus {
     pub fn starting(launch: &Launch) -> Self {
         Self {
+            frame_url: None,
+            presentation_url: None,
             running: true,
             starting: true,
             paused: false,
@@ -372,4 +379,14 @@ impl PreviewSelection {
             _ => None,
         }
     }
+}
+
+/// Bounded latest-only native Test presentation. Values retain the ordinary
+/// Host Channel codec strings consumed by the shared HUD and read-only GM UI.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TestPresentation {
+    pub sequence: u64,
+    pub channels: std::collections::BTreeMap<String, String>,
+    pub role_presets: String,
 }

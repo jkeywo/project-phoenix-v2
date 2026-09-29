@@ -7,7 +7,10 @@ pub mod keyboard;
 pub mod lod_generation;
 pub mod preview;
 pub mod test_clock;
+pub mod test_frames;
 pub mod test_process;
+#[cfg(feature = "host")]
+pub mod test_render;
 
 use bevy::prelude::*;
 

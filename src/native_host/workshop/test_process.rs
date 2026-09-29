@@ -74,9 +74,18 @@ pub struct TestProcess {
     output: Option<std::thread::JoinHandle<()>>,
     sequence: u64,
     _stage: Stage,
+    frame_route: Option<super::test_frames::FrameRoute>,
 }
 impl TestProcess {
     pub fn start(executable: &Path, stages: &Path, snapshot: TestSnapshot) -> Result<Self, String> {
+        Self::start_with_delivery(executable, stages, snapshot, None)
+    }
+    pub fn start_with_delivery(
+        executable: &Path,
+        stages: &Path,
+        snapshot: TestSnapshot,
+        delivery: Option<(crate::delivery::serve::HostedDocuments, String)>,
+    ) -> Result<Self, String> {
         let (stage, launch) = Stage::create(stages, snapshot)?;
         let mut command = Command::new(executable);
         command
@@ -90,13 +99,24 @@ impl TestProcess {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            // Suppress a helper console; winit creates the intended visible
-            // interactive Test Viewscreen itself on the child's main thread.
+            // No helper console or separate interactive window: the Test renders
+            // into the parent's docked document through the private frame pipe.
             command.creation_flags(0x0800_0000);
         }
-        Self::spawn(command, stage, launch)
+        Self::spawn(
+            command,
+            stage,
+            launch,
+            delivery
+                .map(|(documents, origin)| super::test_frames::FrameRoute::new(documents, &origin)),
+        )
     }
-    fn spawn(mut command: Command, stage: Stage, launch: Launch) -> Result<Self, String> {
+    fn spawn(
+        mut command: Command,
+        stage: Stage,
+        launch: Launch,
+        frame_route: Option<super::test_frames::FrameRoute>,
+    ) -> Result<Self, String> {
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         let pipes = child.stdin.take().zip(child.stdout.take());
         let Some((input, output)) = pipes else {
@@ -109,11 +129,51 @@ impl TestProcess {
             changed: Condvar::new(),
         });
         let observed = state.clone();
+        let publish_frame = frame_route.as_ref().map(|route| route.publisher());
+        let publish_presentation = frame_route
+            .as_ref()
+            .map(|route| route.presentation_publisher());
         let reader = std::thread::Builder::new()
             .name("phoenix-workshop-test-output".into())
             .spawn(move || {
                 let mut reader = BufReader::new(output);
                 while let Ok(Some(line)) = bounded_line(&mut reader) {
+                    if line.starts_with(super::test_frames::PRESENTATION_PREFIX) {
+                        match super::test_frames::read_presentation(&line, &mut reader) {
+                            Ok(bytes) => {
+                                if let Some(publish) = &publish_presentation {
+                                    publish(bytes);
+                                }
+                            }
+                            Err(error) => {
+                                observed
+                                    .state
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .error = Some(error);
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    if line.starts_with(super::test_frames::PREFIX) {
+                        match super::test_frames::read_frame(&line, &mut reader) {
+                            Ok(bytes) => {
+                                if let Some(publish) = &publish_frame {
+                                    publish(bytes);
+                                }
+                            }
+                            Err(error) => {
+                                observed
+                                    .state
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .error = Some(error);
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     let Some(json) = line.strip_prefix(STATUS_PREFIX) else {
                         continue;
                     };
@@ -139,6 +199,7 @@ impl TestProcess {
             output: Some(reader),
             sequence: 0,
             _stage: stage,
+            frame_route,
         })
     }
     pub fn status(&mut self) -> TestStatus {
@@ -149,6 +210,18 @@ impl TestProcess {
                 state.error = Some(format!("Disposable Test exited with {exit}"));
             }
         }
+        state.frame_url = state
+            .running
+            .then(|| self.frame_route.as_ref().map(|route| route.url.clone()))
+            .flatten();
+        state.presentation_url = state
+            .running
+            .then(|| {
+                self.frame_route
+                    .as_ref()
+                    .map(|route| route.presentation_url.clone())
+            })
+            .flatten();
         state.clone()
     }
     pub fn control(&mut self, control: TestControl) -> Result<TestStatus, String> {
@@ -194,6 +267,18 @@ impl TestProcess {
         if !state.running && !stopping {
             return Err("Disposable Test is closed".into());
         }
+        state.frame_url = state
+            .running
+            .then(|| self.frame_route.as_ref().map(|route| route.url.clone()))
+            .flatten();
+        state.presentation_url = state
+            .running
+            .then(|| {
+                self.frame_route
+                    .as_ref()
+                    .map(|route| route.presentation_url.clone())
+            })
+            .flatten();
         Ok(state.clone())
     }
 }
@@ -274,7 +359,10 @@ pub(super) fn pipe_probe(parent: &Path) -> (TestProcess, PathBuf) {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
     }
-    (TestProcess::spawn(command, stage, launch).unwrap(), path)
+    (
+        TestProcess::spawn(command, stage, launch, None).unwrap(),
+        path,
+    )
 }
 impl Drop for TestProcess {
     fn drop(&mut self) {
@@ -379,7 +467,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
     config.solo = true;
     config.deterministic = true;
     config.remember_layout = false;
-    config.surface = crate::boot::NativeRenderSurface::Window;
+    config.surface = crate::boot::NativeRenderSurface::Offscreen;
     let mut app =
         crate::native_host::build_native_host_app(&config, &preload).map_err(|e| e.to_string())?;
     if let Some(slot_id) = launch.selection.slot.as_deref() {
@@ -394,10 +482,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
         )?;
         app.insert_resource(frozen);
     }
-    let world = app.world_mut();
-    for mut window in world.query::<&mut Window>().iter_mut(world) {
-        window.title = "Project Phoenix — Test".into();
-    }
+    install_test_render(&mut app)?;
     use crate::authoritative::{DeclareState, StateClass};
     app.declare_state::<ChildPipe>(StateClass::Timer, "gm-milestone-integrated-workshop")
         .declare_state::<crate::workshop::test_trace::TestTrace>(
@@ -423,6 +508,15 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
         .add_systems(Last, publish_status.after(super::test_clock::finish_step));
     app.run();
     Ok(())
+}
+
+#[cfg(feature = "host")]
+fn install_test_render(app: &mut App) -> Result<(), String> {
+    super::test_render::install(app)
+}
+#[cfg(not(feature = "host"))]
+fn install_test_render(_app: &mut App) -> Result<(), String> {
+    Err("Native Test rendering requires the host feature".into())
 }
 
 fn pin_test_content_root(descriptor: &Path) -> Result<PathBuf, String> {
@@ -458,15 +552,19 @@ fn publish_status(
     view: Res<crate::workshop::test_view::TestViewState>,
     trace: Res<crate::workshop::test_trace::TestTrace>,
     breakpoint: Res<crate::workshop::test_breakpoint::TestBreakpointState>,
+    failure: Option<Res<super::test_frames::PresentationFailure>>,
 ) {
+    let error = failure.and_then(|failure| failure.error());
     let state = TestStatus {
-        running: true,
+        frame_url: None,
+        presentation_url: None,
+        running: error.is_none(),
         starting: false,
         paused: clock.paused,
         tick: tick.0,
         multiplier: clock.multiplier,
         acknowledged: pipe.acknowledged,
-        error: None,
+        error,
         revision: pipe.launch.revision.clone(),
         selection: pipe.launch.selection.clone(),
         view: view.requested.clone(),

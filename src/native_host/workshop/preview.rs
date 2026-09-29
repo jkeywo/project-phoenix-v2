@@ -63,6 +63,10 @@ impl PreviewRoutes {
         }
     }
 
+    pub(super) fn delivery(&self) -> (HostedDocuments, String) {
+        (self.documents.clone(), self.origin.clone())
+    }
+
     pub fn retire(&mut self) {
         if let Some(active) = self.active.take() {
             for route in active.routes {

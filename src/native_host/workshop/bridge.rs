@@ -280,10 +280,11 @@ impl WorkshopWorker {
                                                 let started = std::env::current_exe()
                                                     .map_err(|e| e.to_string())
                                                     .and_then(|executable| {
-                                                        super::test_process::TestProcess::start(
+                                                        super::test_process::TestProcess::start_with_delivery(
                                                             &executable,
                                                             &provider.test_directory(),
                                                             snapshot,
+                                                            preview.as_ref().map(|routes| routes.delivery()),
                                                         )
                                                     });
                                                 match started {

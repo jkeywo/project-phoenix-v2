@@ -35,7 +35,7 @@ entities:
 
   - component: gm-milestone-peer-tracer
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: GM Peer Exists (Tracer)
       summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: an equal GM session role with its own ready state, force-start past readiness only, visible paused-snapshot drop-in, privileged Admission, and a browser GM page that joins over the T1 #1093 Phoenix transport as a full deterministic headless-simulation peer. Its complete map shows stable player ships, NPCs, structures, hazards and authored Regions (asteroid fields aggregate as Regions), with a reusable selection/inspector shell; its initial bounded tick-stamped activity feed reuses the unconditional structured damage and destruction balance events. Pause/resume is an explicit attributed SetSessionPaused state command. The GM reads local omniscient projections over the Host Channel; only commands cross lockstep."
@@ -43,6 +43,7 @@ entities:
         - "A GM-only session running the world end-to-end is the tracer: it proves topology (host-class peer, local omniscient reads), the admission tier, and lobby role in one vertical slice before any directing tools exist."
         - "Exit criteria: a GM-only deterministic session runs the world; a browser GM in a crewed session sees the complete map/feed, pauses/resumes, force-starts, reconnects through a visibly paused snapshot transfer, and puppets an authentic Station interface."
         - "Published slices #1289-#1299 deliver the M1 paths; #1300 is the AFK end-to-end exit validation. Pause #1292 is the first typed GM action tracer, reusing shared action/feedback issues #1274/#1276."
+        - "Delivery audit 2026-09-29: #1289-#1300 are closed, including the M1 AFK exit."
         - "Issue #1299 completes the Station-puppet tracer without cloning a console or widening downstream authority: canonical SetStationPuppet and IssueStationCommand grants carry equal-GM attribution to the payload-aware ordinary System Admission policy, where live Backfill membership and effective-target availability are revalidated in actual action order before the ControlSystem command becomes source-stripped. Applied/No-op/Refused outcomes are persisted with the applied journal; an already-admitted command queue is captured and folded across immediate recovery. Only the selected Backfill Station's AI is suppressed. The local GM projection supplies its exact authored console URL and complete per-ship raw replica (topology, blackboards, pose, absolute live world entities, objectives, waypoint, hull and control state) to the ordinary ClientSimState, radar-region, console-state and action-map paths; its scrollable shell keeps takeover and authentic iframe controls reachable at the standard 1280x720 host viewport. Player.station tenure is never changed, crew SimState names active operators and latest admitted activity, release or last-GM host loss reapplies ordinary Backfill, and surviving equal GMs remain active. Canonical FleetLockstep departure plus the agreed PendingHostLoss boundary durably refuse a departed operator's already-sequenced later takeover and command grants; an action exactly on the still-unapplied boundary preserves action-before-loss ordering, and canonical slot recovery re-admits future work. Canonical membership, outcomes and pending admitted commands are captured, folded and replayed with seeded production evidence."
         - "The Station raw/config boundary reuses the exact complete ShipClientConfig projector used by an ordinary Welcome, so authored Helm/Sensors/Navigation ranges and filters, weapon arcs, hostile-arc colour, tutorials, hull identity and assist gaps cannot drift into a GM-only subset. The authentic iframe's opaque action correlation is preserved on IssueStationCommand. Admission-time refusals settle immediately; an accepted correlated command remains an internal, unprojected Pending fact until its ordinary System consumer reports Applied or Refused. That exact-once terminal fact returns to the same iframe's ordinary feedback lifecycle, including downstream weapon-state refusals."
         - "GM slot recovery advances a canonical generation in the journal. Every grant records its generation, so pre-loss queued work remains durably Refused after loss and rejoin while genuinely post-recovery grants apply; adjacent generations retain deterministic same-boundary ordering, and generation history participates in snapshot, digest and replay."
@@ -59,7 +60,7 @@ entities:
 
   - component: gm-milestone-directing
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: GM Directing
       summary: "Deliver PRD #930 modules 3 and 4 and part of 8: typed attributed idempotent GM commands through the trigger-action pipeline; explicit per-event Fire, persistent manual Pause, and Skip-next controls; manual gm_event Fire tools; map-gesture palette spawn and safe despawn; authored doctrine/directive and Objective controls; reveal/conceal/normal; direct Entity/Station/System damage and healing; System disable/restore; and Station-scoped puppeting of compatible player and NPC ships alongside players. The mission panel, quick actions, dossier, inspectors, validation, and structured result adapters are shared with later M6 rather than exposing raw ECS mutation."
@@ -67,6 +68,7 @@ entities:
         - "Exit criteria: a GM runs Combat Test end-to-end with event controls, map spawn/despawn, Objective/doctrine/knowledge controls, damage/heal/disable/restore, and compatible player/NPC puppeting, with replay-identical results."
         - "Every new action kind follows the trigger-action extension contract so scenario authors gain the same vocabulary the GM uses."
         - "Published slices #1301-#1314 deliver the directing action families, shared platform issue #1315 delivers configurable confirmation/preview, and #1316 is the AFK Combat Test plus replay exit validation."
+        - "Delivery audit 2026-09-29: #1301-#1316 are closed, including the M2 AFK replay exit."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -75,7 +77,7 @@ entities:
 
   - component: gm-milestone-performing
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: GM Performing (PRD 930 MVP Complete)
       summary: "Deliver PRD #930 modules 5 and 7 and the rest of 8: a Comms studio for bounded logged free-form send-as-existing-identity messages, authored visibility/recipients, quick templates and scripted hail initiation; per-ship Truth/Crew Knowledge/Difference views over the crew's own contact, Objective, and Comms projections; and reconnectable per-GM role presets that filter the interface but never authority. Role-preset and panel components must also render in M6 Authoring/Test, without adding those later workflows to the MVP."
@@ -83,6 +85,7 @@ entities:
         - "Exit criteria: a real multi-crew HITL run with at least two equal GMs validates Comms, knowledge comparison, live-switching role presets, simultaneous actions, and reconnect."
         - "Role presets differentiate GM interfaces (filters, quick-action panels, scripts), never permissions — all GMs remain mechanically equal and deterministic Admission ordering resolves simultaneous actions."
         - "Published slices #1317-#1319 deliver Comms, knowledge comparison, and role presets; #1320 is the HITL two-equal-GM live-event exit."
+        - "Delivery audit 2026-09-29: #1317-#1319 are closed, but #1320 remains open. docs/acceptance/1320-gm-live-event.md explicitly records preparation only and no accepted human session; M3's feature code is delivered but its exit is not."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -91,14 +94,15 @@ entities:
 
   - component: gm-milestone-facilitation-assistance
     core:
-      status: proposed
-      confidence: provisional
+      status: partially-implemented
+      confidence: confirmed
       title: GM Facilitation Assistance
       summary: "Advisory attention tooling so one GM can run a large session: a prioritized attention queue (pending comms, eligible beats, idle NPCs, disconnected stations), quiet-time detection, station workload indicators limited to broad states (underused/engaged/overloaded), declarative per-mission GM panels as typed widgets in world TOML extending the role-preset schema, and per-operator attention filtering for multi-GM sessions."
       rationale:
         - "Chosen as the first post-MVP milestone: the MVP gives the GM hands; this gives the GM eyes, which is the binding constraint at real events."
         - "All assistance is advisory, never prescriptive, and avoids false precision — broad workload states only."
         - "Exit criteria: one GM can run a large session without missing important activity."
+        - "Delivery audit 2026-09-29: #1433-#1439 implement the M4 attention, quiet-time, peer-health, workload and widget slices and are closed. #1440 busy-session human acceptance is still open."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -107,14 +111,15 @@ entities:
 
   - component: gm-milestone-operations-safety
     core:
-      status: proposed
-      confidence: provisional
+      status: partially-implemented
+      confidence: confirmed
       title: GM Operations and Safety
       summary: "Recoverability for live events: an action log UI over the shared command log, undo for invertible actions (spawn/despawn, faction and doctrine restore) with the UI distinguishing technically from fictionally reversible, checkpoint/bookmark and restore reusing the #862 snapshot machinery, and a peer-health/technical panel (connected peers, station assignments, tick health)."
       rationale:
         - "Sequenced before information control: recoverability protects real events as soon as GMs start running them; false-info drama can wait."
         - "The tick-stamped command log from #849/#854 already carries attribution and replay; this milestone is UI and inverse-action definitions, not new logging infrastructure."
         - "Exit criteria: a live event survives GM mistakes and crashes without stopping the game."
+        - "Delivery audit 2026-09-29: #1441-#1447 implement action history, undo, checkpoints and peer restore and are closed. #1448 live-event recovery acceptance is still open."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -129,8 +134,8 @@ entities:
       title: GM Integrated Workshop and Live Inspector
       summary: "T4 M6, after Operations and Safety, is the first native GM integration. One native simulation instance may carry one fixed player-ship slot alongside local equal GM operator identities, advertise ship plus gm capabilities, and count once for deterministic NPC ownership; browser GM remains GM-only. Unify the GM console, HTML editor and model viewer around shared schema-backed inspectors while keeping two exclusive contexts. Live exists only while connected as a GM peer: it exposes M1-M5 actions plus separately tested safe reconciliation adapters as constrained, attributed, optimistic-concurrency transactions through Operations/Safety; Rhai source is fixed for the run and no arbitrary ECS escape hatch exists. Standalone Workshop switches between Authoring and Test with one chronological undo stack. Native Authoring edits an explicitly selected project root or one mod workspace; Browser Authoring edits exactly one in-memory new/imported/loaded mod pack over read-only base/other-pack dependencies and exports one ZIP. Test validates an unsaved draft, starts a fresh disposable deterministic simulation with every Station on Backfill, and switches between the omniscient GM view and the authentic Viewscreen of any simulated player ship. M6 reaches comment-preserving TOML/Rhai/entity/definition/mod-pack parity, integrates model/rig/marker/variant/LOD preview and native LOD/remesh capability, then deletes the old editor and standalone viewer interfaces while preserving redirecting developer shortcuts."
       rationale:
-        - "Implementation in progress: browser and native Authoring preserve source and history, validate through runtime-equivalent gates, recover crash drafts, and run disposable deterministic Tests from exact unsaved source. Model scalar authoring and captured preview are present, and the first shared-descriptor Live transaction safely edits NPC doctrine through optimistic concurrency. GM/ship Test views, bounded runtime traces and typed scenario-state breakpoints are implemented; role preview, broader specialised panels, native LOD/remesh integration, the golden parity workflow and retirement of the old editor/viewer remain before M6 is complete."
-        - "[ai] Status reconciled after #1496-#1499: the shared browser/native dock substrate is implemented. Authoring now docks its source workflow, add/recovery lifecycle, findings, correlated feedback, immutable dependency sources and private settings around fixed lifecycle controls; Live has the roster/readiness/join/manual-save tracer around its fixed Station/status bar. Separate versioned placement-only profile fields and matching browser/native sanitizers preserve the authority boundaries above. This does not complete broader Live panels, Test views/traces, parity, native LOD/remesh or retirement."
+        - "Delivery audit 2026-09-29: browser and native Authoring preserve exact source and history, validate through runtime-equivalent gates, recover drafts and run disposable deterministic Tests. GM/ship Test views, role preview, runtime traces, scenario-state breakpoints, captured model/entity/celestial previews, native LOD/remesh and billboard capture, five Live Inspector domains and checked NPC-doctrine transactions are delivered. #1488 retired the old editor and standalone viewer. Structured world/mod composition #1475, entity composition #1476 and role/widget authoring #1477 remain open, as do golden browser/native acceptance #1487, persisted docked Test #1500 and dock acceptance #1514."
+        - "[ai] The shared browser/native dock substrate and Authoring/Live panel migrations are implemented through #1496-#1513. Separate versioned placement-only profile fields and matching browser/native sanitizers preserve authority boundaries. Test's persisted placement and full acceptance remain #1500/#1514; a docked panel in source is not evidence that its exit passed."
         - "[ai] Scenario placement is implemented through #1479: editable world members expose composed layers, anchors, Regions and entity spawns through a keyboard-operable canvas and an equivalent structured list/form. Position and yaw changes remain exact-source grouped transactions, validate the complete candidate before landing, and flow through the ordinary draft undo, diff, recovery and disposable-Test path."
         - "Issue #1495 implements the combined native ship/GM capability on one host-mesh slot. The frozen topology carries independent ship and GM bindings over one deduplicated participant, so lockstep barriers, watermarks, digests and deterministic NPC work count the native process once; equal GM readiness, attribution, disconnect and fixed-slot recovery remain available while browser ship-only and GM-only peers retain their existing roles. Host-mesh protocol revision 14 refuses mixed builds before topology adoption."
         - "[ai] Disposable browser Test role preview reads the loaded captured world's ordinary wasm_get_gm_role_presets export only after that run finishes startup, then feeds the ordinary GM role-preset and typed-widget controllers. Selection stays local to the fresh iframe, removed presets fall back through the existing All behavior, restart resets the choice, and a retired boot cannot publish late descriptors. The GM action route remains the Test's explicit refusal list, so previewing a role changes no authority or digest input."

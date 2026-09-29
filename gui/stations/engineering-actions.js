@@ -311,7 +311,7 @@ function chooseRepairRecall(view, detail) {
 }
 
 function chooseRepairPriority(view, detail) {
-  if (!view || view.repair_auto) return null;
+  if (!view || (view.repair_auto && !view.repair_summary)) return null;
   const rows = Array.isArray(view.damaged_systems) ? view.damaged_systems : [];
   const requested = detail && typeof detail.system_id === 'string' ? detail.system_id : null;
   const candidates = requested

@@ -46,12 +46,12 @@ describe('battleship repair renderStation', () => {
     own_hull: { pct: 0.8 },
   };
 
-  it('drives hull integrity, core damage and repair teams', () => {
-    renderStation(payload, document);
+  it.each([false, true])('drives hull integrity, core damage and repair teams with summary=%s', (summary) => {
+    renderStation({ ...payload, repair_summary: summary }, document);
     expect(el('hull-integrity').state).toEqual({ total_pct: 0.55, destroyed_pct: 0.05 });
     expect(el('core-damage').state).toEqual({ entries: [{ id: 'core-1' }] });
     expect(el('repair-teams').state).toEqual({
-      teams: payload.teams, auto: true, targets: [{ id: 'dt1' }],
+      teams: payload.teams, auto: true, summary, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }],
       external_dispatch: null,
     });

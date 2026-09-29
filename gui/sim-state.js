@@ -83,6 +83,7 @@ export class ClientSimState {
     // resync follows shortly afterwards, so retain the last authoritative
     // projection instead of briefly falling back to the lobby rating.
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
+    const systemDepths = preserveAuthorityProjection ? this.systemDepths : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
@@ -179,6 +180,7 @@ export class ClientSimState {
     this.stationPuppets = stationPuppets;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
+    this.systemDepths = systemDepths;
     /** Per-system/reserved-channel blackboard mirror, keyed by wire id.
      *  Each value is the inner `data` object of the `SystemBlackboard` variant. */
     this.blackboards = {};
@@ -353,6 +355,7 @@ export class ClientSimState {
         // Missing on older protocol-compatible hosts, where the console
         // builders retain their station-rating fallback.
         this.controlSources = snap.control_sources || {};
+        this.systemDepths = snap.system_depths || {};
         this.stationPuppets = Object.fromEntries(
           (snap.station_puppets || []).filter(Boolean)
             .map(entry => [entry.station, entry]),
@@ -394,6 +397,7 @@ export class ClientSimState {
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};
+        this.systemDepths = {};
         changes.changedDomains.add(CHANGE_DOMAINS.ROUND);
         break;
       case 'Welcome': {
@@ -999,14 +1003,6 @@ export function canDecreasePower(levels, console) {
   return idx !== undefined && levels[idx] > 1;
 }
 
-/**
- * True when the Science console phaser-frequency sub-panel should be visible
- * (Tactical currently at Low complexity). `complexity` is the per-console
- * preset map from lobby state.
- */
-export function isSciencePhaserPanelVisible(complexity) {
-  return (complexity && complexity.Tactical) === 'Low';
-}
 
 /** Singleton used by client.html. */
 export const simState = new ClientSimState();

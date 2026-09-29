@@ -1629,7 +1629,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
       dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
       system_id:            entry.systemId,
-      repair_auto:          state.controlSources?.[entry.systemId] === 'Ai',
+      repair_auto:          ['Ai', 'Simplified'].includes(state.controlSources?.[entry.systemId]),
+      repair_summary:       state.controlSources?.[entry.systemId] === 'Simplified',
       // External repair-team dispatch (issue #1161). Non-null only on a hull
       // that authored `[repair.external_dispatch]` (its blackboard carries a
       // `range`), so the console shows the dispatch control on exactly those
@@ -2028,7 +2029,6 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
     ship_speed:              state.forwardSpeed || 0,
-    complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
     regions:                 state.regions ? state.regions.filter(region => overrides[region.uuid] !== 'conceal' && !Object.hasOwn(reports, region.uuid)) : projectRadarRegions(
@@ -2419,7 +2419,7 @@ function buildFamilyConsoleView(family, state, systemIds) {
     const hasProjection = checkedIds.some(id => Object.prototype.hasOwnProperty.call(sources, id));
     if (hasProjection) {
       view[descriptor.autoField] = checkedIds.length > 0
-        && checkedIds.every(id => sources[id] === 'Ai');
+        && checkedIds.every(id => sources[id] === 'Ai' || sources[id] === 'Simplified');
     }
   }
   if (descriptor.adjust) descriptor.adjust(view, state, systemIds);

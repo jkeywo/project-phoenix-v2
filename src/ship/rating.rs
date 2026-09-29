@@ -2,10 +2,69 @@ use crate::core::messages::{StationId, SystemId};
 use crate::ship::config::{ShipConfig, StationConfig};
 use crate::ship::control_source::ControlSource;
 use crate::ship::control_source::ControlSourceResolver;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Rating name that automates every system owned by the station.
 pub const BACKFILL_RATING: &str = "Backfill";
+
+/// Authored control depth, ordered so a scenario can only raise it.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum SystemDepth {
+    Ai,
+    Simplified,
+    Detailed,
+}
+
+impl SystemDepth {
+    pub fn control_source(self) -> ControlSource {
+        match self {
+            Self::Ai => ControlSource::Ai,
+            Self::Simplified => ControlSource::Simplified,
+            Self::Detailed => ControlSource::Human,
+        }
+    }
+}
+
+/// Resolve one chosen rung without changing its identity. The floor may leave
+/// a station between authored rungs; it never chooses another rung for the crew.
+/// Scenario selectors are resolved to hull IDs by the caller (#1067).
+pub fn resolve_system_depths(
+    config: &ShipConfig,
+    station_id: &StationId,
+    rating_name: &str,
+    floor: &HashMap<SystemId, SystemDepth>,
+) -> Option<std::collections::BTreeMap<SystemId, SystemDepth>> {
+    let station = config.station(station_id)?;
+    let rating = if rating_name == BACKFILL_RATING {
+        None
+    } else {
+        Some(station.ratings.iter().find(|r| r.name == rating_name)?)
+    };
+    Some(
+        config
+            .systems_for_station(station_id)
+            .map(|system| {
+                let chosen = match rating {
+                    None => SystemDepth::Ai,
+                    Some(r) if r.automated_systems.contains(&system.id) => SystemDepth::Ai,
+                    Some(r)
+                        if r.detailed_systems
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(&system.id)) =>
+                    {
+                        SystemDepth::Detailed
+                    }
+                    Some(_) => SystemDepth::Simplified,
+                };
+                let effective =
+                    chosen.max(floor.get(&system.id).copied().unwrap_or(SystemDepth::Ai));
+                (system.id.clone(), effective)
+            })
+            .collect(),
+    )
+}
 
 /// Resolve the set of systems that are automated for a station/rating combination.
 ///
@@ -45,22 +104,12 @@ pub fn apply_rating(
     rating_name: &str,
     resolver: &mut ControlSourceResolver,
 ) {
-    let Some(automated) = resolve_automated_systems(config, station_id, rating_name) else {
+    let Some(depths) = resolve_system_depths(config, station_id, rating_name, &HashMap::new())
+    else {
         return;
     };
-
-    let automated_set: HashSet<&SystemId> = automated.iter().collect();
-
-    // Set automated systems to Ai
-    for system_id in &automated {
-        resolver.set(system_id.clone(), ControlSource::Ai);
-    }
-
-    // Set all other station-owned systems back to Human
-    for system in config.systems_for_station(station_id) {
-        if !automated_set.contains(&system.id) {
-            resolver.set(system.id.clone(), ControlSource::Human);
-        }
+    for (id, depth) in depths {
+        resolver.set(id, depth.control_source());
     }
 }
 
@@ -132,6 +181,74 @@ pub fn ai_only_systems(config: &ShipConfig) -> Vec<SystemId> {
 mod tests {
     use super::*;
     use crate::ship::config::parse_and_validate;
+
+    #[test]
+    fn floor_raises_individual_systems_without_selecting_a_different_rung() {
+        let mut config = parse_and_validate(valid_toml(), KINDS).unwrap();
+        let station = StationId("captain".into());
+        let red = SystemId("red-alert".into());
+        let view = SystemId("viewscreen".into());
+        let rung = &mut config
+            .stations
+            .iter_mut()
+            .find(|s| s.id == station)
+            .unwrap()
+            .ratings[0];
+        rung.automated_systems = vec![red.clone()];
+        rung.detailed_systems = Some(vec![]);
+        let before = config.clone();
+        let floor = HashMap::from([(red.clone(), SystemDepth::Detailed)]);
+        let result = resolve_system_depths(&config, &station, "Assisted", &floor).unwrap();
+        assert_eq!(result[&red], SystemDepth::Detailed);
+        assert_eq!(result[&view], SystemDepth::Simplified);
+        assert_eq!(
+            config, before,
+            "a between-rung result must not rewrite the chosen rung"
+        );
+        let lower = resolve_system_depths(&config, &station, "Manual", &floor).unwrap();
+        assert!(lower.values().all(|d| *d == SystemDepth::Detailed));
+        let backfill =
+            resolve_system_depths(&config, &station, BACKFILL_RATING, &HashMap::new()).unwrap();
+        assert!(backfill.values().all(|d| *d == SystemDepth::Ai));
+        assert!(resolve_system_depths(&config, &station, "unknown", &floor).is_none());
+    }
+
+    #[test]
+    fn explicit_depth_lists_reject_dangling_unowned_and_conflicting_systems() {
+        for (id, expected) in [
+            ("missing", "DanglingRatingReference"),
+            ("phaser-fore", "RatingReferencesUnownedSystem"),
+            ("red-alert", "ConflictingRatingDepth"),
+        ] {
+            let mut config = parse_and_validate(valid_toml(), KINDS).unwrap();
+            config.stations[0].ratings[0].detailed_systems = Some(vec![SystemId(id.into())]);
+            let error = crate::ship::config::validate(&config, KINDS).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn legacy_ratings_preserve_their_sources_and_default_order() {
+        let config = parse_and_validate(valid_toml(), KINDS).unwrap();
+        for station in &config.stations {
+            for rung in &station.ratings {
+                let depths =
+                    resolve_system_depths(&config, &station.id, &rung.name, &HashMap::new())
+                        .unwrap();
+                for (id, depth) in depths {
+                    assert_eq!(
+                        depth,
+                        if rung.automated_systems.contains(&id) {
+                            SystemDepth::Ai
+                        } else {
+                            SystemDepth::Detailed
+                        }
+                    );
+                }
+            }
+        }
+        assert_eq!(config.stations[0].ratings[0].name, "Assisted");
+    }
 
     const KINDS: &[&str] = &[
         "red_alert",

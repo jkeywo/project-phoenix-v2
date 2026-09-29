@@ -62,7 +62,7 @@ impl From<crate::ship::control_source::ControlSource> for ActivitySource {
         use crate::ship::control_source::ControlSource;
         match source {
             ControlSource::Human => ActivitySource::Human,
-            ControlSource::Ai => ActivitySource::Ai,
+            ControlSource::Ai | ControlSource::Simplified => ActivitySource::Ai,
             ControlSource::Offline => ActivitySource::Offline,
         }
     }

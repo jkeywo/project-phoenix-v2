@@ -117,6 +117,7 @@ export function makeEngineeringRender(variant) {
       repairEl.state = {
         teams: r.teams || [],
         auto: !!r.repair_auto,
+        summary: !!r.repair_summary,
         targets: r.dispatch_targets || [],
         damaged: r.damaged_systems || [],
         // The field destination an open idle card offers (issue #1384) and the

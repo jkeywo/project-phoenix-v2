@@ -109,6 +109,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         ingest_station_importance(world);
         let station_importance = build_station_importance_snapshots(world);
         let control_sources = build_control_source_snapshots(world);
+        let system_depths = build_system_depth_snapshots(world);
         let station_puppets = build_station_puppet_snapshots(world);
 
         // ── Emit SystemHullUpdate per recipient, only when that recipient's
@@ -127,6 +128,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             station_health,
             station_importance,
             control_sources,
+            system_depths,
             station_puppets,
         };
         vec![ServerMessage::SimState { snapshot }]
@@ -182,6 +184,33 @@ pub(crate) fn build_station_puppet_snapshots(
         .collect()
 }
 
+pub(crate) fn build_system_depth_snapshots(
+    world: &mut World,
+) -> BTreeMap<crate::core::messages::SystemId, crate::ship::rating::SystemDepth> {
+    use crate::ship::{
+        components::{ActiveStationRatings, ShipConfigComponent},
+        rating,
+    };
+    let mut query =
+        world.query_filtered::<(&ShipConfigComponent, &ActiveStationRatings), With<LocalShip>>();
+    let Some((config, ratings)) = query.iter(world).next() else {
+        return BTreeMap::new();
+    };
+    ratings
+        .0
+        .iter()
+        .flat_map(|(station, name)| {
+            rating::resolve_system_depths(
+                &config.0,
+                station,
+                name,
+                &std::collections::HashMap::new(),
+            )
+            .unwrap_or_default()
+        })
+        .collect()
+}
+
 pub(crate) fn build_control_source_snapshots(
     world: &mut World,
 ) -> BTreeMap<crate::core::messages::SystemId, String> {
@@ -204,6 +233,7 @@ pub(crate) fn build_control_source_snapshots(
                         crate::ship::control_source::ControlSource::Human => "Human",
                         crate::ship::control_source::ControlSource::Ai => "Ai",
                         crate::ship::control_source::ControlSource::Offline => "Offline",
+                        crate::ship::control_source::ControlSource::Simplified => "Simplified",
                     };
                     (system.clone(), label.to_string())
                 })

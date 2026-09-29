@@ -872,7 +872,7 @@ fn control_source_summary(resolver: &crate::ship::control_source::ControlSourceR
     for (_, source) in resolver.entries() {
         match source {
             ControlSource::Human => human += 1,
-            ControlSource::Ai => ai += 1,
+            ControlSource::Ai | ControlSource::Simplified => ai += 1,
             ControlSource::Offline => offline += 1,
         }
     }
@@ -1708,6 +1708,7 @@ fn publish_station_projection(
                             crate::ship::control_source::ControlSource::Human => "Human",
                             crate::ship::control_source::ControlSource::Ai => "Ai",
                             crate::ship::control_source::ControlSource::Offline => "Offline",
+                            crate::ship::control_source::ControlSource::Simplified => "Simplified",
                         };
                         (system.clone(), label.to_string())
                     })

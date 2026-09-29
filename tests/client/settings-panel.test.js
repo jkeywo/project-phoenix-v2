@@ -1004,7 +1004,7 @@ describe('buildSettingsState', () => {
     expect(view.stationId).toBe('helm');
     expect(view.ratings.map((r) => r.name)).toEqual(['Std', 'Simplified']);
     expect(view.ratings.find((r) => r.active).name).toBe('Simplified');
-    expect(view.ratings[0].label).toBe(t('station.rating.std.name'));
+    expect(view.ratings[0].label).toBe('★★ ' + t('station.rating.std.name'));
   });
 
   it('reports no station when the player holds none', () => {

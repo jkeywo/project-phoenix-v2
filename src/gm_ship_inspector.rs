@@ -536,6 +536,7 @@ mod tests {
             rank: "Officer".into(),
             short_code: "H".into(),
             ratings: vec![StationRatingConfig {
+                detailed_systems: None,
                 name: "Full".into(),
                 automated_systems: vec![],
                 ai_tuning: None,

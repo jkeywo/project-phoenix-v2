@@ -163,6 +163,11 @@ pub enum StanceKind {
 pub struct StationRatingConfig {
     pub name: String,
     pub automated_systems: Vec<SystemId>,
+    /// Explicit direct-control systems in this authored rung. Remaining owned
+    /// systems are simplified. Absent on legacy hulls: their non-automated
+    /// systems retain direct control, including their existing default rating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detailed_systems: Option<Vec<SystemId>>,
     /// Per-rating AI tuning parameters (replaces assets/complexity/*.toml).
     /// Keys are AI rule names (e.g. "torpedo_auto_fire", "frequency_match");
     /// values are TOML tables with rule-specific parameters.
@@ -368,6 +373,16 @@ pub enum ShipConfigError {
     DuplicateRatingName {
         station: StationId,
         rating: String,
+    },
+    ConflictingRatingDepth {
+        station: StationId,
+        rating: String,
+        system: SystemId,
+    },
+    UnsupportedSimplifiedSystem {
+        station: StationId,
+        rating: String,
+        system: SystemId,
     },
     /// A `seek_order` on a system that does not seek. The list would be read
     /// by nothing, so it is a typo rather than a preference.
@@ -881,7 +896,11 @@ pub fn validate(
 
     for station in &config.stations {
         for rating in &station.ratings {
-            for system_id in &rating.automated_systems {
+            for system_id in rating
+                .automated_systems
+                .iter()
+                .chain(rating.detailed_systems.iter().flatten())
+            {
                 let Some(owner) = system_owner_by_id.get(system_id) else {
                     return Err(ShipConfigError::DanglingRatingReference {
                         station: station.id.clone(),
@@ -896,6 +915,40 @@ pub fn validate(
                         system: system_id.clone(),
                         owner: owner.clone(),
                     });
+                }
+                if rating.automated_systems.contains(system_id)
+                    && rating
+                        .detailed_systems
+                        .as_ref()
+                        .is_some_and(|ids| ids.contains(system_id))
+                {
+                    return Err(ShipConfigError::ConflictingRatingDepth {
+                        station: station.id.clone(),
+                        rating: rating.name.clone(),
+                        system: system_id.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    for station in &config.stations {
+        for rating in &station.ratings {
+            if let Some(detailed) = &rating.detailed_systems {
+                for system in config.systems_for_station(&station.id) {
+                    // A simplified surface needs summary intent consumed by a
+                    // scoped policy. Never silently turn an unsupported system
+                    // into either direct control or unconfigurable automation.
+                    if !detailed.contains(&system.id)
+                        && !rating.automated_systems.contains(&system.id)
+                        && system.kind != "repair"
+                    {
+                        return Err(ShipConfigError::UnsupportedSimplifiedSystem {
+                            station: station.id.clone(),
+                            rating: rating.name.clone(),
+                            system: system.id.clone(),
+                        });
+                    }
                 }
             }
         }

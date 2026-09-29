@@ -56,6 +56,7 @@ fn snapshot(entity_states: Vec<EntityStateSnapshot>) -> SimSnapshot {
         station_health: Vec::new(),
         station_importance: Vec::new(),
         control_sources: BTreeMap::new(),
+        system_depths: BTreeMap::new(),
         station_puppets: Vec::new(),
     }
 }

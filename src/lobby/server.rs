@@ -2245,6 +2245,7 @@ mod tests {
                     rank: "Crew".into(),
                     short_code: "H".into(),
                     ratings: vec![StationRatingConfig {
+                        detailed_systems: None,
                         name: "Std".into(),
                         automated_systems: vec![],
                         ai_tuning: None,
@@ -2266,6 +2267,7 @@ mod tests {
                     rank: "Crew".into(),
                     short_code: "T".into(),
                     ratings: vec![StationRatingConfig {
+                        detailed_systems: None,
                         name: "Std".into(),
                         automated_systems: vec![],
                         ai_tuning: None,
@@ -2393,6 +2395,7 @@ mod tests {
                 rank: "Crew".into(),
                 short_code: "H".into(),
                 ratings: vec![StationRatingConfig {
+                    detailed_systems: None,
                     name: "Std".into(),
                     automated_systems: vec![],
                     ai_tuning: None,
@@ -2489,6 +2492,7 @@ mod tests {
                     rank: "Crew".into(),
                     short_code: "H".into(),
                     ratings: vec![StationRatingConfig {
+                        detailed_systems: None,
                         name: "Std".into(),
                         automated_systems: vec![],
                         ai_tuning: None,
@@ -2510,6 +2514,7 @@ mod tests {
                     rank: "Crew".into(),
                     short_code: "T".into(),
                     ratings: vec![StationRatingConfig {
+                        detailed_systems: None,
                         name: "Std".into(),
                         automated_systems: vec![],
                         ai_tuning: None,
@@ -2557,6 +2562,7 @@ mod tests {
                 rank: "Crew".into(),
                 short_code: "H".into(),
                 ratings: vec![StationRatingConfig {
+                    detailed_systems: None,
                     name: "Std".into(),
                     automated_systems: vec![],
                     ai_tuning: None,

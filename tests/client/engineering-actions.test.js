@@ -309,6 +309,8 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     const sendAction = vi.fn();
     const view = {
       ...repair(),
+      repair_auto: true,
+      repair_summary: true,
       damaged_systems: [
         {
           system_id: 'core', tier: 'Destroyed', damage_pct: 1,

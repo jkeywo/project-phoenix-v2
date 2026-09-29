@@ -111,8 +111,12 @@ pub fn route_coordination(
     target_control: ControlSource,
 ) -> DeliverAction {
     match (target_control, sender_origin) {
-        (ControlSource::Ai, _) | (ControlSource::Offline, _) => DeliverAction::Consume,
-        (ControlSource::Human, ControlSource::Ai) => DeliverAction::Popup,
+        (ControlSource::Ai | ControlSource::Simplified, _) | (ControlSource::Offline, _) => {
+            DeliverAction::Consume
+        }
+        (ControlSource::Human, ControlSource::Ai | ControlSource::Simplified) => {
+            DeliverAction::Popup
+        }
         (ControlSource::Human, ControlSource::Human)
         | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
     }
@@ -154,7 +158,10 @@ pub struct ShipSeat {
 /// asking is "can a person read this", and one live console on the station is
 /// enough for the answer to be yes.
 pub fn seat_control_source(policies: &[ControlTickPolicy]) -> ControlSource {
-    if policies.iter().any(|p| p.accept_human_input) {
+    if policies
+        .iter()
+        .any(|p| p.accept_human_input || p.accept_summary_input)
+    {
         ControlSource::Human
     } else if policies.iter().any(|p| p.operate_ai) {
         ControlSource::Ai

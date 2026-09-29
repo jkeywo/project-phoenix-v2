@@ -1,4 +1,5 @@
 import { renderAudioSettingsPanel } from './audio-settings-panel.js';
+import { stationRatingLabel } from './station-rating.js';
 
 /**
  * gui/settings-panel.js — the phone client's settings cog (issue #940).
@@ -306,7 +307,7 @@ export function buildSettingsState(opts = {}) {
     const key = 'station.rating.' + String(name).toLowerCase() + '.name';
     return {
       name,
-      label: wireText(key, String(name).toUpperCase()),
+      label: stationRatingLabel(names, name, wireText(key, String(name).toUpperCase())),
       active: name === activeRating,
     };
   });

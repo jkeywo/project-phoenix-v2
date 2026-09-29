@@ -1824,6 +1824,10 @@ pub struct SimSnapshot {
     /// map keeps the authoritative byte stream deterministic.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub control_sources: BTreeMap<SystemId, String>,
+    /// Authored per-system rating depth. Authority remains `control_sources`:
+    /// a rating describes the surface, while damage and GM takeover may gate it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub system_depths: BTreeMap<SystemId, crate::ship::rating::SystemDepth>,
     /// Active GM takeover rows for the local player ship. Station-scoped and
     /// crew-public: this lets every authentic console show that its ordinary
     /// Backfill AI is currently suppressed, including the last attributed GM

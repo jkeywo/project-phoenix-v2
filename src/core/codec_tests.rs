@@ -439,6 +439,10 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         (SystemId("navigation".into()), "Human".into()),
                         (SystemId("shields-system".into()), "Ai".into()),
                     ]),
+                    system_depths: BTreeMap::from([(
+                        SystemId("navigation".into()),
+                        crate::ship::rating::SystemDepth::Simplified,
+                    )]),
                     station_puppets: vec![StationPuppetSnapshot {
                         station: StationId("navigation".into()),
                         operators: vec!["gm-1".into()],

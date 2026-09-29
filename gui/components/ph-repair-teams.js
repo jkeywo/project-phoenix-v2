@@ -650,7 +650,7 @@ export class PhRepairTeams extends PhElement {
           head.textContent = t('component.repair_teams.damaged_title');
           head.style.display = 'block';
           dlist.style.display = 'flex';
-          this.#renderOnSiteSystems(dlist, onSiteRows, auto);
+          this.#renderOnSiteSystems(dlist, onSiteRows, auto && !s.summary);
         } else {
           head.textContent = '';
           head.style.display = 'none';

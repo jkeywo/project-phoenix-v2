@@ -1,4 +1,6 @@
 use super::*;
+#[path = "star_rating_tests.rs"]
+mod star_rating_tests;
 use crate::core::messages::*;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
 use crate::server_app::SimOutbox;

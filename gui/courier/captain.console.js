@@ -68,6 +68,7 @@ export const renderStation = makeCaptainRender({
       repairEl.state = {
         teams: repair.teams || [],
         auto: !!repair.repair_auto,
+        summary: !!repair.repair_summary,
         targets: repair.dispatch_targets || [],
         damaged: repair.damaged_systems || [],
         // The field destination an open idle card offers (issue #1384) and the

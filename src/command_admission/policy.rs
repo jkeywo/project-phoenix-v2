@@ -165,12 +165,23 @@ pub fn is_command_authorized(
     let effective_target = effective_target_for_command(config, target, payload);
 
     let policy = control_sources.0.policy_for(&effective_target);
+    // Summary intent never shares an actuator with the AI. Repair priority
+    // changes the ordinary sweep's policy input; dispatch/recall remain AI-only.
+    let summary = policy.accept_summary_input
+        && config
+            .system(&effective_target)
+            .is_some_and(|s| s.kind == crate::ship::system_registry::REPAIR_KIND)
+        && matches!(
+            payload,
+            SystemControlPayload::SetRepairPriority { .. }
+                | SystemControlPayload::SetRepairTargetPriority { .. }
+        );
 
     if token.starts_with("ai:") {
         return policy.operate_ai;
     }
     if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN {
-        return policy.accept_human_input;
+        return policy.accept_human_input || summary;
     }
 
     // A Spectator (issue #1105) is a registered, connected player with no
@@ -183,11 +194,11 @@ pub fn is_command_authorized(
     // still fire the God-Mode/debug cheats. Placed after the `ai:` and
     // LOCAL_CONSOLE_TOKEN branches (those tokens are never spectators) and
     // before the debug route it closes.
-    if sessions.0.is_spectator(token) {
+    if sessions.0.is_spectator(token) || (summary && sessions.0.is_afk(token)) {
         return false;
     }
 
-    if !policy.accept_human_input {
+    if !policy.accept_human_input && !summary {
         return false;
     }
 

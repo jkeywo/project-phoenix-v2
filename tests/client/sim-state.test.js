@@ -10,7 +10,6 @@ import {
   nearestEntityToPoint,
   isFireButtonEnabled, isTubeLoaded, tubeReloadSecs, phaserModeLabel,
   shieldStatusView, powerTotal, canIncreasePower, canDecreasePower,
-  isSciencePhaserPanelVisible,
 } from '../../gui/sim-state.js';
 import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
 
@@ -863,12 +862,7 @@ describe('view helpers', () => {
     expect(canDecreasePower([2, 2, 2], 'Sensors')).toBe(false); // no longer a powered console
   });
 
-  it('isSciencePhaserPanelVisible only when Tactical is Low', () => {
-    expect(isSciencePhaserPanelVisible({ Tactical: 'Low' })).toBe(true);
-    expect(isSciencePhaserPanelVisible({ Tactical: 'Std' })).toBe(false);
-    expect(isSciencePhaserPanelVisible({})).toBe(false);
-    expect(isSciencePhaserPanelVisible(undefined)).toBe(false);
-  });
+
 });
 
 // ── Single-store fields moved from client.html (issue #819) ─────────────────

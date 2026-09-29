@@ -41,6 +41,16 @@ pub fn handle_station_rating_change(
             let Some(station_id) = station_id else {
                 continue;
             };
+            if sessions.0.is_afk(&ev.token) {
+                continue;
+            }
+
+            // A holder may select only a rating on their own hull's station.
+            // Refuse before changing either the replicated intent or UI state.
+            if rating::resolve_automated_systems(&ship_config.0, &station_id, rating_name).is_none()
+            {
+                continue;
+            }
 
             if fleet.is_some() {
                 intents.push(station_id.clone(), rating_name.clone());
@@ -138,9 +148,7 @@ station = "helm"
         )
     }
 
-    #[test]
-    fn set_station_rating_sets_ai_for_automated_systems() {
-        let mut app = test_app();
+    fn install_assisted_captain(app: &mut App) {
         // Apply the custom config directly on the Ship entity — PendingShipConfig
         // is consumed by spawn_game_start_entities which is not in the test app.
         let custom_config = ship_config_with_assisted_captain();
@@ -150,6 +158,12 @@ station = "helm"
         for mut cfg in q.iter_mut(app.world_mut()) {
             *cfg = custom_config.clone();
         }
+    }
+
+    #[test]
+    fn set_station_rating_sets_ai_for_automated_systems() {
+        let mut app = test_app();
+        install_assisted_captain(&mut app);
         start_game_with_helm_and_science(&mut app);
 
         // Captain "Assisted" rating has red-alert in automated_systems.
@@ -180,7 +194,7 @@ station = "helm"
             &mut app,
             "captain",
             ClientMessage::SetStationRating {
-                rating_name: "Manual".into(),
+                rating_name: "Std".into(),
             },
         );
         tick_twice(&mut app);
@@ -254,6 +268,7 @@ station = "helm"
     #[test]
     fn set_station_rating_updates_active_ratings() {
         let mut app = test_app();
+        install_assisted_captain(&mut app);
         start_game_with_helm_and_science(&mut app);
 
         push(
@@ -278,6 +293,7 @@ station = "helm"
     #[test]
     fn set_station_rating_emits_rating_changed() {
         let mut app = test_app();
+        install_assisted_captain(&mut app);
         start_game_with_helm_and_science(&mut app);
 
         push(

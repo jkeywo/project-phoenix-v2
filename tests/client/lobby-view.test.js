@@ -157,8 +157,8 @@ describe('lobbyViewModel — has-station / detail panel', () => {
     });
     expect(vm.detail.ratings).toEqual({
       list: [
-        { name: 'Std', label: 'STD', active: false },
-        { name: 'Simplified', label: 'SIMPLIFIED', active: true },
+        { name: 'Std', label: '★★ STD', active: false },
+        { name: 'Simplified', label: '★ SIMPLIFIED', active: true },
       ],
       active: 'Simplified',
     });

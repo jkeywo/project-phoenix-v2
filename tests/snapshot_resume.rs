@@ -2645,6 +2645,15 @@ fn frequency_continuation_rebinds_entity_keys_and_replaces_bootstrap_state() {
 /// exactly once.
 #[test]
 fn coordination_staging_round_trips_only_the_unread_suffix_once() {
+    use project_phoenix::ship::control_source::ControlSource;
+    for origin in [ControlSource::Ai, ControlSource::Simplified] {
+        assert_coordination_origin_roundtrip(origin);
+    }
+}
+
+fn assert_coordination_origin_roundtrip(
+    origin: project_phoenix::ship::control_source::ControlSource,
+) {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::{Entity, Messages, Mut};
     use project_phoenix::core::messages::{CoordinationPayload, CoordinationPresentation};
@@ -2673,7 +2682,7 @@ fn coordination_staging_round_trips_only_the_unread_suffix_once() {
     };
     let event = |source_entity: Entity, label: &str| CoordinationEnqueue {
         source_entity,
-        sender_origin: ControlSource::Ai,
+        sender_origin: origin,
         address: address.clone(),
         payload: CoordinationPayload::ThreatBearing {
             bearing_rad: 0.625,
@@ -2715,7 +2724,10 @@ fn coordination_staging_round_trips_only_the_unread_suffix_once() {
     );
     let staged = &payload.coordination_staging[0];
     assert_eq!(staged.source_uuid, source_uuid);
-    assert_eq!(staged.sender_origin, 1);
+    assert_eq!(
+        staged.sender_origin,
+        if origin == ControlSource::Ai { 1 } else { 3 }
+    );
     assert_eq!(staged.address, address);
     assert_eq!(staged.sender_system, sensors_system_id().0);
     assert!(matches!(
@@ -2751,6 +2763,11 @@ fn coordination_staging_round_trips_only_the_unread_suffix_once() {
         });
 
     let report = restore(resumed.world_mut(), &payload);
+    assert_coordination_queues_match(
+        &capture(resumed.world()),
+        &payload,
+        "rating origin roundtrip",
+    );
     assert!(report.is_complete(), "gaps: {:?}", report.gaps);
     assert_eq!(
         capture(resumed.world()).coordination_staging,

@@ -87,14 +87,14 @@ describe('cruiser engineering renderStation', () => {
     own_hull: { pct: 0.9 },
   };
 
-  it('drives power, battery, hull integrity and repair teams from projected families', () => {
-    cruiserRender(payload, document);
+  it.each([false, true])('drives power, battery, hull integrity and repair teams with summary=%s', (summary) => {
+    cruiserRender({ ...payload, systems: { ...payload.systems, repair: { ...payload.systems.repair, repair_summary: summary } } }, document);
     expect(el('power-controls').state).toEqual({ groups: [{ id: 'p1' }], auto: true });
     expect(el('battery-bar').state).toEqual({ level_pct: 40, charging: true, emergency_threshold_pct: 20 });
     expect(el('hull-integrity').state).toEqual({ total_pct: 0.75, destroyed_pct: 0.1 });
     expect(el('core-damage').state).toEqual({ entries: [{ id: 'core-1' }] });
     expect(el('repair-teams').state).toEqual({
-      teams: [{ id: 't1' }], auto: true, targets: [{ id: 'dt1' }],
+      teams: [{ id: 't1' }], auto: true, summary, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }],
       external_dispatch: null,
     });

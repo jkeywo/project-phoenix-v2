@@ -27,6 +27,8 @@ pub mod rating;
 pub mod rating_systems;
 pub mod sensors;
 pub mod shields;
+#[cfg(test)]
+mod star_rating_tests;
 pub mod state;
 pub mod system_registry;
 #[cfg(test)]

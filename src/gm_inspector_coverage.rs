@@ -671,6 +671,7 @@ mod tests {
             crate::ship::config::StationRatingConfig,
             name,
             automated_systems,
+            detailed_systems,
             ai_tuning,
         );
         exhaustive_struct!(

@@ -790,6 +790,16 @@ describe('PhRepairTeams', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  it('lets a simplified operator prioritise a job while recall remains delegated', () => {
+    const { el, sendAction } = onSite({ auto: true, summary: true });
+    const row = card(el, 0).querySelector('.dmg-row[data-system-id="core"]');
+    expect(row.disabled).toBe(false);
+    row.click();
+    expect(sendAction).toHaveBeenCalledWith('set_repair_target_priority', { system_id: 'core' });
+    const recall = card(el, 0).querySelector('.recall-btn');
+    expect(recall?.disabled).toBe(true);
+  });
+
   it('drops rows that are no longer damaged', () => {
     const { el } = onSite();
     el.state = {

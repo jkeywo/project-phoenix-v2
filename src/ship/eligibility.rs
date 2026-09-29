@@ -167,6 +167,7 @@ mod tests {
 
     fn rating(name: &str, automated: &[&str]) -> StationRatingConfig {
         StationRatingConfig {
+            detailed_systems: None,
             name: name.into(),
             automated_systems: automated.iter().map(|s| SystemId((*s).into())).collect(),
             ai_tuning: None,

@@ -359,9 +359,9 @@ pub fn handle_set_repair_priority(
 /// Reads `ClientMessage::ControlSystem { target: "repair", payload:
 /// SetRepairTargetPriority { system_id } }` from `AdmittedCommands`. Admission
 /// upstream has already checked exactly what it checks for `SetRepairPriority`
-/// — same target system, therefore same station-ownership and same
-/// `accept_human_input` gate; the payload variant is not part of that decision
-/// (`command_admission::policy::is_command_authorized` turns on the target).
+/// — same target and station ownership. Detailed admits direct input;
+/// Simplified admits these priority intents while its AI exclusively owns
+/// dispatch and recall. Both paths use this same ordinary sweep implementation.
 ///
 /// The whole point of this handler over [`handle_set_repair_priority`] is that
 /// the TEAM and SYSTEM are resolved here, from the ship's own hull and

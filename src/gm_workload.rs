@@ -1104,7 +1104,7 @@ pub fn observe_station_workload(
                 0
             };
             let level = match seat {
-                ControlSource::Ai => GmWorkloadLevel::Backfill,
+                ControlSource::Ai | ControlSource::Simplified => GmWorkloadLevel::Backfill,
                 ControlSource::Offline => GmWorkloadLevel::Offline,
                 ControlSource::Human if count == 0 => GmWorkloadLevel::Underused,
                 ControlSource::Human

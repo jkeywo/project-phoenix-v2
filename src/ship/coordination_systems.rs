@@ -458,22 +458,26 @@ pub fn resolve_human_seeking_hosts(
                     .unwrap_or_default();
             }
 
-            let automated = station
-                .ratings
-                .iter()
-                .find(|rating| rating.name == assignment.rating)
-                .map(|rating| &rating.automated_systems);
+            let depths = crate::ship::rating::resolve_system_depths(
+                config,
+                &station.id,
+                &assignment.rating,
+                &std::collections::HashMap::new(),
+            )
+            .unwrap_or_default();
             for system in config
                 .systems
                 .iter()
                 .filter(|system| system.station.as_ref() == Some(&station.id))
             {
-                let source = if assignment.host.is_none()
-                    || automated.is_some_and(|ids| ids.contains(&system.id))
-                {
+                let source = if assignment.host.is_none() {
                     ControlSource::Ai
                 } else {
-                    ControlSource::Human
+                    depths
+                        .get(&system.id)
+                        .copied()
+                        .unwrap_or(crate::ship::rating::SystemDepth::Detailed)
+                        .control_source()
                 };
                 control_sources.0.set(system.id.clone(), source);
                 if let Some(host) = assignment.host.as_ref() {

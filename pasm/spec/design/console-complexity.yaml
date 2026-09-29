@@ -9,6 +9,8 @@ entities:
         - "Rungs extend the existing StationRatingConfig (a detailed_systems list beside automated_systems), so star selection, live mid-round change, Backfill fallback, and the lobby's ratings-length signal all reuse the delivered rating machinery."
         - "Authored bundles beat derived arithmetic: designers curate coherent depth combinations per station (the Thorium station-set lesson), while the scenario overlay covers the between-rung states without unauthored rung synthesis."
         - "Simplified means a limited AI — the fine-system policy runtime with authority scoped to that system — drives the full model from summary-surface settings, preserving AI/human symmetry; detailed means direct control of the full model."
+        - "[ai] The initial runtime proves Simplified through Repair: the holder sets standing or named-system priorities while the existing AI exclusively dispatches and recalls teams. Other kinds require a summary-intent adapter before a rung may leave them simplified; validation refuses unsupported modes rather than enabling competing human and AI actuator writers."
+        - "[ai] Authored order remains most-detailed first, preserving legacy first-rating defaults and visiting-station ordering. The picker displays the reverse ordinal of those authored rungs; Backfill is zero. Omitted detailed_systems preserves legacy direct control for every non-automated system."
     game_design:
       must_not_be: [derived arithmetically from system counts instead of authored, changed by a player who does not hold the station]
 

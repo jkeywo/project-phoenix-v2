@@ -1440,7 +1440,7 @@ pub struct CoordinationQueueState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueuedCoordinationState {
-    /// `0 = Human`, `1 = Ai`, `2 = Offline`.
+    /// `0 = Human`, `1 = Ai`, `2 = Offline`, `3 = Simplified`.
     pub sender_origin: u8,
     pub address: crate::core::messages::CoordinationAddress,
     pub payload: crate::core::messages::CoordinationPayload,
@@ -1460,7 +1460,7 @@ pub struct QueuedCoordinationState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoordinationEnqueueState {
     pub source_uuid: String,
-    /// `0 = Human`, `1 = Ai`, `2 = Offline`.
+    /// `0 = Human`, `1 = Ai`, `2 = Offline`, `3 = Simplified`.
     pub sender_origin: u8,
     pub address: crate::core::messages::CoordinationAddress,
     pub payload: crate::core::messages::CoordinationPayload,
@@ -3036,6 +3036,7 @@ fn capture_coordination_staging(world: &World) -> Vec<CoordinationEnqueueState> 
                     crate::ship::control_source::ControlSource::Human => 0,
                     crate::ship::control_source::ControlSource::Ai => 1,
                     crate::ship::control_source::ControlSource::Offline => 2,
+                    crate::ship::control_source::ControlSource::Simplified => 3,
                 },
                 address: message.address.clone(),
                 payload: message.payload.clone(),
@@ -4367,6 +4368,7 @@ fn capture_coordination_queues(world: &World) -> Vec<(String, CoordinationQueueS
                         crate::ship::control_source::ControlSource::Human => 0,
                         crate::ship::control_source::ControlSource::Ai => 1,
                         crate::ship::control_source::ControlSource::Offline => 2,
+                        crate::ship::control_source::ControlSource::Simplified => 3,
                     },
                     address: message.address.clone(),
                     payload: message.payload.clone(),
@@ -5535,6 +5537,7 @@ fn restore_coordination_staging(
             sender_origin: match stored.sender_origin {
                 0 => ControlSource::Human,
                 1 => ControlSource::Ai,
+                3 => ControlSource::Simplified,
                 _ => ControlSource::Offline,
             },
             address: stored.address.clone(),
@@ -6953,6 +6956,7 @@ fn apply_coordination_queue(
                     sender_origin: match message.sender_origin {
                         0 => ControlSource::Human,
                         1 => ControlSource::Ai,
+                        3 => ControlSource::Simplified,
                         _ => ControlSource::Offline,
                     },
                     address: message.address.clone(),
@@ -8085,6 +8089,7 @@ pub enum MeshControlSource {
     Human,
     Ai,
     Offline,
+    Simplified,
 }
 
 fn capture_mesh_crew(world: &World) -> std::collections::BTreeMap<String, MeshCrewState> {
@@ -8115,6 +8120,7 @@ fn capture_mesh_crew(world: &World) -> std::collections::BTreeMap<String, MeshCr
                             ControlSource::Human => MeshControlSource::Human,
                             ControlSource::Ai => MeshControlSource::Ai,
                             ControlSource::Offline => MeshControlSource::Offline,
+                            ControlSource::Simplified => MeshControlSource::Simplified,
                         },
                     )
                 })
@@ -8168,6 +8174,7 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
                     MeshControlSource::Human => ControlSource::Human,
                     MeshControlSource::Ai => ControlSource::Ai,
                     MeshControlSource::Offline => ControlSource::Offline,
+                    MeshControlSource::Simplified => ControlSource::Simplified,
                 },
             );
         }

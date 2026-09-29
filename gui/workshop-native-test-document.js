@@ -5,6 +5,7 @@ export function mountNativeTestDocument({ win, image, hud, gmRoot, gm, status, u
   const LIMIT = 4 * 1024 * 1024;
   let identity = null, active = true, pending = false, sequence = -1;
   let controller = null, imageUrl = null, currentHud = null;
+  let timer = null, latest = null;
   const seenChannels = new Map(); let seenPresets = null;
   const showHud = () => { if (currentHud) hud.contentWindow?.__updateHud?.(currentHud); };
   hud.addEventListener('load', showHud);
@@ -42,10 +43,12 @@ export function mountNativeTestDocument({ win, image, hud, gmRoot, gm, status, u
       if (identity && identity !== presentation.href) return; // A new run needs a new document.
       identity = presentation.href;
     } catch { status.textContent = unavailable; return; }
+    latest = run;
     const showingGm = run.view?.view === 'game-master';
     gmRoot.hidden = !showingGm;
     image.hidden = hud.hidden = showingGm;
     if (pending) return;
+    win.clearTimeout(timer);
     pending = true;
     controller = new AbortController();
     try {
@@ -71,7 +74,10 @@ export function mountNativeTestDocument({ win, image, hud, gmRoot, gm, status, u
     } catch {
       controller?.abort();
       if (active) { image.removeAttribute('src'); status.textContent = unavailable; }
-    } finally { pending = false; }
+    } finally {
+      pending = false;
+      if (active) timer = win.setTimeout(() => { void update(latest); }, 100);
+    }
   }
   const receive = event => {
     if (event.source === win.parent && event.origin === win.location.origin && event.data?.type === 'phoenix-native-test-view') {
@@ -82,6 +88,7 @@ export function mountNativeTestDocument({ win, image, hud, gmRoot, gm, status, u
   return { update, dispose() {
     if (!active) return;
     active = false; controller?.abort();
+    win.clearTimeout(timer);
     win.removeEventListener('message', receive); hud.removeEventListener('load', showHud);
     image.removeAttribute('src'); if (imageUrl) win.URL.revokeObjectURL(imageUrl);
     gm?.dispose();

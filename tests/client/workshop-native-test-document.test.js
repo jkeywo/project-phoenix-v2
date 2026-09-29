@@ -56,6 +56,21 @@ it('does not revive a document when pending responses finish after disposal', as
   expect(image.hasAttribute('src')).toBe(false); expect(gm.channel).not.toHaveBeenCalled();
 });
 
+it('refreshes presentation independently of status polling and stops on disposal', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetcher = vi.fn(async url => response(url.endsWith('.png') ? Uint8Array.of(1) : packet(1)));
+    view = mount(fetcher);
+    await view.update(run('first'));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    view.dispose();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  } finally { vi.useRealTimers(); }
+});
+
 it('ignores older presentation packets and messages from a different window', async () => {
   let sequence = 2;
   const fetcher = vi.fn(async url => response(url.endsWith('.png') ? Uint8Array.of(1) : packet(sequence)));

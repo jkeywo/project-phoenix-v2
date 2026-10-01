@@ -44,7 +44,7 @@ const el = (suffix) => document.getElementById(`gm-faction-${suffix}`);
 
 let sent;
 let panel;
-function mount({ operator = { id: 'gm-alex' }, confirmAction, submit } = {}) {
+function mount({ operator = { id: 'gm-alex' }, confirmAction, submit, schedule = () => 1 } = {}) {
   const parsed = new DOMParser().parseFromString(pageSource, 'text/html');
   document.body.replaceChildren(parsed.getElementById('gm-faction-panel'));
   sent = [];
@@ -55,7 +55,7 @@ function mount({ operator = { id: 'gm-alex' }, confirmAction, submit } = {}) {
     submit: submit || ((request) => { sent.push(request); return true; }),
     confirmAction: confirmAction || ((request) => request.accept()),
     correlation: () => 'undo-corr-1',
-    schedule: () => 1,
+    schedule,
     cancelSchedule: () => {},
   });
   return panel;
@@ -63,6 +63,22 @@ function mount({ operator = { id: 'gm-alex' }, confirmAction, submit } = {}) {
 
 beforeEach(() => {
   setTable(realStrings);
+});
+
+it('ignores an old timeout after reset and a new request with the same correlation', () => {
+  const callbacks = [];
+  mount({ schedule: callback => { callbacks.push(callback); return callbacks.length; } });
+  panel.update(payload()); panel.apply();
+  expect(panel.state().pending).not.toBeNull();
+  panel.reset(); panel.update(payload()); panel.apply();
+  const current = panel.state().pending;
+  callbacks[0]();
+  expect(panel.state().pending).toEqual(current);
+  expect(el('feedback').dataset.state).toBe('pending');
+  callbacks[1]();
+  expect(panel.state().pending).toBeNull();
+  expect(el('feedback').dataset.state).toBe('timed_out');
+  panel.destroy();
 });
 
 it('offers only the factions the running world actually loaded', () => {

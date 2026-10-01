@@ -16,6 +16,19 @@ function setup({ confirmAction, operator = { id: 'gm-one' } } = {}) {
   document.getElementById('gm-system-select').dispatchEvent(new Event('change'));
   return {panel,payload,submit,correlation,schedule,cancelSchedule};
 }
+
+it('ignores a cancelled timeout after resetting and selecting the System again', () => {
+  const f = setup();
+  f.panel.choose(true);
+  f.panel.reset(); f.panel.update(f.payload); f.panel.select(f.payload.entities[0]);
+  f.panel.focusSystem('drive'); f.panel.choose(true);
+  const current = f.panel.state().pending;
+  f.schedule.mock.calls[0][0]();
+  expect(f.panel.state().pending).toEqual(current);
+  expect(document.getElementById('gm-system-feedback').dataset.state).toBe('pending');
+  f.schedule.mock.calls[1][0]();
+  expect(f.panel.state().pending).toBeNull();
+});
 it('captures the selected identity before confirmation and creates Pending only after acceptance',()=>{
   let confirmation; const f=setup({confirmAction:request=>{confirmation=request;return true;}});
   expect(f.panel.choose(true)).toBe(true);

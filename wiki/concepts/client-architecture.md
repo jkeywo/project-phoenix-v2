@@ -3,7 +3,7 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
 sources: [gui/gamepad-presentation.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/panes/operator.rs, src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gm-action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/viewscreen-presentation.js, gui/viewscreen-presentation-panel.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-09-07
+updated: 2026-10-01
 ---
 
 ## Summary
@@ -300,6 +300,12 @@ host-assigned native screens retain their console tabs without release controls.
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
 
 ## Console Family routing
+
+GM Session, Mission, Direct Effect, Spawn, Faction, System, Objective and
+Presentation controls share `gui/gm-action-feedback.js` for pending requests,
+timeouts and reset. Panels retain their own result sources and matching rules;
+the latter four permit one pending request and keep their existing status UI.
+Cancelled timer callbacks cannot clear a subsequent request.
 
 Every shipped `SystemKindDescriptor` requires a Console Family, and `Welcome`
 projects that metadata onto every actual authored System id in

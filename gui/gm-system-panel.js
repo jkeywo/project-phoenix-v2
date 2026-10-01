@@ -1,4 +1,5 @@
-import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { ActionFeedbackLifecycle, createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 import { parseGmEffectScope } from './gm-effect-scope.js';
 
@@ -13,9 +14,16 @@ export function createGmSystemPanel({ doc = globalThis.document, t = id => id,
   correlation = createActionCorrelation, schedule = globalThis.setTimeout,
   cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = key => doc?.getElementById(`gm-system-${key}`);
-  let selected = null, system = '', controls = {}, entities = [], pending = null, timer = null, generation = 0;
+  let selected = null, system = '', controls = {}, entities = [], generation = 0;
+  const actionFeedback = new ActionFeedbackLifecycle({ correlation });
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: 1,
+    timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS, schedule, cancelSchedule,
+    onLocalTerminal: (_meta, outcome) => { feedback(outcome === 'timed-out' ? 'timed_out' : outcome); render(); },
+  });
+  const pending = () => feed.values().next().value?.request ?? null;
   const current = () => controls[selected?.entity_id]?.find(row => row.system_id === system);
-  const valid = () => !!getOperator() && !pending && !!current()
+  const valid = () => !!getOperator() && !pending() && !!current()
     && entities.some(row => row.entity_id === selected?.entity_id);
   function feedback(state, reason = '') {
     if (el('feedback')) {
@@ -48,15 +56,19 @@ export function createGmSystemPanel({ doc = globalThis.document, t = id => id,
     return confirmAction({ ...GM_SYSTEM_CONFIRMATION[verb], description,
       preview: () => t('server.gm.system.explanation'),
       accept: () => {
-        if (epoch !== generation || pending || getOperator()?.id !== identity.operator_id) return false;
+        if (epoch !== generation || pending() || getOperator()?.id !== identity.operator_id) return false;
         // The target may disappear while this private confirmation is open.
         // Submit the captured identity so ordinary Admission records its refusal.
-        const request = { ...identity, correlation: correlation() };
+        const request = { ...identity, correlation: actionFeedback.press(`gm.system.${verb}`).correlation };
+        const meta = { request, operatorId: request.operator_id, correlation: request.correlation };
+        feed.track(meta);
+        actionFeedback.pending(request.correlation);
         let accepted = false;
-        try { accepted = submit(request) !== false; } catch (_) { /* report refusal */ }
-        if (!accepted) { feedback('refused'); return false; }
-        pending = request; feedback('pending'); render();
-        timer = schedule(() => { timer = null; pending = null; feedback('timed_out'); render(); }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+        try { accepted = submit(request) !== false; } catch (_) { /* local refusal */ }
+        feed.submitted(meta, accepted);
+        if (!accepted) return false;
+        if (feed.get(request.correlation) === meta) feedback('pending');
+        render();
         return true;
       },
     }) !== false;
@@ -73,18 +85,18 @@ export function createGmSystemPanel({ doc = globalThis.document, t = id => id,
         || !['applied', 'no-op', 'refused'].includes(row.outcome))) return false;
     entities = value.entities; controls = next;
     if (selected) selected = entities.find(row => row.entity_id === selected.entity_id) || null;
-    const terminal = pending && rows.find(row => row.operator_id === pending.operator_id && row.correlation === pending.correlation
-      && row.target === pending.target && row.effect_scope.system === pending.system && row.action_kind === (pending.disabled ? 'system-disable' : 'system-restore'));
+    const request = pending();
+    const terminal = request && rows.find(row => row.operator_id === request.operator_id && row.correlation === request.correlation
+      && row.target === request.target && row.effect_scope.system === request.system && row.action_kind === (request.disabled ? 'system-disable' : 'system-restore'));
     if (terminal) {
-      if (timer !== null) cancelSchedule(timer);
-      timer = null; pending = null; feedback(terminal.outcome === 'refused' ? 'refused' : terminal.outcome === 'no-op' ? 'no_op' : 'applied');
+      feed.settle(terminal);
+      feedback(terminal.outcome === 'refused' ? 'refused' : terminal.outcome === 'no-op' ? 'no_op' : 'applied');
     }
     options(); render(); return true;
   }
   function reset() {
     generation++;
-    if (timer !== null) cancelSchedule(timer);
-    timer = null; pending = null; selected = null; system = ''; controls = {}; entities = [];
+    feed.reset(); selected = null; system = ''; controls = {}; entities = [];
     if (el('feedback')) el('feedback').textContent = '';
     options(); render();
   }
@@ -99,5 +111,5 @@ export function createGmSystemPanel({ doc = globalThis.document, t = id => id,
       const target = current()?.gm_disabled ? el('restore') : el('disable');
       target?.focus?.(); return doc?.activeElement === target;
     },
-    state: () => ({ target: selected?.entity_id || null, system, pending, controls }) };
+    state: () => ({ target: selected?.entity_id || null, system, pending: pending(), controls }) };
 }

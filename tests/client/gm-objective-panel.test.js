@@ -30,6 +30,18 @@ function mount(options = {}) {
 const instance = (changes = {}) => authored({ id: 'escort::pair', objective_id: 'escort',
   instance_id: 'pair', progress: 0.5, completion_members: [], status: 'Active', ...changes });
 
+it('keeps a new Objective request pending when a cancelled timeout arrives', () => {
+  const { panel, schedule } = mount();
+  panel.update(payload()); button('activate').click(); panel.confirm();
+  panel.reset(); panel.update(payload()); button('activate').click(); panel.confirm();
+  const current = panel.state().pending;
+  schedule.mock.calls[0][0]();
+  expect(panel.state().pending).toEqual(current);
+  expect(document.getElementById('gm-objective-feedback').dataset.state).toBe('pending');
+  schedule.mock.calls[1][0]();
+  expect(panel.state().pending).toBeNull();
+});
+
 it('keeps explicit instance and all-instance requests separate and attributes matching results', () => {
   const { panel, submit } = mount();
   const state = payload({ objective_palette: [], objectives: [instance()] });

@@ -22,14 +22,31 @@ it('mounts into the docked host when the GM desk composed one', () => {
 });
 function setup() {
   const submit = vi.fn(() => true), scheduled = [];
+  let sequence = 0;
   const panel = createGmPresentationPanel({ t, getOperator: () => ({ id: 'Ada' }), submit,
-    correlation: () => 'cue-1', schedule: (callback, delay) => { scheduled.push({ callback, delay }); return 1; }, cancelSchedule: vi.fn() });
+    correlation: () => `cue-${++sequence}`, schedule: (callback, delay) => { scheduled.push({ callback, delay }); return 1; }, cancelSchedule: vi.fn() });
   panel.update({ entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' }], presentation_cameras: { 'ship-a': ['camera_fore'] } });
   document.getElementById('gm-presentation-duration').value = '120';
   const click = label => [...document.querySelectorAll('button')].find(b => b.textContent === label).click();
   return { panel, submit, click, scheduled };
 }
 describe('shared presentation GM controls', () => {
+  it('keeps a later cue pending when the settled cue timeout arrives', () => {
+    const { panel, click, scheduled } = setup();
+    click('force');
+    panel.update({ entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' }],
+      presentation_cameras: { 'ship-a': ['camera_fore'] },
+      presentation_results: [{ operator_id: 'Ada', correlation: 'cue-1', outcome: 'no-op' }] });
+    expect(document.querySelector('[role=status]').textContent).toBe('no-op');
+    click('force');
+    const current = panel.state().pending;
+    expect(current).not.toBeNull();
+    scheduled[0].callback();
+    expect(panel.state().pending).toEqual(current);
+    expect(document.querySelector('[role=status]').textContent).toBe('pending');
+    panel.destroy(); scheduled[1].callback();
+    expect(panel.state().pending).toBeNull();
+  });
   it('accepts an Inspector focus link without creating another action route', () => {
     const { panel, submit } = setup();
     panel.update({ entities: [{ kind: 'player_ship', entity_id: 'ship-a', name: 'Horizon' }],

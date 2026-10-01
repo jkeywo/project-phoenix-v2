@@ -3312,227 +3312,129 @@ fn hull_rows(hull: &crate::ship::damage::SystemHull) -> Vec<(String, f32, f32)> 
 /// from whichever lifecycle component happens to be present is what makes the
 /// boolean exhaustive: a ship carrying neither half is explicitly Low rather
 /// than silently absent from the format-14 payload.
-fn capture_ai_fidelity(world: &World) -> Vec<(String, AiFidelityState)> {
-    let captured_at = f64::from(fixed_elapsed_secs(world).unwrap_or_default());
-    let Some(mut query) = world.try_query_filtered::<(
-        &EntityUuid,
-        Has<crate::ai::server::AiHighFidelity>,
-        Option<&crate::ai::server::LodTransitionTimer>,
-    ), With<crate::server_app::Ship>>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, high_fidelity, timer)| {
-            (
-                uuid.0.clone(),
-                AiFidelityState {
-                    high_fidelity,
-                    last_transition_age_secs: timer
-                        .map(|timer| captured_at - timer.last_state_change_secs),
-                },
-            )
+fn capture_ai_fidelity(entity: EntityRef<'_>, captured_at: f64) -> Option<AiFidelityState> {
+    entity
+        .contains::<crate::server_app::Ship>()
+        .then(|| AiFidelityState {
+            high_fidelity: entity.contains::<crate::ai::server::AiHighFidelity>(),
+            last_transition_age_secs: entity
+                .get::<crate::ai::server::LodTransitionTimer>()
+                .map(|timer| captured_at - timer.last_state_change_secs),
         })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
 }
 
-/// The helm axes, in a query of their own.
-///
-/// Separate from [`capture_entities`]' walk because Bevy's query tuples do not
-/// stretch that far, and joined back by uuid rather than by handle — the same
-/// rule the rest of this module keeps.
-fn capture_controls(world: &World) -> Vec<(String, ControlState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, EntityRef)>() else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .filter_map(|(uuid, entity)| {
-            ControlState::capture_from(entity).map(|control| (uuid.0.clone(), control))
-        })
-        .collect()
+/// Capture the helm axes through their owning continuation adapter.
+fn capture_controls(entity: EntityRef<'_>) -> Option<ControlState> {
+    ControlState::capture_from(entity)
 }
 
-fn capture_drives(world: &World) -> Vec<(String, DriveState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        Option<&ShipImpulse>,
-        Option<&ShipBoost>,
-        Option<&crate::server_app::ImpulseHullHistory>,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .filter(|(_, impulse, boost, _)| impulse.is_some() || boost.is_some())
-        .map(|(uuid, impulse, boost, history)| {
-            (
-                uuid.0.clone(),
-                DriveState {
-                    impulse_phase: impulse.map_or(0, |state| match state.0.phase {
-                        ImpulsePhase::Idle => 0,
-                        ImpulsePhase::Charging => 1,
-                        ImpulsePhase::Active => 2,
-                    }),
-                    impulse_charge_progress: impulse.map_or(0.0, |state| state.0.charge_progress),
-                    impulse_previous_hull_hp: history.and_then(|history| history.0),
-                    boost_active: boost.is_some_and(|state| state.0.active),
-                    boost_battery: boost.map_or(0.0, |state| state.0.battery),
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+fn capture_drives(entity: EntityRef<'_>) -> Option<DriveState> {
+    let impulse = entity.get::<ShipImpulse>();
+    let boost = entity.get::<ShipBoost>();
+    let history = entity.get::<crate::server_app::ImpulseHullHistory>();
+    (impulse.is_some() || boost.is_some()).then(|| DriveState {
+        impulse_phase: impulse.map_or(0, |state| match state.0.phase {
+            ImpulsePhase::Idle => 0,
+            ImpulsePhase::Charging => 1,
+            ImpulsePhase::Active => 2,
+        }),
+        impulse_charge_progress: impulse.map_or(0.0, |state| state.0.charge_progress),
+        impulse_previous_hull_hp: history.and_then(|history| history.0),
+        boost_active: boost.is_some_and(|state| state.0.active),
+        boost_battery: boost.map_or(0.0, |state| state.0.battery),
+    })
 }
 
-/// The weapon state machines and the repair crew, in a query of their own.
-///
-/// Separate from [`capture_entities`] for [`capture_controls`]' reason — Bevy's
-/// query tuples do not stretch that far — and joined back by uuid rather than
-/// by handle, which is the rule the whole module keeps.
+/// Independent weapon/repair presence and the sorted blackboard/patrol continuation.
 type WeaponRepairRow = (
-    String,
     Option<WeaponState>,
     Option<RepairState>,
     Vec<(String, crate::core::messages::SystemBlackboard)>,
     Vec<(String, u32, bool)>,
 );
 
-fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        Option<&ActiveBeam>,
-        Option<&PhaserCooldown>,
-        Option<&TorpedoSystemResource>,
-        Option<&EntityShipArcHull>,
-        Option<&ShipRepairTeams>,
-        Option<&RepairRequestQueue>,
-        Option<&RepairHumanAlerted>,
-        Option<&crate::server_app::ShipSystemBlackboards>,
-        Option<&crate::ai::server::ObjectiveCursors>,
-        Option<&crate::console::weapons::blaster::BlasterSystemResource>,
-        Option<&crate::ship::shields::ShipShields>,
-    )>() else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(
-            |(
-                uuid,
-                beam,
-                cooldown,
-                torpedoes,
-                arcs,
-                teams,
-                queue,
-                alerted,
-                blackboards,
-                cursors,
-                blasters,
-                shields,
-            )| {
-                // A row is emitted only for an entity that carries at least one
-                // of these, for `capture_controls`' reason: an all-defaults
-                // `WeaponState` and a genuinely idle one are the same bytes, so
-                // storing one for every entity would make an asteroid look like
-                // a ship with its weapons cold.
-                let weapons = (beam.is_some()
-                    || cooldown.is_some()
-                    || torpedoes.is_some()
-                    || arcs.is_some()
-                    || blasters.is_some()
-                    || shields.is_some())
-                .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters, shields));
-                let repair = (teams.is_some() || queue.is_some() || alerted.is_some())
-                    .then(|| repair_state(teams, queue, alerted));
-                let mut boards: Vec<(String, crate::core::messages::SystemBlackboard)> =
-                    blackboards
-                        .map(|b| {
-                            b.0.iter()
-                                .map(|(id, board)| (id.0.clone(), board.clone()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                // The component is a `HashMap` on purpose (see its own docs);
-                // a payload may not inherit that order.
-                boards.sort_by(|a, b| a.0.cmp(&b.0));
-                let cursors = cursors
-                    .map(|c| {
-                        c.0.iter()
-                            .map(|cursor| {
-                                (
-                                    cursor.objective_id.clone(),
-                                    cursor.index() as u32,
-                                    cursor.settled(),
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (uuid.0.clone(), weapons, repair, boards, cursors)
-            },
-        )
-        .collect()
-}
-
-/// The Weapons→Helm arc-bearing seam, in a query of its own.
-///
-/// Separate from [`capture_weapons_and_repair`] for that helper's reason — the
-/// query tuple is already at its limit — and joined back by uuid. Component
-/// presence is authoritative even when both halves are default: `Some(default)`
-/// must clear a request the fresh bootstrap produced rather than merge it.
-fn capture_arc_requests(world: &World) -> Vec<(String, ArcRequestState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        Option<&crate::console::weapons::WeaponsArcRequestState>,
-        Option<&crate::ship_plugin::PendingArcBearingRequest>,
-    )>() else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .filter_map(|(uuid, weapons_state, pending)| {
-            let last = weapons_state.and_then(|s| {
-                s.last
-                    .as_ref()
-                    .map(|(family, target, arcs)| (*family, target.clone(), arcs.clone()))
-            });
-            let pending_target = pending.and_then(|p| p.target.map(|t| t.to_string()));
-            let pending_arcs = pending.map(|p| p.arcs.clone()).unwrap_or_default();
-            (weapons_state.is_some() || pending.is_some()).then(|| {
-                (
-                    uuid.0.clone(),
-                    ArcRequestState {
-                        last,
-                        pending_target,
-                        pending_arcs,
-                    },
-                )
-            })
+fn capture_weapons_and_repair(entity: EntityRef<'_>) -> WeaponRepairRow {
+    let beam = entity.get::<ActiveBeam>();
+    let cooldown = entity.get::<PhaserCooldown>();
+    let torpedoes = entity.get::<TorpedoSystemResource>();
+    let arcs = entity.get::<EntityShipArcHull>();
+    let teams = entity.get::<ShipRepairTeams>();
+    let queue = entity.get::<RepairRequestQueue>();
+    let alerted = entity.get::<RepairHumanAlerted>();
+    let blackboards = entity.get::<crate::server_app::ShipSystemBlackboards>();
+    let cursors = entity.get::<crate::ai::server::ObjectiveCursors>();
+    let blasters = entity.get::<crate::console::weapons::blaster::BlasterSystemResource>();
+    let shields = entity.get::<crate::ship::shields::ShipShields>();
+    // A row is emitted only for an entity that carries at least one
+    // of these, for `capture_controls`' reason: an all-defaults
+    // `WeaponState` and a genuinely idle one are the same bytes, so
+    // storing one for every entity would make an asteroid look like
+    // a ship with its weapons cold.
+    let weapons = (beam.is_some()
+        || cooldown.is_some()
+        || torpedoes.is_some()
+        || arcs.is_some()
+        || blasters.is_some()
+        || shields.is_some())
+    .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters, shields));
+    let repair = (teams.is_some() || queue.is_some() || alerted.is_some())
+        .then(|| repair_state(teams, queue, alerted));
+    let mut boards: Vec<(String, crate::core::messages::SystemBlackboard)> = blackboards
+        .map(|b| {
+            b.0.iter()
+                .map(|(id, board)| (id.0.clone(), board.clone()))
+                .collect()
         })
-        .collect()
+        .unwrap_or_default();
+    // The component is a `HashMap` on purpose (see its own docs);
+    // a payload may not inherit that order.
+    boards.sort_by(|a, b| a.0.cmp(&b.0));
+    let cursors = cursors
+        .map(|c| {
+            c.0.iter()
+                .map(|cursor| {
+                    (
+                        cursor.objective_id.clone(),
+                        cursor.index() as u32,
+                        cursor.settled(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    (weapons, repair, boards, cursors)
 }
 
-/// The reactor allocation, in a query of its own, joined back by uuid.
+/// Component presence remains explicit even when both arc-request halves are default.
+fn capture_arc_requests(entity: EntityRef<'_>) -> Option<ArcRequestState> {
+    let weapons_state = entity.get::<crate::console::weapons::WeaponsArcRequestState>();
+    let pending = entity.get::<crate::ship_plugin::PendingArcBearingRequest>();
+    (weapons_state.is_some() || pending.is_some()).then(|| ArcRequestState {
+        last: weapons_state.and_then(|s| {
+            s.last
+                .as_ref()
+                .map(|(family, target, arcs)| (*family, target.clone(), arcs.clone()))
+        }),
+        pending_target: pending.and_then(|p| p.target.map(|t| t.to_string())),
+        pending_arcs: pending.map(|p| p.arcs.clone()).unwrap_or_default(),
+    })
+}
+
+/// The reactor allocation, captured directly from its entity.
 ///
 /// A row is emitted for every ship carrying a [`ShipPowerSystem`] — unlike the
 /// weapon and arc rows there is no "all defaults look idle" ambiguity to guard
 /// against, because a ship either has a reactor or it does not, and a defaulted
 /// reactor (every group at 2, full battery, unlocked) is a genuinely different
 /// state from the boosted one this restore exists to reinstate.
-fn capture_power(world: &World) -> Vec<(String, PowerState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::ship::power::ShipPowerSystem)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, power)| (uuid.0.clone(), power.0.capture_continuation()))
-        .collect()
+fn capture_power(entity: EntityRef<'_>) -> Option<PowerState> {
+    Some(
+        entity
+            .get::<crate::ship::power::ShipPowerSystem>()?
+            .0
+            .capture_continuation(),
+    )
 }
 
 /// One ship's shared desired-motion contract and hazard assessment, as of the
@@ -3564,35 +3466,24 @@ pub struct MotionPlanState {
     pub docking_active: bool,
 }
 
-/// The shared motion plan, in a query of its own, joined by uuid — see
+/// The shared motion plan, looked up by this entity — see
 /// [`EntityState::motion_plan`]. Reads the `HelmMotionPlan` resource (keyed by
 /// `Entity`) and re-keys it by the stable `EntityUuid`, which is what lets it
 /// survive a restore into a world whose entity ids are different.
-fn capture_motion_plans(world: &World) -> Vec<(String, MotionPlanState)> {
-    let Some(plan) = world.get_resource::<crate::ship::helm_planner::HelmMotionPlan>() else {
-        return Vec::new();
-    };
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .filter_map(|(entity, uuid)| {
-            let ship = plan.ships.get(&entity)?;
-            Some((
-                uuid.0.clone(),
-                MotionPlanState {
-                    desired_velocity_local: ship.motion.desired_velocity_local.to_array(),
-                    desired_facing_local: ship.motion.desired_facing_local.to_array(),
-                    hazard_forces: ship.hazard.hazard_forces.to_array(),
-                    urgency: ship.hazard.urgency,
-                    primary_hazard: ship.hazard.primary_hazard.map(|u| u.to_string()),
-                    moving_hazard_threat: ship.hazard.moving_hazard_threat,
-                    docking_active: ship.docking_active,
-                },
-            ))
-        })
-        .collect()
+fn capture_motion_plans(
+    entity: EntityRef<'_>,
+    plan: Option<&crate::ship::helm_planner::HelmMotionPlan>,
+) -> Option<MotionPlanState> {
+    let ship = plan?.ships.get(&entity.id())?;
+    Some(MotionPlanState {
+        desired_velocity_local: ship.motion.desired_velocity_local.to_array(),
+        desired_facing_local: ship.motion.desired_facing_local.to_array(),
+        hazard_forces: ship.hazard.hazard_forces.to_array(),
+        urgency: ship.hazard.urgency,
+        primary_hazard: ship.hazard.primary_hazard.map(|u| u.to_string()),
+        moving_hazard_threat: ship.hazard.moving_hazard_threat,
+        docking_active: ship.docking_active,
+    })
 }
 
 /// Refill [`crate::ship::helm_planner::HelmMotionPlan`] from the captured rows,
@@ -3653,20 +3544,12 @@ fn restore_motion_plans(world: &mut World, snapshot: &PhoenixSnapshot) {
     }
 }
 
-/// The helm pass surface, in a query of its own, joined by uuid — see
+/// The helm pass surface, captured directly from its entity — see
 /// [`EntityState::pass_surface`]. A row is emitted for every ship carrying one;
 /// the planner reads it every tick, so there is no "idle looks default"
 /// ambiguity to guard against.
-fn capture_pass_surfaces(world: &World) -> Vec<(String, crate::ship::helm_ai::HelmPassSurface)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::helm_ai::HelmPassSurface)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, surface)| (uuid.0.clone(), *surface))
-        .collect()
+fn capture_pass_surfaces(entity: EntityRef<'_>) -> Option<crate::ship::helm_ai::HelmPassSurface> {
+    Some(*entity.get::<crate::ship::helm_ai::HelmPassSurface>()?)
 }
 
 fn weapon_state(
@@ -3873,24 +3756,21 @@ fn repair_state(
     }
 }
 
-/// The infrastructure condition tracks, in a query of their own, joined by uuid
+/// The infrastructure condition tracks, captured directly from its entity
 /// — see [`EntityState::infrastructure`]. Only entities that authored
 /// `[infrastructure]` carry one, so most worlds capture an empty list.
 fn capture_infrastructure(
-    world: &World,
-) -> Vec<(String, crate::infrastructure::InfrastructureState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::infrastructure::InfrastructureCondition)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, condition)| (uuid.0.clone(), condition.0.clone()))
-        .collect()
+    entity: EntityRef<'_>,
+) -> Option<crate::infrastructure::InfrastructureState> {
+    Some(
+        entity
+            .get::<crate::infrastructure::InfrastructureCondition>()?
+            .0
+            .clone(),
+    )
 }
 
-/// The tractor-beam states, in a query of their own, joined by uuid — see
+/// The tractor-beam states, captured directly from its entity — see
 /// [`EntityState::tractor`]. Only hulls that authored `[tractor]` carry one, so
 /// most worlds capture an empty list.
 ///
@@ -3898,36 +3778,22 @@ fn capture_infrastructure(
 /// same reading `fold_tractor_namespace` takes: an idle beam is byte-for-byte the
 /// state of a hull built before tractors existed, so writing it would charge
 /// every world fielding a tractor-capable hull for a feature its crew never used.
-fn capture_tractors(world: &World) -> Vec<(String, crate::tractor::TractorSaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::tractor::TractorBeam)>() else {
-        return Vec::new();
-    };
-    let idle = crate::tractor::TractorSaveState::default();
-    query
-        .iter(world)
-        .map(|(uuid, beam)| (uuid.0.clone(), beam.save_state()))
-        .filter(|(_, state)| *state != idle)
-        .collect()
+fn capture_tractors(entity: EntityRef<'_>) -> Option<crate::tractor::TractorSaveState> {
+    let state = entity.get::<crate::tractor::TractorBeam>()?.save_state();
+    (state != crate::tractor::TractorSaveState::default()).then_some(state)
 }
 
-/// The dock control states, in a query of their own, joined by uuid — see
+/// The dock control states, captured directly from its entity — see
 /// [`EntityState::dock`]. Only hulls that authored a `kind = "dock"` system carry
 /// one, so most worlds capture an empty list. An idle control (engaging nothing,
 /// docked to nothing) captures nothing, the same reading `fold_dock_namespace`
 /// takes.
-fn capture_docks(world: &World) -> Vec<(String, crate::dock::DockSaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::dock::DockControl)>() else {
-        return Vec::new();
-    };
-    let idle = crate::dock::DockSaveState::default();
-    query
-        .iter(world)
-        .map(|(uuid, control)| (uuid.0.clone(), control.save_state()))
-        .filter(|(_, state)| *state != idle)
-        .collect()
+fn capture_docks(entity: EntityRef<'_>) -> Option<crate::dock::DockSaveState> {
+    let state = entity.get::<crate::dock::DockControl>()?.save_state();
+    (state != crate::dock::DockSaveState::default()).then_some(state)
 }
 
-/// The external repair-dispatch states, in a query of their own, joined by uuid
+/// The external repair-dispatch states, captured directly from its entity
 /// — see [`EntityState::external_repair`]. Only hulls that authored
 /// `[repair.external_dispatch]` carry one, so most worlds capture an empty list.
 ///
@@ -3937,105 +3803,61 @@ fn capture_docks(world: &World) -> Vec<(String, crate::dock::DockSaveState)> {
 /// writing it would charge every world fielding a capable hull for a feature its
 /// crew never used.
 fn capture_external_repair(
-    world: &World,
-) -> Vec<(String, crate::console::repair::ExternalRepairSaveState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::console::repair::ExternalRepairDispatch)>()
-    else {
-        return Vec::new();
-    };
-    let idle = crate::console::repair::ExternalRepairSaveState::default();
-    query
-        .iter(world)
-        .map(|(uuid, dispatch)| (uuid.0.clone(), dispatch.save_state()))
-        .filter(|(_, state)| *state != idle)
-        .collect()
+    entity: EntityRef<'_>,
+) -> Option<crate::console::repair::ExternalRepairSaveState> {
+    let state = entity
+        .get::<crate::console::repair::ExternalRepairDispatch>()?
+        .save_state();
+    (state != crate::console::repair::ExternalRepairSaveState::default()).then_some(state)
 }
 
-/// The transfer-umbilical states, in a query of their own, joined by uuid — see
+/// The transfer-umbilical states, captured directly from its entity — see
 /// [`EntityState::umbilical`]. Only hulls that authored a `kind = "umbilical"`
 /// system carry one, so most worlds capture an empty list. An idle umbilical (not
 /// running) captures nothing, the same reading `fold_umbilical_namespace` takes.
-fn capture_umbilicals(world: &World) -> Vec<(String, crate::umbilical::UmbilicalSaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::umbilical::TransferUmbilical)>()
-    else {
-        return Vec::new();
-    };
-    let idle = crate::umbilical::UmbilicalSaveState::default();
-    query
-        .iter(world)
-        .map(|(uuid, umbilical)| (uuid.0.clone(), umbilical.save_state()))
-        .filter(|(_, state)| *state != idle)
-        .collect()
+fn capture_umbilicals(entity: EntityRef<'_>) -> Option<crate::umbilical::UmbilicalSaveState> {
+    let state = entity
+        .get::<crate::umbilical::TransferUmbilical>()?
+        .save_state();
+    (state != crate::umbilical::UmbilicalSaveState::default()).then_some(state)
 }
 
-/// The Security-team assignments, in a query of their own, joined by uuid — see
+/// The Security-team assignments, captured directly from its entity — see
 /// [`EntityState::security`]. Only hulls that authored a `[security]` table carry
 /// one, so most worlds capture an empty list. A muster with every team home
 /// captures nothing, the same reading `fold_security_namespace` takes.
-fn capture_security(world: &World) -> Vec<(String, crate::security::SecuritySaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::security::ShipSecurityTeams)>()
-    else {
-        return Vec::new();
-    };
-    let idle = crate::security::SecuritySaveState::default();
-    query
-        .iter(world)
-        .map(|(uuid, security)| (uuid.0.clone(), security.save_state()))
-        .filter(|(_, state)| *state != idle)
-        .collect()
+fn capture_security(entity: EntityRef<'_>) -> Option<crate::security::SecuritySaveState> {
+    let state = entity
+        .get::<crate::security::ShipSecurityTeams>()?
+        .save_state();
+    (state != crate::security::SecuritySaveState::default()).then_some(state)
 }
 
-/// The scan records, in a query of their own, joined by uuid — see
+/// The scan records, captured directly from its entity — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
-fn capture_scans(world: &World) -> Vec<(String, crate::science::ScanSaveState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::science::ShipScanRecord)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, record)| (uuid.0.clone(), record.save_state()))
-        .collect()
+fn capture_scans(entity: EntityRef<'_>) -> Option<crate::science::ScanSaveState> {
+    Some(entity.get::<crate::science::ShipScanRecord>()?.save_state())
 }
 
-/// The spawn origins, in a query of their own, joined by uuid — see
-/// [`EntityState::spawn`] (issue #863).
-///
-/// A query of its own for the reason every sibling here has one, and this type
-/// is the sharpest case of it: `try_query` yields `None` when *any* component it
-/// names is unregistered, `Option<&T>` included, and `EntitySpawnOrigin` is only
-/// registered once a world has actually run a scripted spawn. Folding it into
-/// the main walk therefore made every capture of a spawn-free world — which is
-/// most of them — return no entity rows at all.
-fn capture_spawn_origins(world: &World) -> Vec<(String, crate::world::spawn_origin::SpawnOrigin)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::entities::spawner::EntitySpawnOrigin)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, origin)| (uuid.0.clone(), origin.0.clone()))
-        .collect()
+/// Read the optional spawn recipe directly; an unregistered origin never gates other state.
+fn capture_spawn_origins(entity: EntityRef<'_>) -> Option<crate::world::spawn_origin::SpawnOrigin> {
+    Some(
+        entity
+            .get::<crate::entities::spawner::EntitySpawnOrigin>()?
+            .0
+            .clone(),
+    )
 }
 
-/// The civilian traffic states, in a query of their own, joined by uuid — see
+/// The civilian traffic states, captured directly from its entity — see
 /// [`EntityState::civilian`]. Only entities that authored `[civilian]` carry
 /// one, so most worlds capture an empty list.
-fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianState)> {
-    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::civilian::CivilianTraffic)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, traffic)| (uuid.0.clone(), traffic.0.clone()))
-        .collect()
+fn capture_civilians(entity: EntityRef<'_>) -> Option<crate::civilian::CivilianState> {
+    Some(entity.get::<crate::civilian::CivilianTraffic>()?.0.clone())
 }
 
-/// The debris contacts, in a query of their own, joined by uuid — see
+/// The debris contacts, captured directly from its entity — see
 /// [`EntityState::debris`]. Only entities that authored `[debris]` carry one, so
 /// every world but the one that sheds a corridor captures an empty list.
 ///
@@ -4043,222 +3865,122 @@ fn capture_civilians(world: &World) -> Vec<(String, crate::civilian::CivilianSta
 /// reason is the `Transform` this row carries: an unread mass that has drifted
 /// two hundred units is not in its default state, and dropping the row because
 /// no latch had risen yet would put it back where it was shed.
-fn capture_debris(world: &World) -> Vec<(String, crate::debris::DebrisSaveState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &Transform, &crate::debris::DebrisThreat)>()
-    else {
-        return Vec::new();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, transform, threat)| (uuid.0.clone(), threat.save_state(transform.translation)))
-        .collect()
+fn capture_debris(entity: EntityRef<'_>) -> Option<crate::debris::DebrisSaveState> {
+    let transform = entity.get::<Transform>()?;
+    Some(
+        entity
+            .get::<crate::debris::DebrisThreat>()?
+            .save_state(transform.translation),
+    )
 }
 
-/// Shields AI continuation state, in a query of its own and joined by uuid.
+/// Shields AI continuation state, captured directly from its entity.
 ///
 /// Damage records are stamped with the authoritative logical tick. Persisting
 /// that tick verbatim preserves the strict integer expiry boundary exactly.
-fn capture_shield_ai(world: &World) -> Vec<(String, ShieldsAiState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        Option<&crate::ship::shields::ShieldsDamageHistory>,
-        Option<&crate::ship::shields::PendingShieldsThreatBearing>,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .filter(|(_, history, pending)| history.is_some() || pending.is_some())
-        .map(|(uuid, history, pending)| {
-            let damage_by_arc = history
-                .map(|history| {
-                    history
-                        .arcs
+fn capture_shield_ai(entity: EntityRef<'_>) -> Option<ShieldsAiState> {
+    let history = entity.get::<crate::ship::shields::ShieldsDamageHistory>();
+    let pending = entity.get::<crate::ship::shields::PendingShieldsThreatBearing>();
+    if history.is_none() && pending.is_none() {
+        return None;
+    }
+    let damage_by_arc = history
+        .map(|history| {
+            history
+                .arcs
+                .iter()
+                .map(|records| {
+                    records
                         .iter()
-                        .map(|records| {
-                            records
-                                .iter()
-                                .map(|record| (record.recorded_tick, record.amount))
-                                .collect()
-                        })
+                        .map(|record| (record.recorded_tick, record.amount))
                         .collect()
                 })
-                .unwrap_or_default();
-            let last_hp = history
-                .map(|history| history.last_hp.clone())
-                .unwrap_or_default();
+                .collect()
+        })
+        .unwrap_or_default();
+    let last_hp = history
+        .map(|history| history.last_hp.clone())
+        .unwrap_or_default();
+
+    Some(ShieldsAiState {
+        damage_by_arc,
+        last_hp,
+        pending_threat_bearing_rad: pending.and_then(|bearing| bearing.0),
+    })
+}
+
+/// Sensors threat-warning debounce memory on this entity.
+fn capture_sensors_threat(entity: EntityRef<'_>) -> Option<SensorsThreatMemoryState> {
+    let state = entity.get::<crate::ship::sensors::SensorsThreatState>()?;
+    Some(SensorsThreatMemoryState {
+        last_threat_uuid: state.last_threat_uuid.clone(),
+        last_bearing_rad: state.last_bearing_rad,
+        last_label: state.last_label.clone(),
+        last_distance: state.last_distance,
+    })
+}
+
+fn capture_intent_narration(entity: EntityRef<'_>) -> Option<IntentNarrationState> {
+    let narration = entity.get::<crate::ship::intent_narration_systems::ShipIntentNarration>()?;
+    let (last, generation) = narration.continuation();
+    let mut last: Vec<_> = last
+        .iter()
+        .map(|(station, snapshot)| {
             (
-                uuid.0.clone(),
-                ShieldsAiState {
-                    damage_by_arc,
-                    last_hp,
-                    pending_threat_bearing_rad: pending.and_then(|bearing| bearing.0),
+                station.0.clone(),
+                IntentSnapshotState {
+                    target_label: snapshot.target_label.clone(),
+                    combat_posture: snapshot.combat_posture,
+                    hull_fraction: snapshot.hull_fraction,
+                    shield_focus: snapshot.shield_focus.clone(),
+                    brownout_groups: snapshot.brownout_groups.clone(),
+                    manoeuvre: snapshot.manoeuvre.clone(),
                 },
             )
         })
         .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+    last.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(IntentNarrationState { last, generation })
 }
 
-/// Sensors threat-warning debounce memory, joined to entity rows by uuid.
-fn capture_sensors_threat(world: &World) -> Vec<(String, SensorsThreatMemoryState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::sensors::SensorsThreatState)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, state)| {
-            (
-                uuid.0.clone(),
-                SensorsThreatMemoryState {
-                    last_threat_uuid: state.last_threat_uuid.clone(),
-                    last_bearing_rad: state.last_bearing_rad,
-                    last_label: state.last_label.clone(),
-                    last_distance: state.last_distance,
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+fn capture_recent_combat(
+    entity: EntityRef<'_>,
+    captured_at: f32,
+) -> Option<RecentCombatActivityState> {
+    let activity = entity.get::<crate::ship::combat_activity::RecentCombatActivity>()?;
+    let (damage, hostile_fire, weapon_fired, prev_hull) = activity.continuation();
+    Some(RecentCombatActivityState {
+        last_damage_taken_age_secs: damage.map(|timestamp| captured_at - timestamp),
+        last_hostile_fire_taken_age_secs: hostile_fire.map(|timestamp| captured_at - timestamp),
+        last_weapon_fired_age_secs: weapon_fired.map(|timestamp| captured_at - timestamp),
+        prev_hull,
+    })
 }
 
-fn capture_intent_narration(world: &World) -> Vec<(String, IntentNarrationState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        &crate::ship::intent_narration_systems::ShipIntentNarration,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, narration)| {
-            let (last, generation) = narration.continuation();
-            let mut last: Vec<_> = last
-                .iter()
-                .map(|(station, snapshot)| {
-                    (
-                        station.0.clone(),
-                        IntentSnapshotState {
-                            target_label: snapshot.target_label.clone(),
-                            combat_posture: snapshot.combat_posture,
-                            hull_fraction: snapshot.hull_fraction,
-                            shield_focus: snapshot.shield_focus.clone(),
-                            brownout_groups: snapshot.brownout_groups.clone(),
-                            manoeuvre: snapshot.manoeuvre.clone(),
-                        },
-                    )
-                })
-                .collect();
-            last.sort_by(|a, b| a.0.cmp(&b.0));
-            (uuid.0.clone(), IntentNarrationState { last, generation })
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+fn capture_frequency_hints(entity: EntityRef<'_>) -> Option<FrequencyHintContinuationState> {
+    let state = entity.get::<crate::console_ai::server::ShipFrequencyHintState>()?;
+    let (current_target, elapsed_secs, hint_sent) = state.continuation();
+    Some(FrequencyHintContinuationState {
+        current_target: current_target.map(str::to_owned),
+        elapsed_secs,
+        hint_sent,
+    })
 }
 
-fn capture_recent_combat(world: &World) -> Vec<(String, RecentCombatActivityState)> {
-    let captured_at = fixed_elapsed_secs(world).unwrap_or_default();
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        &crate::ship::combat_activity::RecentCombatActivity,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, activity)| {
-            let (damage, hostile_fire, weapon_fired, prev_hull) = activity.continuation();
-            (
-                uuid.0.clone(),
-                RecentCombatActivityState {
-                    last_damage_taken_age_secs: damage.map(|timestamp| captured_at - timestamp),
-                    last_hostile_fire_taken_age_secs: hostile_fire
-                        .map(|timestamp| captured_at - timestamp),
-                    last_weapon_fired_age_secs: weapon_fired
-                        .map(|timestamp| captured_at - timestamp),
-                    prev_hull,
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
-}
-
-fn capture_frequency_hints(world: &World) -> Vec<(String, FrequencyHintContinuationState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        &crate::console_ai::server::ShipFrequencyHintState,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, state)| {
-            let (current_target, elapsed_secs, hint_sent) = state.continuation();
-            (
-                uuid.0.clone(),
-                FrequencyHintContinuationState {
-                    current_target: current_target.map(str::to_owned),
-                    elapsed_secs,
-                    hint_sent,
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
-}
-
-fn capture_ship_phaser_frequencies(world: &World) -> Vec<(String, ShipPhaserFrequencyState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::state::ShipPhaserFrequency)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, frequency)| {
-            (
-                uuid.0.clone(),
-                ShipPhaserFrequencyState {
-                    frequency: frequency.continuation(),
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+fn capture_ship_phaser_frequencies(entity: EntityRef<'_>) -> Option<ShipPhaserFrequencyState> {
+    let frequency = entity.get::<crate::ship::state::ShipPhaserFrequency>()?;
+    Some(ShipPhaserFrequencyState {
+        frequency: frequency.continuation(),
+    })
 }
 
 fn capture_tactical_frequency_hints(
-    world: &World,
-) -> Vec<(String, TacticalFrequencyHintInboxState)> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        &crate::ship::components::PendingTacticalFrequencyHint,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, pending)| {
-            (
-                uuid.0.clone(),
-                TacticalFrequencyHintInboxState {
-                    frequency: pending.continuation(),
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+    entity: EntityRef<'_>,
+) -> Option<TacticalFrequencyHintInboxState> {
+    let pending = entity.get::<crate::ship::components::PendingTacticalFrequencyHint>()?;
+    Some(TacticalFrequencyHintInboxState {
+        frequency: pending.continuation(),
+    })
 }
 
 fn damage_tier_tag(tier: crate::ship::damage::DamageTier) -> u8 {
@@ -4270,126 +3992,75 @@ fn damage_tier_tag(tier: crate::ship::damage::DamageTier) -> u8 {
     }
 }
 
-fn capture_last_system_tiers(world: &World) -> Vec<(String, LastSystemTiersState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::components::LastSystemTiers)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, state)| {
-            let (tiers, hp) = state.continuation();
-            let mut tiers: Vec<_> = tiers
-                .iter()
-                .map(|(system, tier)| (system.0.clone(), damage_tier_tag(*tier)))
-                .collect();
-            let mut hp: Vec<_> = hp
-                .iter()
-                .map(|(system, value)| (system.0.clone(), *value))
-                .collect();
-            tiers.sort_by(|a, b| a.0.cmp(&b.0));
-            hp.sort_by(|a, b| a.0.cmp(&b.0));
-            (uuid.0.clone(), LastSystemTiersState { tiers, hp })
-        })
+fn capture_last_system_tiers(entity: EntityRef<'_>) -> Option<LastSystemTiersState> {
+    let state = entity.get::<crate::ship::components::LastSystemTiers>()?;
+    let (tiers, hp) = state.continuation();
+    let mut tiers: Vec<_> = tiers
+        .iter()
+        .map(|(system, tier)| (system.0.clone(), damage_tier_tag(*tier)))
         .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+    let mut hp: Vec<_> = hp
+        .iter()
+        .map(|(system, value)| (system.0.clone(), *value))
+        .collect();
+    tiers.sort_by(|a, b| a.0.cmp(&b.0));
+    hp.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(LastSystemTiersState { tiers, hp })
 }
 
-fn capture_power_brownout(world: &World) -> Vec<(String, PowerBrownoutContinuationState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::power::PowerBrownoutState)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, state)| {
-            let (notified_groups, locked_changed) = state.continuation();
-            let mut notified_groups: Vec<_> = notified_groups.iter().cloned().collect();
-            notified_groups.sort();
-            (
-                uuid.0.clone(),
-                PowerBrownoutContinuationState {
-                    notified_groups,
-                    locked_changed,
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+fn capture_power_brownout(entity: EntityRef<'_>) -> Option<PowerBrownoutContinuationState> {
+    let state = entity.get::<crate::ship::power::PowerBrownoutState>()?;
+    let (notified_groups, locked_changed) = state.continuation();
+    let mut notified_groups: Vec<_> = notified_groups.iter().cloned().collect();
+    notified_groups.sort();
+    Some(PowerBrownoutContinuationState {
+        notified_groups,
+        locked_changed,
+    })
 }
 
 fn capture_shields_coordination(
-    world: &World,
-) -> Vec<(String, ShieldsCoordinationContinuationState)> {
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::shields::ShieldsCoordinationState)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, state)| {
-            let (down_notified, restore_notified) = state.continuation();
-            (
-                uuid.0.clone(),
-                ShieldsCoordinationContinuationState {
-                    down_notified: down_notified.to_vec(),
-                    restore_notified: restore_notified.to_vec(),
-                },
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+    entity: EntityRef<'_>,
+) -> Option<ShieldsCoordinationContinuationState> {
+    let state = entity.get::<crate::ship::shields::ShieldsCoordinationState>()?;
+    let (down_notified, restore_notified) = state.continuation();
+    Some(ShieldsCoordinationContinuationState {
+        down_notified: down_notified.to_vec(),
+        restore_notified: restore_notified.to_vec(),
+    })
 }
 
-fn capture_coordination_queues(world: &World) -> Vec<(String, CoordinationQueueState)> {
-    // Outside FixedUpdate, SimTick is the index the NEXT fixed step will read:
-    // FixedLast has already advanced it after the most recently completed one.
-    let captured_tick = world.get_resource::<SimTick>().map_or(0, |tick| tick.0);
-    let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship::components::CoordinationQueue)>()
-    else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .map(|(uuid, queue)| {
-            let pending = queue
-                .0
-                .pending()
-                .iter()
-                .map(|message| QueuedCoordinationState {
-                    sender_origin: match message.sender_origin {
-                        crate::ship::control_source::ControlSource::Human => 0,
-                        crate::ship::control_source::ControlSource::Ai => 1,
-                        crate::ship::control_source::ControlSource::Offline => 2,
-                        crate::ship::control_source::ControlSource::Simplified => 3,
-                    },
-                    address: message.address.clone(),
-                    payload: message.payload.clone(),
-                    presentation: message.presentation.clone(),
-                    sender_label: message.sender_label.clone(),
-                    due_after_fixed_ticks: message
-                        .due_tick
-                        .saturating_sub(captured_tick)
-                        .saturating_add(1),
-                })
-                .collect();
-            (uuid.0.clone(), CoordinationQueueState { pending })
+fn capture_coordination_queues(
+    entity: EntityRef<'_>,
+    captured_tick: u64,
+) -> Option<CoordinationQueueState> {
+    let queue = entity.get::<crate::ship::components::CoordinationQueue>()?;
+    let pending = queue
+        .0
+        .pending()
+        .iter()
+        .map(|message| QueuedCoordinationState {
+            sender_origin: match message.sender_origin {
+                crate::ship::control_source::ControlSource::Human => 0,
+                crate::ship::control_source::ControlSource::Ai => 1,
+                crate::ship::control_source::ControlSource::Offline => 2,
+                crate::ship::control_source::ControlSource::Simplified => 3,
+            },
+            address: message.address.clone(),
+            payload: message.payload.clone(),
+            presentation: message.presentation.clone(),
+            sender_label: message.sender_label.clone(),
+            due_after_fixed_ticks: message
+                .due_tick
+                .saturating_sub(captured_tick)
+                .saturating_add(1),
         })
         .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
+    Some(CoordinationQueueState { pending })
 }
 
-#[derive(Clone)]
+#[derive(Default)]
 struct CapturedNavigationContinuation {
-    uuid: String,
     waypoint: Option<NavigationWaypointState>,
     clearance_issue: Option<NavigationClearanceIssueState>,
     helm_clearance: Option<HelmWaypointClearanceState>,
@@ -4400,49 +4071,34 @@ struct CapturedNavigationContinuation {
 /// Component presence is independent and explicit. In particular, a default
 /// component is still `Some(default)` so restore can clear a value produced by
 /// the fresh bootstrap rather than silently inheriting it.
-fn capture_navigation_continuation(world: &World) -> Vec<CapturedNavigationContinuation> {
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        Option<&crate::console::navigation::NavigationWaypoint>,
-        Option<&crate::console::navigation::NavClearanceIssueState>,
-        Option<&crate::ship_plugin::HelmWaypointClearance>,
-    )>() else {
-        return Vec::new();
-    };
-    let mut rows: Vec<_> = query
-        .iter(world)
-        .filter(|(_, waypoint, clearance_issue, helm_clearance)| {
-            waypoint.is_some() || clearance_issue.is_some() || helm_clearance.is_some()
-        })
-        .map(|(uuid, waypoint, clearance_issue, helm_clearance)| {
-            let waypoint = waypoint.map(|waypoint| {
-                let snapshot = waypoint.snapshot();
-                NavigationWaypointState {
-                    position: snapshot.as_ref().map(|point| [point.x, point.z]),
-                    source_uuid: snapshot.and_then(|point| point.source_uuid),
-                    generation: waypoint.generation(),
-                }
-            });
-            let clearance_issue = clearance_issue.map(|state| {
-                let (issued_generation, helm_axes_were_ai) = state.continuation();
-                NavigationClearanceIssueState {
-                    issued_generation,
-                    helm_axes_were_ai,
-                }
-            });
-            let helm_clearance = helm_clearance.map(|state| HelmWaypointClearanceState {
-                generation: state.0,
-            });
-            CapturedNavigationContinuation {
-                uuid: uuid.0.clone(),
-                waypoint,
-                clearance_issue,
-                helm_clearance,
-            }
-        })
-        .collect();
-    rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
-    rows
+fn capture_navigation_continuation(entity: EntityRef<'_>) -> CapturedNavigationContinuation {
+    let waypoint = entity.get::<crate::console::navigation::NavigationWaypoint>();
+    let clearance_issue = entity.get::<crate::console::navigation::NavClearanceIssueState>();
+    let helm_clearance = entity.get::<crate::ship_plugin::HelmWaypointClearance>();
+    let waypoint = waypoint.map(|waypoint| {
+        let snapshot = waypoint.snapshot();
+        NavigationWaypointState {
+            position: snapshot.as_ref().map(|point| [point.x, point.z]),
+            source_uuid: snapshot.and_then(|point| point.source_uuid),
+            generation: waypoint.generation(),
+        }
+    });
+    let clearance_issue = clearance_issue.map(|state| {
+        let (issued_generation, helm_axes_were_ai) = state.continuation();
+        NavigationClearanceIssueState {
+            issued_generation,
+            helm_axes_were_ai,
+        }
+    });
+    let helm_clearance = helm_clearance.map(|state| HelmWaypointClearanceState {
+        generation: state.0,
+    });
+
+    CapturedNavigationContinuation {
+        waypoint,
+        clearance_issue,
+        helm_clearance,
+    }
 }
 
 /// The complete captured row for ONE live entity, taken through the same walk a
@@ -4459,54 +4115,80 @@ pub(crate) fn capture_entity_state(world: &World, uuid: &str) -> Option<EntitySt
         .find(|row| row.uuid == uuid)
 }
 
+/// Fixed capture inputs and the registration gates of the former optional queries.
+struct EntityCaptureContext<'w> {
+    captured_at: f32,
+    captured_tick: u64,
+    motion_plan: Option<&'w crate::ship::helm_planner::HelmMotionPlan>,
+    ai_fidelity: bool,
+    drives: bool,
+    navigation: bool,
+    machines: bool,
+    shield_ai: bool,
+    arc_requests: bool,
+}
+impl<'w> EntityCaptureContext<'w> {
+    fn new(world: &'w World) -> Self {
+        Self {
+            captured_at: fixed_elapsed_secs(world).unwrap_or_default(),
+            captured_tick: world.get_resource::<SimTick>().map_or(0, |tick| tick.0),
+            motion_plan: world.get_resource(),
+            ai_fidelity: world
+                .try_query_filtered::<(
+                    &EntityUuid,
+                    Has<crate::ai::server::AiHighFidelity>,
+                    Option<&crate::ai::server::LodTransitionTimer>,
+                ), With<crate::server_app::Ship>>()
+                .is_some(),
+            drives: world
+                .try_query::<(
+                    Option<&ShipImpulse>,
+                    Option<&ShipBoost>,
+                    Option<&crate::server_app::ImpulseHullHistory>,
+                )>()
+                .is_some(),
+            navigation: world
+                .try_query::<(
+                    Option<&crate::console::navigation::NavigationWaypoint>,
+                    Option<&crate::console::navigation::NavClearanceIssueState>,
+                    Option<&crate::ship_plugin::HelmWaypointClearance>,
+                )>()
+                .is_some(),
+            machines: world
+                .try_query::<(
+                    Option<&ActiveBeam>,
+                    Option<&PhaserCooldown>,
+                    Option<&TorpedoSystemResource>,
+                    Option<&EntityShipArcHull>,
+                    Option<&ShipRepairTeams>,
+                    Option<&RepairRequestQueue>,
+                    Option<&RepairHumanAlerted>,
+                    Option<&crate::server_app::ShipSystemBlackboards>,
+                    Option<&crate::ai::server::ObjectiveCursors>,
+                    Option<&crate::console::weapons::blaster::BlasterSystemResource>,
+                    Option<&crate::ship::shields::ShipShields>,
+                )>()
+                .is_some(),
+            shield_ai: world
+                .try_query::<(
+                    Option<&crate::ship::shields::ShieldsDamageHistory>,
+                    Option<&crate::ship::shields::PendingShieldsThreatBearing>,
+                )>()
+                .is_some(),
+            arc_requests: world
+                .try_query::<(
+                    Option<&crate::console::weapons::WeaponsArcRequestState>,
+                    Option<&crate::ship_plugin::PendingArcBearingRequest>,
+                )>()
+                .is_some(),
+        }
+    }
+}
+
 fn capture_entities(world: &World) -> Vec<EntityState> {
-    let ai_fidelity = capture_ai_fidelity(world);
-    let controls = capture_controls(world);
-    let mesh_crew = capture_mesh_crew(world);
-    let drives = capture_drives(world);
-    let navigation = capture_navigation_continuation(world);
-    let machines = capture_weapons_and_repair(world);
-    let shield_ai = capture_shield_ai(world);
-    let sensors_threat = capture_sensors_threat(world);
-    let intent_narration = capture_intent_narration(world);
-    let recent_combat = capture_recent_combat(world);
-    let frequency_hints = capture_frequency_hints(world);
-    let phaser_frequencies = capture_ship_phaser_frequencies(world);
-    let tactical_frequency_hints = capture_tactical_frequency_hints(world);
-    let last_system_tiers = capture_last_system_tiers(world);
-    let power_brownout = capture_power_brownout(world);
-    let shields_coordination = capture_shields_coordination(world);
-    let coordination_queues = capture_coordination_queues(world);
-    let arc_requests = capture_arc_requests(world);
-    let power = capture_power(world);
-    let pass_surfaces = capture_pass_surfaces(world);
-    let motion_plans = capture_motion_plans(world);
-    let infrastructure = capture_infrastructure(world);
-    let tractors = capture_tractors(world);
-    let docks = capture_docks(world);
-    let external_repair = capture_external_repair(world);
-    let umbilicals = capture_umbilicals(world);
-    let securities = capture_security(world);
-    let scans = capture_scans(world);
-    let civilians = capture_civilians(world);
-    let debris = capture_debris(world);
-    let spawn_origins = capture_spawn_origins(world);
-    let npc_doctrines: std::collections::BTreeMap<_, _> = world
-        .try_query::<(&EntityUuid, &crate::gm_npc::NpcDoctrineState)>()
-        .map(|mut query| {
-            query
-                .iter(world)
-                .filter_map(|(uuid, state)| {
-                    state
-                        .0
-                        .as_ref()
-                        .map(|state| (uuid.0.clone(), state.clone()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
+        EntityRef,
         Option<&ShipPhysics>,
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
@@ -4515,204 +4197,116 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     )>() else {
         return Vec::new();
     };
+    let context = EntityCaptureContext::new(world);
     let mut rows: Vec<EntityState> = query
         .iter(world)
         .map(
-            |(uuid, physics, hull, alert, stances, control_sources)| EntityState {
-                mesh_crew: mesh_crew.get(&uuid.0).cloned(),
-                npc_doctrine: npc_doctrines.get(&uuid.0).cloned(),
-                ai_fidelity: ai_fidelity
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                control: controls
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                drive: drives
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                navigation_waypoint: navigation
-                    .iter()
-                    .find(|state| state.uuid == uuid.0)
-                    .and_then(|state| state.waypoint.clone()),
-                navigation_clearance_issue: navigation
-                    .iter()
-                    .find(|state| state.uuid == uuid.0)
-                    .and_then(|state| state.clearance_issue.clone()),
-                helm_waypoint_clearance: navigation
-                    .iter()
-                    .find(|state| state.uuid == uuid.0)
-                    .and_then(|state| state.helm_clearance.clone()),
-                weapons: machines
-                    .iter()
-                    .find(|(id, ..)| id == &uuid.0)
-                    .and_then(|(_, weapons, ..)| weapons.clone()),
-                shield_ai: shield_ai
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                sensors_threat: sensors_threat
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                intent_narration: intent_narration
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                recent_combat: recent_combat
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                frequency_hint: frequency_hints
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                phaser_frequency: phaser_frequencies
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                tactical_frequency_hint: tactical_frequency_hints
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                last_system_tiers: last_system_tiers
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                power_brownout: power_brownout
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                shields_coordination: shields_coordination
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                coordination_queue: coordination_queues
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                repair: machines
-                    .iter()
-                    .find(|(id, ..)| id == &uuid.0)
-                    .and_then(|(_, _, repair, ..)| repair.clone()),
-                arc_request: arc_requests
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                power: power
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                pass_surface: pass_surfaces
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, surface)| *surface),
-                motion_plan: motion_plans
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, plan)| plan.clone()),
-                infrastructure: infrastructure
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                tractor: tractors
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                dock: docks
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                external_repair: external_repair
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                umbilical: umbilicals
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                security: securities
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                scan: scans
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                civilian: civilians
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                debris: debris
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, state)| state.clone()),
-                blackboards: machines
-                    .iter()
-                    .find(|(id, ..)| id == &uuid.0)
-                    .map(|(_, _, _, boards, _)| boards.clone())
-                    .unwrap_or_default(),
-                patrol_cursors: machines
-                    .iter()
-                    .find(|(id, ..)| id == &uuid.0)
-                    .map(|(.., cursors)| cursors.clone())
-                    .unwrap_or_default(),
-                uuid: uuid.0.clone(),
-                // Read off the entity rather than joined out of a ledger — see
-                // [`crate::world::spawn_origin`] for why the record rides there.
-                // Absent on every authored `[[entity]]`, which is the signal a
-                // restore reads it for.
-                spawn: spawn_origins
-                    .iter()
-                    .find(|(id, _)| id == &uuid.0)
-                    .map(|(_, origin)| origin.clone()),
-                physics: physics.map(|p| {
-                    [
-                        p.x,
-                        p.y,
-                        p.z,
-                        p.yaw,
-                        p.forward_speed,
-                        p.roll,
-                        p.lateral_speed,
-                        p.vertical_speed,
-                    ]
-                }),
-                hull: hull.map(|h| hull_rows(&h.0)),
-                red_alert: alert.map(|a| a.0),
-                // Sorted by station id, the same walk `fold_station_stances_namespace`
-                // takes, so the capture is byte-identical whatever order the map's
-                // entries were inserted in. An empty map yields an empty vec, which
-                // `skip_serializing_if` drops — a never-commanded hull carries no row.
-                station_stances: stances
-                    .map(|s| {
-                        let mut pairs: Vec<(String, String)> =
-                            s.0.iter()
-                                .map(|(station, stance)| (station.0.clone(), stance.clone()))
-                                .collect();
-                        pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                        pairs
-                    })
-                    .unwrap_or_default(),
-                damage_offline_systems: control_sources
-                    .map(|sources| {
-                        let mut ids: Vec<String> =
-                            sources.0.offline_entries().map(|id| id.0.clone()).collect();
-                        ids.sort();
-                        ids
-                    })
-                    .unwrap_or_default(),
-                gm_disabled_systems: control_sources
-                    .map(|sources| {
-                        sources
-                            .0
-                            .gm_disabled_entries()
-                            .map(|id| id.0.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+            |(uuid, entity, physics, hull, alert, stances, control_sources)| {
+                let navigation = context
+                    .navigation
+                    .then(|| capture_navigation_continuation(entity))
+                    .unwrap_or_default();
+                let (weapons, repair, blackboards, patrol_cursors) = if context.machines {
+                    capture_weapons_and_repair(entity)
+                } else {
+                    Default::default()
+                };
+                EntityState {
+                    mesh_crew: capture_mesh_crew(entity),
+                    npc_doctrine: entity
+                        .get::<crate::gm_npc::NpcDoctrineState>()
+                        .and_then(|state| state.0.clone()),
+                    ai_fidelity: context
+                        .ai_fidelity
+                        .then(|| capture_ai_fidelity(entity, f64::from(context.captured_at)))
+                        .flatten(),
+                    control: capture_controls(entity),
+                    drive: context.drives.then(|| capture_drives(entity)).flatten(),
+                    navigation_waypoint: navigation.waypoint,
+                    navigation_clearance_issue: navigation.clearance_issue,
+                    helm_waypoint_clearance: navigation.helm_clearance,
+                    weapons,
+                    repair,
+                    blackboards,
+                    patrol_cursors,
+                    shield_ai: context
+                        .shield_ai
+                        .then(|| capture_shield_ai(entity))
+                        .flatten(),
+                    sensors_threat: capture_sensors_threat(entity),
+                    intent_narration: capture_intent_narration(entity),
+                    recent_combat: capture_recent_combat(entity, context.captured_at),
+                    frequency_hint: capture_frequency_hints(entity),
+                    phaser_frequency: capture_ship_phaser_frequencies(entity),
+                    tactical_frequency_hint: capture_tactical_frequency_hints(entity),
+                    last_system_tiers: capture_last_system_tiers(entity),
+                    power_brownout: capture_power_brownout(entity),
+                    shields_coordination: capture_shields_coordination(entity),
+                    coordination_queue: capture_coordination_queues(entity, context.captured_tick),
+                    arc_request: context
+                        .arc_requests
+                        .then(|| capture_arc_requests(entity))
+                        .flatten(),
+                    power: capture_power(entity),
+                    pass_surface: capture_pass_surfaces(entity),
+                    motion_plan: capture_motion_plans(entity, context.motion_plan),
+                    infrastructure: capture_infrastructure(entity),
+                    tractor: capture_tractors(entity),
+                    dock: capture_docks(entity),
+                    external_repair: capture_external_repair(entity),
+                    umbilical: capture_umbilicals(entity),
+                    security: capture_security(entity),
+                    scan: capture_scans(entity),
+                    civilian: capture_civilians(entity),
+                    debris: capture_debris(entity),
+                    spawn: capture_spawn_origins(entity),
+                    uuid: uuid.0.clone(),
+                    physics: physics.map(|p| {
+                        [
+                            p.x,
+                            p.y,
+                            p.z,
+                            p.yaw,
+                            p.forward_speed,
+                            p.roll,
+                            p.lateral_speed,
+                            p.vertical_speed,
+                        ]
+                    }),
+                    hull: hull.map(|h| hull_rows(&h.0)),
+                    red_alert: alert.map(|a| a.0),
+                    // Sorted by station id, the same walk `fold_station_stances_namespace`
+                    // takes, so the capture is byte-identical whatever order the map's
+                    // entries were inserted in. An empty map yields an empty vec, which
+                    // `skip_serializing_if` drops — a never-commanded hull carries no row.
+                    station_stances: stances
+                        .map(|s| {
+                            let mut pairs: Vec<(String, String)> =
+                                s.0.iter()
+                                    .map(|(station, stance)| (station.0.clone(), stance.clone()))
+                                    .collect();
+                            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                            pairs
+                        })
+                        .unwrap_or_default(),
+                    damage_offline_systems: control_sources
+                        .map(|sources| {
+                            let mut ids: Vec<String> =
+                                sources.0.offline_entries().map(|id| id.0.clone()).collect();
+                            ids.sort();
+                            ids
+                        })
+                        .unwrap_or_default(),
+                    gm_disabled_systems: control_sources
+                        .map(|sources| {
+                            sources
+                                .0
+                                .gm_disabled_entries()
+                                .map(|id| id.0.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
             },
         )
         .collect();
@@ -8092,43 +7686,34 @@ pub enum MeshControlSource {
     Simplified,
 }
 
-fn capture_mesh_crew(world: &World) -> std::collections::BTreeMap<String, MeshCrewState> {
+fn capture_mesh_crew(entity: EntityRef<'_>) -> Option<MeshCrewState> {
     use crate::ship::control_source::ControlSource;
-    let Some(mut query) = world.try_query::<(
-        &EntityUuid,
-        &crate::ship_plugin::ActiveStationRatings,
-        &crate::ship_plugin::ShipSystemControlSources,
-    )>() else {
-        return Default::default();
-    };
-    query
-        .iter(world)
-        .map(|(uuid, ratings, sources)| {
-            let mut ratings: Vec<_> = ratings
-                .0
-                .iter()
-                .map(|(station, rating)| (station.0.clone(), rating.clone()))
-                .collect();
-            ratings.sort();
-            let mut sources: Vec<_> = sources
-                .0
-                .entries()
-                .map(|(system, source)| {
-                    (
-                        system.0.clone(),
-                        match source {
-                            ControlSource::Human => MeshControlSource::Human,
-                            ControlSource::Ai => MeshControlSource::Ai,
-                            ControlSource::Offline => MeshControlSource::Offline,
-                            ControlSource::Simplified => MeshControlSource::Simplified,
-                        },
-                    )
-                })
-                .collect();
-            sources.sort_by(|a, b| a.0.cmp(&b.0));
-            (uuid.0.clone(), MeshCrewState { ratings, sources })
+    let ratings = entity.get::<crate::ship_plugin::ActiveStationRatings>()?;
+    let sources = entity.get::<crate::ship_plugin::ShipSystemControlSources>()?;
+    let mut ratings: Vec<_> = ratings
+        .0
+        .iter()
+        .map(|(station, rating)| (station.0.clone(), rating.clone()))
+        .collect();
+    ratings.sort();
+    let mut sources: Vec<_> = sources
+        .0
+        .entries()
+        .map(|(system, source)| {
+            (
+                system.0.clone(),
+                match source {
+                    ControlSource::Human => MeshControlSource::Human,
+                    ControlSource::Ai => MeshControlSource::Ai,
+                    ControlSource::Offline => MeshControlSource::Offline,
+                    ControlSource::Simplified => MeshControlSource::Simplified,
+                },
+            )
         })
-        .collect()
+        .collect();
+    sources.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Some(MeshCrewState { ratings, sources })
 }
 
 /// Explicit mesh continuation only. Do not call from ordinary save restore:

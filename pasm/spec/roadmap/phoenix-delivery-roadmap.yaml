@@ -324,6 +324,7 @@ entities:
       title: Full Authoritative Snapshots and Persistence
       summary: "After the tracer, the #848 snapshot adapters are delivered: dynamic combat consequences (#863), scripted progression (#864), portable import/export (#866), campaign-continuity projection (#867), and T2 save-slot lifecycle UX (#865)."
       rationale:
+        - "[ai] Entity capture uses one UUID-sorted traversal and private continuation adapters. Fixed capture inputs and former optional-query registration gates are prepared once; serialization, omission, state ownership, snapshot version and restore behavior are unchanged."
         - One portable snapshot must serve persistence, campaign continuity, native hosting, and P2P transfer rather than each surface serialising its own world.
         - "The adapters are split by their consumer rather than shipped as one block: each half-PRD lands in the band whose feature would otherwise be built on a missing adapter."
         - "Phoenix is the fleet's world-snapshot consumer for vellum-save: slot storage is that crate's Store under its browser backend, portable export (#866) is the same record through its file backend, and compatibility reporting renders its version gate. Only the campaign-continuity projection (#867) is phoenix-owned, because cross-mission facts are game vocabulary."

@@ -15,6 +15,11 @@ enter the simulation digest or fleet mesh.
 
 ## Capture lifecycle
 
+Entity capture in `snapshot.rs` uses one UUID-sorted traversal with private
+state adapters. A per-capture context retains the former optional-query
+registration gates and reads fixed time, tick and motion-plan resources once.
+Absent and explicit default continuations keep their existing serialized forms.
+
 `save_slots::SaveSchedule` chooses completed logical ticks, and
 `save_slots_lifecycle` captures in `FixedLast` after the simulation work and
 `SimTick` advance have committed. The rolling `autosave` slot is replaced on the

@@ -672,10 +672,9 @@ mod cpal_backend {
                 .as_ref()
                 .ok_or("settings.audio.device_stopped")?;
             Ok(devices
-                .discovered
-                .iter()
-                .enumerate()
-                .map(|(index, device)| (device.identity.to_string(), devices.ambiguous[index]))
+                .catalogue
+                .entries()
+                .map(|entry| (entry.device.identity.to_string(), entry.ambiguous))
                 .collect())
         }
         fn open(&mut self, id: &str, mixer: Arc<Mutex<Mixer>>) -> Result<Stream, String> {
@@ -683,17 +682,12 @@ mod cpal_backend {
                 .devices
                 .as_ref()
                 .ok_or("settings.audio.selected_missing")?;
-            let index = devices
-                .discovered
-                .iter()
-                .position(|device| device.identity.as_str() == id)
-                .ok_or("settings.audio.selected_missing")?;
-            if devices.ambiguous[index] {
-                return Err("settings.audio.selected_ambiguous".into());
-            }
+            let entry = devices
+                .catalogue
+                .resolve(id)
+                .map_err(super::super::device::selection_error)?;
             let failed = Arc::new(AtomicBool::new(false));
-            let stream =
-                super::super::device::open(&devices.handles[index], mixer, failed.clone())?;
+            let stream = super::super::device::open(&entry.handle, mixer, failed.clone())?;
             Ok(Stream {
                 _stream: stream,
                 failed,

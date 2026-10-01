@@ -1,12 +1,11 @@
 //! Explicit local microphone level test. Samples are reduced to a peak value
 //! inside the callback and discarded; no audio is retained or transmitted.
 use super::{
-    bridge_media::{self, DeviceAvailability, DiscoveredMediaDevice, MediaKind, RawMediaDevice},
+    bridge_media::{DeviceAvailability, DiscoveredMediaDevice, MediaKind, RawMediaDevice},
     bridge_profile::BridgeProfile,
 };
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
-    collections::HashMap,
     sync::{
         atomic::{AtomicU32, Ordering},
         mpsc, Arc,
@@ -14,10 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use super::media_devices::{DeviceCatalogue, Entry, SelectionError};
 pub struct Microphones {
-    pub discovered: Vec<DiscoveredMediaDevice>,
-    handles: Vec<cpal::Device>,
-    ambiguous: Vec<bool>,
+    catalogue: DeviceCatalogue<cpal::Device>,
 }
 impl Microphones {
     pub fn scan() -> Result<Self, String> {
@@ -25,38 +23,29 @@ impl Microphones {
             .input_devices()
             .map_err(|e| e.to_string())?
             .collect();
-        let raws: Vec<_> = handles
-            .iter()
-            .map(|device| RawMediaDevice {
+        let catalogue = DeviceCatalogue::new(handles.into_iter().map(|device| {
+            let raw = RawMediaDevice {
                 kind: MediaKind::Microphone,
                 name: device.name().ok(),
                 hardware_id: None,
                 default: false,
                 availability: DeviceAvailability::Available,
-            })
-            .collect();
-        let mut counts = HashMap::new();
-        for raw in &raws {
-            *counts.entry(raw.name.clone()).or_insert(0usize) += 1;
-        }
-        let ambiguous = raws
-            .iter()
-            .map(|raw| raw.name.is_none() || counts[&raw.name] > 1)
-            .collect();
-        Ok(Self {
-            discovered: bridge_media::identify_media(&raws),
-            handles,
-            ambiguous,
-        })
+            };
+            (raw, device)
+        }));
+        Ok(Self { catalogue })
+    }
+    pub fn discovered(&self) -> impl Iterator<Item = DiscoveredMediaDevice> + '_ {
+        self.catalogue.entries().map(|entry| entry.device.clone())
     }
     pub fn meter_surface(&self, profile: &BridgeProfile, surface: &str) -> Result<(), String> {
-        let indices = selected_microphones(profile, surface, &self.discovered, &self.ambiguous)?;
-        for index in indices {
-            let id = &self.discovered[index].identity;
+        let indices = selected_microphones(profile, surface, &self.catalogue)?;
+        for entry in indices {
+            let id = &entry.device.identity;
             println!(
                 "Surface {surface:?}: metering {id} for five seconds; samples are not retained"
             );
-            meter(&self.handles[index]).map_err(|error| {
+            meter(&entry.handle).map_err(|error| {
                 format!("Surface {surface:?}: {id}: {error}; no other device substituted")
             })?;
             println!("Surface {surface:?}: {id}: meter stopped; stream closed");
@@ -65,38 +54,24 @@ impl Microphones {
     }
 }
 
-fn selected_microphones(
+fn selected_microphones<'a, H>(
     profile: &BridgeProfile,
     surface: &str,
-    discovered: &[DiscoveredMediaDevice],
-    ambiguous: &[bool],
-) -> Result<Vec<usize>, String> {
-    let media = bridge_media::validate_media(&profile.media).map_err(|e| e.to_string())?;
-    let assigned = media
-        .surfaces
-        .iter()
-        .find(|entry| entry.surface == surface)
-        .ok_or("unknown microphone surface")?;
-    if assigned.microphones.is_empty() {
-        return Err("surface has no assigned microphones".into());
-    }
-    let indices: Vec<_> = assigned
-        .microphones
-        .iter()
-        .map(|id| {
-            let index = discovered
-                .iter()
-                .position(|device| device.identity == *id)
-                .ok_or_else(|| format!("microphone {id} is missing; nothing substituted"))?;
-            if ambiguous[index] {
-                return Err(format!(
-                    "microphone {id} has no unique OS name; rename and refresh before testing"
-                ));
+    catalogue: &'a DeviceCatalogue<H>,
+) -> Result<Vec<&'a Entry<H>>, String> {
+    catalogue
+        .surface(profile, surface, MediaKind::Microphone)
+        .map_err(|error| match error {
+            SelectionError::InvalidProfile(error) => error,
+            SelectionError::UnknownSurface => "unknown microphone surface".into(),
+            SelectionError::Unassigned => "surface has no assigned microphones".into(),
+            SelectionError::Missing(id) => {
+                format!("microphone {id} is missing; nothing substituted")
             }
-            Ok(index)
+            SelectionError::Ambiguous(id) => {
+                format!("microphone {id} has no unique OS name; rename and refresh before testing")
+            }
         })
-        .collect::<Result<_, String>>()?;
-    Ok(indices)
 }
 
 fn meter(device: &cpal::Device) -> Result<(), String> {
@@ -196,30 +171,56 @@ microphone = ["mic:Headset", "mic:Desk"]
 "#,
         )
         .unwrap();
-        let devices =
-            bridge_media::identify_media(&["Headset", "Desk"].map(|name| RawMediaDevice {
-                kind: MediaKind::Microphone,
-                name: Some(name.into()),
-                hardware_id: None,
-                default: false,
-                availability: DeviceAvailability::Available,
-            }));
+        let catalogue = |names: &[&str]| {
+            DeviceCatalogue::new(names.iter().enumerate().map(|(index, name)| {
+                (
+                    RawMediaDevice {
+                        kind: MediaKind::Microphone,
+                        name: Some((*name).into()),
+                        hardware_id: None,
+                        default: false,
+                        availability: DeviceAvailability::Available,
+                    },
+                    index,
+                )
+            }))
+        };
+        let devices = catalogue(&["Headset", "Desk"]);
         assert_eq!(
-            selected_microphones(&profile, "comms", &devices, &[false, false]).unwrap(),
+            selected_microphones(&profile, "comms", &devices)
+                .unwrap()
+                .iter()
+                .map(|entry| entry.handle)
+                .collect::<Vec<_>>(),
             vec![0, 1]
         );
         assert!(
-            selected_microphones(&profile, "comms", &devices[..1], &[false])
-                .unwrap_err()
+            selected_microphones(&profile, "comms", &catalogue(&["Headset"]))
+                .err()
+                .unwrap()
                 .contains("missing")
         );
+        let duplicates = catalogue(&["Headset", "Headset"]);
+        let duplicate_id = duplicates
+            .entries()
+            .next()
+            .unwrap()
+            .device
+            .identity
+            .to_string();
+        let duplicate_profile: BridgeProfile = toml::from_str(&format!(
+            "version=1\n[[media]]\nsurface='comms'\nmicrophone=['{duplicate_id}']"
+        ))
+        .unwrap();
         assert!(
-            selected_microphones(&profile, "comms", &devices, &[false, true])
-                .unwrap_err()
+            selected_microphones(&duplicate_profile, "comms", &duplicates)
+                .err()
+                .unwrap()
                 .contains("unique")
         );
-        assert!(selected_microphones(&profile, "viewscreen", &devices, &[false, false]).is_err());
+        assert!(selected_microphones(&profile, "viewscreen", &devices).is_err());
     }
+
     #[test]
     fn metering_clamps_signal_without_retaining_or_inventing_invalid_levels() {
         assert_eq!(finite_level(-0.75), 0.75);

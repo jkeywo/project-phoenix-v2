@@ -2,21 +2,16 @@
 //! CPAL objects stay on the calling setup thread. Streams never enter a Bevy
 //! Resource or a callback-owned destructor. No recording or network calls.
 
-use super::bridge_media::{
-    self, DeviceAvailability, DiscoveredMediaDevice, MediaKind, RawMediaDevice,
-};
+use super::bridge_media::{DeviceAvailability, DiscoveredMediaDevice, MediaKind, RawMediaDevice};
 use super::bridge_profile::BridgeProfile;
+use super::media_devices::{DeviceCatalogue, Entry, SelectionError};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Duration;
 
 pub struct OutputDevices {
-    pub discovered: Vec<DiscoveredMediaDevice>,
-    pub(crate) handles: Vec<cpal::Device>,
-    pub(crate) ambiguous: Vec<bool>,
+    pub(crate) catalogue: DeviceCatalogue<cpal::Device>,
 }
-
 impl OutputDevices {
     pub fn scan() -> Result<Self, String> {
         let host = cpal::default_host();
@@ -24,31 +19,20 @@ impl OutputDevices {
             .output_devices()
             .map_err(|error| error.to_string())?
             .collect();
-        let raws: Vec<_> = handles
-            .iter()
-            .map(|device| RawMediaDevice {
+        let catalogue = DeviceCatalogue::new(handles.into_iter().map(|device| {
+            let raw = RawMediaDevice {
                 kind: MediaKind::Output,
                 name: device.name().ok(),
                 hardware_id: None,
-                // CPAL 0.15 cannot expose a portable stable endpoint id. No default
-                // is guessed by name, and a test always uses the explicit profile.
                 default: false,
                 availability: DeviceAvailability::Available,
-            })
-            .collect();
-        let mut counts = HashMap::new();
-        for raw in &raws {
-            *counts.entry(raw.name.clone()).or_insert(0usize) += 1;
-        }
-        let ambiguous = raws
-            .iter()
-            .map(|raw| raw.name.is_none() || counts[&raw.name] > 1)
-            .collect();
-        Ok(Self {
-            discovered: bridge_media::identify_media(&raws),
-            handles,
-            ambiguous,
-        })
+            };
+            (raw, device)
+        }));
+        Ok(Self { catalogue })
+    }
+    pub fn discovered(&self) -> impl Iterator<Item = DiscoveredMediaDevice> + '_ {
+        self.catalogue.entries().map(|entry| entry.device.clone())
     }
 
     /// Enumerated handles are retained until teardown. Duplicate/unnamed
@@ -58,12 +42,12 @@ impl OutputDevices {
         profile: &BridgeProfile,
         surface: &str,
     ) -> Result<Vec<String>, String> {
-        let indices = selected_outputs(profile, surface, &self.discovered, &self.ambiguous)?;
+        let indices = selected_outputs(profile, surface, &self.catalogue)?;
         let mut results = Vec::new();
-        for index in indices {
-            let id = &self.discovered[index].identity;
+        for entry in indices {
+            let id = &entry.device.identity;
             println!("Surface {surface:?}: testing output {id} (quiet one-second tone)");
-            play_tone(&self.handles[index]).map_err(|error| {
+            play_tone(&entry.handle).map_err(|error| {
                 format!("Surface {surface:?}: output {id}: {error}; the surface remains usable")
             })?;
             results.push(format!(
@@ -74,32 +58,18 @@ impl OutputDevices {
     }
 }
 
-fn selected_outputs(
+fn selected_outputs<'a, H>(
     profile: &BridgeProfile,
     surface: &str,
-    discovered: &[DiscoveredMediaDevice],
-    ambiguous: &[bool],
-) -> Result<Vec<usize>, String> {
-    let validated =
-        bridge_media::validate_media(&profile.media).map_err(|error| error.to_string())?;
-    let assigned = validated
-        .surfaces
-        .iter()
-        .find(|entry| entry.surface == surface)
-        .ok_or_else(|| format!("Unknown media surface {surface:?}"))?;
-    if assigned.outputs.is_empty() {
-        return Err(format!("Surface {surface:?} has no assigned outputs"));
-    }
-    // Preflight every requested output before playing any one of them.
-    let indices: Vec<usize> = assigned.outputs.iter().map(|id| {
-            let index = discovered.iter().position(|device| device.identity == *id)
-                .ok_or_else(|| format!("Surface {surface:?}: output {id} is missing; nothing substituted"))?;
-            if ambiguous[index] {
-                return Err(format!("Surface {surface:?}: output {id} has no unique device name; give the endpoint a unique OS name and refresh"));
-            }
-            Ok(index)
-        }).collect::<Result<_, String>>()?;
-    Ok(indices)
+    catalogue: &'a DeviceCatalogue<H>,
+) -> Result<Vec<&'a Entry<H>>, String> {
+    catalogue.surface(profile, surface, MediaKind::Output).map_err(|error| match error {
+        SelectionError::InvalidProfile(error) => error,
+        SelectionError::UnknownSurface => format!("Unknown media surface {surface:?}"),
+        SelectionError::Unassigned => format!("Surface {surface:?} has no assigned outputs"),
+        SelectionError::Missing(id) => format!("Surface {surface:?}: output {id} is missing; nothing substituted"),
+        SelectionError::Ambiguous(id) => format!("Surface {surface:?}: output {id} has no unique device name; give the endpoint a unique OS name and refresh"),
+    })
 }
 
 fn play_tone(device: &cpal::Device) -> Result<(), String> {
@@ -197,32 +167,54 @@ output = ["output:Headset", "output:Speakers"]
 "#,
         )
         .unwrap();
-        let devices =
-            bridge_media::identify_media(&["Headset", "Speakers"].map(|name| RawMediaDevice {
-                kind: MediaKind::Output,
-                name: Some(name.into()),
-                hardware_id: None,
-                default: false,
-                availability: DeviceAvailability::Available,
-            }));
+        let catalogue = |names: &[&str]| {
+            DeviceCatalogue::new(names.iter().enumerate().map(|(index, name)| {
+                (
+                    RawMediaDevice {
+                        kind: MediaKind::Output,
+                        name: Some((*name).into()),
+                        hardware_id: None,
+                        default: false,
+                        availability: DeviceAvailability::Available,
+                    },
+                    index,
+                )
+            }))
+        };
+        let devices = catalogue(&["Headset", "Speakers"]);
         assert_eq!(
-            selected_outputs(&profile, "comms", &devices, &[false, false]).unwrap(),
+            selected_outputs(&profile, "comms", &devices)
+                .unwrap()
+                .iter()
+                .map(|entry| entry.handle)
+                .collect::<Vec<_>>(),
             vec![0, 1]
         );
-        assert!(selected_outputs(&profile, "comms", &devices[..1], &[false])
-            .unwrap_err()
-            .contains("missing"));
         assert!(
-            selected_outputs(&profile, "comms", &devices, &[false, true])
-                .unwrap_err()
-                .contains("no unique device name")
+            selected_outputs(&profile, "comms", &catalogue(&["Headset"]))
+                .err()
+                .unwrap()
+                .contains("missing")
         );
-        assert!(
-            selected_outputs(&profile, "viewscreen", &devices, &[false, false])
-                .unwrap_err()
-                .contains("Unknown media surface")
-        );
+        let duplicates = catalogue(&["Headset", "Headset"]);
+        let duplicate_id = duplicates
+            .entries()
+            .next()
+            .unwrap()
+            .device
+            .identity
+            .to_string();
+        let duplicate_profile: BridgeProfile = toml::from_str(&format!(
+            "version=1\n[[media]]\nsurface='comms'\noutput=['{duplicate_id}']"
+        ))
+        .unwrap();
+        assert!(selected_outputs(&duplicate_profile, "comms", &duplicates)
+            .err()
+            .unwrap()
+            .contains("unique"));
+        assert!(selected_outputs(&profile, "viewscreen", &devices).is_err());
     }
+
     #[test]
     fn the_test_tone_is_quiet_faded_and_finite_with_a_silent_tail() {
         for rate in [8_000, 44_100, 48_000, 192_000] {

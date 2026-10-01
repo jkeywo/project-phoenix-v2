@@ -119,6 +119,8 @@ pub mod layout_store;
 pub mod layout_store_systems;
 #[cfg(all(feature = "host", target_os = "windows"))]
 pub mod media_camera;
+#[cfg(any(feature = "host", test))]
+pub(crate) mod media_devices;
 #[cfg(feature = "host")]
 pub mod media_microphone;
 #[cfg(feature = "host")]

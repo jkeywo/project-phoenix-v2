@@ -52,31 +52,23 @@ pub(super) fn run(
             match OutputDevices::scan() {
                 Ok(devices) => {
                     state.lock().unwrap().devices = devices
-                        .discovered
-                        .iter()
-                        .enumerate()
-                        .map(|(i, device)| OutputChoice {
-                            id: device.identity.to_string(),
-                            label: device
+                        .catalogue
+                        .entries()
+                        .map(|entry| OutputChoice {
+                            id: entry.device.identity.to_string(),
+                            label: entry
+                                .device
                                 .name
                                 .clone()
-                                .unwrap_or_else(|| device.identity.to_string()),
-                            available: !devices.ambiguous[i],
+                                .unwrap_or_else(|| entry.device.identity.to_string()),
+                            available: !entry.ambiguous,
                         })
                         .collect();
-                    let selected = route.as_ref().and_then(|id| {
-                        devices
-                            .discovered
-                            .iter()
-                            .position(|d| d.identity.as_str() == id)
-                    });
-                    let bad = match (&route, selected) {
-                        (Some(_), None) => Some("settings.audio.selected_missing"),
-                        (Some(_), Some(index)) if devices.ambiguous[index] => {
-                            Some("settings.audio.selected_ambiguous")
-                        }
-                        _ => None,
-                    };
+                    let selected = route
+                        .as_ref()
+                        .map(|id| devices.catalogue.resolve(id))
+                        .transpose();
+                    let bad = selected.as_ref().err().map(selection_error);
                     if let Some(error) = bad {
                         private.room_output(None);
                         stream = None;
@@ -85,8 +77,8 @@ pub(super) fn run(
                         status.status = "failed";
                         status.detail = error.into();
                     } else if changed && request.routing_error.is_none() {
-                        let device = match selected {
-                            Some(index) => Some(devices.handles[index].clone()),
+                        let device = match selected.ok().flatten() {
+                            Some(entry) => Some(entry.handle.clone()),
                             None => cpal::default_host().default_output_device(),
                         };
                         let opened = device
@@ -98,14 +90,13 @@ pub(super) fn run(
                             .and_then(|device| device.name().ok())
                             .and_then(|name| {
                                 devices
-                                    .discovered
-                                    .iter()
-                                    .enumerate()
-                                    .find(|(index, candidate)| {
-                                        candidate.name.as_deref() == Some(&name)
-                                            && !devices.ambiguous[*index]
+                                    .catalogue
+                                    .entries()
+                                    .find(|entry| {
+                                        entry.device.name.as_deref() == Some(&name)
+                                            && !entry.ambiguous
                                     })
-                                    .map(|(_, candidate)| candidate.identity.to_string())
+                                    .map(|entry| entry.device.identity.to_string())
                             });
                         let mut status = state.lock().unwrap();
                         match opened {
@@ -298,4 +289,15 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
             None,
         )
         .map_err(|e| e.to_string())
+}
+
+pub(super) fn selection_error(
+    error: impl std::borrow::Borrow<crate::native_host::media_devices::SelectionError>,
+) -> &'static str {
+    match error.borrow() {
+        crate::native_host::media_devices::SelectionError::Ambiguous(_) => {
+            "settings.audio.selected_ambiguous"
+        }
+        _ => "settings.audio.selected_missing",
+    }
 }

@@ -2463,14 +2463,14 @@ fn setup_enumerate(
         report.push_str("\nCamera enumeration is supported on Windows only.\n");
         match super::media_output::OutputDevices::scan() {
             Ok(outputs) => {
-                devices.extend(outputs.discovered);
+                devices.extend(outputs.discovered());
                 supported.push(MediaKind::Output);
             }
             Err(error) => report.push_str(&format!("\nOutput enumeration unavailable: {error}\n")),
         }
         match super::media_microphone::Microphones::scan() {
             Ok(mics) => {
-                devices.extend(mics.discovered);
+                devices.extend(mics.discovered());
                 supported.push(MediaKind::Microphone);
             }
             Err(error) => {

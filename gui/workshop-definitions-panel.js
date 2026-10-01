@@ -1,3 +1,4 @@
+import { createWorkshopEditSession } from './workshop-edit-session.js';
 import { definitionsSnapshot, snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
   complianceIsSeconds, complianceIsResponse, planFactionEdits, ratingForm, planRatingEdits, newRung, rungNames, findingsAt,
   draftFirst } from '../editor/workshop-definitions.js';
@@ -402,12 +403,11 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
     if (announce) show('workshop.definitions.refreshed');
   }
 
-  async function guarded(action) {
-    setBusy(true);
-    try { await action(); }
-    catch (error) { if (!disposed) show(knownId(error), true); }
-    finally { if (!disposed) { setBusy(false); refresh(); } }
-  }
+  const { guarded, land } = createWorkshopEditSession({
+    draft, disposed: () => disposed, setBusy, changed, refresh, reload,
+    showChanged: () => show('workshop.changed'),
+    showError: error => show(knownId(error), true),
+  });
 
   /** ONE runtime edit for ONE member, then ONE draft edit. The draft is never
    * touched before the runtime answers, and an answer for a draft that moved in
@@ -415,15 +415,7 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
   async function commit(read, path, edits) {
     const source = read.files[path];
     const result = await runtime.edit(source, { document_path: path, expected_source: source, edits });
-    if (disposed) return;
-    if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
-    if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
-    const current = draft();
-    if (current.edit(path, result)) changed(path);
-    show('workshop.changed');
-    // Re-read so the forms show what was written; a failed re-read leaves the
-    // reading honestly stale rather than reporting the landed edit as refused.
-    await reload({ announce: false }).catch(() => {});
+    return land(read, path, result);
   }
 
   refreshButton.addEventListener('click', () => {

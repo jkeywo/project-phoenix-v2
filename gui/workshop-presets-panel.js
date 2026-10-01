@@ -1,3 +1,4 @@
+import { createWorkshopEditSession } from './workshop-edit-session.js';
 import { definitionsSnapshot, snapshotIsCurrent, draftFirst } from '../editor/workshop-definitions.js';
 import { presetsForm, planPresetEdits, movePreset, moveWidget, newWidget, presetMovable, widgetMovable,
   widgetOwns, widgetTypeChoices, widgetActionChoices, contactChoices, worldChoices, presetFindings, findingsOn,
@@ -580,18 +581,12 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
    * answer has been rendered. Focus moves AFTER that: every control is disabled
    * while the hold is up, so a landing spot chosen inside it could only ever be
    * one the rebuild happened to recreate. */
-  async function guarded(action) {
-    setBusy(true);
-    let focus = null;
-    try { focus = await action(); }
-    catch (error) { if (!disposed) show(knownId(error), true, { detail: error?.detail ?? '' }); }
-    finally {
-      if (!disposed) {
-        setBusy(false); refresh();
-        if (focus?.length) focusFirst(...focus);
-      }
-    }
-  }
+  const { guarded, land } = createWorkshopEditSession({
+    draft, disposed: () => disposed, setBusy, changed, refresh, reload,
+    showChanged: () => show('workshop.changed'),
+    showError: error => show(knownId(error), true, { detail: error?.detail ?? '' }),
+    restoreFocus: focusFirst,
+  });
 
   /** The runtime's own refusal, mapped to the sentence for its rule and carrying
    * its words as the detail. */
@@ -602,22 +597,7 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
     return value;
   }
 
-  /** What a landed answer does to the draft: ONE edit, so one undo reverts it,
-   * then a re-read so the forms show what was written. An answer for a draft that
-   * moved in the meantime is refused as stale rather than written over newer
-   * source. */
-  async function land(read, path, result, focus) {
-    if (disposed) return null;
-    if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
-    if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
-    const current = draft();
-    if (current.edit(path, result)) changed(path);
-    show('workshop.changed');
-    // A failed re-read leaves the reading honestly stale rather than reporting
-    // the landed edit as refused.
-    await reload({ announce: false }).catch(() => {});
-    return focus;
-  }
+
 
   /** ONE edit call for ONE member, then ONE draft edit. The draft is never
    * touched before the runtime answers; a refusal is shown by its category with

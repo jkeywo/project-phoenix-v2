@@ -23,6 +23,11 @@ Workshop provider; browser persistence is recovery plus validated archive
 export. Every mutation validates a candidate before it enters shared history.
 Unknown fields, comments, ordering, BOMs and untouched line endings remain exact.
 
+Entity, Presets, Definitions and Composition share `gui/workshop-edit-session.js`.
+It owns the busy lifetime, stale-answer guard and single draft edit, then refreshes
+and restores keyboard focus after releasing controls. Runtime calls and form
+interpretation remain in each panel. A failed reread leaves a successful edit intact.
+
 ## Modes
 
 - Files and Source select and edit exact documents.

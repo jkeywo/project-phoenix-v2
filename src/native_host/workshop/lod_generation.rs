@@ -1,6 +1,7 @@
 //! Native Workshop wrapper around the production `generate-lods.mjs` path.
 //! The tool writes only into a private immutable stage until the page reviews
 //! and adopts the resulting members as one validated draft transaction.
+use super::asset_job::{remove_stage, AssetJob};
 use crate::{
     delivery::{http, serve::HostedDocuments},
     entities::model_rig::ModelRig,
@@ -10,7 +11,7 @@ use std::{
     collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
 };
 
 const PREFIX: &str = "/workshop-lod-generation/";
@@ -18,10 +19,8 @@ const MANIFEST: &str = "scripts/lod-manifest.toml";
 
 struct ActiveRun {
     id: String,
-    stage: PathBuf,
-    child: Option<Child>,
+    job: AssetJob,
     log: PathBuf,
-    routes: Vec<String>,
     paths: Vec<String>,
     candidates: BTreeSet<String>,
     required_outputs: BTreeSet<String>,
@@ -44,7 +43,7 @@ impl LodGeneration {
         tool_root: PathBuf,
         directory: PathBuf,
     ) -> Result<Self, String> {
-        retire_directory(&directory);
+        remove_stage(&directory);
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         Ok(Self {
             documents,
@@ -106,57 +105,34 @@ impl LodGeneration {
 
         let id = uuid::Uuid::new_v4().to_string();
         let stage = self.directory.join(&id);
-        fs::create_dir_all(&stage).map_err(|error| error.to_string())?;
-        let started = (|| {
-            for (path, bytes) in &files {
-                let target = stage.join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
-                if let Some(parent) = target.parent() {
-                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-                }
-                fs::write(target, bytes).map_err(|error| error.to_string())?;
-            }
-            let log = stage.join("lod-generation.log");
-            let temporary = stage.join("tmp");
-            fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
-            let stderr = fs::File::create(&log).map_err(|error| error.to_string())?;
-            let stdout = stderr.try_clone().map_err(|error| error.to_string())?;
-            let script = self.tool_root.join("scripts/generate-lods.mjs");
-            let mut command = Command::new("node");
-            command.current_dir(&stage).arg(script).arg(&sidecar);
-            if remesh {
-                command.arg("--remesh");
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::CommandExt;
-                command.process_group(0);
-            }
-            let child = command
-                .env("PHOENIX_LOD_TOOL_ROOT", &self.tool_root)
-                .env("PHOENIX_LOD_SIDECAR", &sidecar)
-                .env("TMP", &temporary)
-                .env("TEMP", &temporary)
-                .env("TMPDIR", &temporary)
-                .stdin(Stdio::null())
-                .stdout(Stdio::from(stdout))
-                .stderr(Stdio::from(stderr))
-                .spawn()
-                .map_err(|error| format!("LOD generation tool is unavailable: {error}"))?;
-            Ok::<_, String>((child, log))
-        })();
-        let (child, log) = match started {
-            Ok(value) => value,
-            Err(error) => {
-                retire_directory(&stage);
-                return Err(error);
-            }
-        };
+        let mut job = AssetJob::stage(stage.clone(), self.documents.clone(), &files)?;
+        let log = stage.join("lod-generation.log");
+        let temporary = stage.join("tmp");
+        fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+        let stderr = fs::File::create(&log).map_err(|error| error.to_string())?;
+        let stdout = stderr.try_clone().map_err(|error| error.to_string())?;
+        let script = self.tool_root.join("scripts/generate-lods.mjs");
+        let mut command = Command::new("node");
+        command.current_dir(&stage).arg(script).arg(&sidecar);
+        if remesh {
+            command.arg("--remesh");
+        }
+
+        command
+            .env("PHOENIX_LOD_TOOL_ROOT", &self.tool_root)
+            .env("PHOENIX_LOD_SIDECAR", &sidecar)
+            .env("TMP", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMPDIR", &temporary)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        job.launch(&mut command)
+            .map_err(|error| format!("LOD generation tool is unavailable: {error}"))?;
         self.active = Some(ActiveRun {
             id,
-            stage,
-            child: Some(child),
+            job,
             log,
-            routes: Vec::new(),
             paths: Vec::new(),
             candidates,
             required_outputs,
@@ -170,14 +146,11 @@ impl LodGeneration {
         let Some(active) = self.active.as_mut() else {
             return Err("No LOD generation is active".into());
         };
-        if !active.routes.is_empty() {
+        if active.job.has_review() {
             return Ok(self.response("ready"));
         }
-        let Some(child) = active.child.as_mut() else {
-            return Err("LOD generation has no process".into());
-        };
-        let status = match child.try_wait() {
-            Ok(Some(status)) => status,
+        let output = match active.job.poll() {
+            Ok(Some(output)) => output,
             Ok(None) => return Ok(self.response("running")),
             Err(error) => {
                 let message = error.to_string();
@@ -185,7 +158,7 @@ impl LodGeneration {
                 return Err(message);
             }
         };
-        active.child.take();
+        let status = output.status;
         if !status.success() {
             let detail = progress(&active.log).join(" ");
             self.retire();
@@ -199,7 +172,8 @@ impl LodGeneration {
         let mut published = Vec::new();
         for path in &active.candidates {
             let file = active
-                .stage
+                .job
+                .directory()
                 .join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
             if !file.is_file() {
                 continue;
@@ -213,9 +187,9 @@ impl LodGeneration {
                 }
             };
             let route = format!("{base}{}", published.len());
-            self.documents
-                .publish_bytes(route.clone(), bytes, http::content_type_for(path), true);
-            active.routes.push(route);
+            active
+                .job
+                .publish(route, bytes, http::content_type_for(path));
             published.push(path.clone());
         }
         if !complete_review(&active.required_outputs, &published) {
@@ -237,7 +211,7 @@ impl LodGeneration {
             progress: progress(&active.log),
             sidecar: active.sidecar.clone(),
             source_revision: active.source_revision,
-            base_url: (!active.routes.is_empty())
+            base_url: (active.job.has_review())
                 .then(|| format!("{}{PREFIX}{}/", self.origin, active.id)),
             paths: active.paths.clone(),
             required_paths: active.required_outputs.iter().cloned().collect(),
@@ -249,15 +223,7 @@ impl LodGeneration {
         Response::Done
     }
     pub fn retire(&mut self) {
-        if let Some(mut active) = self.active.take() {
-            if let Some(mut child) = active.child.take() {
-                terminate_tree(&mut child);
-            }
-            for route in active.routes {
-                self.documents.withdraw(&route);
-            }
-            retire_directory(&active.stage);
-        }
+        self.active.take();
     }
 }
 
@@ -285,60 +251,6 @@ fn progress(path: &Path) -> Vec<String> {
         .into_iter()
         .rev()
         .collect()
-}
-fn retire_directory(path: &Path) {
-    let _ = fs::remove_dir_all(path);
-}
-fn terminate_tree(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        // Node is only the coordinator; gltf-transform or Blender may be its
-        // current child. Kill the whole process tree before deleting the stage.
-        if let Ok(mut killer) = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            if !wait_bounded(&mut killer, std::time::Duration::from_secs(2)) {
-                let _ = killer.kill();
-            }
-        }
-    }
-    #[cfg(unix)]
-    {
-        if let Ok(mut killer) = Command::new("kill")
-            // `--` keeps the negative process-group id from being parsed as
-            // another option by the external Unix `kill` command.
-            .args(["-KILL", "--", &format!("-{}", child.id())])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            if !wait_bounded(&mut killer, std::time::Duration::from_secs(2)) {
-                let _ = killer.kill();
-            }
-        }
-    }
-    if !wait_bounded(child, std::time::Duration::from_secs(2)) {
-        let _ = child.kill();
-        wait_bounded(child, std::time::Duration::from_secs(2));
-    }
-}
-fn wait_bounded(child: &mut Child, timeout: std::time::Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return true,
-            Err(_) => return false,
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Ok(None) => return false,
-        }
-    }
 }
 impl Drop for LodGeneration {
     fn drop(&mut self) {
@@ -414,48 +326,5 @@ mod tests {
             &required,
             &["assets/models/ship.remesh.glb".into(), MANIFEST.into()]
         ));
-    }
-
-    #[test]
-    fn cancellation_stops_a_live_descendant_before_the_private_stage_is_removed() {
-        let stage = temporary("cancel-tree");
-        fs::create_dir_all(&stage).unwrap();
-        let marker = stage.join("descendant.txt");
-        let descendant =
-            "setInterval(()=>require('fs').appendFileSync(process.env.PHOENIX_TEST_MARKER,'x'),20)";
-        let parent = format!("require('child_process').spawn(process.execPath,['-e',{}],{{stdio:'ignore',env:process.env}});setInterval(()=>{{}},1000)", serde_json::to_string(descendant).unwrap());
-        let mut command = Command::new("node");
-        command
-            .args(["-e", &parent])
-            .env("PHOENIX_TEST_MARKER", &marker)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = command.spawn().unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while fs::metadata(&marker).map(|value| value.len()).unwrap_or(0) == 0
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        terminate_tree(&mut child);
-        let before = fs::metadata(&marker).map(|value| value.len()).unwrap_or(0);
-        assert!(
-            before > 0,
-            "the live descendant never reached its staged output"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        let after = fs::metadata(&marker).map(|value| value.len()).unwrap_or(0);
-        assert_eq!(
-            before, after,
-            "the generator descendant survived cancellation"
-        );
-        retire_directory(&stage);
-        assert!(!stage.exists());
     }
 }

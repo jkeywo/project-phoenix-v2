@@ -46,6 +46,13 @@ candidate source; refusal leaves the previous workspace intact.
 
 ## Runtime assets
 
+Native Billboard Capture and LOD Generation share the private
+`src/native_host/workshop/asset_job.rs` owner. It stages files and owns process
+launch, polling and review routes. Cancel, replacement, failure and drop retire
+the child process tree before withdrawing routes and removing staged files.
+The two adapters retain their validation and provenance; Preview and disposable
+Test have separate lifetimes.
+
 Workshop retains supported model, texture and sound members as exact bytes.
 The ordinary host upload and offline Workshop validator both use
 `src/world/pack_asset_validation.rs`: actual glTF buffer/accessor/primitive

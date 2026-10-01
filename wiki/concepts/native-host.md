@@ -8,6 +8,10 @@ updated: 2026-09-27
 
 # Native Host
 
+Native operator-profile storage resets Live layouts older than version 19 and
+keeps a sanitized backup. Current layout sanitization uses one current panel
+registry; historical migrations remain in the browser for explicit restoration.
+
 Native Station panes retain their private language in the host-backed operator
 profile (`panes/operator_storage.js`, `panes/operator.rs`). Native GM and
 Workshop use the same profile-backed preference in their own scopes. The

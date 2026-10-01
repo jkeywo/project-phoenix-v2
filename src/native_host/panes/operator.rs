@@ -450,534 +450,7 @@ fn known_panel(value: &Value, allowed: &[&str]) -> bool {
     value.as_str().is_some_and(|panel| allowed.contains(&panel))
 }
 
-const LIVE_PANELS_V1: &[&str] = &["roster", "readiness", "join", "manual-save"];
-const LIVE_PANELS_V2: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-];
-/// Panels registered after version 1, with the group each joins and how.
-/// Comms opens a group BELOW the readiness panels: the record surfaces are one
-/// reading surface on this desk and always were.
-const LIVE_ADDED_IN_V2: &[(&str, &str, &str)] = &[
-    ("mission", "roster", "tab"),
-    ("comms", "roster", "bottom"),
-    ("activity", "comms", "tab"),
-    ("journal", "comms", "tab"),
-    ("session-history", "comms", "tab"),
-];
-
-const LIVE_PANELS_V3: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-];
-/// Panels registered after version 2. The map opens a column beside the
-/// workflow panels; the awareness panels join the groups that hold their kind.
-const LIVE_ADDED_IN_V3: &[(&str, &str, &str)] = &[
-    ("map", "roster", "right"),
-    ("attention", "roster", "tab"),
-    ("workload", "roster", "tab"),
-    ("widgets", "roster", "tab"),
-    ("health", "comms", "tab"),
-];
-
-const LIVE_PANELS_V4: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-];
-/// Panels registered after version 3. The authentic Station console is a
-/// document and joins the map; its controls are an ordinary tool.
-const LIVE_ADDED_IN_V4: &[(&str, &str, &str)] = &[
-    ("station", "roster", "tab"),
-    ("station-console", "map", "tab"),
-];
-
-const LIVE_PANELS_V5: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-];
-/// Panels registered after version 4. The operator's own instruments open a
-/// group of their own under the workflow panels.
-const LIVE_ADDED_IN_V5: &[(&str, &str, &str)] = &[
-    ("presentation", "mission", "bottom"),
-    ("audition", "presentation", "tab"),
-    ("source-link", "presentation", "tab"),
-];
-
-const LIVE_PANELS_V6: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-];
-const LIVE_PANELS_V7: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-];
-/// Panels registered after version 6. The entity inspector is the desk's other
-/// reading surface, so it joins the documents.
-const LIVE_ADDED_IN_V7: &[(&str, &str, &str)] = &[("inspector", "map", "right")];
-
-const LIVE_PANELS_V8: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-];
-/// Panels registered after version 7. Checkpoint browsing is a RECORD and joins
-/// the reading surfaces; restore is a complex action and is temporary.
-const LIVE_ADDED_IN_V8: &[(&str, &str, &str)] = &[("checkpoint", "journal", "tab")];
-
-const LIVE_PANELS_V9: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "ghost",
-];
-/// Panels registered after version 8. Contact control and NPC doctrine are
-/// ordinary tools about the selected entity, so they join the inspector. The
-/// three drafts split out of the contact tool are temporary and never placed.
-const LIVE_ADDED_IN_V9: &[(&str, &str, &str)] =
-    &[("contact", "inspector", "tab"), ("npc", "inspector", "tab")];
-
-const LIVE_PANELS_V10: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "ghost",
-    "system",
-    "effect",
-];
-/// Panels registered after version 9. Disabling and restoring one authored
-/// System is a target-relative choice and a verb, so it is an ordinary tool
-/// beside the selection it reads; direct damage and repair is a draft and is
-/// never placed.
-const LIVE_ADDED_IN_V10: &[(&str, &str, &str)] = &[("system", "inspector", "tab")];
-
-const LIVE_PANELS_V11: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "ghost",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-];
-/// Panels registered after version 10. Removing one selected entity, and
-/// setting an ordered faction pair's absolute hostility, are each one choice
-/// and a verb rather than a draft, so both are ordinary tools beside the
-/// selection and the projection they read.
-const LIVE_ADDED_IN_V11: &[(&str, &str, &str)] = &[
-    ("despawn", "inspector", "tab"),
-    ("faction", "inspector", "tab"),
-];
-
-const LIVE_PANELS_V12: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "ghost",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-];
-/// Panels registered after version 11. Activating, completing and failing an
-/// authored Objective is the mission workflow's own vocabulary — the authored
-/// target and its recipients already define the operation — so it joins the
-/// mission events rather than the selected-entity column.
-const LIVE_ADDED_IN_V12: &[(&str, &str, &str)] = &[("objective", "mission", "tab")];
-
-const LIVE_PANELS_V13: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "ghost",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-    "entity-fields",
-];
-/// Version 14 registers nothing and RETIRES the ghost draft: placing a ghost
-/// became a Spawn outcome — the same palette and the same chart gesture,
-/// reported to a ship instead of spawned — so the draft that composed one
-/// has nothing left to compose. Mirrors LIVE_PANEL_REGISTRY in
-/// gui/live-layout-model.js.
-const LIVE_PANELS_V14: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-    "entity-fields",
-];
-const LIVE_ADDED_IN_V14: &[(&str, &str, &str)] = &[];
-const LIVE_PANELS_V15: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-    "entity-fields",
-    "world-fields",
-];
-const LIVE_PANELS_V16: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-    "entity-fields",
-    "world-fields",
-    "hull-fields",
-];
-const LIVE_PANELS_V17: &[&str] = &[
-    "roster",
-    "readiness",
-    "join",
-    "manual-save",
-    "mission",
-    "comms",
-    "activity",
-    "journal",
-    "session-history",
-    "map",
-    "attention",
-    "workload",
-    "widgets",
-    "health",
-    "station",
-    "station-console",
-    "presentation",
-    "audition",
-    "source-link",
-    "spawn",
-    "inspector",
-    "checkpoint",
-    "restore",
-    "contact",
-    "npc",
-    "misclassify",
-    "report-policy",
-    "system",
-    "effect",
-    "despawn",
-    "faction",
-    "objective",
-    "entity-fields",
-    "world-fields",
-    "hull-fields",
-    "region-fields",
-];
-const LIVE_PANELS_V18: &[&str] = &[
+const LIVE_PANELS: &[&str] = &[
     "roster",
     "readiness",
     "join",
@@ -1016,15 +489,6 @@ const LIVE_PANELS_V18: &[&str] = &[
     "region-fields",
     "presentation-fields",
 ];
-const LIVE_ADDED_IN_V15: &[(&str, &str, &str)] = &[("world-fields", "mission", "tab")];
-const LIVE_ADDED_IN_V16: &[(&str, &str, &str)] = &[("hull-fields", "entity-fields", "tab")];
-const LIVE_ADDED_IN_V17: &[(&str, &str, &str)] = &[("region-fields", "entity-fields", "tab")];
-const LIVE_ADDED_IN_V18: &[(&str, &str, &str)] = &[("presentation-fields", "region-fields", "tab")];
-
-/// Panels registered after version 12. The entities/AI Live Inspector reads the
-/// same selection the entity inspector does, so it joins that column as a tab.
-const LIVE_ADDED_IN_V13: &[(&str, &str, &str)] = &[("entity-fields", "inspector", "tab")];
-
 /// Complex actions the operator opens, fills in and finishes. A DOCKED one is a
 /// tool kept to hand and comes back empty; a FLOATING one is a draft and is not
 /// restored at all. Mirrors LIVE_TEMPORARY_PANELS in gui/live-layout-model.js.
@@ -1070,84 +534,6 @@ fn place_in_first_group(node: &mut Value, panel: &str) {
         }
         _ => *node = json!({"type":"tabs", "tabs":[panel], "active":panel}),
     }
-}
-
-fn live_panels_for(version: u64) -> &'static [&'static str] {
-    match version {
-        1 => LIVE_PANELS_V1,
-        2 => LIVE_PANELS_V2,
-        3 => LIVE_PANELS_V3,
-        4 => LIVE_PANELS_V4,
-        5 => LIVE_PANELS_V5,
-        6 => LIVE_PANELS_V6,
-        7 => LIVE_PANELS_V7,
-        8 => LIVE_PANELS_V8,
-        9 => LIVE_PANELS_V9,
-        10 => LIVE_PANELS_V10,
-        11 => LIVE_PANELS_V11,
-        12 => LIVE_PANELS_V12,
-        13 => LIVE_PANELS_V13,
-        14 => LIVE_PANELS_V14,
-        15 => LIVE_PANELS_V15,
-        16 => LIVE_PANELS_V16,
-        17 => LIVE_PANELS_V17,
-        _ => LIVE_PANELS_V18,
-    }
-}
-
-fn live_panels_added_after(version: u64) -> Vec<(&'static str, &'static str, &'static str)> {
-    let mut added = Vec::new();
-    if version < 2 {
-        added.extend_from_slice(LIVE_ADDED_IN_V2);
-    }
-    if version < 3 {
-        added.extend_from_slice(LIVE_ADDED_IN_V3);
-    }
-    if version < 4 {
-        added.extend_from_slice(LIVE_ADDED_IN_V4);
-    }
-    if version < 5 {
-        added.extend_from_slice(LIVE_ADDED_IN_V5);
-    }
-    // Version 6 registered a temporary panel, which migration never PLACES: it
-    // starts closed, which is what "not open" means for a draft.
-    if version < 7 {
-        added.extend_from_slice(LIVE_ADDED_IN_V7);
-    }
-    if version < 8 {
-        added.extend_from_slice(LIVE_ADDED_IN_V8);
-    }
-    if version < 9 {
-        added.extend_from_slice(LIVE_ADDED_IN_V9);
-    }
-    if version < 10 {
-        added.extend_from_slice(LIVE_ADDED_IN_V10);
-    }
-    if version < 11 {
-        added.extend_from_slice(LIVE_ADDED_IN_V11);
-    }
-    if version < 12 {
-        added.extend_from_slice(LIVE_ADDED_IN_V12);
-    }
-    if version < 13 {
-        added.extend_from_slice(LIVE_ADDED_IN_V13);
-    }
-    if version < 14 {
-        added.extend_from_slice(LIVE_ADDED_IN_V14);
-    }
-    if version < 15 {
-        added.extend_from_slice(LIVE_ADDED_IN_V15);
-    }
-    if version < 16 {
-        added.extend_from_slice(LIVE_ADDED_IN_V16);
-    }
-    if version < 17 {
-        added.extend_from_slice(LIVE_ADDED_IN_V17);
-    }
-    if version < 18 {
-        added.extend_from_slice(LIVE_ADDED_IN_V18);
-    }
-    added
 }
 
 fn sanitize_workshop_node(
@@ -1247,10 +633,7 @@ fn default_test_layout() -> Value {
 
 fn default_live_layout() -> Value {
     let open = ["roster", "map", "inspector", "activity"];
-    let closed: Vec<_> = live_panels_for(u64::MAX)
-        .iter()
-        .filter(|id| !open.contains(id))
-        .collect();
+    let closed: Vec<_> = LIVE_PANELS.iter().filter(|id| !open.contains(id)).collect();
     json!({
         "version": 19,
         "root": {"type":"split", "axis":"vertical", "sizes":[4,1], "children":[
@@ -1272,8 +655,7 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     if stored < 19 {
         return Some(default_live_layout());
     }
-    let allowed = live_panels_for(stored);
-    let added = live_panels_added_after(stored);
+    let allowed = LIVE_PANELS;
     let mut seen = BTreeSet::new();
     let root = match value.get("root")? {
         Value::Null => Value::Null,
@@ -1344,30 +726,14 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
     // only then puts a pinned panel back into the first group. Repairing first
     // would land the pinned panels in a group about to be emptied and keep it.
     retire_unregistered_live_panels(&mut layout);
-    if !added.is_empty() {
-        // Browser migration settles the tree against the current vocabulary
-        // before it places newly registered panels. In particular, if the old
-        // active tab was retired, the repaired survivor stays active instead
-        // of the new panel stealing the view.
-        layout = migrate_live_layout(layout, &added);
-    }
     repair_pinned_live_panels(&mut layout);
     record_unplaced_live_panels(&mut layout);
     Some(layout)
 }
 
-/// Drop every panel the CURRENT registry no longer has.
-///
-/// A stored tree is sanitized against ITS version's vocabulary, so a panel that
-/// was registered then and has been retired since survives that pass and the
-/// placement pass alike. The browser model sanitizes the migrated tree against
-/// its current registry last (`normalizeNode` in gui/dock-layout-model.js keeps
-/// only known tabs, drops a group left empty and collapses a split left with
-/// one child), and this is the same pass, so a native profile and a browser
-/// profile still read back as the same layout. Version 14 is the first to need
-/// it: it retired the ghost draft.
+/// Prune unknown panels before repairing pinned and unplaced current panels.
 fn retire_unregistered_live_panels(layout: &mut Value) {
-    let current = live_panels_for(u64::MAX);
+    let current = LIVE_PANELS;
     let known = |panel: &Value| panel.as_str().is_some_and(|p| current.contains(&p));
     fn prune(node: &Value, known: &dyn Fn(&Value) -> bool) -> Option<Value> {
         match node["type"].as_str() {
@@ -1448,7 +814,7 @@ fn record_unplaced_live_panels(layout: &mut Value) {
         }
     }
     let closed = layout["closed"].as_array_mut().unwrap();
-    for panel in live_panels_for(u64::MAX) {
+    for panel in LIVE_PANELS {
         if !placed.contains(*panel) {
             closed.push(json!(panel));
         }
@@ -1486,56 +852,6 @@ fn repair_pinned_live_panels(layout: &mut Value) {
         };
         layout["closed"].as_array_mut().unwrap().remove(index);
         place_in_first_group(&mut layout["root"], panel);
-    }
-}
-
-/// Place the panels registered after the stored version, exactly as
-/// `gui/dock-layout-migration.js` does.
-fn migrate_live_layout(mut layout: Value, added: &[(&str, &str, &str)]) -> Value {
-    let selected = layout["selected"].clone();
-    let mut previous_actives = BTreeMap::new();
-    collect_workshop_actives(&layout["root"], &mut previous_actives);
-    layout["closed"]
-        .as_array_mut()
-        .unwrap()
-        .extend(added.iter().map(|(panel, _, _)| json!(panel)));
-    for (panel, preferred, placement) in added {
-        add_migration_panel_at(&mut layout, panel, preferred, &Value::Null, placement);
-    }
-    let names: Vec<&str> = added.iter().map(|(panel, _, _)| *panel).collect();
-    settle_new_groups(&mut layout["root"], &names);
-    restore_workshop_actives(&mut layout["root"], &previous_actives);
-    layout["selected"] = selected;
-    layout
-}
-
-/// A group made entirely of panels this migration introduced shows its FIRST
-/// panel, not whichever one happened to be docked last.
-fn settle_new_groups(node: &mut Value, added: &[&str]) {
-    match node["type"].as_str() {
-        Some("tabs") => {
-            let all_new = node["tabs"].as_array().is_some_and(|tabs| {
-                tabs.iter()
-                    .all(|tab| tab.as_str().is_some_and(|tab| added.contains(&tab)))
-            });
-            if all_new {
-                if let Some(first) = node["tabs"]
-                    .as_array()
-                    .and_then(|tabs| tabs.first())
-                    .cloned()
-                {
-                    node["active"] = first;
-                }
-            }
-        }
-        Some("split") => {
-            if let Some(children) = node["children"].as_array_mut() {
-                for child in children {
-                    settle_new_groups(child, added);
-                }
-            }
-        }
-        _ => {}
     }
 }
 
@@ -2245,6 +1561,20 @@ mod tests {
     const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[{\"pressed\":true,\"value\":1}],\"axes\":[1]}])";
 
     #[test]
+    fn live_layout_version_gate_preserves_reset_and_refusal() {
+        for version in 1..19 {
+            let layout = json!({"version": version, "root": {"type":"tabs", "tabs":["map"], "active":"map"},
+                "floats":[], "closed":[], "selected":"map"});
+            assert_eq!(sanitize_live_layout(&layout), Some(default_live_layout()));
+        }
+        for version in [json!(0), json!(20), json!(-1), json!("19"), Value::Null] {
+            assert_eq!(sanitize_live_layout(&json!({"version":version})), None);
+        }
+        assert_eq!(sanitize_live_layout(&json!({"version":19})), None);
+        assert!(sanitize_live_layout(&default_live_layout()).is_some());
+    }
+
+    #[test]
     fn loading_an_old_live_layout_atomically_keeps_a_backup_and_persists_the_reset() {
         let dir = Scratch::new();
         let mut state = NativeOperators {
@@ -2511,7 +1841,7 @@ mod tests {
 
     #[test]
     fn awareness_panels_can_close_with_critical_warnings_owned_by_the_header() {
-        let mut closed: Vec<&str> = live_panels_for(u64::MAX)
+        let mut closed: Vec<&str> = LIVE_PANELS
             .iter()
             .filter(|panel| **panel != "roster")
             .copied()

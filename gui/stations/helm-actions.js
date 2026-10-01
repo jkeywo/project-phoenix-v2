@@ -7,6 +7,8 @@
  * admission remains authoritative.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard as key, button, gamepad } from './action-support.js';
+
 import { familyView } from '../console-payload.js';
 import {
   createSemanticActionRegistry,
@@ -23,36 +25,19 @@ export const HELM_VIEWSCREEN_ACTION_ID = 'helm.viewscreen';
 export const HELM_DOCK_ACTION_ID = 'helm.dock';
 
 const HELM_CONTEXTS = Object.freeze([HELM_ACTION_CONTEXT]);
-const key = (code) => Object.freeze({
-  type: 'keyboard', code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
-});
-const button = (control) => Object.freeze({ type: 'gamepad', input: 'button', control });
 
 function axisAction(id, label, control, options = {}) {
-  return Object.freeze({
-    id,
-    contexts: HELM_CONTEXTS,
-    labelId: `semantic_action.helm.${label}.label`,
-    accessibilityLabelId: `semantic_action.helm.${label}.accessibility`,
-    continuous: Object.freeze({ min: -1, max: 1, neutral: 0, cadenceMs: 100 }),
-    tuning: Object.freeze({ deadzone: 0.1, inverted: options.inverted === true }),
-    bindings: Object.freeze([
-      Object.freeze({ type: 'gamepad', input: 'axis', control }),
-      null,
-    ]),
+  return defineStationAction({
+    id, contexts: HELM_CONTEXTS, labelKey: `helm.${label}`, feedback: null,
+    continuous: { min: -1, max: 1, neutral: 0, cadenceMs: 100 },
+    tuning: { deadzone: 0.1, inverted: options.inverted === true },
+    bindings: [gamepad('axis', control), null],
   });
 }
 
 function authoritativeAction(id, label, keyboard, gamepad, options = {}) {
-  return Object.freeze({
-    id,
-    contexts: HELM_CONTEXTS,
-    labelId: `semantic_action.helm.${label}.label`,
-    accessibilityLabelId: `semantic_action.helm.${label}.accessibility`,
-    authoritativeFeedback: true,
-    hold: options.hold === true,
-    bindings: Object.freeze([keyboard, gamepad]),
-  });
+  return defineStationAction({ id, contexts: HELM_CONTEXTS, labelKey: `helm.${label}`,
+    bindings: [keyboard, gamepad], hold: options.hold === true });
 }
 
 // The standard gamepad maps left-stick-y so pushing UP (forward) reads as -1
@@ -125,13 +110,7 @@ export function registerHelmActions(registry, options = {}) {
     ? options.hasViewscreenControl : () => true;
   const hasDockControl = typeof options.hasDockControl === 'function'
     ? options.hasDockControl : () => true;
-  const send = (actionId, correlation, inputMs, name, payload) => {
-    if (!sendAction || typeof correlation !== 'string' || !correlation) return false;
-    sendAction(name, {
-      ...(payload || {}), correlation, semantic_action: actionId, __input_ms: inputMs,
-    });
-    return true;
-  };
+  const send = createCorrelatedActionSender(sendAction);
 
   registry.register(HELM_THRUST_ACTION, ({ value } = {}) => {
     const view = helmActionView(getState());

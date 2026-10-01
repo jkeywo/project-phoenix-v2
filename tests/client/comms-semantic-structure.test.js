@@ -63,10 +63,10 @@ describe('Comms semantic-action structural coverage', () => {
   it('the shared adapter owns every Comms action-map command and exact response detail', () => {
     const text = source('gui/stations/comms-actions.js');
     for (const action of [
-      "sendAction('hail'",
-      "sendAction('respond_to_message'",
-      "sendAction('clear_comms'",
-      "sendAction('show_on_screen'",
+      "send(actionId, correlation, inputMs, 'hail'",
+      "send(actionId, correlation, inputMs, 'respond_to_message'",
+      "send(actionId, correlation, inputMs, 'clear_comms'",
+      "send(actionId, correlation, inputMs, 'show_on_screen'",
     ]) expect(text).toContain(action);
     expect(text).toContain('selectMessage(selected)');
     // Issue #1380: the inbox lists threads, so the one selection identity
@@ -75,7 +75,7 @@ describe('Comms semantic-action structural coverage', () => {
     // way, and still the same local Applied lifecycle.
     expect(text).toContain('selectThread(thread)');
     expect(text).toContain('detail.thread_id');
-    expect(text).not.toContain("sendAction('select_comms_message'");
+    expect(text).not.toContain("'select_comms_message'");
     expect(text).toContain('response_index');
     expect(text).toContain('confirmed === true');
   });

@@ -1123,6 +1123,59 @@ fn upsert_beam(
     );
 }
 
+/// Appearance and lifetime of one transient billboard. Random offsets stay with the effect.
+struct BurstSprite {
+    texture: Option<Handle<Image>>,
+    color: [f32; 4],
+    emissive_strength: f32,
+    lifetime: f32,
+    start_scale: f32,
+    end_scale: Option<f32>,
+}
+
+fn spawn_burst_sprite(
+    position: Vec3,
+    mesh: Handle<Mesh>,
+    sprite: BurstSprite,
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    // Untextured blaster flashes retain their original single-sided material.
+    let material = match sprite.texture {
+        Some(texture) => {
+            phaser_texture_material(materials, texture, sprite.color, sprite.emissive_strength)
+        }
+        None => glow_material(
+            materials,
+            sprite.color,
+            sprite.emissive_strength,
+            AlphaMode::Add,
+        ),
+    };
+    let mut entity = commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(mesh),
+        MeshMaterial3d(material.clone()),
+        Transform::from_translation(position).with_scale(Vec3::splat(sprite.start_scale)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: sprite.lifetime,
+        },
+        PfxFadingMaterial {
+            handle: material,
+            color: sprite.color,
+            emissive_strength: sprite.emissive_strength,
+        },
+    ));
+    if let Some(end_scale) = sprite.end_scale {
+        entity.insert(PfxBurst {
+            start_scale: sprite.start_scale,
+            end_scale,
+        });
+    }
+}
+
 /// Brief bright flash establishing the beam's origin point (per the "muzzle
 /// effect" design: restrained, brief, tightly concentrated).
 fn spawn_muzzle_flash(
@@ -1133,27 +1186,20 @@ fn spawn_muzzle_flash(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let mat = phaser_texture_material(materials, pfx_assets.radial_glow.clone(), color, 8.0);
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(MUZZLE_FLASH_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: MUZZLE_FLASH_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: MUZZLE_FLASH_START_SIZE,
-            end_scale: MUZZLE_FLASH_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(pfx_assets.radial_glow.clone()),
             color,
             emissive_strength: 8.0,
+            lifetime: MUZZLE_FLASH_LIFETIME_SECS,
+            start_scale: MUZZLE_FLASH_START_SIZE,
+            end_scale: Some(MUZZLE_FLASH_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 }
 
 /// One-shot impact burst at the beam endpoint: an expanding ring plus a
@@ -1167,28 +1213,20 @@ fn spawn_impact_burst(
     materials: &mut Assets<StandardMaterial>,
 ) {
     let ring_color = [color[0], color[1], color[2], color[3] * 0.9];
-    let ring_mat =
-        phaser_texture_material(materials, pfx_assets.impact_ring.clone(), ring_color, 5.0);
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(ring_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(IMPACT_RING_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: IMPACT_RING_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: IMPACT_RING_START_SIZE,
-            end_scale: IMPACT_RING_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: ring_mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(pfx_assets.impact_ring.clone()),
             color: ring_color,
             emissive_strength: 5.0,
+            lifetime: IMPACT_RING_LIFETIME_SECS,
+            start_scale: IMPACT_RING_START_SIZE,
+            end_scale: Some(IMPACT_RING_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 
     let mut rng = rand::rng();
     for _ in 0..IMPACT_SPARK_COUNT {
@@ -1205,24 +1243,20 @@ fn spawn_impact_burst(
             color[2] * 0.5 + 0.5,
             color[3],
         ];
-        let spark_mat =
-            phaser_texture_material(materials, pfx_assets.spark_streak.clone(), spark_color, 6.0);
-        commands.spawn((
-            PfxEntity,
-            Billboard,
-            Mesh3d(billboard_mesh.clone()),
-            MeshMaterial3d(spark_mat.clone()),
-            Transform::from_translation(pos + offset).with_scale(Vec3::splat(IMPACT_SPARK_SIZE)),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: IMPACT_SPARK_LIFETIME_SECS,
-            },
-            PfxFadingMaterial {
-                handle: spark_mat,
+        spawn_burst_sprite(
+            pos + offset,
+            billboard_mesh.clone(),
+            BurstSprite {
+                texture: Some(pfx_assets.spark_streak.clone()),
                 color: spark_color,
                 emissive_strength: 6.0,
+                lifetime: IMPACT_SPARK_LIFETIME_SECS,
+                start_scale: IMPACT_SPARK_SIZE,
+                end_scale: None,
             },
-        ));
+            commands,
+            materials,
+        );
     }
 }
 
@@ -1600,32 +1634,20 @@ fn spawn_torpedo_launch_flash(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let mat = phaser_texture_material(
-        materials,
-        phaser_pfx_assets.radial_glow.clone(),
-        TORPEDO_COLOR,
-        TORPEDO_CORE_EMISSIVE,
-    );
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(meshes.add(unit_billboard_mesh())),
-        MeshMaterial3d(mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_LAUNCH_FLASH_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: TORPEDO_LAUNCH_FLASH_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: TORPEDO_LAUNCH_FLASH_START_SIZE,
-            end_scale: TORPEDO_LAUNCH_FLASH_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: mat,
+    spawn_burst_sprite(
+        pos,
+        meshes.add(unit_billboard_mesh()),
+        BurstSprite {
+            texture: Some(phaser_pfx_assets.radial_glow.clone()),
             color: TORPEDO_COLOR,
             emissive_strength: TORPEDO_CORE_EMISSIVE,
+            lifetime: TORPEDO_LAUNCH_FLASH_LIFETIME_SECS,
+            start_scale: TORPEDO_LAUNCH_FLASH_START_SIZE,
+            end_scale: Some(TORPEDO_LAUNCH_FLASH_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 }
 
 /// Detonation burst where a torpedo disappears (hit or expiry): a hard
@@ -1644,88 +1666,52 @@ fn spawn_torpedo_impact_burst(
     let billboard_mesh = meshes.add(unit_billboard_mesh());
 
     // Contact flash.
-    let flash_mat = phaser_texture_material(
-        materials,
-        phaser_pfx_assets.radial_glow.clone(),
-        TORPEDO_CORE_COLOR,
-        TORPEDO_CORE_EMISSIVE,
-    );
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(flash_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_FLASH_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: TORPEDO_IMPACT_FLASH_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: TORPEDO_IMPACT_FLASH_START_SIZE,
-            end_scale: TORPEDO_IMPACT_FLASH_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: flash_mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(phaser_pfx_assets.radial_glow.clone()),
             color: TORPEDO_CORE_COLOR,
             emissive_strength: TORPEDO_CORE_EMISSIVE,
+            lifetime: TORPEDO_IMPACT_FLASH_LIFETIME_SECS,
+            start_scale: TORPEDO_IMPACT_FLASH_START_SIZE,
+            end_scale: Some(TORPEDO_IMPACT_FLASH_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 
     // Irregular plasma bloom.
-    let plasma_mat = phaser_texture_material(
-        materials,
-        explosion_pfx_assets.puff.clone(),
-        TORPEDO_COLOR,
-        TORPEDO_SHELL_EMISSIVE,
-    );
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(plasma_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_PLASMA_START_SCALE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: TORPEDO_IMPACT_PLASMA_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: TORPEDO_IMPACT_PLASMA_START_SCALE,
-            end_scale: TORPEDO_IMPACT_PLASMA_END_SCALE,
-        },
-        PfxFadingMaterial {
-            handle: plasma_mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(explosion_pfx_assets.puff.clone()),
             color: TORPEDO_COLOR,
             emissive_strength: TORPEDO_SHELL_EMISSIVE,
+            lifetime: TORPEDO_IMPACT_PLASMA_LIFETIME_SECS,
+            start_scale: TORPEDO_IMPACT_PLASMA_START_SCALE,
+            end_scale: Some(TORPEDO_IMPACT_PLASMA_END_SCALE),
         },
-    ));
+        commands,
+        materials,
+    );
 
     // Expanding ring.
-    let ring_mat = phaser_texture_material(
-        materials,
-        phaser_pfx_assets.impact_ring.clone(),
-        TORPEDO_COLOR,
-        TORPEDO_SHELL_EMISSIVE,
-    );
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(ring_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_RING_START_SCALE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: TORPEDO_IMPACT_RING_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: TORPEDO_IMPACT_RING_START_SCALE,
-            end_scale: TORPEDO_IMPACT_RING_END_SCALE,
-        },
-        PfxFadingMaterial {
-            handle: ring_mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(phaser_pfx_assets.impact_ring.clone()),
             color: TORPEDO_COLOR,
             emissive_strength: TORPEDO_SHELL_EMISSIVE,
+            lifetime: TORPEDO_IMPACT_RING_LIFETIME_SECS,
+            start_scale: TORPEDO_IMPACT_RING_START_SCALE,
+            end_scale: Some(TORPEDO_IMPACT_RING_END_SCALE),
         },
-    ));
+        commands,
+        materials,
+    );
 
     // Radial sparks.
     let mut rng = rand::rng();
@@ -1743,29 +1729,20 @@ fn spawn_torpedo_impact_burst(
             TORPEDO_COLOR[2] * 0.5 + 0.5,
             TORPEDO_COLOR[3],
         ];
-        let spark_mat = phaser_texture_material(
-            materials,
-            phaser_pfx_assets.spark_streak.clone(),
-            spark_color,
-            TORPEDO_SHELL_EMISSIVE,
-        );
-        commands.spawn((
-            PfxEntity,
-            Billboard,
-            Mesh3d(billboard_mesh.clone()),
-            MeshMaterial3d(spark_mat.clone()),
-            Transform::from_translation(pos + offset)
-                .with_scale(Vec3::splat(TORPEDO_IMPACT_SPARK_SCALE)),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: TORPEDO_IMPACT_SPARK_LIFETIME_SECS,
-            },
-            PfxFadingMaterial {
-                handle: spark_mat,
+        spawn_burst_sprite(
+            pos + offset,
+            billboard_mesh.clone(),
+            BurstSprite {
+                texture: Some(phaser_pfx_assets.spark_streak.clone()),
                 color: spark_color,
                 emissive_strength: TORPEDO_SHELL_EMISSIVE,
+                lifetime: TORPEDO_IMPACT_SPARK_LIFETIME_SECS,
+                start_scale: TORPEDO_IMPACT_SPARK_SCALE,
+                end_scale: None,
             },
-        ));
+            commands,
+            materials,
+        );
     }
 }
 
@@ -2065,27 +2042,20 @@ fn spawn_blaster_muzzle_flash(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let mat = glow_material(materials, color, BLASTER_EMISSIVE * 1.4, AlphaMode::Add);
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(meshes.add(unit_billboard_mesh())),
-        MeshMaterial3d(mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(BLASTER_MUZZLE_FLASH_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: BLASTER_MUZZLE_FLASH_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: BLASTER_MUZZLE_FLASH_START_SIZE,
-            end_scale: BLASTER_MUZZLE_FLASH_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: mat,
+    spawn_burst_sprite(
+        pos,
+        meshes.add(unit_billboard_mesh()),
+        BurstSprite {
+            texture: None,
             color,
             emissive_strength: BLASTER_EMISSIVE * 1.4,
+            lifetime: BLASTER_MUZZLE_FLASH_LIFETIME_SECS,
+            start_scale: BLASTER_MUZZLE_FLASH_START_SIZE,
+            end_scale: Some(BLASTER_MUZZLE_FLASH_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 }
 
 /// One-shot impact burst where a bolt disappears (hit or expiry): an
@@ -2102,32 +2072,20 @@ fn spawn_blaster_impact_burst(
     let billboard_mesh = meshes.add(unit_billboard_mesh());
     let color = BLASTER_BOLT_COLOR;
     let ring_color = [color[0], color[1], color[2], color[3] * 0.9];
-    let ring_mat = phaser_texture_material(
-        materials,
-        phaser_pfx_assets.impact_ring.clone(),
-        ring_color,
-        BLASTER_EMISSIVE,
-    );
-    commands.spawn((
-        PfxEntity,
-        Billboard,
-        Mesh3d(billboard_mesh.clone()),
-        MeshMaterial3d(ring_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(BLASTER_IMPACT_RING_START_SIZE)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: BLASTER_IMPACT_RING_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: BLASTER_IMPACT_RING_START_SIZE,
-            end_scale: BLASTER_IMPACT_RING_END_SIZE,
-        },
-        PfxFadingMaterial {
-            handle: ring_mat,
+    spawn_burst_sprite(
+        pos,
+        billboard_mesh.clone(),
+        BurstSprite {
+            texture: Some(phaser_pfx_assets.impact_ring.clone()),
             color: ring_color,
             emissive_strength: BLASTER_EMISSIVE,
+            lifetime: BLASTER_IMPACT_RING_LIFETIME_SECS,
+            start_scale: BLASTER_IMPACT_RING_START_SIZE,
+            end_scale: Some(BLASTER_IMPACT_RING_END_SIZE),
         },
-    ));
+        commands,
+        materials,
+    );
 
     let mut rng = rand::rng();
     for _ in 0..BLASTER_IMPACT_SPARK_COUNT {
@@ -2144,29 +2102,20 @@ fn spawn_blaster_impact_burst(
             color[2] * 0.5 + 0.5,
             color[3],
         ];
-        let spark_mat = phaser_texture_material(
-            materials,
-            phaser_pfx_assets.spark_streak.clone(),
-            spark_color,
-            BLASTER_EMISSIVE,
-        );
-        commands.spawn((
-            PfxEntity,
-            Billboard,
-            Mesh3d(billboard_mesh.clone()),
-            MeshMaterial3d(spark_mat.clone()),
-            Transform::from_translation(pos + offset)
-                .with_scale(Vec3::splat(BLASTER_IMPACT_SPARK_SIZE)),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: BLASTER_IMPACT_SPARK_LIFETIME_SECS,
-            },
-            PfxFadingMaterial {
-                handle: spark_mat,
+        spawn_burst_sprite(
+            pos + offset,
+            billboard_mesh.clone(),
+            BurstSprite {
+                texture: Some(phaser_pfx_assets.spark_streak.clone()),
                 color: spark_color,
                 emissive_strength: BLASTER_EMISSIVE,
+                lifetime: BLASTER_IMPACT_SPARK_LIFETIME_SECS,
+                start_scale: BLASTER_IMPACT_SPARK_SIZE,
+                end_scale: None,
             },
-        ));
+            commands,
+            materials,
+        );
     }
 }
 
@@ -2253,154 +2202,93 @@ fn spawn_ship_explosions(
         let mut rng = rand::rng();
 
         // Primary flash — the brightest, briefest moment.
-        let flash_mat = phaser_texture_material(
-            &mut materials,
-            phaser_pfx_assets.radial_glow.clone(),
-            EXPLOSION_FLASH_COLOR,
-            EXPLOSION_FLASH_EMISSIVE,
-        );
-        commands.spawn((
-            PfxEntity,
-            Billboard,
-            Mesh3d(billboard_mesh.clone()),
-            MeshMaterial3d(flash_mat.clone()),
-            Transform::from_translation(pos)
-                .with_scale(Vec3::splat(EXPLOSION_FLASH_START_SCALE * radius)),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: EXPLOSION_FLASH_LIFETIME_SECS,
-            },
-            PfxBurst {
-                start_scale: EXPLOSION_FLASH_START_SCALE * radius,
-                end_scale: EXPLOSION_FLASH_END_SCALE * radius,
-            },
-            PfxFadingMaterial {
-                handle: flash_mat,
+        spawn_burst_sprite(
+            pos,
+            billboard_mesh.clone(),
+            BurstSprite {
+                texture: Some(phaser_pfx_assets.radial_glow.clone()),
                 color: EXPLOSION_FLASH_COLOR,
                 emissive_strength: EXPLOSION_FLASH_EMISSIVE,
+                lifetime: EXPLOSION_FLASH_LIFETIME_SECS,
+                start_scale: EXPLOSION_FLASH_START_SCALE * radius,
+                end_scale: Some(EXPLOSION_FLASH_END_SCALE * radius),
             },
-        ));
+            &mut commands,
+            &mut materials,
+        );
 
         // Hot plasma core — several irregular puffs, short-lived, bright.
         for _ in 0..EXPLOSION_CORE_PUFF_COUNT {
             let offset = random_horizontal_offset(&mut rng, EXPLOSION_CORE_PUFF_SPREAD * radius);
-            let mat = phaser_texture_material(
-                &mut materials,
-                explosion_assets.puff.clone(),
-                EXPLOSION_CORE_COLOR,
-                EXPLOSION_CORE_EMISSIVE,
-            );
-            commands.spawn((
-                PfxEntity,
-                Billboard,
-                Mesh3d(billboard_mesh.clone()),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_translation(pos + offset)
-                    .with_scale(Vec3::splat(EXPLOSION_CORE_PUFF_START_SCALE * radius)),
-                PfxLifetime {
-                    age: 0.0,
-                    lifetime: EXPLOSION_CORE_PUFF_LIFETIME_SECS,
-                },
-                PfxBurst {
-                    start_scale: EXPLOSION_CORE_PUFF_START_SCALE * radius,
-                    end_scale: EXPLOSION_CORE_PUFF_END_SCALE * radius,
-                },
-                PfxFadingMaterial {
-                    handle: mat,
+            spawn_burst_sprite(
+                pos + offset,
+                billboard_mesh.clone(),
+                BurstSprite {
+                    texture: Some(explosion_assets.puff.clone()),
                     color: EXPLOSION_CORE_COLOR,
                     emissive_strength: EXPLOSION_CORE_EMISSIVE,
+                    lifetime: EXPLOSION_CORE_PUFF_LIFETIME_SECS,
+                    start_scale: EXPLOSION_CORE_PUFF_START_SCALE * radius,
+                    end_scale: Some(EXPLOSION_CORE_PUFF_END_SCALE * radius),
                 },
-            ));
+                &mut commands,
+                &mut materials,
+            );
         }
 
         // Outer vapour cloud — fewer, larger, dimmer, longer-lived puffs.
         for _ in 0..EXPLOSION_CLOUD_PUFF_COUNT {
             let offset = random_horizontal_offset(&mut rng, EXPLOSION_CLOUD_PUFF_SPREAD * radius);
-            let mat = phaser_texture_material(
-                &mut materials,
-                explosion_assets.puff.clone(),
-                EXPLOSION_CLOUD_COLOR,
-                EXPLOSION_CLOUD_EMISSIVE,
-            );
-            commands.spawn((
-                PfxEntity,
-                Billboard,
-                Mesh3d(billboard_mesh.clone()),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_translation(pos + offset)
-                    .with_scale(Vec3::splat(EXPLOSION_CLOUD_PUFF_START_SCALE * radius)),
-                PfxLifetime {
-                    age: 0.0,
-                    lifetime: EXPLOSION_CLOUD_PUFF_LIFETIME_SECS,
-                },
-                PfxBurst {
-                    start_scale: EXPLOSION_CLOUD_PUFF_START_SCALE * radius,
-                    end_scale: EXPLOSION_CLOUD_PUFF_END_SCALE * radius,
-                },
-                PfxFadingMaterial {
-                    handle: mat,
+            spawn_burst_sprite(
+                pos + offset,
+                billboard_mesh.clone(),
+                BurstSprite {
+                    texture: Some(explosion_assets.puff.clone()),
                     color: EXPLOSION_CLOUD_COLOR,
                     emissive_strength: EXPLOSION_CLOUD_EMISSIVE,
+                    lifetime: EXPLOSION_CLOUD_PUFF_LIFETIME_SECS,
+                    start_scale: EXPLOSION_CLOUD_PUFF_START_SCALE * radius,
+                    end_scale: Some(EXPLOSION_CLOUD_PUFF_END_SCALE * radius),
                 },
-            ));
+                &mut commands,
+                &mut materials,
+            );
         }
 
         // Expanding shockwave ring.
-        let ring_mat = phaser_texture_material(
-            &mut materials,
-            phaser_pfx_assets.impact_ring.clone(),
-            EXPLOSION_RING_COLOR,
-            EXPLOSION_RING_EMISSIVE,
-        );
-        commands.spawn((
-            PfxEntity,
-            Billboard,
-            Mesh3d(billboard_mesh.clone()),
-            MeshMaterial3d(ring_mat.clone()),
-            Transform::from_translation(pos)
-                .with_scale(Vec3::splat(EXPLOSION_RING_START_SCALE * radius)),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: EXPLOSION_RING_LIFETIME_SECS,
-            },
-            PfxBurst {
-                start_scale: EXPLOSION_RING_START_SCALE * radius,
-                end_scale: EXPLOSION_RING_END_SCALE * radius,
-            },
-            PfxFadingMaterial {
-                handle: ring_mat,
+        spawn_burst_sprite(
+            pos,
+            billboard_mesh.clone(),
+            BurstSprite {
+                texture: Some(phaser_pfx_assets.impact_ring.clone()),
                 color: EXPLOSION_RING_COLOR,
                 emissive_strength: EXPLOSION_RING_EMISSIVE,
+                lifetime: EXPLOSION_RING_LIFETIME_SECS,
+                start_scale: EXPLOSION_RING_START_SCALE * radius,
+                end_scale: Some(EXPLOSION_RING_END_SCALE * radius),
             },
-        ));
+            &mut commands,
+            &mut materials,
+        );
 
         // Sparks scattered omnidirectionally (not a directional impact, so
         // no incoming-shot bias like `spawn_blaster_impact_burst`'s sparks).
         for _ in 0..EXPLOSION_SPARK_COUNT {
             let offset = random_horizontal_offset(&mut rng, EXPLOSION_SPARK_SPREAD * radius);
-            let mat = phaser_texture_material(
-                &mut materials,
-                phaser_pfx_assets.spark_streak.clone(),
-                EXPLOSION_SPARK_COLOR,
-                EXPLOSION_SPARK_EMISSIVE,
-            );
-            commands.spawn((
-                PfxEntity,
-                Billboard,
-                Mesh3d(billboard_mesh.clone()),
-                MeshMaterial3d(mat.clone()),
-                Transform::from_translation(pos + offset)
-                    .with_scale(Vec3::splat(EXPLOSION_SPARK_SCALE * radius)),
-                PfxLifetime {
-                    age: 0.0,
-                    lifetime: EXPLOSION_SPARK_LIFETIME_SECS,
-                },
-                PfxFadingMaterial {
-                    handle: mat,
+            spawn_burst_sprite(
+                pos + offset,
+                billboard_mesh.clone(),
+                BurstSprite {
+                    texture: Some(phaser_pfx_assets.spark_streak.clone()),
                     color: EXPLOSION_SPARK_COLOR,
                     emissive_strength: EXPLOSION_SPARK_EMISSIVE,
+                    lifetime: EXPLOSION_SPARK_LIFETIME_SECS,
+                    start_scale: EXPLOSION_SPARK_SCALE * radius,
+                    end_scale: None,
                 },
-            ));
+                &mut commands,
+                &mut materials,
+            );
         }
     }
 }
@@ -5378,3 +5266,7 @@ direction = [0.0, 0.0, -1.0]
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pfx_burst_tests.rs"]
+mod burst_tests;

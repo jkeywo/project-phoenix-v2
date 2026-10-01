@@ -2,8 +2,8 @@
 title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
-sources: [AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, src/lockstep/mod.rs, src/entities/config.rs, src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
-updated: 2026-09-08
+sources: [src/server/pfx.rs, AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, src/lockstep/mod.rs, src/entities/config.rs, src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
+updated: 2026-10-01
 ---
 
 # Architecture
@@ -45,6 +45,14 @@ Cross-domain infrastructure has narrow homes:
 Session tokens identify players; rendezvous peer ids and DataChannels identify transient transports. The server owns session tenure, game phase, world/runtime content, ship state, objectives, and outcomes. A phone stores only the latest projected state needed to render its consoles.
 
 Human and AI actors submit the same `ControlSystem` commands. Admission records authority once; domain appliers never branch on actor type. Every gameplay decision advances on the authored logical tick, not on rendered frames.
+
+## Host presentation effects
+
+`src/server/pfx.rs` builds transient flashes, rings, plasma and sparks through
+a shared billboard-sprite constructor. Each effect retains its texture,
+lifetime, scale, particle count and random-offset recipe. The constructor
+assembles render and lifetime state; the existing lifetime and burst systems
+fade, scale and expire it. These effects do not feed simulation state.
 
 ## Related
 

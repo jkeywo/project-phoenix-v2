@@ -192,6 +192,24 @@ fn seed_viewscreen_from_selection(
 }
 
 fn test_app() -> App {
+    let phaser_config = crate::entities::config::PhaserCombatConfig {
+        banks: vec![
+            crate::entities::config::PhaserBankConfig {
+                fire_arc_deg: 270.0,
+                auto_arc_deg: 240.0,
+                beam_range: 0.0,
+                beam_duration_secs: 6.0,
+                ..wide_bank("port", -90.0)
+            },
+            crate::entities::config::PhaserBankConfig {
+                fire_arc_deg: 270.0,
+                auto_arc_deg: 240.0,
+                beam_range: 0.0,
+                beam_duration_secs: 6.0,
+                ..wide_bank("starboard", 90.0)
+            },
+        ],
+    };
     let mut app = App::new();
     crate::ai::host::register_ai_host_env(&mut app);
     app.configure_sets(
@@ -229,42 +247,7 @@ fn test_app() -> App {
     // Uses wide (270°) arcs so existing tests that fire "port" at a
     // target ahead still pass. Tighter arcs are tested in dedicated
     // per-bank arc severance tests.
-    .insert_resource(PhaserCombatConfigResource(
-        crate::entities::config::PhaserCombatConfig {
-            banks: vec![
-                crate::entities::config::PhaserBankConfig {
-                    id: "port".into(),
-                    facing_deg: -90.0,
-                    fire_arc_deg: 270.0,
-                    auto_arc_deg: 240.0,
-                    beam_range: 0.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 6.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                },
-                crate::entities::config::PhaserBankConfig {
-                    id: "starboard".into(),
-                    facing_deg: 90.0,
-                    fire_arc_deg: 270.0,
-                    auto_arc_deg: 240.0,
-                    beam_range: 0.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 6.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                },
-            ],
-        },
-    ))
+    .insert_resource(PhaserCombatConfigResource(phaser_config.clone()))
     .add_systems(
         FixedUpdate,
         seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
@@ -327,40 +310,7 @@ fn test_app() -> App {
         // These are overridden by individual tests via insert_resource for the
         // PhaserCombatConfigResource; we keep both in sync here.
         TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
-        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
-            banks: vec![
-                crate::entities::config::PhaserBankConfig {
-                    id: "port".into(),
-                    facing_deg: -90.0,
-                    fire_arc_deg: 270.0,
-                    auto_arc_deg: 240.0,
-                    beam_range: 0.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 6.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                },
-                crate::entities::config::PhaserBankConfig {
-                    id: "starboard".into(),
-                    facing_deg: 90.0,
-                    fire_arc_deg: 270.0,
-                    auto_arc_deg: 240.0,
-                    beam_range: 0.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 6.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                },
-            ],
-        }),
+        PhaserCombatConfigResource(phaser_config),
         PhaserRenderConfig::default(),
         // PR 7 (issue #597) — per-entity beam / target / cooldown components.
         TacticalRadarSelection::default(),
@@ -5798,21 +5748,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
             PhaserCooldown::default(),
             ShipPhysics::default(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
-                banks: vec![crate::entities::config::PhaserBankConfig {
-                    id: "fore".into(),
-                    facing_deg: 0.0,
-                    fire_arc_deg: 360.0,
-                    auto_arc_deg: 360.0,
-                    beam_range: 50.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 3.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                }],
+                banks: vec![wide_bank("fore", 0.0)],
             }),
             AdmittedCommands::default(),
             Transform::default(),
@@ -5881,21 +5817,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
             PhaserCooldown::default(),
             ShipPhysics::default(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
-                banks: vec![crate::entities::config::PhaserBankConfig {
-                    id: "fore".into(),
-                    facing_deg: 0.0,
-                    fire_arc_deg: 360.0,
-                    auto_arc_deg: 360.0,
-                    beam_range: 50.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 3.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                }],
+                banks: vec![wide_bank("fore", 0.0)],
             }),
             AdmittedCommands::default(),
             Transform::default(),
@@ -6082,37 +6004,19 @@ fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
 /// `ArcBearingRequest` addressed to Helm.
 #[test]
 fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000001";
 
     let ship_entity = app
         .world_mut()
         .spawn((
-            crate::server_app::Ship,
-            ShipSystemControlSources::default(),
-            ShipPhysics::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            TacticalRadarSelection(Some(target_uuid.to_string())),
-            WeaponsArcRequestState::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            arc_request_ship(target_uuid, ShipSystemControlSources::default()),
             shipped_weapons_doctrine(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
                 banks: vec![crate::entities::config::PhaserBankConfig {
-                    id: "fore".into(),
-                    facing_deg: 0.0,
                     fire_arc_deg: 30.0,
                     auto_arc_deg: 30.0,
-                    beam_range: 50.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 3.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
+                    ..wide_bank("fore", 0.0)
                 }],
             }),
         ))
@@ -6124,14 +6028,8 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
 
     // Target is directly to starboard (x=20, z=0): in range (distance 20 <
     // beam_range 50) but 90 degrees off the fore bank's 30-degree arc.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6160,48 +6058,24 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
 /// request — Weapons can already fire without Helm's help.
 #[test]
 fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000002";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 30.0,
                 auto_arc_deg: 30.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
-                beam_duration_secs: 3.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("fore", 0.0)
             }],
         }),
     ));
 
     // Directly ahead (forward = -Z at yaw 0): in range and in arc.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(0.0, 0.0, -20.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(0.0, 0.0, -20.0)),));
 
     app.update();
 
@@ -6218,47 +6092,23 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
 /// must not re-enqueue every tick.
 #[test]
 fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000003";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 30.0,
                 auto_arc_deg: 30.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
-                beam_duration_secs: 3.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("fore", 0.0)
             }],
         }),
     ));
 
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
     app.update();
@@ -6277,6 +6127,30 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
 }
 
 // ── #767: weapon-family-aware arc-bearing coordination ───────────────────────
+
+/// Shared arc-request state; callers supply doctrine and weapon inventory explicitly.
+fn arc_request_ship(target_uuid: &str, sources: ShipSystemControlSources) -> impl Bundle {
+    (
+        crate::server_app::Ship,
+        sources,
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
+    )
+}
+
+fn arc_request_target(target_uuid: &str, position: Vec3) -> impl Bundle {
+    (
+        crate::entities::spawner::EntityUuid(target_uuid.to_string()),
+        crate::entities::spawner::EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_translation(position),
+    )
+}
 
 /// Build a single-bank blaster resource facing forward with the given fire arc
 /// and range.
@@ -6335,32 +6209,18 @@ fn find_arc_request(app: &App) -> Option<CoordinationPayload> {
 /// family's arcs.
 #[test]
 fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000001";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         // No phaser config: blasters are the only capable family.
         blaster_res(0.0, 30.0, 50.0),
     ));
     // Directly to starboard: in range (20 < 50) but 90° off the 30° fore arc.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6389,8 +6249,6 @@ fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
 /// emit for the Torpedoes family carrying the tube's arc + homing reach.
 #[test]
 fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000002";
     // Homing reach = default speed × lifespan.
@@ -6398,25 +6256,13 @@ fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
     let reach = cfg.speed * cfg.lifespan;
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         loaded_torpedo_res(0.0, 30.0),
     ));
     // To starboard: in homing reach but 90° off the 30° fore tube arc.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6478,31 +6324,15 @@ fn spawn_two_family_arc_miss(
     use crate::entities::spawner::EntityUuid;
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         doctrine,
         // A 30-degree fore beam and a 30-degree fore tube. The target below sits
         // 90 degrees off both, inside both reaches, so BOTH families qualify.
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 30.0,
                 auto_arc_deg: 30.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
-                beam_duration_secs: 3.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("fore", 0.0)
             }],
         }),
         loaded_torpedo_res(0.0, 30.0),
@@ -6599,30 +6429,16 @@ fn the_arc_request_family_follows_the_ships_authored_doctrine() {
 /// — so what this pins is that nothing quietly reintroduces the constant.
 #[test]
 fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "dd000000-0000-0000-0000-000000000002";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         // …and deliberately NO WeaponsDoctrineAiPolicy.
         loaded_torpedo_res(0.0, 30.0),
     ));
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6641,30 +6457,16 @@ fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
 /// (an empty blaster vec, no phasers, no tubes) must not emit.
 #[test]
 fn tick_weapons_arc_request_silent_when_family_incapable() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000003";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         BlasterSystemResource(vec![]), // capable of nothing
     ));
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6678,8 +6480,6 @@ fn tick_weapons_arc_request_silent_when_family_incapable() {
 /// bank classifies as `Offline`, never `OutOfArc`, so no bearing is asked.
 #[test]
 fn tick_weapons_arc_request_silent_when_family_offline() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000004";
 
@@ -6687,25 +6487,13 @@ fn tick_weapons_arc_request_silent_when_family_offline() {
     cs.0.set_offline(SystemId("blaster-fore".into()), true);
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        cs,
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, cs),
         shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
     // In range, out of arc — but the bank is offline.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6719,31 +6507,17 @@ fn tick_weapons_arc_request_silent_when_family_offline() {
 /// an out-of-reach contact into a firing solution, so nothing is asked.
 #[test]
 fn tick_weapons_arc_request_silent_when_target_out_of_range() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000005";
 
     app.world_mut().spawn((
-        crate::server_app::Ship,
-        ShipSystemControlSources::default(),
-        ShipPhysics::default(),
-        crate::server_app::ShipSystemBlackboards::default(),
-        TacticalRadarSelection(Some(target_uuid.to_string())),
-        WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        arc_request_ship(target_uuid, ShipSystemControlSources::default()),
         shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
     // Beyond the 50-unit blaster range (200 away) — out of range entirely.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(200.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(200.0, 0.0, 0.0)),));
 
     app.update();
 
@@ -6757,21 +6531,13 @@ fn tick_weapons_arc_request_silent_when_target_out_of_range() {
 /// once the same family+target has the target in arc, no request stands.
 #[test]
 fn tick_weapons_arc_request_clears_when_target_enters_arc() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000006";
 
     let ship = app
         .world_mut()
         .spawn((
-            crate::server_app::Ship,
-            ShipSystemControlSources::default(),
-            ShipPhysics::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            TacticalRadarSelection(Some(target_uuid.to_string())),
-            WeaponsArcRequestState::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            arc_request_ship(target_uuid, ShipSystemControlSources::default()),
             shipped_weapons_doctrine(),
             blaster_res(0.0, 30.0, 50.0),
         ))
@@ -6779,14 +6545,7 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
     // Start out of arc (starboard) → request fires.
     let target = app
         .world_mut()
-        .spawn((
-            EntityUuid(target_uuid.to_string()),
-            EntitySystemHull(SystemHull::from_config(&[(
-                SystemId("captain".into()),
-                50.0,
-            )])),
-            Transform::from_xyz(20.0, 0.0, 0.0),
-        ))
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),))
         .id();
     app.update();
     assert!(
@@ -6818,35 +6577,21 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
 /// request, delivered on the earlier tick, was never told.
 #[test]
 fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000007";
 
     let ship = app
         .world_mut()
         .spawn((
-            crate::server_app::Ship,
-            ShipSystemControlSources::default(),
-            ShipPhysics::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            TacticalRadarSelection(Some(target_uuid.to_string())),
-            WeaponsArcRequestState::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            arc_request_ship(target_uuid, ShipSystemControlSources::default()),
             shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))
         .id();
     // To starboard: in homing reach but 90° off the 30° fore tube's arc, so
     // the standing request comes from Torpedoes and nothing else.
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
     assert!(
@@ -6903,33 +6648,19 @@ fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty()
 /// debounce discipline `tick_weapons_arc_request` already gives requests.
 #[test]
 fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
-    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000008";
 
     let ship = app
         .world_mut()
         .spawn((
-            crate::server_app::Ship,
-            ShipSystemControlSources::default(),
-            ShipPhysics::default(),
-            crate::server_app::ShipSystemBlackboards::default(),
-            TacticalRadarSelection(Some(target_uuid.to_string())),
-            WeaponsArcRequestState::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            arc_request_ship(target_uuid, ShipSystemControlSources::default()),
             shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))
         .id();
-    app.world_mut().spawn((
-        EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
-        Transform::from_xyz(20.0, 0.0, 0.0),
-    ));
+    app.world_mut()
+        .spawn((arc_request_target(target_uuid, Vec3::new(20.0, 0.0, 0.0)),));
 
     app.update();
     app.world_mut()
@@ -6983,19 +6714,9 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
     );
     let combat = crate::entities::config::PhaserCombatConfig {
         banks: vec![crate::entities::config::PhaserBankConfig {
-            id: "port".into(),
-            facing_deg: -90.0,
             fire_arc_deg: 60.0,
             auto_arc_deg: 60.0,
-            beam_range: 50.0,
-            beam_damage_per_sec: 5.0,
-            beam_duration_secs: 3.0,
-            cooldown_secs: 6.0,
-            beam_color: vec![],
-            shield_pierce: None,
-            marker: None,
-            ai: None,
-            cycle_jitter: 0.0,
+            ..wide_bank("port", -90.0)
         }],
     };
     let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid).unwrap();
@@ -8470,31 +8191,33 @@ fn objective_beats_a_lock_that_coincides_with_the_sensors_designation() {
     );
 }
 
-fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) {
+fn insert_objective_blackboard(
+    app: &mut App,
+    target: &str,
+    score: f32,
+    directive: AiDirective,
+    id: String,
+    text: String,
+    relevance: Vec<SystemAffinity>,
+) {
     use crate::core::messages::{
-        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
-        SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+        ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective, SystemBlackboard,
+        ViewscreenBlackboard,
     };
     use crate::server_app::ShipSystemBlackboards;
 
     let viewscreen = ViewscreenBlackboard {
         scored_objectives: vec![ScoredObjective {
-            id: format!("obj-destroy-{target}"),
+            id: id.clone(),
             score,
-            directive: AiDirective::Destroy {
-                target: target.into(),
-            },
+            directive,
             source: ObjectiveSource::Mission,
-            relevance: vec![
-                SystemAffinity::Helm,
-                SystemAffinity::Weapons,
-                SystemAffinity::Captain,
-            ],
+            relevance,
             snapshot: ObjectiveSnapshot {
                 progress: None,
                 unassigned: false,
-                id: format!("obj-destroy-{target}"),
-                text: format!("Destroy {target}"),
+                id: id.clone(),
+                text,
                 text_params: Default::default(),
                 mandatory: true,
                 status: ObjectiveStatus::Active,
@@ -8513,6 +8236,24 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
     bbs.0.insert(
         crate::ship::system_registry::viewscreen_system_id(),
         SystemBlackboard::Viewscreen(viewscreen),
+    );
+}
+
+fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) {
+    insert_objective_blackboard(
+        app,
+        target,
+        score,
+        AiDirective::Destroy {
+            target: target.into(),
+        },
+        format!("obj-destroy-{target}"),
+        format!("Destroy {target}"),
+        vec![
+            SystemAffinity::Helm,
+            SystemAffinity::Weapons,
+            SystemAffinity::Captain,
+        ],
     );
 }
 
@@ -8522,44 +8263,16 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
 /// selector reads it ONLY through the directive-kind-matched `objective-operate`
 /// source, which is the whole point of D2.
 fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) {
-    use crate::core::messages::{
-        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
-        SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
-    };
-    use crate::server_app::ShipSystemBlackboards;
-
-    let viewscreen = ViewscreenBlackboard {
-        scored_objectives: vec![ScoredObjective {
-            id: format!("obj-tow-{target}"),
-            score,
-            directive: AiDirective::Tow {
-                target: target.into(),
-            },
-            source: ObjectiveSource::Mission,
-            relevance: vec![SystemAffinity::Engineering],
-            snapshot: ObjectiveSnapshot {
-                progress: None,
-                unassigned: false,
-                id: format!("obj-tow-{target}"),
-                text: format!("Tow {target}"),
-                text_params: Default::default(),
-                mandatory: true,
-                status: ObjectiveStatus::Active,
-                targets: vec![target.into()],
-                source: ObjectiveSource::Mission,
-            },
-        }],
-        ..Default::default()
-    };
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
-    let mut bbs = q
-        .single_mut(app.world_mut())
-        .expect("LocalShip must have ShipSystemBlackboards");
-    bbs.0.insert(
-        crate::ship::system_registry::viewscreen_system_id(),
-        SystemBlackboard::Viewscreen(viewscreen),
+    insert_objective_blackboard(
+        app,
+        target,
+        score,
+        AiDirective::Tow {
+            target: target.into(),
+        },
+        format!("obj-tow-{target}"),
+        format!("Tow {target}"),
+        vec![SystemAffinity::Engineering],
     );
 }
 
@@ -8567,44 +8280,16 @@ fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) 
 /// Its lock is executable through external repair, never through a tractor
 /// coupling that happens to name the same target.
 fn insert_field_repair_objective_blackboard(app: &mut App, target: &str, score: f32) {
-    use crate::core::messages::{
-        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
-        SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
-    };
-    use crate::server_app::ShipSystemBlackboards;
-
-    let viewscreen = ViewscreenBlackboard {
-        scored_objectives: vec![ScoredObjective {
-            id: format!("obj-field-repair-{target}"),
-            score,
-            directive: AiDirective::FieldRepair {
-                target: target.into(),
-            },
-            source: ObjectiveSource::Mission,
-            relevance: vec![SystemAffinity::Repair],
-            snapshot: ObjectiveSnapshot {
-                progress: None,
-                unassigned: false,
-                id: format!("obj-field-repair-{target}"),
-                text: format!("Field repair {target}"),
-                text_params: Default::default(),
-                mandatory: true,
-                status: ObjectiveStatus::Active,
-                targets: vec![target.into()],
-                source: ObjectiveSource::Mission,
-            },
-        }],
-        ..Default::default()
-    };
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
-    let mut bbs = q
-        .single_mut(app.world_mut())
-        .expect("LocalShip must have ShipSystemBlackboards");
-    bbs.0.insert(
-        crate::ship::system_registry::viewscreen_system_id(),
-        SystemBlackboard::Viewscreen(viewscreen),
+    insert_objective_blackboard(
+        app,
+        target,
+        score,
+        AiDirective::FieldRepair {
+            target: target.into(),
+        },
+        format!("obj-field-repair-{target}"),
+        format!("Field repair {target}"),
+        vec![SystemAffinity::Repair],
     );
 }
 
@@ -13124,19 +12809,10 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 270.0,
                 auto_arc_deg: 180.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
                 beam_duration_secs: 6.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("fore", 0.0)
             }];
         }
     }
@@ -13278,21 +12954,7 @@ ai_only = true
             PhaserCooldown::default(),
             ShipPhysics::default(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
-                banks: vec![crate::entities::config::PhaserBankConfig {
-                    id: "port".into(),
-                    facing_deg: 0.0,
-                    fire_arc_deg: 360.0,
-                    auto_arc_deg: 360.0,
-                    beam_range: 50.0,
-                    beam_damage_per_sec: 5.0,
-                    beam_duration_secs: 3.0,
-                    cooldown_secs: 6.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
-                }],
+                banks: vec![wide_bank("port", 0.0)],
             }),
             Transform::default(),
             crate::core::messages::AdmittedCommands::default(),
@@ -13729,19 +13391,10 @@ fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
-                id: "dorsal".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 270.0,
                 auto_arc_deg: 180.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
                 beam_duration_secs: 6.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("dorsal", 0.0)
             }];
         }
     }
@@ -13798,19 +13451,10 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
                 fire_arc_deg: 270.0,
                 auto_arc_deg: 180.0,
-                beam_range: 50.0,
-                beam_damage_per_sec: 5.0,
                 beam_duration_secs: 6.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("fore", 0.0)
             }];
         }
     }
@@ -14209,19 +13853,11 @@ fn los_test_app() -> App {
         .insert_resource(PhaserCombatConfigResource(
             crate::entities::config::PhaserCombatConfig {
                 banks: vec![crate::entities::config::PhaserBankConfig {
-                    id: "port".into(),
-                    facing_deg: -90.0,
-                    fire_arc_deg: 360.0,
-                    auto_arc_deg: 360.0,
                     beam_range: 0.0,
                     beam_damage_per_sec: 100.0,
                     beam_duration_secs: 10.0,
                     cooldown_secs: 1.0,
-                    beam_color: vec![],
-                    shield_pierce: None,
-                    marker: None,
-                    ai: None,
-                    cycle_jitter: 0.0,
+                    ..wide_bank("port", -90.0)
                 }],
             },
         ))
@@ -14289,19 +13925,11 @@ fn spawn_los_ship(
         PhaserCooldown::default(),
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
-                id: "port".into(),
-                facing_deg: -90.0,
-                fire_arc_deg: 360.0,
-                auto_arc_deg: 360.0,
                 beam_range: 0.0,
                 beam_damage_per_sec: 100.0,
                 beam_duration_secs: 10.0,
                 cooldown_secs: 1.0,
-                beam_color: vec![],
-                shield_pierce: None,
-                marker: None,
-                ai: None,
-                cycle_jitter: 0.0,
+                ..wide_bank("port", -90.0)
             }],
         }),
         crate::ship_plugin::ShipSystemControlSources::default(),

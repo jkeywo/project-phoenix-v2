@@ -1,3 +1,4 @@
+import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
 /** Accessible, authoritative GM session pause/result presentation (#1292). */
 
 import {
@@ -93,10 +94,6 @@ function setAccessibility(region, heading, pause, resume, state, feedback, log) 
   }
 }
 
-function entryKey(operatorId, correlation) {
-  return JSON.stringify([operatorId, correlation]);
-}
-
 /**
  * Mount the GM session controls over injected page/transport seams.
  *
@@ -148,12 +145,17 @@ export function createGmSessionControls({
   }
 
   let paused = null;
-  let authoritativeResults = [];
-  const pending = new Map();
-  const localTerminals = new Map();
   const rows = new Map();
   let actions = suppliedActions;
   let actionFeedback = suppliedActionFeedback;
+
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: boundedCapacity, timeoutMs: boundedTimeoutMs,
+    schedule, cancelSchedule,
+    onLocalTerminal() {
+      renderLog();
+    },
+  });
 
   function operator() {
     try {
@@ -191,13 +193,6 @@ export function createGmSessionControls({
     return labelId
       ? t(labelId)
       : t('server.gm.session.reason_unknown', { reason });
-  }
-
-  function clearPendingTimer(meta) {
-    if (!meta || meta.timerScheduled !== true) return;
-    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
-    meta.timer = null;
-    meta.timerScheduled = false;
   }
 
   function appendRow(operatorId, correlationValue) {
@@ -265,43 +260,11 @@ export function createGmSessionControls({
     if (!log) return;
     log.replaceChildren();
     rows.clear();
-    const authoritativeKeys = new Set();
-    for (const result of authoritativeResults) {
-      authoritativeKeys.add(entryKey(result.operator_id, result.correlation));
-      paintResultRow(result);
+    for (const { kind, value } of feed.entries()) {
+      if (kind === 'result') paintResultRow(value);
+      else if (kind === 'local') paintLocalTerminalRow(value);
+      else paintPendingRow(value);
     }
-    for (const [key, terminal] of localTerminals) {
-      if (!authoritativeKeys.has(key)) paintLocalTerminalRow(terminal);
-    }
-    for (const meta of pending.values()) {
-      const key = entryKey(meta.operatorId, meta.correlation);
-      if (!authoritativeKeys.has(key)) paintPendingRow(meta);
-    }
-  }
-
-  function rememberLocalTerminal(meta, outcome, reason) {
-    const key = entryKey(meta.operatorId, meta.correlation);
-    localTerminals.set(key, {
-      operatorId: meta.operatorId,
-      operatorName: meta.operatorName,
-      correlation: meta.correlation,
-      active: meta.active,
-      outcome,
-      reason,
-    });
-    while (localTerminals.size > boundedCapacity) {
-      localTerminals.delete(localTerminals.keys().next().value);
-    }
-  }
-
-  function finishLocalPending(correlationValue, outcome, reason) {
-    const meta = pending.get(correlationValue);
-    if (!meta) return false;
-    clearPendingTimer(meta);
-    pending.delete(correlationValue);
-    rememberLocalTerminal(meta, outcome, reason);
-    renderLog();
-    return true;
   }
 
   function paintFeedback(value) {
@@ -319,7 +282,7 @@ export function createGmSessionControls({
     if (!value || (value.actionId !== GM_PAUSE_ACTION_ID
         && value.actionId !== GM_RESUME_ACTION_ID)) return;
     paintFeedback(value);
-    const meta = pending.get(value.correlation);
+    const meta = feed.get(value.correlation);
     if (value.state === ACTION_FEEDBACK_STATE.PENDING && meta) {
       renderLog();
       if (meta.localReason) {
@@ -328,25 +291,17 @@ export function createGmSessionControls({
         // later listeners observe Refused before the outer Pending event.
         if (!meta.refusalScheduled) {
           meta.refusalScheduled = true;
-          defer(() => actionFeedback.settle(
-            value.correlation,
-            ACTION_FEEDBACK_STATE.REFUSED,
-          ));
+          defer(() => {
+            if (feed.get(value.correlation) === meta) actionFeedback.settle(value.correlation, ACTION_FEEDBACK_STATE.REFUSED);
+          });
         }
         return;
       }
-      if (!meta.timerScheduled) {
-        meta.timerScheduled = true;
-        meta.timer = schedule(() => {
-          if (!actionFeedback.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT)) {
-            finishLocalPending(meta.correlation, 'timed-out', null);
-          }
-        }, boundedTimeoutMs);
-      }
+      feed.startTimer(meta);
     } else if (value.state === ACTION_FEEDBACK_STATE.TIMED_OUT && meta) {
-      finishLocalPending(value.correlation, 'timed-out', null);
+      feed.finishLocal(value.correlation, 'timed-out', null);
     } else if (value.state === ACTION_FEEDBACK_STATE.REFUSED && meta && meta.localReason) {
-      finishLocalPending(value.correlation, 'refused', meta.localReason);
+      feed.finishLocal(value.correlation, 'refused', meta.localReason);
     }
   }
 
@@ -372,18 +327,10 @@ export function createGmSessionControls({
     throw new Error('shared host registry has a partial GM session action set');
   }
 
-  function expireOldestPending() {
-    const oldest = pending.keys().next().value;
-    if (!oldest) return;
-    if (!actionFeedback.settle(oldest, ACTION_FEEDBACK_STATE.TIMED_OUT)) {
-      finishLocalPending(oldest, 'timed-out', null);
-    }
-  }
-
   function submit(active, correlationValue) {
     const current = operator();
     if (!current) return false;
-    while (pending.size >= boundedCapacity) expireOldestPending();
+    feed.makeRoom(true);
     const meta = {
       active,
       correlation: correlationValue,
@@ -395,7 +342,7 @@ export function createGmSessionControls({
       localReason: null,
       refusalScheduled: false,
     };
-    pending.set(correlationValue, meta);
+    feed.track(meta);
     let accepted = false;
     try {
       accepted = typeof submitSessionPaused === 'function'
@@ -453,22 +400,7 @@ export function createGmSessionControls({
     const projection = parseGmSessionPayload(payload);
     if (!projection) return false;
     paused = projection.paused;
-    authoritativeResults = projection.results.slice(-boundedCapacity);
-    localTerminals.clear();
-    // Settle every exact local occurrence even if the display capacity trims
-    // it. A same-correlation result attributed to another GM is never ours.
-    for (const result of projection.results) {
-      const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) continue;
-      clearPendingTimer(meta);
-      pending.delete(result.correlation);
-      actionFeedback.settle(
-        result.correlation,
-        result.outcome === 'refused'
-          ? ACTION_FEEDBACK_STATE.REFUSED
-          : ACTION_FEEDBACK_STATE.APPLIED,
-      );
-    }
+    feed.replace(projection.results);
     paintAuthoritativeState();
     renderLog();
     refreshAdmission();
@@ -477,11 +409,7 @@ export function createGmSessionControls({
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
   function reset() {
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    for (const correlationValue of [...pending.keys()]) actionFeedback.cancel(correlationValue);
-    pending.clear();
-    localTerminals.clear();
-    authoritativeResults = [];
+    feed.reset();
     paused = null;
     rows.clear();
     if (log) log.replaceChildren();
@@ -512,8 +440,7 @@ export function createGmSessionControls({
     if (suppliedActionFeedback && win && typeof win.removeEventListener === 'function') {
       win.removeEventListener('phoenix-action-feedback', onFeedbackEvent);
     }
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    pending.clear();
+    feed.reset(false);
   }
 
   return {
@@ -525,9 +452,9 @@ export function createGmSessionControls({
     refreshAdmission,
     state: () => ({
       paused,
-      pending: pending.size,
+      pending: feed.size,
       entries: rows.size,
-      authoritative: authoritativeResults.length,
+      authoritative: feed.authoritativeCount,
     }),
     destroy,
   };

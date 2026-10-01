@@ -1,3 +1,4 @@
+import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
 /**
  * The GM placement panel: the scenario-authored spawn palette and the map
  * gesture that places one (issue #1305, PRD #930 milestone M2).
@@ -174,10 +175,6 @@ function setAccessibility(region, heading, list, empty, feedback, log) {
   }
 }
 
-function entryKey(operatorId, correlation) {
-  return JSON.stringify([operatorId, correlation]);
-}
-
 /** Mount the GM placement panel over injected page/transport/map seams. */
 export function createGmSpawnPanel({
   onSucceeded = () => {},
@@ -236,13 +233,10 @@ export function createGmSpawnPanel({
   setAccessibility(region, heading, list, empty, feedbackStatus, log);
 
   let palette = [];
-  let authoritativeResults = [];
   let armedPaletteId = null;
   // The control that started the current pick, so Escape gives the focus back.
   let pickOrigin = null;
   const selectedVariants = new Map();
-  const pending = new Map();
-  const localTerminals = new Map();
   const buttons = new Map();
   const selects = new Map();
   let boundMap = null;
@@ -253,6 +247,16 @@ export function createGmSpawnPanel({
     ...(typeof correlation === 'function' ? { correlation } : {}),
     ...(typeof now === 'function' ? { now } : {}),
     capacity: boundedCapacity,
+  });
+
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: boundedCapacity, timeoutMs: boundedTimeoutMs,
+    schedule, cancelSchedule,
+    onLocalTerminal(meta, outcome) {
+      paintFeedback(outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED, meta.palette);
+      renderLog();
+      refreshAdmission();
+    },
   });
 
   function operator() {
@@ -345,17 +349,11 @@ export function createGmSpawnPanel({
     let settled = false;
     for (const row of rows) {
       if (!row || row.action_kind !== 'contact-information' || typeof row.correlation !== 'string') continue;
-      const meta = pending.get(row.correlation);
-      if (!meta || !meta.ghost || meta.operatorId !== row.operator_id
-          || meta.ghost.ship !== row.observer || meta.ghost.id !== row.target) continue;
-      clearPendingTimer(meta);
-      pending.delete(row.correlation);
-      // No placement result will ever come for it, so the terminal is kept
-      // here and drawn beside the placements it was made among.
-      rememberLocalTerminal({ ...meta, tick: row.tick }, row.outcome, row.reason || null);
-      const state = row.outcome === 'refused'
-        ? ACTION_FEEDBACK_STATE.REFUSED : ACTION_FEEDBACK_STATE.APPLIED;
-      actionFeedback.settle(row.correlation, state);
+      const match = feed.settle(row, (meta) => meta.ghost
+        && meta.ghost.ship === row.observer && meta.ghost.id === row.target);
+      if (!match) continue;
+      const { meta, state } = match;
+      feed.remember({ ...meta, tick: row.tick }, row.outcome, row.reason || null);
       paintFeedback(state, meta.palette);
       if (row.outcome === 'applied') onSucceeded();
       settled = true;
@@ -387,13 +385,6 @@ export function createGmSpawnPanel({
     }
     const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
     return labelId ? t(labelId) : t('server.gm.spawn.reason_unknown', { reason });
-  }
-
-  function clearPendingTimer(meta) {
-    if (!meta || meta.timerScheduled !== true) return;
-    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
-    meta.timer = null;
-    meta.timerScheduled = false;
   }
 
   function appendRow(operatorId, correlationValue) {
@@ -471,20 +462,9 @@ export function createGmSpawnPanel({
   function renderLog() {
     if (!log) return;
     log.replaceChildren();
-    const authoritativeKeys = new Set();
-    for (const result of authoritativeResults) {
-      authoritativeKeys.add(entryKey(result.operator_id, result.correlation));
-      paintResultRow(result);
-    }
-    for (const [key, terminal] of localTerminals) {
-      if (!authoritativeKeys.has(key)) {
-        paintLocalRow(terminal, terminal.outcome, terminal.reason);
-      }
-    }
-    for (const meta of pending.values()) {
-      if (!authoritativeKeys.has(entryKey(meta.operatorId, meta.correlation))) {
-        paintLocalRow(meta, 'pending', null);
-      }
+    for (const { kind, value } of feed.entries()) {
+      if (kind === 'result') paintResultRow(value);
+      else paintLocalRow(value, kind === 'pending' ? 'pending' : value.outcome, kind === 'pending' ? null : value.reason);
     }
   }
 
@@ -499,32 +479,6 @@ export function createGmSpawnPanel({
           status: t(statusId),
         })
       : '';
-  }
-
-  function rememberLocalTerminal(meta, outcome, reason) {
-    localTerminals.set(entryKey(meta.operatorId, meta.correlation), {
-      ...meta,
-      outcome,
-      reason,
-    });
-    while (localTerminals.size > boundedCapacity) {
-      localTerminals.delete(localTerminals.keys().next().value);
-    }
-  }
-
-  function finishLocalPending(correlationValue, outcome, reason) {
-    const meta = pending.get(correlationValue);
-    if (!meta) return false;
-    clearPendingTimer(meta);
-    pending.delete(correlationValue);
-    rememberLocalTerminal(meta, outcome, reason);
-    paintFeedback(
-      outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED,
-      meta.palette,
-    );
-    renderLog();
-    refreshAdmission();
-    return true;
   }
 
   /**
@@ -590,11 +544,7 @@ export function createGmSpawnPanel({
   /** One pending lifecycle for both outcomes; `send` is the only difference. */
   function submitIntent(current, paletteId, variant, ghost, send) {
     if (operator()?.id !== current.id) return false;
-    while (pending.size >= boundedCapacity) {
-      const oldest = pending.keys().next().value;
-      if (oldest === undefined) break;
-      finishLocalPending(oldest, 'timed-out', null);
-    }
+    feed.makeRoom();
     const press = actionFeedback.press(`${GM_PLACE_ACTION_PREFIX}${paletteId}`);
     const meta = {
       palette: paletteId,
@@ -607,24 +557,14 @@ export function createGmSpawnPanel({
       timerScheduled: false,
       ...(ghost ? { ghost: { ship: ghost.ship.entity_id, shipName: ghost.ship.name, id: ghost.id } } : {}),
     };
-    pending.set(press.correlation, meta);
+    feed.track(meta);
     let accepted = false;
     try {
       accepted = send(press.correlation) === true;
     } catch (_) {
       accepted = false;
     }
-    actionFeedback.pending(press.correlation);
-    if (!accepted) {
-      actionFeedback.settle(press.correlation, ACTION_FEEDBACK_STATE.REFUSED);
-      finishLocalPending(press.correlation, 'refused', LOCAL_INGRESS_REFUSAL);
-      return true;
-    }
-    meta.timerScheduled = true;
-    meta.timer = schedule(() => {
-      actionFeedback.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
-      finishLocalPending(meta.correlation, 'timed-out', null);
-    }, boundedTimeoutMs);
+    if (!feed.submitted(meta, accepted, LOCAL_INGRESS_REFUSAL)) return true;
     paintFeedback(ACTION_FEEDBACK_STATE.PENDING, paletteId);
     renderLog();
     refreshAdmission();
@@ -916,26 +856,13 @@ export function createGmSpawnPanel({
     if (armedPaletteId && !palette.some((entry) => entry.id === armedPaletteId)) {
       setArmed(null);
     }
-    authoritativeResults = projection.results.slice(-boundedCapacity);
-    localTerminals.clear();
-    for (const result of projection.results) {
-      const meta = pending.get(result.correlation);
-      // A ghost is settled by its contact result, never by a placement result:
-      // it placed nothing, so no placement result is about it.
-      if (!meta || meta.ghost || meta.operatorId !== result.operator_id) continue;
-      clearPendingTimer(meta);
-      pending.delete(result.correlation);
-      const state = result.outcome === 'refused'
-        ? ACTION_FEEDBACK_STATE.REFUSED
-        : ACTION_FEEDBACK_STATE.APPLIED;
-      actionFeedback.settle(result.correlation, state);
-      paintFeedback(state, meta.palette);
-      // Only an AUTHORITATIVE APPLIED result finishes the draft. A refusal, a
-      // timeout, a local refusal and a no-op all leave it exactly where it is:
-      // a no-op means nothing was placed, which is something the operator is
-      // about to correct and send again like any other.
-      if (result.outcome === 'applied') onSucceeded();
-    }
+    feed.replace(projection.results, {
+      accepts: (meta) => !meta.ghost,
+      onSettled(meta, result, state) {
+        paintFeedback(state, meta.palette);
+        if (result.outcome === 'applied') onSucceeded();
+      },
+    });
     bindMap();
     renderPalette();
     renderLog();
@@ -991,14 +918,8 @@ export function createGmSpawnPanel({
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
   function reset() {
-    for (const meta of pending.values()) {
-      clearPendingTimer(meta);
-      actionFeedback.cancel(meta.correlation);
-    }
-    pending.clear();
-    localTerminals.clear();
+    feed.reset();
     selectedVariants.clear();
-    authoritativeResults = [];
     palette = [];
     setArmed(null);
     if (exactX) exactX.value = '0';
@@ -1041,8 +962,7 @@ export function createGmSpawnPanel({
       boundMap.removeEventListener('navplacepreview', onPreview);
       boundMap = null;
     }
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    pending.clear();
+    feed.reset(false);
   }
 
   return {
@@ -1075,8 +995,8 @@ export function createGmSpawnPanel({
       dirty: draftDirty(),
       keepOpen: !!keepOpenBox?.checked,
       variants: Object.fromEntries(selectedVariants),
-      pending: pending.size,
-      authoritative: authoritativeResults.length,
+      pending: feed.size,
+      authoritative: feed.authoritativeCount,
       outcome: outcome(),
       ghost: { observer: ghostObserver ? ghostObserver.value : '', id: ghostIdValue() },
     }),

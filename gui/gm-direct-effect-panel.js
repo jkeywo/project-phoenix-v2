@@ -1,3 +1,4 @@
+import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
 /**
  * Direct damage and repair on the selected entity (issue #1310, PRD #930
  * milestone M2 Directing).
@@ -212,10 +213,6 @@ export function scopeIsDamageable(entity, scope) {
   return entityIsDamageable(entity) && !!gmEffectScopeTotals(entity, scope);
 }
 
-function entryKey(operatorId, correlation) {
-  return JSON.stringify([operatorId, correlation]);
-}
-
 /** Mount the direct damage/repair panel over injected page/transport seams. */
 export function createGmDirectEffectPanel({
   doc = globalThis.document,
@@ -271,12 +268,9 @@ export function createGmDirectEffectPanel({
   let scopeKey = 'entity';
   // What the picker's DOM currently shows, so an unchanged list is left alone.
   let renderedScopeSignature = null;
-  let authoritativeResults = [];
-  const pending = new Map();
-  const localTerminals = new Map();
   /** Presses this desk stopped waiting for, until the world answers them.
    *
-   * `localTerminals` cannot carry this: it is cleared on every `update()`, and
+   * The shared result feed cannot carry this: it is cleared on every `update()`, and
    * the projection pushes continuously. The world is slower than the local
    * timeout sometimes, and a press it TOOK is a press that finished — a draft
    * left open waiting for something that already happened is how the same
@@ -292,6 +286,20 @@ export function createGmDirectEffectPanel({
     ...(typeof correlation === 'function' ? { correlation } : {}),
     ...(typeof now === 'function' ? { now } : {}),
     capacity: boundedCapacity,
+  });
+
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: boundedCapacity, timeoutMs: boundedTimeoutMs,
+    schedule, cancelSchedule,
+    onLocalTerminal(meta, outcome) {
+      if (outcome === 'timed-out') {
+        abandoned.set(meta.correlation, meta);
+        while (abandoned.size > boundedCapacity) abandoned.delete(abandoned.keys().next().value);
+      }
+      paintFeedback(outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED, meta.entity);
+      renderLog();
+      refreshAdmission();
+    },
   });
 
   function operator() {
@@ -356,13 +364,6 @@ export function createGmDirectEffectPanel({
   function scopeText(chosen) {
     const name = scopeName(chosen);
     return gmEffectScopeLabel(t, chosen, name == null ? null : displayText(name));
-  }
-
-  function clearPendingTimer(meta) {
-    if (!meta || meta.timerScheduled !== true) return;
-    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
-    meta.timer = null;
-    meta.timerScheduled = false;
   }
 
   function appendRow(operatorId, correlationValue) {
@@ -442,20 +443,9 @@ export function createGmDirectEffectPanel({
   function renderLog() {
     if (!log) return;
     log.replaceChildren();
-    const authoritativeKeys = new Set();
-    for (const result of authoritativeResults) {
-      authoritativeKeys.add(entryKey(result.operator_id, result.correlation));
-      paintResultRow(result);
-    }
-    for (const [key, terminal] of localTerminals) {
-      if (!authoritativeKeys.has(key)) {
-        paintLocalRow(terminal, terminal.outcome, terminal.reason);
-      }
-    }
-    for (const meta of pending.values()) {
-      if (!authoritativeKeys.has(entryKey(meta.operatorId, meta.correlation))) {
-        paintLocalRow(meta, 'pending', null);
-      }
+    for (const { kind, value } of feed.entries()) {
+      if (kind === 'result') paintResultRow(value);
+      else paintLocalRow(value, kind === 'pending' ? 'pending' : value.outcome, kind === 'pending' ? null : value.reason);
     }
   }
 
@@ -623,41 +613,9 @@ export function createGmDirectEffectPanel({
     refreshAdmission();
   }
 
-  function rememberLocalTerminal(meta, outcome, reason) {
-    localTerminals.set(entryKey(meta.operatorId, meta.correlation), {
-      ...meta,
-      outcome,
-      reason,
-    });
-    while (localTerminals.size > boundedCapacity) {
-      localTerminals.delete(localTerminals.keys().next().value);
-    }
-  }
-
-  function finishLocalPending(correlationValue, outcome, reason) {
-    const meta = pending.get(correlationValue);
-    if (!meta) return false;
-    clearPendingTimer(meta);
-    pending.delete(correlationValue);
-    if (outcome === 'timed-out') {
-      abandoned.set(correlationValue, meta);
-      while (abandoned.size > boundedCapacity) {
-        abandoned.delete(abandoned.keys().next().value);
-      }
-    }
-    rememberLocalTerminal(meta, outcome, reason);
-    paintFeedback(
-      outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED,
-      meta.entity,
-    );
-    renderLog();
-    refreshAdmission();
-    return true;
-  }
-
   /** Whether this operator already has an unsettled press on the selection. */
   function hasPendingFor(entityId) {
-    for (const meta of pending.values()) {
+    for (const meta of feed.values()) {
       if (meta.entity === entityId) return true;
     }
     return false;
@@ -701,11 +659,7 @@ export function createGmDirectEffectPanel({
 
   function submitEffect(kind, current, entityId, amount, chosen) {
     if (operator()?.id !== current.id || hasPendingFor(entityId)) return false;
-    while (pending.size >= boundedCapacity) {
-      const oldest = pending.keys().next().value;
-      if (oldest === undefined) break;
-      finishLocalPending(oldest, 'timed-out', null);
-    }
+    feed.makeRoom();
     const press = actionFeedback.press(
       `${GM_EFFECT_ACTION_PREFIX}${kind}:${entityId}:${gmEffectScopeKey(chosen)}`,
     );
@@ -721,7 +675,7 @@ export function createGmDirectEffectPanel({
       timer: null,
       timerScheduled: false,
     };
-    pending.set(press.correlation, meta);
+    feed.track(meta);
     let accepted = false;
     try {
       accepted = typeof submitDirectEffect === 'function'
@@ -735,17 +689,7 @@ export function createGmDirectEffectPanel({
     } catch (_) {
       accepted = false;
     }
-    actionFeedback.pending(press.correlation);
-    if (!accepted) {
-      actionFeedback.settle(press.correlation, ACTION_FEEDBACK_STATE.REFUSED);
-      finishLocalPending(press.correlation, 'refused', LOCAL_INGRESS_REFUSAL);
-      return true;
-    }
-    meta.timerScheduled = true;
-    meta.timer = schedule(() => {
-      actionFeedback.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
-      finishLocalPending(meta.correlation, 'timed-out', null);
-    }, boundedTimeoutMs);
+    if (!feed.submitted(meta, accepted, LOCAL_INGRESS_REFUSAL)) return true;
     paintFeedback(ACTION_FEEDBACK_STATE.PENDING, meta.entity);
     renderLog();
     refreshAdmission();
@@ -825,34 +769,19 @@ export function createGmDirectEffectPanel({
     const results = parseGmEffectResults(payload);
     if (results === undefined) return false;
     let settled = false;
-    authoritativeResults = results.slice(-boundedCapacity);
-    localTerminals.clear();
-    for (const result of results) {
-      const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) {
-        // A press this desk gave up on, answered at last. Any terminal result
-        // answers it, so the memory goes either way; only one the world TOOK
-        // finishes the draft.
+    feed.replace(results, {
+      onSettled(meta, result, state) {
+        paintFeedback(state, meta.entity);
+        if (result.outcome !== 'refused') settled = true;
+      },
+      onUnmatched(result) {
         const gaveUp = abandoned.get(result.correlation);
         if (gaveUp && gaveUp.operatorId === result.operator_id) {
           abandoned.delete(result.correlation);
           if (result.outcome !== 'refused') settled = true;
         }
-        continue;
-      }
-      clearPendingTimer(meta);
-      pending.delete(result.correlation);
-      const state = result.outcome === 'refused'
-        ? ACTION_FEEDBACK_STATE.REFUSED
-        : ACTION_FEEDBACK_STATE.APPLIED;
-      actionFeedback.settle(result.correlation, state);
-      paintFeedback(state, meta.entity);
-      // Only a press the world TOOK finishes the draft. A refusal — a stale
-      // selection, a scope that tracks nothing, a hull already at zero — leaves
-      // it open with its numbers and its reason on screen, which is the whole
-      // point of composing them in a panel of their own.
-      if (result.outcome !== 'refused') settled = true;
-    }
+      },
+    });
     if (settled) {
       composedSincePress = false;
       onSucceeded();
@@ -864,14 +793,8 @@ export function createGmDirectEffectPanel({
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
   function reset() {
-    for (const meta of pending.values()) {
-      clearPendingTimer(meta);
-      actionFeedback.cancel(meta.correlation);
-    }
-    pending.clear();
-    localTerminals.clear();
+    feed.reset();
     abandoned.clear();
-    authoritativeResults = [];
     composedSincePress = false;
     selected = null;
     scopeKey = 'entity';
@@ -886,8 +809,7 @@ export function createGmDirectEffectPanel({
     if (healButton) healButton.removeEventListener('click', onHealClick);
     if (amountInput) amountInput.removeEventListener('input', onAmountInput);
     if (scopeSelect) scopeSelect.removeEventListener('change', onScopeChange);
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    pending.clear();
+    feed.reset(false);
     abandoned.clear();
   }
 
@@ -920,8 +842,8 @@ export function createGmDirectEffectPanel({
       scope: gmEffectScopeKey(scope()),
       scopeDamageable: scopeIsDamageable(selected, scope()),
       amountMilliHp: requestedMilliHp(),
-      pending: pending.size,
-      authoritative: authoritativeResults.length,
+      pending: feed.size,
+      authoritative: feed.authoritativeCount,
     }),
     destroy,
     /** The shared complex-action contract (issue #1511).
@@ -932,7 +854,7 @@ export function createGmDirectEffectPanel({
      * belongs to the map and the inspector, and asking to discard a draft
      * because a different hull is selected would prompt on every close nobody
      * typed into. */
-    draftDirty: () => pending.size > 0
+    draftDirty: () => feed.size > 0
       || (composedSincePress
         && (scopeKey !== 'entity' || (!!amountInput && amountInput.value !== defaultAmount))),
     /** `keepReusable` is the shared rule Spawn set: after a press the world

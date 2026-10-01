@@ -38,7 +38,17 @@ const COMBAT_TEST = 'assets/worlds/combat_test.toml';
 /** Boot combat_test to a live, drawing viewscreen with a Helm client readied so
  *  the game is InProgress (`apply_camera_shake` is gated on it). Mirrors the
  *  SwiftShader + hidden-webdriver recipe `viewscreen.render.spec.js` uses. */
-async function bootViewscreen(context) {
+async function bootViewscreen(context, { holdModelsUntilStart = false } = {}) {
+  let releaseModels;
+  if (holdModelsUntilStart) {
+    // Exercise the Loading path deterministically, without a timed sleep.
+    // The countdown can finish while these model requests are outstanding.
+    const modelsReady = new Promise(resolve => { releaseModels = resolve; });
+    await context.route('**/assets/models/**', async route => {
+      await modelsReady;
+      await route.continue();
+    });
+  }
   const page = await context.newPage();
 
   // The machine says nothing about motion: every effect below is then decided
@@ -78,12 +88,22 @@ async function bootViewscreen(context) {
   await captain.send('SetReady', { ready: true });
   await helm.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 60_000);
+  await page.bringToFront();
+  if (releaseModels) {
+    await page.waitForFunction(() => window.__saveSlotsPhase === 'Loading');
+    releaseModels();
+  }
+  // GameStarted announces the countdown ending, which can enter Loading.
+  // Commands are admitted only in InProgress; wait for that host projection
+  // before sending this one-shot command, especially under SwiftShader.
+  await page.waitForFunction(() => window.__saveSlotsPhase === 'InProgress', undefined, {
+    timeout: 180_000,
+  });
   await captain.send('ControlSystem', {
     target: 'red-alert',
     payload: { type: 'SetRedAlert', data: { active: true } },
   });
   await expect(page.locator('#hud-overlay')).toHaveClass(/alert-on/);
-  await page.bringToFront();
 
   await page.waitForFunction(
     () => !/Preparing scenario|Loading…/.test(document.body.innerText),
@@ -174,7 +194,7 @@ test.describe('the viewscreen’s three effects are set separately', () => {
   test.describe.configure({ timeout: 480_000 });
 
   test('default: every effect at full, and the combination is captured', async ({ context }, testInfo) => {
-    const { page, helm } = await bootViewscreen(context);
+    const { page, helm } = await bootViewscreen(context, { holdModelsUntilStart: true });
 
     // Nothing chosen on this endpoint and nothing asked for by the machine:
     // both intensities resolve to full and are published as such.

@@ -2200,6 +2200,18 @@ pub fn encode_fleet_continuation_status(
     serde_json::to_string(value).map_err(|error| error.to_string())
 }
 
+/// Private native Workshop presentation; not a simulation or crew message.
+pub fn encode_workshop_test_presentation(
+    value: &crate::workshop::test_protocol::TestPresentation,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| e.to_string())
+}
+pub fn decode_workshop_test_presentation(
+    value: &[u8],
+) -> Result<crate::workshop::test_protocol::TestPresentation, String> {
+    serde_json::from_slice(value).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod mesh_frame_tests {
     use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
@@ -3001,16 +3013,4 @@ mod mesh_frame_tests {
             );
         }
     }
-}
-
-/// Private native Workshop presentation; not a simulation or crew message.
-pub fn encode_workshop_test_presentation(
-    value: &crate::workshop::test_protocol::TestPresentation,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_test_presentation(
-    value: &[u8],
-) -> Result<crate::workshop::test_protocol::TestPresentation, String> {
-    serde_json::from_slice(value).map_err(|e| e.to_string())
 }

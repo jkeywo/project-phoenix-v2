@@ -4202,10 +4202,11 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         .iter(world)
         .map(
             |(uuid, entity, physics, hull, alert, stances, control_sources)| {
-                let navigation = context
-                    .navigation
-                    .then(|| capture_navigation_continuation(entity))
-                    .unwrap_or_default();
+                let navigation = if context.navigation {
+                    capture_navigation_continuation(entity)
+                } else {
+                    Default::default()
+                };
                 let (weapons, repair, blackboards, patrol_cursors) = if context.machines {
                     capture_weapons_and_repair(entity)
                 } else {

@@ -3,7 +3,7 @@ title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
 sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-09-28
+updated: 2026-10-01
 ---
 
 # Build & Deployment
@@ -42,21 +42,29 @@ build enforce that the committed `gui/debug-surfaces.generated.js` agrees.
 
 ## CI workflows
 
-- **`.github/workflows/ci.yml`** runs eleven jobs on pushes to and pull requests
-  against `main`: `pasm`, `test`, `viewer-test`, `boundary`, `build`,
-  `editor-test`, `smoke`, `native-build`, `perf`, `balance`, and `deploy`.
-  The first six independent jobs plus `native-build` start in parallel.
+- **`.github/workflows/ci.yml`** runs on pushes to and pull requests against
+  `main`, daily at 03:17 UTC, and on manual dispatch. The `changes` job uses
+  `scripts/ci-schedule.cjs` to skip scheduled testing when an earlier scheduled
+  or manual full run already attempted the same commit, regardless of outcome.
+  Explicit manual runs always proceed, including retries after cancellation. GitHub
+  still starts the small decision job each day, but unchanged commits start
+  no test or build jobs.
+- Pushes and ordinary PRs run the core smoke tier. Scheduled and manual runs
+  run the full smoke suite plus `native-build`, `perf`, and `balance`; the
+  `smoke-full` PR label also selects full smoke coverage.
 - `pasm` validates/scans the design model and uploads traceability reports.
-  `test` owns formatting, workspace Clippy, the headless-enabled native suite,
-  demo-build gates, and native feature-binary compile checks. `viewer-test`
+  `test` owns formatting, workspace Clippy, and native library/doc tests;
+  `native-integration-test` runs the integration binaries. `demo-test` and
+  `tooling-build` cover the demo configuration and native tooling. `viewer-test`
   executes the shared Workshop preview renderer suite, while `boundary` proves
   the simulation and isolated preview renderer compile without the presentation feature.
 - `build` produces the release WASM and pure-JS client artifact independently
   of `test`; `smoke` consumes that artifact. `native-build` produces the shared
   release binaries consumed by the warnings-only `perf` report and the balance
   batches. `balance` keeps the ratified Cruiser matrix gating. `deploy` runs
-  only for a push to `main` and requires `test`, `build`, `editor-test`,
-  `smoke`, `viewer-test`, and `boundary`; `perf` and `balance` do not gate the
+  only for a push to `main` and requires `test`, `native-integration-test`,
+  `build`, `editor-test`, `smoke`, `viewer-test`, `demo-test`, `tooling-build`,
+  and `boundary`; `perf` and `balance` do not gate the
   dev deployment.
 
 The Playwright smoke suite has two projects. Its ordinary message/DOM project

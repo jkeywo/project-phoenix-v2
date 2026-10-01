@@ -2306,15 +2306,19 @@ test('real damage and destruction stay ordered bounded and selectable after remo
   // one explicit operation that restores both defaults.
   await page.selectOption('#gm-activity-category-filter', 'damage');
   await page.selectOption('#gm-activity-ship-filter', liveVictim.id);
-  expect(await page.locator('.gm-activity-entry').evaluateAll((rows, uuid) => (
-    rows.length > 0 && rows.every((row) => {
-      const state = window.__hostGmActivityState();
+  // Query the DOM and the bounded feed in one browser evaluation. evaluateAll
+  // obtains node handles before evaluating them; a live tick can evict those
+  // rows in between, comparing detached old rows with a newer feed.
+  expect(await page.evaluate((uuid) => {
+    const rows = [...document.querySelectorAll('.gm-activity-entry')];
+    const state = window.__hostGmActivityState();
+    return rows.length > 0 && rows.every((row) => {
       const entry = state.entries.find((candidate) => String(candidate.tick) === row.dataset.tick
         && candidate.category === row.dataset.category
         && candidate.ships.some((ship) => ship.entity_id === uuid));
       return row.dataset.category === 'damage' && Boolean(entry);
-    })
-  ), liveVictim.id)).toBe(true);
+    });
+  }, liveVictim.id)).toBe(true);
   await page.click('#gm-activity-clear-filters');
   expect(await page.evaluate(() => ({
     category: document.getElementById('gm-activity-category-filter').value,

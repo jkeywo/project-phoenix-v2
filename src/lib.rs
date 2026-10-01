@@ -191,6 +191,8 @@ pub mod modifiers;
 /// that turn Objective / deadline / beat / Comms / marked-entity transitions
 /// into `core::narrative::NarrativeEvent`s for the headless run report.
 pub mod narrative;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native_file;
 pub mod objective_instances;
 pub mod objectives;
 pub mod radar;

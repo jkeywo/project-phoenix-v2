@@ -93,7 +93,7 @@ impl NativeOperators {
                                 // Backup and replacement are one atomic private write.
                                 // An unwritable preference directory cannot disable the desk.
                                 if let Err(error) =
-                                    super::super::layout_store::write_atomically(&path, &profile)
+                                    crate::native_file::write_preferences(&path, &profile)
                                 {
                                     bevy::log::warn!(
                                         "Could not persist GM layout migration: {error}"
@@ -125,7 +125,7 @@ impl NativeOperators {
                         let path = self
                             .path(name)
                             .ok_or_else(|| "Profile storage is unavailable".to_owned())?;
-                        super::super::layout_store::write_atomically(&path, &profile)
+                        crate::native_file::write_preferences(&path, &profile)
                             .map_err(|e| e.to_string())
                     });
                 if let Err(error) = result {
@@ -1588,7 +1588,7 @@ mod tests {
         let old = json!({"kind":"project-phoenix/operator-profile", "version":1,
             "liveLayout":layout, "gmDensity":"touch",
             "accessibility":{"presentation":{"textScale":1.25}}});
-        super::super::super::layout_store::write_atomically(&path, &old.to_string()).unwrap();
+        crate::native_file::write_preferences(&path, &old.to_string()).unwrap();
         let request = r#"{"type":"NativeOperator","operation":"load"}"#;
         assert!(state.handle(PaneId(1), "desk", request));
         let first = std::fs::read_to_string(&path).unwrap();
@@ -2370,7 +2370,7 @@ mod tests {
             ..Default::default()
         };
         let path = state.path("helm").unwrap();
-        super::super::super::layout_store::write_atomically(&path, "corrupt").unwrap();
+        crate::native_file::write_preferences(&path, "corrupt").unwrap();
         state.handle(
             PaneId(1),
             "helm",

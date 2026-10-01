@@ -48,7 +48,7 @@
 //!    developer's own display settings. Exactly [`super::layout_store`]'s shape,
 //!    for exactly its reason.
 //! 2. **A write is atomic**, through the same
-//!    [`super::layout_store::write_atomically`] the saved bridge layouts use: a
+//!    [`crate::native_file::write_preferences`] the saved bridge layouts use: a
 //!    host killed mid-write leaves the old settings or the new ones, never half
 //!    a TOML file that the next boot reports as corrupt.
 //! 3. **A saved file is never trusted.** [`ViewscreenPresentationStore::load`]
@@ -487,7 +487,7 @@ impl ViewscreenPresentationStore {
             table.insert("audio".into(), audio);
         }
         let text = toml::to_string(&table).map_err(std::io::Error::other)?;
-        super::layout_store::write_atomically(&path, &text)
+        crate::native_file::write_preferences(&path, &text)
     }
 }
 

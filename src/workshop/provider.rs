@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -1009,26 +1008,12 @@ fn remove_optional(path: &Path) -> Result<(), String> {
         Err(error) => Err(io_error(error)),
     }
 }
-// Host-local temporary filename, never a simulation entity or replay identity.
-#[allow(clippy::disallowed_methods)]
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path.parent().ok_or("Missing Workshop parent directory")?;
-    fs::create_dir_all(parent).map_err(io_error)?;
-    let temporary = parent.join(format!(".phoenix-workshop-{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(io_error)?;
-        file.write_all(bytes).map_err(io_error)?;
-        file.sync_all().map_err(io_error)?;
-        fs::rename(&temporary, path).map_err(io_error)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
+    if path.parent().is_none() {
+        return Err("Missing Workshop parent directory".into());
     }
-    result
+    crate::native_file::replace(path, bytes, crate::native_file::TemporaryPolicy::Workshop)
+        .map_err(io_error)
 }
 
 #[cfg(test)]

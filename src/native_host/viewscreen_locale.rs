@@ -44,7 +44,7 @@ impl ViewscreenLocaleStore {
             locale: locale.to_owned(),
         })
         .map_err(std::io::Error::other)?;
-        super::layout_store::write_atomically(&self.path(), &text)
+        crate::native_file::write_preferences(&self.path(), &text)
     }
 }
 

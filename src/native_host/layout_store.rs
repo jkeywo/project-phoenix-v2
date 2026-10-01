@@ -23,7 +23,7 @@
 //!    beside the target, flushes it to the device, and renames it over the top —
 //!    so a host killed mid-write leaves either the old layout or the new one,
 //!    never half a TOML file that the next boot then reports as corrupt. See
-//!    [`write_atomically`] for what that means on Windows specifically.
+//!    [`write_preferences`] for what that means on Windows specifically.
 //! 3. **A saved layout is never trusted.** [`LayoutStore::load`] parses *and*
 //!    re-validates, and hands back a [`ValidatedProfile`] — the same type
 //!    [`BridgeLayout::adopt_profile`] takes from a hand-authored `--profile`,
@@ -116,7 +116,7 @@
 //! nothing and is unreachable from the shipped path — which is precisely the
 //! property worth pinning with a test.
 
-use std::io::Write as _;
+use crate::native_file::{names_a_temporary, write_preferences};
 use std::path::{Path, PathBuf};
 
 use super::bridge_layout::BridgeLayout;
@@ -135,11 +135,11 @@ pub const LAYOUTS_DIR: &str = "bridge-layouts";
 /// `--profile`.
 pub const LAYOUT_EXTENSION: &str = "toml";
 
-/// The extension [`write_atomically`]'s in-flight temporary carries, at the end
+/// The extension [`write_preferences`]'s in-flight temporary carries, at the end
 /// of the `<file name>.<process id>.tmp` shape
 /// [`LayoutStore::sweep_temporaries`] clears. Named once so the writer and the
 /// sweeper cannot drift apart and leave debris nothing collects.
-pub const TEMP_EXTENSION: &str = "tmp";
+pub use crate::native_file::TEMP_EXTENSION;
 
 // ── the class key ───────────────────────────────────────────────────────────
 
@@ -329,7 +329,7 @@ impl LayoutStore {
                 path: path.display().to_string(),
                 source,
             })?;
-        write_atomically(&path, &text).map_err(|e| LayoutStoreError::Write {
+        write_preferences(&path, &text).map_err(|e| LayoutStoreError::Write {
             path: path.display().to_string(),
             detail: e.to_string(),
         })?;
@@ -394,7 +394,7 @@ impl LayoutStore {
     /// Remove the `*.tmp` siblings a hard-killed host left in this directory,
     /// answering what was removed.
     ///
-    /// [`write_atomically`] removes its own temporary on either failure, so an
+    /// [`write_preferences`] removes its own temporary on either failure, so an
     /// *ordinary* failed save leaves nothing behind. This is for the case
     /// nothing runs to clean up after: a power cut, a taskbar close or a
     /// `SIGKILL` landing between the create and the rename. The directory is one
@@ -547,82 +547,6 @@ fn reservations(layout: &BridgeLayout) -> Vec<String> {
         .iter()
         .flat_map(|m| layout.reserved_on(m))
         .collect()
-}
-
-/// Write `contents` to `path` so that a reader never sees a partial file.
-///
-/// Temp-then-rename: the bytes go to a sibling temporary, are flushed to the
-/// device with `sync_all`, and the temporary is renamed over the target. A
-/// process killed at any point leaves either the previous file intact or the new
-/// one complete — the failure mode this avoids is a host crashing mid-save and
-/// the *next* boot finding half a TOML file, which would read as "your saved
-/// layout is corrupt" for a bridge that was fine.
-///
-/// # Windows
-///
-/// `std::fs::rename` is `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`, so
-/// unlike a bare `MoveFile` it does replace an existing destination, and within
-/// one volume it is the closest thing Windows offers to a POSIX `rename`. Two
-/// consequences are worth stating rather than discovering:
-///
-///  * It can fail with a sharing violation while another process holds the
-///    destination open — an editor, an indexer, a virus scanner. That surfaces
-///    as an ordinary [`LayoutStoreError::Write`]; the **previous file is
-///    untouched**, which is the whole point, and the next accepted change tries
-///    again.
-///  * The temporary carries this process's id, so two hosts saving the same
-///    class at the same moment cannot write each other's temporary. Last writer
-///    wins on the target, which is the right answer for a per-user setting.
-///
-/// The temporary is removed on either failure, so a store that has been failing
-/// to save does not fill with debris. A **hard** kill between the create and the
-/// rename does leave one, because nothing runs at all — that is what
-/// [`LayoutStore::sweep_temporaries`] is for, and why the claim above is about
-/// an ordinary failure rather than about every one.
-pub(crate) fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let stem = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "layout".to_string());
-    // `<file name>.<process id>.tmp`. `names_a_temporary` is the reader of this
-    // shape and the two are a pair — see [`LayoutStore::sweep_temporaries`].
-    let temp = dir.join(format!("{stem}.{}.{TEMP_EXTENSION}", std::process::id()));
-
-    let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temp)?;
-        file.write_all(contents.as_bytes())?;
-        file.sync_all()
-    };
-    if let Err(e) = write() {
-        let _ = std::fs::remove_file(&temp);
-        return Err(e);
-    }
-    if let Err(e) = std::fs::rename(&temp, path) {
-        let _ = std::fs::remove_file(&temp);
-        return Err(e);
-    }
-    Ok(())
-}
-
-/// Whether `name` is a temporary [`write_atomically`] left behind:
-/// `<file name>.<process id>.`[`TEMP_EXTENSION`].
-///
-/// The pid component is required, and required to be digits, so that this
-/// matches the writer's own output and nothing else. An operator's `notes.tmp`
-/// or `old.toml.tmp` in the same directory is not debris this wrote and is not
-/// debris this deletes — see [`LayoutStore::sweep_temporaries`]. The pid is not
-/// checked against a *live* process: the whole point is that the host which
-/// wrote it is gone, and a pid is reused.
-fn names_a_temporary(name: &str) -> bool {
-    let Some(rest) = name.strip_suffix(&format!(".{TEMP_EXTENSION}")) else {
-        return false;
-    };
-    let Some((stem, pid)) = rest.rsplit_once('.') else {
-        return false;
-    };
-    !stem.is_empty() && !pid.is_empty() && pid.chars().all(|c| c.is_ascii_digit())
 }
 
 // ── failures ────────────────────────────────────────────────────────────────

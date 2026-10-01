@@ -1,8 +1,8 @@
-//! Hardware routing uses bridge-media vocabulary; mix is an endpoint preference.
+use crate::native_file::write_preferences;
+// Hardware routing uses bridge-media vocabulary; mix is an endpoint preference.
 use super::super::{
     bridge_media::{validate_media, MediaSurfaceEntry, ValidatedMedia},
     bridge_profile::BridgeProfile,
-    layout_store::write_atomically,
 };
 use std::path::PathBuf;
 
@@ -38,7 +38,7 @@ impl HardwareStore {
     pub fn save(&self, profile: &BridgeProfile) -> Result<(), String> {
         validate_media(&profile.media).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        write_atomically(&self.path(), &profile.to_toml().map_err(|e| e.to_string())?)
+        write_preferences(&self.path(), &profile.to_toml().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())
     }
 }

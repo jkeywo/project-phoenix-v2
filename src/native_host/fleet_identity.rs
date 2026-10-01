@@ -62,7 +62,7 @@ impl NativeFleetIdentityStore {
         };
         let raw = serde_json::to_string(identity)
             .map_err(|error| format!("cannot encode native fleet identity: {error}"))?;
-        super::layout_store::write_atomically(&path, &raw)
+        crate::native_file::write_preferences(&path, &raw)
             .map_err(|error| format!("cannot save native fleet identity: {error}"))
     }
 

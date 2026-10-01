@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evaluateFleetDigests } from './fleet-digest-evidence.mjs';
 // Real mixed fleet: two browser ships, two native ships, one GM in each runtime.
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -100,13 +101,15 @@ export function mixedOutcome(browserRows,events,{route,digestAfter,commandWaves=
     }
   }
   need(browser['gm-1']?.state?.mixedGmActions?.length===2,'gm-1: pause/resume observations incomplete');
-  const ticks=new Map();let conflict=false;
-  const record=(id,d)=>{if(!Number.isSafeInteger(d?.tick)||d.tick<=0||typeof d.digest!=='string'||!d.digest){reasons.push(id+': malformed outgoing digest');return;}if(!ticks.has(d.tick))ticks.set(d.tick,new Map());const m=ticks.get(d.tick);if(m.has(id)&&m.get(id)!==d.digest)conflict=true;m.set(id,d.digest);};
-  for(const id of browserIds)for(const row of browser[id]?.state?.mixedDigests||[])if(row.at>digestAfter)record(id,row.value);
-  for(const id of nativeIds)for(const row of events[id]||[])if(row.kind==='digest'&&row.at>digestAfter)record(id,row.value);
-  const commonDigests=[...ticks].filter(([,v])=>v.size===6).map(([tick,v])=>({tick,byPeer:Object.fromEntries(v),agreed:new Set(v.values()).size===1}));
-  need(commonDigests.length>=2&&!conflict&&commonDigests.every(d=>d.agreed),'Two matching post-workload six-peer digests not observed');
-  return {passed:!reasons.length,reasons,native,stations,nativeGm:{operator,requests:requests.length,applied:applied.size},commonDigests};
+  const checkpoints = evaluateFleetDigests([
+    ...browserIds.map(label => ({ label, slot: browser[label]?.state?.mesh?.slot,
+      frames: (browser[label]?.state?.mixedDigests || []).map(row => ({ t: 'digest', d: row.value, at: row.at })) })),
+    ...nativeIds.map(label => ({ label, slot: native[label]?.localSlot,
+      frames: (events[label] || []).filter(row => row.kind === 'digest').map(row => ({ t: 'digest', d: row.value, at: row.at })) })),
+  ], { afterTime: digestAfter });
+  const commonDigests = checkpoints.common;
+  need(checkpoints.passed, 'Two matching post-workload six-peer digests not observed');
+  return {passed:!reasons.length,reasons,native,stations,nativeGm:{operator,requests:requests.length,applied:applied.size},commonDigests,digestFindings:{malformed:checkpoints.malformed,conflicts:checkpoints.conflicts}};
 }
 // Observe the actual outbound digest return value without draining additional frames.
 export function observeMixedDigests(){

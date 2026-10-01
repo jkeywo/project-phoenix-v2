@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { evaluateFleetDigests } from './fleet-digest-evidence.mjs';
 // Real mixed-runtime failure observations; native facts retain their actual source.
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -29,21 +30,6 @@ export function browserRecoveryPeer(row) {
   return {...row,runtime:'browser',slot:row.mesh?.slot,adopted:row.mesh?.in_fleet===true,
     recovery:row.mesh?.recovery,controlFrames:row.frames?.filter(frame=>frame.t!=='digest')||[]};
 }
-function agreement(peers, afterTick) {
-  const ticks=new Map();let malformed=false,contradictory=false;
-  for(const peer of peers)for(const frame of peer.frames||[]) {
-    if(frame.t!=='digest')continue;
-    const d=frame.d;
-    if(d?.from!==peer.slot||!integer(d.tick)||typeof d.digest!=='string'||!/^[0-9a-f]{16}$/.test(d.digest)){malformed=true;continue;}
-    if(d.tick<=afterTick)continue;
-    if(!ticks.has(d.tick))ticks.set(d.tick,new Map());
-    const checkpoint=ticks.get(d.tick);
-    if(checkpoint.has(peer.label)&&checkpoint.get(peer.label)!==d.digest)contradictory=true;
-    checkpoint.set(peer.label,d.digest);
-  }
-  const common=[...ticks].filter(([,values])=>values.size===peers.length).map(([tick,values])=>({tick,byPeer:Object.fromEntries(values),agreed:new Set(values.values()).size===1}));
-  return {common,malformed,contradictory,passed:peers.length>0&&!malformed&&!contradictory&&common.length>=2&&common.every(row=>row.agreed)};
-}
 export function mixedRecoveryOutcome(evidence) {
   const before=evidence.before||[],after=evidence.after||[],victim=evidence.victim;
   const expected=before.filter(peer=>peer.label!==victim?.label);
@@ -60,13 +46,13 @@ export function mixedRecoveryOutcome(evidence) {
   need(after.every(peer=>peer.runtime!=='browser'||(peer.phase==='InProgress'&&peer.mesh?.tick>Math.max(evidence.atTick,lossTick||0)+30
     &&peer.mesh.peers.length===4&&!peer.mesh.peers.includes(victim.slot))),'browser survivors did not resume with the five-peer wait set');
   if(evidence.failure==='leader')need(after.every(peer=>peer.continuation?.status==='committed'&&peer.continuation.loss_tick===lossTick),'owner continuation commit missing');
-  const checkpoints=agreement(after,Math.max(evidence.atTick,lossTick||0));
+  const checkpoints=evaluateFleetDigests(after, { afterTick: Math.max(evidence.atTick,lossTick||0) });
   need(checkpoints.passed,'two exact matching post-loss digest checkpoints required');
   const duplicateOrders=[];
   for(const peer of after){const seen=new Set();for(const command of peer.commands||[]){const key=JSON.stringify([command.origin,command.seq]);if(seen.has(key))duplicateOrders.push({peer:peer.label,key});seen.add(key);}}
   need(!duplicateOrders.length,'duplicate outgoing command orders');
   need(after.every(peer=>!peer.overflow&&!peer.errors?.length),'runtime/observer failure');
-  return {passed:!reasons.length,reasons,lossTick,backfillApplicable:ship,commonDigests:checkpoints.common,duplicateOrders,
+  return {passed:!reasons.length,reasons,lossTick,backfillApplicable:ship,commonDigests:checkpoints.common,digestFindings:{malformed:checkpoints.malformed,conflicts:checkpoints.conflicts},duplicateOrders,
     limits:['Command uniqueness observes production egress orders; it does not independently count every simulation side effect']};
 }
 export function mixedReplacementOutcome(evidence) {
@@ -82,7 +68,7 @@ export function mixedReplacementOutcome(evidence) {
     &&r.result===(peer===replacement?'recovered':peer.slot===restore?.leader?'led':'witnessed');}),'replacement boundary not agreed');
   const claims=after.flatMap(peer=>(peer.controlFrames||[]).filter(frame=>frame.t==='slot-claim').map(frame=>({observer:peer.slot,...frame.d})));
   need(claims.length===1&&claims[0].slot===evidence.victim.slot&&claims[0].from===claims[0].observer&&claims[0].claim_seq===restore?.claim_seq,'exactly one authoritative slot claim required');
-  const checkpoints=agreement(after,Math.max(boundary??Infinity,evidence.challengeTick||0));need(checkpoints.passed,'replacement digest agreement missing');
+  const checkpoints=evaluateFleetDigests(after, { afterTick: Math.max(boundary??Infinity,evidence.challengeTick||0) });need(checkpoints.passed,'replacement digest agreement missing');
   const oldShips=new Set(evidence.before.find(peer=>peer.label===evidence.victim.label)?.commands?.map(row=>row.ship));
   need(oldShips.size===1&&replacement?.commands?.some(row=>row.tick>boundary&&oldShips.has(row.ship)),'restored ship entity identity unobserved');
   const duplicateOrders=[];
@@ -103,7 +89,7 @@ export function mixedReplacementOutcome(evidence) {
       'connected holder challenge was not refused');
     need(replacement?.routes?.includes('ws-relay'),'native replacement relay route unobserved');
   }
-  return {passed:!reasons.length,reasons,boundary,duplicateOrders,commonDigests:checkpoints.common,
+  return {passed:!reasons.length,reasons,boundary,duplicateOrders,commonDigests:checkpoints.common,digestFindings:{malformed:checkpoints.malformed,conflicts:checkpoints.conflicts},
     limits:evidence.raceRequired?[]:['One native replacement only; no simultaneous claim race evidence']};
 }
 export function mixedFailureHook(failure,{faultSeconds=90,nativeLabels=nativeIds}={}) {
@@ -174,7 +160,7 @@ export function mixedDivergenceOutcome(evidence) {
     &&restore?.result==='recovered'&&integer(boundary)&&boundary>evidence.injected.tick,'native GM divergence restore missing');
   need(after.every(peer=>{const r=peer.recovery?.divergence;return r?.boundary_tick===boundary&&r.leader===restore?.leader
     &&r.result===(peer===victim?'recovered':peer.slot===restore?.leader?'led':'witnessed');}),'divergence boundary not agreed');
-  const exact=agreement(after,boundary??Infinity);need(exact.passed,'two exact matching post-restore checkpoints required');
+  const exact=evaluateFleetDigests(after, { afterTick: boundary??Infinity });need(exact.passed,'two exact matching post-restore checkpoints required');
   const identities=before.filter(peer=>peer.label.startsWith('ship-')).map(peer=>({label:peer.label,ships:[...new Set((peer.commands||[]).map(row=>row.ship))]}));
   need(identities.length===4&&identities.every(identity=>identity.ships.length===1&&after.find(peer=>peer.label===identity.label)?.commands?.some(row=>row.tick>boundary&&row.ship===identity.ships[0])),'post-restore original ship controls missing');
   const duplicateOrders=[];
@@ -182,7 +168,7 @@ export function mixedDivergenceOutcome(evidence) {
   need(!duplicateOrders.length,'duplicate outgoing command orders');
   need(directEffectOutcome(evidence),'one continuously witnessed actual effect required');
   need(after.every(peer=>!peer.errors?.length&&!peer.overflow),'runtime/observer failure');
-  return {passed:!reasons.length,reasons,boundary,commonDigests:exact.common,duplicateOrders};
+  return {passed:!reasons.length,reasons,boundary,commonDigests:exact.common,digestFindings:{malformed:exact.malformed,conflicts:exact.conflicts},duplicateOrders};
 }
 export function mixedDivergenceHook({faultSeconds=600,nativeLabels=nativeIds}={}) {
   return async({result,peers,clients=[],step,wait,deadline,evaluate,commandNative,commandGm})=>{

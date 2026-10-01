@@ -1,3 +1,4 @@
+import { evaluateFleetDigests } from './fleet-digest-evidence.mjs';
 // Bounded all-native GM socket recovery. Only the transport socket is closed.
 import { nativeRecoveryPeer } from './fleet-mixed-recovery.mjs';
 const labels=['ship-1','ship-2','ship-3','ship-4','gm-1','gm-2'];
@@ -29,16 +30,9 @@ export function nativeGmRedialOutcome(e) {
   need(losses.length===5&&positive(lossTick)&&losses.every(rows=>rows.length===1&&rows[0].tick===lossTick)
     &&lossTick<=commit?.tick,'five survivors must agree one prior HostLoss');
   need(e.resume?.accepted===true&&e.resumeApplied===true,'explicit post-commit Resume must apply');
-  const ticks=new Map();let malformed=false,contradictory=false;
-  for(const peer of after)for(const frame of peer.frames||[]) {
-    const d=frame.d;if(frame.t!=='digest'||d.tick<=Math.max(e.atTick||0,commit?.tick||Infinity))continue;
-    if(d.from!==peer.slot||!positive(d.tick)||typeof d.digest!=='string'||!/^[0-9a-f]{16}$/.test(d.digest)){malformed=true;continue;}
-    if(!ticks.has(d.tick))ticks.set(d.tick,new Map());const rows=ticks.get(d.tick);
-    if(rows.has(peer.label)&&rows.get(peer.label)!==d.digest)contradictory=true;
-    rows.set(peer.label,d.digest);
-  }
-  const common=[...ticks].filter(([,rows])=>rows.size===6).map(([tick,rows])=>({tick,byPeer:Object.fromEntries(rows),agreed:new Set(rows.values()).size===1}));
-  need(!malformed&&!contradictory&&common.length>=2&&common.every(row=>row.agreed),'two exact post-commit digest checkpoints required');
+  const checkpoints = evaluateFleetDigests(after, { afterTick: Math.max(e.atTick || 0, commit?.tick || Infinity) });
+  const common = checkpoints.common;
+  need(checkpoints.passed,'two exact post-commit digest checkpoints required');
   const duplicates=[];
   for(const peer of after){const seen=new Set();for(const command of peer.commands||[]){const key=JSON.stringify([command.origin,command.seq]);if(seen.has(key))duplicates.push({peer:peer.label,key});seen.add(key);}}
   need(!duplicates.length,'duplicate outgoing command orders');
@@ -47,7 +41,7 @@ export function nativeGmRedialOutcome(e) {
     return ids.size===1&&after.find(row=>row.label===peer.label)?.commands?.some(row=>row.tick>commit?.tick&&ids.has(row.ship));
   }),'original ship identities must remain in fresh controls');
   need(after.every(peer=>!peer.errors?.length),'runtime observer failure');
-  return {passed:!reasons.length,reasons,lossTick,commit,commonDigests:common,duplicateOrders:duplicates};
+  return {passed:!reasons.length,reasons,lossTick,commit,commonDigests:common,digestFindings:{malformed:checkpoints.malformed,conflicts:checkpoints.conflicts},duplicateOrders:duplicates};
 }
 export function nativeGmRedialHook({faultSeconds=600}={}) {
   if(!positive(faultSeconds)||faultSeconds>600)throw new Error('Invalid redial deadline');

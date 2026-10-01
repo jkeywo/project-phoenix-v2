@@ -1,3 +1,4 @@
+import { evaluateFleetDigests } from './fleet-digest-evidence.mjs';
 // #1534 real-browser fixed-slot replacement race, plugged into afterHealthy.
 // This helper observes production Rust egress and drives the public host action.
 // Fixture tests of its evidence gate are not runtime acceptance evidence.
@@ -22,22 +23,6 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const slotsOf = rows => rows.map(row => row.mesh?.slot).sort((a, b) => a - b);
 const admitted = (row, slot) => row?.fleet?.open === true && row.mesh?.in_fleet === true && row.mesh.slot === slot;
 const refused = row => row?.fleet?.open === false && row.fleet.reason === 'slot-taken' && row.mesh?.in_fleet === false;
-
-function checkpoints(peers, afterTick) {
-  const ticks = new Map();
-  let contradictory = false;
-  for (const peer of peers) for (const frame of peer.frames || []) {
-    if (frame.t !== 'digest' || frame.d?.from !== peer.mesh?.slot || !integer(frame.d.tick) || frame.d.tick <= afterTick) continue;
-    if (typeof frame.d.digest !== 'string' || !/^[0-9a-f]{16}$/.test(frame.d.digest)) { contradictory = true; continue; }
-    if (!ticks.has(frame.d.tick)) ticks.set(frame.d.tick, new Map());
-    const row = ticks.get(frame.d.tick);
-    if (row.has(peer.label) && row.get(peer.label) !== frame.d.digest) contradictory = true;
-    row.set(peer.label, frame.d.digest);
-  }
-  const common = [...ticks].filter(([, rows]) => rows.size === 6)
-    .map(([tick, rows]) => ({ tick, byPeer: Object.fromEntries(rows), agreed: new Set(rows.values()).size === 1 }));
-  return { common, contradictory };
-}
 
 function routeObserved(evidence) {
   const transport = evidence.winnerTransport;
@@ -100,12 +85,12 @@ export function replacementOutcome(evidence) {
     && evidence.challenger.challengeAttempt.startedMs > Math.max(...starts)
     && evidence.challenger.challengeAttempt.result?.ok === true
     && admitted(live, slot) && integer(evidence.challengeTick) && live.mesh.tick > evidence.challengeTick + 30;
-  const exact = checkpoints(after, Math.max(boundary ?? Infinity, evidence.challengeTick ?? Infinity));
-  const agreement = !exact.contradictory && exact.common.length >= 2 && exact.common.every(row => row.agreed);
+  const exact = evaluateFleetDigests(after.map(peer => ({ ...peer, slot: peer.mesh?.slot })), { afterTick: Math.max(boundary ?? Infinity, evidence.challengeTick ?? Infinity) });
+  const agreement = exact.passed;
   const routeVerified = routeObserved(evidence);
   const overflow = [...before, ...lossRows, ...candidates, ...after, evidence.challenger].filter(Boolean).some(row => row.overflow);
   return { baseline, disconnected, raced, oneWinner, winner: winner?.label, recovered, boundary, sequence,
-    restoredRoster, recoveryAgreed, oneClaim, advancing, protectedHolder, routeVerified, commonDigests: exact.common, agreement, overflow,
+    restoredRoster, recoveryAgreed, oneClaim, advancing, protectedHolder, routeVerified, commonDigests: exact.common, digestFindings: { malformed: exact.malformed, conflicts: exact.conflicts }, agreement, overflow,
     passed: baseline && disconnected && oneWinner && recoveryAgreed && oneClaim && advancing && protectedHolder && agreement && routeVerified && !overflow };
 }
 

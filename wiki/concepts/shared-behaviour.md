@@ -2,7 +2,7 @@
 title: Shared Behaviour Modules
 type: concept
 tags: [architecture, client, testing]
-sources: [src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
+sources: [scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
 updated: 2026-10-01
 ---
 
@@ -15,3 +15,5 @@ Workshop LOD generation and billboard capture share the asset-job lifecycle. Sta
 The native media catalogue keeps discovered identity, handle and ambiguity in one entry. Explicit selection and surface preflight are shared by microphone/output tests and room/private playback; adapters retain stream ownership and their existing diagnostics.
 
 Native preference stores and Workshop share native_file for byte replacement. Preference PID temporaries retain their matching debris recognizer; Workshop retains exclusive UUID temporaries. Layout timing and Workshop multi-file transaction recovery remain in their own modules.
+
+Fleet acceptance uses one pure digest evaluator for browser replacement, mixed recovery, native redial and mixed matrix evidence. It validates all captured observations before the scenario cutoff, rejects conflicting duplicates, and requires two complete matching checkpoints. Runtime digest production is unchanged.

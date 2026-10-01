@@ -2,15 +2,15 @@ name: CI
 
 # WHAT RUNS WHEN
 #
-# This workflow fires on exactly two events in normal use: a PR against main,
-# and a push to main. There is no branch-push run.
+# Runs on PRs against main, pushes to main, a daily schedule, and manual
+# dispatch. There is no branch-push run.
 #
 #   PR / push to main   the fast gates (pasm, test, editor-test, viewer-test,
 #                       boundary), demo-test, tooling-build, the WASM build,
 #                       and the @core smoke tier.
 #                       This is the loop an agent iterates in, and nothing in it
 #                       exists to measure performance.
-#   nightly (03:17 UTC) all of the above with the FULL smoke suite, plus
+#   nightly (03:17 UTC) once per new commit: all of the above with the FULL smoke suite, plus
 #                       `native-build`, `perf` and `balance` — the three jobs
 #                       that cost ~30 min of runner time to measure things that
 #                       move on the order of days. None of them was ever on the
@@ -39,8 +39,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # GitHub still wakes this small job daily; unchanged commits start no tests.
+  # Failed full runs count too: retrying them requires an explicit manual run.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        id: decide
+        with:
+          script: |
+            const shouldRun = require('./scripts/ci-schedule.cjs');
+            return await shouldRun({ github, context, core });
+
   # ── PASM model validation ───────────────────────────────────────────────────
   pasm:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -72,6 +92,8 @@ jobs:
 
   # ── Unit tests (native — `deploy`, `perf` and `balance` gate on both halves) ─
   test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -196,6 +218,8 @@ jobs:
   # process and runs the binaries one at a time, preserving the process-global
   # cache and Bevy task-pool assumptions documented in those files.
   native-integration-test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -236,6 +260,8 @@ jobs:
   # PHOENIX_DEMO_BUILD changes this crate's cfg, so isolate its rebuild from
   # the ordinary suite. Keep the real decode/admission tests (issue #940).
   demo-test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -259,6 +285,8 @@ jobs:
   # Link the native host and capture tools, which the ordinary test feature
   # set does not build. Keep debug builds; these binaries need no release run.
   tooling-build:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -281,6 +309,8 @@ jobs:
   # The library test binary still compiles in full; this is not a codegen filter.
   # test already owns fmt and clippy, including viewer in its feature list.
   viewer-test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -338,6 +368,8 @@ jobs:
   # To prove the guard bites: add an ungated `use crate::server::renderer::…;` to
   # any always-compiled module and this job goes red; remove it and it is green.
   boundary:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -367,6 +399,8 @@ jobs:
   # group truncates superseded runs. The only cost is runner-minutes spent
   # building a page a red `test` then discards.
   build:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -441,6 +475,8 @@ jobs:
 
   # ── Editor tests (Vitest) ─────────────────────────────────────────────────────
   editor-test:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -726,12 +762,13 @@ jobs:
   # and could shift the balance batch's per-run wall-clock. Identical binary,
   # identical numbers, zero baseline churn.
   native-build:
+    needs: changes
     # NIGHTLY ONLY (see the schedule at the top of this file). This job is not
     # on the critical path of a run — it finishes long before deploy does — so
     # skipping it on branches and PRs buys no wall clock, only runner minutes.
     # That is the whole reason: it costs ~30 min of compute per push to measure
     # something that changes on the order of days.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.run == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:

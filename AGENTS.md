@@ -706,8 +706,11 @@ git diff perf/baselines
 # dependencies; the local gate commands are listed once at the top of this
 # section. Update those commands when the workflow changes.
 #
+# `changes` first skips scheduled coverage if a previous scheduled or manual
+# full run attempted the same commit, regardless of outcome. Manual dispatch
+# always runs. GitHub still starts this small decision job daily.
 # `pasm`, `test`, `editor-test`, `viewer-test`, `demo-test`, `tooling-build`,
-# `boundary` and `build` start independently. `smoke` needs `build` and runs
+# `boundary` and `build` then start independently. `smoke` needs `build` and runs
 # across three shards: @core on ordinary PRs/pushes, full coverage on nightly,
 # workflow_dispatch and PRs labelled `smoke-full`.
 # `deploy` runs on main and needs test, build, editor-test, smoke, viewer-test,

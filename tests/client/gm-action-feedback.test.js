@@ -90,3 +90,26 @@ describe('GM action request feedback', () => {
     expect(feed.size).toBe(0);
   });
 });
+
+
+describe('request-shaped GM feedback', () => {
+  it('refuses capacity pressure and retains exact request shapes', () => {
+    const feed = new GmActionFeedback({ capacity: 1, timeoutMs: 10, schedule: () => 1, cancelSchedule: () => {} });
+    const request = { operator_id: 'gm', correlation: 'one', target: 'ship' };
+    expect(feed.begin(request)).toBe(true);
+    expect(feed.begin({ ...request, correlation: 'two' })).toBe(false);
+    expect([...feed.requests()]).toEqual([request]);
+    expect(feed.settle({ ...request, outcome: 'applied', target: 'other' }, (meta, row) => meta.request.target === row.target)).toBeNull();
+    expect(feed.firstRequest).toEqual(request);
+    expect(feed.settle({ ...request, outcome: 'applied' }).meta.request).toEqual(request);
+    expect(feed.firstRequest).toBeNull();
+  });
+  it('ignores old callbacks after reset and correlation reuse without a semantic lifecycle', () => {
+    const callbacks = [], terminal = vi.fn();
+    const feed = new GmActionFeedback({ capacity: 1, timeoutMs: 10, schedule: fn => callbacks.push(fn), cancelSchedule: () => {}, onLocalTerminal: terminal });
+    const request = { operator_id: 'gm', correlation: 'same' };
+    feed.begin(request); feed.reset(); feed.begin({ ...request });
+    callbacks[0](); expect(terminal).not.toHaveBeenCalled(); expect(feed.firstRequest).toEqual(request);
+    callbacks[1](); expect(feed.firstRequest).toBeNull(); expect(terminal).toHaveBeenCalledOnce();
+  });
+});

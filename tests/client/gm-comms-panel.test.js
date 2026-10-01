@@ -224,3 +224,15 @@ describe('literal Comms wire localisation', () => {
     expect(panel.update('invalid JSON')).toBe(false);
   });
 });
+
+it.each(['applied', 'refused'])('settles synchronous %s feedback during submission', outcome => {
+  let panel;
+  const schedule = vi.fn();
+  ({ panel } = mount({ schedule, submitTransmission: request => {
+    panel.update({ ...payload(), results: [{ ...request, outcome }] }); return true;
+  } }));
+  document.getElementById('gm-comms-send').click();
+  expect(panel.state().pending).toEqual([]);
+  expect(document.getElementById('gm-comms-feedback').dataset.state).toBe(outcome === 'applied' ? 'Applied' : 'Refused');
+  expect(schedule).not.toHaveBeenCalled();
+});

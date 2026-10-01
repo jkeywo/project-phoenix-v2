@@ -408,3 +408,10 @@ it('takes every draft with the run it was for, open or closed', () => {
   expect(document.getElementById('gm-contact-classification').value).toBe('');
   expect(document.getElementById('gm-contact-report-delay').value).toBe('0');
 });
+
+it.each(['reset', 'dispose'])('refuses a confirmation from before %s', action => {
+  let confirmation;
+  const { panel, submit } = mount({ confirmAction: request => { confirmation = request; return true; } });
+  panel.choose('conceal'); panel[action]();
+  expect(confirmation.accept()).toBe(false); expect(submit).not.toHaveBeenCalled();
+});

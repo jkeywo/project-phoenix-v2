@@ -847,3 +847,11 @@ it('keeps the removal Undo readable and operable at 200% text', () => {
   document.documentElement.style.removeProperty('--a11y-text-scale');
   panel2.destroy();
 });
+
+it.each(['reset', 'destroy'])('refuses an undo confirmation from before %s', action => {
+  let confirmation;
+  const submitUndo = vi.fn(() => true);
+  const panel2 = undoPanel({ submitUndo, confirmAction: request => { confirmation = request; return true; } });
+  panel2.update(payload([DOCTRINE])); rows()[0].click(); undoButton().click();
+  panel2[action](); expect(confirmation.accept()).toBe(false); expect(submitUndo).not.toHaveBeenCalled();
+});

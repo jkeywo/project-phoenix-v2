@@ -80,3 +80,5 @@ Current implementation orientation only. For intended design use
 - [Workshop Model Preview](./concepts/model-viewer.md)
 - [Native Lighting Lab](./concepts/native-lighting-lab.md)
 - [LOD Generation](./concepts/lod-generation.md)
+
+- [Shared Behaviour Modules](./concepts/shared-behaviour.md) — shared lifecycle and policy implementations

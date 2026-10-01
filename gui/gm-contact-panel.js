@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 
@@ -19,16 +20,19 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   // this panel only ever asks.
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-contact-${suffix}`);
+  let generation = 0;
   const keepOpen = draft => el(`${draft}-keep-open`)?.checked === true;
-  let selected = null, observer = '', entities = [], overrides = {}, classifications = {}, palette = [], information = { ghosts: {} }, pending = null, timer = null;
+  let selected = null, observer = '', entities = [], overrides = {}, classifications = {}, palette = [], information = { ghosts: {} };
   let renderedPalette = null, renderedObservers = null, renderedGhosts = null;
   /** The picker speaks metres; a ghost's position is canonical integer
    * millimetres. The bounds themselves do not move: the converted value lands
    * in the same fields, checked by the same `validPosition`. */
-  const validObserver = () => getOperator() && !pending && entities.some(row => row.entity_id === observer && row.kind === 'player_ship');
+  const requests = new GmActionFeedback({ capacity: 1, timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
+    schedule, cancelSchedule, onLocalTerminal: (meta) => { feedback('timed_out', meta.request); render(); } });
+  const validObserver = () => getOperator() && !requests.firstRequest && entities.some(row => row.entity_id === observer && row.kind === 'player_ship');
   const boundedId = value => typeof value === 'string' && value.length > 0 && new TextEncoder().encode(value).length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
   const validPosition = values => values.every(value => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647);
-  const valid = () => getOperator() && !pending && selected && selected.entity_id !== observer
+  const valid = () => getOperator() && !requests.firstRequest && selected && selected.entity_id !== observer
     && entities.some(row => row.entity_id === observer && row.kind === 'player_ship')
     && entities.some(row => row.entity_id === selected.entity_id);
   const validPolicy = policy => policy && [policy.delay_ticks, policy.position_step_mm].every(value => Number.isInteger(value) && value >= 0 && value <= 4294967295) && typeof policy.hide_identity === 'boolean' && (policy.delay_ticks > 0 || policy.position_step_mm > 0 || policy.hide_identity);
@@ -123,7 +127,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
    * that is not the active tab is `hidden`: a refusal written only into the
    * contact tool would be a refusal the operator never sees. The contact tool
    * keeps the log of every result, so it is told as well. */
-  function feedback(state, request = pending) {
+  function feedback(state, request = requests.firstRequest) {
     const draft = draftOf(request);
     const nodes = [el('feedback'), draft && el(`${draft === 'report-policy' ? 'report' : draft}-feedback`)];
     for (const node of nodes) {
@@ -140,8 +144,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       mode: t(`server.gm.contact.${mode}`), target: wireText(selected.name),
       ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer),
     });
-    return confirmAction({ category: 'contact.override', description, preview: () => description,
-      accept: () => submitChosen(chosen) });
+    return confirmChosen(chosen, { category: 'contact.override', description, preview: () => description });
   }
   function chooseClassification(choice) {
     if (!valid() || (choice !== null && !palette.some(row => row.palette === choice))) return false;
@@ -150,8 +153,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       mode: choice === null ? t('server.gm.contact.classification-normal') : wireText(palette.find(row => row.palette === choice).label),
       target: wireText(selected.name), ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer),
     });
-    return confirmAction({ category: 'contact.override', description, preview: () => description,
-      accept: () => submitChosen(chosen) });
+    return confirmChosen(chosen, { category: 'contact.override', description, preview: () => description });
   }
   function chooseInformation(change) {
     const target = informationTarget(change);
@@ -163,10 +165,19 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     const chosen = { operator_id: getOperator().id, ship: observer, change: structuredClone(change) };
     const description = t('settings.gm.confirmation.contact', { mode: t(policy ? 'server.gm.contact.report_set' : change.clear_report_policy ? 'server.gm.contact.report_normal' : 'server.gm.contact.ghost-remove'), target,
       ship: wireText(entities.find(row => row.entity_id === observer)?.name || observer) });
-    return confirmAction({ category: 'contact.override', description, preview: () => description, accept: () => submitChosen(chosen) });
+    return confirmChosen(chosen, { category: 'contact.override', description, preview: () => description });
+  }
+  function confirmChosen(chosen, description) {
+    const born = generation;
+    let consumed = false;
+    return confirmAction({ ...description, onCancel() { consumed = true; }, accept() {
+      if (consumed || born !== generation) return false;
+      consumed = true;
+      return submitChosen(chosen);
+    } });
   }
   function submitChosen(chosen) {
-    if (pending || getOperator()?.id !== chosen.operator_id) return false;
+    if (requests.firstRequest || getOperator()?.id !== chosen.operator_id) return false;
     const request = { ...chosen, correlation: correlation() };
     let accepted = false;
     try { accepted = (request.change ? submitInformation(request) : Object.hasOwn(request, 'palette') ? submitClassification(request) : submit(request)) !== false; } catch (_) { /* report below */ }
@@ -176,9 +187,8 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       if (el(node)) { el(node).textContent = ''; delete el(node).dataset.state; }
     }
     if (!accepted) { feedback('refused', chosen); return false; }
-    pending = request;
+    requests.begin(request);
     feedback('pending');
-    timer = schedule(() => { pending = null; timer = null; feedback('timed_out', request); render(); }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
     render(); return true;
   }
   function update(payload) {
@@ -234,13 +244,10 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
       select.value = observer;
     }
     if (selected) selected = entities.find(row => row.entity_id === selected.entity_id) || null;
-    const terminal = pending && rows.find(row => row.operator_id === pending.operator_id && row.correlation === pending.correlation
-      && row.observer === pending.ship && row.target === (pending.change ? informationTarget(pending.change) : pending.target) && row.action_kind === requestedKind(pending));
+    const terminal = requests.firstRequest && rows.find(row => row.operator_id === requests.firstRequest.operator_id && row.correlation === requests.firstRequest.correlation
+      && row.observer === requests.firstRequest.ship && row.target === (requests.firstRequest.change ? informationTarget(requests.firstRequest.change) : requests.firstRequest.target) && row.action_kind === requestedKind(requests.firstRequest));
     if (terminal) {
-      if (timer !== null) cancelSchedule(timer);
-      timer = null;
-      const settled = pending;
-      pending = null;
+      const settled = requests.settle(terminal).meta.request;
       feedback(terminal.outcome === 'refused' ? 'refused' : 'applied', settled);
       // Only a change the world took finishes a draft. A refusal and a no-op
       // both leave the operator with something to answer, on the panel that
@@ -263,8 +270,9 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
     render(); return true;
   }
   function reset() {
-    if (timer !== null) cancelSchedule(timer);
-    timer = null; pending = null; selected = null; observer = ''; entities = []; overrides = {}; classifications = {}; palette = [];
+    generation++;
+    requests.reset();
+    selected = null; observer = ''; entities = []; overrides = {}; classifications = {}; palette = [];
     renderedPalette = null; renderedObservers = null; renderedGhosts = null; information = { ghosts: {} };
     el('results')?.replaceChildren();
     for (const node of ['feedback', 'misclassify-feedback', 'report-feedback']) {
@@ -286,7 +294,7 @@ export function createGmContactPanel({ doc = globalThis.document, t = id => id,
   el('report-clear')?.addEventListener('click', () => chooseInformation({ clear_report_policy: { target: selected?.entity_id } }));
   render();
   return { update, choose, chooseClassification, chooseInformation, reset, refreshAdmission: render, select: entity => { selected = entity; render(); },
-    dispose() {},
+    dispose() { generation++; requests.reset(); },
     drafts,
-    state: () => ({ observer, target: selected?.entity_id || null, pending, overrides, classifications, palette, information }) };
+    state: () => ({ observer, target: selected?.entity_id || null, pending: requests.firstRequest, overrides, classifications, palette, information }) };
 }

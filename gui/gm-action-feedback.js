@@ -4,7 +4,7 @@ export const gmActionEntryKey = (operatorId, correlation) => JSON.stringify([ope
 
 /** Current GM requests and their absolute result feed. Panels own action meaning and rendering. */
 export class GmActionFeedback {
-  constructor({ lifecycle, capacity, timeoutMs, schedule, cancelSchedule, onLocalTerminal = () => {} }) {
+  constructor({ lifecycle = () => null, capacity, timeoutMs, schedule, cancelSchedule, onLocalTerminal = () => {} }) {
     this.lifecycle = lifecycle;
     this.capacity = capacity;
     this.timeoutMs = timeoutMs;
@@ -24,12 +24,30 @@ export class GmActionFeedback {
   makeRoom(settleLifecycle = false) {
     while (this.size >= this.capacity) {
       const oldest = this.pending.keys().next().value;
-      if (settleLifecycle) this.lifecycle().settle(oldest, ACTION_FEEDBACK_STATE.TIMED_OUT);
+      if (settleLifecycle) this.lifecycle()?.settle(oldest, ACTION_FEEDBACK_STATE.TIMED_OUT);
       this.finishLocal(oldest, 'timed-out', null);
     }
   }
 
   track(meta) { this.pending.set(meta.correlation, meta); }
+
+  /** Track wire requests without exposing timer metadata to callers. */
+  trackRequest(request) {
+    if (this.size >= this.capacity || this.get(request.correlation)) return null;
+    const meta = { request, operatorId: request.operator_id, correlation: request.correlation };
+    this.track(meta);
+    this.lifecycle()?.pending(meta.correlation);
+    return meta;
+  }
+  begin(request, accepted = true, refusalReason) {
+    const meta = this.trackRequest(request);
+    return meta ? this.submitted(meta, accepted, refusalReason) : false;
+  }
+  get firstRequest() { return this.values().next().value?.request ?? null; }
+  *requests() { for (const meta of this.values()) yield meta.request; }
+  *localRequests() {
+    for (const meta of this.localTerminals.values()) yield { ...meta.request, outcome: meta.outcome, reason: meta.reason };
+  }
 
   clearTimer(meta) {
     if (!meta || meta.timerScheduled !== true) return;
@@ -44,16 +62,17 @@ export class GmActionFeedback {
     meta.timer = this.schedule(() => {
       // A cancelled callback cannot affect a later request reusing its correlation.
       if (this.get(meta.correlation) !== meta) return;
-      this.lifecycle().settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
+      this.lifecycle()?.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
       this.finishLocal(meta.correlation, 'timed-out', null);
     }, this.timeoutMs);
   }
 
   submitted(meta, accepted, refusalReason) {
-    this.lifecycle().pending(meta.correlation);
+    if (this.get(meta.correlation) !== meta) return accepted;
+    this.lifecycle()?.pending(meta.correlation);
     if (accepted) this.startTimer(meta);
     else {
-      this.lifecycle().settle(meta.correlation, ACTION_FEEDBACK_STATE.REFUSED);
+      this.lifecycle()?.settle(meta.correlation, ACTION_FEEDBACK_STATE.REFUSED);
       this.finishLocal(meta.correlation, 'refused', refusalReason);
     }
     return accepted;
@@ -82,7 +101,7 @@ export class GmActionFeedback {
     this.clearTimer(meta);
     this.pending.delete(result.correlation);
     const state = result.outcome === 'refused' ? ACTION_FEEDBACK_STATE.REFUSED : ACTION_FEEDBACK_STATE.APPLIED;
-    this.lifecycle().settle(result.correlation, state);
+    this.lifecycle()?.settle(result.correlation, state);
     return { meta, state };
   }
 
@@ -113,7 +132,7 @@ export class GmActionFeedback {
 
   reset(cancel = true) {
     for (const meta of this.values()) this.clearTimer(meta);
-    if (cancel) for (const meta of [...this.values()]) this.lifecycle().cancel(meta.correlation);
+    if (cancel) for (const meta of [...this.values()]) this.lifecycle()?.cancel(meta.correlation);
     this.pending.clear();
     this.localTerminals.clear();
     this.authoritative = [];

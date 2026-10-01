@@ -23,11 +23,12 @@ function fixture() {
     : request.op === 'lod-generate-status' ? response('ready') : { status: 'done' });
   const members = [new TextEncoder().encode(sidecarText), glb, new TextEncoder().encode(manifestText)];
   const runtime = { validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
-  const generation = createWorkshopLodGeneration({ call, runtime,
+  const dependencies = { call, runtime,
     fetcher: vi.fn(async url => ({ ok: true, arrayBuffer: async () => members[Number(url.pathname.split('/').at(-1))].buffer })),
     upload: vi.fn(async bytes => ({ asset: `0000000000000002-${bytes.length}`, length: bytes.length })),
-    restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) });
-  return { draft, call, runtime, generation };
+    restoreDocument: snapshot => WorkshopDocument.restore(snapshot, { native: true }) };
+  const generation = createWorkshopLodGeneration(dependencies);
+  return { draft, call, runtime, generation, dependencies };
 }
 
 describe('native Workshop selected-model LOD generation', () => {
@@ -72,4 +73,57 @@ describe('native Workshop selected-model LOD generation', () => {
     expect(call).toHaveBeenCalledWith({ op: 'lod-generate-cancel' });
     expect(draft.toNativeSources()[generated]).toBeUndefined();
   });
+});
+
+for (const stage of ['fetch', 'bytes', 'upload', 'validate']) for (const change of ['edit', 'cancel', 'replacement']) {
+  it('rejects ' + change + ' while awaiting ' + stage + ' without affecting a newer job', async () => {
+    const { draft, call, dependencies } = fixture();
+    let release, entered;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { entered = resolve; });
+    let once = true;
+    const pause = async () => { if (once) { once = false; entered(); await waiting; } };
+    const fetcher = dependencies.fetcher, upload = dependencies.upload, validate = dependencies.runtime.validate;
+    dependencies.fetcher = async (...args) => {
+      if (stage === 'fetch') await pause();
+      const response = await fetcher(...args);
+      return { ...response, arrayBuffer: async () => { if (stage === 'bytes') await pause(); return response.arrayBuffer(); } };
+    };
+    dependencies.upload = async bytes => { if (stage === 'upload') await pause(); return upload(bytes); };
+    dependencies.runtime.validate = async (...args) => { if (stage === 'validate') await pause(); return validate(...args); };
+    const job = createWorkshopLodGeneration(dependencies);
+    await job.start(draft, sidecar);
+    
+    const operation = job.status(draft, sidecar);
+    const rejected = expect(operation).rejects.toThrow('stale');
+    await started;
+    if (change === 'edit') draft.edit(sidecar, draft.read(sidecar) + '# later\n');
+    if (change === 'cancel') await job.cancel();
+    if (change === 'replacement') await job.start(draft, sidecar);
+    const cancels = call.mock.calls.filter(([row]) => row.op.endsWith('-cancel')).length;
+    release(); await rejected;
+    expect(draft.canUndo()).toBe(change === 'edit');
+    if (change === 'replacement') {
+      expect(job.active.state).toBe('running');
+      expect(call.mock.calls.filter(([row]) => row.op.endsWith('-cancel'))).toHaveLength(cancels);
+    }
+  });
+}
+
+it('queues status after native start instead of reading a previous run', async () => {
+  const { draft, generation: job, call } = fixture();
+  const implementation = call.getMockImplementation();
+  let release, entered;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  call.mockImplementation(async request => {
+    if (request.op.endsWith('-start')) { entered(); await waiting; }
+    return implementation(request);
+  });
+  const starting = job.start(draft, sidecar);
+  const status = job.status(draft, sidecar);
+  await started;
+  expect(call.mock.calls.some(([request]) => request.op.endsWith('-status'))).toBe(false);
+  release(); await starting;
+  expect((await status).state).toBe('ready');
 });

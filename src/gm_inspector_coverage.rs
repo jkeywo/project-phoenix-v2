@@ -1357,9 +1357,11 @@ mod tests {
         // and fingerprint. The fingerprint includes every recorded column, so
         // a classification or action-owner change cannot hide behind the same
         // number of rows.
+        // The authored star ladder adds detailed_systems[] and the torpedo
+        // auto-fire tuning flag; the remaining inventory is unchanged.
         assert_eq!(
             counts,
-            [55, 71, 659, 51, 56],
+            [55, 71, 661, 51, 56],
             "update the reviewed inventory ratchet"
         );
         let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1378,7 +1380,7 @@ mod tests {
             }
         }
         assert_eq!(
-            fingerprint, 11_182_696_995_030_163_064,
+            fingerprint, 5_487_810_359_978_247_068,
             "update the reviewed inventory fingerprint"
         );
     }

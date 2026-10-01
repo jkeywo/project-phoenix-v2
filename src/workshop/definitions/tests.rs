@@ -678,8 +678,12 @@ fn shield_arc_rating_references_follow_runtime_ownership() {
 
 #[test]
 fn authored_cruiser_guard_passes_station_rating_reference_validation() {
-    let source = include_str!("../../../assets/entities/alliance_cruiser.toml");
-    let report = findings(&files(&[(HULL_PATH, source)]), &BTreeMap::new());
+    let source = crate::entities::include_resolve::resolve_from_disk(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .expect("the authored cruiser resolves")
+    .toml;
+    let report = findings(&files(&[(HULL_PATH, &source)]), &BTreeMap::new());
     assert!(
         !report
             .iter()

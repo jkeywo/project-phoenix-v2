@@ -536,7 +536,7 @@ fn place_in_first_group(node: &mut Value, panel: &str) {
     }
 }
 
-fn sanitize_workshop_node(
+fn sanitize_placement_node(
     value: &Value,
     seen: &mut BTreeSet<String>,
     depth: usize,
@@ -578,7 +578,7 @@ fn sanitize_workshop_node(
             };
             let mut children = Vec::new();
             for child in raw_children.iter().take(allowed.len()) {
-                if let Some(child) = sanitize_workshop_node(child, seen, depth + 1, allowed)? {
+                if let Some(child) = sanitize_placement_node(child, seen, depth + 1, allowed)? {
                     children.push(child);
                 }
             }
@@ -656,68 +656,11 @@ fn sanitize_live_layout(value: &Value) -> Option<Value> {
         return Some(default_live_layout());
     }
     let allowed = LIVE_PANELS;
-    let mut seen = BTreeSet::new();
-    let root = match value.get("root")? {
-        Value::Null => Value::Null,
-        root => match sanitize_live_node(root, &mut seen, 0, allowed) {
-            Ok(Some(root)) => root,
-            Ok(None) => Value::Null,
-            Err(()) => return Some(default_live_layout()),
-        },
+    let mut layout = match sanitize_placement(value, allowed, LIVE_TEMPORARY_PANELS, "roster") {
+        Ok(layout) => layout,
+        Err(PlacementError::Invalid) => return None,
+        Err(PlacementError::Reset) => return Some(default_live_layout()),
     };
-    let mut floats = Vec::new();
-    for entry in value["floats"].as_array().into_iter().flatten() {
-        let Some(panel) = entry["panel"]
-            .as_str()
-            .filter(|_| known_panel(&entry["panel"], allowed))
-        else {
-            continue;
-        };
-        // A FLOATING draft is not restored. It is left unseen on purpose, so
-        // the pass below records it as closed — which is what "not open" means
-        // for a draft nobody is filling in any more.
-        if LIVE_TEMPORARY_PANELS.contains(&panel) {
-            continue;
-        }
-        if !seen.insert(panel.to_owned()) {
-            continue;
-        }
-        let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
-        floats.push(
-            json!({"panel":panel, "x":number("x",12.0).max(0.0), "y":number("y",12.0).max(0.0),
-            "width":number("width",420.0).max(240.0), "height":number("height",360.0).max(180.0)}),
-        );
-        if floats.len() == allowed.len() {
-            break;
-        }
-    }
-    if !value["root"].is_null() && root.is_null() && floats.is_empty() {
-        return Some(default_live_layout());
-    }
-    let mut closed = Vec::new();
-    for panel in value["closed"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|panel| known_panel(panel, allowed))
-    {
-        let id = panel.as_str().unwrap();
-        if seen.insert(id.to_owned()) {
-            closed.push(json!(id));
-        }
-    }
-    for panel in allowed {
-        if seen.insert((*panel).to_owned()) {
-            closed.push(json!(panel));
-        }
-    }
-    let selected = value
-        .get("selected")
-        .filter(|panel| known_panel(panel, allowed) && !closed.contains(panel))
-        .cloned()
-        .or_else(|| first_visible(&root, &floats))
-        .unwrap_or_else(|| json!("roster"));
-    let mut layout = json!({"version":stored, "root":root, "floats":floats, "closed":closed, "selected":selected});
     // A version that registered only a temporary panel places nothing, so the
     // stamp is written here rather than inside the placement pass.
     layout["version"] = default_live_layout()["version"].clone();
@@ -855,72 +798,6 @@ fn repair_pinned_live_panels(layout: &mut Value) {
     }
 }
 
-fn sanitize_live_node(
-    value: &Value,
-    seen: &mut BTreeSet<String>,
-    depth: usize,
-    allowed: &[&str],
-) -> Result<Option<Value>, ()> {
-    if depth > allowed.len() {
-        return Err(());
-    }
-    match value["type"].as_str() {
-        Some("tabs") => {
-            let Some(raw) = value["tabs"].as_array() else {
-                return Ok(None);
-            };
-            let tabs: Vec<_> = raw
-                .iter()
-                .filter(|panel| known_panel(panel, allowed))
-                .filter_map(|panel| {
-                    let id = panel.as_str()?;
-                    seen.insert(id.to_owned()).then(|| json!(id))
-                })
-                .collect();
-            if tabs.is_empty() {
-                return Ok(None);
-            }
-            let active = value
-                .get("active")
-                .filter(|active| tabs.contains(active))
-                .cloned()
-                .unwrap_or_else(|| tabs[0].clone());
-            Ok(Some(json!({"type":"tabs", "tabs":tabs, "active":active})))
-        }
-        Some("split") if matches!(value["axis"].as_str(), Some("horizontal" | "vertical")) => {
-            let Some(raw) = value["children"].as_array() else {
-                return Ok(None);
-            };
-            let mut children = Vec::new();
-            for child in raw.iter().take(allowed.len()) {
-                if let Some(child) = sanitize_live_node(child, seen, depth + 1, allowed)? {
-                    children.push(child);
-                }
-            }
-            if children.is_empty() {
-                return Ok(None);
-            }
-            if children.len() == 1 {
-                return Ok(children.pop());
-            }
-            let supplied = value["sizes"].as_array();
-            let sizes: Vec<_> = (0..children.len())
-                .map(|index| {
-                    supplied
-                        .and_then(|v| v.get(index))
-                        .and_then(Value::as_f64)
-                        .filter(|v| v.is_finite() && *v > 0.0)
-                        .unwrap_or(1.0)
-                })
-                .collect();
-            Ok(Some(
-                json!({"type":"split", "axis":value["axis"], "sizes":sizes, "children":children}),
-            ))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
     match node["type"].as_str() {
         Some("tabs") => node.get("active").cloned(),
@@ -932,17 +809,26 @@ fn first_visible(node: &Value, floats: &[Value]) -> Option<Value> {
     }
 }
 
-fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
-    let stored = value["version"].as_u64().filter(|v| (1..=10).contains(v))?;
-    let allowed = workshop_panels_for(stored);
-    let added = workshop_panels_added_after(stored);
+#[derive(Debug)]
+enum PlacementError {
+    Invalid,
+    Reset,
+}
+
+/// Shared bounded placement pass. Context adapters own versions and migration.
+fn sanitize_placement(
+    value: &Value,
+    allowed: &[&str],
+    excluded_floats: &[&str],
+    fallback_selection: &str,
+) -> Result<Value, PlacementError> {
     let mut seen = BTreeSet::new();
-    let root = match value.get("root")? {
+    let root = match value.get("root").ok_or(PlacementError::Invalid)? {
         Value::Null => Value::Null,
-        root => match sanitize_workshop_node(root, &mut seen, 0, allowed) {
+        root => match sanitize_placement_node(root, &mut seen, 0, allowed) {
             Ok(Some(root)) => root,
             Ok(None) => Value::Null,
-            Err(()) => return Some(default_authoring_layout()),
+            Err(()) => return Err(PlacementError::Reset),
         },
     };
     let mut floats = Vec::new();
@@ -953,7 +839,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
         else {
             continue;
         };
-        if !seen.insert(panel.to_owned()) {
+        if excluded_floats.contains(&panel) || !seen.insert(panel.to_owned()) {
             continue;
         }
         let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
@@ -969,7 +855,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
         }
     }
     if !value["root"].is_null() && root.is_null() && floats.is_empty() {
-        return Some(default_authoring_layout());
+        return Err(PlacementError::Reset);
     }
     let mut closed = Vec::new();
     for panel in value["closed"]
@@ -993,9 +879,21 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
         .filter(|panel| known_panel(panel, allowed) && !closed.contains(panel))
         .cloned()
         .or_else(|| first_visible(&root, &floats))
-        .unwrap_or_else(|| json!("files"));
+        .unwrap_or_else(|| json!(fallback_selection));
+    Ok(json!({"root": root, "floats": floats, "closed": closed, "selected": selected}))
+}
+
+fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
+    let stored = value["version"].as_u64().filter(|v| (1..=10).contains(v))?;
+    let allowed = workshop_panels_for(stored);
+    let added = workshop_panels_added_after(stored);
+    let mut layout = match sanitize_placement(value, allowed, &[], "files") {
+        Ok(layout) => layout,
+        Err(PlacementError::Invalid) => return None,
+        Err(PlacementError::Reset) => return Some(default_authoring_layout()),
+    };
     let version = if stored == 1 { 2 } else { stored };
-    let mut layout = json!({"version": version, "root": root, "floats": floats, "closed": closed, "selected": selected});
+    layout["version"] = json!(version);
     if !added.is_empty() {
         layout = migrate_authoring_layout(layout, stored, &added, &value["closed"]);
     }
@@ -1008,67 +906,12 @@ fn sanitize_test_layout(value: &Value) -> Option<Value> {
         return None;
     }
     let allowed = WORKSHOP_TEST_PANELS;
-    let mut seen = BTreeSet::new();
-    let root = match value.get("root")? {
-        Value::Null => Value::Null,
-        root => match sanitize_workshop_node(root, &mut seen, 0, allowed) {
-            Ok(Some(root)) => root,
-            Ok(None) => Value::Null,
-            Err(()) => return Some(default_test_layout()),
-        },
+    let mut layout = match sanitize_placement(value, allowed, &[], "test-controls") {
+        Ok(layout) => layout,
+        Err(PlacementError::Invalid) => return None,
+        Err(PlacementError::Reset) => return Some(default_test_layout()),
     };
-    let mut floats = Vec::new();
-    for entry in value["floats"].as_array().into_iter().flatten() {
-        let Some(panel) = entry["panel"]
-            .as_str()
-            .filter(|_| known_panel(&entry["panel"], allowed))
-        else {
-            continue;
-        };
-        if !seen.insert(panel.to_owned()) {
-            continue;
-        }
-        let number = |name: &str, fallback: f64| entry[name].as_f64().unwrap_or(fallback);
-        floats.push(json!({
-            "panel": panel,
-            "x": number("x", 12.0).max(0.0),
-            "y": number("y", 12.0).max(0.0),
-            "width": number("width", 420.0).max(240.0),
-            "height": number("height", 360.0).max(180.0),
-        }));
-        if floats.len() == allowed.len() {
-            break;
-        }
-    }
-    if !value["root"].is_null() && root.is_null() && floats.is_empty() {
-        return Some(default_test_layout());
-    }
-    let mut closed = Vec::new();
-    for panel in value["closed"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|panel| known_panel(panel, allowed))
-    {
-        let panel = panel.as_str().unwrap();
-        if seen.insert(panel.to_owned()) {
-            closed.push(json!(panel));
-        }
-    }
-    for panel in allowed {
-        if seen.insert((*panel).to_owned()) {
-            closed.push(json!(panel));
-        }
-    }
-    let selected = value
-        .get("selected")
-        .filter(|panel| known_panel(panel, allowed) && !closed.contains(panel))
-        .cloned()
-        .or_else(|| first_visible(&root, &floats))
-        .unwrap_or_else(|| json!("test-controls"));
-    let mut layout = json!({
-        "version": 2, "root": root, "floats": floats, "closed": closed, "selected": selected
-    });
+    layout["version"] = json!(2);
     if stored == 1 {
         let selected = layout["selected"].clone();
         dock_workshop_panel(&mut layout, "test-trace", "test-viewscreen", "right");
@@ -1559,6 +1402,51 @@ mod tests {
         }
     }
     const PADS: &str = "window.__phoenixSetGamepads([{\"index\":0,\"id\":\"pad\",\"buttons\":[{\"pressed\":true,\"value\":1}],\"axes\":[1]}])";
+
+    #[test]
+    fn placement_normalizes_one_global_panel_inventory() {
+        let stored = json!({
+            "root": {"type":"split", "axis":"horizontal", "sizes":[0], "children":[
+                {"type":"tabs", "tabs":["a","unknown","a"], "active":"unknown"},
+                {"type":"tabs", "tabs":["b"], "active":"b"}
+            ]},
+            "floats":[{"panel":"a"},{"panel":"c", "x":-9, "width":1},{"panel":"draft"}],
+            "closed":["b","d","unknown"], "selected":"d"
+        });
+        let actual =
+            sanitize_placement(&stored, &["a", "b", "c", "d", "draft"], &["draft"], "a").unwrap();
+        assert_eq!(actual["root"]["sizes"], json!([1.0, 1.0]));
+        assert_eq!(actual["root"]["children"][0]["tabs"], json!(["a"]));
+        assert_eq!(actual["root"]["children"][0]["active"], "a");
+        assert_eq!(
+            actual["floats"],
+            json!([{"panel":"c","x":0.0,"y":12.0,"width":240.0,"height":360.0}])
+        );
+        assert_eq!(actual["closed"], json!(["d", "draft"]));
+        assert_eq!(actual["selected"], "a");
+    }
+
+    #[test]
+    fn placement_distinguishes_invalid_empty_and_reset_roots() {
+        assert!(matches!(
+            sanitize_placement(&json!({}), &["a"], &[], "a"),
+            Err(PlacementError::Invalid)
+        ));
+        let empty = sanitize_placement(&json!({"root":null}), &["a"], &[], "a").unwrap();
+        assert!(empty["root"].is_null());
+        assert_eq!(empty["closed"], json!(["a"]));
+        assert!(matches!(
+            sanitize_placement(&json!({"root":{}}), &["a"], &[], "a"),
+            Err(PlacementError::Reset)
+        ));
+        assert!(sanitize_placement(
+            &json!({"root":{},"floats":[{"panel":"a"}]}),
+            &["a"],
+            &[],
+            "a"
+        )
+        .is_ok());
+    }
 
     #[test]
     fn live_layout_version_gate_preserves_reset_and_refusal() {

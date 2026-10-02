@@ -3,6 +3,167 @@
 //! otherwise: same `use super::*`, same fixtures, same assertions.
 
 use super::*;
+use crate::civilian::CivilianState;
+use crate::infrastructure::InfrastructureState;
+
+fn optional_namespace_fixture() -> World {
+    let mut world = fold_world();
+    let ids = [(10, 1), (2, 1), (10, 2)];
+    for (tick, seq) in ids {
+        let id = crate::world_id::WorldId::new(Namespace::Entity, tick, seq).render();
+        world.spawn((
+            EntityUuid(id.clone()),
+            crate::ship_slots::AuthoredShipSlotId(format!("slot-{tick}-{seq}")),
+            ShipStationStances(std::collections::HashMap::from([
+                (
+                    crate::core::messages::StationId("zeta".into()),
+                    "hold".into(),
+                ),
+                (
+                    crate::core::messages::StationId("alpha".into()),
+                    "advance".into(),
+                ),
+            ])),
+        ));
+        spawn_structure(&mut world, &id, tick as f32 * 5.0);
+        spawn_civilian(
+            &mut world,
+            &id,
+            seq as usize,
+            Some(crate::civilian::CivilianOrder::Hold),
+        );
+        spawn_tug(&mut world, &id, Some("derelict"));
+        spawn_docker(&mut world, &id, Some("berth"));
+        spawn_tender(&mut world, &id, Some((seq as u8, "ally")));
+        spawn_umbilical(&mut world, &id, true);
+        let mut security = ShipSecurityTeams::new(crate::security::SecurityConfig {
+            team_count: 2,
+            deploy_duration_secs: 1.0,
+            withdraw_duration_secs: 2.0,
+            range: 600.0,
+        });
+        security.teams[1].state = crate::security::SecurityTeamState::Withdrawing;
+        security.teams[1].target = Some("platform".into());
+        world.spawn((EntityUuid(id), security));
+    }
+    // Two identical literal UUIDs retain entity-index ordering, even with distinct payloads.
+    for slot in ["second", "first"] {
+        world.spawn((
+            EntityUuid("literal".into()),
+            crate::ship_slots::AuthoredShipSlotId(slot.into()),
+        ));
+    }
+    world
+}
+
+#[test]
+fn optional_namespace_exact_fold_characterization() {
+    let world = optional_namespace_fixture();
+    let folds = [
+        fold_authored_ship_slots_namespace(&world, FOLD_SEED),
+        fold_infrastructure_namespace(&world, FOLD_SEED),
+        fold_civilian_namespace(&world, FOLD_SEED),
+        fold_station_stances_namespace(&world, FOLD_SEED),
+        fold_tractor_namespace(&world, FOLD_SEED),
+        fold_dock_namespace(&world, FOLD_SEED),
+        fold_external_repair_namespace(&world, FOLD_SEED),
+        fold_umbilical_namespace(&world, FOLD_SEED),
+        fold_security_namespace(&world, FOLD_SEED),
+    ];
+    assert_eq!(
+        folds,
+        [
+            14990096391273835901,
+            9060285293550199811,
+            16955860764686382231,
+            16847282475859703794,
+            2604905312334251123,
+            14646410959139128831,
+            12338065970744138158,
+            11779916052664557949,
+            10771667353891034293,
+        ]
+    );
+    assert_eq!(
+        digest_stages(&world),
+        [
+            ("run", 925951794817219311),
+            ("scenario", 925951794817219311),
+            ("entity", 9998391176183457418),
+            ("authored-ship-slots", 5031521044579016138),
+            ("infrastructure", 16708771438897103916),
+            ("civilian", 10007260259203553826),
+            ("station-stances", 7675036808710624197),
+            ("tractor", 3412975283742167187),
+            ("dock", 14402749879927837817),
+            ("external-repair", 15591361003993366682),
+            ("umbilical", 10383317395683004966),
+            ("asteroid", 7742867957391604175),
+            ("collisions", 2207473739003605171),
+            ("security", 9442496669972521287),
+        ]
+    );
+}
+
+#[test]
+fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged() {
+    let mut registered = fold_world();
+    registered.register_component::<ShipStationStances>();
+    registered.register_component::<DockControl>();
+    registered.register_component::<ExternalRepairDispatch>();
+    registered.register_component::<ShipSecurityTeams>();
+    for world in [World::new(), registered] {
+        for fold in [
+            fold_authored_ship_slots_namespace,
+            fold_infrastructure_namespace,
+            fold_civilian_namespace,
+            fold_station_stances_namespace,
+            fold_tractor_namespace,
+            fold_dock_namespace,
+            fold_external_repair_namespace,
+            fold_umbilical_namespace,
+            fold_security_namespace,
+        ] {
+            assert_eq!(fold(&world, 12345), 12345);
+        }
+    }
+}
+
+#[test]
+fn optional_namespace_selectors_skip_idle_rows_but_keep_disengaged_coupling() {
+    let mut world = fold_world();
+    world.spawn((
+        EntityUuid("idle".into()),
+        ShipStationStances::default(),
+        ShipSecurityTeams::new(crate::security::SecurityConfig {
+            team_count: 2,
+            deploy_duration_secs: 1.0,
+            withdraw_duration_secs: 2.0,
+            range: 600.0,
+        }),
+    ));
+    // A nonempty payload without an entity UUID is outside the namespace.
+    world.spawn(ShipStationStances(std::collections::HashMap::from([(
+        crate::core::messages::StationId("helm".into()),
+        "hold".into(),
+    )])));
+    assert_eq!(fold_station_stances_namespace(&world, FOLD_SEED), FOLD_SEED);
+    assert_eq!(fold_security_namespace(&world, FOLD_SEED), FOLD_SEED);
+    spawn_tug(&mut world, "tug", Some("derelict"));
+    world
+        .query::<&mut TractorBeam>()
+        .single_mut(&mut world)
+        .unwrap()
+        .engaged = false;
+    let expected = fold_str(
+        fold_u64(
+            fold_str(fold_u64(fold_str(FOLD_SEED, "tractor-namespace"), 1), "tug"),
+            0,
+        ),
+        "derelict",
+    );
+    assert_eq!(fold_tractor_namespace(&world, FOLD_SEED), expected);
+}
 
 #[test]
 fn nan_flavours_fold_to_one_payload() {

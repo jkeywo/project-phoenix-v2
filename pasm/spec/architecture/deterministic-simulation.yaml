@@ -405,8 +405,8 @@ entities:
         - src/sim_digest.rs
         - src/headless/replay.rs
         - tests/replay_simulation.rs
-      symbols: [FoldKey, Namespace, DigestLedger, Divergence, PhoenixSim, ReplayArtifact]
-      tests: [cargo test, src/headless/replay_tests.rs]
+      symbols: [FoldKey, Namespace, fold_optional_namespace, DigestLedger, Divergence, PhoenixSim, ReplayArtifact]
+      tests: [cargo test, src/sim_digest_tests.rs, src/headless/replay_tests.rs]
 
   - component: cross-target-determinism-probe
     core:

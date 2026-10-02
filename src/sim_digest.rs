@@ -228,7 +228,7 @@
 use bevy::prelude::*;
 use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
-use crate::civilian::{CivilianState, CivilianTraffic};
+use crate::civilian::CivilianTraffic;
 use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::command::server::ShipStationStances;
 use crate::console::repair::external_server::ExternalRepairDispatch;
@@ -236,7 +236,7 @@ use crate::core::collision_history::CollisionHistory;
 use crate::core::messages::{CommsPriority, GamePhase};
 use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
+use crate::infrastructure::InfrastructureCondition;
 use crate::lobby::WorldResource;
 use crate::security::ShipSecurityTeams;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
@@ -1784,39 +1784,58 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     acc
 }
 
-/// Authored mission-slot identity, bound to each ship's stable entity UUID.
-///
-/// This is a separate, empty-when-unused walk so adding the component does not
-/// change legacy worlds' digests and a partial app that never registers the
-/// component cannot disable the established entity namespace above.
-fn fold_authored_ship_slots_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) =
-        world.try_query::<(Entity, &EntityUuid, &crate::ship_slots::AuthoredShipSlotId)>()
-    else {
+/// Fold selected component rows without contributing anything for an empty namespace.
+fn fold_optional_namespace<'w, C: Component, R>(
+    world: &'w World,
+    mut acc: u64,
+    label: &str,
+    mut select: impl FnMut(&'w C) -> Option<R>,
+    mut fold_row: impl FnMut(u64, R) -> u64,
+) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &C)>() else {
         return acc;
     };
     let mut rows: Vec<_> = query
         .iter(world)
-        .map(|(entity, uuid, slot)| {
-            (
-                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
-                slot.0.as_str(),
-            )
+        .filter_map(|(entity, uuid, component)| {
+            select(component).map(|payload| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    payload,
+                )
+            })
         })
         .collect();
     if rows.is_empty() {
         return acc;
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "authored-ship-slots");
+    acc = fold_str(acc, label);
     acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, slot) in rows {
+    for (key, _, payload) in rows {
         acc = fold_str(acc, &key.id);
-        acc = fold_str(acc, slot);
+        acc = fold_row(acc, payload);
     }
     acc
+}
+
+/// Authored mission-slot identity, bound to each ship's stable entity UUID.
+///
+/// This is a separate, empty-when-unused walk so adding the component does not
+/// change legacy worlds' digests and a partial app that never registers the
+/// component cannot disable the established entity namespace above.
+fn fold_authored_ship_slots_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "authored-ship-slots",
+        |slot: &crate::ship_slots::AuthoredShipSlotId| Some(slot.0.as_str()),
+        |mut acc, slot| {
+            acc = fold_str(acc, slot);
+            acc
+        },
+    )
 }
 
 /// Every civilian craft's traffic state (issue #1028), in [`FoldKey`] order, in
@@ -1838,46 +1857,31 @@ fn fold_authored_ship_slots_namespace(world: &World, mut acc: u64) -> u64 {
 /// reason and with the same expiry: no shipped world authors `[civilian]`
 /// traffic, so folding a row count for all of them would move every committed
 /// world digest over state none of them carry.
-fn fold_civilian_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &CivilianTraffic)>() else {
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, CivilianState)> = query
-        .iter(world)
-        .map(|(entity, uuid, traffic)| {
-            (
-                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
-                traffic.0.clone(),
-            )
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "civilian-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, state) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_str(acc, state.route().unwrap_or_default());
-        acc = fold_u64(acc, state.leg() as u64);
-        acc = fold_str(acc, state.compliance().as_str());
-        acc = fold_u64(acc, state.due_tick());
-        // The order, as the two strings a console reads it by. Folding the
-        // typed enum would need a serialiser here; the verb and its destination
-        // are the whole of what distinguishes one order from another.
-        match state.order() {
-            None => acc = fold_u64(acc, 0),
-            Some(order) => {
-                acc = fold_u64(acc, 1);
-                acc = fold_str(acc, order.kind().as_str());
-                acc = fold_str(acc, &civilian_order_destination(order));
+fn fold_civilian_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "civilian-namespace",
+        |traffic: &CivilianTraffic| Some(traffic.0.clone()),
+        |mut acc, state| {
+            acc = fold_str(acc, state.route().unwrap_or_default());
+            acc = fold_u64(acc, state.leg() as u64);
+            acc = fold_str(acc, state.compliance().as_str());
+            acc = fold_u64(acc, state.due_tick());
+            // The order, as the two strings a console reads it by. Folding the
+            // typed enum would need a serialiser here; the verb and its destination
+            // are the whole of what distinguishes one order from another.
+            match state.order() {
+                None => acc = fold_u64(acc, 0),
+                Some(order) => {
+                    acc = fold_u64(acc, 1);
+                    acc = fold_str(acc, order.kind().as_str());
+                    acc = fold_str(acc, &civilian_order_destination(order));
+                }
             }
-        }
-    }
-    acc
+            acc
+        },
+    )
 }
 
 /// Where an order sends a craft, as one string: a route id, an anchor name, a
@@ -1924,49 +1928,32 @@ fn civilian_order_destination(order: &crate::civilian::CivilianOrder) -> String 
 /// the map's own iteration order is `HashMap` order, never stable across
 /// instances — so two hosts fold the same selections to the same number
 /// whatever order the entries were inserted in.
-fn fold_station_stances_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipStationStances)>() else {
-        // A world that never registered the component carries no selection — the
-        // empty case above, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(
-        FoldKey,
-        bevy::ecs::entity::EntityIndex,
-        Vec<(String, String)>,
-    )> = query
-        .iter(world)
-        .filter(|(_, _, stances)| !stances.0.is_empty())
-        .map(|(entity, uuid, stances)| {
+fn fold_station_stances_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "station-stances-namespace",
+        |stances: &ShipStationStances| {
+            if stances.0.is_empty() {
+                return None;
+            }
             let mut selections: Vec<(String, String)> = stances
                 .0
                 .iter()
                 .map(|(station, stance)| (station.0.clone(), stance.clone()))
                 .collect();
             selections.sort_by(|a, b| a.0.cmp(&b.0));
-            (
-                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
-                selections,
-            )
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "station-stances-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, selections) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_u64(acc, selections.len() as u64);
-        for (station, stance) in selections {
-            acc = fold_str(acc, &station);
-            acc = fold_str(acc, &stance);
-        }
-    }
-    acc
+            Some(selections)
+        },
+        |mut acc, selections| {
+            acc = fold_u64(acc, selections.len() as u64);
+            for (station, stance) in selections {
+                acc = fold_str(acc, &station);
+                acc = fold_str(acc, &stance);
+            }
+            acc
+        },
+    )
 }
 
 /// Every ship whose tractor beam is holding a target (issue #1156), in
@@ -1991,38 +1978,22 @@ fn fold_station_stances_namespace(world: &World, mut acc: u64) -> u64 {
 /// same real work: a hull that authored a `[tractor]` table and is holding
 /// nothing folds NOTHING — not even a row — so a shipped hull can gain a tractor
 /// without moving any committed world's digest.
-fn fold_tractor_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &TractorBeam)>() else {
-        // A world that never registered the component runs no tractor — the
-        // empty case, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, bool, String)> = query
-        .iter(world)
-        .filter_map(|(entity, uuid, beam)| {
-            beam.coupled_target.as_ref().map(|target| {
-                (
-                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                    entity.index(),
-                    beam.engaged,
-                    target.clone(),
-                )
-            })
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "tractor-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, engaged, target) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_u64(acc, engaged as u64);
-        acc = fold_str(acc, &target);
-    }
-    acc
+fn fold_tractor_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "tractor-namespace",
+        |beam: &TractorBeam| {
+            beam.coupled_target
+                .as_ref()
+                .map(|target| (beam.engaged, target.clone()))
+        },
+        |mut acc, (engaged, target)| {
+            acc = fold_u64(acc, engaged as u64);
+            acc = fold_str(acc, &target);
+            acc
+        },
+    )
 }
 
 /// Every ship DOCKED to another hull (issue #1159), in [`FoldKey`] order, in its
@@ -2045,36 +2016,17 @@ fn fold_tractor_namespace(world: &World, mut acc: u64) -> u64 {
 /// NOTHING — not even a row — so a shipped hull can gain docking without moving
 /// any committed world's digest. The moment one ship is docked the row count is
 /// in the accumulator like everyone else's.
-fn fold_dock_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &DockControl)>() else {
-        // A world that never registered the component runs no docks — the empty
-        // case, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String)> = query
-        .iter(world)
-        .filter_map(|(entity, uuid, control)| {
-            control.docked_partner().map(|target| {
-                (
-                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                    entity.index(),
-                    target.to_string(),
-                )
-            })
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "dock-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, target) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_str(acc, &target);
-    }
-    acc
+fn fold_dock_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "dock-namespace",
+        |control: &DockControl| control.docked_partner().map(str::to_string),
+        |mut acc, target| {
+            acc = fold_str(acc, &target);
+            acc
+        },
+    )
 }
 
 /// Every ship dispatching a repair team abroad (issue #1161), in [`FoldKey`]
@@ -2097,46 +2049,30 @@ fn fold_dock_namespace(world: &World, mut acc: u64) -> u64 {
 /// `[repair.external_dispatch]` and is dispatching nobody folds NOTHING — not
 /// even a row — so a shipped hull can gain the capability without moving any
 /// committed world's digest.
-fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ExternalRepairDispatch)>()
-    else {
-        // A world that never registered the component runs no external dispatch
-        // — the empty case, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String, u8)> = query
-        .iter(world)
-        .filter_map(|(entity, uuid, dispatch)| {
-            dispatch.dispatched_target.as_ref().map(|target| {
-                (
-                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                    entity.index(),
-                    target.clone(),
-                    dispatch.team_idx,
-                )
-            })
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "external-repair-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, target, team_idx) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_str(acc, &target);
-        // WHICH team is abroad, beside the target it is working (issue #1386).
-        // It has to fold for the reason the target does: two hosts that disagree
-        // about it disagree about which slot this hull has free for its own
-        // damage-control sweep, and therefore about where the next internal
-        // dispatch lands. The empty-walk affordance is untouched — a ship
-        // dispatching nobody still folds nothing at all, so `dispatched_target`
-        // folds exactly as it did.
-        acc = fold_u64(acc, u64::from(team_idx));
-    }
-    acc
+fn fold_external_repair_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "external-repair-namespace",
+        |dispatch: &ExternalRepairDispatch| {
+            dispatch
+                .dispatched_target
+                .as_ref()
+                .map(|target| (target.clone(), dispatch.team_idx))
+        },
+        |mut acc, (target, team_idx)| {
+            acc = fold_str(acc, &target);
+            // WHICH team is abroad, beside the target it is working (issue #1386).
+            // It has to fold for the reason the target does: two hosts that disagree
+            // about it disagree about which slot this hull has free for its own
+            // damage-control sweep, and therefore about where the next internal
+            // dispatch lands. The empty-walk affordance is untouched — a ship
+            // dispatching nobody still folds nothing at all, so `dispatched_target`
+            // folds exactly as it did.
+            acc = fold_u64(acc, u64::from(team_idx));
+            acc
+        },
+    )
 }
 
 /// Every ship whose transfer umbilical is RUNNING (issue #1160), in [`FoldKey`]
@@ -2159,33 +2095,14 @@ fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
 /// NOTHING — not even a row — so a shipped hull can gain an umbilical without
 /// moving any committed world's digest. The moment one umbilical runs the row
 /// count is in the accumulator like everyone else's.
-fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &TransferUmbilical)>() else {
-        // A world that never registered the component runs no umbilicals — the
-        // empty case, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex)> = query
-        .iter(world)
-        .filter(|(_, _, umbilical)| umbilical.running)
-        .map(|(entity, uuid, _)| {
-            (
-                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
-            )
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "umbilical-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _) in rows {
-        acc = fold_str(acc, &key.id);
-    }
-    acc
+fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "umbilical-namespace",
+        |umbilical: &TransferUmbilical| umbilical.running.then_some(()),
+        |acc, ()| acc,
+    )
 }
 
 /// Every ship with a Security team OUT (issue #1346), in [`FoldKey`] order, in
@@ -2217,19 +2134,12 @@ fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
 /// NOTHING — not even a row — so a shipped hull can gain Security teams without
 /// moving any committed world's digest. The moment one team crosses over, the row
 /// count is in the accumulator like everyone else's.
-fn fold_security_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipSecurityTeams)>() else {
-        // A world that never registered the component musters nobody — the empty
-        // case, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(
-        FoldKey,
-        bevy::ecs::entity::EntityIndex,
-        Vec<(u8, &'static str, String)>,
-    )> = query
-        .iter(world)
-        .filter_map(|(entity, uuid, security)| {
+fn fold_security_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "security-namespace",
+        |security: &ShipSecurityTeams| {
             let committed: Vec<(u8, &'static str, String)> = security
                 .teams
                 .iter()
@@ -2243,32 +2153,18 @@ fn fold_security_namespace(world: &World, mut acc: u64) -> u64 {
                     )
                 })
                 .collect();
-            (!committed.is_empty()).then(|| {
-                (
-                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                    entity.index(),
-                    committed,
-                )
-            })
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "security-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, committed) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_u64(acc, committed.len() as u64);
-        for (index, state, target) in committed {
-            acc = fold_u64(acc, index as u64);
-            acc = fold_str(acc, state);
-            acc = fold_str(acc, &target);
-        }
-    }
-    acc
+            (!committed.is_empty()).then_some(committed)
+        },
+        |mut acc, committed| {
+            acc = fold_u64(acc, committed.len() as u64);
+            for (index, state, target) in committed {
+                acc = fold_u64(acc, index as u64);
+                acc = fold_str(acc, state);
+                acc = fold_str(acc, &target);
+            }
+            acc
+        },
+    )
 }
 
 /// Every entity carrying an infrastructure condition track (issue #1025), in
@@ -2290,55 +2186,37 @@ fn fold_security_namespace(world: &World, mut acc: u64) -> u64 {
 /// compatibility affordance, not a hole: two hosts that disagree about whether a
 /// structure exists at all disagree about `rows.len()` as soon as either of them
 /// has one.
-fn fold_infrastructure_namespace(world: &World, mut acc: u64) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &InfrastructureCondition)>()
-    else {
-        // A world that never registered the component has no infrastructure —
-        // the empty case above, not a distinct one.
-        return acc;
-    };
-    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, InfrastructureState)> = query
-        .iter(world)
-        .map(|(entity, uuid, condition)| {
-            (
-                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
-                entity.index(),
-                condition.0.clone(),
-            )
-        })
-        .collect();
-    if rows.is_empty() {
-        return acc;
-    }
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    acc = fold_str(acc, "infrastructure-namespace");
-    acc = fold_u64(acc, rows.len() as u64);
-    for (key, _, state) in rows {
-        acc = fold_str(acc, &key.id);
-        acc = fold_f32(acc, state.condition());
-        acc = fold_f32(acc, state.condition_max());
-        acc = fold_u64(acc, state.flags().len() as u64);
-        for (flag, held) in state.flags() {
-            acc = fold_str(acc, flag);
-            acc = fold_u64(acc, u64::from(held));
-        }
-        // A capacity-backed threshold is represented at runtime by the same
-        // held flag above plus the live source level below. Its selector and
-        // restore/failure lines are immutable authored content, owned by the
-        // content digest rather than duplicated in this state fold.
-        // Capacity LEVELS, since #1027 made them movable. Two hosts that
-        // disagree about how many berths a depot has left disagree about
-        // whether the transfer window can be met, which is the mission. The
-        // ceiling is authored content and `content_digest` is answerable for
-        // it, so only the level is folded.
-        acc = fold_u64(acc, state.capacities().len() as u64);
-        for capacity in state.capacities() {
-            acc = fold_str(acc, &capacity.id);
-            acc = fold_u64(acc, capacity.level as u64);
-        }
-    }
-    acc
+fn fold_infrastructure_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "infrastructure-namespace",
+        |condition: &InfrastructureCondition| Some(condition.0.clone()),
+        |mut acc, state| {
+            acc = fold_f32(acc, state.condition());
+            acc = fold_f32(acc, state.condition_max());
+            acc = fold_u64(acc, state.flags().len() as u64);
+            for (flag, held) in state.flags() {
+                acc = fold_str(acc, flag);
+                acc = fold_u64(acc, u64::from(held));
+            }
+            // A capacity-backed threshold is represented at runtime by the same
+            // held flag above plus the live source level below. Its selector and
+            // restore/failure lines are immutable authored content, owned by the
+            // content digest rather than duplicated in this state fold.
+            // Capacity LEVELS, since #1027 made them movable. Two hosts that
+            // disagree about how many berths a depot has left disagree about
+            // whether the transfer window can be met, which is the mission. The
+            // ceiling is authored content and `content_digest` is answerable for
+            // it, so only the level is folded.
+            acc = fold_u64(acc, state.capacities().len() as u64);
+            for capacity in state.capacities() {
+                acc = fold_str(acc, &capacity.id);
+                acc = fold_u64(acc, capacity.level as u64);
+            }
+            acc
+        },
+    )
 }
 
 /// Every asteroid, in [`FoldKey`] order, in its own namespace after the

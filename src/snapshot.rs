@@ -225,7 +225,7 @@ use crate::world::commitments::CommitmentLedger;
 use crate::world::content::WorldEvent;
 use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
-use crate::world::script::schedule::{PendingCallbacks, ScheduledCall, TickBudget};
+use crate::world::script::schedule::{PendingCallbacks, ScheduledCall};
 use crate::world::server::{WorldContentRuntime, WorldScriptRuntime};
 use crate::world_id::{WorldIdMint, WorldIdMintState};
 
@@ -5646,8 +5646,7 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
     match world.get_resource_mut::<WorldScriptRuntime>() {
         Some(mut script) => {
             script.pending_callbacks = PendingCallbacks(stored.script_callbacks.clone());
-            script.budget = TickBudget::new();
-            script.budget_tick = snapshot.tick;
+            script.reset_invocation_budget(snapshot.tick);
         }
         None if !stored.script_callbacks.is_empty() => {
             report.gaps.push(RestoreGap::ScriptRuntimeAbsent {

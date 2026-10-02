@@ -649,22 +649,7 @@ pub(crate) fn handle_respond_to_message(
 
         // ── The dialogue's own effects (issue #984) ──────────────────────────
         //
-        // Entering a node and picking a response are the SAME operation: call
-        // the `on_pick` fn, take the effects it buffered, read the follow-up
-        // node it returned. Issue #985 deleted the declarative arm that used to
-        // sit beside this one and dispatch a `[[comms.response.action]]` array;
-        // the bindings above were always built once and shared by both, and are
-        // now simply this arm's.
         let sd = &dialogue.script;
-        let dialogue_flag_chain: Vec<crate::world::flags::FlagStore> =
-            crate::world::server::layered_flag_chain(
-                origin_layer.as_deref(),
-                &runtime.flags,
-                world_layers.layer_map.as_deref(),
-            )
-            .into_iter()
-            .cloned()
-            .collect();
         // Read the clock BEFORE borrowing the runtime, so the two reads of
         // `aux` stay sequential.
         let now_tick = aux.script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
@@ -690,32 +675,7 @@ pub(crate) fn handle_respond_to_message(
             reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         };
-        // Reset the shared budget once per tick, `SimTick`-keyed and
-        // idempotent — the same block `tick_trigger_pipeline`,
-        // `tick_script_callbacks` and `open_scripted_comms_threads` open
-        // with. This handler runs in `SimSet::Input`, BEFORE any of them, so
-        // without it the arm would read (and charge) the PREVIOUS tick's
-        // budget: a stale trip would spuriously refuse this tick's pick, and
-        // the charges it did make would land on a budget wiped moments later
-        // in `Physics` — leaving live dialogue calls effectively unbudgeted.
-        if sr.budget_tick != now_tick {
-            sr.budget = crate::world::script::schedule::TickBudget::new();
-            sr.budget_tick = now_tick;
-        }
-        // Issue #1050 / R5: a call the budget refuses produces nothing, and
-        // "nothing" is what a terminal response that buffered nothing also
-        // produces — so the refusal is caught BEFORE the call rather than
-        // inferred from its result. `can_admit()`, not `tripped()`: the call
-        // that REACHES the call cap is refused and trips the budget in one
-        // step, so a `tripped()` pre-flight passes on a pick that is about to
-        // be dropped. A player's pick the tick cannot afford therefore
-        // flashes the attempted control red through the SAME `reject` closure
-        // the stale, out-of-range and out-of-bounds refusals use, instead of
-        // appearing to do nothing.
-        if !sr.budget.can_admit() {
-            reject(&mut aux.outbox, cmd, message_id, *response_index);
-            continue;
-        }
+        sr.prepare_invocation_tick(now_tick);
         // Parallel to the shown responses by construction (`project_node`),
         // so the bounds check above already covers this index; refused
         // rather than indexed, so a future drift cannot panic mid-mission.
@@ -724,39 +684,29 @@ pub(crate) fn handle_respond_to_message(
             continue;
         };
 
-        // Entering a node and picking a response are the SAME operation:
-        // call the fn, take the effects it buffered, read the follow-up node
-        // it returned. Disjoint field borrows so the one `&self` call takes
-        // `&mut budget` and `&ast` at once while `&runtime.flags` (a
-        // DISJOINT resource) is the flag overlay base.
-        let entered = {
-            let crate::world::server::WorldScriptRuntime {
-                host, asts, budget, ..
-            } = &mut *sr;
-            match asts.get(&sd.script_path) {
-                Some(ast) => Some(crate::world::script::comms::enter_node_scoped(
-                    host,
-                    budget,
-                    &script_clock,
-                    ast,
-                    &sd.script_path,
-                    &on_pick_fn,
-                    &dialogue_flag_chain,
-                    &runtime.deadlines,
-                    &runtime.commitments,
-                    &runtime.evidence,
-                    origin_layer.as_deref(),
-                )),
-                None => {
+        let context = crate::world::server::ScriptCallContext {
+            log_ctx: "handle_respond_to_message (script)",
+            clock: script_clock,
+            mission_clock_anchored: elapsed_secs.is_some(),
+            origin_layer: origin_layer.clone(),
+            entity_name: sender_entity_name.clone(),
+            script_path: &sd.script_path,
+            function: &on_pick_fn,
+        };
+        let entered =
+            match sr.invoke_dialogue(&context, &runtime, world_layers.layer_map.as_deref()) {
+                Ok(pair) => Some(Ok(pair)),
+                Err(crate::world::server::DialogueInvocationError::MissingUnit) => {
                     bevy::log::warn!(
                         "handle_respond_to_message: on_pick '{on_pick_fn}' names a missing \
-                         unit '{}'",
+                     unit '{}'",
                         sd.script_path
                     );
                     None
                 }
-            }
-        };
+                Err(crate::world::server::DialogueInvocationError::BudgetUnavailable) => None,
+                Err(crate::world::server::DialogueInvocationError::Node(error)) => Some(Err(error)),
+            };
         // A malformed return is refused like any other pick that produced no
         // node — but only AFTER the effects the call really did buffer have
         // been applied below, which is why it is carried as a flag rather
@@ -782,15 +732,7 @@ pub(crate) fn handle_respond_to_message(
 
         crate::world::server::apply_script_call(
             effects,
-            crate::world::server::ScriptCallContext {
-                log_ctx: "handle_respond_to_message (script)",
-                clock: script_clock,
-                mission_clock_anchored: elapsed_secs.is_some(),
-                origin_layer: origin_layer.clone(),
-                entity_name: sender_entity_name.clone(),
-                script_path: &sd.script_path,
-                function: &on_pick_fn,
-            },
+            context,
             crate::world::server::ScriptEventTarget::Pending,
             sr,
             &uuid_to_entity,

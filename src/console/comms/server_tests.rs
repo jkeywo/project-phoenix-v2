@@ -3547,9 +3547,10 @@ fn a_budget_refused_scripted_response_is_rejected() {
     // Spend the tick's whole operation budget: `charge_ops` trips it, and a
     // tripped budget refuses every remaining call — exactly the state a busy
     // tick leaves behind.
-    sr.budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
-    assert!(sr.budget.tripped());
-    sr.budget_tick = responding_tick(&app);
+    let mut budget = crate::world::script::schedule::TickBudget::new();
+    budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+    assert!(budget.tripped());
+    sr.seed_invocation_budget(responding_tick(&app), budget);
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
         "reach_axiom",
@@ -3602,11 +3603,12 @@ fn a_stale_tripped_budget_does_not_refuse_this_ticks_scripted_response() {
     let mut app = comms_test_app();
     setup_game_with_comms(&mut app, station_uuid);
     let mut sr = crate::comms::scripted::tests::compile_fixture(DIALOGUE_TREE);
-    sr.budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
-    assert!(sr.budget.tripped());
+    let mut budget = crate::world::script::schedule::TickBudget::new();
+    budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+    assert!(budget.tripped());
     // Stamped with a tick that is NOT the responding one: a spent budget
     // belonging to the past.
-    sr.budget_tick = responding_tick(&app).wrapping_sub(1);
+    sr.seed_invocation_budget(responding_tick(&app).wrapping_sub(1), budget);
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
         "reach_axiom",
@@ -3644,8 +3646,12 @@ fn a_stale_tripped_budget_does_not_refuse_this_ticks_scripted_response() {
     let sr = app
         .world()
         .resource::<crate::world::server::WorldScriptRuntime>();
-    assert_eq!(sr.budget_tick, responding_tick(&app));
-    assert_eq!(sr.budget.calls_used(), 1, "the dialogue call was charged");
+    assert_eq!(sr.invocation_budget().0, responding_tick(&app));
+    assert_eq!(
+        sr.invocation_budget().1.calls_used(),
+        1,
+        "the dialogue call was charged"
+    );
 }
 
 /// Finding 4's immediate half: an `on_pick` naming a fn that does not exist

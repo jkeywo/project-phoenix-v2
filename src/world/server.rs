@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use rhai::{Map, AST};
+use rhai::AST;
 
 use crate::core::messages::{GamePhase, ServerMessage};
 use crate::effect_queue::EffectQueue;
@@ -23,6 +23,10 @@ use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader}
 use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
 use crate::world::script::schedule::{CallEffects, PendingCallbacks, SchedClock, TickBudget};
+
+#[path = "script_invocation.rs"]
+mod script_invocation;
+pub(crate) use script_invocation::DialogueInvocationError;
 
 // -- Resources --------------------------------------------------------------
 
@@ -626,7 +630,7 @@ pub struct WorldScriptRuntime {
     /// Authored names remain valid before their instance is activated.
     pub recipient_declarations: BTreeSet<crate::objective_instances::ObjectiveInstanceKey>,
     /// The runtime host that runs retained handler fns.
-    pub host: RuntimeHost,
+    host: RuntimeHost,
     /// Retained ASTs keyed by content-relative (or virtual) path.
     pub asts: BTreeMap<String, AST>,
     /// Owners retaining each AST unit. `None` denotes the root world; layer
@@ -639,9 +643,9 @@ pub struct WorldScriptRuntime {
     /// The per-tick operation/call budget, shared across every script call in a
     /// tick and reset when [`budget_tick`](Self::budget_tick) falls behind the
     /// current `SimTick`.
-    pub budget: TickBudget,
+    budget: TickBudget,
     /// The `SimTick` the current [`budget`](Self::budget) was created for.
-    pub budget_tick: u64,
+    budget_tick: u64,
     /// Content hash of the compiled script set (the #988 save-binding input).
     pub content_hash: u64,
     /// Serialisable queue of deferred `after(n, |ctx| …)` callbacks awaiting
@@ -2445,10 +2449,7 @@ pub(crate) fn tick_trigger_pipeline(
     // Reset the shared budget once per tick (`SimTick`-keyed), so it spans every
     // chaining pass this tick exactly as the M0 spike's aggregate caps require.
     if let Some(sr) = script.runtime.as_deref_mut() {
-        if sr.budget_tick != now_tick {
-            sr.budget = TickBudget::new();
-            sr.budget_tick = now_tick;
-        }
+        sr.prepare_invocation_tick(now_tick);
     }
 
     // Reborrow the `ResMut` as a plain `&mut` so the evaluation loop below can
@@ -2743,69 +2744,33 @@ pub(crate) fn tick_trigger_pipeline(
             // (`apply_script_commands`).
             if let Some(sr) = script.runtime.as_deref_mut() {
                 if let Some(h) = handler {
-                    // The store chain THIS handler reads through (issue #1045):
-                    // its own layer first, then outward to the base world — the
-                    // same walk its `when` predicates evaluate against and the
-                    // same one `scope_scripted_flag_write` resolves its writes
-                    // through, so a handler cannot write somewhere it cannot read
-                    // back from. Snapshotted by value because the borrow of
-                    // `layer_map` must not survive into `apply_script_commands`,
-                    // which takes it mutably; one entry (`[base]`) for a
-                    // base-world handler, which is what every shipped world has.
-                    let handler_flag_chain: Vec<crate::world::flags::FlagStore> =
-                        layered_flag_chain(
-                            ft.origin_layer.as_deref(),
-                            &runtime.flags,
-                            world_layers.layer_map.as_deref(),
-                        )
-                        .into_iter()
-                        .cloned()
-                        .collect();
-                    // Split `WorldScriptRuntime` into disjoint field borrows so
-                    // the one `&self` call takes `&mut budget` and `&ast` at once.
-                    // `call` returns owned `CallEffects`, so no
-                    // `WorldScriptRuntime` borrow survives into the apply.
-                    let effects = {
-                        let WorldScriptRuntime {
-                            host, asts, budget, ..
-                        } = &mut *sr;
-                        match asts.get(&h.script_path) {
-                            Some(ast) => Some(host.call_scoped(
-                                budget,
-                                &script_clock,
-                                ast,
-                                &h.script_path,
-                                &h.fn_name,
-                                &handler_flag_chain,
-                                &runtime.deadlines,
-                                &runtime.commitments,
-                                &runtime.evidence,
-                                ft.origin_layer.as_deref(),
-                                Map::new(),
-                            )),
-                            None => {
-                                bevy::log::warn!(
-                                    "tick_trigger_pipeline: scripted handler '{}' names a \
-                                     missing unit '{}'",
-                                    h.fn_name,
-                                    h.script_path
-                                );
-                                None
-                            }
+                    let context = ScriptCallContext {
+                        log_ctx: "tick_trigger_pipeline (script)",
+                        clock: script_clock,
+                        mission_clock_anchored: elapsed_secs.is_some(),
+                        origin_layer: ft.origin_layer.clone(),
+                        entity_name: ft.entity_name.clone(),
+                        script_path: &h.script_path,
+                        function: &h.fn_name,
+                    };
+                    let effects = match sr.invoke_effects(
+                        &context,
+                        runtime,
+                        world_layers.layer_map.as_deref(),
+                    ) {
+                        Ok(effects) => Some(effects),
+                        Err(_) => {
+                            bevy::log::warn!(
+                                "tick_trigger_pipeline: scripted handler '{}' names a missing unit '{}'",
+                                    h.fn_name, h.script_path
+                            );
+                            None
                         }
                     };
                     if let Some(effects) = effects {
                         apply_script_call(
                             effects,
-                            ScriptCallContext {
-                                log_ctx: "tick_trigger_pipeline (script)",
-                                clock: script_clock,
-                                mission_clock_anchored: elapsed_secs.is_some(),
-                                origin_layer: ft.origin_layer.clone(),
-                                entity_name: ft.entity_name.clone(),
-                                script_path: &h.script_path,
-                                function: &h.fn_name,
-                            },
+                            context,
                             ScriptEventTarget::TriggerChain(&mut next_events),
                             sr,
                             &uuid_to_entity,
@@ -4476,10 +4441,7 @@ pub(crate) fn tick_script_callbacks(
     // Reset the shared budget once per tick (`SimTick`-keyed): whichever script
     // system runs first this tick resets it, so trigger-handler ops and callback
     // ops share ONE budget per the M3 contract.
-    if sr.budget_tick != now_tick {
-        sr.budget = TickBudget::new();
-        sr.budget_tick = now_tick;
-    }
+    sr.prepare_invocation_tick(now_tick);
 
     // Split off the due callbacks in authored order; the rest stay queued. Taking
     // the snapshot first means a callback re-queued this tick (even at delay 0,
@@ -4554,47 +4516,25 @@ pub(crate) fn tick_script_callbacks(
                 },
             );
         }
-        let callback_flag_chain: Vec<crate::world::flags::FlagStore> = layered_flag_chain(
-            callback_origin.as_deref(),
-            &runtime.flags,
-            world_layers.layer_map.as_deref(),
-        )
-        .into_iter()
-        .cloned()
-        .collect();
-        // Split `WorldScriptRuntime` into disjoint field borrows so the one
-        // `&self` call takes `&mut budget` and `&ast` at once, while
-        // `&runtime.flags` (a DISJOINT resource) is the overlay base. `call`
-        // returns owned `CallEffects`, so no `WorldScriptRuntime` borrow survives
-        // into the apply below.
-        let effects = {
-            let WorldScriptRuntime {
-                host, asts, budget, ..
-            } = &mut *sr;
-            match asts.get(&call.script_path) {
-                Some(ast) => Some(host.call_scoped(
-                    budget,
-                    &script_clock,
-                    ast,
-                    &call.script_path,
-                    &call.fn_name,
-                    // The callback's captured layer chain; root callbacks have
-                    // the ordinary one-entry base chain.
-                    &callback_flag_chain,
-                    &runtime.deadlines,
-                    &runtime.commitments,
-                    &runtime.evidence,
-                    callback_origin.as_deref(),
-                    Map::new(),
-                )),
-                None => {
-                    bevy::log::warn!(
-                        "tick_script_callbacks: callback '{}' names a missing unit '{}'",
-                        call.fn_name,
-                        call.script_path
-                    );
-                    None
-                }
+        let context = ScriptCallContext {
+            log_ctx: "tick_script_callbacks",
+            clock: script_clock,
+            mission_clock_anchored: elapsed_secs.is_some(),
+            origin_layer: callback_origin.clone(),
+            entity_name: None,
+            script_path: &call.script_path,
+            function: &call.fn_name,
+        };
+        let effects = match sr.invoke_effects(&context, runtime, world_layers.layer_map.as_deref())
+        {
+            Ok(effects) => Some(effects),
+            Err(_) => {
+                bevy::log::warn!(
+                    "tick_script_callbacks: callback '{}' names a missing unit '{}'",
+                    call.fn_name,
+                    call.script_path
+                );
+                None
             }
         };
         let Some(effects) = effects else {
@@ -4606,15 +4546,7 @@ pub(crate) fn tick_script_callbacks(
         // `tick_trigger_pipeline` has already drained `pending_world_events`.
         apply_script_call(
             effects,
-            ScriptCallContext {
-                log_ctx: "tick_script_callbacks",
-                clock: script_clock,
-                mission_clock_anchored: elapsed_secs.is_some(),
-                origin_layer: callback_origin.clone(),
-                entity_name: None,
-                script_path: &call.script_path,
-                function: &call.fn_name,
-            },
+            context,
             ScriptEventTarget::Pending,
             sr,
             &uuid_to_entity,

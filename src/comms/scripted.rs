@@ -3,7 +3,7 @@
 //! The materialising half of `ctx.effects.open_comms(#{…})`: a scripted handler
 //! (or a deferred callback) buffers an
 //! [`OpenCommsRequest`](crate::comms::content::OpenCommsRequest) onto
-//! [`WorldScriptRuntime::pending_comms_opens`], and
+//! [`WorldScriptRuntime::pending_comms_opens`](crate::world::server::WorldScriptRuntime::pending_comms_opens), and
 //! [`open_scripted_comms_threads`] drains that queue, enters the thread's root
 //! node, and injects the resulting message into the inbox as a channel-2
 //! delivery — the SAME delivery a fired `[[comms]]` template makes.
@@ -32,12 +32,12 @@ use crate::comms::content::{response_views, ActiveDialogue, ScriptedDialogue};
 use crate::comms::server::{CommsChannel2Event, CommsRuntime};
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
-use crate::world::script::comms::{enter_node_scoped, project_node, EnterError};
-use crate::world::script::schedule::{SchedClock, TickBudget};
+use crate::world::script::comms::{project_node, EnterError};
+use crate::world::script::schedule::SchedClock;
 use crate::world::server::{
-    apply_script_call, EffectQueues, ObjectiveManagerRes, ScriptCallContext, ScriptEventTarget,
-    ScriptRuntimeParams, ShipModifiersParams, WorldContentRuntime, WorldLayerParams,
-    WorldScriptRuntime,
+    apply_script_call, DialogueInvocationError, EffectQueues, ObjectiveManagerRes,
+    ScriptCallContext, ScriptEventTarget, ScriptRuntimeParams, ShipModifiersParams,
+    WorldContentRuntime, WorldLayerParams,
 };
 
 /// The three tick-scoped reads [`open_scripted_comms_threads`] needs that are
@@ -81,8 +81,8 @@ pub(crate) struct ScriptedCommsAux<'w, 's> {
 ///    unresolvable `from` falls through to itself, which
 ///    [`crate::comms::server::sender_in_range_for_fleet`] treats as
 ///    always-readable);
-/// 2. enter the root node under the tick's SHARED [`TickBudget`], gated on a
-///    pre-flight [`can_admit`](TickBudget::can_admit) check;
+/// 2. enter the root node under the tick's SHARED [`TickBudget`](crate::world::script::schedule::TickBudget), gated on a
+///    pre-flight `can_admit` check;
 /// 3. commit the complete call through [`apply_script_call`], using the same
 ///    dispatch bindings as triggers/callbacks and the pending World event queue.
 ///    Nested `comms_opens` wait for the NEXT drain, never re-entrantly;
@@ -154,10 +154,7 @@ pub(crate) fn open_scripted_comms_threads(
     // tick so it is idempotent, and repeated here so a fixture that registers
     // only this system still shares ONE budget per tick rather than carrying a
     // stale trip forward.
-    if sr.budget_tick != now_tick {
-        sr.budget = TickBudget::new();
-        sr.budget_tick = now_tick;
-    }
+    sr.prepare_invocation_tick(now_tick);
     // Taken whole up front: a request this pass produces (a root fn that itself
     // calls `open_comms`) lands on the now-empty queue and is drained NEXT tick,
     // never re-entrantly within this loop.
@@ -328,25 +325,6 @@ pub(crate) fn open_scripted_comms_threads(
         }) {
             continue;
         }
-        // A spent budget refuses every remaining call this tick by contract, so
-        // stop here rather than logging once per request. Deterministic: the trip
-        // is a pure function of the tick's call/op sequence, so every peer drops
-        // the same tail. The requests are dropped, not re-queued — re-queueing a
-        // refused open would let a busy tick push work forward indefinitely.
-        //
-        // `can_admit()`, not `tripped()`: the call that REACHES the call cap is
-        // refused and trips the budget in one step, so a `tripped()` pre-flight
-        // passes on a call that is about to be dropped — and the drop would then
-        // surface below as the misleading "root fn returned no node".
-        if !sr.budget.can_admit() {
-            bevy::log::warn!(
-                target: crate::logging::LogCat::World.target(),
-                "open_scripted_comms_threads: the tick's script budget is spent; \
-                 dropping the remaining comms opens"
-            );
-            break;
-        }
-
         // Sender identity, by the rule the deleted `inject_comms_templates` used:
         // `_self` is the reserved synthetic internal sender and renders as
         // "Internal Report";
@@ -382,49 +360,36 @@ pub(crate) fn open_scripted_comms_threads(
             })
             .unwrap_or(channel_name);
 
-        // Enter the root node under the tick's SHARED budget. Split
-        // `WorldScriptRuntime` into disjoint field borrows so the one `&self` call
-        // takes `&mut budget` and `&ast` at once while `&runtime.flags` (a
-        // DISJOINT resource) is the overlay base.
-        let dialogue_flag_chain: Vec<crate::world::flags::FlagStore> =
-            crate::world::server::layered_flag_chain(
-                req.origin_layer.as_deref(),
-                &runtime.flags,
-                world_layers.layer_map.as_deref(),
-            )
-            .into_iter()
-            .cloned()
-            .collect();
-        let entered = {
-            let WorldScriptRuntime {
-                host, asts, budget, ..
-            } = &mut *sr;
-            match asts.get(&req.script_path) {
-                Some(ast) => Some(enter_node_scoped(
-                    host,
-                    budget,
-                    &script_clock,
-                    ast,
-                    &req.script_path,
-                    &req.root_fn,
-                    &dialogue_flag_chain,
-                    &runtime.deadlines,
-                    &runtime.commitments,
-                    &runtime.evidence,
-                    req.origin_layer.as_deref(),
-                )),
-                None => {
-                    bevy::log::warn!(
-                        "open_scripted_comms_threads: root fn '{}' names a missing unit '{}'",
-                        req.root_fn,
-                        req.script_path
-                    );
-                    None
-                }
-            }
+        let context = ScriptCallContext {
+            log_ctx: "open_scripted_comms_threads",
+            clock: script_clock,
+            mission_clock_anchored: elapsed_secs.is_some(),
+            origin_layer: req.origin_layer.clone(),
+            entity_name: Some(req.from.clone()),
+            script_path: &req.script_path,
+            function: &req.root_fn,
         };
-        let Some(entered) = entered else {
-            continue;
+        let entered = match sr.invoke_dialogue(&context, runtime, world_layers.layer_map.as_deref())
+        {
+            Ok(pair) => Ok(pair),
+            Err(DialogueInvocationError::BudgetUnavailable) => {
+                // Keep the drained tail dropped; retrying would defer refused work.
+                bevy::log::warn!(
+                    target: crate::logging::LogCat::World.target(),
+                    "open_scripted_comms_threads: the tick's script budget is spent; \
+                     dropping the remaining comms opens"
+                );
+                break;
+            }
+            Err(DialogueInvocationError::MissingUnit) => {
+                bevy::log::warn!(
+                    "open_scripted_comms_threads: root fn '{}' names a missing unit '{}'",
+                    req.root_fn,
+                    req.script_path
+                );
+                continue;
+            }
+            Err(DialogueInvocationError::Node(error)) => Err(error),
         };
         // Three outcomes, three log lines — a malformed return, an unresolvable
         // name and a refused call are different authoring problems, and none of
@@ -459,15 +424,7 @@ pub(crate) fn open_scripted_comms_threads(
         // is consumed in `SimSet::Broadcast`.
         apply_script_call(
             effects,
-            ScriptCallContext {
-                log_ctx: "open_scripted_comms_threads",
-                clock: script_clock,
-                mission_clock_anchored: elapsed_secs.is_some(),
-                origin_layer: req.origin_layer.clone(),
-                entity_name: Some(req.from.clone()),
-                script_path: &req.script_path,
-                function: &req.root_fn,
-            },
+            context,
             ScriptEventTarget::Pending,
             sr,
             &uuid_to_entity,

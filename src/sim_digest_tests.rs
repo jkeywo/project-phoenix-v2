@@ -1127,32 +1127,17 @@ use crate::world::commitments::{Commitment, CommitmentState};
 use crate::world::config::{Trigger, TriggerCondition};
 use crate::world::content::TriggerState;
 use crate::world::deadlines::{DeadlineRecord, DeadlineState};
-use crate::world::script::schedule::{PendingCallbacks, ScheduledCall, TickBudget};
+use crate::world::script::schedule::ScheduledCall;
 use crate::world::server::WorldRuntime;
 use crate::world::workforce::WorkforceRecord;
 
 /// A script runtime carrying no compiled units — enough to hold the two queues
 /// the fold walks.
 ///
-/// Written out rather than built through `WorldScriptRuntime::from_compiled`,
-/// which returns `None` for an empty set on purpose (a script-free world
-/// inserts no resource at all, and that case is covered by
-/// [`an_empty_scenario_folds_as_no_scenario_at_all`]).
+/// The layer runtime's empty constructor retains a resource for queue tests;
+/// from_compiled deliberately returns None for script-free worlds.
 fn empty_script_runtime() -> WorldScriptRuntime {
-    WorldScriptRuntime {
-        recipient_declarations: Default::default(),
-        host: crate::world::script::engine::RuntimeHost::new(),
-        asts: std::collections::BTreeMap::new(),
-        ast_owners: std::collections::BTreeMap::new(),
-        function_lines: std::collections::BTreeMap::new(),
-        triggers: Vec::new(),
-        budget: TickBudget::new(),
-        budget_tick: 0,
-        content_hash: 0,
-        pending_callbacks: PendingCallbacks::new(),
-        pending_comms_opens: Vec::new(),
-        deadline_handlers: Vec::new(),
-    }
+    WorldScriptRuntime::empty()
 }
 
 /// [`fold_world`] plus every scenario resource the scope walks, all empty — the

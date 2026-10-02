@@ -2,13 +2,30 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/gm_event.rs, src/gm_spawn.rs, src/world/script/, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/boot/mod.rs, src/content_ledger.rs, src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/script/effects.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/objectives/directive.rs, src/console/navigation/server.rs, src/civilian/server.rs, src/infrastructure/condition.rs, src/infrastructure/server.rs, src/campaign/projection.rs, src/tractor/server.rs, src/dock/server.rs, src/umbilical/server.rs, src/console/repair/external_server.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app/mod.rs, src/server_app/world_setup.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/falling_skyway.toml, assets/factions/]
-updated: 2026-09-07
+sources: [src/world/script_invocation.rs, src/gm_event.rs, src/gm_spawn.rs, src/world/script/, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/boot/mod.rs, src/content_ledger.rs, src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/script/effects.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/objectives/directive.rs, src/console/navigation/server.rs, src/civilian/server.rs, src/infrastructure/condition.rs, src/infrastructure/server.rs, src/campaign/projection.rs, src/tractor/server.rs, src/dock/server.rs, src/umbilical/server.rs, src/console/repair/external_server.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app/mod.rs, src/server_app/world_setup.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/falling_skyway.toml, assets/factions/]
+updated: 2026-10-02
 ---
 
 # WorldPlugin
 
 `WorldPlugin` is a Bevy plugin that owns world bootstrap and runtime content lifecycle for the simulation.
+
+## Script invocation
+
+`WorldScriptRuntime::invoke_effects` and `invoke_dialogue` in
+`src/world/script_invocation.rs` own the retained-AST lookup, shared tick budget
+and fresh layer flag snapshot for triggers, callbacks and both Comms entry
+paths. The engine and budget fields are private. Each adapter captures one
+`ScriptCallContext`, borrows it for invocation and passes the same context to
+complete effect application. Existing drains retain their tick-adoption point;
+invocation also adopts the tick so a new caller cannot use a stale budget.
+
+Dialogue invocation distinguishes unavailable budget, missing unit and the
+existing node errors. Comms opening drops its refused batch tail; responses
+reject the attempted pick. A successful malformed return still carries its
+complete effects. `RuntimeHost` retains call charging and its panic/discard
+policy. Snapshot restore unconditionally resets the transient budget at the
+restored tick; serialized queues and digest state stay unchanged.
 
 ## Script-call application
 
@@ -125,7 +142,7 @@ Triggers registered from a world's `[script]` block are matched against `WorldEv
 
 ## Trigger actions
 
-Trigger-fired actions are decided by a pure dispatch table in `src/world/dispatch.rs`: `dispatch_action` (`src/world/dispatch.rs:628`) covers every `TriggerAction` variant, routing grouped variants to five group functions (`dispatch_state_action`, `dispatch_entity_modifier_action`, `dispatch_world_flag_action`, `dispatch_destroy_entity`, `dispatch_spawn_entity` — spawn template loading goes through the injected `TemplateLoader` trait, `src/entities/loader.rs:81`). Each returns a `DispatchResult` that the applier `apply_dispatch_result` (`src/world/server.rs:3497`) turns into ECS mutations — the shared apply path for `tick_trigger_pipeline` (immediate actions) and `tick_delayed_actions` (delayed ones). Comms response effects use that path too: `handle_respond_to_message` invokes the scripted `on_pick`, whose complete effects enter `apply_script_call` (`src/world/server.rs:3022`) and the same dispatcher/applier. Design rationale for the pipeline split lives in `pasm/spec/`.
+Trigger-fired actions are decided by a pure dispatch table in `src/world/dispatch.rs`: `dispatch_action` (`src/world/dispatch.rs:628`) covers every `TriggerAction` variant, routing grouped variants to five group functions (`dispatch_state_action`, `dispatch_entity_modifier_action`, `dispatch_world_flag_action`, `dispatch_destroy_entity`, `dispatch_spawn_entity` — spawn template loading goes through the injected `TemplateLoader` trait, `src/entities/loader.rs:81`). Each returns a `DispatchResult` that the applier `apply_dispatch_result` (`src/world/server.rs:3462`) turns into ECS mutations — the shared apply path for `tick_trigger_pipeline` (immediate actions) and `tick_delayed_actions` (delayed ones). Comms response effects use that path too: `handle_respond_to_message` invokes the scripted `on_pick`, whose complete effects enter `apply_script_call` (`src/world/server.rs:2987`) and the same dispatcher/applier. Design rationale for the pipeline split lives in `pasm/spec/`.
 
 Authoring shape per action variant:
 
@@ -144,7 +161,7 @@ Authoring shape per action variant:
 | `repair_infrastructure` / `damage_infrastructure` | `entity`, `points` | Move the named structure's `[infrastructure]` condition (issue #1025). Whole points, or a `flt("…")` slice for a fractional per-tick step. The applier resolves the name and QUEUES the delta on `WorldContentRuntime::pending_condition_adjustments` rather than writing the component, so every condition move goes through the one system that owns threshold edges. No delay-builder twin. |
 | `adjust_capacity` | `entity`, `capacity`, `delta` | Move one of the named structure's published `[[infrastructure.capacity]]` levels by whole units — negative spends, positive returns (issue #1042). The capacity sibling of the two condition verbs above, and it queues on `WorldContentRuntime::pending_capacity_adjustments` — the same queue a completed umbilical transfer fills — so a scripted move and a delivered cargo land in the one system that re-publishes the counter a script predicate reads. ONE signed verb rather than a spend/return pair, which is the opposite call to `repair`/`damage`: a condition move has a different fiction on each side, where a capacity move has one, so splitting it would force a scenario publishing a *computed* number to branch on the sign of its own arithmetic before it could name the verb. Whole units only, with no `flt` overload, because a capacity is a count on an `i64` counter. A capacity the structure never declared is a warn-only no-op, dropped in `tick_infrastructure_condition` rather than at the applier, because that check needs the component. No delay-builder twin. |
 | `order_hold` / `order_divert_route` / `order_divert_anchor` / `order_dock` | `entity`, plus a destination for the last three | Order the named civilian craft (issue #1028). The applier resolves the name and QUEUES the order on `WorldContentRuntime::pending_civilian_orders` rather than writing the component, so a scripted order goes through the same acknowledgement delay and the same authored disposition a crew's order does — a scenario cannot remote-control traffic a crew has to negotiate with. Four verbs rather than one taking a verb string, and `divert` split by destination, because a single verb could not tell a route id from an anchor name. No delay-builder twin. |
-| `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:99`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every AI controller's remembered target (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:4759`) so an in-progress engagement does not stick on a now-friendly target. |
+| `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:99`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every AI controller's remembered target (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:4691`) so an in-progress engagement does not stick on a now-friendly target. |
 
 Scenario logic is authored in the editor's script panel; the runtime dispatch table is the single action catalogue.
 
@@ -158,7 +175,7 @@ Campaign projection treats `[infrastructure] publish = false` as a private missi
 
 ### Factions
 
-Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:53`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:1584`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:148`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. A faction may carry an optional `display_name` string id, the only faction string a player sees; `name` remains the reference key used by `add_faction_enemy` and entity templates. The AI's shared nearest-hostile scan (`find_nearest_hostile`, `src/ai/core.rs:1633`) consults this predicate when picking a target.
+Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:53`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:1584`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:148`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. A faction may carry an optional `display_name` string id, the only faction string a player sees; `name` remains the reference key used by `add_faction_enemy` and entity templates. The AI's shared nearest-hostile scan (`find_nearest_hostile`, `src/ai/core.rs:1634`) consults this predicate when picking a target.
 
 **Defaults:** Alliance is hostile to Pirate only. Harrow defaults to neutral so non-combat worlds (Starbase Alpha in `default.toml`, Before the Fire in `before_the_fire.toml`) can reuse the same Harrow ship templates as ambient patrols. Combat scenarios (`combat_test.toml`) flip the Alliance↔Harrow relationship hostile on `on_world_loaded` via two `add_faction_enemy` actions before the first wave's hostile scan.
 

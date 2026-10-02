@@ -185,6 +185,8 @@ entities:
       rationale:
         - "The two M0 flag hazards are fixed here (roadmap #981). `flags.increment` emits `FlagMutation::Increment` so a script increment and a concurrent TOML `increment_flag` on the same flag in the same tick COMPOSE in either order; and each mutation is pushed onto the call's single shared effect sink at the point it is authored, so flag writes and effects emit in AUTHORED ORDER. `flags.x += n` cannot be made composable (Rhai desugars `+=` on an indexer to get-then-set) and is rejected at load by the lint recorded in `scenario-script-loader-validation`."
         - "Issue #1045 makes origin authoritative rather than deriving it from `script_path`: a supporting-layer trigger, deadline, callback, nested callback, delayed effect or scripted comms open retains the owning layer through every drain. Unloading that layer retracts its queued work without touching another layer that shares the same AST. `origin_layer` is serde-defaulted for older payloads, while snapshot format 13 prevents a current layered save from silently resuming without the ownership state."
+        - "[ai] The four invocation adapters share WorldScriptRuntime::invoke_effects and invoke_dialogue. This operation adopts the current SimTick budget, resolves the retained AST and snapshots the captured origin's current flag chain; the same ScriptCallContext then reaches complete effect application. Existing drains keep their no-call tick-adoption points. Engine and budget fields are private; snapshot restore unconditionally clears the transient budget at the restored tick without changing serialized queues or digest fields."
+        - "[ai] Dialogue budget preflight precedes unit/function resolution and spends no attempt. Opening drops the remaining drained requests on budget refusal; responses reject the attempted pick and continue. Missing units remain distinct from unresolved node functions. A successful malformed dialogue return retains its effects; engine failures retain the existing dev-panic/release-discard policy and charge failed work. Invocation introduces no evaluator, scheduler, queue or SystemParam."
     architecture:
       kind: scheduling-policy
       authority: authoritative
@@ -194,8 +196,9 @@ entities:
       paths:
         - src/world/script/schedule.rs
         - src/world/server.rs
-      symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks, apply_script_call, ScriptCallContext, ScriptEventTarget]
-      tests: [cargo test, src/world/script/schedule_tests.rs]
+        - src/world/script_invocation.rs
+      symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks, apply_script_call, ScriptCallContext, ScriptEventTarget, invoke_effects, invoke_dialogue, prepare_invocation_tick, reset_invocation_budget]
+      tests: [cargo test, src/world/script/schedule_tests.rs, src/world/script_invocation_tests.rs, src/comms/scripted_tests.rs, src/console/comms/server_tests.rs]
     evidence:
       - kind: test
         reference: complete_script_call_applies_all_six_collections_with_clock_and_owner_context

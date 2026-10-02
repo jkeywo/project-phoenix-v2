@@ -2,6 +2,7 @@ use super::*;
 use crate::comms::content::OpenCommsRequest;
 use crate::comms::server::CommsInboxRes;
 use crate::console::comms::server::handle_comms_channel2;
+use crate::world::server::WorldScriptRuntime;
 use crate::world_id::InstallWorldIdMint;
 
 /// The virtual path an inline `[script] setup = …` block compiles under.
@@ -1403,21 +1404,19 @@ fn compile_default_world() -> (WorldScriptRuntime, String) {
 #[test]
 fn default_worlds_raider_attack_still_loads_the_reinforcements_layer_and_broadcasts() {
     use crate::world::script::effects::BufferedEffect;
-    let (sr, path) = compile_default_world();
-    let mut budget = TickBudget::new();
-    let (effects, node) = crate::world::script::comms::enter_node(
-        &sr.host,
-        &mut budget,
-        &SchedClock::ZERO,
-        sr.asts.get(&path).expect("compiled unit"),
-        &path,
-        "on_raider_attacked",
-        &crate::world::flags::FlagStore::new(),
-        &crate::world::deadlines::DeadlineTable::default(),
-        &crate::world::commitments::CommitmentLedger::default(),
-        &crate::dossier::evidence::EvidenceLog::default(),
-    )
-    .expect("the handler runs");
+    let (mut sr, path) = compile_default_world();
+    let context = ScriptCallContext {
+        log_ctx: "default_worlds_raider_attack",
+        clock: SchedClock::ZERO,
+        mission_clock_anchored: false,
+        origin_layer: None,
+        entity_name: None,
+        script_path: &path,
+        function: "on_raider_attacked",
+    };
+    let (effects, node) = sr
+        .invoke_dialogue(&context, &WorldContentRuntime::default(), None)
+        .expect("the handler runs");
     assert!(node.is_none(), "a trigger handler returns no dialogue node");
 
     assert_eq!(

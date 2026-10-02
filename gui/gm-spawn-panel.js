@@ -1,4 +1,5 @@
-import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { createGmFeedbackPresentation, isGmResultEnvelope } from './gm-feedback-presentation.js';
 /**
  * The GM placement panel: the scenario-authored spawn palette and the map
  * gesture that places one (issue #1305, PRD #930 milestone M2).
@@ -38,7 +39,6 @@ import {
   createActionCorrelation,
 } from './action-feedback.js';
 import {
-  GM_ACTION_REFUSAL_REASON_LABELS,
   LOCAL_INGRESS_REFUSAL,
 } from './gm-action-reasons.js';
 
@@ -55,8 +55,6 @@ export const GM_SPAWN_FIXED_POINT_SCALE = 1000;
 
 /** The action's own coordinate bound, mirrored from `MAX_GM_SPAWN_COORD_MM`. */
 export const GM_SPAWN_MAX_COORD_MM = 5_000_000_000;
-
-const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 
 const FEEDBACK_STATUS_IDS = Object.freeze({
   [ACTION_FEEDBACK_STATE.PENDING]: 'action_feedback.pending',
@@ -87,12 +85,7 @@ function parseEntry(value) {
 }
 
 function parseResult(value) {
-  if (!value || typeof value !== 'object'
-      || typeof value.operator_id !== 'string' || value.operator_id.length === 0
-      || typeof value.correlation !== 'string' || value.correlation.length === 0
-      || !RESULT_OUTCOMES.has(value.outcome)
-      || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || (value.reason != null && typeof value.reason !== 'string')
+  if (!isGmResultEnvelope(value)
       || (value.target != null && typeof value.target !== 'string')) return null;
   return {
     operator_id: value.operator_id,
@@ -259,23 +252,10 @@ export function createGmSpawnPanel({
     },
   });
 
-  function operator() {
-    try {
-      const value = typeof getOperator === 'function' ? getOperator() : null;
-      return value && typeof value.id === 'string' && value.id.length > 0 ? value : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function operatorName(id) {
-    try {
-      const value = typeof getOperatorName === 'function' ? getOperatorName(id) : id;
-      return typeof value === 'string' && value.length > 0 ? value : id;
-    } catch (_) {
-      return id;
-    }
-  }
+  const { operator, operatorName, refusalText, appendRow, renderLog } = createGmFeedbackPresentation({
+    doc, log, rowClass: 'gm-spawn-log-entry', feed, t, getOperator, getOperatorName,
+    reasonPrefix: 'server.gm.spawn', paintResult: paintResultRow, paintLocal: paintLocalRow,
+  });
 
   /** A report identity is bounded exactly as gm_information::bounded bounds it. */
   const boundedId = (value) => typeof value === 'string' && value.length > 0
@@ -378,26 +358,6 @@ export function createGmSpawnPanel({
     return entry ? t(entry.label) : paletteId || '';
   }
 
-  function refusalText(reason) {
-    if (!reason) return t('server.gm.spawn.reason_unspecified');
-    if (reason === LOCAL_INGRESS_REFUSAL) {
-      return t('server.gm.session.reason.ingress_rejected');
-    }
-    const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
-    return labelId ? t(labelId) : t('server.gm.spawn.reason_unknown', { reason });
-  }
-
-  function appendRow(operatorId, correlationValue) {
-    if (!log) return null;
-    const row = doc.createElement('li');
-    row.className = 'gm-spawn-log-entry';
-    row.dataset.entryKey = entryKey(operatorId, correlationValue);
-    row.dataset.operatorId = operatorId;
-    row.dataset.correlation = correlationValue;
-    log.appendChild(row);
-    return row;
-  }
-
   function paintResultRow(result) {
     const row = appendRow(result.operator_id, result.correlation);
     if (!row) return;
@@ -456,16 +416,6 @@ export function createGmSpawnPanel({
       correlation: meta.correlation,
       reason: refusalText(reason),
     });
-  }
-
-  /** Rebuild deterministically: absolute terminal order, then local live rows. */
-  function renderLog() {
-    if (!log) return;
-    log.replaceChildren();
-    for (const { kind, value } of feed.entries()) {
-      if (kind === 'result') paintResultRow(value);
-      else paintLocalRow(value, kind === 'pending' ? 'pending' : value.outcome, kind === 'pending' ? null : value.reason);
-    }
   }
 
   function paintFeedback(state, paletteId) {
@@ -553,18 +503,9 @@ export function createGmSpawnPanel({
       operatorId: current.id,
       operatorName: typeof current.name === 'string' && current.name.length > 0
         ? current.name : operatorName(current.id),
-      timer: null,
-      timerScheduled: false,
       ...(ghost ? { ghost: { ship: ghost.ship.entity_id, shipName: ghost.ship.name, id: ghost.id } } : {}),
     };
-    feed.track(meta);
-    let accepted = false;
-    try {
-      accepted = send(press.correlation) === true;
-    } catch (_) {
-      accepted = false;
-    }
-    if (!feed.submitted(meta, accepted, LOCAL_INGRESS_REFUSAL)) return true;
+    if (!feed.submit(meta, () => send(press.correlation) === true, LOCAL_INGRESS_REFUSAL)) return true;
     paintFeedback(ACTION_FEEDBACK_STATE.PENDING, paletteId);
     renderLog();
     refreshAdmission();

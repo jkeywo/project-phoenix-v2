@@ -1,4 +1,5 @@
-import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { createGmFeedbackPresentation, isGmResultEnvelope } from './gm-feedback-presentation.js';
 /**
  * Direct damage and repair on the selected entity (issue #1310, PRD #930
  * milestone M2 Directing).
@@ -52,7 +53,6 @@ import {
   createActionCorrelation,
 } from './action-feedback.js';
 import {
-  GM_ACTION_REFUSAL_REASON_LABELS,
   LOCAL_INGRESS_REFUSAL,
 } from './gm-action-reasons.js';
 import {
@@ -73,7 +73,6 @@ export const GM_EFFECT_ACTION_PREFIX = 'gm.effect.apply:';
 /** Milli-HP per hull point — the one place the unit conversion is spelled. */
 export const MILLI_HP_PER_HP = 1000;
 
-const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const EFFECT_KINDS = new Set(['damage', 'heal']);
 
 const FEEDBACK_STATUS_IDS = Object.freeze({
@@ -101,12 +100,7 @@ export function milliHpFromInput(value) {
 }
 
 function parseEffectResult(value) {
-  if (!value || typeof value !== 'object'
-      || typeof value.operator_id !== 'string' || value.operator_id.length === 0
-      || typeof value.correlation !== 'string' || value.correlation.length === 0
-      || !RESULT_OUTCOMES.has(value.outcome)
-      || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || (value.reason != null && typeof value.reason !== 'string')
+  if (!isGmResultEnvelope(value)
       || (value.target != null && typeof value.target !== 'string')) return null;
   // `effect_scope`, because that is what `LoggedGmAction` calls it — this feed
   // IS that struct, and its sibling is `effect`. (The activity feed's row is a
@@ -302,32 +296,10 @@ export function createGmDirectEffectPanel({
     },
   });
 
-  function operator() {
-    try {
-      const value = typeof getOperator === 'function' ? getOperator() : null;
-      return value && typeof value.id === 'string' && value.id.length > 0 ? value : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function operatorName(id) {
-    try {
-      const value = typeof getOperatorName === 'function' ? getOperatorName(id) : id;
-      return typeof value === 'string' && value.length > 0 ? value : id;
-    } catch (_) {
-      return id;
-    }
-  }
-
-  function refusalText(reason) {
-    if (!reason) return t('server.gm.effect.reason_unspecified');
-    if (reason === LOCAL_INGRESS_REFUSAL) {
-      return t('server.gm.session.reason.ingress_rejected');
-    }
-    const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
-    return labelId ? t(labelId) : t('server.gm.effect.reason_unknown', { reason });
-  }
+  const { operator, operatorName, refusalText, appendRow, renderLog } = createGmFeedbackPresentation({
+    doc, log, rowClass: 'gm-effect-log-entry', feed, t, getOperator, getOperatorName,
+    reasonPrefix: 'server.gm.effect', paintResult: paintResultRow, paintLocal: paintLocalRow,
+  });
 
   function requestedMilliHp() {
     return milliHpFromInput(amountInput ? amountInput.value : null);
@@ -364,17 +336,6 @@ export function createGmDirectEffectPanel({
   function scopeText(chosen) {
     const name = scopeName(chosen);
     return gmEffectScopeLabel(t, chosen, name == null ? null : displayText(name));
-  }
-
-  function appendRow(operatorId, correlationValue) {
-    if (!log) return null;
-    const row = doc.createElement('li');
-    row.className = 'gm-effect-log-entry';
-    row.dataset.entryKey = entryKey(operatorId, correlationValue);
-    row.dataset.operatorId = operatorId;
-    row.dataset.correlation = correlationValue;
-    log.appendChild(row);
-    return row;
   }
 
   function paintResultRow(result) {
@@ -437,16 +398,6 @@ export function createGmDirectEffectPanel({
       correlation: meta.correlation,
       reason: refusalText(reason),
     });
-  }
-
-  /** Rebuild deterministically: absolute terminal order, then local live rows. */
-  function renderLog() {
-    if (!log) return;
-    log.replaceChildren();
-    for (const { kind, value } of feed.entries()) {
-      if (kind === 'result') paintResultRow(value);
-      else paintLocalRow(value, kind === 'pending' ? 'pending' : value.outcome, kind === 'pending' ? null : value.reason);
-    }
   }
 
   function paintFeedback(state, entity) {
@@ -672,24 +623,15 @@ export function createGmDirectEffectPanel({
       operatorId: current.id,
       operatorName: typeof current.name === 'string' && current.name.length > 0
         ? current.name : operatorName(current.id),
-      timer: null,
-      timerScheduled: false,
     };
-    feed.track(meta);
-    let accepted = false;
-    try {
-      accepted = typeof submitDirectEffect === 'function'
+    if (!feed.submit(meta, () => typeof submitDirectEffect === 'function'
         && submitDirectEffect({
           entity: meta.entity,
           effect: kind,
           amount_milli_hp: amount,
           correlation: press.correlation,
           ...gmEffectScopeRequestFields(chosen),
-        }) !== false;
-    } catch (_) {
-      accepted = false;
-    }
-    if (!feed.submitted(meta, accepted, LOCAL_INGRESS_REFUSAL)) return true;
+        }) !== false, LOCAL_INGRESS_REFUSAL)) return true;
     paintFeedback(ACTION_FEEDBACK_STATE.PENDING, meta.entity);
     renderLog();
     refreshAdmission();

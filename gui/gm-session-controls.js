@@ -1,4 +1,5 @@
-import { GmActionFeedback, gmActionEntryKey as entryKey } from './gm-action-feedback.js';
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { createGmFeedbackPresentation, isGmResultEnvelope } from './gm-feedback-presentation.js';
 /** Accessible, authoritative GM session pause/result presentation (#1292). */
 
 import {
@@ -21,8 +22,6 @@ import {
 
 export const GM_SESSION_FEED_CAPACITY = 32;
 
-const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
-
 /**
  * Rust wire identities stay machine-readable while their copy is localised.
  *
@@ -33,13 +32,8 @@ const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 export { GM_ACTION_REFUSAL_REASON_LABELS };
 
 function parseResult(value) {
-  if (!value || typeof value !== 'object'
-      || typeof value.operator_id !== 'string' || value.operator_id.length === 0
-      || typeof value.correlation !== 'string' || value.correlation.length === 0
-      || typeof value.requested_active !== 'boolean'
-      || !RESULT_OUTCOMES.has(value.outcome)
-      || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || (value.reason != null && typeof value.reason !== 'string')) return null;
+  if (!isGmResultEnvelope(value)
+      || typeof value.requested_active !== 'boolean') return null;
   return {
     operator_id: value.operator_id,
     correlation: value.correlation,
@@ -157,23 +151,11 @@ export function createGmSessionControls({
     },
   });
 
-  function operator() {
-    try {
-      const value = typeof getOperator === 'function' ? getOperator() : null;
-      return value && typeof value.id === 'string' && value.id.length > 0 ? value : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function operatorName(id) {
-    try {
-      const value = typeof getOperatorName === 'function' ? getOperatorName(id) : id;
-      return typeof value === 'string' && value.length > 0 ? value : id;
-    } catch (_) {
-      return id;
-    }
-  }
+  const { operator, operatorName, refusalText, appendRow, renderLog } = createGmFeedbackPresentation({
+    doc, log, rowClass: 'gm-session-log-entry', feed, t, getOperator, getOperatorName,
+    reasonPrefix: 'server.gm.session', paintResult: paintResultRow, paintLocal: (value, outcome) => outcome === 'pending' ? paintPendingRow(value) : paintLocalTerminalRow(value),
+    beforeRender: () => rows.clear(), onAppend: row => rows.set(row.dataset.entryKey, row),
+  });
 
   function actionLabel(actionId) {
     const definition = actions && actions.action(actionId);
@@ -182,30 +164,6 @@ export function createGmSessionControls({
 
   function requestedState(active) {
     return t(active ? 'server.gm.session.requested_paused' : 'server.gm.session.requested_running');
-  }
-
-  function refusalText(reason) {
-    if (!reason) return t('server.gm.session.reason_unspecified');
-    if (reason === LOCAL_INGRESS_REFUSAL) {
-      return t('server.gm.session.reason.ingress_rejected');
-    }
-    const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
-    return labelId
-      ? t(labelId)
-      : t('server.gm.session.reason_unknown', { reason });
-  }
-
-  function appendRow(operatorId, correlationValue) {
-    if (!log) return null;
-    const key = entryKey(operatorId, correlationValue);
-    const row = doc.createElement('li');
-    row.className = 'gm-session-log-entry';
-    row.dataset.entryKey = key;
-    row.dataset.operatorId = operatorId;
-    row.dataset.correlation = correlationValue;
-    rows.set(key, row);
-    log.appendChild(row);
-    return row;
   }
 
   function paintPendingRow(meta) {
@@ -253,18 +211,6 @@ export function createGmSessionControls({
       correlation: terminal.correlation,
       reason: refusalText(terminal.reason),
     });
-  }
-
-  /** Rebuild deterministically: absolute terminal order, then local live rows. */
-  function renderLog() {
-    if (!log) return;
-    log.replaceChildren();
-    rows.clear();
-    for (const { kind, value } of feed.entries()) {
-      if (kind === 'result') paintResultRow(value);
-      else if (kind === 'local') paintLocalTerminalRow(value);
-      else paintPendingRow(value);
-    }
   }
 
   function paintFeedback(value) {

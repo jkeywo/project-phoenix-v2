@@ -31,6 +31,14 @@ export class GmActionFeedback {
 
   track(meta) { this.pending.set(meta.correlation, meta); }
 
+  /** Track before sending; submission may synchronously replace the feed. */
+  submit(meta, send, refusalReason) {
+    this.track(meta);
+    let accepted = false;
+    try { accepted = send() !== false; } catch (_) { /* local ingress refusal */ }
+    return this.submitted(meta, accepted, refusalReason);
+  }
+
   /** Track wire requests without exposing timer metadata to callers. */
   trackRequest(request) {
     if (this.size >= this.capacity || this.get(request.correlation)) return null;

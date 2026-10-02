@@ -15,7 +15,7 @@ entities:
     implementation:
       status: declared
       paths: [src/server/asset_preload.rs, src/world/config.rs, src/entities/config.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/server/asset_preload_tests.rs]
 
   - state: asset-manifest-state
     core:
@@ -31,6 +31,7 @@ entities:
       status: declared
       paths: [src/server/asset_preload.rs]
 
+      tests: [src/server/asset_preload_tests.rs]
   - component: host-asset-preloader
     core:
       status: implemented
@@ -48,7 +49,7 @@ entities:
     implementation:
       status: declared
       paths: [src/server/asset_preload.rs, src/core/messages.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/server/asset_preload_tests.rs, src/core/messages_view_mode_tests.rs]
 
   - state: asset-loading-state
     core:
@@ -66,6 +67,7 @@ entities:
       paths: [src/server/asset_preload.rs, src/core/messages.rs]
       symbols: [AssetPreloadResource]
 
+      tests: [src/server/asset_preload_tests.rs, src/core/messages_view_mode_tests.rs]
   - component: model-rig-and-marker-loader
     core:
       status: implemented
@@ -85,7 +87,7 @@ entities:
       status: declared
       paths: [src/entities/model_markers.rs, src/entities/model_rig.rs, src/entities/config_cache.rs, src/entities/loader.rs, src/server_app/registration.rs, src/lockstep/mod.rs, src/lobby/server.rs, src/server/viewscreen_border.rs, src/server/bridge.rs, server.html]
       symbols: [ModelRigReadiness, primary_sidecar_path, sync_authoritative_model_markers, wasm_push_sidecar_toml, gate_lockstep_ticks]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/model_markers_tests.rs, src/entities/model_rig_tests.rs, src/entities/config_cache_tests.rs, src/entities/loader_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/lockstep/tests.rs, src/lobby/server_tests.rs, src/server/viewscreen_border_tests.rs, src/server/bridge_tests.rs]
 
   - state: model-rig-readiness-state
     core:
@@ -102,6 +104,7 @@ entities:
       paths: [src/entities/model_markers.rs, src/entities/config_cache.rs, src/server_app/registration.rs, src/lockstep/mod.rs]
       symbols: [ModelRigReadiness, sync_authoritative_model_markers, gate_lockstep_ticks]
 
+      tests: [src/entities/model_markers_tests.rs, src/entities/config_cache_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/lockstep/tests.rs]
   - state: model-marker-runtime-state
     core:
       status: implemented
@@ -117,6 +120,7 @@ entities:
       paths: [src/entities/model_markers.rs, src/entities/model_rig.rs]
       symbols: [ModelRig, ModelMarkers]
 
+      tests: [src/entities/model_markers_tests.rs, src/entities/model_rig_tests.rs]
   - component: host-presentation-effects
     core:
       status: implemented
@@ -132,7 +136,7 @@ entities:
     implementation:
       status: declared
       paths: [src/server/pfx.rs, src/server/renderer.rs, src/server/viewscreen_border.rs, src/entities/star.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/server/pfx_dust_tests.rs, src/server/pfx_tests.rs, src/server/renderer_tests.rs, src/server/viewscreen_border_tests.rs]
 
   - component: client-audio-presentation
     core:
@@ -153,7 +157,7 @@ entities:
       status: declared
       paths: [client.html, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, gui/operator-profile.js, gui/audio-settings-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/native_gm/boot.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json]
       symbols: [createPrivateAudio, createPrivateAlerts, createStationPrivateAlerts]
-      tests: [tests/client/private-audio.test.js, tests/client/private-alerts.test.js, tests/smoke/private-audio.spec.js, tests/smoke/private-alerts.spec.js]
+      tests: [tests/client/private-audio.test.js, tests/client/private-alerts.test.js, tests/smoke/private-audio.spec.js, tests/smoke/private-alerts.spec.js, src/native_host/panes/operator_tests.rs]
 
   - component: browser-room-audio
     core:
@@ -197,7 +201,7 @@ entities:
       status: declared
       paths: [src/audio_lifecycle.rs, src/server/audio_lifecycle.rs, src/server/audio.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/console_bridge.rs, src/core/codec.rs, src/boot/mod.rs]
       symbols: [RoomAudioLifecycle, AudioLifecycleState, AudioLifecyclePublished, advance_audio_lifecycle, publish_audio_lifecycle, rebase_audio_presentation, rebase_hud_state, encode_audio_lifecycle]
-      tests: [src/audio_lifecycle.rs, src/boot/tests.rs, tests/gm_restore.rs, cargo test --features headless --lib server::audio, cargo test --features headless --lib restore_rebase]
+      tests: [src/audio_lifecycle.rs, src/boot/tests.rs, tests/gm_restore.rs, cargo test --features headless --lib server::audio, cargo test --features headless --lib restore_rebase, src/audio_lifecycle_tests.rs, src/server/audio_tests.rs, src/server/bridge_tests.rs, src/server/viewscreen_border_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: native-room-audio-player
     core:
@@ -225,7 +229,7 @@ entities:
       status: declared
       paths: [assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/mod.rs, src/native_host/audio/decoder.rs, src/native_host/audio/engine.rs, src/native_host/audio/player.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, src/native_host/audio/mix.rs, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/ultralight.rs, src/server/audio.rs, src/native_host/viewscreen_presentation.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/scenario.rs, src/native_host/host_lobby/mod.rs, gui/native-audio.js, gui/native-settings.js, gui/audio-settings-panel.js, gui/viewscreen-hud.html, gui/audio-live-equivalents.js]
       symbols: [NativeRoomAudio, NativeRoomAudioPlugin, RoomPlayer, Mixer, HardwareStore, NativeAudioVisual, VisualReader, createNativeAudio, renderNativeAudioOutput]
-      tests: [cargo test --features headless --lib native_host::audio, cargo test --features headless --lib audio_hud_delivers, cargo test --features headless --lib blaster_audience, tests/client/native-audio.test.js, tests/client/native-settings.test.js, tests/client/viewscreen-hud.test.js, tests/smoke/native-audio.spec.js, tests/smoke/native-combat-audio.spec.js]
+      tests: [cargo test --features headless --lib native_host::audio, cargo test --features headless --lib audio_hud_delivers, cargo test --features headless --lib blaster_audience, tests/client/native-audio.test.js, tests/client/native-settings.test.js, tests/client/viewscreen-hud.test.js, tests/smoke/native-audio.spec.js, tests/smoke/native-combat-audio.spec.js, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/server/audio_tests.rs, src/native_host/viewscreen_presentation_tests.rs, src/native_host/host_lobby/bridge_tests.rs, src/native_host/host_lobby/scenario_tests.rs, src/native_host/host_lobby/tests.rs]
 
   - state: native-room-audio
     core:

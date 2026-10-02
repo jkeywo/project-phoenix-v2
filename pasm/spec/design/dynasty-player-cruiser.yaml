@@ -26,7 +26,7 @@ entities:
     implementation:
       status: declared
       paths: [src/modifiers/power_system.rs, src/entities/config/power.rs, src/sim_digest.rs, assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/power.html]
-      tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser]
+      tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser, src/modifiers/power_system_tests.rs]
   - decision: dynasty-global-strike-boost
     core:
       status: implemented
@@ -39,7 +39,7 @@ entities:
     implementation:
       status: declared
       paths: [src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/snapshot.rs, gui/components/ph-strike-reserve.js]
-      tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js]
+      tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js, src/modifiers/strike_reserve_tests.rs]
   - decision: dynasty-backfill-strike-cycle
     core:
       status: implemented

@@ -18,7 +18,7 @@ entities:
       status: declared
       paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app/components.rs, server.html, gui/action-map.js]
       symbols: [LOCAL_CONSOLE_TOKEN, wasm_receive_message, dispatchConsoleAction]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/server/bridge_tests.rs, src/server_app/components_interior_write_access_tests.rs]
 
   - state: host-local-console-identity-state
     core:
@@ -35,6 +35,7 @@ entities:
       paths: [src/console_bridge.rs, src/server/bridge.rs]
       symbols: [LOCAL_CONSOLE_TOKEN]
 
+      tests: [src/server/bridge_tests.rs]
   - message: host-local-ui-action-command
     core:
       status: implemented
@@ -52,7 +53,7 @@ entities:
       status: declared
       paths: [server.html, gui/action-map.js, src/core/codec.rs]
       symbols: [decode_bridge_client_message]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/codec_mesh_frame_tests.rs]
 
   - component: wire-codec-protocol
     core:
@@ -72,7 +73,7 @@ entities:
       status: declared
       paths: [src/core/codec.rs, src/core/messages.rs]
       symbols: [JsonCodec, decode_bridge_client_message, encode_hud_state, encode_chatter, encode_lobby_state, encode_mesh_frame, decode_mesh_frame, decode_gm_action_request]
-      tests: [cargo test]
+      tests: [cargo test, src/core/codec_mesh_frame_tests.rs, src/core/messages_view_mode_tests.rs]
 
   - component: host-page-push-bridge
     core:
@@ -90,7 +91,7 @@ entities:
       status: declared
       paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server/audio.rs, src/gm_projection.rs, gui/gm-local-projection.js]
       symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged]
-      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js]
+      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js, src/server/bridge_tests.rs, src/server/viewscreen_border_tests.rs, src/server/audio_tests.rs, src/gm_projection_tests.rs]
 
   - state: browser-gm-profile-marker-state
     core:
@@ -106,7 +107,7 @@ entities:
       status: declared
       paths: [src/gm_projection.rs, src/server/bridge.rs, server.html]
       symbols: [BrowserGameMaster, GmProjectionPlugin]
-      tests: [cargo test, tests/smoke/gm-page.spec.js]
+      tests: [cargo test, tests/smoke/gm-page.spec.js, src/gm_projection_tests.rs, src/server/bridge_tests.rs]
 
   - component: entity-targetability-contract
     core:
@@ -124,7 +125,7 @@ entities:
       status: declared
       paths: [src/entities/tags.rs, src/entities/target.rs, src/entities/config.rs, src/entities/spawner.rs, src/console/weapons/mod.rs]
       symbols: [EntityTag, TargetSection, parse_tags, matches_any]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/tags_tests.rs]
 
   - state: entity-targetability-projection-state
     core:
@@ -139,7 +140,7 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/target.rs, src/console/weapons/mod.rs, src/core/messages.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/core/messages_view_mode_tests.rs]
 
   # The authored-toml-observer component and its authored-content-observation-state
   # were removed when phoenix de-vendored PASM. They modelled the TOML scanner
@@ -174,4 +175,4 @@ entities:
       status: declared
       paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app/registration.rs]
       symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, tick_frequency_hint_high_fidelity]
-      tests: [cargo test]
+      tests: [cargo test, src/console_ai/core_tests.rs, src/server_app/registration_physics_boundary_tests.rs]

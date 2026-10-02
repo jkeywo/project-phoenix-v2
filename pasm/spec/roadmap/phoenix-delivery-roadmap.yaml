@@ -242,6 +242,11 @@ entities:
         - scripts/generate-debug-surfaces.mjs
         - src/objectives/directive.rs
       tests:
+        - src/ship/system_registry_tests.rs
+        - src/server_app/components_interior_write_access_tests.rs
+        - src/core/broadcast/lifecycle_tests.rs
+        - src/debug/catalogue_tests.rs
+        - src/objectives/directive_tests.rs
         - cargo test --workspace --features headless
         - npm run debug-surfaces:check
         - npx vitest run
@@ -730,7 +735,7 @@ entities:
     implementation:
       status: declared
       paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/tokens.css, src/server/viewscreen_border.rs]
-      tests: [tests/client/interaction-floors.test.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js]
+      tests: [tests/client/interaction-floors.test.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js, src/server/viewscreen_border_tests.rs]
 
   - state: world-snapshot-artifact
     core:

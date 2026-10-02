@@ -19,7 +19,7 @@ entities:
       status: observed
       paths: [src/modifiers/power_system.rs, src/ship/continuation.rs, src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PowerState, capture_continuation, restore_continuation, ControlState, PolicyState, RecoveryHistory, capture_from, restore_into]
-      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_"]
+      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", src/modifiers/power_system_tests.rs, src/ship/continuation_tests.rs]
 
   - component: startup-save-restore-driver
     core:
@@ -40,7 +40,7 @@ entities:
       status: observed
       paths: [src/startup_restore.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/server/bridge.rs, src/lockstep/mod.rs]
       symbols: [StagedRestore, RestoreOutcome, RestoreFailure]
-      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js, src/startup_restore_tests.rs, src/save_slots_lifecycle_tests.rs, src/save_slots_store_tests.rs, src/server/bridge_tests.rs, src/lockstep/tests.rs]
 
   - component: authoritative-state-digest-boundary
     core:
@@ -84,6 +84,7 @@ entities:
       paths: [src/entities/spawner.rs, src/asteroids/lifecycle.rs, src/ai/server.rs, src/server_app/components.rs]
       symbols: [EntityUuid, AsteroidUuid]
 
+      tests: [src/asteroids/lifecycle_tests.rs, src/server_app/components_interior_write_access_tests.rs]
   - state: world-id-mint-state
     core:
       status: implemented
@@ -104,6 +105,7 @@ entities:
       paths: [src/world_id.rs]
       symbols: [WorldIdMint, WorldId, IdNamespace]
 
+      tests: [src/world_id_tests.rs, src/world_id_live_namespace_tests.rs]
   - state: npc-ai-fidelity-state
     core:
       status: implemented
@@ -136,6 +138,7 @@ entities:
       paths: [src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/snapshot.rs]
       symbols: [TrackedEntities, TrackedEntitiesState, reconcile_runtime_entities]
 
+      tests: [src/server_app/components_interior_write_access_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs]
   - component: tick-scoped-id-mint
     core:
       status: implemented
@@ -168,7 +171,7 @@ entities:
         - src/sim_digest.rs
         - clippy.toml
       symbols: [WorldId, WorldIdMint, IdNamespace, mint_id_with, sync_world_id_mint]
-      tests: [cargo test]
+      tests: [cargo test, src/world_id_tests.rs, src/world_id_live_namespace_tests.rs, src/sim_tick_tests.rs, src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs]
 
   - component: digest-float-canonicalisation-policy
     core:
@@ -189,6 +192,7 @@ entities:
       status: declared
       paths: [src/ship/physics.rs, Cargo.toml]
 
+      tests: [src/ship/physics_tests.rs]
   - component: libm-shared-math-policy
     core:
       status: proposed
@@ -222,6 +226,7 @@ entities:
       paths: [src/sim_rng.rs]
       symbols: [SimRng, SimStream]
 
+      tests: [src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs]
   - component: digest-render-interp-fold-point
     core:
       status: proposed
@@ -241,6 +246,7 @@ entities:
       paths: [src/sim_tick.rs, src/sim_sets.rs, src/server/renderer.rs]
       symbols: [SimTick, SimSet, RenderInterp]
 
+      tests: [src/sim_tick_tests.rs, src/server/renderer_tests.rs]
   - component: digest-exclusion-classes
     core:
       status: proposed
@@ -300,6 +306,7 @@ entities:
       # (weapons.yaml) entities. Claiming those owner files here as well would
       # make PASM attribution ambiguous rather than improve the exclusion record.
 
+      tests: [src/ai/cadence_tests.rs, src/core/messages_view_mode_tests.rs, src/sim_tick_tests.rs, src/server_app/broadcast_replication_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/debug_overlay_tests.rs, src/command_admission/tests.rs]
   - component: digest-census-traceability-symbols
     core:
       status: proposed
@@ -345,6 +352,7 @@ entities:
       paths: [src/sim_rng.rs, src/core/messages.rs, src/headless/fingerprint.rs, src/server_app/components.rs, src/lobby/server.rs]
       symbols: [SimRng, GamePhase, GameOverReason, WorldResource, CaptainPriorityBoost, EntitySnapshot]
 
+      tests: [src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs, src/core/messages_view_mode_tests.rs, src/server_app/components_interior_write_access_tests.rs, src/lobby/server_tests.rs]
   - component: vellum-digest-primitive-reference
     core:
       status: proposed
@@ -398,7 +406,7 @@ entities:
         - src/headless/replay.rs
         - tests/replay_simulation.rs
       symbols: [FoldKey, Namespace, DigestLedger, Divergence, PhoenixSim, ReplayArtifact]
-      tests: [cargo test]
+      tests: [cargo test, src/headless/replay_tests.rs]
 
   - component: cross-target-determinism-probe
     core:
@@ -496,4 +504,4 @@ entities:
         - docs/admitted-foreign-consumer-proof.md
         - docs/captain-sensors-order-proof.md
       symbols: [FixedStep, DeclaredOrder, configure_fixed_order, RedAlertApplied, handle_set_red_alert, operate_command_ai, apply_alert_change_to_stances]
-      tests: [cargo test]
+      tests: [cargo test, src/sim_sets/order/pass_tests.rs, src/server_app/registration_physics_boundary_tests.rs]

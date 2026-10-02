@@ -21,7 +21,7 @@ entities:
       status: declared
       paths: [src/ship/shields.rs, src/ship/config.rs, src/core/broadcast/audience.rs, src/weapons/shield.rs, src/entities/config.rs]
       symbols: [tick_shields, shields_state_broadcaster, register_shields_replication_lifecycle, reconnect_shields_projection, station_for_system_kind, shield_facing_statuses, ShieldSystem, ShieldArcConfig, ShieldFacing, fraction]
-      tests: [cargo test, tests/smoke/shields-console.spec.js]
+      tests: [cargo test, tests/smoke/shields-console.spec.js, src/core/broadcast/audience_tests.rs]
 
   - state: shield-arc-state
     core:
@@ -39,6 +39,7 @@ entities:
       paths: [src/weapons/shield.rs, src/core/messages.rs]
       symbols: [ShieldSystem]
 
+      tests: [src/core/messages_view_mode_tests.rs]
   - state: shields-coordination-debounce-state
     core:
       status: implemented
@@ -55,6 +56,7 @@ entities:
       paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [ShieldsCoordinationState, ShieldsCoordinationContinuationState]
 
+      tests: [src/server_app/registration_physics_boundary_tests.rs]
   - component: shield-focus-controller
     core:
       status: implemented
@@ -75,7 +77,7 @@ entities:
       paths: [src/ship/shields.rs, src/core/messages.rs, gui/action-map.js]
       symbols: [handle_shields_messages]
       messages: [SetShieldArcFocus]
-      tests: [cargo test, tests/client/ph-shield-facings.test.js]
+      tests: [cargo test, tests/client/ph-shield-facings.test.js, src/core/messages_view_mode_tests.rs]
 
   - message: set-shield-arc-focus-command
     core:
@@ -95,6 +97,7 @@ entities:
       paths: [src/core/messages.rs, gui/action-map.js]
       messages: [SetShieldArcFocus]
 
+      tests: [src/core/messages_view_mode_tests.rs]
   - component: shield-damage-router
     core:
       status: implemented
@@ -127,7 +130,7 @@ entities:
       status: declared
       paths: [src/ship/shields.rs, src/core/messages.rs, gui/components/ph-shield-panel.js]
       symbols: [ShieldsBlackboard]
-      tests: [cargo test, tests/client/ph-shield-panel.test.js]
+      tests: [cargo test, tests/client/ph-shield-panel.test.js, src/core/messages_view_mode_tests.rs]
 
   - component: shields-recent-damage-ai
     core:
@@ -160,7 +163,7 @@ entities:
       status: observed
       paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/policy.rs]
       symbols: [ai_shield_focus, tick_shield_focus_ai, receive_shields_coordination, PendingShieldsThreatBearing, ShieldsDamageHistory, ShieldsAiConfigToml, ShieldsFocusAiPolicy, seed_shields_focus_facts, SHIELD_FOCUS_CHANNEL, SHIELD_FOCUS_VERB]
-      tests: [cargo test]
+      tests: [cargo test, src/console_ai/core_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs]
 
   - state: shields-damage-history-state
     core:
@@ -177,6 +180,7 @@ entities:
       paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [ShieldsDamageHistory, DamageRecord, ShieldsAiState]
 
+      tests: [src/server_app/registration_physics_boundary_tests.rs]
   - state: shields-threat-bearing-inbox-state
     core:
       status: implemented
@@ -192,3 +196,4 @@ entities:
       status: observed
       paths: [src/ship/shields.rs, src/console_ai/server.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [PendingShieldsThreatBearing, receive_shields_coordination, ai_shield_focus]
+      tests: [src/server_app/registration_physics_boundary_tests.rs]

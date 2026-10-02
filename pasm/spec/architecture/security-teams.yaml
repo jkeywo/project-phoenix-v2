@@ -46,7 +46,7 @@ entities:
         - tick_security_teams
         - publish_security_blackboard
       messages: [DispatchSecurityTeam, RecallSecurityTeam]
-      tests: [cargo test]
+      tests: [cargo test, src/security/teams_tests.rs]
 
   - component: security-backfill-host
     core:
@@ -127,7 +127,7 @@ entities:
         - SecurityTargetConfig
         - SecurityActionConfig
         - SecurityTargetActions
-      tests: [cargo test]
+      tests: [cargo test, src/security/teams_tests.rs]
 
   - state: security-published-state
     core:
@@ -154,4 +154,4 @@ entities:
         - SecurityTeamSlot
         - SecurityTargetOption
         - SecurityActionOption
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]

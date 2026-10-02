@@ -953,14 +953,8 @@ impl Default for ViewMode {
 }
 
 #[cfg(test)]
-mod view_mode_tests {
-    use super::*;
-
-    #[test]
-    fn default_view_mode_is_camera() {
-        assert_eq!(ViewMode::default(), ViewMode::Camera(CameraView::default()));
-    }
-}
+#[path = "messages_view_mode_tests.rs"]
+mod view_mode_tests;
 
 // ── Comms wire types ──────────────────────────────────────────────────────
 

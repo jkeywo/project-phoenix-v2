@@ -260,6 +260,9 @@ entities:
         - RendezvousFrame
         - HandshakeFrame
       tests:
+        - src/native_host/relay_socket_tests.rs
+        - src/bin/tests/phoenix_host_launch_path_tests.rs
+        - src/bin/tests/phoenix_host_tests.rs
         - src/native_host/relay_transport_tests.rs
         - tests/native_host_panes/session_connections.rs
         - tests/native_relay_protocol.rs
@@ -322,6 +325,10 @@ entities:
         - rendezvousBaseForOrigin
         - KNOWN_WEB_ORIGINS
       tests:
+        - src/native_host/join_codes_tests.rs
+        - src/delivery/serve_tests.rs
+        - src/bin/tests/phoenix_host_launch_path_tests.rs
+        - src/bin/tests/phoenix_host_tests.rs
         - src/native_host/direct_join_tests.rs
         - tests/native_direct_join.rs
         - tests/client/join-url.test.js
@@ -364,7 +371,7 @@ entities:
         - wasm_check_client_stamp
         - wasm_check_host_stamp
         - encode_join_verdict
-      tests: [cargo test, tests/client/client-stamp.test.js]
+      tests: [cargo test, tests/client/client-stamp.test.js, src/delivery/tests.rs, src/delivery/stamp_tests.rs, src/server/bridge_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - message: host-mesh-frame
     core:

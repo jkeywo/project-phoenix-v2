@@ -28,7 +28,7 @@ entities:
       status: declared
       paths: [src/gm_attention.rs, src/gm_comms.rs, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, src/native_host/native_gm/mod.rs, gui/gm-attention-panel.js, gui/gm-attention-filters.js, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/host-channel.js, gui/gm-comms-panel.js, server.html, assets/worlds/probe_gm_attention.toml, assets/worlds/probe_gm_attention_fleet.toml]
       symbols: [GmAttentionBand, GmAttentionCategory, GmAttentionOccurrence, GmAttentionProjection, GmAttentionState, GmAttentionPlugin, publish_attention_projection, GmAttentionChanged, encode_gm_attention_projection, attention_band, createGmAttentionPanel, createGmAttentionFilters, GM_ATTENTION_SNOOZE_MS, focusRoute]
-      tests: ["cargo test --features headless --test gm_attention", "cargo test --features headless --lib -- gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-workspace-shell.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_attention", "cargo test --features headless --lib -- gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-workspace-shell.test.js", "tests/smoke/gm-layout.spec.js", src/gm_attention_tests.rs, src/gm_comms_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/native_gm/tests.rs]
   - component: gm-t3-eligible-beats
     core:
       status: implemented
@@ -54,7 +54,7 @@ entities:
       status: declared
       paths: [src/gm_attention.rs, src/world/content.rs, src/world/config.rs, src/world/script/triggers.rs, src/world/script/authoring.rs, src/world/script/validate.rs, gui/gm-attention-panel.js, gui/gm-mission-panel.js, gui/gm-workspace.js, server.html, assets/worlds/probe_gm_beats.toml]
       symbols: [GmAttentionCategory, GmAttentionEventTarget, ELIGIBLE_BEAT_REASON, ELIGIBLE_BEAT_MANUAL_REASON, ELIGIBLE_BEAT_ID_PREFIX, publish_attention_projection, manual_fire_would_land, validate_attention_band, validate_gm_events, focusEvent]
-      tests: ["cargo test --features headless --test gm_attention_beats", "cargo test --features headless --lib -- world::script::validate::tests", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-mission-panel.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_attention_beats", "cargo test --features headless --lib -- world::script::validate::tests", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-mission-panel.test.js", "tests/smoke/gm-layout.spec.js", src/gm_attention_tests.rs, src/world/script/triggers_tests.rs, src/world/script/authoring_tests.rs, src/world/script/validate_tests.rs]
   - component: gm-t3-idle-npc-advisory
     core:
       status: implemented
@@ -81,7 +81,7 @@ entities:
       status: declared
       paths: [src/gm_attention.rs, src/objectives.rs, src/world/config.rs, src/snapshot.rs, gui/gm-attention-panel.js, gui/gm-workspace.js, assets/worlds/probe_gm_idle_npc.toml, assets/worlds/probe_gm_idle_npc_authored.toml, assets/worlds/probe_gm_idle_npc_quiet.toml]
       symbols: [GmAttentionSettings, GmIdleSpell, GmIdleNpcWatch, observe_idle_npcs, idle_rows, without_orders, format_sim_clock, IDLE_NPC_REASON, DEFAULT_IDLE_NPC_GRACE_SECS, has_active_for_ship]
-      tests: ["cargo test --features headless --test gm_idle_npc", "cargo test --features headless --lib -- gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js"]
+      tests: ["cargo test --features headless --test gm_idle_npc", "cargo test --features headless --lib -- gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js", src/gm_attention_tests.rs, src/objectives_tests.rs]
   - component: gm-t3-peer-health
     core:
       status: implemented
@@ -110,7 +110,7 @@ entities:
       status: declared
       paths: [src/gm_health.rs, src/gm_attention.rs, src/lockstep/recovery.rs, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, src/native_host/native_gm/mod.rs, gui/gm-health-banner.js, gui/gm-health-panel.js, gui/gm-attention-panel.js, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/host-channel.js, server.html]
       symbols: [GmHealthState, GmHealthAlertKind, GmHealthAlert, GmHealthReason, GmStationHealth, GmOperatorHealth, GmPeerHealth, GmRecoveryHealth, GmHealthProjection, GmHealthWatch, GmHealthPlugin, publish_health_projection, GmHealthChanged, encode_gm_health_projection, RecoveryStatus, GmAttentionCategory, createGmHealthBanner, createGmHealthPanel, parseGmHealthProjection, worstHealthState, defaultRenderBanners]
-      tests: ["cargo test --features headless --test gm_health", "cargo test --features headless --test lockstep_recovery", "cargo test --features headless --lib -- gm_health:: lockstep::recovery::tests", "npx vitest run tests/client/gm-health-panel.test.js", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-workspace-shell.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_health", "cargo test --features headless --test lockstep_recovery", "cargo test --features headless --lib -- gm_health:: lockstep::recovery::tests", "npx vitest run tests/client/gm-health-panel.test.js", "npx vitest run tests/client/gm-attention-panel.test.js", "npx vitest run tests/client/gm-workspace-shell.test.js", "tests/smoke/gm-layout.spec.js", src/gm_health_tests.rs, src/gm_attention_tests.rs, src/lockstep/recovery_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/native_gm/tests.rs]
   - component: gm-t3-quiet-time-advisory
     core:
       status: implemented
@@ -139,7 +139,7 @@ entities:
       status: declared
       paths: [src/gm_quiet.rs, src/gm_attention.rs, src/command_admission/ai_emit.rs, src/snapshot.rs, gui/gm-attention-panel.js, assets/worlds/probe_gm_quiet.toml]
       symbols: [GmCrewActivity, GmQuietPlugin, observe_crew_activity, counts_as_worked_control, quiet_row, quiet_settings, QUIET_REASON, QUIET_ID_PREFIX, DEFAULT_QUIET_SECONDS, GmAttentionSettings, is_ai_token, rebase_after_restore]
-      tests: ["cargo test --features headless --test gm_attention_quiet", "cargo test --features headless --lib -- gm_quiet:: gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_attention_quiet", "cargo test --features headless --lib -- gm_quiet:: gm_attention::", "npx vitest run tests/client/gm-attention-panel.test.js", "tests/smoke/gm-layout.spec.js", src/gm_quiet_tests.rs, src/gm_attention_tests.rs, src/command_admission/ai_emit_tests.rs]
 
   - component: gm-t3-directing-performing-readability
     core:
@@ -200,7 +200,7 @@ entities:
       status: declared
       paths: [src/gm_restore.rs, src/lockstep/snapshot_relay.rs, src/gm_action.rs, src/gm_activity.rs, src/gm_health.rs, src/gm_puppet.rs, src/save_slots_store.rs, src/lockstep/mod.rs, src/core/codec.rs, gui/gm-restore-control.js, gui/gm-checkpoint-panel.js, gui/save-slots.js, gui/gm-health-banner.js, gui/gm-activity-feed.js, gui/gm-confirmation.js, gui/gm-action-reasons.js, gui/gm-journal-panel.js, gui/gm-workspace.js, gui/gm-workspace.css, gui/native-gm-workspace.js, server.html]
       symbols: [GmLiveRestore, GmRestorePhase, GmRestoreFailure, AcceptedRestore, RECOVERY_CHECKPOINT_NAME, READINESS_FRAME_BUDGET, gate_and_restore_rebuilding, revalidate, publish_restore_context, drive_live_restore, GmAction::RequestLiveRestore, GmActionKind::LiveRestore, GmActionRefusalReason::MultipleSimulationPeers, GmActionRefusalReason::LiveRestoreInProgress, GmActivityAction::RequestLiveRestore, GmHealthAlertKind::LiveRestoreInProgress, GmHealthAlertKind::LiveRestoreSettled, GmLiveRestoreHealth, live_restore_health, SaveSlotService::persist, slotName, createGmRestoreControl, parseGmRestoreState, restorePhaseLabelId, GM_RESTORE_CONFIRMATION]
-      tests: ["cargo test --features headless --test gm_restore", "cargo test --features headless --lib -- gm_restore:: gm_action:: gm_activity", "cargo test --features headless --test gm_checkpoint", "cargo test --features headless --test gm_health", "npx vitest run tests/client/gm-restore-control.test.js", "npx vitest run tests/client/gm-checkpoint-panel.test.js", "npx vitest run tests/client/save-slots.test.js", "npx vitest run tests/client/gm-journal-panel.test.js", "tests/smoke/gm-restore-200.spec.js"]
+      tests: ["cargo test --features headless --test gm_restore", "cargo test --features headless --lib -- gm_restore:: gm_action:: gm_activity", "cargo test --features headless --test gm_checkpoint", "cargo test --features headless --test gm_health", "npx vitest run tests/client/gm-restore-control.test.js", "npx vitest run tests/client/gm-checkpoint-panel.test.js", "npx vitest run tests/client/save-slots.test.js", "npx vitest run tests/client/gm-journal-panel.test.js", "tests/smoke/gm-restore-200.spec.js", src/gm_restore_tests.rs, src/lockstep/snapshot_relay_tests.rs, src/gm_action_tests.rs, src/gm_health_tests.rs, src/gm_puppet_tests.rs, src/save_slots_store_tests.rs, src/lockstep/tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: gm-t3-multi-peer-live-restore
     core:
@@ -233,7 +233,7 @@ entities:
       status: declared
       paths: [src/gm_restore.rs, src/gm_action.rs, src/gm_health.rs, src/lockstep/mod.rs, src/lockstep/frame.rs, src/lockstep/snapshot_relay.rs, src/core/codec.rs, gui/gm-restore-control.js, gui/gm-health-banner.js, gui/host-mesh.js]
       symbols: [GmRestoreFrame, GmRestoreInbox, GmActionJournal::live_restore_admitted, GmRestorePhase::AwaitingReadiness, GmRestorePhase::AwaitingAgreement, PEER_WINDOW_SECONDS, GmRestoreFailure::PeerLoadFailed, GmRestoreFailure::PeerDigestMismatch, GmRestoreFailure::TransferIncomplete, GmRestoreFailure::CoordinatorLost, GmLiveRestore::waiting_on, GmLiveRestore::excluded, GmLiveRestore::remaining_seconds, GmLiveRestore::coordinating, MeshFrame::GmRestore, TYPE_GM_RESTORE, HOST_MESH_PROTOCOL, sequence_owner_proposal, GmPeerHealth::restore_waiting, GmPeerHealth::restore_excluded, GmLiveRestoreHealth::countdown_seconds, HOST_FRAME_GM_RESTORE, parseGmRestoreState]
-      tests: ["cargo test --features headless --test lockstep_gm_restore", "cargo test --features headless --test gm_restore", "cargo test --features headless --lib -- gm_restore:: codec::mesh_frame_tests lockstep::frame::", "npx vitest run tests/client/gm-restore-control.test.js", "npx vitest run tests/client/host-mesh.test.js", "tests/smoke/gm-restore-200.spec.js"]
+      tests: ["cargo test --features headless --test lockstep_gm_restore", "cargo test --features headless --test gm_restore", "cargo test --features headless --lib -- gm_restore:: codec::mesh_frame_tests lockstep::frame::", "npx vitest run tests/client/gm-restore-control.test.js", "npx vitest run tests/client/host-mesh.test.js", "tests/smoke/gm-restore-200.spec.js", src/gm_restore_tests.rs, src/gm_action_tests.rs, src/gm_health_tests.rs, src/lockstep/tests.rs, src/lockstep/frame_tests.rs, src/lockstep/snapshot_relay_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: gm-t3-station-workload
     core:
@@ -268,7 +268,7 @@ entities:
       status: declared
       paths: [src/gm_workload.rs, src/gm_attention.rs, src/console/navigation/server.rs, src/console_bridge.rs, src/core/codec.rs, src/server/bridge.rs, src/native_host/native_gm/mod.rs, src/snapshot.rs, gui/gm-workload-panel.js, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/host-channel.js, server.html, docs/gm-station-workload-inventory.md, assets/worlds/probe_gm_workload.toml, assets/worlds/probe_gm_workload_authored.toml, assets/worlds/probe_gm_workload_quiet.toml, assets/worlds/probe_gm_workload_course.toml, src/console/repair/server.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/sim_sets/order.rs]
       symbols: [GmWorkloadLevel, GmWorkloadDemand, GmStationWorkload, GmWorkloadProjection, GmWorkloadWatch, GmWorkloadState, GmWorkloadPlugin, observe_station_workload, publish_workload_projection, TASK_DEMAND_INVENTORY, task_verb_counts, GmWorkloadChanged, encode_gm_workload_projection, workload_overload_count, workload_overload_ticks, issued_generation, tier_string_id, delivers_to_a_person, hull_has_arrived, prune_repair_request_queue, request_still_open, operate_repair_ai, station_delivery_policy, HumanRouted, seat_standing, SeatStanding, systems_for_station, createGmWorkloadPanel, parseGmWorkloadProjection]
-      tests: ["cargo test --features headless --test gm_workload", "cargo test --features headless --lib -- gm_workload:: console::repair ship::coordination", "npx vitest run tests/client/gm-workload-panel.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_workload", "cargo test --features headless --lib -- gm_workload:: console::repair ship::coordination", "npx vitest run tests/client/gm-workload-panel.test.js", "tests/smoke/gm-layout.spec.js", src/gm_workload_tests.rs, src/gm_attention_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/native_gm/tests.rs, src/ship/components_tests.rs]
   - component: gm-t3-authored-gm-widgets
     core:
       status: implemented
@@ -297,7 +297,7 @@ entities:
       status: declared
       paths: [src/world/config.rs, src/gm_attention.rs, src/core/codec.rs, gui/gm-widgets-panel.js, gui/gm-role-presets.js, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, server.html, assets/worlds/probe_gm_widgets.toml, docs/gm-widget-authoring.md, tests/fixtures/gm-widgets-presets.json]
       symbols: [GmRolePresetWidget, GM_WIDGET_TYPES, GM_WIDGET_TYPE_ATTENTION, GM_WIDGET_TYPE_WORKLOAD, GM_WIDGET_TYPE_ACTIONS, GM_WIDGET_TYPE_NOTE, GM_WIDGET_ACTION_IDS, GmAttentionCategory::from_authored, GmAttentionCategory::authored_vocabulary, createGmWidgetsPanel, GM_WIDGET_ATTENTION_ROWS, normaliseWidget, onEffective]
-      tests: ["cargo test --features headless --test gm_widgets", "cargo test --features headless --lib -- world::config::tests core::codec::tests::gm_role_preset", "npx vitest run tests/client/gm-widgets-panel.test.js tests/client/gm-role-presets.test.js", "tests/smoke/gm-layout.spec.js"]
+      tests: ["cargo test --features headless --test gm_widgets", "cargo test --features headless --lib -- world::config::tests core::codec::tests::gm_role_preset", "npx vitest run tests/client/gm-widgets-panel.test.js tests/client/gm-role-presets.test.js", "tests/smoke/gm-layout.spec.js", src/gm_attention_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: gm-t3-post-m5-desk-screen
     core:

@@ -21,7 +21,7 @@ entities:
       status: declared
       paths: [src/session_connections.rs, src/session_connections/browser.rs, src/core/codec.rs, gui/host-peer-routing.js, server.html, src/native_host/connections.rs, src/native_host/transport.rs, src/native_host/relay_transport.rs, src/native_host/panes/transport.rs, src/native_host/panes/registry.rs, src/native_host/bridge_display.rs]
       symbols: [ConnectionRegistry, ConnectionId, BrowserConnections, createHostConnections, hostConnectionRegistryReady, SharedConnections, PairedTransport, RelayTransport, PaneTransport]
-      tests: [src/session_connections.rs, src/session_connections/browser.rs, tests/fixtures/session-connections.json, tests/client/host-peer-routing.test.js, tests/smoke/session-connections.spec.js, tests/smoke/reconnect.spec.js, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs]
+      tests: [src/session_connections.rs, src/session_connections/browser.rs, tests/fixtures/session-connections.json, tests/client/host-peer-routing.test.js, tests/smoke/session-connections.spec.js, tests/smoke/reconnect.spec.js, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs, src/session_connections_tests.rs, src/session_connections/browser_tests.rs, src/core/codec_mesh_frame_tests.rs, src/native_host/transport_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/registry_tests.rs, src/native_host/bridge_display_tests.rs]
 
   - component: session-identity-manager
     core:
@@ -44,7 +44,7 @@ entities:
       status: declared
       paths: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs]
       symbols: [SessionManager, handle_identify_system, LobbyResultApplier, identify_ratings, afk_ratings]
-      tests: [cargo test, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js, "cargo test --features headless --lib lobby::server::result_application_tests"]
+      tests: [cargo test, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js, "cargo test --features headless --lib lobby::server::result_application_tests", src/lobby/session_tests.rs, src/lobby/server_tests.rs]
 
   - state: session-identity-state
     core:
@@ -61,6 +61,7 @@ entities:
       paths: [src/lobby/session.rs]
       symbols: [SessionManager]
 
+      tests: [src/lobby/session_tests.rs]
   - state: session-station-ownership-state
     core:
       status: implemented
@@ -76,7 +77,7 @@ entities:
       status: declared
       paths: [src/lobby/session.rs, src/lobby/stations_config.rs, src/core/messages.rs]
       symbols: [SessionManager, Player]
-      tests: [cargo test, tests/smoke/stations.spec.js]
+      tests: [cargo test, tests/smoke/stations.spec.js, src/lobby/session_tests.rs, src/core/messages_view_mode_tests.rs]
 
   - component: peer-transport-bridge
     core:
@@ -149,7 +150,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs, src/lobby/handler.rs, gui/rendezvous-transport.js]
       messages: [Identify, Welcome]
-      tests: [cargo test, tests/client/rendezvous-transport.test.js]
+      tests: [cargo test, tests/client/rendezvous-transport.test.js, src/core/messages_view_mode_tests.rs]
 
   - component: station-claim-router
     core:
@@ -167,7 +168,7 @@ entities:
       status: declared
       paths: [src/lobby/handler.rs, src/lobby/stations_config.rs, src/lobby/server.rs]
       messages: [SelectStation, ReleaseStation, StationAssigned]
-      tests: [cargo test, tests/smoke/stations.spec.js]
+      tests: [cargo test, tests/smoke/stations.spec.js, src/lobby/server_tests.rs]
 
   - component: host-state-broadcaster
     core:
@@ -192,7 +193,7 @@ entities:
       status: declared
       paths: [src/core/broadcast, src/core/broadcast/lifecycle.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
       symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, register_reconnect_projection, ReconnectBoundary, reset_registered_replication]
-      tests: [cargo test, tests/smoke/snapshot-channel.spec.js]
+      tests: [cargo test, tests/smoke/snapshot-channel.spec.js, src/core/broadcast/lifecycle_tests.rs, src/server_app/components_interior_write_access_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/lobby/server_tests.rs, src/server/bridge_tests.rs]
 
   - component: replication-lifecycle-registry
     core:
@@ -222,7 +223,7 @@ entities:
       paths: [src/core/broadcast/reconnect.rs, src/core/broadcast/lifecycle.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/ship/shields.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs]
       symbols: [register_reconnect_projection, ReconnectRequests, ReconnectBoundary, ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastEntityPositions, LastBroadcastEntityHealth, LastBroadcastHull, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_entity_state_replication_lifecycle, prune_entity_replication_caches, register_hull_replication_lifecycle, register_shields_replication_lifecycle, register_weapons_replication_lifecycle]
       messages: [BlackboardUpdate, SystemHullUpdate, ShieldStatus, WeaponsUpdate]
-      tests: [cargo test]
+      tests: [cargo test, src/core/broadcast/reconnect_tests.rs, src/core/broadcast/lifecycle_tests.rs, src/server_app/broadcast_replication_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/console/repair/visibility_tests.rs, src/console/weapons/blackboard_lifecycle_tests.rs]
 
   - state: lobby-session-replica
     core:
@@ -238,7 +239,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs, gui/lobby-state.js]
       messages: [Welcome, PlayerJoined, StationAssigned, ReadyChanged]
-      tests: [tests/client/lobby-state.test.js, tests/smoke/lobby.spec.js]
+      tests: [tests/client/lobby-state.test.js, tests/smoke/lobby.spec.js, src/core/messages_view_mode_tests.rs]
 
   - state: simulation-state-replica
     core:
@@ -254,4 +255,4 @@ entities:
       status: declared
       paths: [src/core/messages.rs, gui/sim-state.js, gui/console-state.js]
       messages: [SimState, BlackboardUpdate, EntitySpawned, EntityDespawned]
-      tests: [tests/client/sim-state.test.js, tests/smoke/snapshot-channel.spec.js]
+      tests: [tests/client/sim-state.test.js, tests/smoke/snapshot-channel.spec.js, src/core/messages_view_mode_tests.rs]

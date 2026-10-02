@@ -16,4 +16,4 @@ entities:
       status: declared
       paths: [src/gm_information/reports.rs, src/entities/spawner.rs, src/server_app/registration.rs]
       symbols: [SensorsObservationConfig, SensorsObservationSpawn]
-      tests: ["cargo test --features headless --test authoritative_state_enumeration", "cargo test --features headless --test gm_contact report_policy"]
+      tests: ["cargo test --features headless --test authoritative_state_enumeration", "cargo test --features headless --test gm_contact report_policy", src/gm_information/reports_tests.rs, src/server_app/registration_physics_boundary_tests.rs]

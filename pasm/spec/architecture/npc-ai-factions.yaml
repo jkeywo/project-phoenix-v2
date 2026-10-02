@@ -14,7 +14,7 @@ entities:
       status: declared
       paths: [src/ai/faction.rs, assets/factions]
       symbols: [FactionConfig]
-      tests: [cargo test]
+      tests: [cargo test, src/ai/faction_tests.rs]
 
   - state: faction-relationship-state
     core:
@@ -34,6 +34,7 @@ entities:
       # named for completeness even though the scanner cannot observe it here.
       symbols: [FactionRegistry, FactionConfig]
 
+      tests: [src/ai/faction_tests.rs, src/entities/config_cache_tests.rs]
   - component: npc-ai-controller-provisioner
     core:
       status: implemented
@@ -53,7 +54,7 @@ entities:
       status: declared
       paths: [src/ai/server.rs, src/entities/spawner.rs, src/ship/control_source.rs]
       symbols: [BehaviourSection, register_ai_tokens_on_spawn]
-      tests: [cargo test]
+      tests: [cargo test, src/ship/control_source_tests.rs]
 
   - state: npc-ai-controller-state
     core:
@@ -70,6 +71,7 @@ entities:
       paths: [src/ai/server.rs, src/ship/combat_activity.rs]
       symbols: [RecentCombatActivity, LodBubble]
 
+      tests: [src/ship/combat_activity_tests.rs]
   - component: npc-doctrine-evaluator
     core:
       status: implemented
@@ -88,7 +90,7 @@ entities:
       status: declared
       paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
       symbols: [plan_helm_travel, operate_weapons]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: per-system-ai-operator-suite
     core:
@@ -138,7 +140,7 @@ entities:
         - src/ai/lod.rs
         - tests/headless_runner.rs
       symbols: [evaluate_lod, LodState]
-      tests: [cargo test]
+      tests: [cargo test, src/ai/lod_tests.rs]
     evidence:
       - kind: test
         reference: low_lod_and_helm_ship_physics_writers_can_never_share_an_entity
@@ -167,7 +169,7 @@ entities:
       status: declared
       paths: [src/ship/combat_activity.rs, src/console/captain/server.rs]
       symbols: [RecentCombatActivity]
-      tests: [cargo test]
+      tests: [cargo test, src/ship/combat_activity_tests.rs]
 
   - state: recent-combat-activity-state
     core:
@@ -184,3 +186,4 @@ entities:
       status: declared
       paths: [src/ship/combat_activity.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [RecentCombatActivity, RecentCombatActivityState]
+      tests: [src/ship/combat_activity_tests.rs, src/server_app/registration_physics_boundary_tests.rs]

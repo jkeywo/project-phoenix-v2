@@ -37,7 +37,7 @@ entities:
       status: declared
       paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app/collision.rs, src/server_app/broadcast.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai/mod.rs]
       symbols: [BalanceEvent, VictimKind, Outcome]
-      tests: [cargo test]
+      tests: [cargo test, src/core/balance_tests.rs, src/server_app/broadcast_replication_tests.rs, src/ship/damage_sync_tests.rs]
 
   - state: balance-event-stream
     core:
@@ -54,7 +54,7 @@ entities:
       status: declared
       paths: [src/core/balance.rs]
       symbols: [BalanceEvent]
-      tests: [cargo test]
+      tests: [cargo test, src/core/balance_tests.rs]
 
   - component: shared-collision-history-collector
     core:
@@ -77,7 +77,7 @@ entities:
       status: declared
       paths: [src/core/collision_history.rs, src/server_app/registration.rs, src/snapshot.rs]
       symbols: [CollisionHistory, CollisionRecord]
-      tests: [cargo test --features headless --lib core::collision_history, cargo test --features headless --test collision_history]
+      tests: [cargo test --features headless --lib core::collision_history, cargo test --features headless --test collision_history, src/server_app/registration_physics_boundary_tests.rs]
 
   - state: collision-attribution-history
     core:
@@ -115,7 +115,7 @@ entities:
       status: declared
       paths: [src/headless/report.rs, src/headless/app.rs]
       symbols: [RunTelemetry, StampedBalanceEvent, collect_balance_events]
-      tests: [cargo test, tests/headless_runner.rs]
+      tests: [cargo test, tests/headless_runner.rs, src/headless/report_tests.rs]
 
   - state: run-telemetry-state
     core:
@@ -132,7 +132,7 @@ entities:
       status: declared
       paths: [src/headless/report.rs]
       symbols: [RunTelemetry]
-      tests: [cargo test]
+      tests: [cargo test, src/headless/report_tests.rs]
 
   - component: combat-ledger-aggregator
     core:
@@ -152,7 +152,7 @@ entities:
       status: declared
       paths: [src/core/balance.rs, src/headless/report.rs]
       symbols: [aggregate_ledgers, aggregate_damage, DamageLedger, ledgers_to_json]
-      tests: [cargo test]
+      tests: [cargo test, src/core/balance_tests.rs, src/headless/report_tests.rs]
 
   - component: sim-rng
     core:
@@ -173,7 +173,7 @@ entities:
       status: declared
       paths: [src/sim_rng.rs, src/server_app/registration.rs, src/headless/app.rs, src/headless/args.rs, src/regions/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/asteroids/lifecycle.rs, src/world/server.rs]
       symbols: [SimRng, SimStream, SeedSource, assign_uuid_with]
-      tests: [cargo test, tests/rng_determinism.rs]
+      tests: [cargo test, tests/rng_determinism.rs, src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/headless/args_tests.rs, src/asteroids/lifecycle_tests.rs]
 
   - state: sim-rng-state
     core:
@@ -196,7 +196,7 @@ entities:
       status: declared
       paths: [src/sim_rng.rs]
       symbols: [SimRng, SimRngState, StreamRng]
-      tests: [cargo test, tests/rng_determinism.rs]
+      tests: [cargo test, tests/rng_determinism.rs, src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs]
 
   - component: run-outcome-classifier
     core:
@@ -217,7 +217,7 @@ entities:
       status: declared
       paths: [src/core/balance.rs, src/headless/report.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/server_app/components.rs]
       symbols: [classify, closing_damage_rates, RunOutcome, OutcomeReport, SideMargins, GameOverReason]
-      tests: [cargo test, tests/headless_runner.rs]
+      tests: [cargo test, tests/headless_runner.rs, src/core/balance_tests.rs, src/headless/report_tests.rs, src/server_app/components_interior_write_access_tests.rs]
 
   - state: run-report-artifact
     core:
@@ -234,7 +234,7 @@ entities:
       status: declared
       paths: [src/headless/report.rs, src/bin/phoenix_headless.rs]
       symbols: [RunReport]
-      tests: [cargo test, tests/headless_runner.rs]
+      tests: [cargo test, tests/headless_runner.rs, src/headless/report_tests.rs]
 
   - component: duel-composition-transform
     core:
@@ -258,7 +258,7 @@ entities:
       status: declared
       paths: [src/headless/duel.rs, src/headless/app.rs, src/headless/args.rs, assets/worlds/duel.toml]
       symbols: [apply_duel_sides, resolve_template, SLOT_MARKER, DuelError, DuelTemplateLoader]
-      tests: [cargo test, tests/headless_runner.rs]
+      tests: [cargo test, tests/headless_runner.rs, src/headless/duel_tests.rs, src/headless/args_tests.rs]
 
   - component: balance-batch-runner
     core:

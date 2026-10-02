@@ -31,7 +31,7 @@ entities:
       status: declared
       paths: [assets/scenarios.toml, src/world/manifest.rs, src/server/bridge.rs]
       symbols: [Manifest, ScenarioEntry, parse_manifest, validate_manifest, ScenarioCatalog, build_catalog]
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - state: world-content-pack-state
     core:
@@ -51,6 +51,7 @@ entities:
       # each catalog entry resolves to once loaded.
       symbols: [Manifest, ScenarioCatalog, WorldConfig]
 
+      tests: [src/world/manifest_tests.rs]
   - component: default-world-content
     core:
       status: implemented

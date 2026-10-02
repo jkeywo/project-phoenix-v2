@@ -14,7 +14,7 @@ entities:
       status: declared
       paths: [src/entities/config.rs, src/entities/config_cache.rs]
       symbols: [EntityConfig, ConfigCachePlugin]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/config_cache_tests.rs]
 
   - state: entity-template-state
     core:
@@ -70,7 +70,7 @@ entities:
       status: declared
       paths: [src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config_cache.rs, src/entities/loader.rs]
       symbols: [resolve_template, resolve_from_disk, load_entity_config, preload_step, PreloadStep, ResolvedTemplate, Provenance, FieldOrigin, MergeStep, IncludeError, IncludeErrorDetail, FsFragmentSource, INCLUDES_KEY, MergePolicy, ArrayRule, merge_entity_config_toml_with, reject_unhonoured_removals, find_removal_marker, strip_removals, REMOVE_KEY]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/entity_override_tests.rs, src/entities/config_cache_tests.rs, src/entities/loader_tests.rs]
 
   - state: resolved-entity-template-state
     core:
@@ -109,7 +109,7 @@ entities:
       status: declared
       paths: [src/ship/config.rs, src/entities/config.rs, src/ship/system_registry.rs]
       symbols: [parse_and_validate, ShipConfig]
-      tests: [cargo test]
+      tests: [cargo test, src/ship/system_registry_tests.rs]
 
   - component: entity-spawn-orchestrator
     core:
@@ -166,6 +166,7 @@ entities:
       symbols: [EntityUuid, EntityId, EntityName, StaticPointDefence]
       messages: [EntitySpawned, EntityDespawned]
 
+      tests: [src/core/messages_view_mode_tests.rs]
   - component: model-marker-contract
     core:
       status: implemented
@@ -186,7 +187,7 @@ entities:
         - src/server/pfx.rs
         - src/headless/app.rs
       symbols: [ModelRig, MarkerFinding, MarkerRole, validate_entity_markers, duplicate_marker_findings]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/model_rig_tests.rs, src/entities/marker_validate_tests.rs, src/server/pfx_dust_tests.rs, src/server/pfx_tests.rs]
     exceptions:
       - rule: every-marker-reference-is-validated-before-attachment
         scope:
@@ -235,7 +236,7 @@ entities:
       status: declared
       paths: [src/entities/entity_override.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
       symbols: [player_hull_config]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/entity_override_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs]
     evidence:
       - kind: test
         reference: a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull
@@ -261,7 +262,7 @@ entities:
       status: declared
       paths: [src/world/manifest.rs, src/world/config.rs, src/delivery/payload.rs, src/core/messages.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
       symbols: [AvailableShipEntry, ScenarioCatalog, build_catalog, build_merged_catalog, CatalogShipWire, ScenarioCatalogWire, ScenarioCatalogPayload, catalogue_snapshot]
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/delivery/payload_tests.rs, src/core/messages_view_mode_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: entity-template-schema-validator
     core:
@@ -299,7 +300,7 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/spawner.rs, src/entities/loader.rs, src/ship/config.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/loader_tests.rs]
 
   - component: entity-template-capability-contract
     core:

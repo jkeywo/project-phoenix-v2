@@ -26,7 +26,7 @@ entities:
       status: declared
       paths: [src/core/narrative.rs, src/narrative.rs, src/objectives.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/world/config.rs, src/world/validate.rs, src/console/comms/server.rs, src/server_app/registration.rs, src/server_app/world_setup.rs, src/core/computer_message.rs]
       symbols: [NarrativeEvent, NarrativeKind, NarrativeActor, NarrativeValue, NarrativeMark, NarrativeRequest, ObjectiveTransition, emit_scenario_narrative, emit_authored_and_marked_entity_narrative, tick_computer_message, ActiveComputerMessage, ComputerMessageRequest]
-      tests: [cargo test, tests/narrative_timeline.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, src/core/narrative_tests.rs, src/narrative_tests.rs, src/objectives_tests.rs, src/world/script/effects_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/core/computer_message_tests.rs]
 
   - state: narrative-event-stream
     core:
@@ -46,7 +46,7 @@ entities:
       status: declared
       paths: [src/core/narrative.rs]
       symbols: [NarrativeEvent, NarrativeKind, NarrativeMark]
-      tests: [cargo test]
+      tests: [cargo test, src/core/narrative_tests.rs]
 
   - component: narrative-telemetry-collector
     core:
@@ -67,7 +67,7 @@ entities:
       status: declared
       paths: [src/headless/report.rs, src/headless/app.rs, src/core/telemetry.rs]
       symbols: [collect_narrative_events, StampedNarrativeEvent, RunTelemetry]
-      tests: [cargo test, tests/narrative_timeline.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, src/headless/report_tests.rs]
 
   - component: narrative-timeline-projector
     core:
@@ -89,7 +89,7 @@ entities:
       status: declared
       paths: [src/core/narrative.rs, src/headless/report.rs]
       symbols: [fold_narrative, NarrativeTimeline, RunReport]
-      tests: [cargo test, tests/narrative_timeline.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, src/core/narrative_tests.rs, src/headless/report_tests.rs]
 
   - component: task-lifecycle-emitter
     core:
@@ -119,7 +119,7 @@ entities:
       status: declared
       paths: [src/ai/standing_operation.rs, src/core/task_lifecycle.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
       symbols: [TaskKey, TaskSlot, TaskOutcome, TaskTerminalReason, TaskActivation, TaskLifecycleRequest, TaskLifecycles, start_event, terminal_event, repeats_event, emit_task_lifecycle_narrative, finalize_task_lifecycles]
-      tests: [cargo test, tests/task_lifecycle_narrative.rs]
+      tests: [cargo test, tests/task_lifecycle_narrative.rs, src/ai/standing_operation_tests.rs, src/core/task_lifecycle_tests.rs, src/narrative_tests.rs, src/tractor/server_tests.rs, src/science/server_tests.rs, src/headless/report_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
 
   - state: task-lifecycle-registry
     core:
@@ -142,7 +142,7 @@ entities:
       status: declared
       paths: [src/core/task_lifecycle.rs]
       symbols: [TaskLifecycles, TaskActivation, TaskKey, TaskSlot]
-      tests: [cargo test]
+      tests: [cargo test, src/core/task_lifecycle_tests.rs]
 
   - state: post-mission-report-state
     core:
@@ -166,7 +166,7 @@ entities:
       status: declared
       paths: [src/core/report.rs, src/sim_digest.rs, src/snapshot.rs, src/server_app/registration.rs]
       symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow, reset_mission_report]
-      tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs, src/core/report_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
 
   - component: post-mission-report-accumulator
     core:
@@ -192,4 +192,4 @@ entities:
       status: declared
       paths: [src/mission_report.rs, src/world/dispatch.rs, src/world/server.rs, src/world/script/effects.rs, src/server_app/broadcast_publish.rs, src/server/viewscreen_border.rs, src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js, client.html, server.html]
       symbols: [apply_report_rows, reset_mission_report, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView, reportRows]
-      tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js, src/mission_report_tests.rs, src/world/script/effects_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/server/viewscreen_border_tests.rs, src/core/balance_tests.rs]

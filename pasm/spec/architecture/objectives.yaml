@@ -17,7 +17,7 @@ entities:
       status: declared
       paths: [src/objective_instances.rs, src/objective_instances/control.rs, src/gm_objective.rs, src/gm_action.rs, gui/gm-objective-panel.js, src/ship_slots.rs, src/server_app/world_setup.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/schedule.rs, src/narrative.rs, src/snapshot.rs, src/sim_digest.rs]
       symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId, ObjectiveInstanceScope, apply_instance_command, apply_instance_control]
-      tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js]
+      tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js, src/objective_instances_tests.rs, src/gm_objective_tests.rs, src/gm_action_tests.rs, src/ship_slots_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/world/script/effects_tests.rs, src/world/script/schedule_tests.rs, src/narrative_tests.rs]
 
   - state: objective-instance-state
     core:
@@ -34,6 +34,7 @@ entities:
       paths: [src/objective_instances.rs, src/ship_slots.rs, src/sim_digest.rs]
       symbols: [ObjectiveInstanceRecord, ObjectiveInstanceManager, AuthoredShipSlotId]
 
+      tests: [src/objective_instances_tests.rs, src/ship_slots_tests.rs]
   - component: objective-directive-contract
     core:
       status: implemented
@@ -53,7 +54,7 @@ entities:
       status: declared
       paths: [src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/objectives.rs, src/ai/core.rs]
       symbols: [DirectiveKind, AuthoredDirective, DirectiveError, interpret, authored_doctrine_directive, authored_world_directive, directive_relevance]
-      tests: [cargo test doctrine_and_world_adapters --lib, cargo test nonempty_text_lists_reject_blank_elements --lib, cargo test unknown_directive_fields --lib, cargo test add_objective_rejects_an_unknown_directive_field --lib]
+      tests: [cargo test doctrine_and_world_adapters --lib, cargo test nonempty_text_lists_reject_blank_elements --lib, cargo test unknown_directive_fields --lib, cargo test add_objective_rejects_an_unknown_directive_field --lib, src/objectives/directive_tests.rs, src/world/script/effects_tests.rs, src/objectives_tests.rs]
 
   - state: objective-directive-state
     core:
@@ -70,6 +71,7 @@ entities:
       paths: [src/objectives.rs, src/core/messages.rs]
       symbols: [AiDirective, ScoredObjective]
 
+      tests: [src/objectives_tests.rs, src/core/messages_view_mode_tests.rs]
   - component: objective-doctrine-score-policy
     core:
       status: implemented
@@ -92,7 +94,7 @@ entities:
       status: declared
       paths: [src/objectives.rs, src/ship/viewscreen.rs, src/ai/server.rs, src/server_app/broadcast.rs]
       symbols: [UtilityConfig, WorldConditions, attacked_recently, last_landed_hit_secs]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs, src/ship/viewscreen_tests.rs, src/server_app/broadcast_replication_tests.rs]
 
   - component: objective-target-name-resolver
     core:
@@ -110,7 +112,7 @@ entities:
       status: declared
       paths: [src/ai/core.rs, src/world/server.rs, src/objectives.rs]
       symbols: [resolve_objective_target]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - state: objective-target-resolution-state
     core:
@@ -143,7 +145,7 @@ entities:
       status: declared
       paths: [src/objectives.rs, src/world/server.rs, src/console/comms/server.rs]
       symbols: [ObjectiveManager]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: objective-authoring-actions
     core:
@@ -180,7 +182,7 @@ entities:
       status: declared
       paths: [src/objectives.rs, src/world/server.rs, src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs, src/gm_objective_tests.rs]
 
   - state: objective-runtime-state
     core:
@@ -196,7 +198,7 @@ entities:
       status: declared
       paths: [src/objectives.rs]
       symbols: [ObjectiveManager]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - state: scored-objective-pool-state
     core:
@@ -212,7 +214,7 @@ entities:
       status: declared
       paths: [src/objectives.rs]
       symbols: [WorldConditions, UtilityConfig]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: objective-ai-projection
     core:
@@ -229,7 +231,7 @@ entities:
       status: declared
       paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs, src/console/comms/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
       symbols: [score_doctrine_pool, plan_helm_travel, directive_relevance, top_operate_directive, operate_comms_ai]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs, src/console/repair/external_server_tests.rs]
 
   - component: captain-objective-priority
     core:
@@ -264,7 +266,7 @@ entities:
       status: declared
       paths: [src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
-      tests: [cargo test]
+      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
 
   - component: objective-player-projection
     core:
@@ -303,7 +305,7 @@ entities:
       status: declared
       paths: [src/console/captain/server.rs, src/server_app/components.rs]
       symbols: [handle_set_objective_priority, CaptainPriorityBoost]
-      tests: [cargo test]
+      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
 
   - state: scoped-objective-priority-state
     core:
@@ -319,7 +321,7 @@ entities:
       status: declared
       paths: [src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
-      tests: [cargo test]
+      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
 
   - component: objective-visibility-policy
     core:
@@ -336,7 +338,7 @@ entities:
       status: declared
       paths: [src/objectives.rs, src/console/captain/server.rs, src/console/comms/server.rs]
       symbols: [is_visible_objective, publish_captain_blackboard, publish_comms_blackboard]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: objective-authoring-validation
     core:
@@ -372,7 +374,7 @@ entities:
       status: declared
       paths: [src/world/server.rs, src/objectives.rs]
       symbols: [apply_world_layer_changes]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: comms-objective-ai
     core:
@@ -389,7 +391,7 @@ entities:
       status: declared
       paths: [src/console/comms/server.rs, src/objectives.rs]
       symbols: [operate_comms_ai, directive_relevance]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: objective-comms-consequence-router
     core:
@@ -424,4 +426,4 @@ entities:
     implementation:
       status: declared
       paths: [src/console/captain/server.rs, src/console/comms/server.rs, src/ai/core.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/console/repair/external_server_tests.rs]

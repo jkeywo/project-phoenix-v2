@@ -151,7 +151,7 @@ entities:
         - src/world/script/registry.rs
         - src/bin/phoenix_headless.rs
       symbols: [init_hashing_seed, HASHING_SEED, MAX_OPS_PER_CALL, MAX_OPS_PER_TICK, MAX_CALLS_PER_TICK, loading_engine, runtime_engine, RuntimeHost, BuilderState, EffectSink, register_effects, Flags, register_flags, HostRegistry, collect_host_fn_descriptors]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/tests.rs, src/world/script/engine_tests.rs, src/world/script/effects_tests.rs, src/world/script/flags_tests.rs]
     evidence:
       - kind: test
         reference: "world::script::tests::init_hashing_seed_is_idempotent, budgets_are_ordered_safety_limits (src/world/script/mod.rs)"
@@ -174,7 +174,7 @@ entities:
         - src/world/script/engine.rs
         - src/world/trigger_registry.rs
       symbols: [WorldTriggerRegistry, ScriptHandlerRef, register_trigger_builders, BuilderState, ScriptTrigger, Registration, TriggerHandle, register_real_lit]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/triggers_tests.rs, src/world/script/engine_tests.rs]
 
   - component: scenario-script-scheduling
     core:
@@ -195,7 +195,7 @@ entities:
         - src/world/script/schedule.rs
         - src/world/server.rs
       symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks, apply_script_call, ScriptCallContext, ScriptEventTarget]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/schedule_tests.rs]
     evidence:
       - kind: test
         reference: complete_script_call_applies_all_six_collections_with_clock_and_owner_context
@@ -237,6 +237,8 @@ entities:
         - dispatch_destroy_entity
         - DestroyEntity
       tests:
+        - src/world/script/effects_tests.rs
+        - src/world/script/schedule_tests.rs
         - cargo test
         - "cargo test --features headless --test headless_runner a_scripted_destroy"
         - "cargo test --features headless --test entity_id_minting two_instances_destroy"
@@ -267,7 +269,7 @@ entities:
       paths:
         - src/world/script/comms.rs
       symbols: [ScriptDialogueNode, ScriptDialogueResponse, read_dialogue_node, enter_node]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/comms_tests.rs]
 
   - component: scenario-text-parameters
     core:
@@ -317,7 +319,7 @@ entities:
         - CommsMessage
         - CommsDialogueNode
         - ScriptDialogueNode
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/objectives_tests.rs, src/world/script/comms_tests.rs, src/world/script/effects_tests.rs]
     evidence:
       - kind: test
         reference: "src/core/codec.rs::an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire"
@@ -358,7 +360,7 @@ entities:
         - src/world/validate.rs
         - tests/snapshot_resume.rs
       symbols: [ScriptActivationGate, ScriptResolver, CompiledScripts, ResolvedScriptSpawnRef, resolved_script_spawn_refs, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, eager_record_world_entities_with_scripts, note_uncovered_spawn, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
-      tests: [cargo test, "cargo test --lib world::server::tests::script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload", "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content"]
+      tests: [cargo test, "cargo test --lib world::server::tests::script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload", "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content", src/content_ledger_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/world/script/load_tests.rs, src/world/script/validate_tests.rs]
 
   - component: scenario-script-editor-host
     core:
@@ -376,7 +378,7 @@ entities:
         - src/world/script/authoring.rs
         - src/server/bridge.rs
       symbols: [HostFn, host_fns, ScriptDiagnostic, script_diagnostics, wasm_get_script_host_fns, wasm_script_diagnostics]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/authoring_tests.rs, src/server/bridge_tests.rs]
 
   - component: scenario-script-activation-obligations
     core:
@@ -400,6 +402,7 @@ entities:
         - src/content_ledger.rs
       symbols: [load_world_scripts, OverlayScriptResolver]
 
+      tests: [src/world/script/load_tests.rs, src/entities/config_cache_tests.rs, src/content_ledger_tests.rs]
   - component: mission-deadline-vocabulary
     core:
       status: implemented
@@ -444,7 +447,7 @@ entities:
         - validate_deadline_handlers
         - DEADLINE_NOT_PAIRED
         - DeadlineSnapshot
-      tests: [cargo test, "cargo test --features headless --test headless_runner a_slipped_deadline"]
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_slipped_deadline", src/world/deadlines_tests.rs, src/world/script/deadlines_tests.rs, src/world/script/validate_tests.rs, src/core/messages_view_mode_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires"
@@ -496,7 +499,7 @@ entities:
         # rather than have to discover it.
         - PendingCallbacks
         - ScheduledCall
-      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly", "cargo test --features headless --test snapshot_resume a_dynamically_unloaded_startup_layer_stays_absent_after_resume"]
+      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly", "cargo test --features headless --test snapshot_resume a_dynamically_unloaded_startup_layer_stays_absent_after_resume", src/world/deadlines_tests.rs]
     evidence:
       - kind: test
         reference: "src/world/deadlines.rs tests; tests/snapshot_resume.rs"
@@ -542,7 +545,7 @@ entities:
         - CommitmentOutcome
         - kept_flag
         - broken_flag
-      tests: [cargo test, "cargo test --features headless --test headless_runner a_promise_gates"]
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_promise_gates", src/world/commitments_tests.rs, src/world/script/commitments_tests.rs, src/world/script/engine_tests.rs, src/world/script/schedule_tests.rs, src/world/script/comms_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag"
@@ -586,7 +589,7 @@ entities:
         - CommitmentState
         - DuplicateCommitment
         - WorldContentRuntime
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_kept_promise"]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_kept_promise", src/world/commitments_tests.rs]
     evidence:
       - kind: test
         reference: "src/world/commitments.rs tests; tests/snapshot_resume.rs"
@@ -631,7 +634,7 @@ entities:
         - disposition_flag
         - arm_mission_workforces
         - InfrastructureConfig
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled"]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled", src/world/workforce_tests.rs, src/world/script/effects_tests.rs, src/infrastructure/condition_tests.rs]
     evidence:
       - kind: test
         reference: "tests/snapshot_resume.rs::a_settled_strike_stays_settled_across_a_resume"
@@ -676,7 +679,7 @@ entities:
         - DISPOSITION_MIN
         - DISPOSITION_MAX
         - WorldContentRuntime
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike"]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike", src/world/workforce_tests.rs]
     evidence:
       - kind: test
         reference: "src/world/workforce.rs tests; tests/snapshot_resume.rs"

@@ -111,6 +111,7 @@ entities:
         - SpawnOrigin
         - EntitySpawnOrigin
       tests:
+        - src/world/spawn_origin_tests.rs
         - cargo test
         - "cargo test --features headless --test snapshot_resume a_mid_run_spawn"
     evidence:
@@ -175,7 +176,7 @@ entities:
       status: declared
       paths: [src/world/server.rs, src/world/content.rs, src/world/trigger_registry.rs, src/world/script/engine.rs, src/world/script/schedule.rs]
       symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
-      tests: [cargo test]
+      tests: [cargo test, src/world/script/engine_tests.rs, src/world/script/schedule_tests.rs]
     evidence:
       - kind: test
         reference: trigger_chain_exceeding_max_passes_stops_at_the_cap
@@ -215,7 +216,7 @@ entities:
       status: declared
       paths: [src/world/dispatch.rs, src/world/server.rs, src/entities/loader.rs]
       symbols: [dispatch_action, dispatch_state_action, dispatch_entity_modifier_action, dispatch_world_flag_action, dispatch_destroy_entity, dispatch_spawn_entity, DispatchContext, DispatchResult, ActionCmd, TemplateLoader]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/loader_tests.rs]
     evidence:
       - kind: test
         reference: spawn_failed_template_load_does_not_consume_a_uuid_directly
@@ -266,7 +267,7 @@ entities:
       status: declared
       paths: [src/world/server.rs, src/world/delayed.rs]
       symbols: [tick_delayed_actions, DelayedAction, partition_delayed_actions]
-      tests: [cargo test]
+      tests: [cargo test, src/world/delayed_tests.rs]
     evidence:
       - kind: test
         reference: delayed_action_dispatches_and_queues_event_for_next_tick

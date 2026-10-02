@@ -42,6 +42,7 @@ entities:
       paths: [src/ship/state.rs, src/console/captain/server.rs]
       symbols: [ShipRedAlert]
 
+      tests: [src/ship/state_tests.rs]
   - component: weapons-cold-fire-gate
     core:
       status: implemented
@@ -119,7 +120,7 @@ entities:
         - mirror_weapons_cold_flags
         - OWN_SHIP_WEAPONS_COLD_FLAG
         - weapons_cold_flag
-      tests: [cargo test, "cargo test --features headless --test headless_runner restraint"]
+      tests: [cargo test, "cargo test --features headless --test headless_runner restraint", src/world/script/effects_tests.rs, src/modifiers/power_system_tests.rs]
     evidence:
       - kind: test
         reference: "src/ship/power_tests.rs::a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default"
@@ -170,7 +171,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, gui/sim-state.js]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: host-red-alert-control-router
     core:
@@ -195,7 +196,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/captain/server.rs, src/core/messages.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/core/messages_view_mode_tests.rs]
 
   - component: red-alert-ai-operator
     core:
@@ -241,7 +242,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/messages.rs, src/ship/sensors.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/core/messages_view_mode_tests.rs]
 
   - component: sensor-target-alert-publisher
     core:
@@ -302,3 +303,4 @@ entities:
     implementation:
       status: declared
       paths: [src/console/captain/server.rs, src/server/viewscreen_border.rs, gui/components/ph-red-alert.js, assets/sounds/red_alert_siren.ogg]
+      tests: [src/server/viewscreen_border_tests.rs]

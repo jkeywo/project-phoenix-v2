@@ -18,7 +18,7 @@ entities:
       status: declared
       paths: [src/recipients.rs, src/world/script/recipient_refs.rs, src/world/script/effects.rs, src/world/server.rs, src/comms/scripted.rs, src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
       symbols: [RecipientSelection, RecipientCatalog, RecipientSources, PreparedRecipients, prepare_in_world, RecipientDiagnostics, addressed_action, apply_addressed_action]
-      tests: [cargo test --lib addressed, cargo test --lib recipients]
+      tests: [cargo test --lib addressed, cargo test --lib recipients, src/recipients_tests.rs, src/world/script/recipient_refs_tests.rs, src/world/script/effects_tests.rs]
 
   - component: comms-dialogue-controller
     core:
@@ -47,7 +47,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/server.rs, src/comms/scripted.rs, src/world/server.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/console/comms/inbox_tests.rs]
 
   - state: comms-inbox-state
     core:
@@ -65,6 +65,7 @@ entities:
       paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/comms/server.rs, src/core/messages.rs]
       symbols: [CommsInboxRes, CommsInbox]
 
+      tests: [src/console/comms/inbox_tests.rs, src/core/messages_view_mode_tests.rs]
   - state: comms-dialogue-state
     core:
       status: implemented
@@ -100,7 +101,7 @@ entities:
     implementation:
       status: declared
       paths: [src/comms/range.rs, src/comms/component.rs, src/comms/server.rs, src/console/comms/server.rs]
-      tests: [cargo test]
+      tests: [cargo test, src/comms/range_tests.rs]
 
   - state: comms-range-state
     core:
@@ -145,7 +146,7 @@ entities:
       status: declared
       paths: [src/comms/roster.rs, src/comms/component.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs]
       symbols: [EntityContact, merge_entity_contacts, entity_contact_label, CommsHailable, CommsConfig, update_comms_range_flags, init_comms_runtime]
-      tests: [cargo test]
+      tests: [cargo test, src/comms/roster_tests.rs]
 
   - component: comms-blackboard-publisher
     core:
@@ -163,6 +164,7 @@ entities:
       status: declared
       paths: [src/console/comms/server.rs, src/core/messages.rs, gui/comms-state.js]
 
+      tests: [src/core/messages_view_mode_tests.rs]
   - component: comms-ai-operator
     core:
       status: implemented
@@ -191,7 +193,7 @@ entities:
       status: declared
       paths: [src/console/comms/server.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/selector.rs, src/ai/policy.rs]
       symbols: [operate_comms_ai, operate_comms_response_ai, CommsTargetSelector, CommsResponseAiPolicy, comms_console_ai_components, seed_comms_hail_facts, seed_comms_self_facts, seed_comms_response_facts]
-      tests: [cargo test]
+      tests: [cargo test, src/server_app/world_setup_game_start_identity_tests.rs, src/ai/selector_tests.rs]
 
   - component: important-comms-decision-presentation
     core:
@@ -208,7 +210,7 @@ entities:
       status: declared
       paths: [src/world/config.rs, src/core/messages.rs, src/comms/content.rs, gui/components/ph-comms-current-message.js]
       symbols: [CommsResponseView, response_views]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: comms-response-availability-presentation
     core:
@@ -225,7 +227,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs, src/comms/server.rs, src/console/comms/server.rs, gui/components/ph-comms-current-message.js]
       symbols: [CommsResponseView, broadcast_comms_state, publish_comms_blackboard]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: comms-response-rejection-feedback
     core:
@@ -242,7 +244,7 @@ entities:
       status: declared
       paths: [src/console/comms/server.rs, src/core/messages.rs, src/core/codec.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/components/ph-comms-current-message.js]
       symbols: [handle_respond_to_message, CommsRespondAux]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
 
   - component: comms-semantic-action-adapters
     core:
@@ -263,7 +265,7 @@ entities:
       status: declared
       paths: [gui/stations/comms-actions.js, gui/stations/comms-console.js, gui/console-core.js, gui/client-semantic-actions.js, gui/action-map.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, src/command_admission/mod.rs, src/console/comms/server.rs]
       symbols: [registerCommsActions, createCommsActionRegistry, makeCommsRender, handle_hail, handle_respond_to_message, handle_clear_comms, handle_show_on_screen]
-      tests: [cargo test, npx vitest run, npx playwright test]
+      tests: [cargo test, npx vitest run, npx playwright test, src/command_admission/tests.rs]
 
   - component: client-comms-thread-inbox
     core:

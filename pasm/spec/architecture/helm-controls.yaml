@@ -20,7 +20,7 @@ entities:
       status: observed
       paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app/collision.rs]
       symbols: [compute_physics]
-      tests: [cargo test]
+      tests: [cargo test, src/ship/physics_tests.rs]
 
   - component: helm-console-interface
     core:
@@ -180,6 +180,10 @@ entities:
         - ToggleBoost
         - SetBoost
       tests:
+        - src/ship/helm_admission_tests.rs
+        - src/ship/impulse_boost_systems_tests.rs
+        - src/ship/physics_systems_tests.rs
+        - src/ship/physics_tests.rs
         - cargo test
 
   - state: last-helm-input-state
@@ -209,6 +213,7 @@ entities:
       symbols:
         - LastHelmInput
 
+      tests: [src/ship/continuation_tests.rs, src/ship/components_tests.rs]
   - state: authoritative-ship-motion-state
     core:
       status: implemented
@@ -232,6 +237,7 @@ entities:
         - ShipPhysics
         - sync_ship_position
 
+      tests: [src/ship/state_tests.rs, src/ship/physics_systems_tests.rs]
   - state: desired-motion-state
     core:
       status: implemented
@@ -264,6 +270,7 @@ entities:
         - encode_local_velocity
         - encode_local_facing
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: hazard-assessment-state
@@ -307,6 +314,7 @@ entities:
         - assess_hazards
         - seed_helm_actuator_facts
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: impulse-drive-state
@@ -339,6 +347,9 @@ entities:
         - ImpulsePhase
         - tick_impulse
       tests:
+        - src/server_app/components_interior_write_access_tests.rs
+        - src/ship/impulse_tests.rs
+        - src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
   - state: impulse-manoeuvre-policy-state
@@ -404,6 +415,9 @@ entities:
         - BoostState
         - tick_boost
       tests:
+        - src/server_app/components_interior_write_access_tests.rs
+        - src/ship/boost_tests.rs
+        - src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
   - component: helm-blackboard-publisher
@@ -436,6 +450,7 @@ entities:
       symbols:
         - publish_helm_blackboard
       tests:
+        - src/console/helm/server_tests.rs
         - cargo test
 
   - state: helm-status-blackboard-state
@@ -461,6 +476,7 @@ entities:
         - HelmBlackboard
         - buildHelmConsoleState
 
+      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
   - state: helm-motion-blackboard-state
     core:
       status: implemented
@@ -485,6 +501,7 @@ entities:
         - HelmMotionPlan
         - ShipMotionPlan
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-lateral-thrust-blackboard-state
@@ -508,6 +525,7 @@ entities:
         - HelmLateralThrustBlackboard
         - buildHelmConsoleState
 
+      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
   - state: helm-engine-blackboard-state
     core:
       status: implemented
@@ -533,6 +551,7 @@ entities:
         - HelmEngineBlackboard
         - buildHelmConsoleState
 
+      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
   - component: helm-motion-planner
     core:
       status: implemented
@@ -570,6 +589,7 @@ entities:
         - helm_motion_planner
         - HelmMotionPlan
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   # The `helm-shared-motion-planner-rollout` migration entity was REMOVED here
@@ -632,6 +652,7 @@ entities:
         - ScoredObjective
         - SystemAffinity
 
+      tests: [src/core/messages_view_mode_tests.rs]
   - component: ai-world-snapshot-builder
     core:
       status: implemented
@@ -764,6 +785,7 @@ entities:
         - receive_helm_coordination
         - apply_arc_bearing_request
 
+      tests: [src/ship/components_tests.rs, src/console/helm/server_tests.rs]
   - state: docking-motion-intent-state
     core:
       status: implemented
@@ -798,6 +820,7 @@ entities:
         - helm_motion_planner
         - ai_helm_lateral_thrust
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-ai-surfaces-frame-state
@@ -986,6 +1009,7 @@ entities:
         - checked_snapshot_every_ticks
         - snapshot_every_ticks
       tests:
+        - src/ai/cadence_tests.rs
         - cargo test
 
   - state: helm-actuator-input-state
@@ -1021,6 +1045,8 @@ entities:
         - ImpulseCommand
         - BoostCommand
       tests:
+        - src/ship/helm_admission_tests.rs
+        - src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-engines-ai-operator
@@ -1082,6 +1108,7 @@ entities:
         - decode_thrust_from_velocity
         - integrate_ship_physics
       tests:
+        - src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-steering-ai-operator
@@ -1144,6 +1171,7 @@ entities:
         - decode_steering_from_facing
         - integrate_ship_physics
       tests:
+        - src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-input-arbiter
@@ -1171,6 +1199,7 @@ entities:
       symbols:
         - process_helm_inputs
       tests:
+        - src/ship/helm_admission_tests.rs
         - cargo test
 
   - component: helm-vertical-thrust-ai-operator
@@ -1217,6 +1246,7 @@ entities:
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
         - seed_helm_actuator_facts
       tests:
+        - src/ship/helm_planner_tests.rs
         - cargo test
 
   - component: helm-impulse-ai-operator
@@ -1320,6 +1350,7 @@ entities:
         - process_helm_inputs
         - seed_helm_actuator_facts
       tests:
+        - src/ship/helm_admission_tests.rs
         - cargo test
 
   - component: torpedo-flight-operator
@@ -1368,6 +1399,8 @@ entities:
         - SetThrust
         - SetSteering
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1397,6 +1430,8 @@ entities:
       messages:
         - LateralThrustInput
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1426,6 +1461,8 @@ entities:
       messages:
         - StartImpulseCharge
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1455,6 +1492,8 @@ entities:
       messages:
         - CancelImpulse
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1484,6 +1523,8 @@ entities:
       messages:
         - ToggleBoost
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1513,5 +1554,7 @@ entities:
       messages:
         - SetBoost
       tests:
+        - src/core/messages_view_mode_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test

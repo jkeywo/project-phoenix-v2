@@ -44,7 +44,7 @@ entities:
     implementation:
       status: declared
       paths: [src/native_host/workshop/document.rs, editor/workshop-provider.js, editor/workshop-source-provider.js]
-      tests: [cargo test, npm run test:editor]
+      tests: [cargo test, npm run test:editor, src/native_host/workshop/document_tests.rs]
 
   - component: editor-validation-service
     core:
@@ -154,7 +154,7 @@ entities:
         - server.html
         - src/server/bridge.rs
       symbols: [wasm_add_mod_pack, wasm_remove_mod_pack, wasm_reorder_mod_packs, wasm_active_pack_manifest, wasm_clear_mod_pack]
-      tests: [cargo test]
+      tests: [cargo test, src/server/bridge_tests.rs]
     evidence:
       - kind: code
         reference: pre-scenario upload control gated to the scenario stage
@@ -185,7 +185,7 @@ entities:
       # `overlay_conflicts` are the pure resolution + provenance walks; and
       # `clear_mod_pack_overlay` discards the whole stack for the same-page seam.
       symbols: [ActivePack, PathConflict, push_mod_pack, remove_mod_pack, reorder_mod_packs, active_packs, mod_pack_overlay_get, overlay_source, overlay_lookup, overlay_conflicts, clear_mod_pack_overlay]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/config_cache_tests.rs]
 
   - component: mod-content-overlay-resolver
     core:
@@ -206,7 +206,7 @@ entities:
         - src/world/mod_pack.rs
         - src/entities/config_cache.rs
       symbols: [validate_mod_pack, validate_pack_scripts]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/config_cache_tests.rs]
     evidence:
       - kind: test
         reference: valid_pack_is_accepted / corrupt_archive_rejects_whole_pack
@@ -237,7 +237,7 @@ entities:
       # wins, via the pure overlay_lookup) over the normal fetch path, never
       # materialised as its own struct.
       symbols: [mod_pack_overlay_get, overlay_lookup]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/config_cache_tests.rs]
 
   - component: mod-aware-scenario-catalog
     core:
@@ -256,7 +256,7 @@ entities:
       paths:
         - src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
         reference: merged_catalog_contains_only_manifest_listed_scenarios
@@ -349,7 +349,7 @@ entities:
       paths:
         - src/world/manifest.rs
       symbols: [parse_pack_manifest, PackManifest, PackMeta, PackRequires, parse_content_identity, ContentIdentity, SUPPORTED_PACK_FORMAT]
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs]
 
   - component: mod-pack-script-trust-boundary
     core:
@@ -370,7 +370,7 @@ entities:
         - src/entities/config_cache.rs
         - src/content_ledger.rs
       symbols: [validate_pack_scripts, PackScriptFiles, OverlayScriptResolver]
-      tests: [cargo test]
+      tests: [cargo test, src/entities/config_cache_tests.rs, src/content_ledger_tests.rs]
     evidence:
       - kind: test
         reference: "a_pack_script_resolves_from_the_overlay_not_the_fallback / a_script_carrying_pack_moves_the_content_digest (src/entities/config_cache.rs)"
@@ -394,7 +394,7 @@ entities:
         - src/server/bridge.rs
         - server.html
       symbols: [build_merged_catalog, MergedCatalog, ScenarioCatalogEntry]
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
         reference: "merged_catalog_base_scenarios_report_no_origin (src/world/manifest.rs)"

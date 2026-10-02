@@ -61,6 +61,7 @@ entities:
         - proposeContentPinMigration
         - proposeWorkshopMigration
       tests:
+        - src/native_host/panes/operator_tests.rs
         - npx vitest run editor/tests/workshop-document.test.js editor/tests/workshop-diff.test.js editor/tests/workshop-migration.test.js
         - npx vitest run tests/client/workshop-authoring.test.js tests/client/workshop-layout-model.test.js
         - cargo test --lib native_host::panes::operator
@@ -96,6 +97,7 @@ entities:
         - applyCompositionOperation
         - mountWorkshopComposition
       tests:
+        - src/native_host/panes/operator_tests.rs
         - npx vitest run editor/tests/workshop-composition.test.js tests/client/workshop-composition-panel.test.js
         - npx vitest run tests/client/workshop-authoring.test.js tests/client/workshop-layout-model.test.js tests/client/operator-profile.test.js
         - cargo test --lib native_host::panes::operator

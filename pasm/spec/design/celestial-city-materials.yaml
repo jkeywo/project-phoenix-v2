@@ -22,4 +22,4 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/planet.rs, src/entities/celestial_visual.rs, src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_ecumenopolis.toml, scripts/planets]
-      tests: [cargo test --lib entities::planet::tests, node scripts/planets/check-ecumenopolis.mjs]
+      tests: [cargo test --lib entities::planet::tests, node scripts/planets/check-ecumenopolis.mjs, src/entities/planet_tests.rs]

@@ -21,7 +21,7 @@ entities:
       status: declared
       paths: [src/debug/mod.rs, src/debug/payload.rs, src/core/codec.rs, src/debug/station_activity.rs, src/debug/ai_state.rs, src/debug/scenario.rs, src/debug/modifiers.rs, src/debug/damage.rs, src/debug/entities.rs, src/debug/inspector.rs]
       symbols: [DebugPlugin, DEBUG_SCHEMA_VERSION]
-      tests: [cargo test]
+      tests: [cargo test, src/debug/payload_tests.rs, src/core/codec_mesh_frame_tests.rs, src/debug/station_activity_tests.rs, src/debug/ai_state_tests.rs, src/debug/scenario_tests.rs, src/debug/damage_tests.rs, src/debug/entities_tests.rs, src/debug/inspector_tests.rs]
 
   - state: debug-station-activity
     core:
@@ -37,7 +37,7 @@ entities:
       status: declared
       paths: [src/debug/station_activity.rs, gui/station-activity-chart.js]
       symbols: [StationActivityTracker, DebugStationActivityEnabled, StationActivityCapture]
-      tests: [cargo test]
+      tests: [cargo test, src/debug/station_activity_tests.rs]
 
   - state: debug-ai-doctrine
     core:
@@ -53,7 +53,7 @@ entities:
       status: declared
       paths: [src/debug/ai_state.rs, gui/ai-doctrine-panel.js]
       symbols: [DebugAiDoctrineEnabled, AiDoctrineCapture]
-      tests: [cargo test]
+      tests: [cargo test, src/debug/ai_state_tests.rs]
 
   - state: debug-scenario-state
     core:
@@ -69,7 +69,7 @@ entities:
       status: declared
       paths: [src/debug/scenario.rs, gui/scenario-state-panel.js]
       symbols: [DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder]
-      tests: [cargo test]
+      tests: [cargo test, src/debug/scenario_tests.rs]
 
   - state: debug-legacy-overlays
     core:
@@ -85,4 +85,4 @@ entities:
       status: declared
       paths: [src/debug/modifiers.rs, src/debug/damage.rs, src/debug/entities.rs, src/debug/inspector.rs]
       symbols: [ModifierDebugCapture, DamageDebugCapture, EntityBehaviorCapture, EntityInspectorCapture]
-      tests: [cargo test]
+      tests: [cargo test, src/debug/damage_tests.rs, src/debug/entities_tests.rs, src/debug/inspector_tests.rs]

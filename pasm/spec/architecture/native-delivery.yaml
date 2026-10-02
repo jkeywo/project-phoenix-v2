@@ -48,7 +48,7 @@ entities:
           wasm_get_scenario_catalog,
           wasm_delivery_stamp,
         ]
-      tests: [cargo test, tests/native_host.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, tests/smoke/mod-pack.spec.js]
+      tests: [cargo test, tests/native_host.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, tests/smoke/mod-pack.spec.js, src/delivery/payload_tests.rs, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: delivery-version-pin
     core:
@@ -78,7 +78,7 @@ entities:
           check_bundle_content,
           client_stamp_from_request,
         ]
-      tests: [cargo test, tests/native_host.rs]
+      tests: [cargo test, tests/native_host.rs, src/delivery/stamp_tests.rs, src/core/messages_view_mode_tests.rs, src/delivery/tests.rs]
 
   - component: delivery-http-contract
     core:
@@ -106,7 +106,7 @@ entities:
           .github/workflows/check-deploy-headers.yml,
         ]
       symbols: [CachePolicy, cache_policy_for, content_type_for, resolve_static_path, checkProbe, checkAll]
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/delivery/http_tests.rs]
 
   - component: native-delivery-host
     core:
@@ -176,7 +176,7 @@ entities:
           tests/native_host_snapshot.rs,
           tests/native_viewscreen_render.rs,
           tests/native_direct_join.rs,
-        ]
+         src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, src/native_host/app_tests.rs, src/native_host/transport_tests.rs]
 
   - component: native-runtime-world-load
     core:
@@ -256,7 +256,7 @@ entities:
           cargo test,
           tests/native_host_lobby.rs,
           tests/client/scenario-arbiter-parity.test.js,
-        ]
+         src/native_host/world_load_tests.rs, src/lobby/scenario_arbiter_tests.rs, src/native_host/app_tests.rs, src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, src/content_ledger_tests.rs]
 
   - component: curated-public-catalogue-gate
     core:
@@ -287,7 +287,7 @@ entities:
           .github/workflows/deploy-demo.yml,
         ]
       symbols: [accepts_mod_pack_uploads, offersModPackUpload, wasm_add_mod_pack]
-      tests: [cargo test, npx vitest run, tests/native_host.rs]
+      tests: [cargo test, npx vitest run, tests/native_host.rs, src/build_flags_tests.rs, src/server/bridge_tests.rs]
 
   - component: native-station-pane
     core:
@@ -380,7 +380,7 @@ entities:
           tests/native_host_panes.rs,
           tests/native_host_pane_ultralight.rs,
           "npx vitest run tests/client/viewscreen-hud.test.js",
-        ]
+         src/native_host/panes/identity_tests.rs, src/native_host/panes/registry_tests.rs, src/session_connections_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/surface_tests.rs, src/native_host/panes/document_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/panes/hud_tests.rs, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, src/core/codec_mesh_frame_tests.rs, src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
 
   - component: bridge-display-profile
     core:
@@ -458,7 +458,7 @@ entities:
           reconcile_seated_consoles,
           run_setup,
         ]
-      tests: [cargo test, tests/native_bridge_displays.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs]
+      tests: [cargo test, tests/native_bridge_displays.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/bridge_display_tests.rs, src/native_host/app_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
 
   - component: bridge-layout-law
     core:
@@ -566,7 +566,7 @@ entities:
           LAYOUTS_DIR,
           TEMP_EXTENSION,
         ]
-      tests: [cargo test]
+      tests: [cargo test, src/native_host/app_tests.rs]
 
   - component: bridge-media-profile
     core:
@@ -619,7 +619,7 @@ entities:
           render_media_setup_report,
           enumerate_note,
         ]
-      tests: [cargo test]
+      tests: [cargo test, src/native_host/media_camera_tests.rs, src/native_host/media_microphone_tests.rs, src/native_host/media_output_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
 
   - component: native-pane-recovery
     core:
@@ -684,7 +684,7 @@ entities:
           cargo test,
           tests/native_host_panes.rs,
           tests/native_bridge_displays.rs,
-        ]
+         src/native_host/panes/recovery_tests.rs, src/native_host/panes/placement_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/registry_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/bridge_display_tests.rs]
 
   - component: bridge-input-routing
     core:
@@ -736,7 +736,7 @@ entities:
           PaneDisplayEntry,
           BridgeStationSurface,
         ]
-      tests: [cargo test, tests/native_host_input.rs]
+      tests: [cargo test, tests/native_host_input.rs, src/native_host/panes/keyboard_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/bridge_display_tests.rs, src/native_host/app_tests.rs]
 
   - component: ultralight-sdk-handling
     core:
@@ -768,7 +768,7 @@ entities:
           .gitignore,
         ]
       symbols: [stage_sdk]
-      tests: [cargo test, tests/native_host_pane_ultralight.rs]
+      tests: [cargo test, tests/native_host_pane_ultralight.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs]
 
   - component: native-host-lobby-surface
     core:
@@ -919,4 +919,4 @@ entities:
           npx vitest run,
           tests/native_host_lobby.rs,
           tests/native_host_lobby_ultralight.rs,
-        ]
+         src/native_host/host_lobby/tests.rs, src/native_host/host_lobby/document_tests.rs, src/native_host/host_lobby/bridge_tests.rs, src/native_host/host_lobby/layout_tests.rs, src/native_host/host_lobby/reveal_tests.rs, src/native_host/host_lobby/join_tests.rs, src/native_host/host_lobby/scenario_tests.rs, src/native_host/host_lobby/fleet_tests.rs, src/native_host/session_role_tests.rs, src/native_host/fleet_identity_tests.rs, src/native_host/native_gm/tests.rs, src/native_host/native_gm/start_tests.rs, src/native_host/relay_socket_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/app_tests.rs, src/native_host/bridge_display_tests.rs, src/native_host/world_load_tests.rs, src/server/bridge_tests.rs, src/core/codec_mesh_frame_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]

@@ -51,7 +51,7 @@ entities:
       status: declared
       paths: [src/world/config.rs, src/ship_slots.rs]
       symbols: [ShipSlotConfig, UnclaimedSlotPolicy, ShipSlotReservations, FrozenShipSlots, ClaimOutcome, HullOutcome]
-      tests: [cargo test]
+      tests: [cargo test, src/ship_slots_tests.rs]
 
   - state: mission-ship-slot-reservations
     core:
@@ -68,6 +68,7 @@ entities:
       paths: [src/ship_slots.rs]
       symbols: [ShipSlotReservations, SlotReservation]
 
+      tests: [src/ship_slots_tests.rs]
   - component: world-entity-spawner
     core:
       status: implemented
@@ -171,7 +172,7 @@ entities:
         - WorldContentRuntime
         - CommitmentLedger
         - CommitmentState
-      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway"]
+      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway", src/world/commitments_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word; ::a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back; ::the_lift_runs_out_and_the_third_claimant_is_never_offered_one; ::the_early_collapse_leaves_one_berth_and_control_asks_for_a_name"
@@ -215,6 +216,7 @@ entities:
         - project
         - seed_flags
       tests:
+        - src/campaign/projection_tests.rs
         - cargo test
         - "cargo test --features headless --test headless_runner the_next_mission_opens"
     evidence:
@@ -254,7 +256,7 @@ entities:
         - InfrastructurePlugin
         - tick_infrastructure_condition
         - CapacityAdjustment
-      tests: [cargo test]
+      tests: [cargo test, src/infrastructure/condition_tests.rs, src/infrastructure/server_tests.rs]
 
   - state: infrastructure-condition-state
     core:
@@ -284,7 +286,7 @@ entities:
         - CapacityConfig
         - CapacityAdjustment
         - ThresholdConfig
-      tests: [cargo test]
+      tests: [cargo test, src/infrastructure/condition_tests.rs]
 
   - state: infrastructure-published-state
     core:
@@ -300,7 +302,7 @@ entities:
       status: declared
       paths: [src/core/messages.rs]
       symbols: [InfrastructureSnapshot]
-      tests: [cargo test]
+      tests: [cargo test, src/core/messages_view_mode_tests.rs]
 
   - component: tractor-beam-coupler
     core:
@@ -347,7 +349,7 @@ entities:
         - condition_delta
         - publish_tractor_blackboard
       messages: [EngageTractor, ReleaseTractor]
-      tests: [cargo test]
+      tests: [cargo test, src/tractor/coupling_tests.rs, src/tractor/held_response_tests.rs, src/tractor/server_tests.rs]
 
   - state: tractor-beam-state
     core:
@@ -372,7 +374,7 @@ entities:
       symbols:
         - TractorBeam
         - TractorSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/tractor/server_tests.rs]
 
   - state: tractor-beam-published-state
     core:
@@ -394,7 +396,7 @@ entities:
       paths: [src/core/messages.rs]
       symbols:
         - TractorBlackboard
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: external-repair-dispatcher
     core:
@@ -432,7 +434,7 @@ entities:
         - apply_external_repair
         - register_external_repair
       messages: [DispatchExternalRepair, RecallExternalRepair, DispatchRepairTeam]
-      tests: [cargo test]
+      tests: [cargo test, src/console/repair/external_tests.rs, src/console/repair/external_server_tests.rs]
 
   - component: named-external-repair-claim
     core:
@@ -474,7 +476,7 @@ entities:
         - is_committed_to_operation
         - fold_external_repair_namespace
       messages: [DispatchRepairTeam, RecallRepairTeam]
-      tests: [cargo test, npx vitest run, npx playwright test]
+      tests: [cargo test, npx vitest run, npx playwright test, src/console/repair/external_tests.rs, src/console/repair/external_server_tests.rs, src/console/repair/dispatch_tests.rs, src/core/messages_view_mode_tests.rs]
 
   - state: external-repair-dispatch-state
     core:
@@ -499,7 +501,7 @@ entities:
       symbols:
         - ExternalRepairDispatch
         - ExternalRepairSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/console/repair/external_server_tests.rs]
 
   - state: external-repair-published-state
     core:
@@ -522,7 +524,7 @@ entities:
       paths: [src/core/messages.rs]
       symbols:
         - RepairBlackboard
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - state: held-response-state
     core:
@@ -548,7 +550,7 @@ entities:
         - HeldResponse
         - held_offset
         - condition_delta
-      tests: [cargo test]
+      tests: [cargo test, src/tractor/held_response_tests.rs]
 
   - component: dock-controller
     core:
@@ -589,7 +591,7 @@ entities:
         - publish_dock_blackboard
         - resolve_dock_markers
       messages: [Dock, Undock]
-      tests: [cargo test]
+      tests: [cargo test, src/dock/mating_tests.rs, src/dock/server_tests.rs]
 
   - state: dock-relationship-state
     core:
@@ -613,7 +615,7 @@ entities:
       symbols:
         - DockControl
         - DockSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/dock/server_tests.rs]
 
   - state: dock-published-state
     core:
@@ -635,7 +637,7 @@ entities:
       paths: [src/core/messages.rs]
       symbols:
         - DockBlackboard
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: umbilical-flow-controller
     core:
@@ -675,7 +677,7 @@ entities:
         - tick_umbilical
         - publish_umbilical_blackboard
       messages: [StartTransfer, StopTransfer]
-      tests: [cargo test]
+      tests: [cargo test, src/umbilical/flow_tests.rs, src/umbilical/server_tests.rs]
 
   - state: umbilical-flow-state
     core:
@@ -699,7 +701,7 @@ entities:
       symbols:
         - TransferUmbilical
         - UmbilicalSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/umbilical/server_tests.rs]
 
   - state: umbilical-published-state
     core:
@@ -721,7 +723,7 @@ entities:
       paths: [src/core/messages.rs]
       symbols:
         - UmbilicalBlackboard
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: dossier-projection
     core:
@@ -761,7 +763,7 @@ entities:
         - DossierPlugin
         - publish_dossier_blackboard
         - DOSSIER_BLACKBOARD_KEY
-      tests: [cargo test]
+      tests: [cargo test, src/dossier/projection_tests.rs, src/dossier/server_tests.rs]
 
   - state: dossier-published-state
     core:
@@ -789,7 +791,7 @@ entities:
         - DossierFactSnapshot
         - DossierValue
         - DossierEvidenceSnapshot
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - state: dossier-evidence-state
     core:
@@ -824,7 +826,7 @@ entities:
         - Dossier
         - register_dossier
         - RecordDossierEvidence
-      tests: [cargo test]
+      tests: [cargo test, src/dossier/evidence_tests.rs, src/world/script/dossier_tests.rs]
 
   - component: science-scan-deriver
     core:
@@ -869,7 +871,7 @@ entities:
         - tick_scans
         - publish_scan_blackboard
         - SCAN_BLACKBOARD_KEY
-      tests: [cargo test]
+      tests: [cargo test, src/science/scan_tests.rs, src/science/server_tests.rs]
 
   - state: science-scan-state
     core:
@@ -899,7 +901,7 @@ entities:
         - ScanReading
         - ScanRefusal
         - ScanSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/science/scan_tests.rs, src/science/server_tests.rs]
 
   - state: science-scan-published-state
     core:
@@ -926,7 +928,7 @@ entities:
       symbols:
         - ScanBlackboard
         - ScanReadingSnapshot
-      tests: [cargo test, npx vitest run]
+      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
 
   - component: debris-hazard-tracker
     core:
@@ -965,7 +967,7 @@ entities:
         - DebrisSaveState
         - tick_debris_drift
         - tick_debris_state
-      tests: [cargo test]
+      tests: [cargo test, src/debris/threat_tests.rs]
 
   - state: debris-threat-state
     core:
@@ -993,7 +995,7 @@ entities:
       symbols:
         - DebrisThreat
         - DebrisSaveState
-      tests: [cargo test]
+      tests: [cargo test, src/debris/threat_tests.rs]
 
   - component: world-trigger-evaluator
     core:
@@ -1028,6 +1030,7 @@ entities:
       paths: [src/world/server.rs, src/objectives.rs]
       symbols: [ObjectiveManagerRes, ObjectiveManager]
 
+      tests: [src/objectives_tests.rs]
   - component: world-comms-runtime
     core:
       status: implemented
@@ -1043,7 +1046,7 @@ entities:
       status: declared
       paths: [src/comms/server.rs, src/world/config.rs, src/console/comms/inbox.rs]
       symbols: [CommsInboxRes, mark_comms_dirty_on_game_start]
-      tests: [cargo test]
+      tests: [cargo test, src/console/comms/inbox_tests.rs]
 
   - component: world-presentation-config
     core:
@@ -1060,7 +1063,7 @@ entities:
       status: declared
       paths: [src/world/config.rs, src/server/renderer.rs, src/server/pfx.rs]
       symbols: [AmbientLightConfig]
-      tests: [cargo test]
+      tests: [cargo test, src/server/renderer_tests.rs, src/server/pfx_dust_tests.rs, src/server/pfx_tests.rs]
 
   - component: world-authoring-validator
     core:
@@ -1081,7 +1084,7 @@ entities:
       status: declared
       paths: [src/world/validate.rs, src/world/manifest.rs, src/headless/app.rs]
       symbols: [validate_composition, validate_supporting_world, validate_entity_identity, validate_manifest, WorldSource, WorldFinding, has_error]
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs]
 
   - state: world-authoring-validation-state
     core:
@@ -1183,7 +1186,7 @@ entities:
       status: declared
       paths: [src/headless/app.rs, src/world/server.rs, src/world/layers.rs, src/world/validate.rs]
       symbols: [validate_composition, validate_supporting_world, LayerValidationContext, evaluate_layer_load, activation_findings, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
-      tests: [cargo test]
+      tests: [cargo test, src/world/layers_tests.rs]
 
   - state: world-content-lifecycle-state
     core:
@@ -1200,6 +1203,7 @@ entities:
       paths: [src/headless/app.rs, src/world/materialization.rs, src/world/server.rs, src/server_app/world_setup.rs]
       symbols: [WorldMaterialization, spawn_immediate_entities_internal, spawn_anonymous_entities_internal, world_activation_blocked, WorldRuntime, apply_world_layer_changes]
 
+      tests: [src/server_app/world_setup_game_start_identity_tests.rs]
   - component: world-objective-contract
     core:
       status: implemented
@@ -1214,7 +1218,7 @@ entities:
       status: declared
       paths: [src/objectives.rs, src/world/dispatch.rs, src/world/server.rs, src/world/validate.rs]
       symbols: [ObjectiveManager, apply_world_layer_changes, validate_objectives]
-      tests: [cargo test]
+      tests: [cargo test, src/objectives_tests.rs]
 
   - component: world-trigger-lifecycle-contract
     core:
@@ -1231,7 +1235,7 @@ entities:
       status: declared
       paths: [src/world/content.rs, src/world/config.rs, src/world/delayed.rs, src/world/server.rs]
       symbols: [Trigger, TriggerState, cooldown_elapsed, reset_triggers_by_id, DelayedUnloadPolicy, partition_delayed_actions_on_unload]
-      tests: [cargo test]
+      tests: [cargo test, src/world/delayed_tests.rs]
 
   - component: world-comms-identity-contract
     core:
@@ -1271,7 +1275,7 @@ entities:
       status: declared
       paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs, src/world/validate.rs, src/entities/config_cache.rs, src/server/bridge.rs, server.html]
       symbols: [LayerValidationContext, evaluate_layer_load, validate_supporting_world, apply_world_layer_changes, WorldLayerMap, WorldRuntime]
-      tests: [cargo test, "npx playwright test layer-sibling-script.spec.js"]
+      tests: [cargo test, "npx playwright test layer-sibling-script.spec.js", src/world/layers_tests.rs, src/entities/config_cache_tests.rs, src/server/bridge_tests.rs]
 
   - state: world-layer-runtime-state
     core:
@@ -1288,6 +1292,7 @@ entities:
       paths: [src/world/server.rs, src/world/layers.rs]
       symbols: [WorldLayerMap, WorldRuntime, PendingWorldLayerChanges, WorldLayerChange, EntityOriginLayer, AwaitingScript, WorldFetchState]
 
+      tests: [src/world/layers_tests.rs]
   - component: world-trigger-action-dispatcher
     core:
       status: implemented
@@ -1343,4 +1348,4 @@ entities:
       status: declared
       paths: [src/world/server.rs, src/world/layers.rs, src/world/deadlines.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/world/delayed.rs, src/objectives.rs]
       symbols: [apply_world_layer_changes, evaluate_layer_unload, remove_origin, remove_layer_script_triggers, partition_delayed_actions_on_unload]
-      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume a_layer_deadline_resumes"]
+      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume a_layer_deadline_resumes", src/world/layers_tests.rs, src/world/deadlines_tests.rs, src/world/script/schedule_tests.rs, src/world/delayed_tests.rs, src/objectives_tests.rs]

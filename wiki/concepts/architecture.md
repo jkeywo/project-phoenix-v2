@@ -3,7 +3,7 @@ title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
 sources: [src/server/pfx.rs, AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, src/lockstep/mod.rs, src/entities/config.rs, src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Architecture
@@ -60,3 +60,5 @@ fade, scale and expire it. These effects do not feed simulation state.
 - [Client Architecture](./client-architecture.md)
 - [Message Flow](./message-flow.md)
 - [Networking](./networking.md)
+
+Rust unit-test modules live in sibling `*_tests.rs` files (or `tests.rs` beside a `mod.rs`) and are loaded through test-gated path declarations. Their module names and private access remain unchanged. Binary test files live under `src/bin/tests/` to avoid Cargo target discovery. Production files retain test-only hooks when the production type needs them; unit-test bodies and fixtures stay in the sibling files. The placement convention is maintained in `AGENTS.md`.

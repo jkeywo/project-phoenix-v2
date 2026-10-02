@@ -82,7 +82,7 @@ entities:
       status: declared
       paths: [src/world/flags.rs, crates/phoenix-math/src/bounded_history.rs, src/entities/ai_flag_hosts.rs, src/world/config.rs]
       symbols: [evaluate_selector, AiFactSet, FactContext, Predicate, HistoryReducer, HistorySpec, HistoryRef, AiHistory, HISTORY_REDUCERS, fold_history, history_atom, referenced_history, BoundedHistory, AiHost, FlagChain, AI_HOSTS]
-      tests: [cargo test]
+      tests: [cargo test, crates/phoenix-math/src/bounded_history_tests.rs]
 
   - component: per-system-target-ranking-policy
     core:
@@ -123,7 +123,7 @@ entities:
       status: declared
       paths: [src/ai/selector.rs, src/world/flags.rs, src/ship/sensors.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/navigation/mod.rs, src/console/repair/server.rs, src/console/comms/server.rs, src/entities/config.rs]
       symbols: [TargetSelector, select, validate_fine_system_ai_selector, operate_sensors_ai, ai_target_selection, TacticalTargetSelector, operate_navigation_ai, NavigationTargetSelector, operate_repair_ai, RepairTargetSelector, seed_repair_facts, seed_repair_self_facts, operate_comms_ai, CommsTargetSelector, seed_comms_hail_facts, seed_comms_self_facts]
-      tests: [cargo test]
+      tests: [cargo test, src/ai/selector_tests.rs]
 
   - state: fine-system-ai-policy-state
     core:
@@ -164,6 +164,7 @@ entities:
       # TacticalRadarSelection), not by this component.
       symbols: [AiPolicyRuntimeState, AiPolicyMemory, AiHistory]
 
+      tests: [crates/phoenix-math/src/bounded_history_tests.rs, crates/phoenix-math/src/composite_rng_tests.rs]
   - component: fine-system-ai-policy-runtime
     core:
       status: implemented
@@ -213,7 +214,7 @@ entities:
       status: declared
       paths: [src/console/captain/server.rs, src/ship/helm_ai/mod.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_ai/facts.rs, src/ship/helm_ai/engines.rs, src/ship/helm_ai/steering.rs, src/ship/helm_ai/impulse.rs, src/ship/helm_ai/lateral.rs, src/ship/helm_ai/vertical.rs, src/ship/helm_ai/boost.rs, src/ship/helm_planner.rs, src/ai/core.rs, src/ai/policy.rs, src/ai/server.rs, src/world/flags.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console_ai/server.rs, src/console_ai/core.rs, src/ship/shields.rs, src/ship/power.rs, src/console/comms/server.rs, crates/phoenix-math/src/composite_rng.rs, crates/phoenix-math/src/bounded_history.rs]
       symbols: [operate_captain_ai, nearest_hostile_range, CAPTAIN_HOSTILE_CONTACT_FACT, CAPTAIN_HOSTILE_RANGE_FACT, ai_helm_thrust, ai_helm_steering, ai_helm_lateral_thrust, ai_helm_vertical_thrust, ai_helm_impulse, ai_helm_boost, ai_phaser_auto_fire, tick_blaster_auto_fire, ai_torpedo_load, ai_torpedo_auto_fire, ai_shield_focus, tick_shield_focus_ai, ai_power_allocation, operate_comms_response_ai, FineSystemAiPolicies, PhaserBankAiPolicies, BlasterBankAiPolicies, TorpedoTubeAiPolicies, TorpedoMagazineAiPolicy, ShieldsFocusAiPolicy, PowerAiPolicy, CommsResponseAiPolicy, seed_helm_actuator_facts, seed_phaser_bank_facts, seed_blaster_bank_facts, seed_torpedo_tube_load_facts, seed_torpedo_tube_launch_facts, seed_torpedo_magazine_facts, seed_shields_focus_facts, seed_power_facts, seed_comms_response_facts, resolve_channel, evaluate_with, best_in, resolve_channel_in_state, resolve_transition, evaluate_stateful, AiPolicyMachine, AiPolicyState, AiPolicyTransition, AiPolicyRuntimeState, AiPolicyMemory, HelmBoostAiPolicyState, HelmEnginesAiPolicyState, HelmSteeringAiPolicyState, HelmPassSurface, ai_policy_state_tick, tick_policy_machine, build_pass_surface, resolve_helm_channel, seed_helm_travel_facts, seed_memory_derived_facts, seed_recovery_facts, seed_pressed_facts, MIN_RANGE_TARGET_MEMORY, target_relative_motion, plan_fly_through_pass, plan_recovery_orbit, plan_artillery_position, FlyThroughLeg, FlyThroughPassInput, RecoveryOrbitInput, ArtilleryPositionInput, TargetRelativeMotion, HoldCommittedHeading, AiPolicyTickClock, AiHighFidelityComponents, ai_high_fidelity_components, has_ai_high_fidelity_components, HelmRecoveryHistory, BoundedHistory, CompositeKey, composite_seed, signed_choice, key_from_name]
-      tests: [cargo test]
+      tests: [cargo test, src/ship/helm_planner_tests.rs, src/console_ai/core_tests.rs, crates/phoenix-math/src/composite_rng_tests.rs, crates/phoenix-math/src/bounded_history_tests.rs]
 
   - component: ai-policy-host-spine
     core:
@@ -246,6 +247,7 @@ entities:
         - AiEmitter
         - register_ai_host_env
       tests:
+        - src/ai/host_tests.rs
         - cargo test
 
   - component: per-bank-weapon-policy
@@ -300,7 +302,7 @@ entities:
       status: declared
       paths: [src/ai/cadence.rs, src/console/navigation/mod.rs, src/console/repair/server.rs, src/console/comms/server.rs, src/ship/power.rs, src/console_ai/server.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/entities/authored_ai_pins.rs]
       symbols: [AiTickReady, AiSnapshotReady, AiBaseInterval, tick_ai_cadence, ai_tick_ready, ai_snapshot_ready, evaluate_every_ticks_ready, register_ai_cadence, arm_ai_tick, operate_navigation_ai, operate_repair_ai, operate_comms_ai, operate_comms_response_ai, PowerAiPolicy, PowerAiCadence, CommsResponseAiPolicy, CommsResponseAiCadence, comms_console_ai_components, ai_power_allocation]
-      tests: [cargo test]
+      tests: [cargo test, src/ai/cadence_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs]
 
   - component: fine-system-ai-policy-validation
     core:

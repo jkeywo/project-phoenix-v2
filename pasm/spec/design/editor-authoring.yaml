@@ -69,7 +69,7 @@ entities:
         - server.html
         - src/server/bridge.rs
         - src/world/mod_pack.rs
-      tests: [cargo test]
+      tests: [cargo test, src/server/bridge_tests.rs]
 
   - decision: mod-pack-content-composition
     core:
@@ -127,7 +127,7 @@ entities:
       paths:
         - src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: mod-scenario-provenance-visible
     core:
@@ -145,7 +145,7 @@ entities:
       paths:
         - src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test]
+      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: authored-scenario-scripting
     core:

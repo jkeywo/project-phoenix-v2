@@ -29,6 +29,11 @@ entities:
       paths: [src/workshop/validation_support.rs, gui/workshop-edit-session.js, src/workshop/definitions.rs, src/workshop/document.rs, src/workshop/wasm.rs, src/workshop/provider.rs, src/workshop/mod.rs, src/workshop/test_browser.rs, src/core/codec.rs, src/entities/config_cache.rs, src/headless/app.rs, editor/workshop-definitions.js, gui/workshop-definitions-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, src/native_host/panes/operator.rs]
       symbols: [finding, sort_findings, catalog, findings, new_faction_source, check_value, check_table_fields, edit, EditRequest, Edit, DefinitionCatalog, wasm_workshop_definitions, wasm_workshop_edit, wasm_workshop_new_faction, get_faction_registry, faction_registry_from, faction_directory_beside, replace_faction_registry, planFactionEdits, planRatingEdits, complianceKeys, snapshotIsCurrent, mountWorkshopDefinitions, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms]
       tests:
+        - src/workshop/validation_support_tests.rs
+        - src/workshop/document_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
+        - src/entities/config_cache_tests.rs
+        - src/native_host/panes/operator_tests.rs
         - "cargo test --lib -- workshop:: entities::config_cache native_host::panes::operator native_host::workshop"
         - "npx vitest run editor/tests/workshop-definitions.test.js tests/client/workshop-definitions-panel.test.js tests/client/workshop-edit-session.test.js tests/client/workshop-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/workshop-runtime.test.js editor/tests/workshop-provider.test.js"
   - component: workshop-composition-authoring
@@ -60,6 +65,11 @@ entities:
       paths: [src/workshop/validation_support.rs, gui/workshop-edit-session.js, src/workshop/composition.rs, src/workshop/source_spans.rs, src/workshop/document.rs, src/workshop/wasm.rs, src/workshop/provider.rs, src/workshop/mod.rs, src/workshop/test_source.rs, src/core/codec.rs, editor/workshop-composition.js, gui/workshop-composition-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, src/native_host/panes/operator.rs]
       symbols: [finding, sort_findings, catalog, compose, findings, selection_findings, scenario_catalogue, new_world_source, CompositionCatalog, ComposeRequest, CatalogueEntry, wasm_workshop_composition, wasm_workshop_compose, wasm_workshop_new_world, reference_dependencies, planScenarioEdits, planExtraWorldEdits, moveRoot, refusalStringId, worldSlugPath, mountWorkshopComposition]
       tests:
+        - src/workshop/validation_support_tests.rs
+        - src/workshop/document_tests.rs
+        - src/workshop/test_source_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
+        - src/native_host/panes/operator_tests.rs
         - "cargo test --lib -- workshop:: native_host::panes::operator native_host::workshop"
         - "npx vitest run editor/tests/workshop-composition.test.js tests/client/workshop-composition-panel.test.js tests/client/workshop-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/workshop-runtime.test.js editor/tests/workshop-provider.test.js tests/client/native-workshop-boot.test.js tests/client/operator-profile.test.js"
         - "tests/smoke/workshop-composition.render.spec.js"
@@ -95,6 +105,11 @@ entities:
       paths: [src/workshop/validation_support.rs, gui/workshop-edit-session.js, src/workshop/entity.rs, src/workshop/document.rs, src/workshop/source_spans.rs, src/workshop/wasm.rs, src/workshop/provider.rs, src/workshop/mod.rs, src/core/codec.rs, src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config.rs, editor/workshop-entity.js, gui/workshop-entity-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, src/native_host/panes/operator.rs, scripts/build-workshop.mjs]
       symbols: [finding, sort_findings, catalog, compose, materialise, findings, supported_components, component_skeleton, component_skeletons, EntityComposition, EntityEditRequest, IncludeView, ComponentView, FieldView, FragmentChoice, wasm_workshop_entity, wasm_workshop_entity_edit, wasm_workshop_entity_materialise, encode_workshop_entity_composition, decode_workshop_entity_request, authoredInclude, includesForm, moveInclude, includeChoices, planIncludeEdits, componentSkeleton, componentAddable, planComponentAdd, planComponentRemove, fieldSegments, fieldIsEditable, fieldIsMaterialisable, fieldIsScalar, fieldGroups, fieldsForm, planFieldEdits, templateChoices, refusalStringId, mountWorkshopEntity]
       tests:
+        - src/workshop/validation_support_tests.rs
+        - src/workshop/document_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
+        - src/entities/entity_override_tests.rs
+        - src/native_host/panes/operator_tests.rs
         - "cargo test --lib -- workshop:: native_host::panes::operator native_host::workshop"
         - "npx vitest run editor/tests/workshop-entity.test.js tests/client/workshop-entity-panel.test.js tests/client/workshop-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/workshop-runtime.test.js editor/tests/workshop-provider.test.js tests/client/workshop-build-modules.test.js tests/client/native-workshop-boot.test.js tests/client/operator-profile.test.js editor/tests/mod-mode-view.test.js"
         - "tests/smoke/workshop-entity.render.spec.js"
@@ -133,6 +148,11 @@ entities:
       paths: [src/workshop/validation_support.rs, src/workshop/presets.rs, src/workshop/source_spans.rs, src/workshop/document.rs, src/workshop/wasm.rs, src/workshop/provider.rs, src/workshop/mod.rs, src/core/codec.rs, src/world/config.rs, src/gm_attention.rs, editor/workshop-presets.js, gui/workshop-presets-panel.js, gui/gm-role-presets.js, editor/workshop-runtime.js, editor/workshop-provider.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop.css, src/native_host/panes/operator.rs, scripts/build-workshop.mjs, assets/strings/strings.csv, tests/gm_role_preset_digest_neutrality.rs]
       symbols: [finding, sort_findings, catalog, compose, findings, new_preset_source, preset_issues, widget_issues, introduced, probe, owns, vocabulary, entity_names, PresetCatalog, PresetView, WidgetView, Choices, PresetEditRequest, scalar_at, GmRolePresetWidget, wasm_workshop_presets, wasm_workshop_presets_edit, wasm_workshop_new_preset, encode_workshop_preset_catalog, decode_workshop_preset_request, presetsForm, planPresetEdits, presetViolations, movePreset, moveWidget, newWidget, presetMovable, widgetMovable, widgetOwns, WIDGET_KEY_OWNERS, probeWidget, widgetTypeChoices, widgetActionChoices, contactChoices, worldChoices, presetFindings, findingsOn, appendPresetBlock, refusalStringId, refusalMessage, mountWorkshopPresets]
       tests:
+        - src/workshop/validation_support_tests.rs
+        - src/workshop/document_tests.rs
+        - src/core/codec_mesh_frame_tests.rs
+        - src/gm_attention_tests.rs
+        - src/native_host/panes/operator_tests.rs
         - "cargo test --lib -- workshop:: native_host::panes::operator native_host::workshop"
         - "cargo test --features headless --test gm_role_preset_digest_neutrality"
         - "npx vitest run editor/tests/workshop-presets.test.js tests/client/workshop-presets-panel.test.js tests/client/workshop-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/workshop-runtime.test.js editor/tests/workshop-provider.test.js tests/client/workshop-build-modules.test.js tests/client/native-workshop-boot.test.js tests/client/operator-profile.test.js editor/tests/mod-mode-view.test.js"

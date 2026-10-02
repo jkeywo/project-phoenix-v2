@@ -289,6 +289,7 @@ fn adopt_remembered_layout(
     log: Option<Res<LogFilterConfig>>,
     bus: Option<Res<super::panes::PaneBusResource>>,
     mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
+    mut claims: Option<ResMut<super::console_assignment::PendingConsoleClaims>>,
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
 ) {
     // The hull-known moment: both resources land together, in
@@ -398,32 +399,14 @@ fn adopt_remembered_layout(
         }
     }
 
-    // A selected class replaces logical screen intent too. In particular a
-    // same-id station saved Off on this hull cannot inherit the old hull's
-    // reservation merely because its prior view was unavailable. Hardware
-    // reconcile does not run this path; only an explicit class adoption does.
-    if let Some(bus) = &bus {
-        for (_, station) in bus.0.console_assignments() {
-            if !desired.contains_key(&station) {
-                bus.0.release_console(&station.0);
-            }
-        }
-        // This adapter runs after the display follower. Reserve adopted seats
-        // now, before the next FixedUpdate can accept a competing phone claim.
-        for station in next.roster() {
-            if desired.contains_key(station) {
-                bus.0.reserve_console(&station.0);
-            }
-        }
-        if let Some(sessions) = sessions.as_mut() {
-            sessions
-                .0
-                .set_native_station_assignments(bus.0.console_assignments());
-        }
-    }
-    if let Some(assignments) = assignments.as_mut() {
-        assignments.0 = desired;
-    }
+    super::console_assignment::adopt_assignments(
+        next.roster(),
+        desired,
+        assignments.as_deref_mut(),
+        claims.as_deref_mut(),
+        bus.as_ref().map(|bus| &bus.0),
+        sessions.as_mut().map(|sessions| &mut sessions.0),
+    );
 
     // Written through a value compare so the frame this runs on a `--world`
     // host, where the reconcile is a no-op and there is no saved file, does not

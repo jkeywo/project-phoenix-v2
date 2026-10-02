@@ -105,6 +105,7 @@ use super::bridge_profile::{
     runtime_display_returns, DiscoveredMonitor, DisplayRole, MonitorGeometry, MonitorIdentity,
     PaneRect, PaneSlot, RawMonitor, RuntimeDisplayLoss, ValidatedProfile,
 };
+use super::console_assignment::{self, PendingConsoleClaims};
 use super::host_lobby::LayoutNotice;
 
 /// The validated bridge profile a native host applies to its displays.
@@ -387,7 +388,7 @@ impl Plugin for BridgeDisplayPlugin {
         app.add_systems(
             Update,
             (
-                apply_pending_console_claims,
+                console_assignment::apply_pending_console_claims,
                 super::console_assignment::sync_console_assignments,
             )
                 .chain()
@@ -433,76 +434,6 @@ impl Plugin for BridgeDisplayPlugin {
                 .in_set(BridgeDisplaySet),
         );
     }
-}
-
-/// Consoles opened on a screen that still owe their station a claim.
-///
-/// Putting a station on a screen should ALSO claim it (native), so an operator
-/// who assigns a console to their glass is seated without a second manual press.
-/// The console pane joins as an ordinary participant on a freshly minted token
-/// (`transport::PaneBus::open_console`), and a claim can only name a session the
-/// lobby has already registered — so [`reconcile_seated_consoles`] records the
-/// intent here at open, and [`apply_pending_console_claims`] emits the
-/// `SelectStation` the frame that session appears. The native assignment is
-/// already reserved to that ordinary token; command authority still requires
-/// connected station tenure through the same gate a phone uses.
-#[derive(Resource, Default)]
-struct PendingConsoleClaims(Vec<PendingConsoleClaim>);
-
-struct PendingConsoleClaim {
-    /// The console pane's own session token.
-    token: String,
-    /// The station to claim — an id, which `lobby::stations_config::get_station`
-    /// resolves the same as a name.
-    station: String,
-    /// Frames waited for the session to register, bounded so a console whose page
-    /// never connected does not keep a claim pending for the life of the host.
-    waited: u32,
-}
-
-/// Frames a pending claim waits for its console's session before it is dropped —
-/// ~10s at 60 fps, generous for a slow page load and bounded so a failed pane
-/// stops being retried.
-const PENDING_CLAIM_MAX_FRAMES: u32 = 600;
-
-/// Claim each console's station the frame its participant's session registers,
-/// so putting a station on a screen seats it (native auto-claim).
-///
-/// Deferred rather than sent at open because the console's page has to connect
-/// and `Identify` first; until its token is a connected session the lobby
-/// handler would run against an unknown token and drop the claim. Sending it on
-/// the console's OWN token keeps the seat attributed to that console, exactly as
-/// a phone's claim is, and `handle_select_station` no-ops harmlessly if the seat
-/// was taken in the meantime.
-fn apply_pending_console_claims(
-    claims: Option<ResMut<PendingConsoleClaims>>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
-    mut inbound: MessageWriter<crate::lobby::InboundMessage>,
-) {
-    let (Some(mut claims), Some(sessions)) = (claims, sessions) else {
-        return;
-    };
-    if claims.0.is_empty() {
-        return;
-    }
-    claims.0.retain_mut(|claim| {
-        let registered = sessions
-            .0
-            .players()
-            .iter()
-            .any(|p| p.connected && p.token == claim.token);
-        if registered {
-            inbound.write(crate::lobby::InboundMessage {
-                token: claim.token.clone(),
-                msg: crate::core::messages::ClientMessage::SelectStation {
-                    station: claim.station.clone(),
-                },
-            });
-            return false;
-        }
-        claim.waited += 1;
-        claim.waited < PENDING_CLAIM_MAX_FRAMES
-    });
 }
 
 /// Lift one Bevy [`Monitor`](bevy::window::Monitor) into a [`RawMonitor`].
@@ -1648,17 +1579,11 @@ fn follow_layout_stations(
         }
     }
     for station in known_stations.iter().filter(|s| !seated.contains(s)) {
-        if let Some(claims) = auto_claims.as_mut() {
-            claims.0.retain(|claim| claim.station != station.0);
-        }
-        let Some(pane) = bus.0.open_pane_for_name(&station.0) else {
+        let Some(_pane) =
+            console_assignment::close_console(&bus.0, auto_claims.as_deref_mut(), station)
+        else {
             continue;
         };
-        // The dropped-phone path, deliberately: a plain `close`, which owes the
-        // lobby one `PlayerDisconnected` and flips the station to `Backfill`.
-        // NOT a fault — a fault asks the pane host to rebuild the view, and this
-        // console was closed on purpose.
-        bus.0.close(pane);
         crate::pinfo!(
             log,
             LogCat::Lobby,
@@ -1759,19 +1684,8 @@ fn follow_layout_stations(
             .layout
             .monitor_of(station)
             .expect("a seated station is on one of this bridge's monitors");
-        let (pane, _url) = bus.0.open_console(&station.0);
-        // Putting a station on a screen also CLAIMS it (native auto-claim):
-        // record the intent against this console's OWN freshly minted token, to
-        // be sent as a `SelectStation` once its session registers. Without this
-        // the console opens on the glass but sits in the lobby until the operator
-        // presses claim — a second step the physical bridge should not need.
-        if let (Some(claims), Some(token)) = (auto_claims.as_mut(), bus.0.token_of(pane)) {
-            claims.0.push(PendingConsoleClaim {
-                token,
-                station: station.0.clone(),
-                waited: 0,
-            });
-        }
+        let (pane, _url) =
+            console_assignment::open_console(&bus.0, auto_claims.as_deref_mut(), station);
         // The URL is NOT logged: it carries this console's session token in its
         // fragment, and an operator log is a file, a scrollback and a screenshot.
         crate::pinfo!(

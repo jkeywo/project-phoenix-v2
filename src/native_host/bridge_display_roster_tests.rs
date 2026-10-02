@@ -202,12 +202,6 @@ fn roster_removal_closes_only_its_console(monitor_blip: bool) {
     let mut transport = bus.transport();
     transport.poll();
     bus.take_pending_views();
-    assert!(app
-        .world()
-        .resource::<PendingConsoleClaims>()
-        .0
-        .iter()
-        .any(|claim| claim.token == tactical_token));
 
     let monitor_entities: Vec<_> = if monitor_blip {
         app.world_mut()
@@ -259,12 +253,7 @@ fn roster_removal_closes_only_its_console(monitor_blip: bool) {
     assert_eq!(bus.open_pane_for_name("science"), Some(science));
     assert_eq!(bus.open_pane_for_name("Ada"), Some(ada));
     assert!(bus.open_pane_for_name("helm").is_none());
-    assert!(!app
-        .world()
-        .resource::<PendingConsoleClaims>()
-        .0
-        .iter()
-        .any(|claim| claim.token == tactical_token));
+
     assert_eq!(
         transport.poll(),
         vec![TransportEvent::Disconnected {
@@ -417,4 +406,57 @@ fn selected_roster_is_available_after_game_start_consumes_pending_hull() {
         &[id("helm"), id("tactical")]
     );
     assert!(bus.open_pane_for_name("helm").is_some());
+}
+
+#[test]
+fn removed_pending_station_never_claims_during_an_empty_monitor_frame() {
+    let (mut app, bus) = host(None);
+    app.insert_resource(hull(&["tactical", "science"]));
+    app.update();
+    arrange(
+        &mut app,
+        LayoutAction::AssignStation {
+            station: id("tactical"),
+            monitor: MonitorIdentity::new(OTHER),
+        },
+    );
+    app.update();
+    let pane = bus.open_pane_for_name("tactical").unwrap();
+    let token = bus.token_of(pane).unwrap();
+    let mut sessions = crate::lobby::session::SessionManager::new();
+    sessions.register(token.clone(), "Tactical".into()).unwrap();
+    app.insert_resource(crate::lobby::Sessions(sessions));
+    app.add_message::<crate::lobby::InboundMessage>();
+
+    let monitors: Vec<_> = app
+        .world_mut()
+        .query_filtered::<Entity, With<Monitor>>()
+        .iter(app.world())
+        .collect();
+    for entity in monitors {
+        app.world_mut().entity_mut(entity).remove::<Monitor>();
+    }
+    app.insert_resource(hull(&["science"]));
+    app.update();
+
+    assert_eq!(
+        app.world()
+            .resource::<BridgeLayoutResource>()
+            .layout
+            .roster(),
+        &[id("science")]
+    );
+    assert!(
+        !app.world()
+            .resource::<Messages<crate::lobby::InboundMessage>>()
+            .iter_current_update_messages()
+            .any(|message| message.token == token
+                && matches!(
+                    message.msg,
+                    crate::core::messages::ClientMessage::SelectStation { .. }
+                )),
+        "roster reconciliation precedes the deferred display close; no stale claim may escape"
+    );
+    assert!(bus.open_pane_for_name("tactical").is_none());
+    assert!(bus.console_assignments().is_empty());
 }

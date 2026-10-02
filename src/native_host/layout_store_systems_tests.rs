@@ -288,7 +288,7 @@ fn switching_class_releases_an_unavailable_console_saved_off_on_the_new_hull() {
     app.update();
     assert!(live(&app).monitor_of(&station("helm")).is_none());
     assert!(bus.console_assignments().is_empty());
-    assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+    assert!(app.world().resource::<ConsoleAssignments>().is_empty());
     assert!(app
         .world()
         .resource::<crate::lobby::Sessions>()
@@ -392,8 +392,7 @@ fn saved_screen_on_a_missing_boot_monitor_stays_reserved_until_off() {
     assert_eq!(
         app.world()
             .resource::<ConsoleAssignments>()
-            .0
-            .get(&station("helm")),
+            .monitor_for(&station("helm")),
         Some(&m(BENQ))
     );
     let sessions = &app.world().resource::<crate::lobby::Sessions>().0;
@@ -403,7 +402,7 @@ fn saved_screen_on_a_missing_boot_monitor_stays_reserved_until_off() {
     surface.queue_record(r#"{"kind":"unassign-station","station":"helm"}"#);
     pump_host_lobby(&bridge, &mut surface);
     app.update();
-    assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+    assert!(app.world().resource::<ConsoleAssignments>().is_empty());
     assert!(bus.console_assignments().is_empty());
     assert!(saved(&scratch, DESTROYER)
         .monitor_of(&station("helm"))

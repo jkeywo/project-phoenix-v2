@@ -459,20 +459,49 @@ fn choose(app: &mut App, identity: &str) {
         .layout = moved;
 }
 
-/// Open a station's console on a monitor, as a lobby button press does.
-fn seat(app: &mut App, station: &str, identity: &str) {
-    let placed = app
+/// Drive the same logical transition the lobby drain uses, without needing its
+/// page bridge in tests whose subject is display following.
+fn station_press(app: &mut App, action: LayoutAction) {
+    use super::super::console_assignment::{apply_host_action, ConsoleAssignments};
+    use super::super::panes::PaneBusResource;
+    let layout = app
         .world()
         .resource::<BridgeLayoutResource>()
         .layout
-        .apply(&LayoutAction::AssignStation {
-            station: crate::core::messages::StationId(station.to_string()),
-            monitor: MonitorIdentity::new(identity),
-        })
-        .expect("a free monitor takes a console");
+        .clone();
+    let bus = app
+        .world()
+        .get_resource::<PaneBusResource>()
+        .map(|bus| bus.0.clone());
     app.world_mut()
-        .resource_mut::<BridgeLayoutResource>()
-        .layout = placed;
+        .resource_scope(|world, mut assignments: Mut<ConsoleAssignments>| {
+            world.resource_scope(|world, mut claims: Mut<PendingConsoleClaims>| {
+                let (next, _) = {
+                    let mut sessions = world.get_resource_mut::<crate::lobby::Sessions>();
+                    apply_host_action(
+                        &layout,
+                        &action,
+                        Some(&mut assignments),
+                        Some(&mut claims),
+                        bus.as_ref(),
+                        sessions.as_mut().map(|sessions| &mut sessions.0),
+                    )
+                    .expect("the host accepts the Station action")
+                };
+                world.resource_mut::<BridgeLayoutResource>().layout = next;
+            });
+        });
+}
+
+/// Open a station's console on a monitor, as a lobby button press does.
+fn seat(app: &mut App, station: &str, identity: &str) {
+    station_press(
+        app,
+        LayoutAction::AssignStation {
+            station: crate::core::messages::StationId(station.to_owned()),
+            monitor: MonitorIdentity::new(identity),
+        },
+    );
 }
 
 #[test]
@@ -909,31 +938,14 @@ fn console_host() -> (App, crate::native_host::panes::transport::PaneBus) {
     (app, bus)
 }
 
-/// Close a station's console, as the row's off button does.
+/// Close a station's console through the production host Off transition.
 fn unseat(app: &mut App, station_id: &str) {
-    // Mirror the host Off action's logical release as well as its physical
-    // layout edit. Hardware reconciliation alone intentionally keeps this.
-    if let Some(bus) = app
-        .world()
-        .get_resource::<crate::native_host::panes::PaneBusResource>()
-    {
-        bus.0.release_console(station_id);
-    }
-    app.world_mut()
-        .resource_mut::<super::super::console_assignment::ConsoleAssignments>()
-        .0
-        .remove(&station(station_id));
-    let closed = app
-        .world()
-        .resource::<BridgeLayoutResource>()
-        .layout
-        .apply(&LayoutAction::UnassignStation {
+    station_press(
+        app,
+        LayoutAction::UnassignStation {
             station: station(station_id),
-        })
-        .expect("closing a console the roster has is always lawful");
-    app.world_mut()
-        .resource_mut::<BridgeLayoutResource>()
-        .layout = closed;
+        },
+    );
 }
 
 /// The Station surfaces open right now, by monitor identity.
@@ -1134,8 +1146,7 @@ fn native_screen_reservation_survives_monitor_loss_move_and_ends_only_at_off() {
     assert_eq!(
         app.world()
             .resource::<ConsoleAssignments>()
-            .0
-            .get(&station("helm")),
+            .monitor_for(&station("helm")),
         Some(&MonitorIdentity::new(BENQ))
     );
     assert_eq!(
@@ -1160,7 +1171,7 @@ fn native_screen_reservation_survives_monitor_loss_move_and_ends_only_at_off() {
     app.update();
     assert!(bus.open_pane_for_name("helm").is_none());
     assert!(bus.console_assignments().is_empty());
-    assert!(app.world().resource::<ConsoleAssignments>().0.is_empty());
+    assert!(app.world().resource::<ConsoleAssignments>().is_empty());
     assert!(app
         .world()
         .resource::<crate::lobby::Sessions>()

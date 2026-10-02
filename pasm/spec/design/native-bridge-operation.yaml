@@ -25,10 +25,11 @@ entities:
         - "The host lobby moves or closes assigned screens. Moving, losing a monitor or rebuilding a console retains its reservation and identity; Backfill operates during disconnection. Host Off releases the reservation."
         - "Manually opened participant panes and ordinary browser clients keep their existing selection rules."
         - "[ai] A connected phone's existing station is not silently displaced by opening a native screen: the host is told to have it released first. A disconnected screen retains visible host Off and move controls even while its physical monitor is absent."
+        - "[ai] Native Station assignment transitions are owned by console_assignment: host actions and selected-class adoption publish reservations immediately, while physical close retains them. Desired-monitor state and deferred initial-claim counters are separate resources; initial claims and return-to-lobby repair share duplicate suppression while retaining distinct eligibility policies. A pending initial claim is discarded if the selected roster no longer contains its Station, including an empty-monitor frame that defers display closure."
     implementation:
       status: declared
-      paths: [gui/client-lobby-render.js, gui/lobby-view.js, src/lobby/session.rs, src/lobby/handler.rs, src/native_host/bridge_display.rs, src/native_host/console_assignment.rs, src/native_host/layout_store_systems.rs]
-      tests: [tests/client/client-lobby-render.test.js, tests/client/lobby-view.test.js, tests/native_host_panes.rs, docs/acceptance/controllers-native-gm.md, src/lobby/session_tests.rs, src/native_host/bridge_display_tests.rs]
+      paths: [gui/client-lobby-render.js, gui/lobby-view.js, src/lobby/session.rs, src/lobby/handler.rs, src/native_host/bridge_display.rs, src/native_host/console_assignment.rs, src/native_host/host_lobby/mod.rs, src/native_host/layout_store_systems.rs]
+      tests: [tests/client/client-lobby-render.test.js, tests/client/lobby-view.test.js, tests/native_host_panes.rs, docs/acceptance/controllers-native-gm.md, src/lobby/session_tests.rs, src/native_host/bridge_display_tests.rs, src/native_host/console_assignment_tests.rs, src/native_host/bridge_display_roster_tests.rs, src/native_host/layout_store_systems_tests.rs]
 
   - decision: native-local-gm-workspace
     core:

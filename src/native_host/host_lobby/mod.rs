@@ -1082,7 +1082,10 @@ pub(crate) fn drain_surface_records(
     log: Option<Res<LogFilterConfig>>,
     bus: Option<Res<super::panes::PaneBusResource>>,
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
-    mut assignments: Option<ResMut<super::console_assignment::ConsoleAssignments>>,
+    (mut assignments, mut claims): (
+        Option<ResMut<super::console_assignment::ConsoleAssignments>>,
+        Option<ResMut<super::console_assignment::PendingConsoleClaims>>,
+    ),
     mut pending_save: Option<ResMut<super::layout_store_systems::PendingLayoutSave>>,
     mut room_records: ParamSet<(
         Option<ResMut<super::audio::NativeRoomAudio>>,
@@ -1428,11 +1431,9 @@ pub(crate) fn drain_surface_records(
                 }
                 continue;
             }
-            HostLobbyRecord::SetGameMaster { monitor } => {
-                crate::native_host::bridge_layout::LayoutAction::SetGameMaster {
-                    monitor: monitor.map(crate::native_host::bridge_profile::MonitorIdentity::new),
-                }
-            }
+            HostLobbyRecord::SetGameMaster { monitor } => LayoutAction::SetGameMaster {
+                monitor: monitor.map(crate::native_host::bridge_profile::MonitorIdentity::new),
+            },
             HostLobbyRecord::SetViewscreen { monitor } => layout::set_viewscreen_action(monitor),
             HostLobbyRecord::AssignStation { station, monitor } => {
                 layout::assign_station_action(station, monitor)
@@ -1473,34 +1474,28 @@ pub(crate) fn drain_surface_records(
             continue;
         };
         let notices = layout_notices.get_or_insert_with(Vec::new);
-        if let LayoutAction::AssignStation { station, .. } = &action {
-            if let Some(holder) = sessions.as_ref().and_then(|s| {
-                s.0.players().iter().find(|p| {
-                    p.connected
-                        && p.station.as_ref() == Some(station)
-                        && s.0.native_station_for_token(&p.token) != Some(station)
-                })
-            }) {
-                notices.push(LayoutNotice::StationHeld {
-                    station: station.clone(),
-                    holder: holder.name.clone(),
-                });
-                continue;
-            }
-        }
-        let result = if matches!(&action, crate::native_host::bridge_layout::LayoutAction::SetGameMaster { monitor } if monitor.is_some() != native_gm.as_ref().map_or(layout.layout.game_master_monitor().is_some(), |gm| gm.enabled))
+        let result = if matches!(&action, LayoutAction::SetGameMaster { monitor } if monitor.is_some() != native_gm.as_ref().map_or(layout.layout.game_master_monitor().is_some(), |gm| gm.enabled))
             && (phase
                 .as_ref()
                 .is_some_and(|phase| phase.get() != &GamePhase::Lobby)
                 || next_phase.as_deref().is_some_and(
                     |next| matches!(next, NextState::Pending(phase) if phase != &GamePhase::Lobby),
                 )) {
-            Err(crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen)
+            Err(Box::new(LayoutNotice::Refused(
+                crate::native_host::bridge_layout::LayoutRefusal::GameMasterRoleFrozen,
+            )))
         } else {
-            layout.layout.apply(&action)
+            super::console_assignment::apply_host_action(
+                &layout.layout,
+                &action,
+                assignments.as_deref_mut(),
+                claims.as_deref_mut(),
+                bus.as_ref().map(|bus| &bus.0),
+                sessions.as_mut().map(|sessions| &mut sessions.0),
+            )
         };
         match result {
-            Ok(next) => {
+            Ok((next, released)) => {
                 crate::pinfo!(
                     log,
                     LogCat::Lobby,
@@ -1509,37 +1504,13 @@ pub(crate) fn drain_surface_records(
                 );
                 layout.layout = next;
                 notices.clear();
-                match &action {
-                    LayoutAction::AssignStation { station, monitor } => {
-                        if let Some(assignments) = assignments.as_mut() {
-                            assignments.0.insert(station.clone(), monitor.clone());
-                        }
-                        if let Some(bus) = &bus {
-                            bus.0.reserve_console(&station.0);
-                        }
-                    }
-                    LayoutAction::UnassignStation { station } => {
-                        let released = assignments
-                            .as_mut()
-                            .is_some_and(|assignments| assignments.0.remove(station).is_some());
-                        if let Some(pending_save) = pending_save.as_mut() {
-                            pending_save.0 |= released;
-                        }
-                        if let Some(bus) = &bus {
-                            bus.0.release_console(&station.0);
-                        }
-                    }
-                    _ => {}
-                }
-                if let (Some(sessions), Some(bus)) = (sessions.as_mut(), &bus) {
-                    sessions
-                        .0
-                        .set_native_station_assignments(bus.0.console_assignments());
+                if let Some(pending_save) = pending_save.as_mut() {
+                    pending_save.0 |= released;
                 }
             }
             Err(refusal) => {
                 crate::pwarn!(log, LogCat::Lobby, "host lobby: {refusal}");
-                notices.push(LayoutNotice::Refused(refusal));
+                notices.push(*refusal);
             }
         }
     }
@@ -1755,8 +1726,7 @@ fn publish_bridge_layout(
         for row in &mut payload.stations {
             if row.assigned_to.is_none() {
                 row.assigned_to = assignments
-                    .0
-                    .get(&crate::core::messages::StationId(row.station.clone()))
+                    .monitor_for(&crate::core::messages::StationId(row.station.clone()))
                     .map(ToString::to_string);
             }
         }

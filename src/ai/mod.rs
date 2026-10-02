@@ -8,6 +8,7 @@ pub mod patrol_cursor;
 pub mod policy;
 pub mod selector;
 pub mod server;
+pub(crate) mod standing_operation;
 
 // `core::hazard_threat_fraction` is deliberately NOT re-exported (issue #968
 // review). It is `pub` so the two hazard entry points below can document it by

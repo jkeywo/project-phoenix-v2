@@ -18,6 +18,7 @@
 //! coordinator once ran; #1166 (S12) dissolved that coordinator, and the tractor
 //! is now the only path that takes a target under tow.
 
+use crate::ai::standing_operation::OperationFacts;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -497,54 +498,44 @@ pub fn operate_tractor_ai(
             _ => None,
         };
 
-        let payload = match directive_target {
-            // A tractor order is active: engage once the ship's ONE combat lock
-            // is on the named target (the `objective-operate` source put it
-            // there). Idempotent — a beam already engaged emits nothing. Claim
-            // the beam as host-driven whenever it is engaged under this order, so
-            // a later withdrawal releases it (and a resume re-adopts it).
-            Some(name) => {
-                let resolved = resolve_directive_target(&name, runtime.as_deref());
-                let locked_on_target = lock
-                    .and_then(|l| l.0.as_deref())
-                    .is_some_and(|locked| locked == resolved);
-                let emit = if locked_on_target && !beam.engaged {
-                    Some(SystemControlPayload::EngageTractor)
-                } else {
-                    None
-                };
-                if (emit.is_some() || beam.engaged) && !host_engaged {
-                    commands.entity(entity).insert(TractorAiEngaged);
-                }
-                emit
-            }
-            // No tractor order: release a beam THIS HOST engaged, so a completed
-            // or withdrawn order lets go — but never touch a beam a console set
-            // on the same AI-operated system (no marker → leave it alone).
-            None => {
-                if beam.engaged && host_engaged {
-                    commands.entity(entity).remove::<TractorAiEngaged>();
-                    // The scenario closing the task, not the operator changing
-                    // their mind (issue #1341). Reported HERE, ahead of the
-                    // `ReleaseTractor` this emits, because this system is
-                    // ordered before `handle_tractor_commands` and the emitter
-                    // records the FIRST terminal report for an activation: the
-                    // handler's own `Released` for the same hold arrives second
-                    // and is dropped, so a withdrawn order reads as a withdrawn
-                    // order rather than as a crew decision.
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        uuid,
-                        TaskLifecycleRequest::End {
-                            slot: hold_slot(uuid),
-                            reason: TaskTerminalReason::OrderWithdrawn,
-                        },
-                    );
-                    Some(SystemControlPayload::ReleaseTractor)
-                } else {
-                    None
-                }
-            }
+        let ready = directive_target.as_deref().is_some_and(|name| {
+            let resolved = resolve_directive_target(name, runtime.as_deref());
+            lock.and_then(|l| l.0.as_deref())
+                .is_some_and(|locked| locked == resolved)
+        });
+        let facts = OperationFacts {
+            order_present: directive_target.is_some(),
+            ready,
+            active: beam.engaged,
+            owned: host_engaged,
+        };
+        let decision = crate::ai::standing_operation::decide(facts);
+        if decision.claim {
+            commands.entity(entity).insert(TractorAiEngaged);
+        }
+        let payload = if decision.withdraw {
+            commands.entity(entity).remove::<TractorAiEngaged>();
+            // The scenario closing the task, not the operator changing
+            // their mind (issue #1341). Reported HERE, ahead of the
+            // `ReleaseTractor` this emits, because this system is
+            // ordered before `handle_tractor_commands` and the emitter
+            // records the FIRST terminal report for an activation: the
+            // handler's own `Released` for the same hold arrives second
+            // and is dropped, so a withdrawn order reads as a withdrawn
+            // order rather than as a crew decision.
+            push_lifecycle(
+                lifecycle.as_deref_mut(),
+                uuid,
+                TaskLifecycleRequest::End {
+                    slot: hold_slot(uuid),
+                    reason: TaskTerminalReason::OrderWithdrawn,
+                },
+            );
+            Some(SystemControlPayload::ReleaseTractor)
+        } else {
+            decision
+                .start
+                .then_some(SystemControlPayload::EngageTractor)
         };
 
         if let Some(payload) = payload {

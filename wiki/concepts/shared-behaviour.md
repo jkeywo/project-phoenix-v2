@@ -2,7 +2,7 @@
 title: Shared Behaviour Modules
 type: concept
 tags: [architecture, client, testing]
-sources: [src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
+sources: [src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
 updated: 2026-10-02
 ---
 
@@ -19,3 +19,5 @@ Native preference stores and Workshop share native_file for byte replacement. Pr
 Fleet acceptance uses one pure digest evaluator for browser replacement, mixed recovery, native redial and mixed matrix evidence. It validates all captured observations before the scenario cutoff, rejects conflicting duplicates, and requires two complete matching checkpoints. Runtime digest production is unchanged.
 
 Native operator layouts share a bounded placement sanitizer for Authoring, Test and Live. It normalizes the tree and global panel inventory once; each context retains its stored vocabulary, migration, defaults and postprocessing. Browser validation stays independent and uses parity fixtures.
+
+Tractor, Dock and Umbilical share standing-operation ownership decisions. Their adapters retain Control Source gates, Objective selection, physical readiness and admitted command emission. Ownership is derived; withdrawal reports precede command-handler release reports. Dock retains its distinct engaged-only start condition.

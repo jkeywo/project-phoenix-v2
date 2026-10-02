@@ -22,6 +22,7 @@
 //! one target — `docking_target` is a single `Option` — which the umbilical (#1160)
 //! reads; berth-side occupancy (one docker per target) is not enforced here.
 
+use crate::ai::standing_operation::OperationFacts;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -451,47 +452,48 @@ pub fn operate_dock_ai(
             _ => None,
         };
 
-        let payload = match directive_target {
-            // A transfer order is active: dock once the ordered hull is available
-            // in range. Idempotent — a dock already engaged emits nothing. Claim
-            // the dock as host-driven whenever it is engaged under this order.
-            Some(name) => {
-                let resolved = resolve_dock_target(&name, runtime.as_deref());
-                let available_is_target = dock
-                    .available_target
-                    .as_deref()
-                    .is_some_and(|a| a == resolved);
-                let emit =
-                    (available_is_target && !dock.engaged).then_some(SystemControlPayload::Dock);
-                if (emit.is_some() || dock.engaged || dock.docked) && !host_engaged {
-                    commands.entity(entity).insert(DockAiEngaged);
-                }
-                emit
-            }
-            // No transfer order: undock a dock THIS HOST engaged — never one a
-            // console set on the same AI-operated system (no marker → leave it).
-            None => {
-                if (dock.engaged || dock.docked) && host_engaged {
-                    commands.entity(entity).remove::<DockAiEngaged>();
-                    // The scenario closing the task, not the operator changing
-                    // their mind (issue #1345). Reported HERE, ahead of the
-                    // `Undock` this emits and this system's own ordering ahead of
-                    // `handle_dock_commands`, so the withdrawn order — not the
-                    // handler's own `Released` for the same hold — is the first
-                    // (and therefore recorded) terminal report.
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        uuid,
-                        TaskLifecycleRequest::End {
-                            slot: hold_slot(&dock.system_id, uuid),
-                            reason: TaskTerminalReason::OrderWithdrawn,
-                        },
-                    );
-                    Some(SystemControlPayload::Undock)
-                } else {
-                    None
-                }
-            }
+        let ready = directive_target.as_deref().is_some_and(|name| {
+            let resolved = resolve_dock_target(name, runtime.as_deref());
+            dock.available_target
+                .as_deref()
+                .is_some_and(|a| a == resolved)
+        });
+        let facts = OperationFacts {
+            order_present: directive_target.is_some(),
+            ready,
+            active: dock.engaged || dock.docked,
+            owned: host_engaged,
+        };
+        let decision = crate::ai::standing_operation::decide(facts);
+        // Dock historically tests engaged alone when starting, but both
+        // engaged and docked when adopting or withdrawing (including restored state).
+        let start = crate::ai::standing_operation::decide(OperationFacts {
+            active: dock.engaged,
+            ..facts
+        })
+        .start;
+        if decision.claim {
+            commands.entity(entity).insert(DockAiEngaged);
+        }
+        let payload = if decision.withdraw {
+            commands.entity(entity).remove::<DockAiEngaged>();
+            // The scenario closing the task, not the operator changing
+            // their mind (issue #1345). Reported HERE, ahead of the
+            // `Undock` this emits and this system's own ordering ahead of
+            // `handle_dock_commands`, so the withdrawn order — not the
+            // handler's own `Released` for the same hold — is the first
+            // (and therefore recorded) terminal report.
+            push_lifecycle(
+                lifecycle.as_deref_mut(),
+                uuid,
+                TaskLifecycleRequest::End {
+                    slot: hold_slot(&dock.system_id, uuid),
+                    reason: TaskTerminalReason::OrderWithdrawn,
+                },
+            );
+            Some(SystemControlPayload::Undock)
+        } else {
+            start.then_some(SystemControlPayload::Dock)
         };
 
         if let Some(payload) = payload {
@@ -1076,6 +1078,105 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
+        use crate::core::messages::{
+            AdmittedCommands, AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus,
+            ScoredObjective, ViewscreenBlackboard,
+        };
+        let mut app = App::new();
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ));
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        app.add_systems(Update, operate_dock_ai);
+        let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+        sources.0.set(
+            SystemId(DOCK_SYSTEM_ID.into()),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        let mut dock = control();
+        dock.docked = true;
+        dock.engaged = false;
+        dock.available_target = Some("berth".into());
+        let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
+        blackboards.0.insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+                scored_objectives: vec![ScoredObjective {
+                    id: "transfer".into(),
+                    score: 1.0,
+                    directive: AiDirective::Transfer {
+                        target: "berth".into(),
+                    },
+                    source: ObjectiveSource::Mission,
+                    relevance: vec![SystemAffinity::Helm],
+                    snapshot: ObjectiveSnapshot {
+                        id: "transfer".into(),
+                        text: String::new(),
+                        text_params: Default::default(),
+                        mandatory: false,
+                        status: ObjectiveStatus::Active,
+                        targets: vec![],
+                        source: ObjectiveSource::Mission,
+                        progress: None,
+                        unassigned: false,
+                    },
+                }],
+                ..Default::default()
+            }),
+        );
+        let operator = app
+            .world_mut()
+            .spawn((
+                EntityUuid("operator".into()),
+                sources,
+                dock,
+                blackboards,
+                AdmittedCommands::default(),
+            ))
+            .id();
+        app.update();
+        assert!(app.world().entity(operator).contains::<DockAiEngaged>());
+        let first = app
+            .world_mut()
+            .entity_mut(operator)
+            .take::<AdmittedCommands>()
+            .unwrap();
+        assert_eq!(first.0.len(), 1);
+        assert_eq!(first.0[0].payload, SystemControlPayload::Dock);
+        app.world_mut()
+            .entity_mut(operator)
+            .insert(AdmittedCommands::default());
+        app.world_mut()
+            .entity_mut(operator)
+            .get_mut::<crate::server_app::ShipSystemBlackboards>()
+            .unwrap()
+            .0
+            .clear();
+        app.update();
+        assert!(!app.world().entity(operator).contains::<DockAiEngaged>());
+        assert_eq!(
+            app.world()
+                .entity(operator)
+                .get::<AdmittedCommands>()
+                .unwrap()
+                .0[0]
+                .payload,
+            SystemControlPayload::Undock
+        );
+        assert!(matches!(
+            app.world()
+                .resource::<EffectQueue<TaskLifecycleRequest>>()
+                .0
+                .as_slice(),
+            [TaskLifecycleRequest::End {
+                reason: TaskTerminalReason::OrderWithdrawn,
+                ..
+            }]
+        ));
     }
 
     #[test]

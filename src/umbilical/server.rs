@@ -22,6 +22,7 @@
 //! counter a scenario predicate reads, rather than being written onto the
 //! component behind the one system that owns those numbers.
 
+use crate::ai::standing_operation::OperationFacts;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -423,19 +424,16 @@ pub fn operate_umbilical_ai(
             _ => false,
         };
 
-        let payload = if transfer_active {
-            // Start once the dock is made (the umbilical only flows while docked),
-            // idempotent once running. Claim the flow as host-driven while it runs
-            // under this order.
-            let emit = (dock.docked_partner().is_some() && !umbilical.running)
-                .then_some(SystemControlPayload::StartTransfer);
-            if (emit.is_some() || umbilical.running) && !host_running {
-                commands.entity(entity).insert(UmbilicalAiRunning);
-            }
-            emit
-        } else if umbilical.running && host_running {
-            // No transfer order: stop a flow THIS HOST started — never one a
-            // console started on the same AI-operated system.
+        let decision = crate::ai::standing_operation::decide(OperationFacts {
+            order_present: transfer_active,
+            ready: dock.docked_partner().is_some(),
+            active: umbilical.running,
+            owned: host_running,
+        });
+        if decision.claim {
+            commands.entity(entity).insert(UmbilicalAiRunning);
+        }
+        let payload = if decision.withdraw {
             commands.entity(entity).remove::<UmbilicalAiRunning>();
             // The scenario closing the task, not the operator changing their
             // mind (issue #1345). Reported HERE, ahead of the `StopTransfer`
@@ -453,7 +451,9 @@ pub fn operate_umbilical_ai(
             }
             Some(SystemControlPayload::StopTransfer)
         } else {
-            None
+            decision
+                .start
+                .then_some(SystemControlPayload::StartTransfer)
         };
 
         if let Some(payload) = payload {

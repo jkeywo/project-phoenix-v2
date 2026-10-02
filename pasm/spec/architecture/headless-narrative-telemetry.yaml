@@ -98,6 +98,7 @@ entities:
       title: Task Lifecycle Emitter
       summary: Turns the queued start/end reports from continuous workflows — the science scan and the tractor hold are the two tracer workflows — into paired narrative beats, minting each activation's deterministic task key, resolving the station its system belongs to, and guaranteeing exactly one terminal event per activation across completion, cancellation, failure, interruption, subject loss and mission end.
       rationale:
+        - "[ai] Tractor, Dock and Umbilical share pure standing-operation start, adoption and withdrawal decisions. Their adapters retain Objective selection, physical readiness, admission and derived ownership markers, and report OrderWithdrawn before release. Dock preserves engaged-only start eligibility separately from engaged-or-docked ownership."
         - "Generic by construction, not scan-shaped or tractor-shaped. A continuous task is an operator, a system, a verb, an optional subject, a start and exactly one terminal moment; the later mechanics of PRD #1337 (#1345, #1346, #1348, #1350) push the same TaskLifecycleRequest and inherit the whole contract rather than inventing parallel lifecycle telemetry."
         - "The SITES report one fact each — work began, or work ended for this reason — and the EMITTER makes all five judgements. handle_tractor_commands, tick_tractor, operate_tractor_ai and tick_scans know none of the ordinal, the owning station, whether the subject is still in the world, whether another site already reported the same ending, or whether this is the hundredth identical retry of a standing order; concentrating those here is what keeps a new workflow's cost to two queue pushes."
         - "Exactly one terminal event is enforced by the registry, not hoped for: a terminal report for a slot with no live activation is DROPPED. That is what lets operate_tractor_ai report an order withdrawal and handle_tractor_commands report the ReleaseTractor it causes, on the same tick, and have the timeline record the truer of the two — the AI host is ordered before the command handler, so the first report through the queue wins and a withdrawn order does not read as a crew decision."
@@ -116,7 +117,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/task_lifecycle.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
+      paths: [src/ai/standing_operation.rs, src/core/task_lifecycle.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
       symbols: [TaskKey, TaskSlot, TaskOutcome, TaskTerminalReason, TaskActivation, TaskLifecycleRequest, TaskLifecycles, start_event, terminal_event, repeats_event, emit_task_lifecycle_narrative, finalize_task_lifecycles]
       tests: [cargo test, tests/task_lifecycle_narrative.rs]
 

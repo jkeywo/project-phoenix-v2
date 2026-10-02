@@ -270,3 +270,19 @@ entities:
         - src/native_host/workshop/test_process_tests.rs
         - cargo test --lib workshop::test_clock workshop::test_breakpoint workshop::test_protocol
         - npx vitest run editor/tests/workshop-test-breakpoint.test.js tests/client/workshop-test-panel.test.js editor/tests/workshop-test-frame.test.js editor/tests/workshop-test-snapshot.test.js
+
+  - component: workshop-ordered-form-interactions
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Ordered Form Interactions
+      summary: Shared live-row traversal, neighbour availability and swaps preserve authored row positions; control adapters rebuild before restoring their existing focus policy. Presets and widgets retain movable-content restrictions, roots remain unrestricted, and removal storage and accessible names remain panel-owned.
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [editor/ordered-form.js, gui/ordered-form-controls.js, editor/workshop-presets.js, editor/workshop-composition.js, gui/workshop-presets-panel.js, gui/workshop-composition-panel.js, gui/workshop-definitions-panel.js, scripts/build-workshop.mjs]
+      symbols: [liveFormPositions, formNeighbours, swapFormNeighbour, survivingFormPosition, bindFormMoves]
+      tests: [npx vitest run editor/tests/ordered-form.test.js tests/client/ordered-form-controls.test.js editor/tests/workshop-presets.test.js editor/tests/workshop-composition.test.js tests/client/workshop-presets-panel.test.js tests/client/workshop-composition-panel.test.js tests/client/workshop-definitions-panel.test.js]

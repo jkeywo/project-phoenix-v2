@@ -1,3 +1,4 @@
+import { liveFormPositions, formNeighbours, survivingFormPosition, bindFormMoves } from './ordered-form-controls.js';
 import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
 import { snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
 import { rootsForm, newRoot, moveRoot, offeredShips, planScenarioEdits, worldForm, extraWorldChoices, planExtraWorldEdits,
@@ -159,7 +160,7 @@ export function mountWorkshopComposition({ root, runtime, provider, draft, busy,
     if (worlds.some(entry => entry.path === wantedAdd)) addRootWorld.value = wantedAdd;
     if (!current || !rootsState) return;
     const form = rootsState;
-    const live = form.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
+    const live = liveFormPositions(form);
     form.forEach((entry, position) => {
       if (entry.removed) return;
       const original = entry.index == null ? null : (current.scenarios || []).find(candidate => candidate.index === entry.index);
@@ -236,27 +237,18 @@ export function mountWorkshopComposition({ root, runtime, provider, draft, busy,
       if (!shipList.children.length) shipList.append(node('li', 'workshop.composition.no_ships'));
       ships.append(shipList); set.append(ships);
       const actions = node('div', null, { class: 'workshop-composition-row' });
-      const rank = live.indexOf(position);
-      // An end root has nowhere to go in that direction: the control stays in
-      // place, disabled, so the row keeps the same shape for a keyboard user.
-      if (rank === 0) up.dataset.readonly = 'true';
-      if (rank === live.length - 1) down.dataset.readonly = 'true';
-      const move = direction => () => {
-        const target = moveRoot(form, position, direction);
-        if (target == null) return;
-        renderRoots(); refresh();
-        const kind = direction < 0 ? 'up' : 'down', other = direction < 0 ? 'down' : 'up';
-        focusFirst(`root-${target}-${kind}`, `root-${target}-${other}`, `root-${target}-id`);
-      };
-      up.addEventListener('click', move(-1));
-      down.addEventListener('click', move(1));
+      const neighbours = formNeighbours(form, position);
+      if (!neighbours.up) up.dataset.readonly = 'true';
+      if (!neighbours.down) down.dataset.readonly = 'true';
+      bindFormMoves(up, down, direction => moveRoot(form, position, direction),
+        () => { renderRoots(); refresh(); },
+        (target, kind, other) => focusFirst(`root-${target}-${kind}`, `root-${target}-${other}`, `root-${target}-id`));
       remove.addEventListener('click', () => {
         if (entry.index == null) form.splice(position, 1); else entry.removed = true;
         renderRoots(); refresh();
         // Root ids follow the form's positions: the next root left, else the
         // one before, else the add control.
-        const left = form.map((candidate, at) => (candidate.removed ? null : at)).filter(at => at != null);
-        const nearest = left.find(at => at >= position) ?? left.filter(at => at < position).pop();
+        const nearest = survivingFormPosition(form, position);
         focusFirst(nearest == null ? null : `root-${nearest}-id`, 'add-root-id');
       });
       actions.append(up, down, remove);

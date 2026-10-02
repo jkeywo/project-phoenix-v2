@@ -2,7 +2,7 @@
 title: Shared Behaviour Modules
 type: concept
 tags: [architecture, client, testing]
-sources: [src/core/task_lifecycle.rs, editor/barrel-pattern-validate.js, gui/components/continuous-helm-input.js, src/workshop/validation_support.rs, src/gm_action.rs, gui/settings-gamepad-presentation.js, gui/settings-panel.js, gui/server-settings.js, gui/workshop-edit-session.js, gui/workshop-definitions-panel.js, gui/workshop-composition-panel.js, gui/workshop-entity-panel.js, gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
+sources: [src/core/task_lifecycle.rs, editor/barrel-pattern-validate.js, gui/components/continuous-helm-input.js, src/workshop/validation_support.rs, src/gm_action.rs, gui/settings-gamepad-presentation.js, gui/settings-panel.js, gui/server-settings.js, gui/workshop-edit-session.js, gui/workshop-definitions-panel.js, gui/workshop-composition-panel.js, gui/workshop-entity-panel.js, gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js, editor/ordered-form.js, gui/ordered-form-controls.js]
 updated: 2026-10-02
 ---
 
@@ -39,3 +39,5 @@ Helm and lateral-thrust joysticks share continuous-helm-input for pointer identi
 Authored blaster and torpedo patterns share barrel-pattern-validate for traversal, duplicate identities, barrel bounds and offsets. Existing validators retain their exported names, paths and domain diagnostic wording; validateFile continues using those adapters to block invalid saves.
 
 Physical-work adapters for Tractor, Dock and Umbilical share ordered activation reports in core::task_lifecycle. Dock retains mating-state activation; Tractor and Umbilical retain subject-change activation. Physical verdicts, optional identities and component writes stay local.
+
+Workshop ordered forms share live-row traversal, neighbour availability, swaps and surviving-row selection through ordered-form. Preset and widget adapters retain their movable-content rules; roots remain unrestricted. ordered-form-controls rebuilds before restoring adapter-owned focus. Removal tombstones, splices, DOM identities, labels and the ratings’ strictly-next focus policy remain local.

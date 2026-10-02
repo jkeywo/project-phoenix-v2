@@ -1,3 +1,4 @@
+import { swapFormNeighbour } from './ordered-form.js';
 /** GM role presets, panel assignments, quick actions and typed mission widgets
  * over the Workshop's source owner (issue #1477). No filesystem, live ECS, TOML
  * serializer or separate history: the runtime reads the selected world into a
@@ -223,24 +224,12 @@ export const widgetMovable = widget => !(widget?.unknown_keys || []).length;
  * to, or null when it is already at that end or either preset cannot be
  * carried. */
 export function movePreset(form, position, direction) {
-  const list = form?.presets || [];
-  const live = list.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
-  const rank = live.indexOf(position);
-  if (rank < 0) return null;
-  const target = live[rank + direction];
-  if (target == null || !presetMovable(list[position]) || !presetMovable(list[target])) return null;
-  [list[position], list[target]] = [list[target], list[position]];
-  return target;
+  return swapFormNeighbour(form?.presets || [], position, direction, presetMovable);
 }
 
 /** Swap two widgets of one preset in the form only, the same way. */
 export function moveWidget(widgets, position, direction) {
-  const list = widgets || [];
-  const target = position + direction;
-  if (position < 0 || position >= list.length || target < 0 || target >= list.length) return null;
-  if (!widgetMovable(list[position]) || !widgetMovable(list[target])) return null;
-  [list[position], list[target]] = [list[target], list[position]];
-  return target;
+  return swapFormNeighbour(widgets || [], position, direction, widgetMovable, true);
 }
 
 /** The rule each preset and widget breaks, as a multiset keyed by the rule and

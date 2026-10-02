@@ -1,3 +1,4 @@
+import { survivingFormPosition } from './ordered-form-controls.js';
 import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
 import { snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
   complianceIsSeconds, complianceIsResponse, planFactionEdits, ratingForm, planRatingEdits, newRung, rungNames, findingsAt,
@@ -335,8 +336,7 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
         renderStationForm(); refresh();
         // Rung ids follow the form's positions: the next rung left, else the
         // one before, else the add control.
-        const left = form.ratings.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
-        const nearest = left.find(at => at > position) ?? left.filter(at => at < position).pop();
+        const nearest = survivingFormPosition(form.ratings, position, true);
         focusFirst(nearest == null ? null : `rung-${nearest}-name`, 'new-rung');
       });
       set.append(remove);

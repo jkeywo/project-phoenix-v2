@@ -62,6 +62,7 @@ entities:
         - gui/battleship/helm.html
         - gui/cruiser/helm.html
         - gui/destroyer/helm.html
+        - gui/components/continuous-helm-input.js
         - gui/components/ph-helm-joystick.js
         - gui/components/ph-lateral-thrust-joystick.js
         - gui/components/ph-impulse-btn.js
@@ -69,6 +70,7 @@ entities:
       symbols:
         - buildHelmConsoleState
         - sendHelmInput
+        - createContinuousHelmInput
         - PhHelmJoystick
         - PhLateralThrustJoystick
         - PhImpulseBtn
@@ -77,6 +79,7 @@ entities:
         - tests/client/console-state.test.js
         - tests/client/action-map.test.js
         - tests/client/helm-dispatch.test.js
+        - tests/client/continuous-helm-compat.test.js
         - tests/client/ph-helm-joystick.test.js
         - tests/client/ph-lateral-thrust-joystick.test.js
         - tests/client/ph-impulse-btn.test.js

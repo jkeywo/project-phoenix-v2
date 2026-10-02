@@ -10,17 +10,28 @@ import {
   HELM_THRUST_ACTION_ID,
 } from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { createContinuousHelmInput } from './continuous-helm-input.js';
 
 export class PhHelmJoystick extends PhElement {
   #px = 0;
   #py = 0;
-  #pointerId = null;
-  #rafId = null;
-  #hbRaf = null;
-  #lastHbSend = 0;
-  #keys = {};
-  #inputRaf = null;
-  #lastKbSend = 0;
+  #input = createContinuousHelmInput({
+    keys: ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyA', 'KeyD', 'KeyW', 'KeyS'],
+    auto: () => !!this.state?.auto,
+    immediatePointer: false,
+    pointer: (e) => this.#setFromPointer(e.clientX, e.clientY),
+    keyboard: (keys) => this.#sampleKeys(keys),
+    hasValue: () => this.#px !== 0 || this.#py !== 0,
+    reset: () => {
+      this.#px = 0;
+      this.#py = 0;
+    },
+    paint: () => {
+      this.#applyNubPosition();
+      this.#updateReadout();
+    },
+    send: () => this.#sendAction(),
+  });
 
   template() {
     return `
@@ -100,7 +111,7 @@ export class PhHelmJoystick extends PhElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.#bindEvents();
+    this.#input.connect(this.shadowRoot.getElementById('well'));
     // Focusable, named group (issue #1176). The drag well was a bare <div>: a
     // pointer control the keyboard could not land on, name, or reach. The host
     // becomes the one Tab stop — `role="group"` is the honest role for a
@@ -123,26 +134,10 @@ export class PhHelmJoystick extends PhElement {
     // arrives natively or relayed (the key state is a set keyed by code, so a
     // native + relayed pair cannot double-count). Ported from the legacy
     // helm-console.html so the new per-ship helm consoles keep desktop control.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.#onKeyDown);
-      document.addEventListener('keyup', this.#onKeyUp);
-    }
-    if (typeof window !== 'undefined') {
-      window.addEventListener('blur', this.#onBlur);
-    }
   }
 
   disconnectedCallback() {
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('keydown', this.#onKeyDown);
-      document.removeEventListener('keyup', this.#onKeyUp);
-    }
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('blur', this.#onBlur);
-    }
-    if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
-    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
+    this.#input.disconnect();
   }
 
   render(state) {
@@ -152,75 +147,13 @@ export class PhHelmJoystick extends PhElement {
     const well = root.getElementById('well');
     badge.style.display = auto ? 'inline' : 'none';
     well.classList.toggle('auto', auto);
-    if (auto && this.#pointerId === null) {
+    if (auto && !this.#input.hasPointer()) {
       this.#px = 0;
       this.#py = 0;
       this.#applyNubPosition();
       this.#updateReadout();
     }
   }
-
-  #bindEvents() {
-    const well = this.shadowRoot.getElementById('well');
-    well.addEventListener('pointerdown', this.#onDown);
-    well.addEventListener('pointermove', this.#onMove);
-    well.addEventListener('pointerup', this.#onUp);
-    well.addEventListener('pointercancel', this.#onUp);
-    // Safety net: if the browser silently revokes pointer capture (e.g. the
-    // finger slides off a scrolling container on mobile), treat it as a
-    // release so the stick zeroes instead of latching the last input.
-    well.addEventListener('lostpointercapture', this.#onUp);
-  }
-
-  #onDown = (e) => {
-    const auto = this.state ? !!this.state.auto : false;
-    if (auto) return;
-    if (this.#pointerId !== null) return;
-    this.#pointerId = e.pointerId;
-    const well = this.shadowRoot.getElementById('well');
-    if (well.setPointerCapture) well.setPointerCapture(e.pointerId);
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    if (!this.#hbRaf) {
-      this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
-    }
-    this.#setFromPointer(e.clientX, e.clientY);
-    e.preventDefault();
-  };
-
-  // Frame-driven heartbeat: samples the current stick position and sends it
-  // at a throttled rate while dragging. Replaces a bare setInterval, which
-  // drifts and bunches under main-thread load (rAF here is scheduling next
-  // to the paint step so the send cadence stays even). Mirrors the keyboard
-  // input loop's throttling approach.
-  #heartbeatLoop = () => {
-    this.#hbRaf = null;
-    if (this.#pointerId === null) return;
-    const now = performance.now();
-    if (now - this.#lastHbSend >= 100) {
-      this.#sendAction();
-      this.#lastHbSend = now;
-    }
-    this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
-  };
-
-  #onMove = (e) => {
-    if (e.pointerId !== this.#pointerId) return;
-    this.#setFromPointer(e.clientX, e.clientY);
-  };
-
-  #onUp = (e) => {
-    if (e.pointerId !== this.#pointerId) return;
-    this.#pointerId = null;
-    const well = this.shadowRoot.getElementById('well');
-    try { if (well.releasePointerCapture) well.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
-    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    this.#px = 0;
-    this.#py = 0;
-    this.#applyNubPosition();
-    this.#updateReadout();
-    this.#sendAction();
-  };
 
   #setFromPointer(clientX, clientY) {
     const well = this.shadowRoot.getElementById('well');
@@ -234,16 +167,6 @@ export class PhHelmJoystick extends PhElement {
     if (d > 1) { dx /= d; dy /= d; }
     this.#px = dx;
     this.#py = dy;
-    this.#scheduleApply();
-  }
-
-  #scheduleApply() {
-    if (this.#rafId) return;
-    this.#rafId = requestAnimationFrame(() => {
-      this.#rafId = null;
-      this.#applyNubPosition();
-      this.#updateReadout();
-    });
   }
 
   #applyNubPosition() {
@@ -263,74 +186,19 @@ export class PhHelmJoystick extends PhElement {
   }
 
   // ── Keyboard + gamepad input ──────────────────────────────────────────
-  #onKeyDown = (e) => {
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    const relevant = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyA', 'KeyD', 'KeyW', 'KeyS'];
-    if (relevant.indexOf(e.code) === -1) return;
-    e.preventDefault();
-    this.#keys[e.code] = true;
-    this.#startInputLoop();
-  };
-
-  #onKeyUp = (e) => {
-    delete this.#keys[e.code];
-    this.#startInputLoop();
-  };
-
-  #onBlur = () => {
-    this.#keys = {};
-    this.#startInputLoop();
-  };
-
-  #startInputLoop() {
-    if (this.#inputRaf) return;
-    this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-  }
-
-  #inputLoop = () => {
-    this.#inputRaf = null;
-    const auto = this.state ? !!this.state.auto : false;
-    const keepPolling = Object.keys(this.#keys).length > 0;
-
-    // The on-screen thumbstick (pointer drag) and AUTO both take priority.
-    if (auto || this.#pointerId !== null) {
-      if (!auto && keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-      return;
-    }
-
-    let kx = 0, ky = 0;
-    if (this.#keys['ArrowLeft'] || this.#keys['KeyA']) kx -= 1;
-    if (this.#keys['ArrowRight'] || this.#keys['KeyD']) kx += 1;
-    if (this.#keys['ArrowUp'] || this.#keys['KeyW']) ky -= 1; // forward thrust
-    if (this.#keys['ArrowDown'] || this.#keys['KeyS']) ky += 1;
-
-    let nx = kx;
-    let ny = ky;
+  #sampleKeys(keys) {
+    let nx = 0, ny = 0;
+    if (keys['ArrowLeft'] || keys['KeyA']) nx -= 1;
+    if (keys['ArrowRight'] || keys['KeyD']) nx += 1;
+    if (keys['ArrowUp'] || keys['KeyW']) ny -= 1;
+    if (keys['ArrowDown'] || keys['KeyS']) ny += 1;
     const d = Math.hypot(nx, ny);
     if (d > 1) { nx /= d; ny /= d; }
-
-    const hasInput = nx !== 0 || ny !== 0;
-    if (hasInput) {
-      this.#px = nx;
-      this.#py = ny;
-      this.#applyNubPosition();
-      this.#updateReadout();
-      const now = Date.now();
-      if (now - this.#lastKbSend >= 100) { this.#sendAction(); this.#lastKbSend = now; }
-      this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-    } else {
-      // Input released this frame — snap back to centre and send a stop once.
-      if (this.#px !== 0 || this.#py !== 0) {
-        this.#px = 0;
-        this.#py = 0;
-        this.#applyNubPosition();
-        this.#updateReadout();
-        this.#sendAction();
-      }
-      if (keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-    }
-  };
+    if (nx === 0 && ny === 0) return false;
+    this.#px = nx;
+    this.#py = ny;
+    return true;
+  }
 
   #sendAction() {
     const activate = typeof window !== 'undefined' && window.activateSemanticAction;

@@ -282,7 +282,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/console.css, gui/components/ph-scope-chrome.js, gui/components/ph-radar.js, gui/components/ph-helm-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-sensor-radar.js, gui/components/ph-courier-radar.js, gui/components/ph-helm-joystick.js, gui/components/ph-lateral-thrust-joystick.js, gui/battleship/, gui/courier/, gui/cruiser/, gui/destroyer/]
+      paths: [gui/console.css, gui/components/ph-scope-chrome.js, gui/components/ph-radar.js, gui/components/ph-helm-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-sensor-radar.js, gui/components/ph-courier-radar.js, gui/components/continuous-helm-input.js, gui/components/ph-helm-joystick.js, gui/components/ph-lateral-thrust-joystick.js, gui/battleship/, gui/courier/, gui/cruiser/, gui/destroyer/]
       symbols: [SCOPE_CORNER_CSS, SCOPE_CHROME_CSS, SCOPE_ON_SCREEN_CSS, scopeChromeMarkup, scopeOnScreenMarkup, updateScopeChrome, setScopeOnScreen]
       tests: [npx vitest run, tests/smoke]
 

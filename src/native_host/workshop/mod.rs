@@ -149,56 +149,6 @@ pub fn run(args: &crate::delivery::args::HostArgs) -> Result<(), String> {
 fn read_dependencies(
     root: &std::path::Path,
 ) -> Result<crate::workshop::WorkshopDependencies, String> {
-    fn walk(
-        root: &std::path::Path,
-        directory: &std::path::Path,
-        files: &mut std::collections::BTreeMap<String, String>,
-        binary: &mut std::collections::BTreeMap<String, Vec<u8>>,
-        total: &mut usize,
-    ) -> Result<(), String> {
-        for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let kind = entry.file_type().map_err(|e| e.to_string())?;
-            if kind.is_symlink() {
-                return Err("Read-only Workshop dependencies cannot contain linked paths".into());
-            }
-            let path = entry.path();
-            if kind.is_dir() {
-                walk(root, &path, files, binary, total)?;
-            } else if kind.is_file() {
-                let name = path
-                    .strip_prefix(root)
-                    .map_err(|e| e.to_string())?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let text_source = name.ends_with(".toml") || name.ends_with(".rhai");
-                if !text_source
-                    && !crate::workshop::provider::assets::binary_path(&name)
-                    && !crate::workshop::provider::test_snapshot::runtime_support_path(&name)
-                {
-                    continue;
-                }
-                use std::io::Read;
-                let remaining = (512 * 1024 * 1024usize).saturating_sub(*total);
-                let mut bytes = Vec::new();
-                std::fs::File::open(&path)
-                    .map_err(|e| e.to_string())?
-                    .take(remaining as u64 + 1)
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| e.to_string())?;
-                *total = total.saturating_add(bytes.len());
-                if *total > 512 * 1024 * 1024 || files.len() + binary.len() >= 16384 {
-                    return Err("Workshop dependencies are too large".into());
-                }
-                if text_source {
-                    files.insert(name, String::from_utf8(bytes).map_err(|e| e.to_string())?);
-                } else {
-                    binary.insert(name, bytes);
-                }
-            }
-        }
-        Ok(())
-    }
     let mut dependencies = crate::workshop::WorkshopDependencies::default();
     let assets = root.join("assets");
     if std::fs::symlink_metadata(&assets)
@@ -209,13 +159,43 @@ fn read_dependencies(
         return Err("Read-only Workshop dependencies cannot contain linked paths".into());
     }
     let mut total = 0;
-    walk(
-        root,
-        &assets,
-        &mut dependencies.base_files,
-        &mut dependencies.base_assets,
-        &mut total,
-    )?;
+    crate::native_capture::walk(&assets, &mut |entry| {
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        if kind.is_symlink() {
+            return Err("Read-only Workshop dependencies cannot contain linked paths".into());
+        }
+        let path = entry.path();
+        if kind.is_dir() {
+            return Ok(Some(path));
+        } else if kind.is_file() {
+            let name = crate::native_capture::relative_name(&path, root)?;
+            let text_source = name.ends_with(".toml") || name.ends_with(".rhai");
+            if !text_source
+                && !crate::workshop::provider::assets::binary_path(&name)
+                && !crate::workshop::provider::test_snapshot::runtime_support_path(&name)
+            {
+                return Ok(None);
+            }
+            let remaining = (512 * 1024 * 1024usize).saturating_sub(total);
+            let bytes = crate::native_capture::read_bounded(&path, remaining as u64)?;
+            total = total.saturating_add(bytes.len());
+            crate::native_capture::check_size(
+                dependencies.base_files.len() + dependencies.base_assets.len(),
+                total,
+                16383,
+                512 * 1024 * 1024,
+                "Workshop dependencies are too large",
+            )?;
+            if text_source {
+                dependencies
+                    .base_files
+                    .insert(name, String::from_utf8(bytes).map_err(|e| e.to_string())?);
+            } else {
+                dependencies.base_assets.insert(name, bytes);
+            }
+        }
+        Ok(None)
+    })?;
     Ok(dependencies)
 }
 

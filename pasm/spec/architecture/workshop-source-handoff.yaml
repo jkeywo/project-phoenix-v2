@@ -29,6 +29,7 @@ entities:
       title: Workshop Exact-Source Member Lifecycle
       summary: "Workshop drafts create, rename and delete text and binary members through one chronological history whose entries are GROUPS of changes, so a rename and an accepted migration each undo as a single press. A workspace-changes view reports added, removed, renamed and modified members against the source the draft was imported as, comparing bytes and paths only. Older supported content is offered an explicit before/after migration of its content pin, which only deliberate acceptance applies. Browser and native keep immutable imported bytes, revisions and crash recovery; validation, native save and browser export still operate on the exact reviewed candidate and leave the prior draft intact on refusal."
       rationale:
+        - "[ai] Native selected-root inventory, immutable dependency capture and disposable Test support share native_capture directory visitation, relative names, bounded reads and file accumulation checks. Each adapter retains traversal admission, symlink handling, byte/count limits, error wording and check timing; the editable inventory retains its metadata check and ordinary whole-file read."
         - "[ai] A history entry is `{ changes: [...] }` rather than one path. A rename is two changes and a migration rewrites a member wholesale; half a rename is a member with no name and half an accepted migration is source nobody reviewed, so neither may be reachable by pressing undo once. Recovery snapshots become version 4 (browser) and 5 (native), and versions 2 and 3 are still read as one-change groups because a draft recovered from an older crash is still a draft."
         - "[ai] Rename carries the member's VALUE across rather than re-encoding it, so moving a file cannot normalise its line endings, its BOM or a native asset reference. Renaming a file is not an edit of it."
         - "[ai] The changes view compares bytes and paths and never meaning. A rename is recognised from identical content rather than inferred from similarity, and a member that moved AND changed is reported honestly as a removal plus an addition, because the bytes that arrived are not the bytes that left. Nothing is normalised before comparing, which is the same promise exact-source authoring makes everywhere else."
@@ -42,6 +43,10 @@ entities:
     implementation:
       status: declared
       paths:
+        - src/native_capture.rs
+        - src/workshop/provider.rs
+        - src/workshop/provider/test_snapshot.rs
+        - src/native_host/workshop/mod.rs
         - editor/workshop-document.js
         - editor/workshop-diff.js
         - editor/workshop-migration.js
@@ -61,6 +66,8 @@ entities:
         - proposeContentPinMigration
         - proposeWorkshopMigration
       tests:
+        - src/native_capture_tests.rs
+        - cargo test --lib native_capture
         - src/native_host/panes/operator_tests.rs
         - npx vitest run editor/tests/workshop-document.test.js editor/tests/workshop-diff.test.js editor/tests/workshop-migration.test.js
         - npx vitest run tests/client/workshop-authoring.test.js tests/client/workshop-layout-model.test.js

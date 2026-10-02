@@ -821,14 +821,9 @@ impl NativeWorkshopProvider {
     }
 
     fn walk(&self, directory: &Path, files: &mut Files) -> Result<(), String> {
-        for entry in fs::read_dir(directory).map_err(io_error)? {
-            let entry = entry.map_err(io_error)?;
+        crate::native_capture::walk(directory, &mut |entry| {
             let path = entry.path();
-            let relative = path
-                .strip_prefix(&self.root)
-                .map_err(io_error)?
-                .to_string_lossy()
-                .replace('\\', "/");
+            let relative = crate::native_capture::relative_name(&path, &self.root)?;
             // The project root is explicit authority over authored content,
             // never over code, git metadata or endpoint-private files.
             if entry.file_type().map_err(io_error)?.is_dir() {
@@ -841,7 +836,7 @@ impl NativeWorkshopProvider {
                     || relative.starts_with("scripts/art/lod-sources/")
                 {
                     self.resolve(&relative)?;
-                    self.walk(&path, files)?;
+                    return Ok(Some(path));
                 }
             } else if allowed_path(self.kind, &relative) {
                 self.resolve(&relative)?;
@@ -849,12 +844,14 @@ impl NativeWorkshopProvider {
                 if size > MAX_BYTES as u64 {
                     return Err("Workshop source member is too large".into());
                 }
-                files.insert(relative, fs::read(path).map_err(io_error)?);
-                if files.len() > MAX_FILES
-                    || files.values().map(Vec::len).sum::<usize>() > MAX_BYTES
-                {
-                    return Err("Workshop source bundle is too large".into());
-                }
+                crate::native_capture::insert_checked(
+                    files,
+                    relative,
+                    fs::read(path).map_err(io_error)?,
+                    MAX_FILES,
+                    MAX_BYTES,
+                    "Workshop source bundle is too large",
+                )?;
             } else if entry.file_type().map_err(io_error)?.is_symlink()
                 && (relative.starts_with("assets")
                     || relative.starts_with("scripts/art/lod-sources"))
@@ -863,8 +860,8 @@ impl NativeWorkshopProvider {
                     "Linked Workshop paths are not supported: {relative}"
                 ));
             }
-        }
-        Ok(())
+            Ok(None)
+        })
     }
 
     fn resolve(&self, relative: &str) -> Result<PathBuf, String> {

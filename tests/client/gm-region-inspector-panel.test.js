@@ -103,6 +103,6 @@ describe('Region Live Inspector', () => {
     expect(workspace).toContain("updateReading('region-fields', gmRegionFields, p)");
     expect(workspace).toContain('gmRegionFields.select(entity)');
     expect(workspace).toContain('gmRegionFields.reset()');
-    expect(readFileSync('src/native_host/native_gm/document.rs', 'utf8')).toContain('gm-region-fields-panel');
+    expect(readFileSync('src/native_host/native_gm/document_tests.rs', 'utf8')).toContain('gm-region-fields-panel');
   });
 });

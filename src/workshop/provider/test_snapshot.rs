@@ -74,45 +74,28 @@ impl NativeWorkshopProvider {
     }
 
     pub(super) fn capture_test_support(&self) -> Result<Files, String> {
-        fn walk(
-            provider: &NativeWorkshopProvider,
-            directory: &std::path::Path,
-            files: &mut Files,
-        ) -> Result<(), String> {
-            for entry in std::fs::read_dir(directory).map_err(super::io_error)? {
-                let entry = entry.map_err(super::io_error)?;
-                let name = entry
-                    .path()
-                    .strip_prefix(&provider.root)
-                    .map_err(super::io_error)?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let path = provider.resolve(&name)?;
-                if entry.file_type().map_err(super::io_error)?.is_dir() {
-                    walk(provider, &path, files)?;
-                } else if runtime_support_path(&name) {
-                    use std::io::Read;
-                    let mut bytes = Vec::new();
-                    std::fs::File::open(path)
-                        .map_err(super::io_error)?
-                        .take(4 * 1024 * 1024 + 1)
-                        .read_to_end(&mut bytes)
-                        .map_err(super::io_error)?;
-                    files.insert(name, bytes);
-                    if files.len() > 128
-                        || files.values().map(Vec::len).sum::<usize>() > 4 * 1024 * 1024
-                    {
-                        return Err("Workshop render support is too large".into());
-                    }
-                }
-            }
-            Ok(())
-        }
         let mut files = Files::new();
         if self.kind == WorkspaceKind::Project {
             let directory = self.resolve("assets/shaders")?;
             if directory.is_dir() {
-                walk(self, &directory, &mut files)?;
+                crate::native_capture::walk(&directory, &mut |entry| {
+                    let name = crate::native_capture::relative_name(&entry.path(), &self.root)?;
+                    let path = self.resolve(&name)?;
+                    if entry.file_type().map_err(super::io_error)?.is_dir() {
+                        return Ok(Some(path));
+                    } else if runtime_support_path(&name) {
+                        let bytes = crate::native_capture::read_bounded(&path, 4 * 1024 * 1024)?;
+                        crate::native_capture::insert_checked(
+                            &mut files,
+                            name,
+                            bytes,
+                            128,
+                            4 * 1024 * 1024,
+                            "Workshop render support is too large",
+                        )?;
+                    }
+                    Ok(None)
+                })?;
             }
         }
         Ok(files)

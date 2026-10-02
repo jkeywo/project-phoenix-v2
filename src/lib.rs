@@ -192,6 +192,8 @@ pub mod modifiers;
 /// into `core::narrative::NarrativeEvent`s for the headless run report.
 pub mod narrative;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native_capture;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native_file;
 pub mod objective_instances;
 pub mod objectives;

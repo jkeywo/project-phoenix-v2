@@ -109,6 +109,6 @@ describe('hull/Station/System Live Inspector', () => {
     expect(workspace).toContain('gmShipFields.reset()');
     expect(workspace.indexOf("shell.temporaryActions?.open('effect')"))
       .toBeLessThan(workspace.indexOf('gmDirectEffect.selectScope(scope)'));
-    expect(readFileSync('src/native_host/native_gm/document.rs', 'utf8')).toContain('gm-ship-fields-panel');
+    expect(readFileSync('src/native_host/native_gm/document_tests.rs', 'utf8')).toContain('gm-ship-fields-panel');
   });
 });

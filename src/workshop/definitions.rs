@@ -21,6 +21,7 @@ use super::document::Segment;
 use super::source_spans::{
     is_member, line_at, span_line, string_field, table_line, value_text, visit_tables,
 };
+use super::validation_support::{finding, sort_findings};
 use super::{WorkshopDependencies, WorkshopFinding};
 use crate::ai::faction::FactionConfig;
 use crate::civilian::{ComplianceDisposition, OrderResponse};
@@ -740,28 +741,11 @@ pub(super) fn check_table_fields(
 
 // ── Findings ──────────────────────────────────────────────────────────────────
 
-fn finding(category: &str, file: &str, line: Option<usize>, message: String) -> WorkshopFinding {
-    WorkshopFinding {
-        severity: "error".into(),
-        category: category.into(),
-        message,
-        file: file.to_owned(),
-        line,
-    }
-}
-
 fn warning(category: &str, file: &str, message: String) -> WorkshopFinding {
     WorkshopFinding {
         severity: "warning".into(),
         ..finding(category, file, None, message)
     }
-}
-
-fn sort_findings(findings: &mut Vec<WorkshopFinding>) {
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, &a.category, &a.message).cmp(&(&b.file, b.line, &b.category, &b.message))
-    });
-    findings.dedup();
 }
 
 /// Definition-level semantic findings over CANDIDATE members, resolved against

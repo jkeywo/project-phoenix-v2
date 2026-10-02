@@ -49,8 +49,13 @@ use std::ops::Range;
 use serde::Serialize;
 use toml_edit::{Document, Item, Table, TableLike, Value};
 
+type Issue = super::validation_support::Issue<Option<usize>>;
+
 use super::document::{self, Edit, EditRequest, Segment};
 use super::source_spans::{is_member, line_at, span_line, value_text};
+use super::validation_support::{
+    beneath_of, finding, introduced, origin_of, sort_findings, sources_of,
+};
 use super::{WorkshopDependencies, WorkshopFinding};
 use crate::entities::config::EntityConfig;
 use crate::entities::entity_override::{ArrayRule, MergePolicy};
@@ -61,8 +66,6 @@ use crate::entities::include_resolve::{
 /// The one directory an entity template or fragment may live under, for both
 /// the pack rules and an `includes` entry.
 const ENTITIES: &str = "assets/entities/";
-const ORIGIN_DRAFT: &str = "draft";
-const ORIGIN_BASE: &str = "base";
 /// The layer an entity template composes at — the same constant
 /// `include_resolve` merges with, so the identity keys read here are the ones
 /// the runtime reconciles by.
@@ -166,49 +169,6 @@ pub struct FragmentChoice {
 pub type EntityEditRequest = EditRequest;
 
 // ── Effective member set ──────────────────────────────────────────────────────
-
-/// Everything beneath the draft as one map, later packs winning, exactly as
-/// `validate_pack` resolves references.
-fn beneath_of(dependencies: &WorkshopDependencies) -> BTreeMap<String, String> {
-    let mut beneath = dependencies.base_files.clone();
-    for pack in &dependencies.packs {
-        beneath.extend(pack.files.clone());
-    }
-    beneath
-}
-
-/// Candidate ∪ dependencies as one flat source map, the draft winning a path —
-/// the fragment source the resolver reads, and the overlay order the runtime
-/// itself resolves in.
-fn sources_of(
-    files: &BTreeMap<String, String>,
-    dependencies: &WorkshopDependencies,
-) -> BTreeMap<String, String> {
-    let mut sources = beneath_of(dependencies);
-    sources.extend(files.clone());
-    sources
-}
-
-/// Where a path comes from, newest layer first: the draft, then the newest
-/// pack that carries it, then the base set.
-fn origin_of(
-    path: &str,
-    files: &BTreeMap<String, String>,
-    dependencies: &WorkshopDependencies,
-) -> Option<(usize, String)> {
-    if files.contains_key(path) {
-        return Some((0, ORIGIN_DRAFT.to_owned()));
-    }
-    for (index, pack) in dependencies.packs.iter().enumerate().rev() {
-        if pack.files.contains_key(path) {
-            return Some((index + 2, format!("pack:{}", pack.id)));
-        }
-    }
-    if dependencies.base_files.contains_key(path) {
-        return Some((1, ORIGIN_BASE.to_owned()));
-    }
-    None
-}
 
 /// Whether `path` may be an entity template or an `includes` target at all.
 fn is_entity_path(path: &str) -> bool {
@@ -986,21 +946,6 @@ fn inherited_owner(
 
 // ── Rules shared by refusals and findings ─────────────────────────────────────
 
-/// One violated rule: the line it sits on, its category (the finding category,
-/// and the rule name a refusal message opens with), a message naming the
-/// offending value, and a KEY — the offending value without its array slot —
-/// that identifies the violation across an edit which only moves the entry.
-///
-/// The same shape #1475 uses, and for the same reason: every message names an
-/// index, so a violation the member already carried must not read as new at
-/// its new index.
-struct Issue {
-    line: Option<usize>,
-    category: &'static str,
-    key: String,
-    message: String,
-}
-
 /// The rules one template's `includes` list breaks, in authored order.
 fn include_issues(
     canonical: &str,
@@ -1147,28 +1092,6 @@ fn refusal(issue: &Issue) -> String {
     format!("{}: {}", issue.category, issue.message)
 }
 
-/// The rules the edited member would break AFTER the edit that it did not
-/// break before it. Rules the edit does not touch are findings, not refusals:
-/// an author must be able to fix a hand-broken draft — or edit a fragment that
-/// was never a complete entity on its own — one edit at a time. Violations are
-/// matched by category and offending value, never by message, and the counts
-/// are what make a SECOND copy of a violation the member already had new.
-fn introduced(before: Vec<Issue>, after: Vec<Issue>) -> Result<(), String> {
-    let mut carried: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for issue in &before {
-        *carried
-            .entry((issue.category, issue.key.as_str()))
-            .or_default() += 1;
-    }
-    for issue in &after {
-        match carried.get_mut(&(issue.category, issue.key.as_str())) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => return Err(refusal(issue)),
-        }
-    }
-    Ok(())
-}
-
 // ── Entity edits ──────────────────────────────────────────────────────────────
 
 /// Apply an entity edit to a COPY of the member and refuse it — the error, the
@@ -1229,6 +1152,7 @@ pub fn compose(
     introduced(
         member_issues(&canonical, source, &before),
         member_issues(&canonical, &edited, &after),
+        refusal,
     )?;
     Ok(edited)
 }
@@ -1288,28 +1212,12 @@ pub fn materialise(
     introduced(
         member_issues(&canonical, source, &sources),
         member_issues(&canonical, &edited, &after),
+        refusal,
     )?;
     Ok(edited)
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
-
-fn finding(category: &str, file: &str, line: Option<usize>, message: String) -> WorkshopFinding {
-    WorkshopFinding {
-        severity: "error".into(),
-        category: category.into(),
-        message,
-        file: file.to_owned(),
-        line,
-    }
-}
-
-fn sort_findings(findings: &mut Vec<WorkshopFinding>) {
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, &a.category, &a.message).cmp(&(&b.file, b.line, &b.category, &b.message))
-    });
-    findings.dedup();
-}
 
 /// Include and composition findings over CANDIDATE entity members, resolved
 /// against candidate ∪ beneath (candidate wins by path). Deterministic: sorted

@@ -149,7 +149,7 @@ fn the_fixture_world_is_one_the_runtime_reads() {
 fn the_catalog_reads_every_authored_value_with_its_exact_line() {
     let catalog = catalog(&files(), &dependencies(), WORLD);
     assert_eq!(catalog.path, WORLD);
-    assert_eq!(catalog.origin, ORIGIN_DRAFT);
+    assert_eq!(catalog.origin, "draft");
     assert!(catalog.findings.is_empty(), "{:?}", catalog.findings);
     assert_eq!(catalog.presets.len(), 2);
 
@@ -298,11 +298,7 @@ fn the_catalog_lists_the_world_members_a_preset_may_be_authored_in() {
             .iter()
             .map(|world| (world.path.as_str(), world.origin.as_str()))
             .collect::<Vec<_>>(),
-        vec![
-            (WORLD, ORIGIN_DRAFT),
-            (CHILD, ORIGIN_DRAFT),
-            (BASE_WORLD, ORIGIN_BASE),
-        ]
+        vec![(WORLD, "draft"), (CHILD, "draft"), (BASE_WORLD, "base"),]
     );
 }
 

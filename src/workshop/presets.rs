@@ -101,6 +101,9 @@ use toml_edit::{ArrayOfTables, Document, DocumentMut, Item, Table, TableLike, Va
 
 use super::document::{self, EditRequest};
 use super::source_spans::{is_member, scalar_at, span_line, string_field, table_line, value_text};
+use super::validation_support::{
+    beneath_of, finding, introduced, origin_of, sort_findings, sources_of, Issue,
+};
 use super::{WorkshopDependencies, WorkshopFinding};
 use crate::gm_attention::{GmAttentionBand, GmAttentionCategory};
 use crate::world::config::{
@@ -108,8 +111,6 @@ use crate::world::config::{
 };
 
 const WORLDS: &str = "assets/worlds/";
-const ORIGIN_DRAFT: &str = "draft";
-const ORIGIN_BASE: &str = "base";
 /// The world key holding the presets, and the nested key holding one preset's
 /// widgets — the array-of-tables spellings `GmRolePresetEntry` reads.
 const PRESETS_KEY: &str = "gm_role_preset";
@@ -245,47 +246,6 @@ pub struct WorldChoice {
 pub type PresetEditRequest = EditRequest;
 
 // ── Effective member set ──────────────────────────────────────────────────────
-
-/// Everything beneath the draft as one map, later packs winning, exactly as
-/// `validate_pack` resolves references.
-fn beneath_of(dependencies: &WorkshopDependencies) -> BTreeMap<String, String> {
-    let mut beneath = dependencies.base_files.clone();
-    for pack in &dependencies.packs {
-        beneath.extend(pack.files.clone());
-    }
-    beneath
-}
-
-/// Candidate ∪ dependencies as one flat source map, the draft winning a path.
-fn sources_of(
-    files: &BTreeMap<String, String>,
-    dependencies: &WorkshopDependencies,
-) -> BTreeMap<String, String> {
-    let mut sources = beneath_of(dependencies);
-    sources.extend(files.clone());
-    sources
-}
-
-/// Where a path comes from, newest layer first, with the rank the panel lists
-/// choices in: the draft, then the newest pack that carries it, then the base.
-fn origin_of(
-    path: &str,
-    files: &BTreeMap<String, String>,
-    dependencies: &WorkshopDependencies,
-) -> Option<(usize, String)> {
-    if files.contains_key(path) {
-        return Some((0, ORIGIN_DRAFT.to_owned()));
-    }
-    for (index, pack) in dependencies.packs.iter().enumerate().rev() {
-        if pack.files.contains_key(path) {
-            return Some((index + 2, format!("pack:{}", pack.id)));
-        }
-    }
-    if dependencies.base_files.contains_key(path) {
-        return Some((1, ORIGIN_BASE.to_owned()));
-    }
-    None
-}
 
 // ── Structural reads ──────────────────────────────────────────────────────────
 
@@ -744,21 +704,6 @@ pub fn new_preset_source(id: &str, label: &str) -> Result<String, String> {
 
 // ── Rules shared by refusals and findings ─────────────────────────────────────
 
-/// One violated rule: the line it sits on, its category (the finding category,
-/// and the rule name a refusal message opens with), the runtime's own sentence
-/// where there is one, and a KEY — the offending VALUE without its array slot —
-/// that identifies the violation across an edit which only moves the entry.
-///
-/// The same shape #1475 and #1476 use, and for the same reason: every message
-/// names an index, so a violation the member already carried must not read as
-/// new at its new index.
-struct Issue {
-    line: usize,
-    category: &'static str,
-    key: String,
-    message: String,
-}
-
 /// The address `parse_world` builds for a widget, character for character, so
 /// the sentence the runtime's validator returns reads as the runtime wrote it.
 fn widget_at(preset_index: usize, preset_id: &str, widget_index: usize) -> String {
@@ -1111,29 +1056,6 @@ fn refusal(issue: &Issue) -> String {
     format!("{}: {}", issue.category, issue.message)
 }
 
-/// The rules the edited member would break AFTER the edit that it did not
-/// break before it. Rules the edit does not touch are findings, not refusals:
-/// an author must be able to repair a hand-broken draft one edit at a time.
-/// Violations are matched by category and offending value, never by message —
-/// every message names an index, and a reorder shifts every index after the
-/// moved entry — and the counts are what make a SECOND copy of a violation the
-/// member already had new.
-fn introduced(before: Vec<Issue>, after: Vec<Issue>) -> Result<(), String> {
-    let mut carried: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for issue in &before {
-        *carried
-            .entry((issue.category, issue.key.as_str()))
-            .or_default() += 1;
-    }
-    for issue in &after {
-        match carried.get_mut(&(issue.category, issue.key.as_str())) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => return Err(refusal(issue)),
-        }
-    }
-    Ok(())
-}
-
 /// Apply a preset edit to a COPY of the world member and refuse it — the
 /// error, the source untouched — when the edit introduces any preset or widget
 /// rule the member did not already break. A reorder is `set` edits on the
@@ -1162,28 +1084,12 @@ pub fn compose(
     introduced(
         preset_issues(source, &entity_names(path, source, &before)),
         preset_issues(&edited, &entity_names(path, &edited, &after)),
+        refusal,
     )?;
     Ok(edited)
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
-
-fn finding(category: &str, file: &str, line: Option<usize>, message: String) -> WorkshopFinding {
-    WorkshopFinding {
-        severity: "error".into(),
-        category: category.into(),
-        message,
-        file: file.to_owned(),
-        line,
-    }
-}
-
-fn sort_findings(findings: &mut Vec<WorkshopFinding>) {
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, &a.category, &a.message).cmp(&(&b.file, b.line, &b.category, &b.message))
-    });
-    findings.dedup();
-}
 
 /// Role-preset findings over CANDIDATE world members, references resolved
 /// against candidate ∪ beneath (candidate wins by path). Every category is an

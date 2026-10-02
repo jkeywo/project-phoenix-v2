@@ -47,6 +47,7 @@ pub mod test_source;
 pub mod test_trace;
 /// Which observer a disposable Test draws for (issue #1472).
 pub mod test_view;
+mod validation_support;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

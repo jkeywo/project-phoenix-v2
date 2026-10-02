@@ -39,6 +39,7 @@ use super::document::{self, EditRequest};
 use super::source_spans::{
     is_member, line_at, span_line, string_field, table_line, value_text, visit_tables,
 };
+use super::validation_support::{beneath_of, finding, introduced, sort_findings, Issue};
 use super::{Sources, WorkshopDependencies, WorkshopFinding};
 use crate::entities::loader::TemplateLoader;
 use crate::world::manifest::{build_catalog, parse_manifest};
@@ -261,16 +262,6 @@ fn effective_members<'a>(
     let mut ordered: Vec<Member<'a>> = members.into_values().collect();
     ordered.sort_by(|a, b| (a.rank, a.path).cmp(&(b.rank, b.path)));
     ordered
-}
-
-/// Everything beneath the draft as one map, later packs winning, exactly as
-/// `validate_pack` resolves references.
-fn beneath_of(dependencies: &WorkshopDependencies) -> BTreeMap<String, String> {
-    let mut beneath = dependencies.base_files.clone();
-    for pack in &dependencies.packs {
-        beneath.extend(pack.files.clone());
-    }
-    beneath
 }
 
 fn origin_of(members: &[Member<'_>], path: &str) -> Option<String> {
@@ -1008,18 +999,6 @@ pub fn new_world_source(title: &str) -> Result<String, String> {
 
 // ── Rules shared by refusals and findings ─────────────────────────────────────
 
-/// One violated composition rule: the line it sits on, its category (the
-/// finding category, and the rule name a refusal message opens with), a
-/// message naming the offending value, and a KEY — the offending value(s)
-/// without the array slot — that identifies the violation across an edit
-/// which only moves the entry.
-struct Issue {
-    line: usize,
-    category: &'static str,
-    key: String,
-    message: String,
-}
-
 /// The `extra_worlds` graph over candidate ∪ beneath, the candidate winning a
 /// path, as edges from each world to what it declares.
 fn extra_worlds_graph(
@@ -1241,30 +1220,6 @@ fn refusal(issue: &Issue) -> String {
     format!("{}: {}", issue.category, issue.message)
 }
 
-/// The rules the edited member would break AFTER the edit that it did not
-/// break before it. Rules the edit does not touch are findings, not
-/// refusals: an author must be able to fix a hand-broken draft one edit at a
-/// time. Violations are matched by category and offending value, never by
-/// message: every message names the entry's array slot, and removing or
-/// reordering an earlier entry shifts the slots after it, so a violation the
-/// member already carried must not read as new at its new index. The counts
-/// are what make a SECOND copy of a violation the member already had new.
-fn introduced(before: Vec<Issue>, after: Vec<Issue>) -> Result<(), String> {
-    let mut carried: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for issue in &before {
-        *carried
-            .entry((issue.category, issue.key.as_str()))
-            .or_default() += 1;
-    }
-    for issue in &after {
-        match carried.get_mut(&(issue.category, issue.key.as_str())) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => return Err(refusal(issue)),
-        }
-    }
-    Ok(())
-}
-
 /// Apply a composition edit to a COPY of the member and refuse it — the
 /// error, the source untouched — when the edited member introduces a
 /// missing, cyclic, duplicate or disallowed reference over candidate ∪
@@ -1302,6 +1257,7 @@ pub fn compose(
         introduced(
             manifest_issues(source, &lookup),
             manifest_issues(&edited, &lookup),
+            refusal,
         )?;
     } else if is_member(path, WORLDS) {
         let exists = |target: &str| lookup(target).is_some();
@@ -1310,29 +1266,13 @@ pub fn compose(
         introduced(
             extra_world_issues(path, source, &exists, &graph_before),
             extra_world_issues(path, &edited, &exists, &graph_after),
+            refusal,
         )?;
     }
     Ok(edited)
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
-
-fn finding(category: &str, file: &str, line: Option<usize>, message: String) -> WorkshopFinding {
-    WorkshopFinding {
-        severity: "error".into(),
-        category: category.into(),
-        message,
-        file: file.to_owned(),
-        line,
-    }
-}
-
-fn sort_findings(findings: &mut Vec<WorkshopFinding>) {
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, &a.category, &a.message).cmp(&(&b.file, b.line, &b.category, &b.message))
-    });
-    findings.dedup();
-}
 
 /// Composition findings over CANDIDATE members, resolved against candidate ∪
 /// beneath (candidate wins by path). Lines refer to candidate sources.

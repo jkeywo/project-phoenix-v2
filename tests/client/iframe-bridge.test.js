@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { push, setOverlay, wireLoad } from '../../gui/iframe-bridge.js';
+import { push, setOverlay } from '../../gui/iframe-bridge.js';
 
 // ── push ─────────────────────────────────────────────────────────────────────
 
@@ -78,34 +78,5 @@ describe('setOverlay', () => {
       contentWindow: { __setConsoleOverlay: () => { throw new Error('oops'); } },
     };
     expect(() => setOverlay(iframe, 'intel-overlay')).not.toThrow();
-  });
-});
-
-// ── wireLoad ─────────────────────────────────────────────────────────────────
-
-describe('wireLoad', () => {
-  it('attaches a load listener to the iframe', () => {
-    const addFn = vi.fn();
-    const iframe = { addEventListener: addFn };
-    const refresh = vi.fn();
-    wireLoad(iframe, refresh);
-    expect(addFn).toHaveBeenCalledWith('load', refresh);
-  });
-
-  it('does nothing when iframeEl is null', () => {
-    expect(() => wireLoad(null, vi.fn())).not.toThrow();
-  });
-
-  it('does nothing when iframeEl is undefined', () => {
-    expect(() => wireLoad(undefined, vi.fn())).not.toThrow();
-  });
-
-  it('calls the refresh function when the load event fires', () => {
-    let loadCb = null;
-    const iframe = { addEventListener: (ev, cb) => { if (ev === 'load') loadCb = cb; } };
-    const refresh = vi.fn();
-    wireLoad(iframe, refresh);
-    loadCb();
-    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

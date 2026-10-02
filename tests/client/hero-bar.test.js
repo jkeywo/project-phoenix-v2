@@ -885,48 +885,15 @@ describe('client.html gives the bar the shape the labels assume', () => {
       .not.toMatch(/padding/);
   });
 
-  // ── The overlay-tab seam's shell half (issue #1373) ───────────────────────
-  //
-  // The model above takes `consoleTabs` already chosen; choosing them is
-  // client.html's job, and it is the part AC3 is about. Its inline script is
-  // not importable, so these read the source for the two decisions that make
-  // the difference between a bar that recovers and one that shows a background
-  // console's tabs. tests/smoke/console-tabs.spec.js drives the real thing.
-
-  it('stores each console declaration under its own console name', () => {
-    // One iframe per Station is mounted at once and every one of them runs
-    // initConsole, so a single slot would let whichever posted last win.
-    expect(CLIENT_HTML).toMatch(/consoleTabsByConsole\[name\]\s*=/);
-    expect(CLIENT_HTML).toMatch(/consoleHullByConsole\[name\]\s*=/);
-  });
-
-  it("renders only the active console's declaration", () => {
-    expect(CLIENT_HTML).toMatch(/consoleTabs:\s*\(consoleTabsByConsole\[activeConsole\]/);
-  });
+  // Declaration ownership and reload behavior run through the production
+  // parent lifetime in console-mount-lifecycle.test.js.
 
   it('resolves the two tab labels through the string table, not raw', () => {
     // The console posts strings.csv ids; no English crosses the seam.
-    const call = CLIENT_HTML.match(/consoleTabs:\s*\(consoleTabsByConsole\[activeConsole\][\s\S]*?\}\)\),/);
+    const call = CLIENT_HTML.match(/consoleTabs:\s*\(consoleMounts\?\.view\(activeConsole\)\.tabs[\s\S]*?\}\)\),/);
     expect(call, 'no consoleTabs mapping').not.toBeNull();
     expect(call[0]).toMatch(/code:\s*wireText\(tab\.code/);
     expect(call[0]).toMatch(/name:\s*wireText\(tab\.name/);
-  });
-
-  it("lets the console's own declaration settle which panel is open", () => {
-    // The document is the truth about what is covering the console; the bar
-    // only lights a tab optimistically on the tap. A console reporting no open
-    // panel clears its OWN selection and says nothing about another's.
-    expect(CLIENT_HTML).toMatch(/const open = event\.data\.open \|\| null;/);
-    expect(CLIENT_HTML).toMatch(/if \(open\) openConsoleOverlay = \{ console: name, id: open \};/);
-    expect(CLIENT_HTML).toMatch(/else if \(openConsoleOverlay\.console === name\)/);
-  });
-
-  it("drops a console's selection when its iframe reloads", () => {
-    // A reloaded document has every panel closed, so a selection held over it
-    // would show a tab selected with nothing behind it.
-    const onLoad = CLIENT_HTML.match(/function _attachIframeLoadListener[\s\S]*?\n    \}\n/);
-    expect(onLoad, 'no iframe load listener').not.toBeNull();
-    expect(onLoad[0]).toMatch(/openConsoleOverlay\.console === consoleName/);
   });
 
   it('draws the unread badge as a hideable corner mark on the tab', () => {

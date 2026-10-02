@@ -34,8 +34,13 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Console Mount Plan
-      summary: Pure-JavaScript mount plan deriving the phone console panels from the server-supplied ship stations — canonical station-id DOM naming with the single tactical alias, console URL resolution, section switching over the mounted stations, and per-console payload builders whose shapes are documented as typedefs; the static console registry it replaced was deleted in issue 827.
+      title: Client Console Mount Lifetime
+      summary: Parent-side Console lifetime derives mounted documents from server-supplied Stations, owns their identity and load listeners, publishes authoritative snapshots under the existing dirty and latency-cause policies, and retains declarations for the Station Bar. Canonical DOM naming, URL resolution, payload builders, locale and accessibility remain collaborators; switching Stations preserves iframe identity.
+      rationale:
+        - "[ai] createConsoleMounts owns load order: locale installation, an IFRAME_LOAD snapshot, that Station's overlay reset, accessibility, bindings, feedback preferences and gamepad presentation. Live readers ensure reloads use current state and private preferences; a missing registry skips bindings, feedback and gamepad refresh together."
+        - "[ai] Welcome reduction and dirty publication precede remount effects. Host-origin publication retains active-Station plus always-push-family filtering; explicit local and load refreshes retain their existing causes and cannot acknowledge pending commands."
+        - "[ai] Replaced mounts detach listeners and invalidate already-queued load callbacks. An obsolete callback previously resolved its snapshot by Station id and could publish into its replacement and clear the replacement's overlay. Explicit disposal removes owned sections while preserving unrelated shell content."
+        - "[ai] Declarations retain the last report until a fresh report replaces it. Mounted frame identity distinguishes Stations sharing one document; absent or unmatched sources retain the existing claimed-name fallback. This presentation refactor changes neither command Admission nor GM Station puppet lifetime."
     architecture:
       kind: client-shell
       authority: non-authoritative
@@ -43,8 +48,9 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/mount-plan.js, gui/content-switcher.js, gui/console-state.js, gui/console-resolver.js]
-      tests: [npx vitest run]
+      paths: [gui/console-mount.js, gui/iframe-bridge.js, gui/mount-plan.js, gui/content-switcher.js, gui/console-state.js, gui/console-resolver.js, gui/dirty-consoles.js, client.html]
+      symbols: [createConsoleMounts, mountConsoles, applyConsoleVisibility, stationIdForSource]
+      tests: [npx vitest run tests/client/console-mount-lifecycle.test.js tests/client/console-persistence.test.js tests/client/console-chrome.test.js tests/client/hero-bar.test.js tests/client/console-latency.test.js, tests/smoke/console-tabs.spec.js, tests/smoke/station-damage-popup.spec.js]
 
   - component: client-contextual-station-controls
     core:
@@ -206,7 +212,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/console-core.js, gui/console-overlays.js, gui/iframe-bridge.js, gui/hero-bar.js, gui/intel-unread.js, gui/destroyer/tactical.html, gui/destroyer/tactical.console.js, client.html, assets/strings/strings.csv]
+      paths: [gui/console-core.js, gui/console-mount.js, gui/console-overlays.js, gui/iframe-bridge.js, gui/hero-bar.js, gui/intel-unread.js, gui/destroyer/tactical.html, gui/destroyer/tactical.console.js, client.html, assets/strings/strings.csv]
       symbols: [setConsoleOverlay, openConsoleOverlayId, setOverlay, heroBarModel, renderHeroBarDom, intelUnreadCount, markIntelSeen]
       tests: [npx vitest run, tests/smoke]
 
@@ -223,7 +229,7 @@ entities:
       writers: [client-console-overlay-tab-seam]
     implementation:
       status: declared
-      paths: [gui/console-core.js, client.html]
+      paths: [gui/console-core.js, gui/console-mount.js, client.html]
       tests: [npx vitest run]
 
   - component: client-station-damage-popup

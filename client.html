@@ -2705,24 +2705,9 @@
     /// (The flag itself lives in window.simState.redAlert — issue #819.)
     let bezelAlertOn = false;
 
-    /// Overlay tabs each mounted console declared (issue #1373), keyed by the
-    /// STATION whose iframe posted them (senderStationId, not the name the
-    /// document gave itself — one document can serve two Stations). EVERY
-    /// mounted console posts its own — one iframe per Station is mounted at
-    /// once and they all run `initConsole` — so the bar reads only the active
-    /// Station's entry rather than whichever message arrived last. A console
-    /// with no overlay panels posts an empty list.
-    const consoleTabsByConsole = Object.create(null);
-    /// The own-Station system rows each console posted (issue #1373), keyed the
-    /// same way. This is what the per-system damage popup draws (issue #1374):
-    /// tapping the bar's already-selected Station tab opens the active
-    /// console's rows, and a fresh post repaints an open popup in place.
-    const consoleHullByConsole = Object.create(null);
-    /// Which overlay panel is open, and in which console. One at a time: the
-    /// panels cover the console, and the bar is a tablist with one selection.
-    /// `console` is carried alongside the id so switching Stations cannot leave
-    /// a stale selection pointing at another console's panel.
-    let openConsoleOverlay = { console: null, id: null };
+    // One parent-side owner for mounted Station documents and their declarations.
+    // Created after deferred modules are ready, before profile application/join.
+    let consoleMounts = null;
 
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
@@ -2770,32 +2755,17 @@
       // console closes it — both here, so the bar stops showing it selected,
       // and in the iframe, so the panel is not still covering the console the
       // next time the player comes back to it.
-      setConsoleOverlay(null, null);
+      consoleMounts?.selectOverlay(null, null);
       // The damage popup belongs to a Station too (issue #1374): it names one
       // and lists that one's systems, so it cannot outlive a switch away from
       // it — including the switch to `null` that leaving the game makes.
       dismissStationDamagePopup();
     }
 
-    /// Open exactly one console's overlay panel — or, with a null id, none.
-    /// The shell half of the seam gui/console-overlays.js owns inside the
-    /// iframe: the bar decides, the console obeys (issue #1373).
-    function setConsoleOverlay(consoleName, overlayId) {
-      const previous = openConsoleOverlay;
-      openConsoleOverlay = { console: overlayId ? consoleName : null,
-                             id: overlayId || null };
-      const setOverlay = window.iframeBridgeSetOverlay;
-      if (typeof setOverlay !== 'function') return;
-      if (previous.console && previous.console !== openConsoleOverlay.console) {
-        setOverlay($(consoleIframeId(previous.console)), null);
-      }
-      if (consoleName) setOverlay($(consoleIframeId(consoleName)), overlayId || null);
-    }
-
     /// The overlay the ACTIVE console is showing, or null. The bar never
     /// renders another console's selection.
     function activeConsoleOverlay() {
-      return openConsoleOverlay.console === activeConsole ? openConsoleOverlay.id : null;
+      return consoleMounts?.view(activeConsole).activeOverlay || null;
     }
 
     // -- Helpers -------------------------------------------------
@@ -3198,30 +3168,9 @@
       }
       renderStationHero(s, inGame);
 
-      // Console sections: map activeConsole → HTML section id via
-      // gui/content-switcher.js, over the sections this ship actually mounts
-      // (issue #827). Only the matching section gets `.active`. Sections that
-      // don't exist on this ship are simply absent from the DOM; the $() call
-      // returns null and is silently skipped.
-      const stationIds = ((s.shipStations && s.shipStations.stations) || [])
-        .map(st => st.id).filter(Boolean);
-      if (typeof window.applyConsoleVisibility === 'function') {
-        // The tab-switch seam (gui/console-mount.js): a pure `.active` toggle
-        // over the mounted sections. It never touches iframe nodes, so session-
-        // local console state survives a switch away and back (issue #1099 AC1).
-        window.applyConsoleVisibility(document, activeConsole, inGame, stationIds);
-      } else {
-        // Boot-race fallback: canonical `${id}-ui` scheme + the one tactical →
-        // weapons alias (single home: gui/mount-plan.js).
-        const sections = Object.fromEntries(stationIds.map(id => {
-          const base = id === 'tactical' ? 'weapons' : id;
-          return [base + '-ui', inGame && activeConsole === id];
-        }));
-        for (const [sectionId, visible] of Object.entries(sections)) {
-          const el = $(sectionId);
-          if (el) el.className = visible ? 'console-section active' : 'console-section';
-        }
-      }
+      // Showing a Station only toggles its persistent section; its document
+      // and local interface state survive tab switches.
+      consoleMounts?.show(activeConsole, inGame);
 
       // Orientation is CSS's business (issue #1370): the media queries in this
       // page and in gui/console.css read the viewport directly, so render()
@@ -3652,35 +3601,12 @@
     // HTML ids that were never added (orphaned Bevy-era remnants) and were
     // removed here; the iframe supersedes them.
 
-    // -- iframe state-push helper (wraps gui/iframe-bridge.js) ----------------
-    function _pushIframe(iframeEl, consoleName, stateJson) {
-      // Module not loaded yet (boot race): drop the push — pushes are idempotent
-      // snapshots and the next tick repeats them.
-      if (typeof window.iframeBridgePush !== 'function') return;
-      window.iframeBridgePush(iframeEl, consoleName, stateJson);
-    }
-
-    // -- Generic console state push (ship-agnostic) --------------------------
-    // Every station id (including the aggregate cruiser/destroyer consoles like
-    // `engineering` = power+repair and `science` = sensors+shields) is handled
-    // generically by window.buildConsoleState(name, window.simState), which nests the
-    // sub-panel payloads. Iframe ids resolve through gui/mount-plan.js (the
-    // single home of the `${id}-iframe` scheme + the tactical → weapons
-    // alias) so whatever iframe the current ship actually mounted is fed.
-    // This is the ONLY push path (#823): handleMessage fans out through
-    // pushDirtyConsoles below, and renderGame / iframe-load listeners push
-    // the active console directly.
-    function consoleIframeId(name) {
-      return (typeof window.iframeIdFor === 'function')
-        ? window.iframeIdFor(name) : (name + '-iframe');
-    }
-
     function actionFeedbackRouter() {
       if (_actionFeedbackRouter) return _actionFeedbackRouter;
       if (typeof window.ActionFeedbackRouter !== 'function') return null;
       _actionFeedbackRouter = new window.ActionFeedbackRouter({
         deliver: (value) => {
-          const iframe = $(consoleIframeId(value.console));
+          const iframe = consoleMounts?.frame(value.console);
           try {
             const update = iframe && iframe.contentWindow
               && iframe.contentWindow.__updateActionFeedback;
@@ -3706,7 +3632,7 @@
     // (the host assigns that, so a client cannot claim a series it does not own).
     //
     // WHICH push counts is the whole correctness question (issue #1169 review,
-    // finding B1). `pushConsoleStateFor` is also called by a local re-render, by
+    // finding B1). the Console lifetime also refreshes snapshots by a local re-render, by
     // a freshly loaded iframe, and by client-local tutorial progress; acking on
     // those records a plausible 40 ms "response" for a command a stalled data
     // channel never delivered. So every call site names its cause and
@@ -3714,7 +3640,7 @@
     // deliberately does not live in this inline script.
     //
     // The meter is created lazily and tolerates its module not having executed
-    // yet, exactly as `pushDirtyConsoles` tolerates `dirtyConsolesFor` missing:
+    // yet, before the page has initialized its Console lifetime:
     // this is diagnostic, and a dropped early sample costs nothing.
     let _latencyMeter = null;
     function latencyMeter() {
@@ -3772,60 +3698,8 @@
       });
     }
 
-    /**
-     * Push one console's payload to its iframe.
-     *
-     * `cause` is a `PUSH_CAUSE` value naming WHY (issue #1169): only
-     * `SERVER_MESSAGE` — an inbound host message that carried or dirtied state
-     * for this console — may acknowledge a pending action. Omitting it is
-     * treated as non-acknowledging, so a future call site that forgets
-     * under-reports rather than fabricating samples.
-     */
-    function pushConsoleStateFor(name, cause) {
-      if (!name) return;
-      const json = (typeof window.buildConsoleState === 'function' && window.simState)
-        ? window.buildConsoleState(name, window.simState)
-        : '{}';
-      _pushIframe($(consoleIframeId(name)), name, json);
-      const meter = latencyMeter();
-      if (meter) meter.noteAck(name, cause);
-    }
-
-    function pushActiveConsoleState(cause) {
-      pushConsoleStateFor(activeConsole, cause);
-    }
-
-    // Resolve the active console's iframe the same way pushConsoleStateFor
-    // does, so the relay always follows whatever iframe this ship mounted.
     function activeConsoleIframe() {
-      if (!activeConsole) return null;
-      return $(consoleIframeId(activeConsole));
-    }
-
-    function pushSemanticBindingsToIframe(iframeEl) {
-      if (!iframeEl || !semanticActionRegistry) return;
-      try {
-        const target = iframeEl.contentWindow;
-        const update = target
-          && iframeEl.contentWindow.__updateSemanticActionBindings;
-        if (typeof update === 'function') {
-          update(semanticActionRegistry.bindingProfile());
-        }
-        const updateFeedback = target && target.__updateActionFeedbackPreferences;
-        if (typeof updateFeedback === 'function') {
-          updateFeedback(activeFeedbackPreferences);
-        }
-      } catch (_) { /* a cross-origin or not-yet-loaded frame is retried on load */ }
-      refreshGamepadPresentation();
-    }
-
-    function pushSemanticBindingsToConsoles() {
-      const stations = (uiState.shipStations && uiState.shipStations.stations) || [];
-      for (const station of stations) {
-        if (station && station.id) {
-          pushSemanticBindingsToIframe($(consoleIframeId(station.id)));
-        }
-      }
+      return consoleMounts?.frame(activeConsole) || null;
     }
 
     function operatorProfileStorage() {
@@ -3918,7 +3792,7 @@
           && typeof gamepadInputRuntime.restorePreferred === 'function') {
         gamepadInputRuntime.restoreDevice(operatorProfile.gamepad.preferredDevice);
       }
-      pushSemanticBindingsToConsoles();
+      consoleMounts?.refreshBindings();
       if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
       if (typeof window.applyAccessibilityProfile === 'function') {
         window.applyAccessibilityProfile();
@@ -3956,7 +3830,7 @@
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.setBinding(actionId, slot, binding, options);
       if (result.status === 'applied') {
-        pushSemanticBindingsToConsoles();
+        consoleMounts?.refreshBindings();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
         persistOperatorProfile();
       }
@@ -3967,7 +3841,7 @@
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.resetAction(actionId);
       if (result.status === 'applied') {
-        pushSemanticBindingsToConsoles();
+        consoleMounts?.refreshBindings();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
         persistOperatorProfile();
       }
@@ -3978,7 +3852,7 @@
       if (!semanticActionRegistry) return { status: 'unavailable' };
       const result = semanticActionRegistry.resetAllBindings();
       if (result.status === 'applied') {
-        pushSemanticBindingsToConsoles();
+        consoleMounts?.refreshBindings();
         if (gamepadInputRuntime) gamepadInputRuntime.neutralize();
         persistOperatorProfile();
       }
@@ -4017,74 +3891,6 @@
       });
     }
 
-    // -- Semantic-change console refresh (issues #823 / #1260) ----------------
-    // The per-console build*/push*ConsoleState wrapper pairs that used to live
-    // here were deleted: reducers now report semantic changes and
-    // gui/dirty-consoles.js resolves those through authoritative topology,
-    // then pushes each through the generic pushConsoleStateFor above. Pushes
-    // are gated on
-    // the console being active, except Stations projected from the
-    // unconditional Console Families in dirty-consoles.js
-    // (captain — its push was always unconditional).
-    function pushDirtyConsoles(changes) {
-      // Boot race: the module scripts may not have executed yet — drop the
-      // fan-out; pushes are idempotent snapshots and the next message repeats
-      // them (same tolerance as _pushIframe / pushConsoleStateFor).
-      if (typeof window.dirtyConsolesFor !== 'function') return;
-      const stationSystems = window.simState ? window.simState.stationSystems : null;
-      const systemConsoleFamilies = window.simState ? window.simState.systemConsoleFamilies : null;
-      const blackboardConsoleFamilies = window.simState ? window.simState.blackboardConsoleFamilies : null;
-      const alwaysPush = window.alwaysPushConsoles
-        ? window.alwaysPushConsoles(stationSystems, systemConsoleFamilies)
-        : new Set();
-      for (const name of window.dirtyConsolesFor(
-        changes,
-        stationSystems,
-        systemConsoleFamilies,
-        blackboardConsoleFamilies,
-      )) {
-        // The one acknowledging push (issue #1169): this fan-out runs only for
-        // consoles an INBOUND host message dirtied, which is exactly the
-        // causality `send_to_ack` claims.
-        if (alwaysPush.has(name) || activeConsole === name) {
-          pushConsoleStateFor(name, pushCause().SERVER_MESSAGE);
-        }
-      }
-    }
-
-    // Attach on-load listener for an iframe that was created dynamically by
-    // mountConsoles(). Each iframe re-pushes its console state on load so it
-    // receives the current snapshot even after a reload or late mount.
-    // consoleName must be the lowercase station id.
-    function _attachIframeLoadListener(iframeEl, consoleName) {
-      if (!iframeEl) return;
-      iframeEl.addEventListener('load', () => {
-        // A console document owns a distinct module realm. Install the shell's
-        // private locale and the Welcome's ordered mod catalogues before its
-        // first state push so component t() calls see the same table.
-        window.phLocale?.installIframe?.(iframeEl);
-        // Push the freshly-loaded iframe its current snapshot. Generic so it
-        // covers every station id the ship mounts (including engineering /
-        // science aggregates the old per-name switch never handled).
-        // NOT an acknowledgement (issue #1169): a reloaded iframe is handed a
-        // snapshot that may be seconds old and owes nothing to the host having
-        // answered anything.
-        pushConsoleStateFor(consoleName, pushCause().IFRAME_LOAD);
-        // A reloaded document has every panel closed and re-posts its
-        // `console_tabs` from `initConsole`, so the shell drops the selection
-        // it was holding for this console rather than showing a tab as
-        // selected over a panel that is no longer open (issue #1373).
-        if (openConsoleOverlay.console === consoleName) setConsoleOverlay(null, null);
-        // Re-apply the private Accessibility profile to this same-origin console
-        // now that its document has (re)loaded — a reload otherwise resets the
-        // iframe :root, losing the text-scale var until the next apply (#1102).
-        if (typeof window.applyAccessibilityProfile === 'function') {
-          window.applyAccessibilityProfile({ iframes: [iframeEl] });
-        }
-        pushSemanticBindingsToIframe(iframeEl);
-      });
-    }
-
     function renderGame(s) {
       // Refresh whichever console is currently visible. This is ship-agnostic:
       // it covers the aggregate cruiser/destroyer consoles (engineering,
@@ -4092,7 +3898,7 @@
       // iframe via the registry.
       // NOT an acknowledgement (issue #1169): a render fires on rotation,
       // resize and tab switches, none of which mean the host answered.
-      pushActiveConsoleState(pushCause().RENDER);
+      consoleMounts?.refresh(activeConsole, pushCause().RENDER);
     }
 
     function placeShellChrome() {
@@ -4165,7 +3971,7 @@
         // site, exactly where `stationLabel` resolves the Station names beside
         // them. `wireText` substitutes only what the table actually holds, so a
         // console that authored literal text still shows it.
-        consoleTabs: (consoleTabsByConsole[activeConsole] || []).map(tab => ({
+        consoleTabs: (consoleMounts?.view(activeConsole).tabs || []).map(tab => ({
           id: tab.id,
           code: wireText(tab.code, tab.code || ''),
           name: wireText(tab.name, tab.name || tab.id),
@@ -4197,7 +4003,7 @@
           // and changes nothing else — same seat, same iframe, a surface in
           // front of it (issue #1373).
           if (kind === 'overlay') {
-            setConsoleOverlay(activeConsole, tabId);
+            consoleMounts?.selectOverlay(activeConsole, tabId);
             scheduleRender();
             return;
           }
@@ -4224,7 +4030,7 @@
           // A Station tab closes whatever overlay is open, which is what
           // "selecting a station tab closes it" means even when the Station
           // selected is the one already active.
-          setConsoleOverlay(null, null);
+          consoleMounts?.selectOverlay(null, null);
           setActiveConsole(tabId);
           // Tell the host this Station's tab was visited (issue #1101), so it
           // clears the one-off `unread` importance flag authoritatively through
@@ -4255,7 +4061,7 @@
         // A console posts these only when they CHANGE (gui/console-core.js), so
         // an absent entry means "this console has not published a hull yet" —
         // which the popup shows as the neutral no-damage-model state.
-        entries: consoleHullByConsole[activeConsole] || [],
+        entries: consoleMounts?.view(activeConsole).hull || [],
       };
     }
 
@@ -4294,85 +4100,12 @@
       }
     }
 
-    // -- Dynamic console mounting (Module H / issues #621, #827) ---------------
-    // Called after a Welcome message updates uiState.shipStations.
-    // gui/mount-plan.js decides WHAT to mount (station id → section/iframe
-    // ids + URL, tactical alias included); this loop only creates the DOM.
-    // Stations not present on this ship have no DOM elements, keeping the DOM
-    // minimal and matching only what the current ship configuration provides.
-    function mountConsoles(shipStations) {
-      const container = $('console-container');
-      if (!container) return;
-      // The mount seam lives in gui/console-mount.js (issues #827, #1099): it
-      // owns node creation (via gui/mount-plan.js planMounts) so the iframe
-      // nodes it creates are the persistent ones a tab switch must preserve.
-      // We attach the per-iframe load listener here so the iframe re-pushes
-      // state after load/reload.
-      if (typeof window.mountConsolesDom === 'function') {
-        window.mountConsolesDom(document, container, shipStations,
-          (iframe, mount) => _attachIframeLoadListener(iframe, mount.stationId));
-      }
-    }
-
-    /// Which STATION a console message came from (issue #1374). Resolved from
-    /// the sending frame via gui/console-mount.js, never from the name the
-    /// document gave itself: one console document can be mounted at two
-    /// Stations (`gui/cruiser/comms.html` serves the cruiser's `comms` and
-    /// `navigation` seats and both call themselves 'comms'), so the claim is
-    /// not a key. The shell mounted each iframe against a Station id, so it
-    /// knows; the claim is kept only as the fallback for the paths with no
-    /// iframe behind them.
-    function senderStationId(event) {
-      const claimed = (event.data && typeof event.data.console === 'string')
-        ? event.data.console : '';
-      if (typeof window.consoleStationIdForSource !== 'function') return claimed;
-      return window.consoleStationIdForSource(
-        document, uiState.shipStations, event.source, claimed);
-    }
-
     // -- Console action postMessage bridge (issue #422) ------------------------
     // All iframe consoles send {type:'console_action', payload:json} via
     // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
     window.addEventListener('message', (event) => {
       if (!event.data) return;
-      // A console declaring its overlay panels, and the own-Station system
-      // rows behind the bar's damage popup (issue #1373). Both are keyed by
-      // the STATION the shell mounted the sending frame at — every mounted
-      // iframe posts its own, so storing them in one slot would let a
-      // background console's declaration win the bar.
-      if (event.data.type === 'console_tabs') {
-        const name = senderStationId(event);
-        if (name === '') return;
-        consoleTabsByConsole[name] = Array.isArray(event.data.tabs) ? event.data.tabs : [];
-        // The console's own document is the truth about which of its panels is
-        // covering it, so its declaration settles the selection this shell only
-        // set optimistically on the tap — and reports a panel closed from
-        // inside (the panel's Back button) rather than leaving a tab lit over
-        // nothing. A console reporting no open panel clears only ITS OWN
-        // selection; it says nothing about another console's.
-        const open = event.data.open || null;
-        if (open) openConsoleOverlay = { console: name, id: open };
-        else if (openConsoleOverlay.console === name) {
-          openConsoleOverlay = { console: null, id: null };
-        }
-        if (name === activeConsole) scheduleRender();
-        return;
-      }
-      if (event.data.type === 'console_hull') {
-        const name = senderStationId(event);
-        if (name === '') return;
-        consoleHullByConsole[name] = Array.isArray(event.data.entries) ? event.data.entries : [];
-        // A console only re-posts when its rows CHANGE, and a change while the
-        // popup is open is exactly the moment a player is watching for — a
-        // system dropping under fire. Repaint in place rather than making them
-        // close and reopen it (issue #1374).
-        const popup = document.getElementById('station-damage-popup');
-        if (name === activeConsole && popup && !popup.hidden
-            && typeof window.renderStationDamagePopup === 'function') {
-          window.renderStationDamagePopup(document, stationDamagePopupState());
-        }
-        return;
-      }
+      if (consoleMounts?.handleDeclaration(event)) return;
       if (event.data.type !== 'console_action') return;
       if (window.simState?.crewSpectator?.active) return;
       let action;
@@ -4390,7 +4123,7 @@
         const tut = window.applyTutorialAction(window.simState, action, tutStorage);
         // NOT an acknowledgement (issue #1169): tutorial progress is entirely
         // client-local and never leaves the device.
-        if (tut.changed) pushConsoleStateFor(action.console || activeConsole, pushCause().TUTORIAL);
+        if (tut.changed) consoleMounts?.refresh(action.console || activeConsole, pushCause().TUTORIAL);
         if (tut.handled) return;
       }
       if (typeof window.dispatchConsoleAction === 'function') {
@@ -4510,7 +4243,7 @@
       // the consoles are
       // (re)mounted AFTER this fan-out — that is fine: each iframe's load
       // listener re-pushes its snapshot once it actually loads.
-      pushDirtyConsoles(changes);
+      consoleMounts?.publishChanges(changes);
       // Reducer-result routing (#1261) happens only after dirty iframe
       // publication. The router receives no wire message: reducers already own
       // its meaning and report ordered lifecycle/presentation effects. Boot
@@ -4544,7 +4277,7 @@
     function applySideEffect(fx) {
       switch (fx.effect) {
         case 'mount-consoles':
-          mountConsoles(fx.shipStations);
+          consoleMounts?.mount(fx.shipStations);
           break;
         case 'ship-theme': {
           // Inject ship theme CSS from Welcome ship_css (Fix: Module F).
@@ -4682,6 +4415,31 @@
         ? window.createClientSemanticActionRegistry()
         : null;
 
+      consoleMounts = window.createConsoleMounts({
+        doc: document,
+        container: $('console-container'),
+        readState: () => window.simState,
+        buildState: (stationId, state) => typeof window.buildConsoleState === 'function'
+          ? window.buildConsoleState(stationId, state) : '{}',
+        readActiveStation: () => activeConsole,
+        readBindings: () => semanticActionRegistry?.bindingProfile() || null,
+        readFeedbackPreferences: () => activeFeedbackPreferences,
+        installLocale: iframe => window.phLocale?.installIframe?.(iframe),
+        applyAccessibility: iframe => window.applyAccessibilityProfile?.({ iframes: [iframe] }),
+        noteSnapshot: (stationId, cause) => latencyMeter()?.noteAck(stationId, cause),
+        afterBindings: () => refreshGamepadPresentation(),
+        onDeclaration: ({ type, stationId }) => {
+          if (stationId !== activeConsole) return;
+          if (type === 'console_tabs') scheduleRender();
+          else {
+            const popup = document.getElementById('station-damage-popup');
+            if (popup && !popup.hidden && typeof window.renderStationDamagePopup === 'function') {
+              window.renderStationDamagePopup(document, stationDamagePopupState());
+            }
+          }
+        },
+      });
+
       if (window.OperatorProfile && semanticActionRegistry) {
         updateNativeProfileStatus();
         const loadedProfile = window.OperatorProfile.loadOperatorProfile(
@@ -4709,7 +4467,7 @@
         if (window.__privateAlerts) window.PrivateAlerts.attachPrivateAlertLifecycle(window.__privateAlerts, window);
         window.__privateActionFeedback = window.PrivateAudio.privateFeedbackReceiver({
           getAudio: () => privateAudio,
-          currentSource: () => activeConsole && $(consoleIframeId(activeConsole))?.contentWindow,
+          currentSource: () => activeConsole && consoleMounts?.frame(activeConsole)?.contentWindow,
         });
         window.PrivateAudio.attachPrivateAudioLifecycle(privateAudio, window);
       }
@@ -4746,9 +4504,9 @@
                 ? window.CompositeActionRouting.iframeForSemanticContext(
                     context,
                     activeIframe,
-                    (value) => $(consoleIframeId(value)),
+                    (value) => consoleMounts?.frame(value),
                   )
-                : context ? $(consoleIframeId(context)) : activeIframe;
+                : context ? consoleMounts?.frame(context) : activeIframe;
               try {
                 const activate = iframe && iframe.contentWindow
                   && iframe.contentWindow.activateSemanticAction;
@@ -4806,7 +4564,7 @@
             window.phLocale?.select?.(locale);
             scheduleRender();
             for (const station of uiState.shipStations?.stations || []) {
-              pushConsoleStateFor(station.id, pushCause().RENDER);
+              consoleMounts?.refresh(station.id, pushCause().RENDER);
             }
             settingsPanel?.rebuildContent?.();
             if (settingsOverlay) settingsOverlay.scrollTop = scrollTop;
@@ -4928,7 +4686,7 @@
 
       // Apply the private Accessibility profile to the shell at boot (issue
       // #1102). Console iframes are (re)covered as they mount and on every
-      // iframe load — see mountConsoles / _attachIframeLoadListener.
+      // iframe load by the parent Console lifetime.
       if (typeof window.applyAccessibilityProfile === 'function') {
         window.applyAccessibilityProfile();
       }

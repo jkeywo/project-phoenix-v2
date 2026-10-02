@@ -2,8 +2,8 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
-sources: [gui/stations/action-support.js, gui/gamepad-presentation.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/panes/operator.rs, src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gm-action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/viewscreen-presentation.js, gui/viewscreen-presentation-panel.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-10-01
+sources: [gui/console-mount.js, gui/stations/action-support.js, gui/gamepad-presentation.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/panes/operator.rs, src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gm-action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/viewscreen-presentation.js, gui/viewscreen-presentation-panel.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+updated: 2026-10-02
 ---
 
 ## Summary
@@ -26,12 +26,13 @@ DataChannel message (JSON, reliable or lossy)
   → gui/sim-state.js apply(msg)           # folds simulation state and reports semantic changes
   → gui/comms-state.js apply(msg)         # folds Comms state and reports semantic changes
   → gui/reducer-result.js mergeReducerResults(...results)  # sets + ordered effects
-  → gui/dirty-consoles.js dirtyConsolesFor(changes, stationSystems,
+  → gui/console-mount.js publishChanges(changes)
+    → gui/dirty-consoles.js dirtyConsolesFor(changes, stationSystems,
                                                systemConsoleFamilies,
                                                blackboardConsoleFamilies)
                                                        # which consoles changed
   → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
-  → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
+    → gui/iframe-bridge.js push()         # __updateConsole(name, json) into the iframe
   → gui/client-router.js routeReducerResult(changes)       # lobby mirror + render guards
   → client.html applySideEffect(effect)   # executes ordered presentation effects
 ```
@@ -40,6 +41,24 @@ DataChannel message (JSON, reliable or lossy)
 reducers interpret each inbound message, `dirty-consoles.js` narrows iframe
 publication to the affected consoles, and `client-router.js` consumes only the
 merged reducer result.
+
+`createConsoleMounts` in `gui/console-mount.js` owns the parent-side Console
+lifetime: mounted Station identity, load listeners, snapshot publication,
+bindings/feedback propagation, and the overlay/hull declarations the shell
+renders. Each load installs locale, pushes the current snapshot with an
+`IFRAME_LOAD` cause, clears that Station's overlay selection, reapplies
+accessibility, then restores bindings and feedback before refreshing gamepad
+presentation. Live readers supply current state and preferences. Host-origin
+publication retains the active-Station and always-push-family policy; local
+refreshes keep their non-acknowledging causes. Welcome still publishes dirty
+state before its remount effect.
+
+Replacing a mount detaches its listener and invalidates queued callbacks, so an
+old document cannot update or clear an overlay on its replacement. Explicit
+disposal removes only owned Console sections. Declaration caches retain their
+last report until replaced; shared-document Stations resolve by sending frame,
+with the existing claimed-name fallback for non-frame paths. The GM Station
+puppet retains its separate lifetime and presentation policy.
 
 `systemConsoleFamilies` is the host-projected presentation classification for
 actual System instance ids. `blackboardConsoleFamilies` separately classifies
@@ -283,7 +302,7 @@ host-assigned native screens retain their console tabs without release controls.
 | `gm-role-presets.js` | Live-switchable scenario-authored personal presets with All fallback and private identity persistence; current map/inspector/activity and Pause/Resume visibility filtering changes no action authority |
 | `gm-activity-feed.js` | Strict raw local Host Channel DTO for the bounded Damage, Destruction, Objective, Trigger, Red Alert, Connection, and GM Action history; one repeat-preserving `{tick, category, ships, links, detail}` reduction whose fixed facts retain their pre-advance tick and whose PostUpdate operational sources retain the producing tick; strict category + semantic-ship AND filtering with global rows only under All ships, render-site localisation, and availability-checked links into the GM map's stable UUID selection |
 | `semantic-action-registry.js`, `semantic-controls-remapper.js`, `gamepad-input.js`, `client-semantic-actions.js`, `composite-action-routing.js`, `stations/{captain,helm,tactical,comms,sensors,navigation,engineering}-actions.js`, `host-actions.js`, `gm-session-actions.js`, `gm-session-controls.js`, `server-settings.js`, `operator-profile.js` | Non-authoritative context/input identity, exactly two keyboard-or-standard-gamepad slots, continuous metadata and axis tuning, the shared keyboard capture/conflict/reset presenter used by phone and host/GM Settings, explicit selected-standard-gamepad ownership with neutral-gated discrete edges and continuous values, composite-family subcontext routing back to the owning Station iframe, atomic validation plus private browser persistence/export/import, reserved-chord policy, overlap-only conflict replacement and reset operations, plus the real Captain, Helm, Tactical, Comms, Sensors/Science, Navigation, Engineering/Power/Repair, host QR, and attributed GM Pause/Resume adapters above `action-map.js` |
-| `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
+| `console-mount.js`, `iframe-bridge.js` | Parent Console lifetime and its guarded state/overlay calls into iframe documents; the shell supplies live readers and presentation adapters |
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure reducer-result driver: mirrors accepted LobbyState, applies local render/bezel guards, and emits the ordered named side-effect plan without receiving a ServerMessage; Coordination effects carry the authoritative address through to presentation |

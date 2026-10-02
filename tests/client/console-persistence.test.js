@@ -11,8 +11,7 @@ import { mountConsoles, applyConsoleVisibility } from '../../gui/console-mount.j
 // an activeConsole switch away and back untouched.
 //
 // This drives the REAL production seams from gui/console-mount.js — the same
-// functions client.html calls (window.mountConsolesDom /
-// window.applyConsoleVisibility) — so node identity and local-state survival
+// functions the parent Console lifetime calls — so node identity and local-state survival
 // are asserted of production code, not of a copy. If a regression made the
 // mount rebuild iframe nodes, or made the toggle re-parent/re-create them, the
 // node-identity assertions below would fail. The "Welcome-only remount" half is

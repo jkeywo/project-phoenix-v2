@@ -1956,11 +1956,9 @@ describe('semantic controls tab', () => {
       binding && binding.code)).toEqual(['KeyV', null]);
   });
 
-  it('wires the parent-owned profile to the explicit iframe update seam', () => {
-    expect(CLIENT_HTML).toContain('createClientSemanticActionRegistry');
-    expect(CLIENT_HTML).toContain('__updateSemanticActionBindings');
-    expect(CLIENT_HTML).toContain('pushSemanticBindingsToIframe');
-  });
+  // Binding propagation into mounted realms is exercised by
+  // console-mount-lifecycle.test.js through refreshBindings().
+
 });
 
 describe('accessibility tab', () => {

@@ -226,26 +226,6 @@ describe('the shell owns the damage popup the footers used to', () => {
     expect(setActive[0]).toMatch(/dismissStationDamagePopup\(\)/);
   });
 
-  it('keys the rows and the tabs by the SENDING FRAME, not by the claimed name', () => {
-    // A console document says its own name and nothing else, and that name is
-    // not a Station (see the cruiser case pinned below). Reading
-    // `event.data.console` straight into the stores is the regression: it
-    // collapses two seats sharing a document into one slot.
-    const listener = CLIENT_HTML.match(
-      /window\.addEventListener\('message', \(event\) => \{[\s\S]*?\n      if \(event\.data\.type !== 'console_action'\) return;/,
-    );
-    expect(listener, 'no message listener').not.toBeNull();
-    for (const type of ['console_tabs', 'console_hull']) {
-      const branch = listener[0].match(
-        new RegExp(`if \\(event\\.data\\.type === '${type}'\\) \\{\\n([\\s\\S]*?)\\n        return;`),
-      );
-      expect(branch, `no ${type} branch`).not.toBeNull();
-      expect(branch[1], `${type} keyed by the claim`)
-        .not.toMatch(/const name = event\.data\.console/);
-      expect(branch[1], `${type} does not resolve its sender`)
-        .toMatch(/const name = senderStationId\(event\);/);
-    }
-  });
 });
 
 describe('two Stations sharing one console document (issue #1374)', () => {

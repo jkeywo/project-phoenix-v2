@@ -1,6 +1,167 @@
 use super::*;
 
 #[test]
+fn grant_result_metadata_exact_characterization() {
+    use crate::command_admission::log::ShipKey;
+    use crate::core::messages::{StationId, SystemId};
+    use crate::gm_objective::{ObjectiveInstanceScope, ObjectiveVerb};
+    let actions = vec![
+        GmAction::SetSessionPaused { active: false },
+        GmAction::ArmGmEventSkip {
+            event: "base::event".into(),
+        },
+        GmAction::ApplyDirectEffect {
+            target: "target".into(),
+            scope: crate::gm_effect::GmDirectEffectScope::Station(StationId("helm".into())),
+            effect: crate::gm_effect::GmDirectEffectKind::Damage,
+            amount_milli_hp: 1000,
+        },
+        GmAction::ObjectiveAction {
+            objective: "objective".into(),
+            verb: ObjectiveVerb::Activate,
+            recipients: vec!["ship-a".into(), "ship-b".into()],
+        },
+        GmAction::ObjectiveInstanceAction {
+            objective: "objective".into(),
+            scope: ObjectiveInstanceScope::All,
+            verb: ObjectiveVerb::Complete,
+        },
+        GmAction::SetContactClassification {
+            ship: ShipKey("observer".into()),
+            target: "target".into(),
+            palette: Some("pirate".into()),
+        },
+        GmAction::SetNpcDoctrineChecked {
+            target: "target".into(),
+            doctrine: "patrol".into(),
+            expected_revision: "0123456789abcdef".into(),
+        },
+        GmAction::SetSystemDisabled {
+            target: "target".into(),
+            system: SystemId("reactor".into()),
+            disabled: true,
+        },
+        GmAction::TransmitComms {
+            transmission: crate::gm_comms::GmCommsTransmission {
+                sender: "sender".into(),
+                route: "route".into(),
+                recipients: vec![ShipKey("ship-a".into()), ShipKey("ship-b".into())],
+                content: crate::gm_comms::GmCommsContent::Literal {
+                    text: "hello".into(),
+                },
+            },
+        },
+        GmAction::UndoGmAction {
+            original: GmActionId::new("original").unwrap(),
+            original_operator: "gm-2".into(),
+            original_sequence: 1,
+            expected: GmAffectedField::FactionHostility {
+                faction: "a".into(),
+                enemy: "b".into(),
+                before: false,
+                after: true,
+            },
+        },
+    ];
+    let count = actions.len();
+    let mut journal = GmActionJournal::default();
+    for (index, action) in actions.into_iter().enumerate() {
+        journal
+            .insert(station_grant(
+                index as u64 + 1,
+                12,
+                &format!("metadata-{index}"),
+                action,
+            ))
+            .unwrap();
+    }
+    let entries = journal.derived_log_prefix(count).entries;
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/gm-grant-results.json")).unwrap();
+    assert_eq!(serde_json::to_value(entries).unwrap(), expected);
+}
+
+#[test]
+fn missing_puppet_resource_keeps_both_canonical_refusal_reasons() {
+    for (active, reason) in [
+        (true, GmActionRefusalReason::UnknownStation),
+        (false, GmActionRefusalReason::StationNotPuppeted),
+    ] {
+        let row = station_grant(
+            1,
+            12,
+            "missing-puppets",
+            GmAction::SetStationPuppet {
+                ship: crate::command_admission::log::ShipKey("player-1".into()),
+                station: crate::core::messages::StationId("helm".into()),
+                active,
+            },
+        );
+        let mut app = station_apply_app(12, Default::default(), Default::default(), [row.clone()]);
+        app.world_mut()
+            .remove_resource::<crate::gm_puppet::StationPuppets>();
+        app.update();
+        let mut expected = LoggedGmAction::refused_request(
+            &GmActionRequest {
+                operator_id: row.operator_id,
+                correlation: row.correlation,
+                action: row.action,
+            },
+            12,
+            reason,
+        );
+        expected.order = Some(row.order);
+        assert_eq!(
+            app.world().resource::<GmActionJournal>().applied_results(),
+            [expected]
+        );
+    }
+}
+
+#[test]
+fn missing_station_command_ship_records_refusal_before_the_next_grant() {
+    let ship = crate::command_admission::log::ShipKey("missing".into());
+    let station = crate::core::messages::StationId("helm".into());
+    let mut puppets = crate::gm_puppet::StationPuppets::default();
+    puppets.set_operator(
+        crate::gm_puppet::StationPuppetTarget::new(ship.clone(), station.clone()),
+        "gm-1".into(),
+        true,
+    );
+    let row = station_grant(
+        1,
+        12,
+        "missing-ship",
+        GmAction::IssueStationCommand {
+            ship,
+            station,
+            target: crate::core::messages::SystemId("helm-thrust".into()),
+            payload: crate::core::codec::canonical_system_command(
+                &crate::core::messages::SystemControlPayload::SetThrust { value: 0.5 },
+            )
+            .unwrap(),
+        },
+    );
+    let next = grant(1, 2, 12, "following-pause", true);
+    let mut app = station_apply_app(12, Default::default(), puppets, [row.clone(), next]);
+    app.update();
+    let mut expected = LoggedGmAction::refused_request(
+        &GmActionRequest {
+            operator_id: row.operator_id,
+            correlation: row.correlation,
+            action: row.action,
+        },
+        12,
+        GmActionRefusalReason::UnknownStation,
+    );
+    expected.order = Some(row.order);
+    let entries = app.world().resource::<GmActionJournal>().applied_results();
+    assert_eq!(entries[0], expected);
+    assert_eq!(entries[1].correlation.as_str(), "following-pause");
+    assert_eq!(entries[1].outcome, GmActionOutcome::Applied);
+}
+
+#[test]
 fn both_journal_policies_fold_every_latch_and_live_restore() {
     for initially_paused in [false, true] {
         let mut journal = GmActionJournal::default();

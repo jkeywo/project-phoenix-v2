@@ -81,4 +81,4 @@ Current implementation orientation only. For intended design use
 - [Native Lighting Lab](./concepts/native-lighting-lab.md)
 - [LOD Generation](./concepts/lod-generation.md)
 
-- [Shared Behaviour Modules](./concepts/shared-behaviour.md) — shared lifecycle, policy and optional digest traversal implementations
+- [Shared Behaviour Modules](./concepts/shared-behaviour.md) — shared lifecycle, policy, optional digest traversal and GM result construction implementations

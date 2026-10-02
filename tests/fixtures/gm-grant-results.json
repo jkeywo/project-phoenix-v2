@@ -1,0 +1,156 @@
+[
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-0",
+    "action_kind": "session-pause",
+    "requested_active": false,
+    "outcome": "no-op",
+    "tick": 12,
+    "order": {
+      "sequence": 1,
+      "origin": 1
+    }
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-1",
+    "action_kind": "event-control",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 2,
+      "origin": 1
+    },
+    "target": "base::event",
+    "lever": "skip-next"
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-2",
+    "action_kind": "direct-effect",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 3,
+      "origin": 1
+    },
+    "target": "target",
+    "effect_scope": {
+      "station": "helm"
+    }
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-3",
+    "action_kind": "objective-control",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 4,
+      "origin": 1
+    },
+    "target": "objective",
+    "objective_verb": "activate",
+    "objective_recipients": [
+      "ship-a",
+      "ship-b"
+    ]
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-4",
+    "action_kind": "objective-control",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 5,
+      "origin": 1
+    },
+    "target": "objective",
+    "objective_verb": "complete",
+    "objective_recipients": [],
+    "objective_instance_scope": "all"
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-5",
+    "action_kind": "contact-misclassify",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 6,
+      "origin": 1
+    },
+    "target": "target",
+    "observer": "observer"
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-6",
+    "action_kind": "npc-doctrine",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 7,
+      "origin": 1
+    },
+    "target": "target",
+    "npc_doctrine": "patrol"
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-7",
+    "action_kind": "system-disable",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 8,
+      "origin": 1
+    },
+    "target": "target",
+    "effect_scope": {
+      "system": "reactor"
+    }
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-8",
+    "action_kind": "comms",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 9,
+      "origin": 1
+    },
+    "target": "sender",
+    "comms_recipients": [
+      "ship-a",
+      "ship-b"
+    ]
+  },
+  {
+    "operator_id": "gm-1",
+    "correlation": "metadata-9",
+    "action_kind": "action-undo",
+    "requested_active": true,
+    "outcome": "applied",
+    "tick": 12,
+    "order": {
+      "sequence": 10,
+      "origin": 1
+    },
+    "undo_of": {
+      "operator_id": "gm-2",
+      "correlation": "original",
+      "sequence": 1
+    }
+  }
+]

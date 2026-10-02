@@ -1778,6 +1778,37 @@ pub struct LoggedGmAction {
 }
 
 impl LoggedGmAction {
+    /// Build grant metadata; measured application facts are attached by the caller.
+    fn from_grant(
+        grant: &GmActionGrant,
+        outcome: GmActionOutcome,
+        reason: Option<GmActionRefusalReason>,
+    ) -> Self {
+        Self {
+            operator_id: grant.operator_id.clone(),
+            correlation: grant.correlation.clone(),
+            action_kind: grant.action.kind(),
+            requested_active: grant.action.requested_active(),
+            outcome,
+            tick: grant.apply_tick,
+            reason,
+            order: Some(grant.order),
+            target: grant.action.target_id().map(str::to_string),
+            effect: None,
+            verb: grant.action.verb(),
+            lever: grant.action.event_lever(),
+            effect_scope: grant.action.effect_scope(),
+            objective_verb: grant.action.objective_verb(),
+            objective_instance_scope: grant.action.objective_instance_scope(),
+            objective_recipients: grant.action.objective_recipients(),
+            comms_recipients: grant.action.comms_recipients(),
+            observer: grant.action.observer_id(),
+            npc_doctrine: grant.action.npc_doctrine(),
+            affected: None,
+            undo_of: grant.action.undo_reference(),
+        }
+    }
+
     pub fn refused(
         operator_id: String,
         correlation: GmActionId,
@@ -2496,7 +2527,6 @@ impl GmActionJournal {
         let mut armed_skips = std::collections::BTreeSet::new();
         let mut entries = Vec::new();
         for (index, grant) in self.grants.iter().take(end).enumerate() {
-            let requested_active = grant.action.requested_active();
             if let Some(result) = self
                 .applied_results
                 .get(index)
@@ -2650,33 +2680,7 @@ impl GmActionJournal {
                     GmActionOutcome::Applied
                 }
             };
-            entries.push(LoggedGmAction {
-                operator_id: grant.operator_id.clone(),
-                correlation: grant.correlation.clone(),
-                action_kind: grant.action.kind(),
-                requested_active,
-                outcome,
-                tick: grant.apply_tick,
-                reason: None,
-                order: Some(grant.order),
-                target: grant.action.target_id().map(str::to_string),
-                effect: None,
-                verb: grant.action.verb(),
-                lever: grant.action.event_lever(),
-                effect_scope: grant.action.effect_scope(),
-                objective_verb: grant.action.objective_verb(),
-                objective_instance_scope: grant.action.objective_instance_scope(),
-                objective_recipients: grant.action.objective_recipients(),
-                comms_recipients: grant.action.comms_recipients(),
-                observer: grant.action.observer_id(),
-                npc_doctrine: grant.action.npc_doctrine(),
-                // The affected before/after pair is measured against the LIVE
-                // world at the apply tick, which this fixture reducer has none
-                // of. Guessing one would put a fabricated fact under an inverse
-                // that revalidates against it, so it stays absent.
-                affected: None,
-                undo_of: grant.action.undo_reference(),
-            });
+            entries.push(LoggedGmAction::from_grant(grant, outcome, None));
         }
         GmActionLog { entries, paused }
     }
@@ -3246,7 +3250,6 @@ pub fn apply_due_actions(
     let now = tick.as_deref().map_or(0, |tick| tick.0);
     let due = journal.pending_through(now).to_vec();
     for grant in due {
-        let requested_active = grant.action.requested_active();
         // Only the directed world-effect family fills this in; every other
         // family's durable fact keeps its exact pre-#1310 shape.
         let mut resolved_effect: Option<crate::gm_effect::GmDirectEffectResult> = None;
@@ -4056,29 +4059,11 @@ pub fn apply_due_actions(
                 // operator gets an answer under their own correlation.
                 let Some(content) = content.as_deref_mut() else {
                     journal
-                        .record_applied_result(LoggedGmAction {
-                            operator_id: grant.operator_id.clone(),
-                            correlation: grant.correlation.clone(),
-                            action_kind: grant.action.kind(),
-                            requested_active,
-                            outcome: GmActionOutcome::Refused,
-                            tick: grant.apply_tick,
-                            reason: Some(GmActionRefusalReason::WorldUnavailable),
-                            order: Some(grant.order),
-                            target: grant.action.target_id().map(str::to_string),
-                            effect: None,
-                            verb: grant.action.verb(),
-                            lever: grant.action.event_lever(),
-                            effect_scope: None,
-                            objective_verb: None,
-                            objective_instance_scope: None,
-                            objective_recipients: None,
-                            comms_recipients: None,
-                            observer: None,
-                            npc_doctrine: None,
-                            affected: None,
-                            undo_of: None,
-                        })
+                        .record_applied_result(LoggedGmAction::from_grant(
+                            &grant,
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::WorldUnavailable),
+                        ))
                         .expect("live GM result matches its canonical grant");
                     continue;
                 };
@@ -4323,29 +4308,8 @@ pub fn apply_due_actions(
                     } else {
                         GmActionRefusalReason::StationNotPuppeted
                     };
-                    let result = LoggedGmAction {
-                        operator_id: grant.operator_id.clone(),
-                        correlation: grant.correlation.clone(),
-                        action_kind: grant.action.kind(),
-                        requested_active,
-                        outcome: GmActionOutcome::Refused,
-                        tick: grant.apply_tick,
-                        reason: Some(reason),
-                        order: Some(grant.order),
-                        target: grant.action.target_id().map(str::to_string),
-                        effect: None,
-                        verb: grant.action.verb(),
-                        lever: grant.action.event_lever(),
-                        effect_scope: None,
-                        objective_verb: None,
-                        objective_instance_scope: None,
-                        objective_recipients: None,
-                        comms_recipients: None,
-                        observer: None,
-                        npc_doctrine: None,
-                        affected: None,
-                        undo_of: None,
-                    };
+                    let result =
+                        LoggedGmAction::from_grant(&grant, GmActionOutcome::Refused, Some(reason));
                     journal
                         .record_applied_result(result)
                         .expect("live GM result matches its canonical grant");
@@ -4411,29 +4375,11 @@ pub fn apply_due_actions(
                     let Some((_, config, _, sources, hosts)) =
                         ships.iter().find(|(uuid, ..)| uuid.0 == ship.0)
                     else {
-                        let result = LoggedGmAction {
-                            operator_id: grant.operator_id.clone(),
-                            correlation: grant.correlation.clone(),
-                            action_kind: grant.action.kind(),
-                            requested_active,
-                            outcome: GmActionOutcome::Refused,
-                            tick: grant.apply_tick,
-                            reason: Some(GmActionRefusalReason::UnknownStation),
-                            order: Some(grant.order),
-                            target: grant.action.target_id().map(str::to_string),
-                            effect: None,
-                            verb: grant.action.verb(),
-                            lever: grant.action.event_lever(),
-                            effect_scope: None,
-                            objective_verb: None,
-                            objective_instance_scope: None,
-                            objective_recipients: None,
-                            comms_recipients: None,
-                            observer: None,
-                            npc_doctrine: None,
-                            affected: None,
-                            undo_of: None,
-                        };
+                        let result = LoggedGmAction::from_grant(
+                            &grant,
+                            GmActionOutcome::Refused,
+                            Some(GmActionRefusalReason::UnknownStation),
+                        );
                         journal
                             .record_applied_result(result)
                             .expect("live GM result matches its canonical grant");
@@ -4509,29 +4455,11 @@ pub fn apply_due_actions(
             }
         };
         journal
-            .record_applied_result(LoggedGmAction {
-                operator_id: grant.operator_id,
-                correlation: grant.correlation,
-                action_kind: grant.action.kind(),
-                requested_active,
-                outcome,
-                tick: grant.apply_tick,
-                reason,
-                order: Some(grant.order),
-                target: grant.action.target_id().map(str::to_string),
-                effect: resolved_effect,
-                verb: grant.action.verb(),
-                lever: grant.action.event_lever(),
-                effect_scope: requested_scope,
-                objective_verb: grant.action.objective_verb(),
-                objective_instance_scope: grant.action.objective_instance_scope(),
-                objective_recipients: grant.action.objective_recipients(),
-                comms_recipients: grant.action.comms_recipients(),
-                observer: grant.action.observer_id(),
-                npc_doctrine: grant.action.npc_doctrine(),
-                affected,
-                undo_of: grant.action.undo_reference(),
-            })
+            .record_applied_result(
+                LoggedGmAction::from_grant(&grant, outcome, reason)
+                    .with_effect(resolved_effect, requested_scope)
+                    .with_affected(affected),
+            )
             .expect("live GM result matches its canonical grant");
     }
     *log = journal.applied_log();

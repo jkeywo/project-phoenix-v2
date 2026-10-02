@@ -27,3 +27,5 @@ Contextual Station controls share light-DOM mounting, synchronous authoritative 
 Workshop Definitions, Composition and Entity share read freshness and unapplied-form retention in workshop-edit-session. Forms are captured after a validated current answer arrives, then restored after rebuilding only when selection identity and exact source match. Typed catalogs, runtime edits, Test holds and focus remain panel-owned.
 
 Client and host Settings share device selectors and accessible gamepad status through settings-gamepad-presentation. Explicit policies preserve assignment and capability-loss choices on the client and the host's simpler status policy. Polling refreshes existing controls; input ownership and panel rebuild timing stay with the adapters. Helm touch visibility remains in gamepad-presentation.
+
+Workshop Authoring layout generations derive vocabulary, migration placement and defaults from ordered introduction records. Vocabulary order remains distinct from migration order. Browser and native histories remain independent and retain their existing supported versions.

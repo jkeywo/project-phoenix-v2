@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import generations from './workshop-layout-generations.json';
 import {
   closeWorkshopPanel, defaultWorkshopLayout, dockWorkshopPanel, floatWorkshopPanel,
   moveWorkshopFloat, normalizeWorkshopLayout, reopenWorkshopPanel, workshopLayoutModel,
@@ -7,6 +8,12 @@ import {
 const panels = state => JSON.stringify(state.root) + JSON.stringify(state.floats);
 
 describe('Workshop layout model', () => {
+  it('preserves characterized generation defaults and migration outputs', () => {
+    expect(defaultWorkshopLayout()).toEqual(generations.default);
+    for (const { value, expected } of generations.cases) {
+      expect(normalizeWorkshopLayout(value), JSON.stringify(value)).toEqual(expected);
+    }
+  });
   it('tabs, splits, floats, moves, closes, reopens and resets all panels', () => {
     let state = defaultWorkshopLayout();
     state = dockWorkshopPanel(state, 'inspector', 'source', 'tab');

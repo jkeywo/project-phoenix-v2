@@ -238,212 +238,48 @@ fn fields(value: &Value, names: &[&str]) -> Value {
 /// `gui/workshop-layout-model.js`. A tree is sanitized against the vocabulary
 /// its own version had, so a panel registered later can never be read back out
 /// of an older profile: it only ever enters through migration.
-const WORKSHOP_PANELS_V2: &[&str] = &["files", "source", "inspector", "add", "recovery"];
-const WORKSHOP_PANELS_V3: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-];
-const WORKSHOP_PANELS_V4: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-];
-const WORKSHOP_PANELS_V5: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-];
-const WORKSHOP_PANELS_V6: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-    "definitions",
-];
-const WORKSHOP_PANELS_V7: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-    "definitions",
-    "composition",
-];
-const WORKSHOP_PANELS_V8: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-    "definitions",
-    "composition",
-    "entity",
-];
-const WORKSHOP_PANELS_V9: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-    "definitions",
-    "composition",
-    "entity",
-    "presets",
-];
-const WORKSHOP_PANELS_V10: &[&str] = &[
-    "files",
-    "source",
-    "inspector",
-    "add",
-    "recovery",
-    "findings",
-    "feedback",
-    "dependencies",
-    "settings",
-    "models",
-    "model-preview",
-    "sound",
-    "changes",
-    "definitions",
-    "composition",
-    "entity",
-    "presets",
-    "scripts",
+// Vocabulary order is record order; migration order is deliberately separate.
+// id, introduction version, migration order, preferred target, default column.
+const WORKSHOP_INTRODUCTIONS: &[(&str, u64, usize, &str, usize)] = &[
+    ("files", 2, 0, "", 0),
+    ("source", 2, 0, "", 1),
+    ("inspector", 2, 0, "", 2),
+    ("add", 2, 0, "", 2),
+    ("recovery", 2, 0, "", 2),
+    ("findings", 3, 1, "source", 1),
+    ("feedback", 3, 2, "source", 1),
+    ("dependencies", 3, 0, "files", 0),
+    ("settings", 3, 3, "inspector", 2),
+    ("models", 4, 4, "inspector", 2),
+    ("model-preview", 4, 5, "source", 1),
+    ("sound", 4, 6, "inspector", 2),
+    ("changes", 5, 7, "files", 0),
+    ("definitions", 6, 8, "inspector", 2),
+    ("composition", 7, 9, "files", 0),
+    ("entity", 8, 10, "inspector", 2),
+    ("presets", 9, 11, "files", 0),
+    ("scripts", 10, 12, "source", 1),
 ];
 const WORKSHOP_TEST_PANELS: &[&str] = &["test-controls", "test-viewscreen", "test-trace"];
-/// Panels registered after a stored version, with the group each joins on migration.
-const WORKSHOP_ADDED_IN_V3: &[(&str, &str)] = &[
-    ("dependencies", "files"),
-    ("findings", "source"),
-    ("feedback", "source"),
-    ("settings", "inspector"),
-];
-const WORKSHOP_ADDED_IN_V4: &[(&str, &str)] = &[
-    ("models", "inspector"),
-    ("model-preview", "source"),
-    ("sound", "inspector"),
-];
-/// Panels registered after version 4. The workspace changes view reads the same
-/// draft the file list does, so it joins that column.
-const WORKSHOP_ADDED_IN_V5: &[(&str, &str)] = &[("changes", "files")];
-/// Panels registered after version 5. Faction and complexity definitions are a
-/// specialised form over the same runtime the inspector reads, so it joins the
-/// inspector's column beside the model form (issue #1474).
-const WORKSHOP_ADDED_IN_V6: &[(&str, &str)] = &[("definitions", "inspector")];
-/// Panels registered after version 6. World composition reads the draft's
-/// member set the way the changes view does, so it joins that column beside
-/// it (issue #1475).
-const WORKSHOP_ADDED_IN_V7: &[(&str, &str)] = &[("composition", "files")];
-/// Panels registered after version 7. Entity template and fragment composition
-/// is a specialised form over the same runtime the inspector reads, so it joins
-/// the inspector's column beside the definition forms (issue #1476).
-const WORKSHOP_ADDED_IN_V8: &[(&str, &str)] = &[("entity", "inspector")];
-/// Panels registered after version 8. GM role presets and typed mission widgets
-/// are authored in a WORLD member, the same document family the composition form
-/// edits, so the form joins that column beside it (issue #1477).
-const WORKSHOP_ADDED_IN_V9: &[(&str, &str)] = &[("presets", "files")];
-const WORKSHOP_ADDED_IN_V10: &[(&str, &str)] = &[("scripts", "source")];
 
-fn workshop_panels_for(version: u64) -> &'static [&'static str] {
-    match version {
-        1 | 2 => WORKSHOP_PANELS_V2,
-        3 => WORKSHOP_PANELS_V3,
-        4 => WORKSHOP_PANELS_V4,
-        5 => WORKSHOP_PANELS_V5,
-        6 => WORKSHOP_PANELS_V6,
-        7 => WORKSHOP_PANELS_V7,
-        8 => WORKSHOP_PANELS_V8,
-        9 => WORKSHOP_PANELS_V9,
-        _ => WORKSHOP_PANELS_V10,
-    }
+fn workshop_panels_for(version: u64) -> Vec<&'static str> {
+    WORKSHOP_INTRODUCTIONS
+        .iter()
+        .filter(|(_, introduced, _, _, _)| *introduced <= version.clamp(2, 10))
+        .map(|(panel, _, _, _, _)| *panel)
+        .collect()
 }
 
 fn workshop_panels_added_after(version: u64) -> Vec<(&'static str, &'static str)> {
-    let mut added = Vec::new();
-    if version < 3 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V3);
-    }
-    if version < 4 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V4);
-    }
-    if version < 5 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V5);
-    }
-    if version < 6 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V6);
-    }
-    if version < 7 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V7);
-    }
-    if version < 8 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V8);
-    }
-    if version < 9 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V9);
-    }
-    if version < 10 {
-        added.extend_from_slice(WORKSHOP_ADDED_IN_V10);
-    }
-    added
+    let mut records: Vec<_> = WORKSHOP_INTRODUCTIONS
+        .iter()
+        .filter(|(_, introduced, _, _, _)| *introduced > version.max(2))
+        .collect();
+    records.sort_by_key(|(_, _, order, _, _)| *order);
+    records
+        .into_iter()
+        .map(|(panel, _, _, target, _)| (*panel, *target))
+        .collect()
 }
 
 fn known_panel(value: &Value, allowed: &[&str]) -> bool {
@@ -608,15 +444,20 @@ fn sanitize_placement_node(
 }
 
 fn default_authoring_layout() -> Value {
-    json!({
-        "version": 10,
-        "root": {"type":"split", "axis":"horizontal", "sizes":[22,56,22], "children":[
-            {"type":"tabs", "tabs":["files","dependencies","changes","composition","presets"], "active":"files"},
-            {"type":"tabs", "tabs":["source","findings","feedback","model-preview","scripts"], "active":"source"},
-            {"type":"tabs", "tabs":["inspector","add","recovery","settings","models","sound","definitions","entity"], "active":"inspector"}
-        ]},
-        "floats": [], "closed": [], "selected": "source"
-    })
+    let children: Vec<_> = ["files", "source", "inspector"]
+        .into_iter()
+        .enumerate()
+        .map(|(column, active)| {
+            let tabs: Vec<_> = WORKSHOP_INTRODUCTIONS
+                .iter()
+                .filter(|(_, _, _, _, home)| *home == column)
+                .map(|(panel, _, _, _, _)| *panel)
+                .collect();
+            json!({"type":"tabs", "tabs":tabs, "active":active})
+        })
+        .collect();
+    json!({"version":10, "root":{"type":"split", "axis":"horizontal",
+        "sizes":[22,56,22], "children":children}, "floats":[], "closed":[], "selected":"source"})
 }
 
 fn default_test_layout() -> Value {
@@ -887,7 +728,7 @@ fn sanitize_authoring_layout(value: &Value) -> Option<Value> {
     let stored = value["version"].as_u64().filter(|v| (1..=10).contains(v))?;
     let allowed = workshop_panels_for(stored);
     let added = workshop_panels_added_after(stored);
-    let mut layout = match sanitize_placement(value, allowed, &[], "files") {
+    let mut layout = match sanitize_placement(value, &allowed, &[], "files") {
         Ok(layout) => layout,
         Err(PlacementError::Invalid) => return None,
         Err(PlacementError::Reset) => return Some(default_authoring_layout()),
@@ -1384,6 +1225,44 @@ fn sanitize_profile(text: &str) -> Result<String, String> {
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // Random UUIDs isolate host-local temporary test directories.
 mod tests {
+    #[test]
+    fn authoring_generations_keep_vocabulary_and_migration_orders_distinct() {
+        assert_eq!(workshop_panels_for(1), workshop_panels_for(2));
+        assert_eq!(
+            workshop_panels_for(3),
+            [
+                "files",
+                "source",
+                "inspector",
+                "add",
+                "recovery",
+                "findings",
+                "feedback",
+                "dependencies",
+                "settings"
+            ]
+        );
+        assert_eq!(
+            &workshop_panels_added_after(2)[..4],
+            &[
+                ("dependencies", "files"),
+                ("findings", "source"),
+                ("feedback", "source"),
+                ("settings", "inspector")
+            ]
+        );
+        for version in 2..=10 {
+            let vocabulary = workshop_panels_for(version);
+            let added = workshop_panels_added_after(version);
+            assert!(added.iter().all(|(panel, _)| !vocabulary.contains(panel)));
+            assert_eq!(
+                vocabulary.len() + added.len(),
+                workshop_panels_for(10).len()
+            );
+        }
+        assert!(workshop_panels_added_after(10).is_empty());
+        assert!(!workshop_panels_for(10).contains(&"localisation"));
+    }
     use super::*;
     struct Scratch(PathBuf);
     impl Scratch {

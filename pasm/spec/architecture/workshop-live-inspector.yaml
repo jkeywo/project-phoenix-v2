@@ -29,7 +29,7 @@ entities:
     implementation:
       status: declared
       paths: [gui/dock-layout-model.js, gui/dock-layout-migration.js, gui/gm-temporary-actions.js, gui/gm-spawn-panel.js, gui/components/ph-navigation-map.js, gui/gm-station-puppet.js, gui/gm-presentation-panel.js, gui/workshop-source-link.js, scripts/generate-live-layout-fixture.mjs, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-definitions-panel.js, gui/workshop-scripts-panel.js, editor/workshop-scripts.js, editor/workshop-sound-cues.js, gui/workshop-layout-model.js, gui/live-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-authoring.js, gui/gm-workspace-shell.js, gui/operator-profile.js, src/native_host/panes/operator.rs, src/workshop/provider.rs, editor/workshop-provider.js]
-      symbols: [sanitize_placement, sanitize_placement_node, createDockLayoutModel, PANEL_KIND, createTemporaryActions, createDockLayoutMigration, workshop_panels_for, live_panels_for, workshopLayoutModel, liveLayoutModel, mountDockLayout, mountWorkshopAuthoring, mountGmWorkspaceShell, sanitize_authoring_layout, sanitize_live_layout]
+      symbols: [WORKSHOP_INTRODUCTIONS, workshop_panels_added_after, sanitize_placement, sanitize_placement_node, createDockLayoutModel, PANEL_KIND, createTemporaryActions, createDockLayoutMigration, workshop_panels_for, live_panels_for, workshopLayoutModel, liveLayoutModel, mountDockLayout, mountWorkshopAuthoring, mountGmWorkspaceShell, sanitize_authoring_layout, sanitize_live_layout]
       tests:
         - tests/smoke/gm-spatial-pick.spec.js
         - npm run live-layout:check

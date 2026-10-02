@@ -2,139 +2,52 @@ import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
 import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
 
 export const WORKSHOP_LAYOUT_VERSION = 11;
-const tool = id => Object.freeze({ id, kind: PANEL_KIND.TOOL });
-const documentPanel = id => Object.freeze({ id, kind: PANEL_KIND.DOCUMENT });
-export const WORKSHOP_PANEL_REGISTRY = Object.freeze([
-  tool('files'), documentPanel('source'), tool('inspector'),
-  tool('add'), tool('recovery'), tool('findings'),
-  tool('feedback'), tool('dependencies'), tool('settings'),
-  tool('models'), documentPanel('model-preview'), tool('sound'),
-  tool('changes'), tool('definitions'), tool('composition'), tool('entity'),
-  tool('presets'), documentPanel('scripts'), tool('localisation'),
+// id, introduction version, migration order, preferred target, default column, kind.
+// Vocabulary order is record order, independently of migration placement order.
+const introductions = Object.freeze([
+  ['files', 2, 0, '', 0, PANEL_KIND.TOOL],
+  ['source', 2, 0, '', 1, PANEL_KIND.DOCUMENT],
+  ['inspector', 2, 0, '', 2, PANEL_KIND.TOOL],
+  ['add', 2, 0, '', 2, PANEL_KIND.TOOL],
+  ['recovery', 2, 0, '', 2, PANEL_KIND.TOOL],
+  ['findings', 3, 1, 'source', 1, PANEL_KIND.TOOL],
+  ['feedback', 3, 2, 'source', 1, PANEL_KIND.TOOL],
+  ['dependencies', 3, 0, 'files', 0, PANEL_KIND.TOOL],
+  ['settings', 3, 3, 'inspector', 2, PANEL_KIND.TOOL],
+  ['models', 4, 4, 'inspector', 2, PANEL_KIND.TOOL],
+  ['model-preview', 4, 5, 'source', 1, PANEL_KIND.DOCUMENT],
+  ['sound', 4, 6, 'inspector', 2, PANEL_KIND.TOOL],
+  ['changes', 5, 7, 'files', 0, PANEL_KIND.TOOL],
+  ['definitions', 6, 8, 'inspector', 2, PANEL_KIND.TOOL],
+  ['composition', 7, 9, 'files', 0, PANEL_KIND.TOOL],
+  ['entity', 8, 10, 'inspector', 2, PANEL_KIND.TOOL],
+  ['presets', 9, 11, 'files', 0, PANEL_KIND.TOOL],
+  ['scripts', 10, 12, 'source', 1, PANEL_KIND.DOCUMENT],
+  ['localisation', 11, 13, 'dependencies', 0, PANEL_KIND.TOOL],
 ]);
+export const WORKSHOP_PANEL_REGISTRY = Object.freeze(introductions.map(([id, , , , , kind]) => Object.freeze({ id, kind })));
 export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
-const group = (tabs, active = tabs[0]) => ({ type: 'tabs', tabs, active });
-const LEGACY_PANELS = Object.freeze(['files', 'source', 'inspector', 'add', 'recovery']);
-const V3_PANELS = Object.freeze([...LEGACY_PANELS, 'findings', 'feedback', 'dependencies', 'settings']);
-// Panels registered after a stored version, with the group each joins on migration.
-const ADDED_IN_V3 = Object.freeze([['dependencies', 'files'], ['findings', 'source'],
-  ['feedback', 'source'], ['settings', 'inspector']]);
-const ADDED_IN_V4 = Object.freeze([['models', 'inspector'], ['model-preview', 'source'], ['sound', 'inspector']]);
-const V4_PANELS = Object.freeze([...V3_PANELS, 'models', 'model-preview', 'sound']);
-/** Panels registered after version 4. The workspace changes view reads the same
- * draft the file list does — what has been added, removed, renamed or modified
- * against the source this draft was imported as — so it joins that column
- * (issue #1471). */
-const ADDED_IN_V5 = Object.freeze([['changes', 'files']]);
-const V5_PANELS = Object.freeze([...V4_PANELS, 'changes']);
-/** Panels registered after version 5. Faction and complexity definitions are a
- * specialised form over the same runtime the inspector reads, so it joins the
- * inspector's column beside the model form (issue #1474). */
-const ADDED_IN_V6 = Object.freeze([['definitions', 'inspector']]);
-const V6_PANELS = Object.freeze([...V5_PANELS, 'definitions']);
-/** Panels registered after version 6. World composition reads the draft's
- * member set the way the changes view does — which members exist, which
- * reference which — so it joins that column beside it (issue #1475). */
-const ADDED_IN_V7 = Object.freeze([['composition', 'files']]);
-const V7_PANELS = Object.freeze([...V6_PANELS, 'composition']);
-/** Panels registered after version 7. Entity template and fragment composition
- * is a specialised form over the same runtime the inspector reads, so it joins
- * the inspector's column beside the definition forms (issue #1476). #1481 will
- * extend that panel rather than add another, because it authors the same
- * document. */
-const ADDED_IN_V8 = Object.freeze([['entity', 'inspector']]);
-const V8_PANELS = Object.freeze([...V7_PANELS, 'entity']);
-/** Panels registered after version 8. GM role presets and typed mission widgets
- * are authored in a WORLD member, the same document family the composition form
- * edits, so the form joins that column beside it (issue #1477). #1483 will extend
- * that panel rather than add another, because it previews the same authored
- * presets. */
-const ADDED_IN_V9 = Object.freeze([['presets', 'files']]);
-const V9_PANELS = Object.freeze([...V8_PANELS, 'presets']);
-const ADDED_IN_V10 = Object.freeze([['scripts', 'source']]);
-const V10_PANELS = Object.freeze([...V9_PANELS, 'scripts']);
-const ADDED_IN_V11 = Object.freeze([['localisation', 'dependencies']]);
-const legacyDefault = () => ({ version: 2,
+const vocabulary = version => introductions.filter(([, introduced]) => introduced <= Math.max(2, version)).map(([id]) => id);
+const additions = version => introductions.filter(([, introduced]) => introduced === version)
+  .sort((a, b) => a[2] - b[2]).map(([id, , , preferred]) => [id, preferred]);
+const LEGACY_PANELS = vocabulary(2);
+const historicalDefault = version => ({ version,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files']), group(['source']), group(['inspector', 'add', 'recovery'], 'inspector')] },
+    children: ['files', 'source', 'inspector'].map((active, column) => ({ type: 'tabs', active,
+      tabs: introductions.filter(([, introduced, , , home]) => introduced <= version && home === column).map(([id]) => id) })) },
   floats: [], closed: [], selected: 'source' });
-const v4Default = () => ({ version: 4,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v3Default = () => ({ version: 3,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies'], 'files'), group(['source', 'findings', 'feedback'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v5Default = () => ({ version: 5,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies', 'changes'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v6Default = () => ({ version: 6,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies', 'changes'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v7Default = () => ({ version: 7,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies', 'changes', 'composition'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v8Default = () => ({ version: 8,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies', 'changes', 'composition'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-const v9Default = () => ({ version: 9,
-  root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-    children: [group(['files', 'dependencies', 'changes', 'composition', 'presets'], 'files'),
-      group(['source', 'findings', 'feedback', 'model-preview'], 'source'),
-      group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
-  floats: [], closed: [], selected: 'source' });
-function v10Default() {
-  return { version: 10,
-    root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
-      children: [group(['files', 'dependencies', 'changes', 'composition', 'presets'], 'files'),
-        group(['source', 'findings', 'feedback', 'model-preview', 'scripts'], 'source'),
-        group(['inspector', 'add', 'recovery', 'settings', 'models', 'sound', 'definitions', 'entity'], 'inspector')] },
-    floats: [], closed: [], selected: 'source' };
-}
-export function defaultWorkshopLayout() {
-  const previous = v10Default();
-  return { ...previous, version: WORKSHOP_LAYOUT_VERSION,
-    root: { ...previous.root, children: [
-      group(['files', 'dependencies', 'changes', 'composition', 'presets', 'localisation'], 'files'),
-      ...previous.root.children.slice(1),
-    ] } };
-}
+export const defaultWorkshopLayout = () => historicalDefault(WORKSHOP_LAYOUT_VERSION);
 const base = createDockLayoutModel({ version: WORKSHOP_LAYOUT_VERSION, panels: WORKSHOP_PANEL_REGISTRY,
   defaultLayout: defaultWorkshopLayout, compatibleVersions: [WORKSHOP_LAYOUT_VERSION] });
 const legacy = createDockLayoutModel({ version: 2, panels: LEGACY_PANELS,
-  defaultLayout: legacyDefault, compatibleVersions: [1, 2] });
-const v3 = createDockLayoutModel({ version: 3, panels: V3_PANELS,
-  defaultLayout: v3Default, compatibleVersions: [3] });
-const v4 = createDockLayoutModel({ version: 4, panels: V4_PANELS,
-  defaultLayout: v4Default, compatibleVersions: [4] });
-const v5 = createDockLayoutModel({ version: 5, panels: V5_PANELS,
-  defaultLayout: v5Default, compatibleVersions: [5] });
-const v6 = createDockLayoutModel({ version: 6, panels: V6_PANELS,
-  defaultLayout: v6Default, compatibleVersions: [6] });
-const v7 = createDockLayoutModel({ version: 7, panels: V7_PANELS,
-  defaultLayout: v7Default, compatibleVersions: [7] });
-const v8 = createDockLayoutModel({ version: 8, panels: V8_PANELS,
-  defaultLayout: v8Default, compatibleVersions: [8] });
-const v9 = createDockLayoutModel({ version: 9, panels: V9_PANELS,
-  defaultLayout: v9Default, compatibleVersions: [9] });
-const v10 = createDockLayoutModel({ version: 10, panels: V10_PANELS,
-  defaultLayout: v10Default, compatibleVersions: [10] });
+  defaultLayout: () => historicalDefault(2), compatibleVersions: [1, 2] });
+const generations = Array.from({ length: WORKSHOP_LAYOUT_VERSION }, (_, index) => {
+  const version = index + 1;
+  const model = version <= 2 ? legacy : version === WORKSHOP_LAYOUT_VERSION ? base
+    : createDockLayoutModel({ version, panels: vocabulary(version),
+      defaultLayout: () => historicalDefault(version), compatibleVersions: [version] });
+  return { version, model, added: version <= 2 ? [] : additions(version) };
+});
 
 // Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
 // They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
@@ -151,19 +64,7 @@ function rehomeVersionOne(state, from, value) {
 
 const migrate = createDockLayoutMigration({
   version: WORKSHOP_LAYOUT_VERSION, current: base, rehome: rehomeVersionOne,
-  generations: [
-    { version: 1, model: legacy, added: [] },
-    { version: 2, model: legacy, added: [] },
-    { version: 3, model: v3, added: ADDED_IN_V3 },
-    { version: 4, model: v4, added: ADDED_IN_V4 },
-    { version: 5, model: v5, added: ADDED_IN_V5 },
-    { version: 6, model: v6, added: ADDED_IN_V6 },
-    { version: 7, model: v7, added: ADDED_IN_V7 },
-    { version: 8, model: v8, added: ADDED_IN_V8 },
-    { version: 9, model: v9, added: ADDED_IN_V9 },
-    { version: 10, model: v10, added: ADDED_IN_V10 },
-    { version: WORKSHOP_LAYOUT_VERSION, model: base, added: ADDED_IN_V11 },
-  ],
+  generations,
 });
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });
 export const normalizeWorkshopLayout = migrate;

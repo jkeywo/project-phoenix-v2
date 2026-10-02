@@ -32,7 +32,8 @@ use crate::core::messages::{
     UmbilicalBlackboard,
 };
 use crate::core::task_lifecycle::{
-    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_UMBILICAL_FLOW,
+    physical_work_reports, PhysicalWork, PriorActivation, TaskLifecycleRequest, TaskSlot,
+    TaskTerminalReason, TASK_VERB_UMBILICAL_FLOW,
 };
 use crate::dock::DockControl;
 use crate::effect_queue::EffectQueue;
@@ -643,22 +644,19 @@ pub fn tick_umbilical(
                     // "an engage refused before it couples still opens and
                     // closes one activation" the tractor keeps. A flow that WAS
                     // moving capacity and just broke only needs the close.
-                    if row.activation_target.is_none() {
-                        push_lifecycle(
-                            lifecycle.as_deref_mut(),
-                            TaskLifecycleRequest::Start {
-                                slot: flow_slot(&row.uuid),
-                                target: row.partner.clone(),
-                            },
-                        );
-                    }
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        TaskLifecycleRequest::End {
-                            slot: flow_slot(&row.uuid),
+                    for report in physical_work_reports(
+                        flow_slot(&row.uuid),
+                        PriorActivation {
+                            active: row.activation_target.is_some(),
+                            target: row.activation_target.as_deref(),
+                        },
+                        PhysicalWork::Refused {
+                            target: row.partner.as_deref(),
                             reason: terminal_reason_for(refusal),
                         },
-                    );
+                    ) {
+                        push_lifecycle(lifecycle.as_deref_mut(), report);
+                    }
                     outcomes.push(Outcome {
                         entity: row.entity,
                         running: false,
@@ -683,23 +681,18 @@ pub fn tick_umbilical(
                     // change requires an undock, which refuses the flow first),
                     // but kept symmetric with the tractor's own re-designation
                     // handling rather than assumed away.
-                    if row.activation_target.as_deref() != row.partner.as_deref() {
-                        if row.activation_target.is_some() {
-                            push_lifecycle(
-                                lifecycle.as_deref_mut(),
-                                TaskLifecycleRequest::End {
-                                    slot: flow_slot(&row.uuid),
-                                    reason: TaskTerminalReason::TargetLost,
-                                },
-                            );
-                        }
-                        push_lifecycle(
-                            lifecycle.as_deref_mut(),
-                            TaskLifecycleRequest::Start {
-                                slot: flow_slot(&row.uuid),
-                                target: row.partner.clone(),
-                            },
-                        );
+                    for report in physical_work_reports(
+                        flow_slot(&row.uuid),
+                        PriorActivation {
+                            active: row.activation_target.is_some(),
+                            target: row.activation_target.as_deref(),
+                        },
+                        PhysicalWork::Formed {
+                            target: row.partner.as_deref(),
+                            follow_subject: true,
+                        },
+                    ) {
+                        push_lifecycle(lifecycle.as_deref_mut(), report);
                     }
                     // A move only reaches the queue when it is non-zero and there
                     // is a partner to move it to — a depleted source or a full

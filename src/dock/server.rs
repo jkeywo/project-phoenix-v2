@@ -32,7 +32,8 @@ use crate::core::messages::{
     SystemControlPayload, SystemId,
 };
 use crate::core::task_lifecycle::{
-    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_DOCK_HOLD,
+    physical_work_reports, PhysicalWork, PriorActivation, TaskLifecycleRequest, TaskSlot,
+    TaskTerminalReason, TASK_VERB_DOCK_HOLD,
 };
 use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
 use crate::effect_queue::EffectQueue;
@@ -634,54 +635,33 @@ pub fn tick_dock(
         // publishing "no markers" or "nothing in range" is not an attempt and
         // opens nothing.
         if dock.engaged || dock.docked {
-            match (dock.docked, out.docked, out.last_refusal) {
-                // Arrival: the two hulls have mated. The subject is whatever the
-                // manoeuvre actually closed on, `out.docking_target`.
-                (false, true, _) => push_lifecycle(
-                    lifecycle.as_deref_mut(),
-                    Some(uuid),
-                    TaskLifecycleRequest::Start {
-                        slot: hold_slot(&dock.system_id, Some(uuid)),
-                        target: out.docking_target.clone(),
+            let work = if !dock.docked && out.docked {
+                Some(PhysicalWork::Formed {
+                    target: out.docking_target.as_deref(),
+                    follow_subject: false,
+                })
+            } else if !out.docked {
+                out.last_refusal.map(|refusal| PhysicalWork::Refused {
+                    target: dock.docking_target.as_deref(),
+                    reason: terminal_reason_for(refusal),
+                })
+            } else {
+                None
+            };
+            if let Some(work) = work {
+                for report in physical_work_reports(
+                    hold_slot(&dock.system_id, Some(uuid)),
+                    PriorActivation {
+                        active: dock.docked,
+                        target: dock.docking_target.as_deref(),
                     },
-                ),
-                // Refused before it ever mated: a whole activation opens and
-                // closes at once, mirroring the tractor's "an engage refused
-                // before it couples still opens and closes one activation" —
-                // the attempt is a beat, not a silence. The subject is the
-                // berth the approach was closing on, `dock.docking_target`
-                // (the PRIOR value; the outcome has already cleared it).
-                (false, false, Some(refusal)) => {
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        Some(uuid),
-                        TaskLifecycleRequest::Start {
-                            slot: hold_slot(&dock.system_id, Some(uuid)),
-                            target: dock.docking_target.clone(),
-                        },
-                    );
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        Some(uuid),
-                        TaskLifecycleRequest::End {
-                            slot: hold_slot(&dock.system_id, Some(uuid)),
-                            reason: terminal_reason_for(refusal),
-                        },
-                    );
+                    work,
+                ) {
+                    push_lifecycle(lifecycle.as_deref_mut(), Some(uuid), report);
                 }
-                // Was mated; the mate broke this tick.
-                (true, false, Some(refusal)) => push_lifecycle(
-                    lifecycle.as_deref_mut(),
-                    Some(uuid),
-                    TaskLifecycleRequest::End {
-                        slot: hold_slot(&dock.system_id, Some(uuid)),
-                        reason: terminal_reason_for(refusal),
-                    },
-                ),
-                // Still approaching, or holding unchanged: nothing to report.
-                _ => {}
             }
         }
+
         dock.engaged = out.engaged;
         dock.docked = out.docked;
         dock.docking_target = out.docking_target;

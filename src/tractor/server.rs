@@ -29,7 +29,8 @@ use crate::core::messages::{
     SystemControlPayload, SystemId, TractorBlackboard,
 };
 use crate::core::task_lifecycle::{
-    TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_TRACTOR_HOLD,
+    physical_work_reports, PhysicalWork, PriorActivation, TaskLifecycleRequest, TaskSlot,
+    TaskTerminalReason, TASK_VERB_TRACTOR_HOLD,
 };
 use crate::effect_queue::EffectQueue;
 use crate::entities::config::DEFAULT_ENTITY_MASS;
@@ -684,25 +685,18 @@ pub fn tick_tractor(
                 //   the new subject would never get a start.
                 //
                 // A hold that simply continues reports nothing at all.
-                if beam.coupled_target != row.lock {
-                    if beam.coupled_target.is_some() {
-                        push_lifecycle(
-                            lifecycle.as_deref_mut(),
-                            row.uuid.as_ref(),
-                            TaskLifecycleRequest::End {
-                                slot: hold_slot(row.uuid.as_ref()),
-                                reason: TaskTerminalReason::TargetLost,
-                            },
-                        );
-                    }
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        row.uuid.as_ref(),
-                        TaskLifecycleRequest::Start {
-                            slot: hold_slot(row.uuid.as_ref()),
-                            target: row.lock.clone(),
-                        },
-                    );
+                for report in physical_work_reports(
+                    hold_slot(row.uuid.as_ref()),
+                    PriorActivation {
+                        active: beam.coupled_target.is_some(),
+                        target: beam.coupled_target.as_deref(),
+                    },
+                    PhysicalWork::Formed {
+                        target: row.lock.as_deref(),
+                        follow_subject: true,
+                    },
+                ) {
+                    push_lifecycle(lifecycle.as_deref_mut(), row.uuid.as_ref(), report);
                 }
                 beam.coupled_target = row.lock.clone();
                 beam.last_refusal = None;
@@ -715,15 +709,20 @@ pub fn tick_tractor(
                 // judged against, which is exactly what `hold_status` looked at.
                 // A hold that was already gripping something has its activation
                 // open already and only needs the ending.
-                if beam.coupled_target.is_none() {
-                    push_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        row.uuid.as_ref(),
-                        TaskLifecycleRequest::Start {
-                            slot: hold_slot(row.uuid.as_ref()),
-                            target: row.lock.clone(),
-                        },
-                    );
+                let reports = physical_work_reports(
+                    hold_slot(row.uuid.as_ref()),
+                    PriorActivation {
+                        active: beam.coupled_target.is_some(),
+                        target: beam.coupled_target.as_deref(),
+                    },
+                    PhysicalWork::Refused {
+                        target: row.lock.as_deref(),
+                        reason: terminal_reason_for(refusal),
+                    },
+                );
+                // Retain the former Start-before-write, End-after-write ordering.
+                if let Some(report @ TaskLifecycleRequest::Start { .. }) = reports.first() {
+                    push_lifecycle(lifecycle.as_deref_mut(), row.uuid.as_ref(), report.clone());
                 }
                 // Each interruption ends the hold: intent and coupling drop
                 // together, and the crew watch the hulk stop following them.
@@ -736,10 +735,7 @@ pub fn tick_tractor(
                 push_lifecycle(
                     lifecycle.as_deref_mut(),
                     row.uuid.as_ref(),
-                    TaskLifecycleRequest::End {
-                        slot: hold_slot(row.uuid.as_ref()),
-                        reason: terminal_reason_for(refusal),
-                    },
+                    reports.last().unwrap().clone(),
                 );
             }
         }

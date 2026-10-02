@@ -403,6 +403,67 @@ pub enum TaskLifecycleRequest {
     },
 }
 
+/// Physical-work adapters retain their own activation state and verdicts.
+/// A live activation can have no subject (for example an initially refused attempt).
+#[derive(Clone, Copy)]
+pub(crate) struct PriorActivation<'a> {
+    pub active: bool,
+    pub target: Option<&'a str>,
+}
+
+pub(crate) enum PhysicalWork<'a> {
+    /// Tractor and Umbilical follow subject changes; Dock follows mating state.
+    Formed {
+        target: Option<&'a str>,
+        follow_subject: bool,
+    },
+    Refused {
+        target: Option<&'a str>,
+        reason: TaskTerminalReason,
+    },
+}
+
+/// Ordered reports only: component writes and optional identity gates stay local.
+pub(crate) fn physical_work_reports(
+    slot: TaskSlot,
+    prior: PriorActivation<'_>,
+    work: PhysicalWork<'_>,
+) -> Vec<TaskLifecycleRequest> {
+    let mut reports = Vec::with_capacity(2);
+    let start = |target: Option<&str>| TaskLifecycleRequest::Start {
+        slot: slot.clone(),
+        target: target.map(str::to_owned),
+    };
+    match work {
+        PhysicalWork::Formed {
+            target,
+            follow_subject,
+        } => {
+            let changed = if follow_subject {
+                prior.target != target
+            } else {
+                !prior.active
+            };
+            if changed {
+                if prior.active {
+                    reports.push(TaskLifecycleRequest::End {
+                        slot: slot.clone(),
+                        reason: TaskTerminalReason::TargetLost,
+                    });
+                }
+                reports.push(start(target));
+            }
+        }
+        PhysicalWork::Refused { target, reason } => {
+            if !prior.active {
+                reports.push(start(target));
+            }
+            reports.push(TaskLifecycleRequest::End { slot, reason });
+        }
+    }
+    reports
+}
+
 /// Every live task activation, and the per-slot ordinal counter that keeps
 /// restarts distinct (issue #1341).
 ///

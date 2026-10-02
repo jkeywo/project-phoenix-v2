@@ -2,7 +2,7 @@
 title: Shared Behaviour Modules
 type: concept
 tags: [architecture, client, testing]
-sources: [editor/barrel-pattern-validate.js, gui/components/continuous-helm-input.js, src/workshop/validation_support.rs, src/gm_action.rs, gui/settings-gamepad-presentation.js, gui/settings-panel.js, gui/server-settings.js, gui/workshop-edit-session.js, gui/workshop-definitions-panel.js, gui/workshop-composition-panel.js, gui/workshop-entity-panel.js, gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
+sources: [src/core/task_lifecycle.rs, editor/barrel-pattern-validate.js, gui/components/continuous-helm-input.js, src/workshop/validation_support.rs, src/gm_action.rs, gui/settings-gamepad-presentation.js, gui/settings-panel.js, gui/server-settings.js, gui/workshop-edit-session.js, gui/workshop-definitions-panel.js, gui/workshop-composition-panel.js, gui/workshop-entity-panel.js, gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
 updated: 2026-10-02
 ---
 
@@ -37,3 +37,5 @@ Workshop validation_support owns ordered dependency overlays, source provenance,
 Helm and lateral-thrust joysticks share continuous-helm-input for pointer identity, keyboard state, listener lifetime and animation scheduling. The adapters retain geometry and semantic actions. Explicit pointer policy keeps lateral submissions immediate and the main joystick on its heartbeat; disconnect retains input state without submitting neutral.
 
 Authored blaster and torpedo patterns share barrel-pattern-validate for traversal, duplicate identities, barrel bounds and offsets. Existing validators retain their exported names, paths and domain diagnostic wording; validateFile continues using those adapters to block invalid saves.
+
+Physical-work adapters for Tractor, Dock and Umbilical share ordered activation reports in core::task_lifecycle. Dock retains mating-state activation; Tractor and Umbilical retain subject-change activation. Physical verdicts, optional identities and component writes stay local.

@@ -322,3 +322,72 @@ fn a_subjectless_task_still_encodes_five_fields() {
     );
     assert!(start_event(&activation).target.is_none());
 }
+
+#[test]
+fn physical_work_preserves_transition_order_and_subject_policy() {
+    let start = |target: Option<&str>| TaskLifecycleRequest::Start {
+        slot: slot(),
+        target: target.map(str::to_owned),
+    };
+    let end = |reason| TaskLifecycleRequest::End {
+        slot: slot(),
+        reason,
+    };
+    let cases = [
+        (false, None, Some("a"), true, vec![start(Some("a"))]),
+        (true, Some("a"), Some("a"), true, vec![]),
+        (
+            true,
+            Some("a"),
+            Some("b"),
+            true,
+            vec![end(TaskTerminalReason::TargetLost), start(Some("b"))],
+        ),
+        (
+            true,
+            Some("a"),
+            None,
+            true,
+            vec![end(TaskTerminalReason::TargetLost), start(None)],
+        ),
+        (false, None, None, true, vec![]),
+        (false, None, None, false, vec![start(None)]),
+        (true, Some("a"), Some("b"), false, vec![]),
+    ];
+    for (active, prior, target, follow_subject, expected) in cases {
+        assert_eq!(
+            physical_work_reports(
+                slot(),
+                PriorActivation {
+                    active,
+                    target: prior
+                },
+                PhysicalWork::Formed {
+                    target,
+                    follow_subject
+                }
+            ),
+            expected
+        );
+    }
+    for target in [None, Some("a")] {
+        for active in [false, true] {
+            let mut expected = Vec::new();
+            if !active {
+                expected.push(start(target));
+            }
+            expected.push(end(TaskTerminalReason::Unpowered));
+            assert_eq!(
+                physical_work_reports(
+                    slot(),
+                    PriorActivation { active, target },
+                    PhysicalWork::Refused {
+                        target,
+                        reason: TaskTerminalReason::Unpowered
+                    }
+                ),
+                expected
+            );
+        }
+    }
+}

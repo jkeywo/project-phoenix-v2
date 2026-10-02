@@ -117,7 +117,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/ai/standing_operation.rs, src/core/task_lifecycle.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
+      paths: [src/ai/standing_operation.rs, src/core/task_lifecycle.rs, src/core/task_lifecycle_tests.rs, src/dock/server.rs, src/umbilical/server.rs, src/narrative.rs, src/tractor/server.rs, src/science/server.rs, src/headless/report.rs, src/server_app/registration.rs]
       symbols: [TaskKey, TaskSlot, TaskOutcome, TaskTerminalReason, TaskActivation, TaskLifecycleRequest, TaskLifecycles, start_event, terminal_event, repeats_event, emit_task_lifecycle_narrative, finalize_task_lifecycles]
       tests: [cargo test, tests/task_lifecycle_narrative.rs, src/ai/standing_operation_tests.rs, src/core/task_lifecycle_tests.rs, src/narrative_tests.rs, src/tractor/server_tests.rs, src/science/server_tests.rs, src/headless/report_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
 

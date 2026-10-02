@@ -60,6 +60,8 @@ entities:
       confidence: confirmed
       title: Wire Codec Protocol
       summary: Sole JSON codec boundary for remote client and server envelopes and serialized HUD, lobby, chatter, and audio host-channel payloads; every inbound path decodes one full ClientMessage dialect (issue 822 retired the UiAction and short-form vocabularies).
+      rationale:
+        - "[ai] Private wire projection in codec.rs reuses typed mesh/action Serde representations while retaining the existing mesh envelope and exact flat GM ingress schema. Value-first parsing preserves last-key-wins duplicate handling; field projection prevents ignored wire extras from becoming internal frame fields. Required nullable keys, hexadecimal u64 fields, legacy refusal decoding and family-specific validation retain their existing behavior."
     architecture:
       kind: protocol-codec
       authority: authoritative
@@ -69,7 +71,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/codec.rs, src/core/messages.rs]
-      symbols: [JsonCodec, decode_bridge_client_message, encode_hud_state, encode_chatter, encode_lobby_state]
+      symbols: [JsonCodec, decode_bridge_client_message, encode_hud_state, encode_chatter, encode_lobby_state, encode_mesh_frame, decode_mesh_frame, decode_gm_action_request]
       tests: [cargo test]
 
   - component: host-page-push-bridge

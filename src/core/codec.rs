@@ -844,622 +844,538 @@ mod tests;
 // host admitted.
 
 /// The envelope key for the vocabulary revision, matching `gui/host-mesh.js`.
-const MESH_ENVELOPE_PROTOCOL: &str = "m";
-/// The envelope key for the frame type.
-const MESH_ENVELOPE_TYPE: &str = "t";
-/// The envelope key for the tick a frame applies at.
-const MESH_ENVELOPE_TICK: &str = "tick";
-/// The envelope key for the body.
-const MESH_ENVELOPE_BODY: &str = "d";
+mod wire {
+    //! Private wire projection: keep JSON shape separate from durable typed frames.
 
-/// Encode one host-mesh simulation frame for the wire.
-///
-/// The `digest` field crosses as a **hex string**, not a number, and that is
-/// load-bearing rather than stylistic: a digest is a `u64` and JavaScript's
-/// number type loses integers above 2^53, so a JSON number would silently round
-/// the very value two hosts are comparing — the fleet would then report a
-/// divergence it does not have, or miss one it does. Ticks and sequences stay
-/// numbers; neither can reach 2^53 in any run a human will sit through.
-pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, serde_json::Error> {
+    use serde::de::DeserializeOwned;
+    use serde_json::{Map, Value};
+
     use crate::lockstep::MeshFrame;
-    let (tick, body) = match frame {
-        MeshFrame::Tick(f) => (
-            f.tick,
-            serde_json::json!({
-                "from": f.from.0,
-                "tick": f.tick,
-                "ready_through": f.ready_through,
-                "start_grant": f.start_grant,
-                "commands": f
-                    .commands
-                    .iter()
-                    .map(|c| {
-                        Ok(serde_json::json!({
-                            "tick": c.tick,
-                            "origin": c.order.origin.0,
-                            "seq": c.order.seq,
-                            "ship": c.ship.0,
-                            "target": c.target.0,
-                            "payload": serde_json::to_value(&c.payload)?,
-                        }))
-                    })
-                    .collect::<Result<Vec<_>, serde_json::Error>>()?,
-            }),
-        ),
-        MeshFrame::Digest(f) => (
-            f.tick,
-            serde_json::json!({
-                "from": f.from.0,
-                "tick": f.tick,
-                "digest": format!("{:016x}", f.digest),
-            }),
-        ),
-        // A snapshot chunk (issue #1117). `transfer_id` and `whole_hash` are u64s,
-        // so they cross as hex STRINGS for the same reason `digest` does — a JSON
-        // number would silently round them above 2^53, and the whole-hash is the
-        // value a receiver checks the reassembled record against. `seq`, `total`
-        // and `crc` are u32s and stay numbers; none can reach 2^53. `text` is a
-        // slice of the RON export, JSON-escaped like any string.
-        MeshFrame::Snapshot(c) => (
-            c.tick,
-            serde_json::json!({
-                "from": c.from.0,
-                "transfer_id": format!("{:016x}", c.transfer_id),
-                "tick": c.tick,
-                "seq": c.seq,
-                "total": c.total,
-                "whole_hash": format!("{:016x}", c.whole_hash),
-                "crc": c.crc,
-                "text": c.text,
-            }),
-        ),
-        // A host-loss report (issue #1119). `lost` and both slot ordinals are
-        // small, and the tick — like `tick` above and unlike `digest` — cannot
-        // reach 2^53 in any run a human sits through, so all three cross as
-        // numbers rather than as the hex a `u64` digest needs.
-        MeshFrame::HostLoss(f) => (
-            f.tick,
-            serde_json::json!({
-                "from": f.from.0,
-                "lost": f.lost.0,
-                "tick": f.tick,
-            }),
-        ),
-        // A slot-claim announcement (issue #1120). `slot`, both ordinals, the
-        // owner-minted `claim_seq` and the tick are all small counters that cannot
-        // reach 2^53 in any run a human sits through, so — like `HostLoss` and
-        // unlike a `u64` digest — they cross as numbers rather than as hex.
-        MeshFrame::SlotClaim(f) => (
-            f.tick,
-            serde_json::json!({
-                "from": f.from.0,
-                "slot": f.slot.0,
-                "claim_seq": f.claim_seq,
-                "tick": f.tick,
-            }),
-        ),
-        MeshFrame::GmAction(f) => match f {
-            crate::gm_action::GmActionFrame::Proposal(proposal) => (
-                0,
-                serde_json::json!({
-                    "from": proposal.from.0,
-                    "tick": 0,
-                    "kind": "proposal",
-                    "operator_id": proposal.operator_id,
-                    "correlation": proposal.correlation,
-                    "action": serde_json::to_value(&proposal.action)?,
-                }),
-            ),
-            crate::gm_action::GmActionFrame::Granted(grant) => (
-                grant.apply_tick,
-                serde_json::json!({
-                    "from": grant.sequenced_by.0,
-                    "tick": grant.apply_tick,
-                    "kind": "granted",
-                    "requester": grant.from.0,
-                    "operator_id": grant.operator_id,
-                    "correlation": grant.correlation,
-                    "recovery_generation": grant.recovery_generation,
-                    "apply_tick": grant.apply_tick,
-                    "sequence": grant.order.sequence,
-                    "action": serde_json::to_value(&grant.action)?,
-                }),
-            ),
-            crate::gm_action::GmActionFrame::Refused(refusal) => {
-                let mut body = serde_json::json!({
-                    "from": refusal.sequenced_by.0,
-                    "tick": refusal.tick,
-                    "kind": "refused",
-                    "requester": refusal.requester.0,
-                    "operator_id": refusal.operator_id,
-                    "correlation": refusal.correlation,
-                    "action_kind": refusal.action_kind,
-                    "requested_active": refusal.requested_active,
-                    "reason": refusal.reason,
-                    // The stable target the refused action named (issue #1301),
-                    // `null` for every family that has none. The decoder reads
-                    // an absent key the same way, so a refusal minted by a peer
-                    // that predates the event-control family still decodes.
-                    "target": refusal.target,
-                    // And WHICH lever it refused (issue #1303), on the same
-                    // terms: `null` for every family without one, and an
-                    // absent key reads the same way.
-                    "verb": refusal.verb,
-                    // Which lever the refused action pulled (issue #1304),
-                    // `null` for a Fire, a Pause and for every family that
-                    // pulls none. Same reading rule as `target` above.
-                    "lever": refusal.lever,
-                    "effect_scope": refusal.effect_scope,
-                    "objective_verb": refusal.objective_verb,
-                    "objective_recipients": refusal.objective_recipients,
-                    "observer": refusal.observer,
-                });
-                // Keep every unaffected action's wire bytes unchanged.
-                if let Some(recipients) = &refusal.comms_recipients {
-                    body["comms_recipients"] = serde_json::to_value(recipients)?;
-                }
-                if let Some(doctrine) = &refusal.npc_doctrine {
-                    body["npc_doctrine"] = serde_json::to_value(doctrine)?;
-                }
-                (refusal.tick, body)
-            }
-        },
-        MeshFrame::GmJoin(frame) => match frame {
-            crate::gm_join::GmJoinFrame::Pause(approval) => (
-                approval.apply_tick,
-                serde_json::json!({
-                    "from": approval.owner.0,
-                    "tick": approval.apply_tick,
-                    "kind": "pause",
-                    "join_kind": approval.kind,
-                    "join_id": approval.id.0,
-                    "approved_by": approval.approved_by.0,
-                    "candidate": approval.candidate.host.0,
-                    "operator_id": approval.candidate.operator_id,
-                    "apply_tick": approval.apply_tick,
-                    "transfer_id": format!("{:016x}", approval.transfer_id),
-                }),
-            ),
-            crate::gm_join::GmJoinFrame::Restored { from, id, digest } => (
-                0,
-                serde_json::json!({
-                    "from": from.0,
-                    "tick": 0,
-                    "kind": "restored",
-                    "join_id": id.0,
-                    "digest": format!("{:016x}", digest),
-                }),
-            ),
-            crate::gm_join::GmJoinFrame::RestoreBoundary { from, id, boundary } => (
-                0,
-                serde_json::json!({
-                    "from": from.0,
-                    "tick": 0,
-                    "kind": "restore-boundary",
-                    "join_id": id.0,
-                    "boundary": boundary,
-                }),
-            ),
-            crate::gm_join::GmJoinFrame::Committed(commit) => (
-                commit.tick,
-                serde_json::json!({
-                    "from": commit.owner.0,
-                    "tick": commit.tick,
-                    "kind": "committed",
-                    "join_kind": commit.kind,
-                    "join_id": commit.id.0,
-                    "candidate": commit.candidate.host.0,
-                    "operator_id": commit.candidate.operator_id,
-                    "digest": format!("{:016x}", commit.digest),
-                }),
-            ),
-            crate::gm_join::GmJoinFrame::Refused { from, id, reason } => (
-                0,
-                serde_json::json!({
-                    "from": from.0,
-                    "tick": 0,
-                    "kind": "refused",
-                    "join_id": id.0,
-                    "reason": reason,
-                }),
-            ),
-        },
-        // The multi-peer live-restore lane (issue #1447). The restore's shared
-        // identity is the canonical order of the accepted request, carried as
-        // its two parts so a decoder cannot mistake one restore for another.
-        MeshFrame::GmRestore(frame) => {
-            let order = frame.restore();
-            let mut body = serde_json::json!({
-                "from": frame.from().0,
-                "tick": 0,
-                "restore_origin": order.origin.0,
-                "restore_sequence": order.sequence,
-            });
-            let tick = match frame {
-                crate::gm_restore::GmRestoreFrame::Ready { .. } => {
-                    body["kind"] = serde_json::json!("ready");
-                    0
-                }
-                crate::gm_restore::GmRestoreFrame::Loaded { tick, digest, .. } => {
-                    body["kind"] = serde_json::json!("loaded");
-                    body["tick"] = serde_json::json!(tick);
-                    body["digest"] = serde_json::json!(format!("{digest:016x}"));
-                    *tick
-                }
-                crate::gm_restore::GmRestoreFrame::Unable { failure, .. } => {
-                    body["kind"] = serde_json::json!("unable");
-                    body["failure"] = serde_json::to_value(failure)?;
-                    0
-                }
-                crate::gm_restore::GmRestoreFrame::Settle {
-                    commit, failure, ..
-                } => {
-                    body["kind"] = serde_json::json!("settle");
-                    body["commit"] = serde_json::json!(commit);
-                    if let Some(failure) = failure {
-                        body["failure"] = serde_json::to_value(failure)?;
-                    }
-                    0
-                }
-            };
-            (tick, body)
+
+    type Object = Map<String, Value>;
+
+    fn decode<T: DeserializeOwned>(value: Value) -> Option<T> {
+        serde_json::from_value(value).ok()
+    }
+
+    fn project(body: &Value, required: &str, optional: &str) -> Option<Object> {
+        let mut object = Object::new();
+        for key in required.split_whitespace() {
+            object.insert(key.into(), body.get(key)?.clone());
         }
-    };
-    Ok(serde_json::json!({
-        MESH_ENVELOPE_PROTOCOL: crate::lockstep::HOST_MESH_PROTOCOL,
-        MESH_ENVELOPE_TYPE: frame.type_name(),
-        MESH_ENVELOPE_TICK: tick,
-        MESH_ENVELOPE_BODY: body,
-    })
-    .to_string())
+        for key in optional.split_whitespace() {
+            if let Some(value) = body.get(key) {
+                object.insert(key.into(), value.clone());
+            }
+        }
+        Some(object)
+    }
+
+    fn rename(object: &mut Object, from: &str, to: &str) -> Option<()> {
+        let value = object.remove(from)?;
+        object.insert(to.into(), value);
+        Some(())
+    }
+
+    fn unhex(object: &mut Object, keys: &str) -> Option<()> {
+        for key in keys.split_whitespace() {
+            let value = u64::from_str_radix(object.get(key)?.as_str()?, 16).ok()?;
+            object.insert(key.into(), value.into());
+        }
+        Some(())
+    }
+
+    fn hex(object: &mut Object, keys: &str) {
+        for key in keys.split_whitespace() {
+            let value = object[key].as_u64().expect("typed hexadecimal field");
+            object.insert(key.into(), format!("{value:016x}").into());
+        }
+    }
+
+    fn tagged(tag: &str, object: Object) -> Value {
+        let mut value = Object::new();
+        value.insert(tag.into(), Value::Object(object));
+        Value::Object(value)
+    }
+
+    pub(super) fn decode_gm_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
+        let value: Value = serde_json::from_str(raw).ok()?;
+        let mut object = value.as_object()?.clone();
+        let operator_id = object.remove("operator_id")?.as_str()?.to_owned();
+        let correlation = decode(object.remove("correlation")?)?;
+        if operator_id.is_empty()
+            || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+        {
+            return None;
+        }
+        let kind = object.remove("action")?.as_str()?.to_owned();
+        // Exact flat ingress shapes, including required nullable keys. Nested domain
+        // values keep their existing Serde rules; there is no flatten/deny-unknown mix.
+        let (keys, bounded) = match kind.as_str() {
+            "set_session_paused" => ("active", ""),
+            "set_station_puppet" => ("ship station active", "ship station"),
+            "fire_gm_event" | "arm_gm_event_skip" => ("event", "event"),
+            "apply_direct_effect" => ("entity effect amount_milli_hp scope scope_id", "entity"),
+            "objective_instance_action" => ("objective scope verb", "objective"),
+            "objective_action" => ("objective verb recipients", "objective"),
+            "presentation" => ("ship cue", "ship"),
+            "set_contact_information" => ("ship change", "ship"),
+            "set_contact_classification" => ("ship target palette", "ship target palette"),
+            // This older ingress intentionally accepts raw identities.
+            "set_contact_override" => ("ship target mode", ""),
+            "set_system_disabled" => ("target system disabled", "target system"),
+            "transmit_comms" => ("transmission", ""),
+            "set_npc_doctrine" => ("target doctrine", "target doctrine"),
+            "set_npc_doctrine_checked" => ("target doctrine expected_revision", "target doctrine"),
+            "set_faction_hostility" => ("faction enemy hostile", "faction enemy"),
+            "undo_gm_action" => ("original original_operator original_sequence expected", ""),
+            "despawn_entity" => ("target", "target"),
+            "request_live_restore" => ("candidate", "candidate"),
+            "backfill_ship_slot" => ("slot", "slot"),
+            "spawn_palette_entity" => (
+                "palette variant position_mm heading_mdeg",
+                "palette variant",
+            ),
+            "set_event_paused" => ("event active", "event"),
+            "issue_station_command" => ("ship station target payload", "ship station target"),
+            _ => return None,
+        };
+        if object.len() != keys.split_whitespace().count()
+            || keys.split_whitespace().any(|key| !object.contains_key(key))
+        {
+            return None;
+        }
+        for key in bounded.split_whitespace() {
+            let value = object.get(key)?;
+            if value.is_null()
+                && matches!(
+                    (kind.as_str(), key),
+                    ("set_contact_classification", "palette") | ("spawn_palette_entity", "variant")
+                )
+            {
+                continue;
+            }
+            if key == "event" {
+                super::bounded_gm_event_id(value.as_str()?)?;
+            } else {
+                super::bounded_gm_target_id(value.as_str()?)?;
+            }
+        }
+        match kind.as_str() {
+            "apply_direct_effect" => {
+                rename(&mut object, "entity", "target")?;
+                let scope_id = object.remove("scope_id")?;
+                let scope = match object.get("scope")?.as_str()? {
+                    "entity" if scope_id.is_null() => crate::gm_effect::GmDirectEffectScope::Entity,
+                    "station" => crate::gm_effect::GmDirectEffectScope::Station(
+                        crate::core::messages::StationId(super::bounded_gm_target_id(
+                            scope_id.as_str()?,
+                        )?),
+                    ),
+                    "system" => crate::gm_effect::GmDirectEffectScope::System(
+                        crate::core::messages::SystemId(super::bounded_gm_target_id(
+                            scope_id.as_str()?,
+                        )?),
+                    ),
+                    _ => return None,
+                };
+                let amount: u32 = decode(object.get("amount_milli_hp")?.clone())?;
+                if amount == 0 {
+                    return None;
+                }
+                object.insert("scope".into(), serde_json::to_value(scope).ok()?);
+            }
+            "issue_station_command" => {
+                let payload = decode(object.remove("payload")?)?;
+                object.insert(
+                    "payload".into(),
+                    serde_json::to_value(super::canonical_system_command(&payload)?).ok()?,
+                );
+            }
+            _ => {}
+        }
+        let action: crate::gm_action::GmAction = decode(tagged(&kind, object))?;
+        // Only these ingress families performed domain validation before sequencing.
+        match &action {
+            crate::gm_action::GmAction::ObjectiveInstanceAction { .. }
+            | crate::gm_action::GmAction::ObjectiveAction { .. }
+            | crate::gm_action::GmAction::Presentation { .. }
+            | crate::gm_action::GmAction::SetContactInformation { .. }
+            | crate::gm_action::GmAction::SetNpcDoctrineChecked { .. }
+            | crate::gm_action::GmAction::SetFactionHostility { .. }
+            | crate::gm_action::GmAction::UndoGmAction { .. } => action.validate().ok()?,
+            crate::gm_action::GmAction::TransmitComms { transmission } => {
+                if !transmission.valid_shape() {
+                    return None;
+                }
+            }
+            crate::gm_action::GmAction::SpawnPaletteEntity {
+                position_mm,
+                heading_mdeg,
+                ..
+            } => {
+                if !crate::gm_spawn::placement_is_valid(*position_mm, *heading_mdeg) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        Some(crate::gm_action::GmActionRequest {
+            operator_id,
+            correlation,
+            action,
+        })
+    }
+
+    fn nest(object: &mut Object, key: &str, fields: &[(&str, &str)]) -> Option<()> {
+        let mut nested = Object::new();
+        for (flat, inner) in fields {
+            nested.insert((*inner).into(), object.remove(*flat)?);
+        }
+        object.insert(key.into(), Value::Object(nested));
+        Some(())
+    }
+
+    fn flatten(object: &mut Object, key: &str, fields: &[(&str, &str)]) {
+        let nested = object.remove(key).expect("typed nested field");
+        for (flat, inner) in fields {
+            object.insert((*flat).into(), nested[*inner].clone());
+        }
+    }
+
+    pub(super) fn encode_mesh(frame: &MeshFrame) -> Result<String, serde_json::Error> {
+        let encoded = serde_json::to_value(frame)?;
+        let (_, body) = encoded
+            .as_object()
+            .expect("typed mesh enum")
+            .iter()
+            .next()
+            .unwrap();
+        let mut body = body.clone();
+        let mut kind = None;
+        if matches!(
+            frame,
+            MeshFrame::GmAction(_) | MeshFrame::GmJoin(_) | MeshFrame::GmRestore(_)
+        ) {
+            let (variant, nested) = body
+                .as_object()
+                .expect("typed frame enum")
+                .iter()
+                .next()
+                .unwrap();
+            kind = Some(variant.clone());
+            body = nested.clone();
+        }
+        let body = body.as_object_mut().expect("typed frame body");
+        let tick = match frame {
+            MeshFrame::Tick(frame) => {
+                for command in body.get_mut("commands").unwrap().as_array_mut().unwrap() {
+                    flatten(
+                        command.as_object_mut().unwrap(),
+                        "order",
+                        &[("origin", "origin"), ("seq", "seq")],
+                    );
+                }
+                frame.tick
+            }
+            MeshFrame::Digest(frame) => {
+                hex(body, "digest");
+                frame.tick
+            }
+            MeshFrame::Snapshot(frame) => {
+                hex(body, "transfer_id whole_hash");
+                frame.tick
+            }
+            MeshFrame::HostLoss(frame) => frame.tick,
+            MeshFrame::SlotClaim(frame) => frame.tick,
+            MeshFrame::GmAction(frame) => {
+                match frame {
+                    crate::gm_action::GmActionFrame::Proposal(_) => {}
+                    crate::gm_action::GmActionFrame::Granted(_) => {
+                        rename(body, "from", "requester").unwrap();
+                        rename(body, "sequenced_by", "from").unwrap();
+                        flatten(body, "order", &[("sequence", "sequence")]);
+                    }
+                    crate::gm_action::GmActionFrame::Refused(_) => {
+                        rename(body, "sequenced_by", "from").unwrap();
+                        body.remove("objective_instance_scope");
+                        for key in "target verb lever effect_scope objective_verb objective_recipients observer".split_whitespace() {
+                            body.entry(key).or_insert(Value::Null);
+                        }
+                    }
+                }
+                frame.tick()
+            }
+            MeshFrame::GmJoin(frame) => {
+                rename(body, "id", "join_id").unwrap();
+                if matches!(
+                    frame,
+                    crate::gm_join::GmJoinFrame::Pause(_)
+                        | crate::gm_join::GmJoinFrame::Committed(_)
+                ) {
+                    rename(body, "owner", "from").unwrap();
+                    rename(body, "kind", "join_kind").unwrap();
+                    flatten(
+                        body,
+                        "candidate",
+                        &[("candidate", "host"), ("operator_id", "operator_id")],
+                    );
+                }
+                if matches!(frame, crate::gm_join::GmJoinFrame::Pause(_)) {
+                    hex(body, "transfer_id");
+                }
+                if matches!(
+                    frame,
+                    crate::gm_join::GmJoinFrame::Restored { .. }
+                        | crate::gm_join::GmJoinFrame::Committed(_)
+                ) {
+                    hex(body, "digest");
+                }
+                frame.tick()
+            }
+            MeshFrame::GmRestore(frame) => {
+                flatten(
+                    body,
+                    "restore",
+                    &[
+                        ("restore_origin", "origin"),
+                        ("restore_sequence", "sequence"),
+                    ],
+                );
+                if matches!(frame, crate::gm_restore::GmRestoreFrame::Loaded { .. }) {
+                    hex(body, "digest");
+                }
+                if body.get("failure").is_some_and(Value::is_null) {
+                    body.remove("failure");
+                }
+                match frame {
+                    crate::gm_restore::GmRestoreFrame::Loaded { tick, .. } => *tick,
+                    _ => 0,
+                }
+            }
+        };
+        body.insert("tick".into(), tick.into());
+        if let Some(kind) = kind {
+            let kind = match kind.as_str() {
+                "RestoreBoundary" => "restore-boundary".into(),
+                _ => kind.to_lowercase(),
+            };
+            body.insert("kind".into(), kind.into());
+        }
+        // Value retains the existing map ordering; direct struct serialization would not.
+        Ok(serde_json::json!({"m": crate::lockstep::HOST_MESH_PROTOCOL, "t": frame.type_name(), "tick": tick, "d": body}).to_string())
+    }
+
+    pub(super) fn decode_mesh(raw: &str) -> Option<MeshFrame> {
+        // Value parsing deliberately retains last-key-wins duplicate handling.
+        let value: Value = serde_json::from_str(raw).ok()?;
+        if value.get("m")?.as_u64()? != u64::from(crate::lockstep::HOST_MESH_PROTOCOL) {
+            return None;
+        }
+        let body = value.get("d")?;
+        let _: u32 = decode(body.get("from")?.clone())?;
+        let tick = body.get("tick")?.as_u64()?;
+        let (tag, body) = match value.get("t")?.as_str()? {
+            "tick" => {
+                let mut object = project(body, "from tick ready_through commands start_grant", "")?;
+                for command in object.get_mut("commands")?.as_array_mut()? {
+                    let mut fields = project(command, "tick origin seq ship target payload", "")?;
+                    nest(
+                        &mut fields,
+                        "order",
+                        &[("origin", "origin"), ("seq", "seq")],
+                    )?;
+                    *command = Value::Object(fields);
+                }
+                ("Tick", object)
+            }
+            "digest" => {
+                let mut object = project(body, "from tick digest", "")?;
+                unhex(&mut object, "digest")?;
+                ("Digest", object)
+            }
+            "snapshot" => {
+                let mut object = project(
+                    body,
+                    "from tick transfer_id seq total whole_hash crc text",
+                    "",
+                )?;
+                unhex(&mut object, "transfer_id whole_hash")?;
+                ("Snapshot", object)
+            }
+            "host-loss" => ("HostLoss", project(body, "from tick lost", "")?),
+            "slot-claim" => ("SlotClaim", project(body, "from tick slot claim_seq", "")?),
+            "gm-action" => {
+                let kind = body.get("kind")?.as_str()?;
+                let mut object = match kind {
+                    "proposal" if tick == 0 => {
+                        project(body, "from operator_id correlation action", "")?
+                    }
+                    "granted" => {
+                        let mut object = project(body, "from requester operator_id correlation recovery_generation apply_tick sequence action", "")?;
+                        if object.get("apply_tick")?.as_u64()? != tick {
+                            return None;
+                        }
+                        rename(&mut object, "from", "sequenced_by")?;
+                        rename(&mut object, "requester", "from")?;
+                        object.insert("origin".into(), object["from"].clone());
+                        nest(
+                            &mut object,
+                            "order",
+                            &[("origin", "origin"), ("sequence", "sequence")],
+                        )?;
+                        object
+                    }
+                    "refused" => {
+                        let mut object = project(body, "from requester operator_id correlation action_kind requested_active tick reason", "effect_scope observer comms_recipients npc_doctrine objective_verb objective_instance_scope objective_recipients lever")?;
+                        rename(&mut object, "from", "sequenced_by")?;
+                        object.insert(
+                            "target".into(),
+                            body.get("target")
+                                .and_then(Value::as_str)
+                                .and_then(super::bounded_gm_target_id)
+                                .map(Value::String)
+                                .unwrap_or(Value::Null),
+                        );
+                        let verb: Option<crate::gm_action::GmEventVerb> =
+                            body.get("verb").cloned().and_then(decode);
+                        object.insert("verb".into(), serde_json::to_value(verb).ok()?);
+                        if let Some(observer) = object.get("observer").filter(|v| !v.is_null()) {
+                            super::bounded_gm_target_id(observer.as_str()?)?;
+                        }
+                        object
+                    }
+                    _ => return None,
+                };
+                let frame: crate::gm_action::GmActionFrame =
+                    decode(tagged(kind, std::mem::take(&mut object)))?;
+                match &frame {
+                    crate::gm_action::GmActionFrame::Proposal(proposal) => {
+                        proposal.validate().ok()?
+                    }
+                    crate::gm_action::GmActionFrame::Granted(grant) => grant.validate().ok()?,
+                    crate::gm_action::GmActionFrame::Refused(refusal) => {
+                        use crate::gm_action::GmActionKind::*;
+                        if !crate::gm_action::valid_comms_result_scope(
+                            refusal.action_kind,
+                            refusal.comms_recipients.as_deref(),
+                        ) || matches!(
+                            refusal.action_kind,
+                            ContactReveal
+                                | ContactConceal
+                                | ContactNormal
+                                | ContactMisclassify
+                                | ContactClassificationNormal
+                                | ContactInformation
+                        ) != refusal.observer.is_some()
+                            || (refusal.effect_scope.is_some()
+                                && !matches!(
+                                    refusal.action_kind,
+                                    DirectEffect | SystemDisable | SystemRestore
+                                ))
+                        {
+                            return None;
+                        }
+                    }
+                }
+                return Some(MeshFrame::GmAction(frame));
+            }
+            "gm-join" => {
+                let (kind, mut object) = match body.get("kind")?.as_str()? {
+                    "pause" | "committed" => {
+                        let pause = body.get("kind")?.as_str()? == "pause";
+                        let required = if pause {
+                            "join_id join_kind from approved_by candidate operator_id apply_tick transfer_id"
+                        } else {
+                            "join_id join_kind from candidate operator_id tick digest"
+                        };
+                        let mut object = project(body, required, "")?;
+                        if pause && object.get("apply_tick")?.as_u64()? != tick {
+                            return None;
+                        }
+                        rename(&mut object, "from", "owner")?;
+                        rename(&mut object, "join_kind", "kind")?;
+                        nest(
+                            &mut object,
+                            "candidate",
+                            &[("candidate", "host"), ("operator_id", "operator_id")],
+                        )?;
+                        unhex(&mut object, if pause { "transfer_id" } else { "digest" })?;
+                        (if pause { "Pause" } else { "Committed" }, object)
+                    }
+                    "restored" if tick == 0 => {
+                        let mut object = project(body, "from join_id digest", "")?;
+                        unhex(&mut object, "digest")?;
+                        ("Restored", object)
+                    }
+                    "restore-boundary" if tick == 0 => (
+                        "RestoreBoundary",
+                        project(body, "from join_id boundary", "")?,
+                    ),
+                    "refused" if tick == 0 => {
+                        ("Refused", project(body, "from join_id reason", "")?)
+                    }
+                    _ => return None,
+                };
+                rename(&mut object, "join_id", "id")?;
+                return decode(tagged(kind, object)).map(MeshFrame::GmJoin);
+            }
+            "gm-restore" => {
+                let (kind, mut object) = match body.get("kind")?.as_str()? {
+                    "ready" => (
+                        "Ready",
+                        project(body, "from restore_origin restore_sequence", "")?,
+                    ),
+                    "loaded" => {
+                        let mut object =
+                            project(body, "from restore_origin restore_sequence tick digest", "")?;
+                        unhex(&mut object, "digest")?;
+                        ("Loaded", object)
+                    }
+                    "unable" => (
+                        "Unable",
+                        project(body, "from restore_origin restore_sequence failure", "")?,
+                    ),
+                    "settle" => {
+                        let mut object =
+                            project(body, "from restore_origin restore_sequence commit", "")?;
+                        let failure: Option<crate::gm_restore::GmRestoreFailure> =
+                            body.get("failure").cloned().and_then(decode);
+                        object.insert("failure".into(), serde_json::to_value(failure).ok()?);
+                        ("Settle", object)
+                    }
+                    _ => return None,
+                };
+                nest(
+                    &mut object,
+                    "restore",
+                    &[
+                        ("restore_origin", "origin"),
+                        ("restore_sequence", "sequence"),
+                    ],
+                )?;
+                return decode(tagged(kind, object)).map(MeshFrame::GmRestore);
+            }
+            _ => return None,
+        };
+        let frame: MeshFrame = decode(tagged(tag, body))?;
+        if let MeshFrame::Tick(frame) = &frame {
+            if let Some(grant) = &frame.start_grant {
+                grant.validate().ok()?;
+            }
+        }
+        Some(frame)
+    }
 }
 
-/// Decode one host-mesh simulation frame, or `None`.
-///
-/// `None` covers every "this is not a simulation frame of a revision I speak"
-/// case together — unparseable text, a lobby frame, a crew message, a future
-/// revision, a body missing a field. The caller's answer to all of them is to
-/// drop it, exactly as `gui/host-mesh.js`'s `decodeHostFrame` answers `null`
-/// for the same reasons: distinguishing them would invite a receiver to act on
-/// a frame it does not understand.
-pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
-    use crate::command_admission::{CommandOrder, HostSlot, ShipKey};
-    use crate::core::messages::SystemId;
-    use crate::lockstep::{DigestFrame, HostLossFrame, MeshCommand, MeshFrame, TickFrame};
+/// Encode a mesh frame with the existing envelope and exact hexadecimal fields.
+pub fn encode_mesh_frame(frame: &crate::lockstep::MeshFrame) -> Result<String, serde_json::Error> {
+    wire::encode_mesh(frame)
+}
 
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    if value.get(MESH_ENVELOPE_PROTOCOL)?.as_u64()?
-        != u64::from(crate::lockstep::HOST_MESH_PROTOCOL)
-    {
-        return None;
-    }
-    let body = value.get(MESH_ENVELOPE_BODY)?;
-    let from = HostSlot(u32::try_from(body.get("from")?.as_u64()?).ok()?);
-    let tick = body.get("tick")?.as_u64()?;
-    match value.get(MESH_ENVELOPE_TYPE)?.as_str()? {
-        crate::lockstep::frame::TYPE_TICK => {
-            let start_grant = match body.get("start_grant")? {
-                serde_json::Value::Null => None,
-                value => {
-                    let grant: crate::lobby::start_policy::StartGrant =
-                        serde_json::from_value(value.clone()).ok()?;
-                    grant.validate().ok()?;
-                    Some(grant)
-                }
-            };
-            let mut commands = Vec::new();
-            for entry in body.get("commands")?.as_array()? {
-                commands.push(MeshCommand {
-                    tick: entry.get("tick")?.as_u64()?,
-                    order: CommandOrder::new(
-                        HostSlot(u32::try_from(entry.get("origin")?.as_u64()?).ok()?),
-                        entry.get("seq")?.as_u64()?,
-                    ),
-                    ship: ShipKey(entry.get("ship")?.as_str()?.to_string()),
-                    target: SystemId(entry.get("target")?.as_str()?.to_string()),
-                    payload: serde_json::from_value(entry.get("payload")?.clone()).ok()?,
-                });
-            }
-            Some(MeshFrame::Tick(TickFrame {
-                from,
-                tick,
-                ready_through: body.get("ready_through")?.as_u64()?,
-                commands,
-                start_grant,
-            }))
-        }
-        crate::lockstep::frame::TYPE_DIGEST => Some(MeshFrame::Digest(DigestFrame {
-            from,
-            tick,
-            digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
-        })),
-        crate::lockstep::frame::TYPE_SNAPSHOT => {
-            Some(MeshFrame::Snapshot(crate::lockstep::SnapshotChunk {
-                from,
-                transfer_id: u64::from_str_radix(body.get("transfer_id")?.as_str()?, 16).ok()?,
-                tick,
-                seq: u32::try_from(body.get("seq")?.as_u64()?).ok()?,
-                total: u32::try_from(body.get("total")?.as_u64()?).ok()?,
-                whole_hash: u64::from_str_radix(body.get("whole_hash")?.as_str()?, 16).ok()?,
-                crc: u32::try_from(body.get("crc")?.as_u64()?).ok()?,
-                text: body.get("text")?.as_str()?.to_string(),
-            }))
-        }
-        crate::lockstep::frame::TYPE_HOST_LOSS => Some(MeshFrame::HostLoss(HostLossFrame {
-            from,
-            lost: HostSlot(u32::try_from(body.get("lost")?.as_u64()?).ok()?),
-            tick,
-        })),
-        crate::lockstep::frame::TYPE_SLOT_CLAIM => {
-            Some(MeshFrame::SlotClaim(crate::lockstep::SlotClaimFrame {
-                from,
-                slot: HostSlot(u32::try_from(body.get("slot")?.as_u64()?).ok()?),
-                claim_seq: body.get("claim_seq")?.as_u64()?,
-                tick,
-            }))
-        }
-        crate::lockstep::frame::TYPE_GM_ACTION => {
-            let frame = match body.get("kind")?.as_str()? {
-                "proposal" => {
-                    if tick != 0 {
-                        return None;
-                    }
-                    let proposal = crate::gm_action::GmActionProposal {
-                        from,
-                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
-                        correlation: serde_json::from_value(body.get("correlation")?.clone())
-                            .ok()?,
-                        action: serde_json::from_value(body.get("action")?.clone()).ok()?,
-                    };
-                    proposal
-                        .validate()
-                        .is_ok()
-                        .then_some(crate::gm_action::GmActionFrame::Proposal(proposal))?
-                }
-                "granted" => {
-                    let requester = HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?);
-                    let grant = crate::gm_action::GmActionGrant {
-                        from: requester,
-                        sequenced_by: from,
-                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
-                        correlation: serde_json::from_value(body.get("correlation")?.clone())
-                            .ok()?,
-                        recovery_generation: body.get("recovery_generation")?.as_u64()?,
-                        apply_tick: body.get("apply_tick")?.as_u64()?,
-                        order: crate::gm_action::GmActionOrder::new(
-                            requester,
-                            body.get("sequence")?.as_u64()?,
-                        ),
-                        action: serde_json::from_value(body.get("action")?.clone()).ok()?,
-                    };
-                    if grant.apply_tick != tick || grant.validate().is_err() {
-                        return None;
-                    }
-                    crate::gm_action::GmActionFrame::Granted(grant)
-                }
-                "refused" => {
-                    let action_kind =
-                        serde_json::from_value(body.get("action_kind")?.clone()).ok()?;
-                    let effect_scope = match body.get("effect_scope") {
-                        None | Some(serde_json::Value::Null) => None,
-                        Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
-                    };
-                    let observer = match body.get("observer") {
-                        None | Some(serde_json::Value::Null) => None,
-                        Some(value) => Some(bounded_gm_target_id(value.as_str()?)?),
-                    };
-                    let comms_recipients: Option<Vec<String>> = body
-                        .get("comms_recipients")
-                        .filter(|value| !value.is_null())
-                        .map(|value| serde_json::from_value(value.clone()))
-                        .transpose()
-                        .ok()?;
-                    if !crate::gm_action::valid_comms_result_scope(
-                        action_kind,
-                        comms_recipients.as_deref(),
-                    ) {
-                        return None;
-                    }
-                    if matches!(
-                        action_kind,
-                        crate::gm_action::GmActionKind::ContactReveal
-                            | crate::gm_action::GmActionKind::ContactConceal
-                            | crate::gm_action::GmActionKind::ContactNormal
-                            | crate::gm_action::GmActionKind::ContactMisclassify
-                            | crate::gm_action::GmActionKind::ContactClassificationNormal
-                            | crate::gm_action::GmActionKind::ContactInformation
-                    ) != observer.is_some()
-                    {
-                        return None;
-                    }
-                    if effect_scope.is_some()
-                        && action_kind != crate::gm_action::GmActionKind::DirectEffect
-                        && !matches!(
-                            action_kind,
-                            crate::gm_action::GmActionKind::SystemDisable
-                                | crate::gm_action::GmActionKind::SystemRestore
-                        )
-                    {
-                        return None;
-                    }
-                    crate::gm_action::GmActionFrame::Refused(crate::gm_action::GmActionRefusal {
-                        sequenced_by: from,
-                        requester: HostSlot(u32::try_from(body.get("requester")?.as_u64()?).ok()?),
-                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
-                        correlation: serde_json::from_value(body.get("correlation")?.clone())
-                            .ok()?,
-                        action_kind,
-                        requested_active: body.get("requested_active")?.as_bool()?,
-                        effect_scope,
-                        npc_doctrine: body
-                            .get("npc_doctrine")
-                            .filter(|v| !v.is_null())
-                            .map(|v| serde_json::from_value(v.clone()))
-                            .transpose()
-                            .ok()?,
-                        objective_verb: body
-                            .get("objective_verb")
-                            .filter(|v| !v.is_null())
-                            .map(|v| serde_json::from_value(v.clone()))
-                            .transpose()
-                            .ok()?,
-                        objective_instance_scope: body
-                            .get("objective_instance_scope")
-                            .filter(|v| !v.is_null())
-                            .map(|v| serde_json::from_value(v.clone()))
-                            .transpose()
-                            .ok()?,
-                        objective_recipients: body
-                            .get("objective_recipients")
-                            .filter(|v| !v.is_null())
-                            .map(|v| serde_json::from_value(v.clone()))
-                            .transpose()
-                            .ok()?,
-                        comms_recipients,
-                        observer,
-                        tick,
-                        reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
-                        // Absent, `null` or unbounded all read as "this family
-                        // named no stable target": a peer that predates issue
-                        // #1301 omits the key, and the bound is the same one
-                        // every other GM id crosses this ingress under.
-                        target: body
-                            .get("target")
-                            .and_then(serde_json::Value::as_str)
-                            .and_then(bounded_gm_target_id),
-                        // The lever (issue #1303). Absent, `null` or an
-                        // unrecognised spelling all read as "this family names
-                        // no lever" — `validate_fleet_frame` then refuses the
-                        // frame if its family required one, rather than this
-                        // ingress guessing Fire.
-                        verb: body
-                            .get("verb")
-                            .cloned()
-                            .and_then(|value| serde_json::from_value(value).ok()),
-                        // The event-control lever (issue #1304), on the same
-                        // terms: absent or `null` leaves Fire/Pause identity
-                        // to `verb`, as pre-Skip peers do. An unrecognised
-                        // spelling fails the whole frame rather than degrading
-                        // to Fire — reporting a refused Skip as a refused Fire
-                        // would be the opposite sentence about the same button.
-                        lever: match body.get("lever") {
-                            None | Some(serde_json::Value::Null) => None,
-                            Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
-                        },
-                    })
-                }
-                _ => return None,
-            };
-            Some(MeshFrame::GmAction(frame))
-        }
-        crate::lockstep::frame::TYPE_GM_JOIN => {
-            use crate::gm_join::{
-                GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId,
-            };
-            let id = GmJoinId(body.get("join_id")?.as_u64()?);
-            let frame = match body.get("kind")?.as_str()? {
-                "pause" => {
-                    let approval = GmJoinApproval {
-                        id,
-                        kind: serde_json::from_value(body.get("join_kind")?.clone()).ok()?,
-                        owner: from,
-                        approved_by: HostSlot(
-                            u32::try_from(body.get("approved_by")?.as_u64()?).ok()?,
-                        ),
-                        candidate: GmJoinCandidate {
-                            host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
-                            operator_id: body.get("operator_id")?.as_str()?.to_string(),
-                        },
-                        apply_tick: body.get("apply_tick")?.as_u64()?,
-                        transfer_id: u64::from_str_radix(body.get("transfer_id")?.as_str()?, 16)
-                            .ok()?,
-                    };
-                    if approval.apply_tick != tick {
-                        return None;
-                    }
-                    GmJoinFrame::Pause(approval)
-                }
-                "restored" => {
-                    if tick != 0 {
-                        return None;
-                    }
-                    GmJoinFrame::Restored {
-                        from,
-                        id,
-                        digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
-                    }
-                }
-                "restore-boundary" => {
-                    if tick != 0 {
-                        return None;
-                    }
-                    GmJoinFrame::RestoreBoundary {
-                        from,
-                        id,
-                        boundary: u16::try_from(body.get("boundary")?.as_u64()?).ok()?,
-                    }
-                }
-                "committed" => GmJoinFrame::Committed(GmJoinCommit {
-                    id,
-                    kind: serde_json::from_value(body.get("join_kind")?.clone()).ok()?,
-                    owner: from,
-                    candidate: GmJoinCandidate {
-                        host: HostSlot(u32::try_from(body.get("candidate")?.as_u64()?).ok()?),
-                        operator_id: body.get("operator_id")?.as_str()?.to_string(),
-                    },
-                    tick,
-                    digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
-                }),
-                "refused" => {
-                    if tick != 0 {
-                        return None;
-                    }
-                    GmJoinFrame::Refused {
-                        from,
-                        id,
-                        reason: serde_json::from_value(body.get("reason")?.clone()).ok()?,
-                    }
-                }
-                _ => return None,
-            };
-            Some(MeshFrame::GmJoin(frame))
-        }
-        crate::lockstep::frame::TYPE_GM_RESTORE => {
-            use crate::gm_restore::GmRestoreFrame;
-            let from = HostSlot(u32::try_from(body.get("from")?.as_u64()?).ok()?);
-            let restore = crate::gm_action::GmActionOrder::new(
-                HostSlot(u32::try_from(body.get("restore_origin")?.as_u64()?).ok()?),
-                body.get("restore_sequence")?.as_u64()?,
-            );
-            let failure = |body: &serde_json::Value| {
-                body.get("failure")
-                    .and_then(|value| serde_json::from_value(value.clone()).ok())
-            };
-            let frame = match body.get("kind")?.as_str()? {
-                "ready" => GmRestoreFrame::Ready { from, restore },
-                "loaded" => GmRestoreFrame::Loaded {
-                    from,
-                    restore,
-                    tick: body.get("tick")?.as_u64()?,
-                    digest: u64::from_str_radix(body.get("digest")?.as_str()?, 16).ok()?,
-                },
-                "unable" => GmRestoreFrame::Unable {
-                    from,
-                    restore,
-                    failure: failure(body)?,
-                },
-                "settle" => GmRestoreFrame::Settle {
-                    from,
-                    restore,
-                    commit: body.get("commit")?.as_bool()?,
-                    failure: failure(body),
-                },
-                _ => return None,
-            };
-            Some(MeshFrame::GmRestore(frame))
-        }
-        _ => None,
-    }
+/// Drop malformed or unsupported frames; envelope tick remains advisory.
+pub fn decode_mesh_frame(raw: &str) -> Option<crate::lockstep::MeshFrame> {
+    wire::decode_mesh(raw)
 }
 
 /// Decode the frozen fleet roster a host page hands the simulation at mission
@@ -1589,337 +1505,7 @@ pub fn encode_local_gm_operator(operator: Option<&crate::gm_roster::GmOperator>)
 /// Unknown fields are refused so this narrow route cannot accidentally become
 /// a generic host mutation surface.
 pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    let object = value.as_object()?;
-    let action = match object.get("action")?.as_str()? {
-        "set_session_paused" if object.len() == 4 && object.contains_key("active") => {
-            crate::gm_action::GmAction::SetSessionPaused {
-                active: object.get("active")?.as_bool()?,
-            }
-        }
-        "set_station_puppet"
-            if object.len() == 6
-                && object.contains_key("ship")
-                && object.contains_key("station")
-                && object.contains_key("active") =>
-        {
-            crate::gm_action::GmAction::SetStationPuppet {
-                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
-                    object.get("ship")?.as_str()?,
-                )?),
-                station: crate::core::messages::StationId(bounded_gm_target_id(
-                    object.get("station")?.as_str()?,
-                )?),
-                active: object.get("active")?.as_bool()?,
-            }
-        }
-        // Exactly `{operator_id, correlation, action, event}` — the same
-        // per-shape field-count guard every arm here carries, so a Fire cannot
-        // smuggle a second target past the narrow ingress.
-        "fire_gm_event" if object.len() == 4 && object.contains_key("event") => {
-            crate::gm_action::GmAction::FireGmEvent {
-                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
-            }
-        }
-        // The Skip lever (issue #1304) on the same exact narrow shape: one
-        // stable layer-qualified event id and nothing else. A separate wire
-        // verb rather than a `lever` field on `fire_gm_event`, so a page that
-        // means to fire can never arm a skip by mistyping one value — the two
-        // levers do opposite things to the same event.
-        "arm_gm_event_skip" if object.len() == 4 && object.contains_key("event") => {
-            crate::gm_action::GmAction::ArmGmEventSkip {
-                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
-            }
-        }
-        // Exactly `{operator_id, correlation, action, entity, effect, amount,
-        // scope, scope_id}` (issues #1310, #1311). The amount arrives as
-        // milli-HP so the browser cannot hand the journal a float it would then
-        // have to round.
-        //
-        // `scope` and `scope_id` are ALWAYS present — `scope_id` is `null` for
-        // the whole-entity scope — so the field-count guard stays exact rather
-        // than accepting two shapes, exactly as `spawn_palette_entity`'s
-        // always-present `variant` does. The pair is a discriminant plus one id
-        // rather than the enum's own serde shape because THIS boundary is a
-        // narrow deny-by-default ingress: a flat pair has one spelling a browser
-        // can send, and a nested object would give a client a second place to
-        // put a field nobody validated.
-        "apply_direct_effect"
-            if object.len() == 8
-                && object.contains_key("entity")
-                && object.contains_key("effect")
-                && object.contains_key("amount_milli_hp")
-                && object.contains_key("scope")
-                && object.contains_key("scope_id") =>
-        {
-            let effect = match object.get("effect")?.as_str()? {
-                "damage" => crate::gm_effect::GmDirectEffectKind::Damage,
-                "heal" => crate::gm_effect::GmDirectEffectKind::Heal,
-                _ => return None,
-            };
-            let scope_id = object.get("scope_id")?;
-            let scope = match object.get("scope")?.as_str()? {
-                // A whole-entity effect carries no id, and one that arrives
-                // anyway is refused rather than ignored: a request the ingress
-                // silently reinterprets is a request whose result cannot be
-                // predicted from what was sent.
-                "entity" if scope_id.is_null() => crate::gm_effect::GmDirectEffectScope::Entity,
-                "station" => crate::gm_effect::GmDirectEffectScope::Station(
-                    crate::core::messages::StationId(bounded_gm_target_id(scope_id.as_str()?)?),
-                ),
-                "system" => crate::gm_effect::GmDirectEffectScope::System(
-                    crate::core::messages::SystemId(bounded_gm_target_id(scope_id.as_str()?)?),
-                ),
-                _ => return None,
-            };
-            let amount = object.get("amount_milli_hp")?.as_u64()?;
-            crate::gm_action::GmAction::ApplyDirectEffect {
-                target: bounded_gm_target_id(object.get("entity")?.as_str()?)?,
-                scope,
-                effect,
-                amount_milli_hp: u32::try_from(amount).ok().filter(|amount| *amount > 0)?,
-            }
-        }
-        // Exactly `{operator_id, correlation, action, palette, variant,
-        // position_mm, heading_mdeg}` (issue #1305). `variant` is always
-        // present — `null` for the bare template — so the field-count guard
-        // stays exact rather than accepting two shapes. There is deliberately
-        // no template/asset field to smuggle anything through: the palette id
-        // IS the vocabulary.
-        "objective_instance_action" if object.len() == 6 => {
-            let action = crate::gm_action::GmAction::ObjectiveInstanceAction {
-                objective: bounded_gm_target_id(object.get("objective")?.as_str()?)?,
-                scope: serde_json::from_value(object.get("scope")?.clone()).ok()?,
-                verb: serde_json::from_value(object.get("verb")?.clone()).ok()?,
-            };
-            action.validate().ok()?;
-            action
-        }
-        "objective_action" if object.len() == 6 => {
-            let action = crate::gm_action::GmAction::ObjectiveAction {
-                objective: bounded_gm_target_id(object.get("objective")?.as_str()?)?,
-                verb: serde_json::from_value(object.get("verb")?.clone()).ok()?,
-                recipients: serde_json::from_value(object.get("recipients")?.clone()).ok()?,
-            };
-            // Reuse canonical bounds and ordering: duplicate or malformed
-            // recipients are invalid vocabulary before they reach admission.
-            action.validate().ok()?;
-            action
-        }
-        "presentation" if object.len() == 5 => {
-            let action = crate::gm_action::GmAction::Presentation {
-                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
-                    object.get("ship")?.as_str()?,
-                )?),
-                cue: serde_json::from_value(object.get("cue")?.clone()).ok()?,
-            };
-            action.validate().ok()?;
-            action
-        }
-        "set_contact_information" if object.len() == 5 => {
-            let action = crate::gm_action::GmAction::SetContactInformation {
-                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
-                    object.get("ship")?.as_str()?,
-                )?),
-                change: serde_json::from_value(object.get("change")?.clone()).ok()?,
-            };
-            action.validate().ok()?;
-            action
-        }
-        "set_contact_classification" if object.len() == 6 => {
-            let palette = object.get("palette")?;
-            crate::gm_action::GmAction::SetContactClassification {
-                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
-                    object.get("ship")?.as_str()?,
-                )?),
-                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
-                palette: if palette.is_null() {
-                    None
-                } else {
-                    Some(bounded_gm_target_id(palette.as_str()?)?)
-                },
-            }
-        }
-        "set_contact_override" if object.len() == 6 => {
-            crate::gm_action::GmAction::SetContactOverride {
-                ship: crate::command_admission::log::ShipKey(
-                    object.get("ship")?.as_str()?.to_owned(),
-                ),
-                target: object.get("target")?.as_str()?.to_owned(),
-                mode: serde_json::from_value(object.get("mode")?.clone()).ok()?,
-            }
-        }
-        "set_system_disabled" if object.len() == 6 => {
-            crate::gm_action::GmAction::SetSystemDisabled {
-                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
-                system: crate::core::messages::SystemId(bounded_gm_target_id(
-                    object.get("system")?.as_str()?,
-                )?),
-                disabled: object.get("disabled")?.as_bool()?,
-            }
-        }
-        "transmit_comms" if object.len() == 4 => {
-            let transmission: crate::gm_comms::GmCommsTransmission =
-                serde_json::from_value(object.get("transmission")?.clone()).ok()?;
-            if !transmission.valid_shape() {
-                return None;
-            }
-            crate::gm_action::GmAction::TransmitComms { transmission }
-        }
-        "set_npc_doctrine" if object.len() == 5 => crate::gm_action::GmAction::SetNpcDoctrine {
-            target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
-            doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
-        },
-        "set_npc_doctrine_checked" if object.len() == 6 => {
-            let action = crate::gm_action::GmAction::SetNpcDoctrineChecked {
-                target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
-                doctrine: bounded_gm_target_id(object.get("doctrine")?.as_str()?)?,
-                expected_revision: object.get("expected_revision")?.as_str()?.to_owned(),
-            };
-            action.validate().ok()?;
-            action
-        }
-        // Exactly `{operator_id, correlation, action, faction, enemy,
-        // hostile}` (issue #1442). The two identities are authored faction
-        // reference NAMES, bounded exactly as every other GM target id is, and
-        // `hostile` is absolute rather than a toggle.
-        "set_faction_hostility"
-            if object.len() == 6
-                && object.contains_key("faction")
-                && object.contains_key("enemy")
-                && object.contains_key("hostile") =>
-        {
-            let action = crate::gm_action::GmAction::SetFactionHostility {
-                faction: bounded_gm_target_id(object.get("faction")?.as_str()?)?,
-                enemy: bounded_gm_target_id(object.get("enemy")?.as_str()?)?,
-                hostile: object.get("hostile")?.as_bool()?,
-            };
-            // A faction hostile to itself is refused HERE rather than at the
-            // apply tick, for the qualified-event-id reason: a request that can
-            // only ever be refused must not become a canonical grant.
-            action.validate().ok()?;
-            action
-        }
-        // Exactly `{operator_id, correlation, action, original,
-        // original_operator, original_sequence, expected}` (issue #1442).
-        //
-        // `expected` is the `affected` object the journal projection published,
-        // echoed back verbatim. The page never constructs one: it re-sends what
-        // it was told, which is precisely what lets the canonical reducer
-        // compare the request against the fact and refuse a stale reading.
-        "undo_gm_action"
-            if object.len() == 7
-                && object.contains_key("original")
-                && object.contains_key("original_operator")
-                && object.contains_key("original_sequence")
-                && object.contains_key("expected") =>
-        {
-            let action = crate::gm_action::GmAction::UndoGmAction {
-                original: serde_json::from_value(object.get("original")?.clone()).ok()?,
-                original_operator: object.get("original_operator")?.as_str()?.to_string(),
-                original_sequence: object.get("original_sequence")?.as_u64()?,
-                expected: serde_json::from_value(object.get("expected")?.clone()).ok()?,
-            };
-            action.validate().ok()?;
-            action
-        }
-        "despawn_entity" if object.len() == 4 => crate::gm_action::GmAction::DespawnEntity {
-            target: bounded_gm_target_id(object.get("target")?.as_str()?)?,
-        },
-        // Exactly `{operator_id, correlation, action, candidate}` (issue
-        // #1446). The candidate is an opaque slot id in the requesting peer's
-        // own catalogue, bounded exactly as every other GM id is: it is never
-        // joined to a directory, and `bounded_gm_target_id` is what keeps a
-        // path-shaped string out of the canonical journal.
-        "request_live_restore" if object.len() == 4 && object.contains_key("candidate") => {
-            crate::gm_action::GmAction::RequestLiveRestore {
-                candidate: bounded_gm_target_id(object.get("candidate")?.as_str()?)?,
-            }
-        }
-        "backfill_ship_slot" if object.len() == 4 && object.contains_key("slot") => {
-            crate::gm_action::GmAction::BackfillShipSlot {
-                slot: bounded_gm_target_id(object.get("slot")?.as_str()?)?,
-            }
-        }
-        "spawn_palette_entity"
-            if object.len() == 7
-                && object.contains_key("palette")
-                && object.contains_key("variant")
-                && object.contains_key("position_mm")
-                && object.contains_key("heading_mdeg") =>
-        {
-            let position = object.get("position_mm")?.as_array()?;
-            if position.len() != 3 {
-                return None;
-            }
-            let mut position_mm = [0i64; 3];
-            for (slot, value) in position_mm.iter_mut().zip(position) {
-                *slot = value.as_i64()?;
-            }
-            let variant = match object.get("variant")? {
-                serde_json::Value::Null => None,
-                value => Some(bounded_gm_target_id(value.as_str()?)?),
-            };
-            let heading_mdeg = i32::try_from(object.get("heading_mdeg")?.as_i64()?).ok()?;
-            // The placement bound is the action's own answer, applied HERE too
-            // so an out-of-range request never becomes a grant, exactly as
-            // `bounded_gm_event_id` refuses an unqualified event id at ingress.
-            if !crate::gm_spawn::placement_is_valid(position_mm, heading_mdeg) {
-                return None;
-            }
-            crate::gm_action::GmAction::SpawnPaletteEntity {
-                palette: bounded_gm_target_id(object.get("palette")?.as_str()?)?,
-                variant,
-                position_mm,
-                heading_mdeg,
-            }
-        }
-        // Exactly `{operator_id, correlation, action, event, active}`. The
-        // absolute `active` is the same shape `set_session_paused` carries and
-        // for the same reason: two GMs pressing at once must not depend on
-        // arrival order for the state the event ends up in.
-        "set_event_paused"
-            if object.len() == 5
-                && object.contains_key("event")
-                && object.contains_key("active") =>
-        {
-            crate::gm_action::GmAction::SetEventPaused {
-                event: bounded_gm_event_id(object.get("event")?.as_str()?)?,
-                active: object.get("active")?.as_bool()?,
-            }
-        }
-        "issue_station_command"
-            if object.len() == 7
-                && object.contains_key("ship")
-                && object.contains_key("station")
-                && object.contains_key("target")
-                && object.contains_key("payload") =>
-        {
-            let payload: crate::core::messages::SystemControlPayload =
-                serde_json::from_value(object.get("payload")?.clone()).ok()?;
-            crate::gm_action::GmAction::IssueStationCommand {
-                ship: crate::command_admission::log::ShipKey(bounded_gm_target_id(
-                    object.get("ship")?.as_str()?,
-                )?),
-                station: crate::core::messages::StationId(bounded_gm_target_id(
-                    object.get("station")?.as_str()?,
-                )?),
-                target: crate::core::messages::SystemId(bounded_gm_target_id(
-                    object.get("target")?.as_str()?,
-                )?),
-                payload: canonical_system_command(&payload)?,
-            }
-        }
-        _ => return None,
-    };
-    let request = crate::gm_action::GmActionRequest {
-        operator_id: object.get("operator_id")?.as_str()?.to_string(),
-        correlation: serde_json::from_value(object.get("correlation")?.clone()).ok()?,
-        action,
-    };
-    (!request.operator_id.is_empty()
-        && request.operator_id.chars().count() <= crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS)
-        .then_some(request)
+    wire::decode_gm_request(raw)
 }
 
 /// One layer-qualified GM event id: an ordinary bounded target id that also
@@ -3014,3 +2600,7 @@ mod mesh_frame_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "codec_wire_tests.rs"]
+mod wire_tests;

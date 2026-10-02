@@ -1,3 +1,4 @@
+import { createGamepadPresentation, updateGamepadPresentation } from './settings-gamepad-presentation.js';
 import { renderAudioSettingsPanel } from './audio-settings-panel.js';
 import { stationRatingLabel } from './station-rating.js';
 
@@ -1129,20 +1130,13 @@ export function mountSettings({
       beforeActions: (target) => {
         const gamepadSection = section('settings.controls.gamepad.heading');
         gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
-        const gamepadLabel = doc.createElement('label');
-        gamepadLabel.className = 'settings-binding-label';
-        gamepadLabel.textContent = t('settings.controls.gamepad.selector');
-        const selector = doc.createElement('select');
-        selector.setAttribute('data-control', 'semantic-gamepad-select');
-        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
-        updateGamepadSelector(selector, gamepad);
-        selector.addEventListener('change', () => {
-          if (typeof _onGamepadSelection === 'function') {
-            _onGamepadSelection(selector.value === '' ? null : Number(selector.value));
-          }
-          buildContent();
+        const { label: gamepadLabel, status } = createGamepadPresentation(doc, gamepad, {
+          policy: 'client', t, statusClass: 'settings-section-hint settings-gamepad-status',
+          onSelect: index => {
+            if (typeof _onGamepadSelection === 'function') _onGamepadSelection(index);
+            buildContent();
+          },
         });
-        gamepadLabel.appendChild(selector);
         gamepadSection.appendChild(gamepadLabel);
         const hideLabel = doc.createElement('label');
         const hide = doc.createElement('input');
@@ -1156,10 +1150,6 @@ export function mountSettings({
         hideLabel.appendChild(hideText);
         gamepadSection.appendChild(hideLabel);
 
-        const status = doc.createElement('div');
-        status.className = 'settings-section-hint settings-gamepad-status';
-        status.setAttribute('data-control', 'semantic-gamepad-status');
-        updateGamepadStatus(status, gamepad);
         gamepadSection.appendChild(status);
         target.appendChild(gamepadSection);
       },
@@ -1366,71 +1356,6 @@ export function mountSettings({
     restoreFocusedControl(restoreTo);
   }
 
-  function visibleGamepadStatus(gamepad) {
-    const unsupportedOnly = gamepad && gamepad.status === 'none'
-      && (gamepad.devices || []).some((device) => !device.supported)
-      && !(gamepad.devices || []).some((device) => device.supported);
-    return unsupportedOnly ? 'unsupported' : ((gamepad && gamepad.status) || 'none');
-  }
-
-  function updateGamepadSelector(selector, gamepad) {
-    if (!selector) return;
-    selector.innerHTML = '';
-    const unavailable = gamepad && gamepad.status === 'unavailable';
-    selector.disabled = !!unavailable;
-    const none = doc.createElement('option');
-    none.value = '';
-    none.textContent = t('settings.controls.gamepad.none');
-    selector.appendChild(none);
-    const seen = new Set();
-    for (const device of (gamepad && gamepad.devices) || []) {
-      const option = doc.createElement('option');
-      option.value = String(device.index);
-      option.textContent = t(device.supported
-        ? 'settings.controls.gamepad.device'
-        : 'settings.controls.gamepad.device_unsupported', {
-        slot: String(Number(device.index) + 1),
-      });
-      option.disabled = !device.supported || device.available === false;
-      if (device.available === false && device.assignedTo) {
-        option.textContent = t('settings.controls.gamepad.device_assigned', {
-          slot: String(Number(device.index) + 1), owner: device.assignedTo,
-        });
-      }
-      selector.appendChild(option);
-      seen.add(Number(device.index));
-    }
-    if (!unavailable && gamepad && gamepad.selectedIndex != null
-        && !seen.has(Number(gamepad.selectedIndex))) {
-      const disconnected = doc.createElement('option');
-      disconnected.value = String(gamepad.selectedIndex);
-      disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
-        slot: String(Number(gamepad.selectedIndex) + 1),
-      });
-      selector.appendChild(disconnected);
-    }
-    if (unavailable && gamepad.retainedIndex != null) {
-      const retained = doc.createElement('option');
-      retained.value = String(gamepad.retainedIndex);
-      retained.textContent = t('settings.controls.gamepad.device_retained', {
-        slot: String(Number(gamepad.retainedIndex) + 1),
-      });
-      selector.appendChild(retained);
-      selector.value = retained.value;
-    } else {
-      selector.value = !gamepad || gamepad.selectedIndex == null
-        ? '' : String(gamepad.selectedIndex);
-    }
-  }
-
-  function updateGamepadStatus(status, gamepad) {
-    if (!status) return;
-    const visibleStatus = visibleGamepadStatus(gamepad);
-    status.setAttribute('role', visibleStatus === 'disconnected' ? 'alert' : 'status');
-    status.setAttribute('aria-live', visibleStatus === 'disconnected' ? 'assertive' : 'polite');
-    status.textContent = t(`settings.controls.gamepad.status_${visibleStatus}`);
-  }
-
   // Gamepad polling can change status while a binding input owns focus. Update
   // only the selector options and live status; rebuilding the whole modal here
   // would detach that exact input, losing keyboard/gamepad capture and making
@@ -1441,13 +1366,10 @@ export function mountSettings({
       return;
     }
     if (!shell.isOpen() || activeTab !== 'controls') return;
-    updateGamepadSelector(
+    updateGamepadPresentation(
       overlay.querySelector('[data-control="semantic-gamepad-select"]'),
-      gamepad,
-    );
-    updateGamepadStatus(
       overlay.querySelector('[data-control="semantic-gamepad-status"]'),
-      gamepad,
+      gamepad, { policy: 'client', t },
     );
   }
 

@@ -843,7 +843,6 @@ mod tests;
 // JavaScript that could construct a `tick` frame could construct a command no
 // host admitted.
 
-/// The envelope key for the vocabulary revision, matching `gui/host-mesh.js`.
 mod wire {
     //! Private wire projection: keep JSON shape separate from durable typed frames.
 
@@ -1004,19 +1003,17 @@ mod wire {
             | crate::gm_action::GmAction::SetNpcDoctrineChecked { .. }
             | crate::gm_action::GmAction::SetFactionHostility { .. }
             | crate::gm_action::GmAction::UndoGmAction { .. } => action.validate().ok()?,
-            crate::gm_action::GmAction::TransmitComms { transmission } => {
-                if !transmission.valid_shape() {
-                    return None;
-                }
+            crate::gm_action::GmAction::TransmitComms { transmission }
+                if !transmission.valid_shape() =>
+            {
+                return None;
             }
             crate::gm_action::GmAction::SpawnPaletteEntity {
                 position_mm,
                 heading_mdeg,
                 ..
-            } => {
-                if !crate::gm_spawn::placement_is_valid(*position_mm, *heading_mdeg) {
-                    return None;
-                }
+            } if !crate::gm_spawn::placement_is_valid(*position_mm, *heading_mdeg) => {
+                return None;
             }
             _ => {}
         }

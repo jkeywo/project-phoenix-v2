@@ -292,6 +292,8 @@ entities:
       confidence: confirmed
       title: Client Settings, Help, and Accessibility Surface
       summary: Local settings, volume, control help, and inline panel assistance; these change client presentation only and do not grant authority or alter simulation state.
+      rationale:
+        - "[ai] Client and host Settings share gamepad device selector construction and in-place accessible status painting with explicit client and host presentation policies. Client assignment, retained capability-loss selection and unsupported-only status remain distinct from host policy. Polling keeps focused binding inputs mounted; each adapter retains selection dispatch and panel rebuild timing."
     architecture:
       kind: client-preferences
       authority: local
@@ -299,8 +301,9 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/settings-panel.js, gui/help-panel.js]
-      tests: [npx vitest run]
+      paths: [gui/settings-gamepad-presentation.js, gui/settings-panel.js, gui/server-settings.js, gui/help-panel.js]
+      symbols: [createGamepadPresentation, updateGamepadPresentation, updateGamepadSelector]
+      tests: [npx vitest run tests/client/settings-gamepad-presentation.test.js tests/client/settings-panel.test.js tests/client/server-settings.test.js tests/client/gamepad-persistence-presentation.test.js]
 
   - component: ship-manual-content-builder
     core:

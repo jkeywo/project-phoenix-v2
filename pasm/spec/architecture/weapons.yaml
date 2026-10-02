@@ -435,6 +435,8 @@ entities:
         - src/console/weapons/blaster.rs
         - src/console/weapons/torpedo.rs
         - src/core/messages.rs
+        - editor/barrel-pattern-validate.js
+        - scripts/build-workshop.mjs
         - editor/blaster-validate.js
         - editor/torpedo-validate.js
         - editor/marker-validate.js
@@ -445,6 +447,7 @@ entities:
         - BarrelPattern
         - validate_barrel_pattern
         - validate_blaster_banks
+        - validateBarrelPatterns
         - validateBlasterBanks
         - validate_torpedo_tubes
         - validateTorpedoTubes

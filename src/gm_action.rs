@@ -2032,6 +2032,11 @@ pub enum GmActionInsert {
     Duplicate,
 }
 
+enum JournalResultPolicy {
+    Recorded,
+    Derived,
+}
+
 impl GmActionJournal {
     pub fn grants(&self) -> &[GmActionGrant] {
         &self.grants
@@ -2467,9 +2472,14 @@ impl GmActionJournal {
     }
 
     fn log_prefix(&self, end: usize) -> GmActionLog {
-        if self.applied_results.is_empty() {
-            return self.derived_log_prefix(end);
-        }
+        self.fold_log_prefix(end, JournalResultPolicy::Recorded)
+    }
+
+    fn derived_log_prefix(&self, end: usize) -> GmActionLog {
+        self.fold_log_prefix(end, JournalResultPolicy::Derived)
+    }
+
+    fn fold_log_prefix(&self, end: usize, policy: JournalResultPolicy) -> GmActionLog {
         let mut paused = self.initial_paused;
         let mut puppets = std::collections::BTreeSet::new();
         // Which one-shot events this canonical prefix has already spent, so a
@@ -2487,7 +2497,11 @@ impl GmActionJournal {
         let mut entries = Vec::new();
         for (index, grant) in self.grants.iter().take(end).enumerate() {
             let requested_active = grant.action.requested_active();
-            if let Some(result) = self.applied_results.get(index) {
+            if let Some(result) = self
+                .applied_results
+                .get(index)
+                .filter(|_| matches!(policy, JournalResultPolicy::Recorded))
+            {
                 if result.outcome == GmActionOutcome::Applied {
                     match &grant.action {
                         GmAction::SetSessionPaused { active } => paused = *active,
@@ -2631,137 +2645,6 @@ impl GmActionJournal {
                 // The same hold, PROJECTED: a request this prefix has not
                 // applied yet will stop the world when it does, and that is
                 // what decides where the grant after it may be scheduled.
-                GmAction::RequestLiveRestore { .. } => {
-                    paused = true;
-                    GmActionOutcome::Applied
-                }
-            };
-            entries.push(LoggedGmAction {
-                operator_id: grant.operator_id.clone(),
-                correlation: grant.correlation.clone(),
-                action_kind: grant.action.kind(),
-                requested_active,
-                outcome,
-                tick: grant.apply_tick,
-                reason: None,
-                order: Some(grant.order),
-                target: grant.action.target_id().map(str::to_string),
-                effect: None,
-                verb: grant.action.verb(),
-                lever: grant.action.event_lever(),
-                effect_scope: grant.action.effect_scope(),
-                objective_verb: grant.action.objective_verb(),
-                objective_instance_scope: grant.action.objective_instance_scope(),
-                objective_recipients: grant.action.objective_recipients(),
-                comms_recipients: grant.action.comms_recipients(),
-                observer: grant.action.observer_id(),
-                npc_doctrine: grant.action.npc_doctrine(),
-                // The affected before/after pair is measured against the LIVE
-                // world at the apply tick, which this fixture reducer has none
-                // of. Guessing one would put a fabricated fact under an inverse
-                // that revalidates against it, so it stays absent.
-                affected: None,
-                undo_of: grant.action.undo_reference(),
-            });
-        }
-        GmActionLog { entries, paused }
-    }
-
-    /// Legacy/pure-fixture reducer used only when an applied frontier is
-    /// reconstructed without live world state. Current production snapshots
-    /// persist the actual results and therefore never guess here.
-    fn derived_log_prefix(&self, end: usize) -> GmActionLog {
-        let mut paused = self.initial_paused;
-        let mut puppets = std::collections::BTreeSet::new();
-        let mut fired_events = std::collections::BTreeSet::new();
-        // Which events this canonical prefix has left paused, so a redundant
-        // set-state reduces to the same No-op on every peer even when the live
-        // trigger table is not available to this reducer (issue #1303).
-        let mut paused_events = std::collections::BTreeSet::new();
-        // The same discipline for Skip (issue #1304): a second arm of an event
-        // this prefix has already armed reduces to the same No-op on every
-        // peer, whether or not the live trigger table is available here.
-        let mut armed_skips = std::collections::BTreeSet::new();
-        let mut entries = Vec::new();
-        for grant in self.grants.iter().take(end) {
-            let requested_active = grant.action.requested_active();
-            let outcome = match &grant.action {
-                GmAction::FireGmEvent { event } if fired_events.contains(event) => {
-                    GmActionOutcome::NoOp
-                }
-                GmAction::FireGmEvent { event } => {
-                    fired_events.insert(event.clone());
-                    GmActionOutcome::Applied
-                }
-                GmAction::SetEventPaused { event, active }
-                    if paused_events.contains(event) == *active =>
-                {
-                    GmActionOutcome::NoOp
-                }
-                GmAction::SetEventPaused { event, active } => {
-                    if *active {
-                        paused_events.insert(event.clone());
-                    } else {
-                        paused_events.remove(event);
-                    }
-                    GmActionOutcome::Applied
-                }
-                GmAction::ArmGmEventSkip { event } if armed_skips.contains(event) => {
-                    GmActionOutcome::NoOp
-                }
-                GmAction::ArmGmEventSkip { event } => {
-                    armed_skips.insert(event.clone());
-                    GmActionOutcome::Applied
-                }
-                GmAction::SetSessionPaused { active } if paused == *active => GmActionOutcome::NoOp,
-                GmAction::SetSessionPaused { active } => {
-                    paused = *active;
-                    GmActionOutcome::Applied
-                }
-                GmAction::SetStationPuppet {
-                    ship,
-                    station,
-                    active,
-                } => {
-                    let key = (ship.0.clone(), station.0.clone(), grant.operator_id.clone());
-                    let changed = if *active {
-                        puppets.insert(key)
-                    } else {
-                        puppets.remove(&key)
-                    };
-                    if changed {
-                        GmActionOutcome::Applied
-                    } else {
-                        GmActionOutcome::NoOp
-                    }
-                }
-                // A directed effect's real answer is a function of the live
-                // hull, which this reducer does not have. Production always
-                // records the actual apply-boundary result above, so this arm
-                // is only ever reached by the pure-fixture path — and the
-                // honest answer there is "the grant was admitted". A
-                // placement has the same shape: each grant is its own spawn.
-                GmAction::IssueStationCommand { .. }
-                | GmAction::ApplyDirectEffect { .. }
-                | GmAction::SpawnPaletteEntity { .. }
-                | GmAction::SetContactOverride { .. }
-                | GmAction::SetContactClassification { .. }
-                | GmAction::Presentation { .. }
-                | GmAction::SetContactInformation { .. }
-                | GmAction::SetSystemDisabled { .. }
-                | GmAction::DespawnEntity { .. }
-                | GmAction::ObjectiveAction { .. }
-                | GmAction::ObjectiveInstanceAction { .. }
-                | GmAction::SetNpcDoctrine { .. }
-                | GmAction::SetNpcDoctrineChecked { .. }
-                | GmAction::SetFactionHostility { .. }
-                | GmAction::UndoGmAction { .. }
-                | GmAction::TransmitComms { .. }
-                | GmAction::BackfillShipSlot { .. } => GmActionOutcome::Applied,
-                // The applied fold's hold, in the reducer-free projection: an
-                // admitted live restore stops the world, so whatever this
-                // prefix schedules after it must land on the stopped boundary
-                // here too.
                 GmAction::RequestLiveRestore { .. } => {
                     paused = true;
                     GmActionOutcome::Applied
@@ -5081,6 +4964,93 @@ fn submit_bound(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn both_journal_policies_fold_every_latch_and_live_restore() {
+        for initially_paused in [false, true] {
+            let mut journal = GmActionJournal::default();
+            journal.adopt_initial_pause(initially_paused);
+            let actions = [
+                GmAction::SetSessionPaused {
+                    active: !initially_paused,
+                },
+                GmAction::SetStationPuppet {
+                    ship: crate::command_admission::log::ShipKey("ship".into()),
+                    station: crate::core::messages::StationId("helm".into()),
+                    active: true,
+                },
+                GmAction::FireGmEvent {
+                    event: "world::fire".into(),
+                },
+                GmAction::SetEventPaused {
+                    event: "world::pause".into(),
+                    active: true,
+                },
+                GmAction::ArmGmEventSkip {
+                    event: "world::skip".into(),
+                },
+            ];
+            for (index, action) in actions
+                .into_iter()
+                .flat_map(|action| [action.clone(), action])
+                .enumerate()
+            {
+                let mut row = grant(1, index as u64 + 1, 1, &format!("latch-{index}"), true);
+                row.action = action;
+                journal.insert(row).unwrap();
+            }
+            let mut restore = grant(1, 11, 1, "restore", true);
+            restore.action = GmAction::RequestLiveRestore {
+                candidate: "candidate".into(),
+            };
+            journal.insert(restore).unwrap();
+            let derived = journal.derived_log_prefix(11);
+            assert!(derived.paused);
+            assert_eq!(
+                derived
+                    .entries
+                    .iter()
+                    .map(|row| row.outcome)
+                    .collect::<Vec<_>>(),
+                [GmActionOutcome::Applied, GmActionOutcome::NoOp]
+                    .repeat(5)
+                    .into_iter()
+                    .chain([GmActionOutcome::Applied])
+                    .collect::<Vec<_>>()
+            );
+            assert!(derived.entries.iter().all(|row| row.affected.is_none()));
+            assert_eq!(journal.log_prefix(11), derived);
+            journal.applied_results = derived.entries.clone();
+            assert_eq!(journal.log_prefix(11), derived);
+        }
+    }
+
+    #[test]
+    fn derived_frontier_ignores_recorded_refusals_but_mixed_projection_retains_them() {
+        let mut journal = GmActionJournal::default();
+        for sequence in 1..=3 {
+            journal
+                .insert(fire_grant(
+                    sequence,
+                    1,
+                    &format!("fire-{sequence}"),
+                    "world::event",
+                ))
+                .unwrap();
+        }
+        let derived = journal.derived_log_prefix(3);
+        let mut refused = derived.entries[0].clone();
+        refused.outcome = GmActionOutcome::Refused;
+        refused.reason = Some(GmActionRefusalReason::UnknownGmEvent);
+        journal.applied_results = vec![refused.clone()];
+        let mixed = journal.log_prefix(3);
+        assert_eq!(mixed.entries[0], refused);
+        assert_eq!(mixed.entries[1].outcome, GmActionOutcome::Applied);
+        assert_eq!(mixed.entries[2].outcome, GmActionOutcome::NoOp);
+        assert_eq!(journal.derived_log_prefix(3), derived);
+        journal.restore_applied_frontier(3).unwrap();
+        assert_eq!(journal.applied_log(), derived);
+    }
 
     fn grant(
         slot: u32,

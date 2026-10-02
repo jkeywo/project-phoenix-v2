@@ -1039,3 +1039,18 @@ fn report_policy_conceal_then_normal_at_one_stopped_boundary_cannot_resurrect_sa
     assert!(report.pending.is_none());
     assert!(report.next_tick.is_none());
 }
+
+#[test]
+fn explicitly_stored_normal_remains_an_unchanged_absolute_request() {
+    let mut overrides = phoenix::gm_contact::ContactOverrides::from([(
+        "observer".into(),
+        std::collections::BTreeMap::from([("target".into(), ContactMode::Normal)]),
+    )]);
+    assert!(!phoenix::gm_contact::set(
+        &mut overrides,
+        "observer",
+        "target",
+        ContactMode::Normal
+    ));
+    assert_eq!(overrides["observer"]["target"], ContactMode::Normal);
+}

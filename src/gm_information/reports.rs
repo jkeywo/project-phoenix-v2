@@ -117,26 +117,14 @@ pub fn set(
     target: &str,
     policy: Option<ReportPolicy>,
 ) -> bool {
-    if reports
-        .get(observer)
-        .and_then(|rows| rows.get(target))
-        .map(|state| &state.policy)
-        == policy.as_ref()
-    {
-        return false;
-    }
-    if let Some(policy) = policy {
-        reports
-            .entry(observer.into())
-            .or_default()
-            .insert(target.into(), ReportState::new(policy));
-    } else if let Some(rows) = reports.get_mut(observer) {
-        rows.remove(target);
-        if rows.is_empty() {
-            reports.remove(observer);
-        }
-    }
-    true
+    super::pair_map::set(
+        reports,
+        observer,
+        target,
+        policy,
+        ReportState::new,
+        |state| &state.policy,
+    )
 }
 
 struct Observation {

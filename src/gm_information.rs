@@ -1,6 +1,7 @@
 //! Per-observer reported information. Ghosts never become simulation entities.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub(crate) mod pair_map;
 pub mod reports;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

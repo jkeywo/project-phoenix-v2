@@ -31,25 +31,14 @@ pub fn set_classification(
     target: &str,
     requested: Option<ReportedClassification>,
 ) -> bool {
-    if classifications
-        .get(observer)
-        .and_then(|rows| rows.get(target))
-        == requested.as_ref()
-    {
-        return false;
-    }
-    if let Some(value) = requested {
-        classifications
-            .entry(observer.into())
-            .or_default()
-            .insert(target.into(), value);
-    } else if let Some(rows) = classifications.get_mut(observer) {
-        rows.remove(target);
-        if rows.is_empty() {
-            classifications.remove(observer);
-        }
-    }
-    true
+    crate::gm_information::pair_map::set(
+        classifications,
+        observer,
+        target,
+        requested,
+        |value| value,
+        |value| value,
+    )
 }
 
 /// The observing Sensors surface gets only its reported labels, never the GM's
@@ -152,20 +141,14 @@ pub fn set(
     if mode(overrides, observer, target) == requested {
         return false;
     }
-    if requested == ContactMode::Normal {
-        if let Some(rows) = overrides.get_mut(observer) {
-            rows.remove(target);
-            if rows.is_empty() {
-                overrides.remove(observer);
-            }
-        }
-    } else {
-        overrides
-            .entry(observer.into())
-            .or_default()
-            .insert(target.into(), requested);
-    }
-    true
+    crate::gm_information::pair_map::set(
+        overrides,
+        observer,
+        target,
+        (requested != ContactMode::Normal).then_some(requested),
+        |value| value,
+        |value| value,
+    )
 }
 
 /// Every disappearance route is covered, including scripted unload and combat.
@@ -187,28 +170,7 @@ pub fn prune(
         .contact_information
         .ghosts
         .retain(|observer, _| live.get(observer.as_str()) == Some(&true));
-    content
-        .contact_information
-        .reports
-        .retain(|observer, rows| {
-            if live.get(observer.as_str()) != Some(&true) {
-                return false;
-            }
-            rows.retain(|target, _| live.contains_key(target.as_str()));
-            !rows.is_empty()
-        });
-    content.contact_overrides.retain(|observer, rows| {
-        if live.get(observer.as_str()) != Some(&true) {
-            return false;
-        }
-        rows.retain(|target, _| live.contains_key(target.as_str()));
-        !rows.is_empty()
-    });
-    content.contact_classifications.retain(|observer, rows| {
-        if live.get(observer.as_str()) != Some(&true) {
-            return false;
-        }
-        rows.retain(|target, _| live.contains_key(target.as_str()));
-        !rows.is_empty()
-    });
+    crate::gm_information::pair_map::prune(&mut content.contact_information.reports, &live);
+    crate::gm_information::pair_map::prune(&mut content.contact_overrides, &live);
+    crate::gm_information::pair_map::prune(&mut content.contact_classifications, &live);
 }

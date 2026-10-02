@@ -41,3 +41,5 @@ Authored blaster and torpedo patterns share barrel-pattern-validate for traversa
 Physical-work adapters for Tractor, Dock and Umbilical share ordered activation reports in core::task_lifecycle. Dock retains mating-state activation; Tractor and Umbilical retain subject-change activation. Physical verdicts, optional identities and component writes stay local.
 
 Workshop ordered forms share live-row traversal, neighbour availability, swaps and surviving-row selection through ordered-form. Preset and widget adapters retain their movable-content rules; roots remain unrestricted. ordered-form-controls rebuilds before restoring adapter-owned focus. Removal tombstones, splices, DOM identities, labels and the ratings’ strictly-next focus policy remain local.
+
+Workshop Ship, Slots, Model structure and Rhai save presentations use workshop-edit-session’s mutation runner for synchronous busy acquisition, asynchronous invocation, outcome delegation and final release. Adapters retain their generation, draft, selection and disposal predicates; Models and Scripts retain unguarded success presentation. Existing guarded, land and reading refresh behavior is unchanged.

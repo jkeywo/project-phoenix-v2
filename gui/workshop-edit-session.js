@@ -64,3 +64,18 @@ export async function refreshWorkshopReading({ draft, disposed, read, validate, 
   restoreUnappliedForms(retained);
   announce?.();
 }
+
+/** Own busy presentation without inventing freshness or cancellation policy. */
+export async function runWorkshopMutation({ setBusy, start = () => {}, invoke, success, error,
+  current, successCurrent = current, release }) {
+  setBusy(true);
+  start();
+  try {
+    const result = await invoke();
+    if (successCurrent()) success(result);
+  } catch (reason) {
+    if (current()) error(reason);
+  } finally {
+    if (current()) { setBusy(false); release(); }
+  }
+}

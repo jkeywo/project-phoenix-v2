@@ -286,3 +286,21 @@ entities:
       paths: [editor/ordered-form.js, gui/ordered-form-controls.js, editor/workshop-presets.js, editor/workshop-composition.js, gui/workshop-presets-panel.js, gui/workshop-composition-panel.js, gui/workshop-definitions-panel.js, scripts/build-workshop.mjs]
       symbols: [liveFormPositions, formNeighbours, swapFormNeighbour, survivingFormPosition, bindFormMoves]
       tests: [npx vitest run editor/tests/ordered-form.test.js tests/client/ordered-form-controls.test.js editor/tests/workshop-presets.test.js editor/tests/workshop-composition.test.js tests/client/workshop-presets-panel.test.js tests/client/workshop-composition-panel.test.js tests/client/workshop-definitions-panel.test.js]
+
+  - component: workshop-mutation-presentation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Workshop Mutation Presentation
+      summary: A shared runner acquires busy state synchronously, invokes the adapter operation and delegates success or refusal before releasing and refreshing. Each adapter supplies its existing presentation phase predicates; source validation, commit safety, selection, messages and focus remain with their owners.
+      rationale:
+        - Models and Scripts preserve unguarded success presentation while their failure and release phases remain disposal-guarded. Ship and Slots retain generation guards; the runner introduces no cancellation or universal freshness policy.
+    architecture:
+      kind: presentation-adapter
+      authority: local
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [gui/workshop-edit-session.js, gui/workshop-ship-authoring-panel.js, gui/workshop-slot-authoring-panel.js, gui/workshop-models-panel.js, gui/workshop-scripts-panel.js]
+      symbols: [runWorkshopMutation]
+      tests: [npx vitest run tests/client/workshop-edit-session.test.js tests/client/workshop-ship-authoring-panel.test.js tests/client/workshop-slot-authoring-panel.test.js tests/client/workshop-models-panel.test.js tests/client/workshop-scripts-panel.test.js]

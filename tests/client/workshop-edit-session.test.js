@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { definitionsSnapshot } from '../../editor/workshop-definitions.js';
-import { createWorkshopEditSession, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms } from '../../gui/workshop-edit-session.js';
+import { createWorkshopEditSession, runWorkshopMutation, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms } from '../../gui/workshop-edit-session.js';
 
 const path = 'assets/worlds/test.toml';
 const source = '# retained\n[global]\nseed = 1\n';
@@ -118,4 +118,39 @@ it.each(['edit', 'replace', 'dispose', 'malformed'])('prevents refresh painting 
   if (kind === 'malformed') await expect(operation).rejects.toThrow('workshop.inspector_refused');
   else await operation;
   expect(forms).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled(); expect(announce).not.toHaveBeenCalled();
+});
+
+
+it('acquires mutation busy state synchronously and releases before refresh', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const order = [];
+  const run = runWorkshopMutation({ setBusy: value => order.push(value), start: () => order.push('start'),
+    invoke: () => { order.push('invoke'); return pending; }, current: () => true,
+    success: value => order.push(value), error: error => { throw error; }, release: () => order.push('refresh') });
+  expect(order).toEqual([true, 'start', 'invoke']);
+  resolve('success'); await run;
+  expect(order).toEqual([true, 'start', 'invoke', 'success', false, 'refresh']);
+});
+
+it('retains adapter phase policies, including unguarded Models and Scripts success', async () => {
+  let current = true, resolve;
+  const events = [], pending = new Promise(done => { resolve = done; });
+  const run = runWorkshopMutation({ setBusy: value => events.push(value), current: () => current,
+    successCurrent: () => true, invoke: () => pending, success: () => events.push('success'),
+    error: () => events.push('error'), release: () => events.push('refresh') });
+  current = false; resolve(); await run;
+  expect(events).toEqual([true, 'success']);
+  await runWorkshopMutation({ setBusy: value => events.push(value), current: () => false,
+    invoke: () => { throw new Error('refused'); }, success: () => events.push('guarded success'),
+    error: () => events.push('error'), release: () => events.push('refresh') });
+  expect(events).toEqual([true, 'success', true]);
+});
+
+it('delegates synchronous invocation and success errors before normal release', async () => {
+  const failure = new Error('refused'), order = [];
+  await runWorkshopMutation({ setBusy: value => order.push(value), current: () => true,
+    invoke: () => 4, success: () => { throw failure; },
+    error: error => order.push(error), release: () => order.push('refresh') });
+  expect(order).toEqual([true, failure, false, 'refresh']);
 });

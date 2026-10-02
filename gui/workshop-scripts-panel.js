@@ -1,3 +1,4 @@
+import { runWorkshopMutation } from './workshop-edit-session.js';
 import { mountScriptEditor, renderScriptList } from '../editor/script-editor-view.js';
 import { applyWorkshopScript, createWorkshopScript, workshopScriptUnits, workshopScriptWorlds } from '../editor/workshop-scripts.js';
 import { addressedModifierSnippet, upsertObjectiveInstanceSnippet } from '../editor/workshop-objective-snippet.js';
@@ -139,16 +140,17 @@ export function mountWorkshopScripts({ root, provider, runtime, draft, busy, set
   async function save(unit, source) {
     if (busy() || !currentUnit(unit)) { show('workshop.scripts.stale', true); return; }
     const target = draft();
-    setBusy(true);
-    try {
-      const edited = await applyWorkshopScript({ draft: target, provider, runtime, unit, source,
-        current: () => !disposed && draft() === target && active?.id === unit.id && currentUnit(unit) });
-      if (edited) { changed(unit.documentPath); show('workshop.scripts.applied'); }
-      else show('workshop.scripts.unchanged');
-    } catch (error) {
-      if (!disposed) show(error?.message || 'workshop.scripts.validation_refused', true,
-        error?.report?.findings?.map(row => `${row.file}${row.line ? `:${row.line}` : ''}: ${row.message}`).join(' ') || '');
-    } finally { if (!disposed) { setBusy(false); refresh(); } }
+    return runWorkshopMutation({ setBusy, current: () => !disposed, successCurrent: () => true,
+      invoke: () => applyWorkshopScript({ draft: target, provider, runtime, unit, source,
+        current: () => !disposed && draft() === target && active?.id === unit.id && currentUnit(unit) }),
+      success: edited => {
+        if (edited) { changed(unit.documentPath); show('workshop.scripts.applied'); }
+        else show('workshop.scripts.unchanged');
+      },
+      error: error => show(error?.message || 'workshop.scripts.validation_refused', true,
+        error?.report?.findings?.map(row => `${row.file}${row.line ? `:${row.line}` : ''}: ${row.message}`).join(' ') || ''),
+      release: refresh,
+    });
   }
   function units() { return workshopScriptUnits(draft(), world.value); }
   function paintList() {

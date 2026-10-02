@@ -1,5 +1,5 @@
-import { createWorkshopEditSession } from './workshop-edit-session.js';
-import { definitionsSnapshot, snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
+import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
+import { snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
 import { includesForm, newInclude, moveInclude, includeChoices, planIncludeEdits, componentSkeleton, componentAddable,
   planComponentAdd, planComponentRemove, fieldGroups, fieldsForm, fieldIsEditable, fieldIsMaterialisable, fieldIsScalar,
   planFieldEdits, templateChoices, refusalMessage, refusalStringId } from '../editor/workshop-entity.js';
@@ -402,29 +402,31 @@ export function mountWorkshopEntity({ root, runtime, draft, busy, setBusy, chang
    * throw away a field typed beside them, nor the reverse. An untouched form is
    * rebuilt from the new reading like everything else. */
   async function reload({ announce = true } = {}) {
-    const candidate = draft();
     const path = template.value;
-    if (!candidate || !path) return;
-    const snapshot = definitionsSnapshot(candidate);
-    const result = await runtime.entity(snapshot.files, path);
-    if (disposed || !snapshotIsCurrent(snapshot, draft())) return;
-    if (!result || typeof result !== 'object' || typeof result.path !== 'string' || !Array.isArray(result.includes)
+    if (!path) return;
+    return refreshWorkshopReading({
+      draft, disposed: () => disposed,
+      read: files => runtime.entity(files, path),
+      validate: result => { if (!result || typeof result !== 'object' || typeof result.path !== 'string' || !Array.isArray(result.includes)
       || !Array.isArray(result.components) || !Array.isArray(result.fields)
-      || !Array.isArray(result.supported_components)) throw new Error('workshop.inspector_refused');
-    const dirty = (state, current) => Boolean(state) && Boolean(current) && JSON.stringify(state) !== JSON.stringify(current);
-    const previous = composition();
-    const pending = {
-      includes: dirty(includesState, previous && includesForm(previous)) ? includesState : null,
-      fields: dirty(fieldsState, previous && fieldsForm(previous)) ? fieldsState : null,
-      path: previous?.path, source: reading?.files?.[previous?.path],
-    };
-    reading = { ...snapshot, composition: result };
-    renderAll();
-    if (pending.path && result.path === pending.path && snapshot.files[pending.path] === pending.source) {
-      if (pending.includes) { includesState = pending.includes; renderIncludes(); }
-      if (pending.fields) { fieldsState = pending.fields; renderFields(); }
-    }
-    if (announce) show('workshop.entity.refreshed');
+      || !Array.isArray(result.supported_components)) throw new Error('workshop.inspector_refused'); },
+      forms: () => {
+        const previous = composition();
+        if (!previous?.path) return [];
+        return [
+          { state: includesState, baseline: previous && includesForm(previous),
+            identity: [previous?.path], source: reading?.files?.[previous?.path],
+            current: () => ({ identity: [reading.composition.path], source: reading.files[reading.composition.path] }),
+            restore: state => { includesState = state; renderIncludes(); } },
+          { state: fieldsState, baseline: previous && fieldsForm(previous),
+            identity: [previous?.path], source: reading?.files?.[previous?.path],
+            current: () => ({ identity: [reading.composition.path], source: reading.files[reading.composition.path] }),
+            restore: state => { fieldsState = state; renderFields(); } },
+        ];
+      },
+      install: (snapshot, result) => { reading = { ...snapshot, composition: result }; renderAll(); },
+      announce: announce ? () => show('workshop.entity.refreshed') : null,
+    });
   }
 
   /** The hold goes up for the whole of one runtime call and comes down once its

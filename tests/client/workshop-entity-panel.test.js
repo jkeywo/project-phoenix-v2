@@ -492,3 +492,12 @@ it('labels every control, gives every button text and every group a legend, and 
     .toContain(t('workshop.entity.field_inherited', { source: FRAGMENT }));
   expect(byId('findings').querySelector('li').textContent).toContain(t('workshop.severity.error'));
 });
+
+it('rebuilds rather than retaining unapplied forms from an accepted empty-path reading', async () => {
+  runtime.entity.mockResolvedValue(composition({ path: '' }));
+  await read();
+  type(byId('field-0-value'), '140');
+  byId('refresh').click();
+  await settled();
+  expect(byId('field-0-value').value).toBe('100');
+});

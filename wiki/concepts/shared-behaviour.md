@@ -2,7 +2,7 @@
 title: Shared Behaviour Modules
 type: concept
 tags: [architecture, client, testing]
-sources: [gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
+sources: [gui/workshop-edit-session.js, gui/workshop-definitions-panel.js, gui/workshop-composition-panel.js, gui/workshop-entity-panel.js, gui/stations/contextual-controls.js, src/ai/standing_operation.rs, src/native_host/panes/operator.rs, scripts/fleet-digest-evidence.mjs, src/native_file.rs, src/native_host/media_devices.rs, editor/workshop-asset-job.js, editor/workshop-acceptance.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-npc-panel.js, gui/gm-contact-panel.js, gui/gm-despawn-panel.js, gui/gm-journal-panel.js, gui/gm-comms-panel.js]
 updated: 2026-10-02
 ---
 
@@ -23,3 +23,5 @@ Native operator layouts share a bounded placement sanitizer for Authoring, Test 
 Tractor, Dock and Umbilical share standing-operation ownership decisions. Their adapters retain Control Source gates, Objective selection, physical readiness and admitted command emission. Ownership is derived; withdrawal reports precede command-handler release reports. Dock retains its distinct engaged-only start condition.
 
 Contextual Station controls share light-DOM mounting, synchronous authoritative painting and listener lifetime. Hull documents explicitly compose each control and preserve their existing action adapters. Helm and Engineering keep compatible render exports.
+
+Workshop Definitions, Composition and Entity share read freshness and unapplied-form retention in workshop-edit-session. Forms are captured after a validated current answer arrives, then restored after rebuilding only when selection identity and exact source match. Typed catalogs, runtime edits, Test holds and focus remain panel-owned.

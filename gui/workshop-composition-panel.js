@@ -1,5 +1,5 @@
-import { createWorkshopEditSession } from './workshop-edit-session.js';
-import { definitionsSnapshot, snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
+import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
+import { snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
 import { rootsForm, newRoot, moveRoot, offeredShips, planScenarioEdits, worldForm, extraWorldChoices, planExtraWorldEdits,
   worldSlugPath, worldTitle, refusalMessage, refusalStringId } from '../editor/workshop-composition.js';
 import { scriptReferenceForms, applyScriptReference } from '../editor/workshop-script-references.js';
@@ -429,30 +429,27 @@ export function mountWorkshopComposition({ root, runtime, provider, draft, busy,
    * the extra world chosen beside them, nor the reverse. An untouched form is
    * rebuilt from the new reading like everything else. */
   async function reload({ announce = true } = {}) {
-    const candidate = draft();
-    if (!candidate) return;
-    const snapshot = definitionsSnapshot(candidate);
-    const result = await runtime.composition(snapshot.files);
-    if (disposed || !snapshotIsCurrent(snapshot, draft())) return;
-    if (!result || !Array.isArray(result.worlds) || !Array.isArray(result.members)
-      || (result.manifest !== null && typeof result.manifest !== 'object')) throw new Error('workshop.inspector_refused');
-    const dirty = (state, fresh) => Boolean(state) && Boolean(fresh) && JSON.stringify(state) !== JSON.stringify(fresh);
-    const previousManifest = manifest(), previousWorld = selectedWorld();
-    const pending = {
-      roots: dirty(rootsState, previousManifest && rootsForm(previousManifest)) ? rootsState : null,
-      manifestPath: previousManifest?.path, manifestSource: reading?.files?.[previousManifest?.path],
-      world: dirty(worldState, previousWorld && worldForm(previousWorld)) ? worldState : null,
-      worldPath: world.value, worldSource: reading?.files?.[world.value],
-    };
-    reading = { ...snapshot, catalog: result };
-    renderAll();
-    if (pending.roots && manifest()?.path === pending.manifestPath && snapshot.files[pending.manifestPath] === pending.manifestSource) {
-      rootsState = pending.roots; renderRoots();
-    }
-    if (pending.world && world.value === pending.worldPath && snapshot.files[world.value] === pending.worldSource) {
-      worldState = pending.world; renderWorldForm();
-    }
-    if (announce) show('workshop.composition.refreshed');
+    return refreshWorkshopReading({
+      draft, disposed: () => disposed,
+      read: files => runtime.composition(files),
+      validate: result => { if (!result || !Array.isArray(result.worlds) || !Array.isArray(result.members)
+      || (result.manifest !== null && typeof result.manifest !== 'object')) throw new Error('workshop.inspector_refused'); },
+      forms: () => {
+        const previousManifest = manifest(), previousWorld = selectedWorld();
+        return [
+          { state: rootsState, baseline: previousManifest && rootsForm(previousManifest),
+            identity: [previousManifest?.path], source: reading?.files?.[previousManifest?.path],
+            current: () => ({ identity: [manifest()?.path], source: reading.files[manifest()?.path] }),
+            restore: state => { rootsState = state; renderRoots(); } },
+          { state: worldState, baseline: previousWorld && worldForm(previousWorld),
+            identity: [world.value], source: reading?.files?.[world.value],
+            current: () => ({ identity: [world.value], source: reading.files[world.value] }),
+            restore: state => { worldState = state; renderWorldForm(); } },
+        ];
+      },
+      install: (snapshot, result) => { reading = { ...snapshot, catalog: result }; renderAll(); },
+      announce: announce ? () => show('workshop.composition.refreshed') : null,
+    });
   }
 
   const { guarded, land } = createWorkshopEditSession({

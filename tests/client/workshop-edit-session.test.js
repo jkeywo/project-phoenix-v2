@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { definitionsSnapshot } from '../../editor/workshop-definitions.js';
-import { createWorkshopEditSession } from '../../gui/workshop-edit-session.js';
+import { createWorkshopEditSession, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms } from '../../gui/workshop-edit-session.js';
 
 const path = 'assets/worlds/test.toml';
 const source = '# retained\n[global]\nseed = 1\n';
@@ -68,4 +68,54 @@ it.each(['runtime', 'invalid-answer'])('releases controls without changing sourc
   expect(s.draft.read(path)).toBe(source);
   expect(s.showError).toHaveBeenCalledOnce();
   expect(s.events).toEqual(['refresh']);
+});
+
+it('captures edits made during a read after validation and before rebuilding forms', async () => {
+  const draft = document(), events = [];
+  let answer, state = { value: 1 };
+  const pending = new Promise(resolve => { answer = resolve; });
+  await Promise.resolve();
+  const operation = refreshWorkshopReading({
+    draft: () => draft, disposed: () => false, read: () => pending,
+    validate: result => { expect(result).toBe('typed reading'); events.push('validate'); },
+    forms: () => { events.push('capture'); return [{ state, baseline: { value: 1 },
+      identity: [path, 'station'], source,
+      current: () => ({ identity: [path, 'station'], source }),
+      restore: saved => { state = saved; events.push('restore'); } }]; },
+    install: () => { state = { value: 1 }; events.push('install'); },
+    announce: () => events.push('announce'),
+  });
+  state = { value: 2 };
+  answer('typed reading');
+  await operation;
+  expect(state).toEqual({ value: 2 });
+  expect(events).toEqual(['validate', 'capture', 'install', 'restore', 'announce']);
+});
+
+it.each(['source', 'selection', 'clean', 'absent'])('does not restore an ineligible %s form', kind => {
+  const restore = vi.fn();
+  const form = { state: kind === 'absent' ? null : { value: kind === 'clean' ? 1 : 2 }, baseline: { value: 1 },
+    identity: [path, 'station'], source,
+    current: () => ({ identity: [path, kind === 'selection' ? 'other' : 'station'],
+      source: kind === 'source' ? replacement : source }), restore };
+  restoreUnappliedForms(retainUnappliedForms([form]));
+  expect(restore).not.toHaveBeenCalled();
+});
+
+it.each(['edit', 'replace', 'dispose', 'malformed'])('prevents refresh painting after %s', async kind => {
+  let draft = document(), disposed = false, answer;
+  const pending = new Promise(resolve => { answer = resolve; });
+  const install = vi.fn(), forms = vi.fn(() => []), announce = vi.fn();
+  const operation = refreshWorkshopReading({
+    draft: () => draft, disposed: () => disposed, read: () => pending,
+    validate: result => { if (result === null) throw new Error('workshop.inspector_refused'); },
+    forms, install, announce,
+  });
+  if (kind === 'edit') draft.edit(path, replacement);
+  if (kind === 'replace') draft = document();
+  if (kind === 'dispose') disposed = true;
+  answer(kind === 'malformed' ? null : {});
+  if (kind === 'malformed') await expect(operation).rejects.toThrow('workshop.inspector_refused');
+  else await operation;
+  expect(forms).not.toHaveBeenCalled(); expect(install).not.toHaveBeenCalled(); expect(announce).not.toHaveBeenCalled();
 });

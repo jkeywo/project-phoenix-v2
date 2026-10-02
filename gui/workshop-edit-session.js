@@ -1,4 +1,4 @@
-import { snapshotIsCurrent } from '../editor/workshop-definitions.js';
+import { definitionsSnapshot, snapshotIsCurrent } from '../editor/workshop-definitions.js';
 
 /** Shared lifetime of a runtime-backed Workshop edit. Panels own the operation,
  * refusal vocabulary and form; the session owns when its answer can land. */
@@ -34,4 +34,33 @@ export function createWorkshopEditSession({
   }
 
   return { guarded, land };
+}
+
+/** Retain dirty forms by exact source and adapter-owned selection identity. */
+export function retainUnappliedForms(forms) {
+  return forms.filter(({ state, baseline }) => state && baseline && JSON.stringify(state) !== JSON.stringify(baseline))
+    .map(form => ({ ...form, identity: form.identity.slice() }));
+}
+
+export function restoreUnappliedForms(forms) {
+  for (const form of forms) {
+    const current = form.current();
+    if (form.source === current.source && form.identity.length === current.identity.length
+        && form.identity.every((part, index) => part === current.identity[index])) form.restore(form.state);
+  }
+}
+
+/** Answer freshness and retention order are shared; typed reads remain local. */
+export async function refreshWorkshopReading({ draft, disposed, read, validate, forms, install, announce }) {
+  const candidate = draft();
+  if (!candidate) return;
+  const snapshot = definitionsSnapshot(candidate);
+  const result = await read(snapshot.files);
+  if (disposed() || !snapshotIsCurrent(snapshot, draft())) return;
+  validate(result);
+  // Capture after the answer: edits made while reading must survive the repaint.
+  const retained = retainUnappliedForms(forms());
+  install(snapshot, result);
+  restoreUnappliedForms(retained);
+  announce?.();
 }

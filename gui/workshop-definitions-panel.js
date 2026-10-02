@@ -1,5 +1,5 @@
-import { createWorkshopEditSession } from './workshop-edit-session.js';
-import { definitionsSnapshot, snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
+import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
+import { snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
   complianceIsSeconds, complianceIsResponse, planFactionEdits, ratingForm, planRatingEdits, newRung, rungNames, findingsAt,
   draftFirst } from '../editor/workshop-definitions.js';
 import { t } from './strings.js';
@@ -377,30 +377,26 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
    * away the rung edits typed beside it, nor the reverse. An untouched form is
    * rebuilt from the new reading like everything else. */
   async function reload({ announce = true } = {}) {
-    const candidate = draft();
-    if (!candidate) return;
-    const snapshot = definitionsSnapshot(candidate);
-    const result = await runtime.definitions(snapshot.files);
-    if (disposed || !snapshotIsCurrent(snapshot, draft())) return;
-    if (!result || !Array.isArray(result.factions) || !Array.isArray(result.hulls)) throw new Error('workshop.inspector_refused');
-    const dirty = (state, fresh) => Boolean(state) && Boolean(fresh) && JSON.stringify(state) !== JSON.stringify(fresh);
-    const previousFaction = selectedFaction(), previousStation = selectedStation();
-    const pending = {
-      faction: dirty(factionState, previousFaction && factionForm(previousFaction, complianceDefaults())) ? factionState : null,
-      factionPath: faction.value, factionSource: reading?.files?.[faction.value],
-      station: dirty(stationState, previousStation && ratingForm(previousStation)) ? stationState : null,
-      hullPath: hull.value, stationIndex: station.value, hullSource: reading?.files?.[hull.value],
-    };
-    reading = { ...snapshot, catalog: result };
-    renderSelectors();
-    if (pending.faction && faction.value === pending.factionPath && snapshot.files[faction.value] === pending.factionSource) {
-      factionState = pending.faction; renderFactionForm();
-    }
-    if (pending.station && hull.value === pending.hullPath && station.value === pending.stationIndex
-      && snapshot.files[hull.value] === pending.hullSource) {
-      stationState = pending.station; renderStationForm();
-    }
-    if (announce) show('workshop.definitions.refreshed');
+    return refreshWorkshopReading({
+      draft, disposed: () => disposed,
+      read: files => runtime.definitions(files),
+      validate: result => { if (!result || !Array.isArray(result.factions) || !Array.isArray(result.hulls)) throw new Error('workshop.inspector_refused'); },
+      forms: () => {
+        const previousFaction = selectedFaction(), previousStation = selectedStation();
+        return [
+          { state: factionState, baseline: previousFaction && factionForm(previousFaction, complianceDefaults()),
+            identity: [faction.value], source: reading?.files?.[faction.value],
+            current: () => ({ identity: [faction.value], source: reading.files[faction.value] }),
+            restore: state => { factionState = state; renderFactionForm(); } },
+          { state: stationState, baseline: previousStation && ratingForm(previousStation),
+            identity: [hull.value, station.value], source: reading?.files?.[hull.value],
+            current: () => ({ identity: [hull.value, station.value], source: reading.files[hull.value] }),
+            restore: state => { stationState = state; renderStationForm(); } },
+        ];
+      },
+      install: (snapshot, result) => { reading = { ...snapshot, catalog: result }; renderSelectors(); },
+      announce: announce ? () => show('workshop.definitions.refreshed') : null,
+    });
   }
 
   const { guarded, land } = createWorkshopEditSession({

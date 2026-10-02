@@ -4,6 +4,8 @@ type: concept
 tags: [client, console, components, html, css, javascript]
 sources:
   - gui/components/
+  - gui/stations/contextual-controls.js
+  - gui/stations/contextual-controls.css
   - gui/console-ui.js
   - gui/mount-plan.js
   - gui/hero-bar.js
@@ -11,7 +13,7 @@ sources:
   - gui/components/ph-repair-teams.js
   - gui/console.css
   - gui/cruiser/tactical.html
-updated: 2026-09-27
+updated: 2026-10-02
 ---
 
 ## Decision
@@ -67,3 +69,5 @@ use the shared `gui/tutorial-state.js` evaluator: Power observes charging and
 depletion, Gunnery observes available charge, enabled boost and depletion.
 Those lessons consume console projections and private dismissal progress;
 they neither allocate power nor toggle boost. All guide text uses catalogue IDs.
+
+Dock, tow-load, Tractor and Umbilical use named light-DOM mount helpers in `gui/stations/contextual-controls.js`. They own child markup, painting and listener disposal while the hull document owns the root, geometry and theme. Existing Helm and Engineering render exports delegate to the same implementation. Identical Alliance control rules live in `contextual-controls.css`; Dynasty keeps its theme classes.

@@ -6,6 +6,7 @@
   <title data-i18n="console.destroyer_helm.doc_title">Project Phoenix — Helm Console</title>
   <script src="../bg-raf-keepalive.js"></script>
   <link rel="stylesheet" href="../console.css">
+  <link rel="stylesheet" href="../stations/contextual-controls.css">
   <style>
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
@@ -36,7 +37,6 @@
     /* Contextual dock control (issue #1159): shown only while a berth is in
        range or a dock is held, so a hull with no dock system is unchanged. */
     .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
-    .dock-panel[hidden] { display: none; }
     /* issue #1425: `flex-wrap: wrap` so a long docked_to_name that cannot
        share this row with the button at all (the button's own content can
        consume the row's entire width at 200% text on a narrow pane — the
@@ -44,17 +44,12 @@
        SOME width remains) drops to its own line below the button instead of
        being squeezed to zero width, which produced an unreadable vertical
        stack of single characters. */
-    .dock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
-    .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
     /* issue #1425: a flex row's default min-width is `auto`, not `0` — a long
        docked_to_name/available_target_name (a world entity name id, unbounded
        length) pushed this span past the row's edge instead of wrapping, which
        is how gui/cruiser/helm.html's OWN dock-status already reads (it was
        fixed there when the cruiser Helm mounted a dock system). Matching that
        fix here rather than leaving the two hulls' identical controls diverge. */
-    .dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
-    .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     /* Under-tow-load indicator (issue #1157): shown only while this ship's
        tractor holds a target, so a hull with no tractor is unchanged. */
     /* issue #1425: `flex-wrap: wrap` for the same reason as .dock-row below —
@@ -127,22 +122,13 @@
                `dock` system publishes a `dock` blackboard; a hull without one
                never does, so this panel stays hidden and the console is
                unchanged. -->
-          <div class="dock-panel" id="dock-panel" hidden>
-            <div class="dock-row">
-              <button id="dock-btn" class="dock-btn" data-i18n="console.dock.dock">Dock</button>
-              <span id="dock-status" class="dock-status">—</span>
-            </div>
-            <div id="dock-refusal" class="dock-refusal" hidden></div>
-          </div>
+          <div class="dock-panel" id="dock-panel" hidden></div>
           <!-- Under-tow-load indicator (issue #1157): shown only while this
                ship's tractor holds a target, so the helm can see it is under
                load and why. A hull with no tractor publishes no `tractor`
                blackboard, so this banner stays hidden and the console is
                unchanged. -->
-          <div class="tow-load-panel" id="tow-load-panel" hidden>
-            <span class="tow-load-label" data-i18n="console.helm.under_tow">Under tow load</span>
-            <span id="tow-load-target" class="tow-load-target"></span>
-          </div>
+          <div class="tow-load-panel" id="tow-load-panel" hidden></div>
         </div>
         <div class="radar-col scope-cell">
           <ph-helm-radar id="helm-radar"></ph-helm-radar>
@@ -154,6 +140,8 @@
     </div>
   </div>
   <script type="module">
+    import { mountDockControl, mountTowLoadControl } from '../stations/contextual-controls.js';
+
     import '../components/ph-helm-radar.js';
     import '../components/ph-helm-joystick.js';
     import '../components/ph-lateral-thrust-joystick.js';
@@ -168,17 +156,11 @@
     // vitest suite imports the same renderStation.
     import { renderStation } from './helm.console.js';
 
+
+    mountDockControl(document.getElementById('dock-panel'), { activate: () => window.activateSemanticAction(HELM_DOCK_ACTION_ID, { context: HELM_ACTION_CONTEXT, source: 'control' }) });
+    mountTowLoadControl(document.getElementById('tow-load-panel'), {  });
     initConsole({ name: 'helm', render: renderStation });
 
-    // The one dock button toggles dock/undock through the action map, which
-    // sends the same admitted command a dock AI would (issues #1159, #1251).
-    // The semantic adapter reads the current authoritative dock view, so the
-    // contextual ship variant cannot dispatch a stale system id or verb.
-    document.getElementById('dock-btn').addEventListener('click', function() {
-      window.activateSemanticAction(HELM_DOCK_ACTION_ID, {
-        context: HELM_ACTION_CONTEXT, source: 'control',
-      });
-    });
   </script>
 </body>
 </html>

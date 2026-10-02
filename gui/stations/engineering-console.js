@@ -13,9 +13,10 @@
  *
  * Both player hulls whose Engineering seat owns coupling gear — the destroyer
  * since #1156/#1160, the cruiser since #1390 — render the SAME two Operations
- * panels, so their bodies live here as `renderTractorPanel` and
- * `renderUmbilicalPanel` rather than as a copy inside each hull's variant.
- * Same reason `renderDockPanel` moved into gui/stations/helm-console.js in
+ * panels, so their exports remain here as `renderTractorPanel` and
+ * `renderUmbilicalPanel` through the shared contextual control module.
+ * Their markup, painting and listeners now live in contextual-controls.js.
+ * Same reason `renderDockPanel` is exported by gui/stations/helm-console.js in
  * #1388: one control reading one authoritative view, and a copy per hull would
  * be a second place for the engage/release and start/stop decisions to drift.
  *
@@ -164,34 +165,7 @@ export function makeEngineeringRender(variant) {
  * @param {Document} doc
  * @param {function} tr   the string resolver (the shared `t`)
  */
-export function renderTractorPanel(s, doc, tr) {
-  const panel = doc.getElementById('tractor-panel');
-  if (!panel) return;
-  const tv = familyView(s, 'tractor');
-  const tractorSystemId = tv.system_id || familySystemId(s, 'tractor');
-  if (!tractorSystemId) {
-    panel.hidden = true;
-    return;
-  }
-  panel.hidden = false;
-  const engaged = !!tv.engaged;
-  const btn = doc.getElementById('tractor-btn');
-  if (btn) {
-    btn.classList.toggle('engaged', engaged);
-    btn.textContent = tr(engaged ? 'console.tractor.release' : 'console.tractor.engage');
-  }
-  const status = doc.getElementById('tractor-status');
-  if (status) {
-    status.textContent = engaged
-      ? tr('console.tractor.holding') + (tv.coupled_target_name ? ' · ' + tr(tv.coupled_target_name) : '')
-      : tr('console.tractor.idle') + ' · ' + tr('console.tractor.range') + ' ' + Math.round(tv.range || 0);
-  }
-  const refusal = doc.getElementById('tractor-refusal');
-  if (refusal) {
-    if (tv.refusal) { refusal.hidden = false; refusal.textContent = tr(tv.refusal); }
-    else { refusal.hidden = true; refusal.textContent = ''; }
-  }
-}
+export { renderTractorPanel } from './contextual-controls.js';
 
 /**
  * The Transfer umbilical control (issue #1160), shared by every hull whose
@@ -210,32 +184,4 @@ export function renderTractorPanel(s, doc, tr) {
  * @param {Document} doc
  * @param {function} tr   the string resolver (the shared `t`)
  */
-export function renderUmbilicalPanel(s, doc, tr) {
-  const panel = doc.getElementById('umbilical-panel');
-  if (!panel) return;
-  const um = familyView(s, 'umbilical');
-  const umbilicalSystemId = um.system_id || familySystemId(s, 'umbilical');
-  if (!umbilicalSystemId) {
-    panel.hidden = true;
-    return;
-  }
-  panel.hidden = false;
-  const running = !!um.running;
-  const btn = doc.getElementById('umbilical-btn');
-  if (btn) {
-    btn.classList.toggle('engaged', running);
-    btn.textContent = tr(running ? 'console.umbilical.stop' : 'console.umbilical.start');
-  }
-  const lvl = (v) => (v == null) ? '—' : Math.round(v);
-  const status = doc.getElementById('umbilical-status');
-  if (status) {
-    status.textContent = tr(running ? 'console.umbilical.flowing' : 'console.umbilical.idle')
-      + ' · ' + tr('console.umbilical.rate') + ' ' + Math.round(um.rate || 0)
-      + ' · ' + tr('console.umbilical.levels') + ' ' + lvl(um.operator_level) + ' → ' + lvl(um.partner_level);
-  }
-  const refusal = doc.getElementById('umbilical-refusal');
-  if (refusal) {
-    if (um.refusal) { refusal.hidden = false; refusal.textContent = tr(um.refusal); }
-    else { refusal.hidden = true; refusal.textContent = ''; }
-  }
-}
+export { renderUmbilicalPanel } from './contextual-controls.js';

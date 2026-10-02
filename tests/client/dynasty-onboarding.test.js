@@ -13,6 +13,7 @@ import '../../gui/components/ph-tutorial-overlay.js';
 import { createTacticalActionRegistry } from '../../gui/stations/tactical-actions.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 import { renderHelm, renderPower, renderDamageControl } from '../../gui/dynasty-cruiser/console.js';
+import { mountDockControl, mountTowLoadControl, mountTractorControl, mountUmbilicalControl } from '../../gui/stations/contextual-controls.js';
 import { createGamepadInputRuntime } from '../../gui/gamepad-input.js';
 import {
   createOperatorProfileSnapshot, serializeOperatorProfile,
@@ -47,6 +48,10 @@ describe('authored Dynasty onboarding', () => {
   it('exposes authored Dock and recovery gear on their human Stations', () => {
     const helmDoc = new DOMParser().parseFromString(readFileSync('gui/dynasty-cruiser/helm.html', 'utf8'), 'text/html');
     const damageDoc = new DOMParser().parseFromString(readFileSync('gui/dynasty-cruiser/damage-control.html', 'utf8'), 'text/html');
+    mountDockControl(helmDoc.getElementById('dock-panel'), { profile: 'dynasty' });
+    mountTowLoadControl(helmDoc.getElementById('tow-load-panel'), { profile: 'dynasty' });
+    mountTractorControl(damageDoc.getElementById('tractor-panel'), { profile: 'dynasty' });
+    mountUmbilicalControl(damageDoc.getElementById('umbilical-panel'), { profile: 'dynasty' });
     applyToDom(helmDoc);
     applyToDom(damageDoc);
     expect(helmDoc.querySelector('script[type="module"]').textContent).toContain('HELM_DOCK_ACTION_ID');

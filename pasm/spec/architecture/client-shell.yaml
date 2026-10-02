@@ -46,6 +46,25 @@ entities:
       paths: [gui/mount-plan.js, gui/content-switcher.js, gui/console-state.js, gui/console-resolver.js]
       tests: [npx vitest run]
 
+  - component: client-contextual-station-controls
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Contextual Station Controls
+      summary: Shared light-DOM Dock, tow-load, Tractor and Umbilical controls own markup, synchronous painting and idempotent input listener lifetime; hull documents retain placement, theme and their existing semantic activation adapters.
+      rationale:
+        - "[ai] Controls mount before console initialization so localization, rendering and action discovery see their existing DOM identities. Alliance and Dynasty retain distinct classes and input adapters; tow is passive. Locale refresh paints existing nodes without remounting."
+    architecture:
+      kind: client-shell
+      authority: non-authoritative
+      reads: [client-presentation-state]
+      runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/stations/contextual-controls.js, gui/stations/contextual-controls.css, gui/stations/helm-console.js, gui/stations/engineering-console.js, gui/cruiser/helm.html, gui/cruiser/engineering.html, gui/destroyer/helm.html, gui/destroyer/engineering.html, gui/dynasty-cruiser/helm.html, gui/dynasty-cruiser/damage-control.html]
+      symbols: [mountDockControl, mountTowLoadControl, mountTractorControl, mountUmbilicalControl, renderDockPanel, renderTowLoadPanel, renderTractorPanel, renderUmbilicalPanel]
+      tests: [npx vitest run tests/client/contextual-controls.test.js tests/client/helm-console.test.js tests/client/engineering-console.test.js tests/client/helm-semantic-structure.test.js tests/client/engineering-semantic-structure.test.js tests/client/dynasty-onboarding.test.js, tests/smoke/helm-dock-controls.spec.js, tests/smoke/cruiser-helm-dock-responsive.spec.js]
+
   - state: client-system-console-family-replica
     core:
       status: implemented

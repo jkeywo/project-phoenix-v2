@@ -1,8 +1,11 @@
+// @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { mountDockControl, mountTowLoadControl } from '../../gui/stations/contextual-controls.js';
 
 function source(path) {
-  return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+  return readFileSync(resolve(process.cwd(), path), 'utf8');
 }
 
 // [hull, lateral-thrust pad, contextual Dock control, under-tow-load banner].
@@ -46,7 +49,10 @@ describe('Helm semantic-action structural coverage', () => {
         '<ph-helm-radar', '<ph-helm-joystick', '<ph-impulse-btn', '<ph-boost-btn',
       ]) expect(html).toContain(control);
       expect(html.includes('<ph-lateral-thrust-joystick')).toBe(lateral);
-      expect(html.includes('id="dock-btn"')).toBe(dock);
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      if (dock) mountDockControl(doc.getElementById('dock-panel'));
+      if (towLoad) mountTowLoadControl(doc.getElementById('tow-load-panel'));
+      expect(!!doc.getElementById('dock-btn')).toBe(dock);
       expect(html.includes('id="tow-load-panel"')).toBe(towLoad);
     });
   }

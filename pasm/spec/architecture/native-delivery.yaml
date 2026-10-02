@@ -875,6 +875,7 @@ entities:
         [
           LocalHostLobby,
           HostLobbyBridge,
+          ProjectionMailbox,
           HostLobbyPlugin,
           NativeSessionRoleState,
           NativeFleetIdentityStore,

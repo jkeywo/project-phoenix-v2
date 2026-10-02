@@ -1811,6 +1811,13 @@ and never a second `take_records` caller.** The host→page direction has no suc
 rule and splits per concern freely: those are latest-wins snapshot slots, and a
 slot costs at most one push a frame.
 
+`host_lobby/bridge.rs` keeps reveal, join, landing, packs, scenario, layout,
+audio and lobby state in one typed `ProjectionMailbox`, in that delivery order.
+Lobby, layout and audio deduplicate identical accepted values. Failed delivery
+restores only an empty lane, so a publication during a push wins over the retry.
+Fleet configuration and ordered fleet queues precede these projections; counted
+QR presses follow them. HUD preferences remain independently retained.
+
 One wart is deliberate: `set-viewscreen` is **kebab** where its three siblings
 are snake_case, kept by an explicit `serde(rename)`. It shipped that way in
 #1330, `gui/host-lobby-view.js` writes it by hand, and the page is assembled

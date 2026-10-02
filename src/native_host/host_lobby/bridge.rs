@@ -35,9 +35,10 @@
 //! state rather than an edge — so an older value has nothing to say that the
 //! newest one does not, and holding a backlog of them would only cost
 //! main-thread time inside a browser engine (see [`super::super::panes::surface`]'s
-//! note on why that time is the *simulation's*). Seven latest-wins slots — the
+//! note on why that time is the *simulation's*). Eight latest-wins lanes — the
 //! reveal, the join invitation, the landing screen, the mod-pack shelf, the
-//! picker, the monitor row and the lobby state — at most one push each a frame.
+//! picker, the monitor row, audio settings and the lobby state — at most one
+//! push each a frame.
 //!
 //! The QR toggle is an *edge* and is counted rather
 //! than collapsed — see [`HostLobbyBridge::push_qr_toggle`].
@@ -69,77 +70,103 @@ use crate::native_host::panes::{PaneSurface, PaneSurfaceError};
 /// than load, and the honest response to it is to keep the newest evidence and
 /// not to grow.
 const RECORD_CAP: usize = 256;
+const AUDIO_LANE: usize = 6;
+
+/// Latest-value lanes in their page-observable delivery order.
+#[derive(Clone, PartialEq)]
+enum Projection {
+    Reveal(bool),
+    Join(String),
+    Landing(String),
+    Packs(String),
+    Scenario(String),
+    Layout(String),
+    Audio(String),
+    Lobby(String),
+}
+
+impl Projection {
+    fn lane(&self) -> usize {
+        match self {
+            Self::Reveal(_) => 0,
+            Self::Join(_) => 1,
+            Self::Landing(_) => 2,
+            Self::Packs(_) => 3,
+            Self::Scenario(_) => 4,
+            Self::Layout(_) => 5,
+            Self::Audio(_) => AUDIO_LANE,
+            Self::Lobby(_) => 7,
+        }
+    }
+
+    fn script(&self) -> String {
+        match self {
+            Self::Reveal(flag) => host_lobby_reveal_script(*flag),
+            Self::Join(json) => host_lobby_join_script(json),
+            Self::Landing(json) => host_lobby_landing_script(json),
+            Self::Packs(json) => host_lobby_packs_script(json),
+            Self::Scenario(json) => host_lobby_scenario_script(json),
+            Self::Layout(json) => host_lobby_layout_script(json),
+            Self::Audio(json) => super::document::host_lobby_audio_script(json),
+            Self::Lobby(json) => host_lobby_apply_script(json),
+        }
+    }
+}
+
+/// Snapshots are replaced, never queued. Only frame-fed lanes deduplicate;
+/// the others keep their existing event-fed publication behavior.
+#[derive(Default)]
+struct ProjectionMailbox {
+    pending: [Option<Projection>; 8],
+    last_accepted: [Option<Projection>; 8],
+}
+
+impl ProjectionMailbox {
+    fn publish(&mut self, value: Projection) {
+        let lane = value.lane();
+        if matches!(
+            value,
+            Projection::Lobby(_) | Projection::Layout(_) | Projection::Audio(_)
+        ) {
+            if self.last_accepted[lane].as_ref() == Some(&value) {
+                return;
+            }
+            self.last_accepted[lane] = Some(value.clone());
+        }
+        self.pending[lane] = Some(value);
+    }
+
+    fn restore(&mut self, value: Projection) {
+        // A publisher may have filled this lane while the surface was pushing.
+        let lane = value.lane();
+        self.pending[lane].get_or_insert(value);
+    }
+
+    fn take(&mut self) -> [Option<Projection>; 8] {
+        std::mem::take(&mut self.pending)
+    }
+
+    fn has_pending(&self) -> bool {
+        self.pending.iter().any(Option::is_some)
+    }
+
+    fn republish_audio(&mut self) {
+        self.pending[AUDIO_LANE] = self.last_accepted[AUDIO_LANE].clone();
+    }
+}
 
 #[derive(Default)]
 struct Inner {
-    /// The newest encoded `LobbyStatePayload` not yet handed to the page.
-    payload: Option<String>,
-    /// The newest payload this bridge has ACCEPTED, whether or not it has been
-    /// pushed yet. See [`HostLobbyBridge::push_lobby_state`] for why an
-    /// identical one is dropped rather than queued.
-    last_accepted: Option<String>,
-    /// The newest reveal flag not yet handed to the page.
-    reveal: Option<bool>,
-    /// The newest join invitation not yet handed to the page (issue #1329).
-    ///
-    /// Latest-wins like the lobby state, and for the same reason: an invitation
-    /// is a statement of where the crew should go NOW, and a reclaimed or
-    /// rotated code makes the previous one wrong rather than merely older.
-    join: Option<String>,
-    /// The newest scenario-panel state not yet handed to the page (issue
-    /// #1328).
-    ///
-    /// Latest-wins like the lobby state, and for the same reason: it is a
-    /// snapshot of the whole picker — the catalogue, what the arbiter has
-    /// locked, and whether a world has landed and closed the picker for good —
-    /// so an older one has nothing to say the newest does not.
-    ///
-    /// Unlike [`Self::payload`] it carries **no dedupe**, because its feed does
-    /// not push every frame: `host_lobby::feed_scenario_panel` pushes only when
-    /// the selection moved or a world arrived, exactly as `join` is pushed only
-    /// when a code is issued.
-    scenario: Option<String>,
-    /// The newest landing-screen state not yet handed to the page (issue
-    /// #1361).
-    ///
-    /// Latest-wins like the picker beside it, and carrying no dedupe for the
-    /// same reason: its feed pushes on the first frame and on the frame a World
-    /// lands, and nothing in between.
-    landing: Option<String>,
-    /// The newest mod-pack shelf not yet handed to the page (issue #1366).
-    ///
-    /// Latest-wins like the landing above it, and carrying no dedupe for the
-    /// same reason: its feed pushes on the first frame and on the frame an
-    /// install attempt finished, and nothing in between.
-    packs: Option<String>,
-    /// QR toggles asked for but not yet applied (issue #1329).
-    ///
-    /// A COUNT, not a flag, because this is the one thing on this bridge that is
-    /// an edge rather than a state: the page owns whether the panel is on
-    /// screen (`gui/host-qr.js` reads `#overlay`), and what crosses is "somebody
-    /// pressed the button". Two presses in a frame are two flips — collapsing
-    /// them to "somebody asked" would turn a double-press into a single one.
+    projections: ProjectionMailbox,
+    /// Counted edges: two QR presses must remain two flips.
     qr_toggles: usize,
-    /// The newest encoded `BridgeLayoutPayload` not yet handed to the page
-    /// (issue #1330).
-    layout: Option<String>,
-    /// The newest monitor row this bridge has ACCEPTED. Deduped for the same
-    /// reason `last_accepted` is: the row is republished whenever the layout
-    /// resource is touched, and a bridge nobody rearranged must cost the
-    /// simulation nothing.
-    last_accepted_layout: Option<String>,
-    /// What the page has asked for, awaiting a reader.
     records: VecDeque<String>,
-    /// A reliable fleet overflow is terminal. Once raised, further fleet
-    /// records are refused until this bridge is replaced with the surface.
+    /// Reliable overflow is terminal until the surface replaces its bridge.
     fleet_faulted: bool,
-    audio: Option<String>,
-    last_accepted_audio: Option<String>,
     hud_reading: Option<String>,
     hud_locale: Option<String>,
     fleet_config: Option<String>,
     fleet_updates: VecDeque<String>,
-    /// Ordered reliable rendezvous frames for the native fleet control plane.
     fleet_wire: VecDeque<String>,
     hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,
 }
@@ -247,45 +274,51 @@ impl HostLobbyBridge {
     /// station-grid rebuild sixty times a second, of the *simulation's* time,
     /// for the whole mission.
     pub fn push_lobby_state(&self, json: impl Into<String>) {
-        let json = json.into();
-        let mut inner = self.lock();
-        if inner.last_accepted.as_deref() == Some(json.as_str()) {
-            return;
-        }
-        inner.last_accepted = Some(json.clone());
-        inner.payload = Some(json);
+        self.lock()
+            .projections
+            .publish(Projection::Lobby(json.into()));
     }
 
     /// Hand the surface the current reveal decision
     /// ([`super::reveal::SurfacePresence::force_chrome`]).
     pub fn push_reveal(&self, force_chrome: bool) {
-        self.lock().reveal = Some(force_chrome);
+        self.lock()
+            .projections
+            .publish(Projection::Reveal(force_chrome));
     }
 
     /// Hand the surface the crew's join invitation
     /// ([`super::join::JoinInvite`], already encoded).
     pub fn push_join(&self, json: impl Into<String>) {
-        self.lock().join = Some(json.into());
+        self.lock()
+            .projections
+            .publish(Projection::Join(json.into()));
     }
 
     /// Hand the surface the scenario picker's state
     /// ([`super::scenario::ScenarioPanelPayload`], already encoded) — issue
     /// #1328.
     pub fn push_scenario(&self, json: impl Into<String>) {
-        self.lock().scenario = Some(json.into());
+        self.lock()
+            .projections
+            .publish(Projection::Scenario(json.into()));
     }
 
     /// Hand the surface the landing screen's state
     /// ([`super::landing::LandingPanelPayload`], already encoded) - issue
     /// #1361.
     pub fn push_landing(&self, json: impl Into<String>) {
-        self.lock().landing = Some(json.into());
+        self.lock()
+            .projections
+            .publish(Projection::Landing(json.into()));
     }
 
     /// Hand the surface the mod-pack shelf
     /// ([`super::packs::ModPackPanelPayload`], already encoded) - issue #1366.
     pub fn push_packs(&self, json: impl Into<String>) {
-        self.lock().packs = Some(json.into());
+        self.lock()
+            .projections
+            .publish(Projection::Packs(json.into()));
     }
 
     /// Somebody asked for the join QR to be flipped (issue #1329).
@@ -307,13 +340,9 @@ impl HostLobbyBridge {
     /// touches, and a bridge nobody rearranged must not spend the simulation's
     /// thread re-rendering an unchanged button row.
     pub fn push_layout(&self, json: impl Into<String>) {
-        let json = json.into();
-        let mut inner = self.lock();
-        if inner.last_accepted_layout.as_deref() == Some(json.as_str()) {
-            return;
-        }
-        inner.last_accepted_layout = Some(json.clone());
-        inner.layout = Some(json);
+        self.lock()
+            .projections
+            .publish(Projection::Layout(json.into()));
     }
 
     /// Whether anything is waiting to be pushed. Diagnostic, and what a test
@@ -323,14 +352,7 @@ impl HostLobbyBridge {
         inner.fleet_config.is_some()
             || !inner.fleet_updates.is_empty()
             || !inner.fleet_wire.is_empty()
-            || inner.payload.is_some()
-            || inner.reveal.is_some()
-            || inner.join.is_some()
-            || inner.scenario.is_some()
-            || inner.landing.is_some()
-            || inner.packs.is_some()
-            || inner.layout.is_some()
-            || inner.audio.is_some()
+            || inner.projections.has_pending()
             || inner.qr_toggles > 0
     }
 
@@ -409,77 +431,14 @@ impl HostLobbyBridge {
             fleet_config: inner.fleet_config.take(),
             fleet_updates: std::mem::take(&mut inner.fleet_updates),
             fleet_wire: std::mem::take(&mut inner.fleet_wire),
-            reveal: inner.reveal.take(),
-            join: inner.join.take(),
-            scenario: inner.scenario.take(),
-            landing: inner.landing.take(),
-            packs: inner.packs.take(),
-            layout: inner.layout.take(),
-            audio: inner.audio.take(),
-            payload: inner.payload.take(),
+            projections: inner.projections.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
-        }
-    }
-
-    /// Put a value back **only if nothing newer has arrived** while the push was
-    /// being attempted. Newer always wins: this is a snapshot, not a backlog.
-    fn restore_payload(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.payload.is_none() {
-            inner.payload = Some(json);
-        }
-    }
-
-    fn restore_reveal(&self, flag: bool) {
-        let mut inner = self.lock();
-        if inner.reveal.is_none() {
-            inner.reveal = Some(flag);
-        }
-    }
-
-    fn restore_join(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.join.is_none() {
-            inner.join = Some(json);
-        }
-    }
-
-    fn restore_scenario(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.scenario.is_none() {
-            inner.scenario = Some(json);
-        }
-    }
-
-    fn restore_landing(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.landing.is_none() {
-            inner.landing = Some(json);
-        }
-    }
-
-    fn restore_packs(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.packs.is_none() {
-            inner.packs = Some(json);
-        }
-    }
-
-    fn restore_layout(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.layout.is_none() {
-            inner.layout = Some(json);
         }
     }
 
     /// Current settings/status only. This lane never carries playback events.
     pub fn push_audio(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.last_accepted_audio.as_ref() == Some(&json) {
-            return;
-        }
-        inner.last_accepted_audio = Some(json.clone());
-        inner.audio = Some(json);
+        self.lock().projections.publish(Projection::Audio(json));
     }
     pub fn push_fleet_config(&self, json: impl Into<String>) {
         self.lock().fleet_config = Some(json.into());
@@ -543,21 +502,8 @@ impl HostLobbyBridge {
         inner.fleet_wire = frames;
     }
     pub fn republish_audio(&self) {
-        let mut inner = self.lock();
-        inner.audio = inner.last_accepted_audio.clone();
+        self.lock().projections.republish_audio();
     }
-    fn restore_audio(&self, json: String) {
-        let mut inner = self.lock();
-        if inner.audio.is_none() {
-            inner.audio = Some(json);
-        }
-    }
-
-    /// Give back toggles that were not delivered.
-    ///
-    /// Added rather than replaced, unlike every other slot here: these are
-    /// edges, and one that failed to cross plus one that arrived while it was
-    /// failing are two presses, both of which the operator made.
     fn restore_qr_toggles(&self, count: usize) {
         self.lock().qr_toggles += count;
     }
@@ -596,14 +542,7 @@ struct Pending {
     fleet_config: Option<String>,
     fleet_updates: VecDeque<String>,
     fleet_wire: VecDeque<String>,
-    audio: Option<String>,
-    reveal: Option<bool>,
-    join: Option<String>,
-    landing: Option<String>,
-    packs: Option<String>,
-    scenario: Option<String>,
-    layout: Option<String>,
-    payload: Option<String>,
+    projections: [Option<Projection>; 8],
     qr_toggles: usize,
 }
 
@@ -743,140 +682,21 @@ pub fn pump_host_lobby(
         }
     }
 
-    if let Some(flag) = pending.reveal {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_reveal(flag);
-        } else {
-            match surface.push(&host_lobby_reveal_script(flag)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_reveal(flag);
+    for projection in pending.projections.into_iter().flatten() {
+        if !failed {
+            match surface.push(&projection.script()) {
+                Ok(()) => {
+                    report.pushed += 1;
+                    continue;
+                }
+                Err(error) => {
+                    report.push_failure = Some(error);
                     failed = true;
                 }
             }
         }
-    }
-
-    if let Some(json) = pending.join {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_join(json);
-        } else {
-            match surface.push(&host_lobby_join_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_join(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.landing {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_landing(json);
-        } else {
-            match surface.push(&host_lobby_landing_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_landing(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.packs {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_packs(json);
-        } else {
-            match surface.push(&host_lobby_packs_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_packs(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.scenario {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_scenario(json);
-        } else {
-            match surface.push(&host_lobby_scenario_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_scenario(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.layout {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_layout(json);
-        } else {
-            match surface.push(&host_lobby_layout_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_layout(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.audio {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_audio(json);
-        } else {
-            match surface.push(&super::document::host_lobby_audio_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_audio(json);
-                    failed = true;
-                }
-            }
-        }
-    }
-
-    if let Some(json) = pending.payload {
-        if failed {
-            report.deferred += 1;
-            bridge.restore_payload(json);
-        } else {
-            match surface.push(&host_lobby_apply_script(&json)) {
-                Ok(()) => report.pushed += 1,
-                Err(e) => {
-                    report.push_failure = Some(e);
-                    report.deferred += 1;
-                    bridge.restore_payload(json);
-                    failed = true;
-                }
-            }
-        }
+        report.deferred += 1;
+        bridge.lock().projections.restore(projection);
     }
 
     if pending.qr_toggles > 0 {
@@ -912,6 +732,145 @@ mod tests {
     use crate::native_host::panes::RecordingSurface;
 
     const LOBBY: &str = r#"{"phase":"Lobby","crew_count":0}"#;
+
+    fn publish_lane(bridge: &HostLobbyBridge, lane: usize, newer: bool) -> String {
+        let json = if newer {
+            r#"{"value":2}"#
+        } else {
+            r#"{"value":1}"#
+        };
+        match lane {
+            0 => {
+                bridge.push_reveal(newer);
+                host_lobby_reveal_script(newer)
+            }
+            1 => {
+                bridge.push_join(json);
+                host_lobby_join_script(json)
+            }
+            2 => {
+                bridge.push_landing(json);
+                host_lobby_landing_script(json)
+            }
+            3 => {
+                bridge.push_packs(json);
+                host_lobby_packs_script(json)
+            }
+            4 => {
+                bridge.push_scenario(json);
+                host_lobby_scenario_script(json)
+            }
+            5 => {
+                bridge.push_layout(json);
+                host_lobby_layout_script(json)
+            }
+            6 => {
+                bridge.push_audio(json.into());
+                super::super::document::host_lobby_audio_script(json)
+            }
+            7 => {
+                bridge.push_lobby_state(json);
+                host_lobby_apply_script(json)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    struct FailingLaneSurface {
+        recorded: RecordingSurface,
+        fail_at: usize,
+        attempted: usize,
+        replace: Option<(HostLobbyBridge, usize)>,
+    }
+
+    impl PaneSurface for FailingLaneSurface {
+        fn load(&mut self, url: &str) -> Result<(), PaneSurfaceError> {
+            self.recorded.load(url)
+        }
+        fn is_ready(&self) -> bool {
+            self.recorded.is_ready()
+        }
+        fn drain(&mut self) -> Vec<String> {
+            self.recorded.drain()
+        }
+        fn push(&mut self, script: &str) -> Result<(), PaneSurfaceError> {
+            let attempt = self.attempted;
+            self.attempted += 1;
+            if attempt == self.fail_at {
+                if let Some((bridge, lane)) = &self.replace {
+                    publish_lane(bridge, *lane, true);
+                }
+                return Err(PaneSurfaceError::Script("injected lane failure".into()));
+            }
+            self.recorded.push(script)
+        }
+    }
+
+    #[test]
+    fn every_projection_failure_preserves_order_counts_and_edges() {
+        for fail_at in 0..8 {
+            let bridge = HostLobbyBridge::new();
+            let expected: Vec<_> = (0..8)
+                .map(|lane| publish_lane(&bridge, lane, false))
+                .collect();
+            bridge.push_qr_toggle();
+            bridge.push_qr_toggle();
+            let mut surface = FailingLaneSurface {
+                recorded: RecordingSurface::ready(),
+                fail_at,
+                attempted: 0,
+                replace: None,
+            };
+            let report = pump_host_lobby(&bridge, &mut surface);
+            assert_eq!(report.pushed, fail_at);
+            assert_eq!(report.deferred, 10 - fail_at);
+            assert_eq!(surface.attempted, fail_at + 1);
+            assert!(report.push_failure.is_some());
+            let retry = pump_host_lobby(&bridge, &mut surface);
+            assert_eq!(retry.pushed, 10 - fail_at);
+            assert_eq!(retry.deferred, 0);
+            assert_eq!(&surface.recorded.pushed[..8], expected.as_slice());
+            assert_eq!(
+                &surface.recorded.pushed[8..],
+                &[host_lobby_qr_toggle_script(), host_lobby_qr_toggle_script()]
+            );
+        }
+    }
+
+    #[test]
+    fn every_projection_retains_a_newer_value_published_during_failure() {
+        for lane in 0..8 {
+            let bridge = HostLobbyBridge::new();
+            publish_lane(&bridge, lane, false);
+            let mut surface = FailingLaneSurface {
+                recorded: RecordingSurface::ready(),
+                fail_at: 0,
+                attempted: 0,
+                replace: Some((bridge.clone(), lane)),
+            };
+            assert_eq!(pump_host_lobby(&bridge, &mut surface).deferred, 1);
+            assert_eq!(pump_host_lobby(&bridge, &mut surface).pushed, 1);
+            assert_eq!(
+                surface.recorded.pushed,
+                vec![publish_lane(&bridge, lane, true)]
+            );
+        }
+    }
+
+    #[test]
+    fn only_frame_fed_projection_lanes_deduplicate() {
+        for lane in 0..8 {
+            let bridge = HostLobbyBridge::new();
+            publish_lane(&bridge, lane, false);
+            let mut surface = RecordingSurface::ready();
+            assert_eq!(pump_host_lobby(&bridge, &mut surface).pushed, 1);
+            publish_lane(&bridge, lane, false);
+            assert_eq!(
+                pump_host_lobby(&bridge, &mut surface).pushed,
+                usize::from(lane < 5)
+            );
+        }
+    }
 
     #[test]
     fn fleet_configuration_is_delivered_before_an_early_ready_frame() {

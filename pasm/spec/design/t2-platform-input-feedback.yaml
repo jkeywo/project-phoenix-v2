@@ -101,11 +101,16 @@ entities:
       status: accepted
       confidence: confirmed
       title: Versioned Private Operator Profile
-      summary: "One versioned client-local schema carries accessibility effects, the two bindings per action, gamepad choice and tuning, feedback preferences, and GM confirmation settings. It never enters deterministic session state or a scenario save. Explicit JSON export/import moves the profile between browser and native surfaces; identity, Station ownership, and save data are excluded. Unknown and older versions migrate or fail safely without leaking private settings to peers."
+      summary: "One versioned client-local schema carries accessibility effects, the two bindings per action, gamepad choice and tuning, feedback preferences, and GM confirmation settings. It never enters deterministic session state or a scenario save. Explicit JSON export/import moves the profile between browser and native surfaces; identity, Station ownership, and save data are excluded. Unknown and older versions migrate or fail safely without leaking private settings to peers. The Station client lifecycle owns canonical retention and live application across browser and native panes; imports persist before applying, ordinary settings persist best-effort after applying, and loading defaults never writes over asynchronously arriving native storage. Inactive layouts and GM density survive snapshots."
     architecture:
       classification: local
       owner: t2-semantic-action-registry
       writers: [t2-semantic-action-registry]
+    implementation:
+      status: observed
+      paths: [gui/operator-profile.js, gui/operator-surface-adapter.js, gui/client-operator-profile.js, client.html]
+      symbols: [createClientOperatorProfile]
+      tests: [tests/client/client-operator-profile.test.js, tests/client/operator-profile.test.js, tests/smoke/semantic-action-red-alert.spec.js]
 
   - component: t2-peer-local-save-slot-lifecycle
     core:

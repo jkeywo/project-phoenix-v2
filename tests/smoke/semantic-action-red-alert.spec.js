@@ -264,6 +264,10 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   Object.assign(storedProfile.bindings['captain.red-alert'][0], {
     code: 'KeyY', ctrlKey: true, shiftKey: true,
   });
+  // Inactive portable preferences must survive the Station lifecycle's next
+  // ordinary settings write instead of being rebuilt from the shell whitelist.
+  storedProfile.gmDensity = 'touch';
+  storedProfile.previousLiveLayout = structuredClone(storedProfile.liveLayout);
   await captain.locator('[data-control="operator-profile-file"]').setInputFiles({
     name: 'operator-profile.json',
     mimeType: 'application/json',
@@ -274,6 +278,14 @@ test('remapped Captain Red Alert binding reaches the authoritative command path'
   await expect(captain.locator(
     '[data-control="semantic-binding-captain.red-alert-0"]',
   )).toHaveValue('Ctrl + Shift + Y');
+
+  await captain.click('[data-control="semantic-binding-reset-captain.view"]');
+  const retainedProfile = await captain.evaluate(() => JSON.parse(
+    localStorage.getItem('phoenix-operator-profile-v1'),
+  ));
+  expect(retainedProfile.gmDensity).toBe('touch');
+  expect(retainedProfile.testLayout).toEqual(storedProfile.testLayout);
+  expect(retainedProfile.previousLiveLayout).toEqual(storedProfile.previousLiveLayout);
 
   // Close Settings so the key relay may hand the host-page event to the
   // active Captain iframe. The remap capture itself stops propagation, so the

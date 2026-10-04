@@ -42,7 +42,7 @@ fn a_button_carries_the_identity_a_press_names_back() {
     // What the page sends back carries that identity verbatim, in the
     // surface's one vocabulary…
     assert_eq!(
-        crate::core::codec::decode_host_lobby_record(&format!(
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(&format!(
             r#"{{"kind":"set-viewscreen","monitor":"{}"}}"#,
             pressed.identity
         ))
@@ -210,12 +210,15 @@ fn a_record_the_page_sends_is_tagged_by_the_verb_it_asks_for() {
     // and there is no reason to make it a wire break.
     let json = r#"{"kind":"set-viewscreen","monitor":"BenQ EX@1920x1080"}"#;
     assert_eq!(
-        crate::core::codec::decode_host_lobby_record(json).unwrap(),
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(json).unwrap(),
         super::super::HostLobbyRecord::SetViewscreen {
             monitor: "BenQ EX@1920x1080".to_string(),
         }
     );
-    assert!(crate::core::codec::decode_host_lobby_record(r#"{"monitor":"x"}"#).is_err());
+    assert!(
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(r#"{"monitor":"x"}"#)
+            .is_err()
+    );
 }
 
 #[test]
@@ -224,7 +227,7 @@ fn the_encoded_payload_is_byte_stable_for_an_unchanged_layout() {
     // what keeps a quiet lobby free of `evaluate_script` calls on the
     // simulation's own thread. That only works if encoding the same layout
     // twice yields the same bytes — hence the ordered parameter map.
-    let first = crate::core::codec::encode_bridge_layout(&bridge_layout_payload(
+    let first = crate::core::codec::to_json(&bridge_layout_payload(
         &layout(),
         &two_monitors(),
         &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
@@ -234,7 +237,7 @@ fn the_encoded_payload_is_byte_stable_for_an_unchanged_layout() {
         })],
     ))
     .unwrap();
-    let second = crate::core::codec::encode_bridge_layout(&bridge_layout_payload(
+    let second = crate::core::codec::to_json(&bridge_layout_payload(
         &layout(),
         &two_monitors(),
         &[LayoutNotice::Refused(LayoutRefusal::MonitorFull {
@@ -486,7 +489,7 @@ fn the_two_station_verbs_round_trip_from_the_page_as_the_law_reads_them() {
     // KEBAB like the `set-viewscreen` they were written to match.
     use super::super::HostLobbyRecord;
     assert_eq!(
-        crate::core::codec::decode_host_lobby_record(
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(
             r#"{"kind":"assign-station","station":"helm","monitor":"BenQ EX@1920x1080"}"#
         )
         .unwrap(),
@@ -503,7 +506,7 @@ fn the_two_station_verbs_round_trip_from_the_page_as_the_law_reads_them() {
         }
     );
     assert_eq!(
-        crate::core::codec::decode_host_lobby_record(
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(
             r#"{"kind":"unassign-station","station":"helm"}"#
         )
         .unwrap(),
@@ -519,8 +522,10 @@ fn the_two_station_verbs_round_trip_from_the_page_as_the_law_reads_them() {
     );
     // There is no `move-station` verb, because the law has no move action:
     // assigning a seated station elsewhere IS the move.
-    assert!(crate::core::codec::decode_host_lobby_record(
-        r#"{"kind":"move-station","station":"helm","monitor":"x"}"#
-    )
-    .is_err());
+    assert!(
+        crate::core::codec::from_json::<super::super::HostLobbyRecord>(
+            r#"{"kind":"move-station","station":"helm","monitor":"x"}"#
+        )
+        .is_err()
+    );
 }

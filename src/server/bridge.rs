@@ -536,17 +536,17 @@ impl crate::save_slots_store::LocalSaveStore for BrowserSlotStore {
 //
 // The names are ungated so native `cargo test` can pin the table's shape.
 pub mod host_channels {
-    /// Viewscreen HUD state — JSON string (`codec::encode_hud_state`).
+    /// Viewscreen HUD state — JSON string (`codec::to_json`).
     pub const HUD: &str = "hud";
-    /// Lobby overlay state — JSON string (`codec::encode_lobby_state`).
+    /// Lobby overlay state — JSON string (`codec::to_json`).
     pub const LOBBY: &str = "lobby";
-    /// AI→AI chatter events — JSON string (`codec::encode_chatter`).
+    /// AI→AI chatter events — JSON string (`codec::to_json`).
     pub const CHATTER: &str = "chatter";
     /// Merged ship + world audio config — JSON string
-    /// (`codec::encode_audio_config`), sent once on game start.
+    /// (`codec::to_json`), sent once on game start.
     pub const AUDIO_CONFIG: &str = "audio_config";
     /// One-shot positional audio cues — JSON string
-    /// (`codec::encode_audio_cue`).
+    /// (`codec::to_json`).
     pub const AUDIO_CUE: &str = "audio_cue";
     /// Runtime-owned continuation boundary; no sound/event history.
     pub const AUDIO_LIFECYCLE: &str = "audio_lifecycle";
@@ -1871,7 +1871,7 @@ fn drain_fleet_lobby_input(
 #[cfg(target_arch = "wasm32")]
 fn flush_start_grant_results(mut results: ResMut<StartGrantResults>) {
     for result in results.drain() {
-        if let Ok(encoded) = crate::core::codec::encode_start_grant_result(&result) {
+        if let Ok(encoded) = crate::core::codec::to_json(&result) {
             edge::publish_start_result(encoded);
         }
     }
@@ -3787,7 +3787,7 @@ pub fn wasm_get_gm_role_presets() -> String {
 #[cfg(target_arch = "wasm32")]
 fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
     let payload = crate::delivery::payload::ship_payload(ship);
-    crate::core::codec::encode_catalog_ship(&payload)
+    crate::core::codec::to_json(&payload)
         .ok()
         .and_then(|json| js_sys::JSON::parse(&json).ok())
         .map(Object::from)
@@ -3861,7 +3861,7 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
 #[cfg(all(target_arch = "wasm32", not(phoenix_demo_build)))]
 #[wasm_bindgen]
 pub fn wasm_add_mod_pack_with_assets(bytes: &[u8], base_assets: &str) -> Result<Array, JsValue> {
-    let assets = crate::core::codec::decode_workshop_asset_bytes(base_assets)
+    let assets = crate::core::codec::from_json(base_assets)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     Ok(add_mod_pack_with_assets(bytes, &assets))
 }
@@ -3990,18 +3990,18 @@ pub fn wasm_pack_asset(path: String) -> Option<Vec<u8>> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_pack_asset_dependencies() -> String {
-    let index = crate::entities::config_cache::mod_pack_assets()
-        .iter()
-        .map(|(path, bytes)| {
-            let required = crate::world::pack_asset_validation::required_assets(path, bytes)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            (path.clone(), required)
-        })
-        .collect();
-    crate::core::codec::encode_asset_dependency_index(&index)
-        .expect("asset index contains only strings")
+    let index: std::collections::BTreeMap<String, Vec<String>> =
+        crate::entities::config_cache::mod_pack_assets()
+            .iter()
+            .map(|(path, bytes)| {
+                let required = crate::world::pack_asset_validation::required_assets(path, bytes)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                (path.clone(), required)
+            })
+            .collect();
+    crate::core::codec::to_json(&index).expect("asset index contains only strings")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -4180,13 +4180,11 @@ pub fn wasm_get_scenario_catalog() -> Array {
         );
     }
     let catalog = merged.catalog;
-    crate::core::codec::encode_scenario_catalog(&crate::delivery::payload::catalog_payload(
-        &catalog,
-    ))
-    .ok()
-    .and_then(|json| js_sys::JSON::parse(&json).ok())
-    .map(|value| Array::from(&value))
-    .unwrap_or_default()
+    crate::core::codec::to_json(&crate::delivery::payload::catalog_payload(&catalog))
+        .ok()
+        .and_then(|json| js_sys::JSON::parse(&json).ok())
+        .map(|value| Array::from(&value))
+        .unwrap_or_default()
 }
 
 /// Publish the browser picker's current enriched catalogue through the same
@@ -4213,7 +4211,7 @@ pub fn browser_scenario_catalog_message(
     locked_ship: Option<String>,
 ) -> Result<String, serde_json::Error> {
     use crate::core::codec::JsonCodec;
-    let scenarios = crate::core::codec::decode_scenario_catalog(scenarios_json)?;
+    let scenarios = crate::core::codec::from_json(scenarios_json)?;
     let payload = crate::delivery::payload::catalogue_snapshot(
         scenarios,
         &crate::entities::config_cache::active_packs(),
@@ -4874,9 +4872,7 @@ fn flush_host_channels(
     // retain their own independent semantics.
     let boundary_changed = audio_lifecycle.is_changed();
     let lifecycle_payloads = if boundary_changed {
-        codec::encode_audio_lifecycle(&audio_lifecycle.state)
-            .into_iter()
-            .collect()
+        codec::to_json(&audio_lifecycle.state).into_iter().collect()
     } else {
         Vec::new()
     };
@@ -4899,7 +4895,7 @@ fn flush_host_channels(
             host_channels::CHATTER,
             chatter
                 .read()
-                .filter_map(|ev| codec::encode_chatter(ev).ok())
+                .filter_map(|ev| codec::to_json(ev).ok())
                 .collect(),
         ),
         (
@@ -4914,70 +4910,70 @@ fn flush_host_channels(
             host_channels::GM_ENTITY,
             gm_entity
                 .read()
-                .filter_map(|event| codec::encode_gm_entity_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_ACTIVITY,
             gm_activity
                 .read()
-                .filter_map(|event| codec::encode_gm_activity_feed(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_STATION,
             gm_station
                 .read()
-                .filter_map(|event| codec::encode_gm_station_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_SESSION,
             gm_session
                 .read()
-                .filter_map(|event| codec::encode_gm_session_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_MISSION,
             gm_mission
                 .read()
-                .filter_map(|event| codec::encode_gm_mission_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_COMMS,
             gm_comms
                 .read()
-                .filter_map(|event| codec::encode_gm_comms_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_SPAWN,
             gm_spawn
                 .read()
-                .filter_map(|event| codec::encode_gm_spawn_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_ATTENTION,
             gm_attention
                 .read()
-                .filter_map(|event| codec::encode_gm_attention_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_HEALTH,
             gm_health
                 .read()
-                .filter_map(|event| codec::encode_gm_health_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
         (
             host_channels::GM_WORKLOAD,
             gm_workload
                 .read()
-                .filter_map(|event| codec::encode_gm_workload_projection(&event.payload).ok())
+                .filter_map(|event| codec::to_json(&event.payload).ok())
                 .collect(),
         ),
     ];

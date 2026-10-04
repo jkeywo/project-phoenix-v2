@@ -140,7 +140,7 @@ fn publish_metadata(bridge: &NativeGmBridge, phase: GamePhase) {
     .unwrap();
     bridge.publish(
         "metadata",
-        codec::encode_native_gm_metadata(&NativeGmMetadata {
+        codec::to_json(&NativeGmMetadata {
             phase,
             host_lobby_unavailable: false,
             local_operator_id: Some(NATIVE_GM_OPERATOR_ID.into()),
@@ -182,16 +182,13 @@ fn publish_ship(bridge: &NativeGmBridge, name: &str, x: f32, hull: u8) {
         }],
         ..Default::default()
     };
-    bridge.publish(
-        "gm_entity",
-        codec::encode_gm_entity_projection(&projection).unwrap(),
-    );
+    bridge.publish("gm_entity", codec::to_json(&projection).unwrap());
 }
 
 fn publish_session(bridge: &NativeGmBridge, paused: bool) {
     bridge.publish(
         "gm_session",
-        codec::encode_gm_session_projection(&GmSessionProjection {
+        codec::to_json(&GmSessionProjection {
             paused,
             results: Vec::new(),
             journal: Default::default(),
@@ -401,7 +398,7 @@ fn exercise_live_station(
     let roster = app.world().resource::<GmRoster>();
     bridge.publish(
         "metadata",
-        codec::encode_native_gm_metadata(&NativeGmMetadata {
+        codec::to_json(&NativeGmMetadata {
             phase: GamePhase::InProgress,
             host_lobby_unavailable: false,
             local_operator_id: Some("gm-1".into()),
@@ -434,10 +431,7 @@ fn exercise_live_station(
             .drain()
             .last()
         {
-            bridge.publish(
-                "gm_station",
-                codec::encode_gm_station_projection(&message.payload).unwrap(),
-            );
+            bridge.publish("gm_station", codec::to_json(&message.payload).unwrap());
         }
         if let Some(message) = app
             .world_mut()
@@ -445,10 +439,7 @@ fn exercise_live_station(
             .drain()
             .last()
         {
-            bridge.publish(
-                "gm_entity",
-                codec::encode_gm_entity_projection(&message.payload).unwrap(),
-            );
+            bridge.publish("gm_entity", codec::to_json(&message.payload).unwrap());
         }
         runtime.render();
     };

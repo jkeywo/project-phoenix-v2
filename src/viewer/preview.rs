@@ -23,7 +23,7 @@ use wasm_bindgen::prelude::*;
 pub fn viewer_workshop_preview_init(selection: String, source: JsValue) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let fail = |message: String| JsValue::from_str(&message);
-    let selection = crate::core::codec::decode_workshop_preview_selection(selection.as_bytes())
+    let selection = crate::core::codec::from_json_bytes(selection.as_bytes())
         .map_err(|e| fail(format!("Invalid preview selection: {e}")))?;
     let subject = selection
         .subject()

@@ -33,19 +33,20 @@ pub fn wasm_workshop_asset_dependencies(bytes: &[u8]) -> Vec<String> {
 
 #[wasm_bindgen]
 pub fn wasm_workshop_test_catalog(files: &str) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_test_source(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    crate::core::codec::encode_workshop_test_catalog(&super::test_source::catalog(files))
-        .map_err(|error| JsValue::from_str(&error))
+    let files = crate::core::codec::from_json(files)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::test_source::catalog(files))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_test_check_selection(files: &str, launch: &str) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_test_source(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let launch = crate::core::codec::decode_workshop_test_launch(launch.as_bytes())
-        .map_err(|error| JsValue::from_str(&error))?;
-    crate::core::codec::encode_workshop_validation(&super::test_source::validate_selection(
+    let files = crate::core::codec::from_json(files)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let launch: super::test_protocol::Launch =
+        crate::core::codec::from_json_bytes(launch.as_bytes())
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::test_source::validate_selection(
         files,
         &launch.selection,
     ))
@@ -54,68 +55,61 @@ pub fn wasm_workshop_test_check_selection(files: &str, launch: &str) -> Result<S
 
 #[wasm_bindgen]
 pub fn wasm_workshop_validate_pack(bytes: &[u8], dependencies: &str) -> Result<String, JsValue> {
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let dependencies = crate::core::codec::from_json(dependencies)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let result = super::validate_pack(bytes, &dependencies);
-    crate::core::codec::encode_workshop_validation(&result)
-        .map_err(|error| JsValue::from_str(&error.to_string()))
+    crate::core::codec::to_json(&result).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_fields(source: &str, document_path: &str) -> Result<String, JsValue> {
     let fields = super::document::fields(source, document_path)
-        .map_err(|error| JsValue::from_str(&error))?;
-    crate::core::codec::encode_workshop_fields(&fields)
-        .map_err(|error| JsValue::from_str(&error.to_string()))
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&fields).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_patch(source: &str, patch: &str) -> Result<String, JsValue> {
-    let patch = crate::core::codec::decode_workshop_patch(patch)
+    let patch = crate::core::codec::from_json(patch)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    super::document::patch(source, &patch).map_err(|error| JsValue::from_str(&error))
+    super::document::patch(source, &patch).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// The faction and complexity catalog over the draft's text members plus the
 /// same explicit dependency bundle validation takes (issue #1474).
 #[wasm_bindgen]
 pub fn wasm_workshop_definitions(files: &str, dependencies: &str) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    crate::core::codec::encode_workshop_definition_catalog(&super::definitions::catalog(
-        &files,
-        &dependencies,
-    ))
-    .map_err(|error| JsValue::from_str(&error))
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::definitions::catalog(&files, &dependencies))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_edit(source: &str, edit: &str) -> Result<String, JsValue> {
-    let edit = crate::core::codec::decode_workshop_edit(edit)
-        .map_err(|error| JsValue::from_str(&error))?;
-    super::document::edit(source, &edit).map_err(|error| JsValue::from_str(&error))
+    let edit = crate::core::codec::from_json(edit)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    super::document::edit(source, &edit).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_new_faction(name: &str, uuid: &str) -> Result<String, JsValue> {
-    super::definitions::new_faction_source(name, uuid).map_err(|error| JsValue::from_str(&error))
+    super::definitions::new_faction_source(name, uuid)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// The composition catalog over the draft's text members plus the same
 /// explicit dependency bundle validation takes (issue #1475).
 #[wasm_bindgen]
 pub fn wasm_workshop_composition(files: &str, dependencies: &str) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    crate::core::codec::encode_workshop_composition_catalog(&super::composition::catalog(
-        &files,
-        &dependencies,
-    ))
-    .map_err(|error| JsValue::from_str(&error))
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::composition::catalog(&files, &dependencies))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// One composition edit group, refused with the source untouched when it
@@ -126,19 +120,20 @@ pub fn wasm_workshop_compose(
     dependencies: &str,
     request: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let request = crate::core::codec::decode_workshop_composition_request(request)
-        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let request = crate::core::codec::from_json(request)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     super::composition::compose(&files, &dependencies, &request)
-        .map_err(|error| JsValue::from_str(&error))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn wasm_workshop_new_world(title: &str) -> Result<String, JsValue> {
-    super::composition::new_world_source(title).map_err(|error| JsValue::from_str(&error))
+    super::composition::new_world_source(title)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// One entity template's composition over the draft's text members plus the
@@ -151,16 +146,12 @@ pub fn wasm_workshop_entity(
     dependencies: &str,
     path: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    crate::core::codec::encode_workshop_entity_composition(&super::entity::catalog(
-        &files,
-        &dependencies,
-        path,
-    ))
-    .map_err(|error| JsValue::from_str(&error))
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::entity::catalog(&files, &dependencies, path))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// One entity edit group, refused with the source untouched when it introduces
@@ -172,14 +163,14 @@ pub fn wasm_workshop_entity_edit(
     dependencies: &str,
     request: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let request = crate::core::codec::decode_workshop_entity_request(request)
-        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let request = crate::core::codec::from_json(request)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     super::entity::compose(&files, &dependencies, &request)
-        .map_err(|error| JsValue::from_str(&error))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// Write one inherited value into the local document as an exact-source
@@ -192,12 +183,12 @@ pub fn wasm_workshop_entity_materialise(
     path: &str,
     address: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let dependencies = crate::core::codec::from_json(dependencies)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     super::entity::materialise(&files, &dependencies, path, address)
-        .map_err(|error| JsValue::from_str(&error))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// One world's GM role presets and typed widgets over the draft's text members
@@ -211,16 +202,12 @@ pub fn wasm_workshop_presets(
     dependencies: &str,
     path: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    crate::core::codec::encode_workshop_preset_catalog(&super::presets::catalog(
-        &files,
-        &dependencies,
-        path,
-    ))
-    .map_err(|error| JsValue::from_str(&error))
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    crate::core::codec::to_json(&super::presets::catalog(&files, &dependencies, path))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// One preset edit group, refused with the source untouched when it introduces
@@ -231,19 +218,20 @@ pub fn wasm_workshop_presets_edit(
     dependencies: &str,
     request: &str,
 ) -> Result<String, JsValue> {
-    let files = crate::core::codec::decode_workshop_definition_files(files)
-        .map_err(|error| JsValue::from_str(&error))?;
-    let dependencies = crate::core::codec::decode_workshop_dependencies(dependencies)
+    let files = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let request = crate::core::codec::decode_workshop_preset_request(request)
-        .map_err(|error| JsValue::from_str(&error))?;
+    let dependencies = crate::core::codec::from_json(dependencies)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let request = crate::core::codec::from_json(request)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     super::presets::compose(&files, &dependencies, &request)
-        .map_err(|error| JsValue::from_str(&error))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 /// The `[[gm_role_preset]]` block a new preset is appended as, asserted by the
 /// runtime's own world reader before it is returned.
 #[wasm_bindgen]
 pub fn wasm_workshop_new_preset(id: &str, label: &str) -> Result<String, JsValue> {
-    super::presets::new_preset_source(id, label).map_err(|error| JsValue::from_str(&error))
+    super::presets::new_preset_source(id, label)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }

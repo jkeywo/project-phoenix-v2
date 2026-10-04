@@ -468,7 +468,7 @@ impl NativeWorkshopProvider {
                 },
             }
         };
-        crate::core::codec::encode_workshop_response(&response)
+        crate::core::codec::to_json(&response)
             .expect("Workshop responses contain only finite source data")
     }
 
@@ -580,7 +580,8 @@ impl NativeWorkshopProvider {
                         before,
                         after,
                     };
-                    let text = crate::core::codec::encode_workshop_transaction(&transaction)?;
+                    let text =
+                        crate::core::codec::to_json(&transaction).map_err(|e| e.to_string())?;
                     atomic_write(&self.private.join("transaction.json"), text.as_bytes())?;
                     // The durable intent precedes every replacement. A crash or
                     // IO failure resumes this exact validated save at next open.
@@ -694,8 +695,9 @@ impl NativeWorkshopProvider {
             },
             Operation::RecoveryLoad => {
                 let recovery = read_optional(&self.private.join("draft.json"))?
-                    .map(|bytes| crate::core::codec::decode_workshop_recovery(&bytes))
-                    .transpose()?;
+                    .map(|bytes| crate::core::codec::from_json_bytes(&bytes))
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
                 Response::Recovery { recovery }
             }
             Operation::RecoverySave {
@@ -711,7 +713,9 @@ impl NativeWorkshopProvider {
                 };
                 atomic_write(
                     &self.private.join("draft.json"),
-                    crate::core::codec::encode_workshop_recovery(&recovery)?.as_bytes(),
+                    crate::core::codec::to_json(&recovery)
+                        .map_err(|e| e.to_string())?
+                        .as_bytes(),
                 )?;
                 Response::Done
             }
@@ -895,7 +899,8 @@ impl NativeWorkshopProvider {
         let Some(bytes) = read_optional(&path)? else {
             return Ok(());
         };
-        let transaction = crate::core::codec::decode_workshop_transaction(&bytes)?;
+        let transaction: Transaction =
+            crate::core::codec::from_json_bytes(&bytes).map_err(|e| e.to_string())?;
         if transaction.root != self.root.to_string_lossy()
             || transaction.before.len() != transaction.after.len()
         {

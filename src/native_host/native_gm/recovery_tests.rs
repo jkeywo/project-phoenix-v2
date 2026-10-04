@@ -72,7 +72,7 @@ fn prelaunch_recovery_queues_the_existing_off_action_without_editing_layout() {
     let records = world.resource::<HostLobbyBridgeResource>().0.take_records();
     assert_eq!(records.len(), 1);
     assert_eq!(
-        crate::core::codec::decode_host_lobby_record(&records[0]).unwrap(),
+        crate::core::codec::from_json::<HostLobbyRecord>(&records[0]).unwrap(),
         HostLobbyRecord::SetGameMaster { monitor: None }
     );
     let next = before

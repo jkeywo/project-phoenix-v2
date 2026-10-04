@@ -47,7 +47,7 @@ impl Stage {
         };
         fs::write(
             stage.path.join("workshop-test.json"),
-            crate::core::codec::encode_workshop_test_launch(&launch)?,
+            crate::core::codec::to_json(&launch).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
         Ok((stage, launch))
@@ -177,7 +177,7 @@ impl TestProcess {
                     let Some(json) = line.strip_prefix(STATUS_PREFIX) else {
                         continue;
                     };
-                    let Ok(next) = crate::core::codec::decode_workshop_test_status(json) else {
+                    let Ok(next) = crate::core::codec::from_json(json) else {
                         continue;
                     };
                     *observed.state.lock().unwrap_or_else(|e| e.into_inner()) = next;
@@ -246,7 +246,7 @@ impl TestProcess {
         writeln!(
             self.input,
             "{}",
-            crate::core::codec::encode_workshop_test_control(&record)?
+            crate::core::codec::to_json(&record).map_err(|e| e.to_string())?
         )
         .map_err(|e| e.to_string())?;
         self.input.flush().map_err(|e| e.to_string())?;
@@ -324,7 +324,7 @@ pub(super) fn retire_abandoned_stages(parent: &Path) {
                     .read_to_end(&mut bytes)
                     .ok()?;
                 (bytes.len() as u64 <= MAX_RECORD_BYTES)
-                    .then(|| crate::core::codec::decode_workshop_test_launch(&bytes).ok())
+                    .then(|| crate::core::codec::from_json_bytes::<Launch>(&bytes).ok())
                     .flatten()
             })
             .is_some();
@@ -412,7 +412,7 @@ pub fn run_child(descriptor: &Path) -> Result<(), String> {
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err("Test launch descriptor is too large".into());
     }
-    let launch = crate::core::codec::decode_workshop_test_launch(&bytes)?;
+    let launch: Launch = crate::core::codec::from_json_bytes(&bytes).map_err(|e| e.to_string())?;
     let result = run_launched_child(descriptor, &launch);
     if let Err(message) = &result {
         let mut status = TestStatus::starting(&launch);
@@ -447,7 +447,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
         .spawn(move || {
             let mut reader = BufReader::new(std::io::stdin());
             while let Ok(Some(line)) = bounded_line(&mut reader) {
-                let Ok(record) = crate::core::codec::decode_workshop_test_control(&line) else {
+                let Ok(record) = crate::core::codec::from_json(&line) else {
                     break;
                 };
                 if send.try_send(record).is_err() {
@@ -577,7 +577,7 @@ fn publish_status(
 }
 
 fn write_status(state: &TestStatus) {
-    if let Ok(record) = crate::core::codec::encode_workshop_test_status(state) {
+    if let Ok(record) = crate::core::codec::to_json(state) {
         // Dedicated inherited pipe, never a host channel or crew broadcast.
         let mut output = std::io::stdout().lock();
         let _ = writeln!(output, "{STATUS_PREFIX}{record}");

@@ -3,7 +3,7 @@ title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion, native, gm]
 sources: [assets/audio/room-ducking.toml, gui/audio-ducking.js, scripts/room-ducking.mjs, tests/client/audio-ducking.test.js, tests/smoke/audio-ducking.spec.js, server.html, client.html, gui/host-audio.js, gui/browser-audio-provider.js, gui/audio-preferences.js, gui/audio-settings-panel.js, gui/audio-live-equivalents.js, gui/private-audio.js, gui/private-audio-preferences.js, gui/private-request-feedback.js, gui/private-alerts.js, src/native_host/native_gm/boot.js, src/server_app/broadcast_publish.rs, gui/operator-profile.js, gui/gm-workspace.js, src/native_host/panes/operator.rs, assets/audio/private-feedback.json, src/audio_lifecycle.rs, src/server/audio_lifecycle.rs, gui/host-lobby-view.js, gui/host-lobby-render.js, gui/host-lobby.css, gui/host-qr.js, gui/host-qr.css, gui/join-url.js, gui/lobby-view.js, gui/client-lobby-render.js, gui/lobby-state.js, gui/fleet-session.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/join.rs, src/lockstep/mod.rs, src/core/messages.rs, src/gm_roster.rs, src/lobby/start_policy.rs]
-updated: 2026-09-21
+updated: 2026-10-04
 ---
 
 # Server HTML Lobby UI
@@ -113,7 +113,7 @@ does not provide one resolvable, ship-tagged `GameStart` row per slot.
 
 ## Push path (Rust → DOM)
 
-1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs` builds a `LobbyStatePayload`, encodes it via `core::codec::encode_lobby_state`, and writes a `LobbyStateChanged` event. Its station roster contains claimable (`auxiliary = false`) seats only; auxiliary mounted Stations never become cards or affect counts.
+1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs` builds a `LobbyStatePayload`, encodes it via `core::codec::to_json`, and writes a `LobbyStateChanged` event. Its station roster contains claimable (`auxiliary = false`) seats only; auxiliary mounted Stations never become cards or affect counts.
 2. **WASM bridge drain.** `flush_host_channels` in `src/server/bridge.rs` drains those events on every tick and invokes the single registered host-channel callback with `("lobby", json)` (#818).
 3. **JS callback registration.** `set_host_channel_callback(window.__hostChannel)` is invoked once in `server.html` when WASM is ready; the dispatcher's handlers table routes `"lobby"` payloads to `window.__updateLobby`.
 4. **View model and DOM mutation.** `gui/host-lobby-view.js` derives the render model; `window.__updateLobby` in `server.html` performs the page's own side effects and hands the model to `gui/host-lobby-render.js`, which writes the lobby DOM.

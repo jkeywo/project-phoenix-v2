@@ -173,9 +173,9 @@ fn feed_presentation(
         return;
     }
     macro_rules! feed_channel {
-        ($reader:ident, $name:literal, $encode:ident) => {
+        ($reader:ident, $name:literal) => {
             if let Some(message) = $reader.read().last() {
-                match codec::$encode(&message.payload) {
+                match codec::to_json(&message.payload) {
                     Ok(json) => {
                         feed.payload.channels.insert($name.into(), json);
                     }
@@ -189,23 +189,23 @@ fn feed_presentation(
             .channels
             .insert("hud".into(), message.json.clone());
     }
-    feed_channel!(entity, "gm_entity", encode_gm_entity_projection);
-    feed_channel!(activity, "gm_activity", encode_gm_activity_feed);
-    feed_channel!(station, "gm_station", encode_gm_station_projection);
-    feed_channel!(session, "gm_session", encode_gm_session_projection);
-    feed_channel!(mission, "gm_mission", encode_gm_mission_projection);
-    feed_channel!(spawn, "gm_spawn", encode_gm_spawn_projection);
-    feed_channel!(comms, "gm_comms", encode_gm_comms_projection);
-    feed_channel!(attention, "gm_attention", encode_gm_attention_projection);
-    feed_channel!(health, "gm_health", encode_gm_health_projection);
-    feed_channel!(workload, "gm_workload", encode_gm_workload_projection);
+    feed_channel!(entity, "gm_entity");
+    feed_channel!(activity, "gm_activity");
+    feed_channel!(station, "gm_station");
+    feed_channel!(session, "gm_session");
+    feed_channel!(mission, "gm_mission");
+    feed_channel!(spawn, "gm_spawn");
+    feed_channel!(comms, "gm_comms");
+    feed_channel!(attention, "gm_attention");
+    feed_channel!(health, "gm_health");
+    feed_channel!(workload, "gm_workload");
     feed.payload.role_presets = codec::encode_gm_role_presets(&config.gm_role_presets);
     // Compare at the previous sequence; only changed absolute state emits.
-    match codec::encode_workshop_test_presentation(&feed.payload) {
+    match codec::to_json(&feed.payload) {
         Ok(json) if feed.last.as_ref() == Some(&json) => {}
         Ok(_) => {
             feed.payload.sequence = feed.payload.sequence.saturating_add(1);
-            match codec::encode_workshop_test_presentation(&feed.payload) {
+            match codec::to_json(&feed.payload) {
                 Ok(json) => {
                     if let Err(error) =
                         test_frames::write_presentation(&mut std::io::stdout().lock(), &json)
@@ -215,10 +215,10 @@ fn feed_presentation(
                         feed.last = Some(json);
                     }
                 }
-                Err(error) => failure.fail(error),
+                Err(error) => failure.fail(error.to_string()),
             }
         }
-        Err(error) => failure.fail(error),
+        Err(error) => failure.fail(error.to_string()),
     }
 }
 

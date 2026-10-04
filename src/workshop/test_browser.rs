@@ -24,8 +24,8 @@ impl BrowserTest {
         if crate::server::bridge::wasm_boot_profile() != "not-started" {
             return Err(fail("Workshop Test requires a fresh iframe"));
         }
-        let launch = crate::core::codec::decode_workshop_test_launch(launch.as_bytes())
-            .map_err(|e| fail(&e))?;
+        let launch: Launch = crate::core::codec::from_json_bytes(launch.as_bytes())
+            .map_err(|e| fail(&e.to_string()))?;
         let captured = super::captured_source::capture(source, "Workshop Test", "Test")
             .map_err(|message| fail(&message))?;
         let (assets, text) = (captured.assets, captured.text);
@@ -56,8 +56,7 @@ impl BrowserTest {
         let report = super::test_source::validate_selection(text.clone(), &launch.selection);
         if !report.accepted {
             return Err(fail(
-                &crate::core::codec::encode_workshop_validation(&report)
-                    .map_err(|e| fail(&e.to_string()))?,
+                &crate::core::codec::to_json(&report).map_err(|e| fail(&e.to_string()))?,
             ));
         }
         let frozen_slots = text
@@ -197,8 +196,8 @@ fn publish_status(
 
 #[wasm_bindgen]
 pub fn wasm_workshop_test_control(record: &str) -> Result<(), JsValue> {
-    let record = crate::core::codec::decode_workshop_test_control(record)
-        .map_err(|e| JsValue::from_str(&e))?;
+    let record: ControlRecord =
+        crate::core::codec::from_json(record).map_err(|e| JsValue::from_str(&e.to_string()))?;
     EDGE.with(|edge| {
         let mut edge = edge.borrow_mut();
         let Some(status) = edge.status.as_ref() else { return Err(JsValue::from_str("Workshop Test is not running")); };
@@ -223,8 +222,8 @@ pub fn wasm_workshop_test_status() -> Result<Option<String>, JsValue> {
         edge.borrow()
             .status
             .as_ref()
-            .map(crate::core::codec::encode_workshop_test_status)
+            .map(crate::core::codec::to_json)
             .transpose()
-            .map_err(|e| JsValue::from_str(&e))
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }

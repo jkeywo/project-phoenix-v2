@@ -222,7 +222,7 @@ pub struct ForcefieldWire {
 }
 
 /// Everything JS needs to build the audio graph, merged from the local ship's
-/// config and the world's. Encoded by `codec::encode_audio_config` and pushed
+/// config and the world's. Encoded by `codec::to_json` and pushed
 /// once on game start via the `AudioConfigChanged` bridge message.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AudioConfigPayload {
@@ -245,7 +245,7 @@ pub struct AudioConfigPayload {
     pub computer_message: Option<ComputerMessageAudio>,
 }
 
-/// A one-shot audio cue. Encoded by `codec::encode_audio_cue` and pushed via
+/// A one-shot audio cue. Encoded by `codec::to_json` and pushed via
 /// the `AudioCueEvent` bridge message.
 ///
 /// Two shapes share one struct, discriminated by `kind`:

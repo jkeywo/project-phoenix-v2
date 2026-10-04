@@ -219,8 +219,7 @@ impl PrivateAudio {
             .map(|entry| entry.status.clone())
     }
     pub fn script(&self, key: Endpoint) -> Option<String> {
-        let json =
-            crate::core::codec::encode_native_private_audio_state(&self.status(key)?).ok()?;
+        let json = crate::core::codec::to_json(&self.status(key)?).ok()?;
         Some(vellum_ultralight::bridge::push_call(
             "window.__phoenixPrivateAudioApply",
             &json,
@@ -235,7 +234,7 @@ impl PrivateAudio {
         if json.len() > 16_384 {
             return true;
         }
-        let Ok(request) = crate::core::codec::decode_native_private_audio_request(json) else {
+        let Ok(request) = crate::core::codec::from_json::<Request>(json) else {
             return true;
         };
         if request.kind != "NativePrivateAudio" {
@@ -458,7 +457,7 @@ pub struct Worker<B: Backend> {
 }
 impl<B: Backend> Worker<B> {
     pub fn new(backend: B) -> Self {
-        let manifest = crate::core::codec::decode_native_private_audio_manifest(include_str!(
+        let manifest: Manifest = crate::core::codec::from_json(include_str!(
             "../../../assets/audio/private-feedback.json"
         ))
         .expect("private sound manifest");

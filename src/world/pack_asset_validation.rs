@@ -20,7 +20,12 @@ pub fn descriptor_sources<'a>(
     members
         .into_iter()
         .filter(|(path, _)| path.ends_with(".ptex"))
-        .filter_map(|(_, bytes)| crate::core::codec::decode_planet_texture_source(bytes).ok())
+        .filter_map(|(_, bytes)| {
+            crate::core::codec::from_json_bytes::<crate::entities::planet_texture::TextureSource>(
+                bytes,
+            )
+            .ok()
+        })
         .filter_map(|source| local_reference(&source.source, "assets/descriptor").ok())
         .collect()
 }
@@ -231,7 +236,8 @@ pub fn required_assets(path: &str, bytes: &[u8]) -> Result<BTreeSet<String>, Str
             }
         }
     } else if path.ends_with(".ptex") {
-        let source = crate::core::codec::decode_planet_texture_source(bytes)?;
+        let source: crate::entities::planet_texture::TextureSource =
+            crate::core::codec::from_json_bytes(bytes).map_err(|e| e.to_string())?;
         // PlanetTextureLoader resolves these against the asset root, not the descriptor's directory.
         required.insert(local_reference(&source.source, "assets/descriptor")?);
         required.insert(local_reference(&source.fallback, "assets/descriptor")?);
@@ -267,7 +273,8 @@ pub fn validate(path: &str, bytes: &[u8], resolve: &AssetResolver<'_>) -> Result
         "mp3" | "ogg" | "wav" => crate::audio_decode::decode(bytes.to_vec(), extension).map(|_| ()),
         "bin" if !bytes.is_empty() => Ok(()), // Opaque glTF buffer; referencing models validate its ranges.
         "ptex" => {
-            let source = crate::core::codec::decode_planet_texture_source(bytes)?;
+            let source: crate::entities::planet_texture::TextureSource =
+                crate::core::codec::from_json_bytes(bytes).map_err(|e| e.to_string())?;
             let compressed = referenced_bytes(&source.source, "assets/descriptor", resolve)?;
             ktx_container(&compressed)?;
             let fallback = referenced_bytes(&source.fallback, "assets/descriptor", resolve)?;

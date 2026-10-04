@@ -382,7 +382,7 @@ impl HostLobbyBridge {
     /// Host-local recovery uses the same typed layout record and one reader as
     /// a lobby button. It never edits layout state from a second dispatch path.
     pub(crate) fn submit_record(&self, record: &super::HostLobbyRecord) -> bool {
-        match crate::core::codec::encode_host_lobby_record(record) {
+        match crate::core::codec::to_json(record) {
             Ok(json) => {
                 self.record(&json);
                 true

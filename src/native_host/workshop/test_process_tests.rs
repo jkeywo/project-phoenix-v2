@@ -85,7 +85,8 @@ fn private_records_refuse_oversize_partial_and_extra_authority_fields() {
         r#"{"id":1,"control":{"command":"script","source":"arbitrary"}}"#,
     ] {
         assert!(
-            crate::core::codec::decode_workshop_test_control(value).is_err(),
+            crate::core::codec::from_json::<crate::workshop::test_protocol::ControlRecord>(value)
+                .is_err(),
             "{value}"
         );
     }
@@ -113,8 +114,10 @@ fn pipe_probe_child() {
         return;
     };
     let path = PathBuf::from(path);
-    let launch =
-        crate::core::codec::decode_workshop_test_launch(&fs::read(&path).unwrap()).unwrap();
+    let launch = crate::core::codec::from_json_bytes::<crate::workshop::test_protocol::Launch>(
+        &fs::read(&path).unwrap(),
+    )
+    .unwrap();
     let root = pin_test_content_root(&path).unwrap();
     assert_eq!(
         fs::canonicalize(std::env::current_dir().unwrap()).unwrap(),
@@ -151,7 +154,9 @@ fn pipe_probe_child() {
     write_status(&status);
     let mut input = BufReader::new(std::io::stdin());
     while let Some(line) = bounded_line(&mut input).unwrap() {
-        let record = crate::core::codec::decode_workshop_test_control(&line).unwrap();
+        let record =
+            crate::core::codec::from_json::<crate::workshop::test_protocol::ControlRecord>(&line)
+                .unwrap();
         status.acknowledged = record.id;
         if matches!(record.control, TestControl::Pause {}) {
             status.paused = true;

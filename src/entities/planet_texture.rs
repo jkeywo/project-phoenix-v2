@@ -91,8 +91,8 @@ impl AssetLoader for PlanetTextureLoader {
         // Descriptor is deliberately tiny and versioned with its fallback.
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let source = crate::core::codec::decode_planet_texture_source(&bytes)
-            .map_err(std::io::Error::other)?;
+        let source: TextureSource =
+            crate::core::codec::from_json_bytes(&bytes).map_err(std::io::Error::other)?;
         #[cfg(target_arch = "wasm32")]
         {
             let result = async {

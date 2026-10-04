@@ -93,8 +93,7 @@ fn artifact_completion_requires_the_whole_interval_and_a_successful_runner_exit(
         };
         capture.finish(&exit).unwrap();
         let artifact: Probe =
-            crate::core::codec::decode_presentation_capture(&std::fs::read(&path).unwrap())
-                .unwrap();
+            crate::core::codec::from_json_bytes(&std::fs::read(&path).unwrap()).unwrap();
         std::fs::remove_file(path).unwrap();
         assert_eq!(artifact.complete, complete);
         assert_eq!(

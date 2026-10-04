@@ -485,8 +485,7 @@ impl SurfaceCapture {
     /// worker cannot hold capture completion hostage or append after closure.
     pub fn finish(self, exit: &AppExit) -> Result<(), String> {
         let artifact = self.close(exit)?;
-        let json = crate::core::codec::encode_presentation_capture(&artifact)
-            .map_err(|e| e.to_string())?;
+        let json = crate::core::codec::to_json(&artifact).map_err(|e| e.to_string())?;
         std::fs::write(&self.path, json).map_err(|e| e.to_string())
     }
 

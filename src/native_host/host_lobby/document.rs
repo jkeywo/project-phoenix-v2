@@ -158,7 +158,7 @@ pub fn host_lobby_drain_script() -> String {
 /// The script that hands the surface one encoded `LobbyStatePayload`.
 ///
 /// The **exact JSON the web host consumes** on its `lobby` host channel
-/// (`codec::encode_lobby_state`), untouched: the two surfaces run the same view
+/// (`codec::to_json`), untouched: the two surfaces run the same view
 /// model over the same bytes, so "the native lobby shows something different"
 /// cannot be a question about the payload.
 pub fn host_lobby_apply_script(json: &str) -> String {

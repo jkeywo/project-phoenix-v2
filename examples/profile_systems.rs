@@ -227,7 +227,7 @@ fn main() {
         interpretation: "Overlapping system wall spans, not exclusive CPU or GPU durations. ExtractSchedule deferred work is nested inside ExtractCommands and must be counted once." };
     let file = std::fs::File::create(output.join("systems.json")).unwrap();
     let mut writer = std::io::BufWriter::new(file);
-    let json = project_phoenix::core::codec::encode_presentation_capture(&artifact).unwrap();
+    let json = project_phoenix::core::codec::to_json(&artifact).unwrap();
     std::io::Write::write_all(&mut writer, json.as_bytes()).unwrap();
     std::io::Write::flush(&mut writer).unwrap();
 }

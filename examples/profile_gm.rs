@@ -59,11 +59,7 @@ fn main() {
             writeln!(
                 marker_file,
                 "{}",
-                project_phoenix::core::codec::encode_presentation_capture(&Marker {
-                    unix_ms: now,
-                    path
-                },)
-                .unwrap()
+                project_phoenix::core::codec::to_json(&Marker { unix_ms: now, path },).unwrap()
             )
             .unwrap();
             marker_file.flush().unwrap();
@@ -304,7 +300,7 @@ fn main() {
     let samples = samples.lock().unwrap();
     std::fs::write(
         capture.with_file_name("diagnostics.json"),
-        project_phoenix::core::codec::encode_presentation_capture(&Diagnostics {
+        project_phoenix::core::codec::to_json(&Diagnostics {
             systems: rows.iter().map(AsRef::as_ref).collect(),
             workload: &samples,
             truncated: control.truncated.load(Ordering::Relaxed),

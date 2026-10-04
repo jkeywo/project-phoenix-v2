@@ -308,7 +308,7 @@ fn push_blaster_cues(
         if dist_sq > cfg.max_distance * cfg.max_distance {
             continue;
         }
-        match codec::encode_audio_cue(&AudioCue::blaster(pos)) {
+        match codec::to_json(&AudioCue::blaster(pos)) {
             Ok(json) => {
                 writer.write(AudioCueEvent { json });
             }
@@ -351,7 +351,7 @@ fn push_computer_message_cue(
         if cfg.for_severity(severity).is_none() {
             continue;
         }
-        match codec::encode_audio_cue(&AudioCue::computer_message(severity)) {
+        match codec::to_json(&AudioCue::computer_message(severity)) {
             Ok(json) => {
                 writer.write(AudioCueEvent { json });
             }

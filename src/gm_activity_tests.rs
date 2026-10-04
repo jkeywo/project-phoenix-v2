@@ -418,7 +418,7 @@ fn gm_peer_projects_remote_fleet_crew_connect_and_disconnect_with_ship_scope() {
     assert_eq!(row.ships[0].entity_id, SOURCE);
     assert_eq!(row.links[0].role, GmActivityLinkRole::Ship);
 
-    let wire = crate::core::codec::encode_gm_activity_feed(&departed).unwrap();
+    let wire = crate::core::codec::to_json(&departed).unwrap();
     assert!(!wire.contains("slot-"));
     assert!(!wire.contains("HostSlot"));
     assert!(!wire.contains("peer"));
@@ -695,7 +695,7 @@ fn canonical_contact_actions_keep_observer_ship_scope_for_no_op_and_departed_ref
     assert_eq!(retained.entries.len(), 3);
     assert_eq!(retained.entries[0].ships[0].name, "Observer A");
     assert_eq!(retained.entries[2].ships[0].name, SHIP_A);
-    let wire = crate::core::codec::encode_gm_activity_feed(&retained).unwrap();
+    let wire = crate::core::codec::to_json(&retained).unwrap();
     assert!(wire.contains(SHIP_A));
 }
 

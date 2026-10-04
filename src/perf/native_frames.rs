@@ -151,8 +151,7 @@ impl NativeFrameCapture {
         };
         let file = std::fs::File::create(&self.path).map_err(|e| e.to_string())?;
         let mut writer = std::io::BufWriter::new(file);
-        let json = crate::core::codec::encode_presentation_capture(&artifact)
-            .map_err(|e| e.to_string())?;
+        let json = crate::core::codec::to_json(&artifact).map_err(|e| e.to_string())?;
         writer
             .write_all(json.as_bytes())
             .map_err(|e| e.to_string())?;

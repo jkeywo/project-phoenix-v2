@@ -7,12 +7,12 @@
 //!
 //! ```text
 //! BridgeLayout + DiscoveredMonitor[] ──bridge_layout_payload──▶  BridgeLayoutPayload
-//!        ▲                                                            │ codec::encode_bridge_layout
+//!        ▲                                                            │ codec::to_json
 //!        │                                                            ▼
 //!  LayoutAction ◀──*_action────────────┐              window.__phoenixHostLobbyLayout(json)
 //!                                      │                         gui/host-lobby-view.js
 //!    HostLobbyRecord::{SetViewscreen, AssignStation, UnassignStation}
-//!                    [super::scenario]  ▲ codec::decode_host_lobby_record
+//!                    [super::scenario]  ▲ codec::from_json
 //!                                       └──────────────  phoenixHostLobbyOut.send
 //! ```
 //!

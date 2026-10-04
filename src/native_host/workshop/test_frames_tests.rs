@@ -51,7 +51,7 @@ fn presentation_round_trip_refuses_unknown_authority_channels_and_large_records(
     payload
         .channels
         .insert("gm_entity".into(), "{\"entities\":[]}".into());
-    let json = crate::core::codec::encode_workshop_test_presentation(&payload).unwrap();
+    let json = crate::core::codec::to_json(&payload).unwrap();
     let mut wire = Vec::new();
     write_presentation(&mut wire, &json).unwrap();
     let mut input = Cursor::new(wire);
@@ -59,13 +59,16 @@ fn presentation_round_trip_refuses_unknown_authority_channels_and_large_records(
     input.read_line(&mut header).unwrap();
     let bytes = read_presentation(&header, &mut input).unwrap();
     assert_eq!(
-        crate::core::codec::decode_workshop_test_presentation(&bytes).unwrap(),
+        crate::core::codec::from_json_bytes::<crate::workshop::test_protocol::TestPresentation>(
+            &bytes
+        )
+        .unwrap(),
         payload
     );
     payload
         .channels
         .insert("execute_script".into(), "bad".into());
-    let json = crate::core::codec::encode_workshop_test_presentation(&payload).unwrap();
+    let json = crate::core::codec::to_json(&payload).unwrap();
     assert!(read_presentation(
         &format!("{PRESENTATION_PREFIX}{}", json.len()),
         &mut Cursor::new(json.as_bytes())

@@ -21,7 +21,7 @@ use bevy::prelude::*;
 pub const LOCAL_CONSOLE_TOKEN: &str = "__local_console__";
 
 /// Emitted by `viewscreen_border::push_hud_state` when the serialised HUD
-/// state changes. `json` is the output of `codec::encode_hud_state`. Drained
+/// state changes. `json` is the output of `codec::to_json`. Drained
 /// by `bridge::flush_host_channels` (wasm) onto the `"hud"` host channel.
 #[derive(Message, Clone, Debug)]
 pub struct HudStateChanged {
@@ -29,7 +29,7 @@ pub struct HudStateChanged {
 }
 
 /// Emitted by the lobby push system when the serialised lobby state changes.
-/// `json` is the output of `codec::encode_lobby_state`. Drained by
+/// `json` is the output of `codec::to_json`. Drained by
 /// `bridge::flush_host_channels` (wasm) onto the `"lobby"` host channel.
 #[derive(Message, Clone, Debug)]
 pub struct LobbyStateChanged {
@@ -41,8 +41,8 @@ pub struct LobbyStateChanged {
 /// the producer-owned presentation envelope. The Viewscreen and phone resolve
 /// the same envelope; neither presenter enumerates the payload. Drained by
 /// `bridge::flush_host_channels` (wasm), which encodes it via
-/// `codec::encode_chatter` onto the `"chatter"` host channel — hence the
-/// `Serialize` derive; the wire shape is pinned by `codec`'s `encode_chatter`
+/// `codec::to_json` onto the `"chatter"` host channel — hence the
+/// `Serialize` derive; the wire shape is pinned by `codec`'s chatter
 /// tests.
 #[derive(Message, Clone, Debug, serde::Serialize)]
 pub struct AiChatterEvent {
@@ -62,7 +62,7 @@ pub struct AiChatterEvent {
 
 /// Emitted once by `server::audio::push_audio_config` when the local ship
 /// spawns, carrying the merged ship + world audio config. `json` is the output
-/// of `codec::encode_audio_config`. Drained by `bridge::flush_host_channels`
+/// of `codec::to_json`. Drained by `bridge::flush_host_channels`
 /// (wasm) onto the `"audio_config"` host channel, whose JS handler builds the
 /// audio graph.
 #[derive(Message, Clone, Debug)]
@@ -80,7 +80,7 @@ pub struct AudioLifecycleState {
 }
 
 /// Emitted by `server::audio::push_blaster_cues` for each one-shot positional
-/// sound. `json` is the output of `codec::encode_audio_cue` and carries
+/// sound. `json` is the output of `codec::to_json` and carries
 /// listener-relative coordinates. Drained by `bridge::flush_host_channels`
 /// (wasm) onto the `"audio_cue"` host channel.
 #[derive(Message, Clone, Debug)]

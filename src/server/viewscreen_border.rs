@@ -441,7 +441,7 @@ pub(crate) fn push_lobby_state(
         countdown_secs,
     };
 
-    if let Ok(json) = codec::encode_lobby_state(&payload) {
+    if let Ok(json) = codec::to_json(&payload) {
         writer.write(LobbyStateChanged { json });
     }
 }
@@ -1013,7 +1013,7 @@ fn push_game_over_hud_state(
     for mut hud in hud_q.iter_mut() {
         hud.0 = next.clone();
     }
-    if let Ok(json) = codec::encode_hud_state(&next) {
+    if let Ok(json) = codec::to_json(&next) {
         writer.write(HudStateChanged { json });
     }
 }
@@ -1025,7 +1025,7 @@ fn push_hud_state(
     mut writer: MessageWriter<HudStateChanged>,
 ) {
     for hud in hud_q.iter() {
-        if let Ok(json) = codec::encode_hud_state(&hud.0) {
+        if let Ok(json) = codec::to_json(&hud.0) {
             writer.write(HudStateChanged { json });
         }
     }
@@ -1056,7 +1056,7 @@ pub(super) fn rebase_hud_state(world: &mut World) {
     let states: Vec<_> = world
         .query::<&ViewscreenHud>()
         .iter(world)
-        .filter_map(|hud| codec::encode_hud_state(&hud.0).ok())
+        .filter_map(|hud| codec::to_json(&hud.0).ok())
         .map(|json| HudStateChanged { json })
         .collect();
     world

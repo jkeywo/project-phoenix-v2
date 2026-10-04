@@ -19,14 +19,13 @@ fn an_empty_boundary_clears_old_config_without_latching_out_a_late_ship() {
     assert_eq!(clear.len(), 1);
     assert_eq!(
         clear[0].json,
-        codec::encode_audio_config(&build_audio_payload(None, None)).unwrap()
+        codec::to_json(&build_audio_payload(None, None)).unwrap()
     );
     let configured = ShipAudioConfig {
         forcefield: Some(forcefield_cfg()),
         ..Default::default()
     };
-    let expected =
-        codec::encode_audio_config(&build_audio_payload(Some(&configured), None)).unwrap();
+    let expected = codec::to_json(&build_audio_payload(Some(&configured), None)).unwrap();
     world.spawn((LocalShip, ShipAudioSection(configured)));
     world.run_system_once(push_audio_config).unwrap();
     let published: Vec<_> = world

@@ -118,7 +118,7 @@ pub(super) fn request(
             error: Some(error),
         },
     };
-    if let Ok(json) = crate::core::codec::encode_native_gm_save_reply(&reply) {
+    if let Ok(json) = crate::core::codec::to_json(&reply) {
         bridge.publish("save_reply", json);
     }
 }

@@ -447,7 +447,7 @@ fn the_wire_carries_no_session_token_no_fleet_slot_and_no_transport_id() {
         .depart(HostSlot(2));
     let projection = health(&mut app);
     assert!(!projection.alerts.is_empty(), "there is something to leak");
-    let json = phoenix::core::codec::encode_gm_health_projection(&projection).unwrap();
+    let json = phoenix::core::codec::to_json(&projection).unwrap();
 
     assert!(
         !json.contains("session-token-abcdef"),

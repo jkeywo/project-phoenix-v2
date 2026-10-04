@@ -2,7 +2,7 @@
 //! reconnect. Its own process isolates native template and mod-pack caches.
 use bevy::prelude::*;
 use project_phoenix::boot::NativeRenderSurface;
-use project_phoenix::core::codec::{encode_scenario_catalog, JsonCodec};
+use project_phoenix::core::codec::{to_json, JsonCodec};
 use project_phoenix::core::messages::{ClientMessage, ScenarioCatalogPayload, ServerMessage};
 use project_phoenix::delivery::serve::ManifestSource;
 use project_phoenix::lobby::handler::Target;
@@ -48,7 +48,7 @@ fn assert_browser_and_surface(
         .merged_catalog()
         .catalog;
     let json = project_phoenix::server::bridge::browser_scenario_catalog_message(
-        &encode_scenario_catalog(&project_phoenix::delivery::payload::catalog_payload(
+        &to_json(&project_phoenix::delivery::payload::catalog_payload(
             &catalog,
         ))
         .unwrap(),
@@ -122,7 +122,7 @@ fn assert_phone_fixture(index: usize) {
         expected["data"]["locked_ship"].as_str().map(str::to_string),
     );
     let browser = project_phoenix::server::bridge::browser_scenario_catalog_message(
-        &encode_scenario_catalog(&catalog_payload(&merged.catalog)).unwrap(),
+        &to_json(&catalog_payload(&merged.catalog)).unwrap(),
         snapshot.locked_scenario.clone(),
         snapshot.locked_slot.clone(),
         snapshot.locked_ship.clone(),

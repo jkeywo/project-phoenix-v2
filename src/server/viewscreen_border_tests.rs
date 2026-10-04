@@ -24,7 +24,7 @@ fn restore_rebase_replaces_old_hud_and_republishes_unchanged_current_values() {
     let hud = &world.query::<&ViewscreenHud>().single(&world).unwrap().0;
     assert!(hud.red_alert);
     assert_eq!(hud.engine_thrust, 0.6);
-    let expected = codec::encode_hud_state(hud).unwrap();
+    let expected = codec::to_json(hud).unwrap();
     let first: Vec<_> = world
         .resource_mut::<Messages<HudStateChanged>>()
         .drain()

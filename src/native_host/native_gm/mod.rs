@@ -443,7 +443,7 @@ fn sync_presence(
         });
         *roster = replacement;
     }
-    if let Ok(json) = codec::encode_native_gm_metadata(&NativeGmMetadata {
+    if let Ok(json) = codec::to_json(&NativeGmMetadata {
         phase: phase.get().clone(),
         host_lobby_unavailable: recovery::host_lobby_unavailable(
             phase.get(),
@@ -506,24 +506,24 @@ fn feed_projections(
     mut workload: MessageReader<GmWorkloadChanged>,
 ) {
     macro_rules! feed {
-        ($reader:ident, $channel:literal, $encode:ident) => {
+        ($reader:ident, $channel:literal) => {
             if let Some(message) = $reader.read().last() {
-                if let Ok(json) = codec::$encode(&message.payload) {
+                if let Ok(json) = codec::to_json(&message.payload) {
                     surface.bridge.publish($channel, json);
                 }
             }
         };
     }
-    feed!(entity, "gm_entity", encode_gm_entity_projection);
-    feed!(activity, "gm_activity", encode_gm_activity_feed);
-    feed!(station, "gm_station", encode_gm_station_projection);
-    feed!(session, "gm_session", encode_gm_session_projection);
-    feed!(mission, "gm_mission", encode_gm_mission_projection);
-    feed!(spawn, "gm_spawn", encode_gm_spawn_projection);
-    feed!(comms, "gm_comms", encode_gm_comms_projection);
-    feed!(attention, "gm_attention", encode_gm_attention_projection);
-    feed!(health, "gm_health", encode_gm_health_projection);
-    feed!(workload, "gm_workload", encode_gm_workload_projection);
+    feed!(entity, "gm_entity");
+    feed!(activity, "gm_activity");
+    feed!(station, "gm_station");
+    feed!(session, "gm_session");
+    feed!(mission, "gm_mission");
+    feed!(spawn, "gm_spawn");
+    feed!(comms, "gm_comms");
+    feed!(attention, "gm_attention");
+    feed!(health, "gm_health");
+    feed!(workload, "gm_workload");
 }
 
 #[cfg(test)]

@@ -43,7 +43,7 @@ impl NativeGmBridge {
         }
         let outcomes: Vec<_> = state.save_outcomes.iter().cloned().collect();
         drop(state);
-        if let Ok(json) = crate::core::codec::encode_native_gm_save_outcomes(&outcomes) {
+        if let Ok(json) = crate::core::codec::to_json(&outcomes) {
             self.publish("save_outcomes", json);
         }
     }

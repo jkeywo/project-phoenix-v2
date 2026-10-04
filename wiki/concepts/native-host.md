@@ -1551,7 +1551,7 @@ no second copy of those element ids to drift.
 
 ```text
 viewscreen_border::push_lobby_state       the same system the browser host runs
-  │  Messages<LobbyStateChanged>          the same codec::encode_lobby_state bytes
+  │  Messages<LobbyStateChanged>          the same codec::to_json bytes
   ▼
 host_lobby::feed_lobby_state              latest-wins, identical snapshots dropped
   ▼

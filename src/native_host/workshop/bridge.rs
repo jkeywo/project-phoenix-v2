@@ -398,7 +398,7 @@ impl WorkshopWorker {
                                             .result
                                     }
                                 };
-                                            crate::core::codec::encode_workshop_response(
+                                            crate::core::codec::to_json(
                                                 &WorkshopResponse { id, result },
                                             )
                                             .expect("finite private Workshop responses serialize")

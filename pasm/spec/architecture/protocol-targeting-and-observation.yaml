@@ -72,7 +72,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/codec.rs, src/core/messages.rs]
-      symbols: [JsonCodec, decode_bridge_client_message, encode_hud_state, encode_chatter, encode_lobby_state, encode_mesh_frame, decode_mesh_frame, decode_gm_action_request]
+      symbols: [JsonCodec, to_json, from_json, from_json_bytes, decode_bridge_client_message, encode_mesh_frame, decode_mesh_frame, decode_gm_action_request]
       tests: [cargo test, src/core/codec_mesh_frame_tests.rs, src/core/messages_view_mode_tests.rs]
 
   - component: host-page-push-bridge

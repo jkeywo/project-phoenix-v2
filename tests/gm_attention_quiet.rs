@@ -200,12 +200,10 @@ fn a_quiet_session_gets_exactly_one_background_row_that_explains_the_interval() 
 
     // The wire spelling the page filters and styles on, through the real
     // encoder the Host Channel uses — an empty `target` and all.
-    let encoded = phoenix::core::codec::encode_gm_attention_projection(
-        &phoenix::gm_attention::GmAttentionProjection {
-            occurrences: rows.clone(),
-            presentation_generation: None,
-        },
-    )
+    let encoded = phoenix::core::codec::to_json(&phoenix::gm_attention::GmAttentionProjection {
+        occurrences: rows.clone(),
+        presentation_generation: None,
+    })
     .expect("the projection encodes");
     assert!(encoded.contains("\"category\":\"quiet_time\""), "{encoded}");
     assert!(encoded.contains("\"target\":{}"), "{encoded}");

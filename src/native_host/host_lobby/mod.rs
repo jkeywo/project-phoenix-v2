@@ -14,7 +14,7 @@
 //!
 //! ```text
 //! server::viewscreen_border::push_lobby_state          the SAME system the browser host runs
-//!   │  Messages<LobbyStateChanged> { json }            the SAME codec::encode_lobby_state bytes
+//!   │  Messages<LobbyStateChanged> { json }            the SAME codec::to_json bytes
 //!   ▼
 //! feed_lobby_state                                     [this module]
 //!   ▼
@@ -1731,7 +1731,7 @@ fn publish_bridge_layout(
             }
         }
     }
-    match crate::core::codec::encode_bridge_layout(&payload) {
+    match crate::core::codec::to_json(&payload) {
         Ok(json) => {
             bridge.0.push_layout(json);
             // Only what was actually pushed is cleared: a payload that could not

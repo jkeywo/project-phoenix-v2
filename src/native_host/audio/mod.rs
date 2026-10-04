@@ -635,7 +635,7 @@ fn update_room(
         return;
     };
     for event in hud.read() {
-        if let Ok(value) = codec::decode_native_audio_hud(&event.json) {
+        if let Ok(value) = codec::from_json(&event.json) {
             *current = Some(value);
         }
     }
@@ -675,11 +675,13 @@ fn update_room(
             }),
     });
     for event in cues.read() {
-        if let Ok(cue) = codec::decode_live_sound_cue(&event.json) {
+        if let Ok(cue) =
+            codec::from_json::<crate::gm_presentation::sound::LiveSoundCue>(&event.json)
+        {
             audio.authored_sound(cue);
             continue;
         }
-        if let Ok(cue) = codec::decode_native_audio_cue(&event.json) {
+        if let Ok(cue) = codec::from_json::<crate::audio_config::AudioCue>(&event.json) {
             if cue.kind == "blaster" {
                 audio.blaster([cue.x, cue.y, cue.z]);
             } else if cue.kind == "computer_message" {
@@ -690,7 +692,7 @@ fn update_room(
         }
     }
     if let Some(bridge) = bridge {
-        if let Ok(json) = codec::encode_native_audio_state(&audio.snapshot()) {
+        if let Ok(json) = codec::to_json(&audio.snapshot()) {
             bridge.0.push_audio(json);
         }
     }

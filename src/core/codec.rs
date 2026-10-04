@@ -1,51 +1,20 @@
 use crate::core::messages::{ClientMessage, ServerMessage};
 
-pub fn decode_workshop_test_source(
-    value: &str,
-) -> Result<std::collections::BTreeMap<String, String>, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
+/// Serialize ordinary JSON at the repository codec seam.
+pub fn to_json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
 }
 
-pub fn encode_workshop_test_catalog(
-    value: &crate::workshop::test_source::TestCatalog,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
+/// Decode ordinary JSON text at the repository codec seam.
+pub fn from_json<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(text)
 }
 
-pub fn encode_workshop_test_launch(
-    value: &crate::workshop::test_protocol::Launch,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_test_launch(
-    value: &[u8],
-) -> Result<crate::workshop::test_protocol::Launch, String> {
-    serde_json::from_slice(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_preview_selection(
-    value: &[u8],
-) -> Result<crate::workshop::test_protocol::PreviewSelection, String> {
-    serde_json::from_slice(value).map_err(|e| e.to_string())
-}
-pub fn encode_workshop_test_status(
-    value: &crate::workshop::test_protocol::TestStatus,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_test_status(
-    value: &str,
-) -> Result<crate::workshop::test_protocol::TestStatus, String> {
-    serde_json::from_str(value).map_err(|e| e.to_string())
-}
-pub fn encode_workshop_test_control(
-    value: &crate::workshop::test_protocol::ControlRecord,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_test_control(
-    value: &str,
-) -> Result<crate::workshop::test_protocol::ControlRecord, String> {
-    serde_json::from_str(value).map_err(|e| e.to_string())
+/// Decode ordinary JSON bytes at the repository codec seam.
+pub fn from_json_bytes<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, serde_json::Error> {
+    serde_json::from_slice(bytes)
 }
 
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -138,36 +107,9 @@ impl JsonCodec {
 
 // ── HTML console bridge (de)serialisation (ADR-0001 / PRD #419) ────────────
 //
-// These are the sanctioned `serde_json` surface for the HTML bridge: the
-// host-channel pushes (HUD, lobby, chatter, audio) and the inbound
-// `ClientMessage` decode. Bridge / plugin code must call these, never
-// `serde_json` directly.
-
-/// Encode a `ViewscreenHudState` to JSON for the HTML viewscreen overlay.
-pub fn encode_hud_state(
-    s: &crate::core::messages::ViewscreenHudState,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(s)
-}
-
-/// Encode an AI→AI chatter event for the `"chatter"` host channel (issue
-/// #818). Issue #1255's wire shape carries `from_label`, `to_label`, the typed
-/// semantic `payload`, and the same required producer-owned `presentation`
-/// envelope a phone popup receives. `server.html::__updateChatter` renders only
-/// that envelope; it does not derive words from the payload.
-pub fn encode_chatter(
-    ev: &crate::console_bridge::AiChatterEvent,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(ev)
-}
-
-/// Encode the merged ship + world audio config for `__audioConfig`. Sent once
-/// on game start; JS builds its `<audio>` elements and Web Audio graph from it.
-pub fn encode_audio_config(
-    p: &crate::audio_config::AudioConfigPayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(p)
-}
+// Ordinary host-channel pushes (HUD, lobby, chatter, audio) use `to_json`;
+// inbound `ClientMessage` decoding retains its named protocol entry point.
+// Bridge / plugin code calls this module, never `serde_json` directly.
 
 /// The room's immutable authored cue definitions travel with its normal config,
 /// so providers can prepare assets before a live occurrence without queuing it.
@@ -186,66 +128,6 @@ pub fn encode_room_audio_config(
         audio: p,
         authored_sounds: catalog.map_or_else(Vec::new, |catalog| catalog.room()),
     })
-}
-
-/// Decode the offline Workshop's explicit, data-only dependency snapshot.
-pub fn decode_workshop_dependencies(
-    s: &str,
-) -> Result<crate::workshop::WorkshopDependencies, serde_json::Error> {
-    serde_json::from_str(s)
-}
-
-pub fn decode_workshop_asset_bytes(
-    text: &str,
-) -> Result<std::collections::BTreeMap<String, Vec<u8>>, serde_json::Error> {
-    serde_json::from_str(text)
-}
-
-pub(crate) fn decode_planet_texture_source(
-    bytes: &[u8],
-) -> Result<crate::entities::planet_texture::TextureSource, String> {
-    serde_json::from_slice(bytes).map_err(|error| error.to_string())
-}
-
-pub fn encode_asset_dependency_index(
-    index: &std::collections::BTreeMap<String, Vec<String>>,
-) -> Result<String, String> {
-    serde_json::to_string(index).map_err(|error| error.to_string())
-}
-
-pub fn encode_workshop_validation(
-    value: &crate::workshop::WorkshopValidation,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
-}
-
-pub fn encode_workshop_fields(
-    value: &[crate::workshop::document::Field],
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
-}
-
-pub fn decode_workshop_patch(
-    value: &str,
-) -> Result<crate::workshop::document::Patch, serde_json::Error> {
-    serde_json::from_str(value)
-}
-
-/// The draft's text members, `{path: text}`, for the definition catalog.
-pub fn decode_workshop_definition_files(
-    value: &str,
-) -> Result<std::collections::BTreeMap<String, String>, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
-}
-
-pub fn encode_workshop_definition_catalog(
-    value: &crate::workshop::definitions::DefinitionCatalog,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-
-pub fn decode_workshop_edit(value: &str) -> Result<crate::workshop::document::EditRequest, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -275,72 +157,6 @@ pub fn workshop_slot_edit_fixtures() -> Vec<(String, crate::workshop::document::
         .collect()
 }
 
-/// The composition edit group a Workshop panel applies to one member (issue #1475).
-pub fn decode_workshop_composition_request(
-    value: &str,
-) -> Result<crate::workshop::composition::ComposeRequest, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
-}
-
-pub fn encode_workshop_composition_catalog(
-    value: &crate::workshop::composition::CompositionCatalog,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-
-/// One entity template's composition: its includes, its effective fields and
-/// who owns each of them (issue #1476).
-pub fn encode_workshop_entity_composition(
-    value: &crate::workshop::entity::EntityComposition,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-
-/// The entity edit group a Workshop panel applies to one template (issue #1476).
-pub fn decode_workshop_entity_request(
-    value: &str,
-) -> Result<crate::workshop::entity::EntityEditRequest, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
-}
-
-/// One world's GM role presets: every authored value with its line, which
-/// references resolve, and the vocabularies the runtime owns (issue #1477).
-pub fn encode_workshop_preset_catalog(
-    value: &crate::workshop::presets::PresetCatalog,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-
-/// The preset edit group a Workshop panel applies to one world (issue #1477).
-pub fn decode_workshop_preset_request(
-    value: &str,
-) -> Result<crate::workshop::presets::PresetEditRequest, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
-}
-
-/// Encode a one-shot positional audio cue for `__audioCue`. Coordinates are
-/// listener-relative — see `audio_config::listener_relative`.
-pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, serde_json::Error> {
-    serde_json::to_string(c)
-}
-pub fn encode_live_sound_cue(
-    cue: &crate::gm_presentation::sound::LiveSoundCue,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(cue)
-}
-pub fn decode_live_sound_cue(
-    json: &str,
-) -> Result<crate::gm_presentation::sound::LiveSoundCue, serde_json::Error> {
-    serde_json::from_str(json)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn decode_native_audio_cue(
-    json: &str,
-) -> Result<crate::audio_config::AudioCue, serde_json::Error> {
-    serde_json::from_str(json)
-}
-
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn encode_native_audio_visual(
     cue: &crate::native_host::audio::visual::VisualCue,
@@ -349,56 +165,11 @@ pub fn encode_native_audio_visual(
         .map(|json| vellum_ultralight::bridge::push_call("window.__phoenixHudAudioCue", &json))
 }
 
-pub fn encode_audio_lifecycle(
-    state: &crate::console_bridge::AudioLifecycleState,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(state)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_native_audio_state(
-    state: &crate::native_host::audio::NativeAudioState,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(state)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_native_private_audio_state(
-    state: &crate::native_host::audio::private::Status,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(state)
-}
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub(crate) fn decode_native_private_audio_request(
-    json: &str,
-) -> Result<crate::native_host::audio::private::Request, serde_json::Error> {
-    serde_json::from_str(json)
-}
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub(crate) fn decode_native_private_audio_manifest(
-    json: &str,
-) -> Result<crate::native_host::audio::private::Manifest, serde_json::Error> {
-    serde_json::from_str(json)
-}
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub(crate) fn is_native_gm_profile_record(json: &str) -> Option<bool> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     (value["type"] == "NativeOperator")
         .then(|| matches!(value["operation"].as_str(), Some("load" | "save")))
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn decode_native_audio_hud(
-    json: &str,
-) -> Result<crate::core::messages::ViewscreenHudState, serde_json::Error> {
-    serde_json::from_str(json)
-}
-
-/// Encode the rendererless GM peer's absolute local map Host Channel projection.
-pub fn encode_gm_entity_projection(
-    payload: &crate::gm_projection::GmEntityProjectionPayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
 }
 
 /// Private host-page presentation request, not a participant message.
@@ -417,21 +188,6 @@ pub fn decode_gm_console_interest(json: &str) -> Option<crate::gm_projection::Gm
     }
     let request: crate::gm_projection::GmConsoleInterest = serde_json::from_str(json).ok()?;
     request.valid().then_some(request)
-}
-
-/// Encode the rendererless GM peer's absolute bounded activity Host Channel
-/// projection (issues #1297/#1298).
-pub fn encode_gm_activity_feed(
-    payload: &crate::gm_activity::GmActivityFeedPayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-/// Encode the rendererless GM peer's authentic Station-interface projection.
-pub fn encode_gm_station_projection(
-    payload: &crate::gm_projection::GmStationProjectionPayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
 }
 
 /// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
@@ -572,19 +328,12 @@ pub fn decode_bridge_client_message(s: &str) -> Result<ClientMessage, serde_json
     serde_json::from_str(s)
 }
 
-/// Encode a `LobbyStatePayload` to JSON for the HTML lobby overlay.
-pub fn encode_lobby_state(
-    s: &crate::core::messages::LobbyStatePayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(s)
-}
-
 // ── The native host's lobby surface (issues #1328/#1330) ────────────────────
 //
-// That surface takes one more push beside the lobby state above — the bridge's
+// That surface takes one more push beside the lobby state — the bridge's
 // monitor roster — and answers with the operator's own presses: a scenario, a
 // hull, an AI launch, a monitor for the viewscreen. Both directions cross as
-// JSON, so both are encoded HERE and nowhere else (AGENTS.md Key Constraint 1);
+// JSON through this codec seam (AGENTS.md Key Constraint 1);
 // the types stay pure and Bevy-free in `native_host::host_lobby::{layout,
 // scenario}`.
 //
@@ -594,31 +343,6 @@ pub fn encode_lobby_state(
 //
 // Gated on the same cfg `crate::native_host` itself carries: a browser host has
 // no monitors to offer, and on wasm the module these name does not exist.
-
-/// Encode the bridge's monitor row for the native host's lobby surface.
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_bridge_layout(
-    p: &crate::native_host::host_lobby::layout::BridgeLayoutPayload,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(p)
-}
-
-/// Decode one record the native lobby surface queued — a pick, an AI launch or
-/// a monitor button press.
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn decode_host_lobby_record(
-    s: &str,
-) -> Result<crate::native_host::host_lobby::HostLobbyRecord, serde_json::Error> {
-    serde_json::from_str(s)
-}
-
-/// Queue a typed local recovery intent through the existing host-lobby reader.
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_host_lobby_record(
-    record: &crate::native_host::host_lobby::HostLobbyRecord,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(record)
-}
 
 // ── Batch inbound decode (issue #602) ───────────────────────────────────────
 
@@ -706,20 +430,6 @@ pub fn decode_handshake_frame(
 //
 // Catalogue field names and defaults are the serde wire types' own.
 
-/// Encode a presentation diagnostic artifact, outside the crew protocol.
-pub fn encode_presentation_capture<T: serde::Serialize>(
-    capture: &T,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(capture)
-}
-
-#[cfg(test)]
-pub(crate) fn decode_presentation_capture<T: serde::de::DeserializeOwned>(
-    capture: &[u8],
-) -> Result<T, serde_json::Error> {
-    serde_json::from_slice(capture)
-}
-
 /// The native HUD accepts the same JSON string as the browser HUD bridge.
 pub fn encode_hud_update_script(json: &str) -> String {
     let argument = serde_json::to_string(json).unwrap_or_else(|_| "\"{}\"".into());
@@ -734,33 +444,12 @@ fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Valu
     })
 }
 
-/// Encode the shared catalogue entries for the browser host's picker.
-pub fn encode_scenario_catalog(
-    scenarios: &[crate::core::messages::ScenarioCatalogWire],
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(scenarios)
-}
-
 /// Encode named Objective-instance lifecycle/report state at the one JSON
 /// boundary used by headless and native diagnostics.
 pub fn encode_objective_instances(
     manager: &crate::objective_instances::ObjectiveInstanceManager,
 ) -> String {
     serde_json::to_string(manager).unwrap_or_else(|_| r#"{"instances":[],"history":{}}"#.into())
-}
-
-/// Decode the browser's current enriched picker snapshot before publication.
-pub fn decode_scenario_catalog(
-    json: &str,
-) -> Result<Vec<crate::core::messages::ScenarioCatalogWire>, serde_json::Error> {
-    serde_json::from_str(json)
-}
-
-/// Encode a hull with the same optional enrichment on every surface.
-pub fn encode_catalog_ship(
-    ship: &crate::core::messages::CatalogShipWire,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(ship)
 }
 
 /// Encode a host's own version stamp — the body of `/host/stamp.json`.
@@ -1532,36 +1221,6 @@ pub fn decode_canonical_system_command(
     (canonical_system_command(&payload)?.as_str() == raw).then_some(payload)
 }
 
-pub fn encode_gm_session_projection(
-    projection: &crate::gm_action::GmSessionProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(projection)
-}
-
-/// Encode the absolute GM spawn-panel projection (issue #1305) for the
-/// `gm_spawn` Host Channel. The payload carries palette ids and String Table
-/// labels only — never a `template_path`, which the browser must never be in a
-/// position to name.
-pub fn encode_gm_spawn_projection(
-    payload: &crate::gm_spawn::GmSpawnProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-/// Encode the absolute GM mission-panel projection (issue #1301).
-pub fn encode_gm_mission_projection(
-    projection: &crate::gm_event::GmMissionProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(projection)
-}
-
-/// Encode the read-only GM admission/reconnect progress mirrored to the page.
-pub fn encode_gm_join_progress(
-    progress: &crate::gm_join::GmJoinProgress,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(progress)
-}
-
 /// Decode and validate one host-mesh lobby start grant (issue #1290).
 ///
 /// JSON stays confined to this codec seam. The grant itself is exact and
@@ -1571,19 +1230,6 @@ pub fn decode_start_grant(raw: &str) -> Option<crate::lobby::start_policy::Start
     let grant: crate::lobby::start_policy::StartGrant = serde_json::from_str(raw).ok()?;
     grant.validate().ok()?;
     Some(grant)
-}
-
-pub fn encode_start_grant_result(
-    result: &crate::lobby::start_policy::StartGrantResult,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(result)
-}
-
-/// Encode the definitive asynchronous result of `wasm_join_fleet` adoption.
-pub fn encode_fleet_join_status(
-    status: &crate::lockstep::FleetJoinStatus,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(status)
 }
 
 /// Encode the fleet-link status the host page's operator surface reads.
@@ -1641,40 +1287,6 @@ pub fn encode_mesh_status(
     .to_string()
 }
 
-/// Absolute local GM Comms Studio projection.
-pub fn encode_gm_comms_projection(
-    payload: &crate::gm_comms::GmCommsProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-/// Absolute local GM attention queue (issue #1433). String Table reason ids and
-/// their parameters cross verbatim; the page resolves them at its own
-/// presentation boundary, exactly as the other GM DTOs do.
-pub fn encode_gm_attention_projection(
-    payload: &crate::gm_attention::GmAttentionProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-/// Absolute local GM technical health (issue #1437). Same contract as the
-/// attention queue: String Table reason ids and their parameters cross
-/// verbatim, and the page resolves them at its own presentation boundary.
-pub fn encode_gm_health_projection(
-    payload: &crate::gm_health::GmHealthProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
-/// Absolute local GM Station-workload summary (issue #1438). Levels cross as
-/// their stable snake_case ids and reasons as String Table ids plus their
-/// parameters; the page resolves both at its own presentation boundary.
-pub fn encode_gm_workload_projection(
-    payload: &crate::gm_workload::GmWorkloadProjection,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(payload)
-}
-
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub fn decode_native_gm_record(
     json: &str,
@@ -1683,26 +1295,6 @@ pub fn decode_native_gm_record(
         return None;
     }
     serde_json::from_str(json).ok()
-}
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub fn encode_native_gm_metadata(
-    value: &crate::native_host::native_gm::NativeGmMetadata,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub(crate) fn encode_native_gm_save_reply(
-    value: &crate::native_host::native_gm::saves::SaveReply,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
-}
-
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub(crate) fn encode_native_gm_save_outcomes(
-    value: &[crate::native_host::native_gm::saves::SaveOutcome],
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(value)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1738,36 +1330,6 @@ pub fn decode_workshop_request(
     }
     Ok(WorkshopRequest { id, operation })
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub fn encode_workshop_response(
-    value: &crate::workshop::provider::WorkshopResponse,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn encode_workshop_transaction(
-    value: &crate::workshop::provider::Transaction,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn decode_workshop_transaction(
-    bytes: &[u8],
-) -> Result<crate::workshop::provider::Transaction, String> {
-    serde_json::from_slice(bytes).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn encode_workshop_recovery(
-    value: &crate::workshop::provider::RecoveryRecord,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-#[cfg(not(target_arch = "wasm32"))]
-pub fn decode_workshop_recovery(
-    bytes: &[u8],
-) -> Result<crate::workshop::provider::RecoveryRecord, String> {
-    serde_json::from_slice(bytes).map_err(|error| error.to_string())
-}
 
 pub fn decode_fleet_continuation(
     value: &str,
@@ -1776,23 +1338,6 @@ pub fn decode_fleet_continuation(
         return Err("continuation-request-too-large".into());
     }
     serde_json::from_str(value).map_err(|error| error.to_string())
-}
-pub fn encode_fleet_continuation_status(
-    value: &crate::lockstep::continuation::ContinuationStatus,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
-
-/// Private native Workshop presentation; not a simulation or crew message.
-pub fn encode_workshop_test_presentation(
-    value: &crate::workshop::test_protocol::TestPresentation,
-) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| e.to_string())
-}
-pub fn decode_workshop_test_presentation(
-    value: &[u8],
-) -> Result<crate::workshop::test_protocol::TestPresentation, String> {
-    serde_json::from_slice(value).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

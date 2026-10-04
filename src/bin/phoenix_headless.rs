@@ -188,7 +188,7 @@ fn main() {
                 project_phoenix::sim_digest::world_digest(app.world())
             ),
         };
-        let json = project_phoenix::core::codec::encode_presentation_capture(&continuation)
+        let json = project_phoenix::core::codec::to_json(&continuation)
             .expect("capture continuation contains only a tick and digest");
         if let Err(error) = std::fs::write(format!("{path}.continuation.json"), json) {
             let log = app

@@ -124,7 +124,8 @@ pub fn read_presentation(header: &str, reader: &mut impl Read) -> Result<Vec<u8>
     }
     let mut bytes = vec![0; length];
     reader.read_exact(&mut bytes).map_err(|e| e.to_string())?;
-    let payload = crate::core::codec::decode_workshop_test_presentation(&bytes)?;
+    let payload: crate::workshop::test_protocol::TestPresentation =
+        crate::core::codec::from_json_bytes(&bytes).map_err(|e| e.to_string())?;
     if payload
         .channels
         .keys()

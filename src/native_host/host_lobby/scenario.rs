@@ -488,7 +488,7 @@ impl HostLobbyRecord {
     /// repository reads (AGENTS.md Key Constraint 1); this is the caller-shaped
     /// wrapper around it.
     pub fn decode(json: &str) -> Option<Self> {
-        crate::core::codec::decode_host_lobby_record(json).ok()
+        crate::core::codec::from_json(json).ok()
     }
 }
 

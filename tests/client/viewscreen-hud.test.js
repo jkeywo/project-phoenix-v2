@@ -113,7 +113,7 @@ function runIsland() {
   new Function(...Object.keys(BINDINGS), body)(...Object.values(BINDINGS));
 }
 
-/** A HUD-state push, in the shape `codec::encode_hud_state` produces. */
+/** A HUD-state push, in the shape `codec::to_json` produces. */
 function push(state) {
   window.__updateHud(JSON.stringify({
     heading: 90,

@@ -127,7 +127,7 @@ pub fn publish(
             occurrence: *serial,
             definition: request.definition.clone(),
         };
-        if let Ok(json) = crate::core::codec::encode_live_sound_cue(&cue) {
+        if let Ok(json) = crate::core::codec::to_json(&cue) {
             output.write(crate::console_bridge::AudioCueEvent { json });
         }
     }

@@ -191,7 +191,7 @@ impl Drop for Delivery {
 }
 
 /// One lobby snapshot, in the shape `viewscreen_border::push_lobby_state`
-/// builds and `codec::encode_lobby_state` encodes.
+/// builds and `codec::to_json` encodes.
 fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
     let station = |id: &str, name: &str, code: &str, rank: &str, holder: Option<&str>| {
         StationPayload {
@@ -228,7 +228,7 @@ fn lobby_payload(phase: &str, holder: Option<&str>) -> String {
         loading_progress: None,
         countdown_secs: 0,
     };
-    codec::encode_lobby_state(&payload).expect("the lobby payload encodes")
+    codec::to_json(&payload).expect("the lobby payload encodes")
 }
 
 /// A two-monitor bridge, in the shape `host_lobby::layout::bridge_layout_payload`
@@ -254,7 +254,7 @@ fn monitor_row(
             // lobby's to fill and to free.
             reserved: Vec::new(),
         };
-    codec::encode_bridge_layout(&BridgeLayoutPayload {
+    codec::to_json(&BridgeLayoutPayload {
         gm: None,
         monitors: vec![
             monitor(

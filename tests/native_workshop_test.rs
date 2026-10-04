@@ -281,9 +281,8 @@ panels = ["gm-map-panel", "gm-activity"]
         if documents
             .resource(&presentation_path)
             .is_some_and(|resource| {
-                let payload =
-                    project_phoenix::core::codec::decode_workshop_test_presentation(&resource.body)
-                        .unwrap();
+                let payload: project_phoenix::workshop::test_protocol::TestPresentation =
+                    project_phoenix::core::codec::from_json_bytes(&resource.body).unwrap();
                 payload.channels.contains_key("gm_entity")
                     && payload.channels.contains_key("hud")
                     && payload.role_presets.contains("test-native-role")

@@ -1032,9 +1032,8 @@ pub(super) fn leave_fleet() -> String {
 }
 
 pub(super) fn fleet_join_status() -> String {
-    FLEET_JOIN_STATUS.with(|status| {
-        crate::core::codec::encode_fleet_join_status(&status.borrow()).unwrap_or_default()
-    })
+    FLEET_JOIN_STATUS
+        .with(|status| crate::core::codec::to_json(&*status.borrow()).unwrap_or_default())
 }
 
 pub(super) fn submit_gm_action(request_json: &str) -> bool {
@@ -1165,9 +1164,7 @@ pub(super) fn refuse_gm_join(join_id: u64, reason: &str) -> bool {
 }
 
 pub(super) fn gm_join_status() -> String {
-    GM_JOIN_STATUS.with(|status| {
-        crate::core::codec::encode_gm_join_progress(&status.borrow()).unwrap_or_default()
-    })
+    GM_JOIN_STATUS.with(|status| crate::core::codec::to_json(&*status.borrow()).unwrap_or_default())
 }
 
 pub(super) fn take_start_result() -> String {
@@ -1352,7 +1349,7 @@ pub(super) fn enqueue_continuation(json: &str) -> String {
     let request = match crate::core::codec::decode_fleet_continuation(json) {
         Ok(request) => request,
         Err(reason) => {
-            return crate::core::codec::encode_fleet_continuation_status(
+            return crate::core::codec::to_json(
                 &crate::lockstep::continuation::ContinuationStatus {
                     status: crate::lockstep::continuation::ContinuationPhase::Refused,
                     reason: Some(reason),
@@ -1364,7 +1361,7 @@ pub(super) fn enqueue_continuation(json: &str) -> String {
     };
     CONTINUATION_REQUEST.with(|pending| {
         if pending.borrow().is_some() {
-            return crate::core::codec::encode_fleet_continuation_status(
+            return crate::core::codec::to_json(
                 &crate::lockstep::continuation::ContinuationStatus {
                     status: crate::lockstep::continuation::ContinuationPhase::Refused,
                     reason: Some("continuation-operation-pending".into()),
@@ -1379,7 +1376,7 @@ pub(super) fn enqueue_continuation(json: &str) -> String {
             status.generation = status.generation.saturating_add(1);
             status.status = crate::lockstep::continuation::ContinuationPhase::Pending;
             status.reason = None;
-            crate::core::codec::encode_fleet_continuation_status(&status).unwrap_or_default()
+            crate::core::codec::to_json(&*status).unwrap_or_default()
         })
     })
 }
@@ -1390,9 +1387,8 @@ pub(super) fn publish_continuation(status: &crate::lockstep::continuation::Conti
     CONTINUATION_STATUS.with(|current| *current.borrow_mut() = status.clone());
 }
 pub(super) fn continuation_status() -> String {
-    CONTINUATION_STATUS.with(|status| {
-        crate::core::codec::encode_fleet_continuation_status(&status.borrow()).unwrap_or_default()
-    })
+    CONTINUATION_STATUS
+        .with(|status| crate::core::codec::to_json(&*status.borrow()).unwrap_or_default())
 }
 
 pub(super) fn enqueue_continuation_frame(epoch: u64, source: u32, json: &str) -> bool {

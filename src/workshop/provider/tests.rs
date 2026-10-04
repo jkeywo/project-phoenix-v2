@@ -609,7 +609,7 @@ fn crash_between_replacements_finishes_the_exact_validated_transaction_on_reopen
     };
     atomic_write(
         &provider.private.join("transaction.json"),
-        crate::core::codec::encode_workshop_transaction(&transaction)
+        crate::core::codec::to_json(&transaction)
             .unwrap()
             .as_bytes(),
     )
@@ -1002,7 +1002,7 @@ fn deletion_recovery_is_idempotent_and_preserves_an_external_replacement() {
         };
         atomic_write(
             &provider.private.join("transaction.json"),
-            crate::core::codec::encode_workshop_transaction(&transaction)
+            crate::core::codec::to_json(&transaction)
                 .unwrap()
                 .as_bytes(),
         )

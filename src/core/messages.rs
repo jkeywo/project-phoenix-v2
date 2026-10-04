@@ -3884,7 +3884,7 @@ pub struct StringCatalogueSource {
 /// Serialised HUD state pushed to the viewscreen HTML overlay (issue #422).
 ///
 /// Produced by the viewscreen border plugin on change and encoded via
-/// `codec::encode_hud_state`. The JS `window.__updateHud` parses this to
+/// `codec::to_json`. The JS `window.__updateHud` parses this to
 /// drive the bottom status strip and the red-alert vignette.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ViewscreenHudState {

@@ -1005,11 +1005,11 @@ fn tractor_load_modifier_source_round_trips() {
 // JS-side compatibility), which the table-driven harness above does not
 // inherently cover.
 
-/// `encode_chatter` wire shape pin (issues #818, #1255): the `"chatter"`
+/// Chatter JSON wire shape pin (issues #818, #1255): the `"chatter"`
 /// host channel keeps the typed payload and carries the same producer-owned
 /// presentation envelope the phone receives.
 #[test]
-fn encode_chatter_wire_shape_matches_js_handler() {
+fn chatter_json_wire_shape_matches_js_handler() {
     let ev = crate::console_bridge::AiChatterEvent {
         from_label: "chatter.sender.sensors".into(),
         to_label: "tactical".into(),
@@ -1020,7 +1020,7 @@ fn encode_chatter_wire_shape_matches_js_handler() {
         )
         .with_body_param("frequency", 0.5_f32),
     };
-    let encoded = encode_chatter(&ev).unwrap();
+    let encoded = to_json(&ev).unwrap();
     assert_eq!(
         encoded,
         r#"{"from_label":"chatter.sender.sensors","to_label":"tactical","payload":{"type":"FrequencyHint","data":{"frequency":0.5}},"presentation":{"title":"coordination.frequency_hint.title","body":"coordination.frequency_hint.body","body_params":{"frequency":0.5}}}"#,
@@ -1029,7 +1029,7 @@ fn encode_chatter_wire_shape_matches_js_handler() {
 }
 
 #[test]
-fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
+fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
     let payload = crate::gm_projection::GmEntityProjectionPayload {
         recipient_diagnostics: Vec::new(),
         world_membership: Default::default(),
@@ -1137,7 +1137,7 @@ fn encode_gm_entity_projection_pins_the_local_host_channel_shape() {
         results: Vec::new(),
     };
     assert_eq!(
-        encode_gm_entity_projection(&payload).unwrap(),
+        to_json(&payload).unwrap(),
         r#"{"world_membership":{},"entity_inspector":{"fields":[],"readings":{}},"entities":[{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":146000,"hull_max_milli_hp":200000,"systems":[{"system_id":"impulse-drive","station_id":"helm","station_name":"station.helm.display_name","name":"system.impulse_drive.display_name","current_milli_hp":96000,"max_milli_hp":120000},{"system_id":"core","station_id":null,"name":"system.core.display_name","current_milli_hp":50000,"max_milli_hp":80000}]},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":null,"hull_max_milli_hp":null},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}],"results":[]}"#
     );
 }
@@ -1187,7 +1187,7 @@ fn gm_ship_slot_backfill_ingress_is_exact_and_bounded() {
 }
 
 #[test]
-fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
+fn gm_activity_feed_json_pins_the_local_host_channel_shape() {
     use crate::gm_activity::{
         GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,
         GmActivityConnectionRole, GmActivityConnectionState, GmActivityDamage, GmActivityDetail,
@@ -1292,7 +1292,7 @@ fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
         ],
     };
     assert_eq!(
-        encode_gm_activity_feed(&payload).unwrap(),
+        to_json(&payload).unwrap(),
         r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"damage","data":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}}},{"tick":42,"category":"destruction","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"destruction"}},{"tick":42,"category":"objective","ships":[],"links":[],"detail":{"type":"objective","data":{"objective_id":"reach_beacon","status":"completed"}}},{"tick":42,"category":"trigger","ships":[],"links":[],"detail":{"type":"trigger","data":{"trigger_id":"arrival","origin":"world.rhai"}}},{"tick":42,"category":"red_alert","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"red_alert","data":{"active":true}}},{"tick":42,"category":"connection","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"connection","data":{"identity":{"id":"crew-1","name":"Ari"},"role":"crew","state":"connected","ship":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alpha","name":"Morgan"},"correlation":"pause-1","action":{"type":"set_session_paused","active":true},"outcome":"refused","reason":"wrong-phase","order":{"sequence":9,"origin":1}}}}]}"#
     );
 }
@@ -1306,7 +1306,7 @@ fn encode_gm_activity_feed_pins_the_local_host_channel_shape() {
 /// what it did before it had an arm of its own — would tell every GM that a
 /// colleague paused the session when they changed a faction relation.
 #[test]
-fn encode_gm_activity_feed_pins_the_faction_and_inverse_action_shapes() {
+fn gm_activity_feed_json_pins_the_faction_and_inverse_action_shapes() {
     use crate::gm_activity::{
         GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityDetail,
         GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityPublicIdentity,
@@ -1379,7 +1379,7 @@ fn encode_gm_activity_feed_pins_the_faction_and_inverse_action_shapes() {
             ),
         ],
     };
-    let wire = encode_gm_activity_feed(&payload).unwrap();
+    let wire = to_json(&payload).unwrap();
     assert_eq!(
         wire,
         r#"{"capacity":128,"entries":[{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-1","action":{"type":"set_faction_hostility","faction":"Alliance","enemy":"Harrow","hostile":true},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-2","action":{"type":"set_faction_hostility","faction":"Alliance","hostile":false},"outcome":"refused","reason":"unknown-faction","order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-blake","name":"Blake"},"correlation":"undo-1","action":{"type":"undo_gm_action","original_operator":{"id":"gm-alex","name":"Alex"},"original_correlation":"faction-1"},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}}]}"#
@@ -1391,13 +1391,13 @@ fn encode_gm_activity_feed_pins_the_faction_and_inverse_action_shapes() {
     assert!(!wire.contains("set_session_paused"));
 }
 
-/// `encode_chatter` must JSON-escape quotes/backslashes in the labels and in
+/// Chatter JSON must escape quotes/backslashes in the labels and in
 /// any text carried inside the payload — the pre-#818 hand-rolled `format!`
 /// encoder did this by hand; serde now owns it. Round-trips through
 /// `serde_json::Value` to prove the output is valid JSON with the original
 /// strings intact.
 #[test]
-fn encode_chatter_escapes_special_characters() {
+fn chatter_json_escapes_special_characters() {
     let ev = crate::console_bridge::AiChatterEvent {
         from_label: r#"AI "Sensors""#.into(),
         to_label: r"helm\aux".into(),
@@ -1409,7 +1409,7 @@ fn encode_chatter_escapes_special_characters() {
             "line1\nline2",
         ),
     };
-    let encoded = encode_chatter(&ev).unwrap();
+    let encoded = to_json(&ev).unwrap();
     let v: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
     assert_eq!(v["from_label"], r#"AI "Sensors""#);
     assert_eq!(v["to_label"], r"helm\aux");
@@ -4269,7 +4269,7 @@ fn host_lobby_payload_carries_exact_presentation_readiness_boolean() {
         countdown_secs: 0,
     };
 
-    let encoded = encode_lobby_state(&payload).expect("encode host lobby state");
+    let encoded = to_json(&payload).expect("encode host lobby state");
     let json: serde_json::Value = serde_json::from_str(&encoded).expect("valid lobby JSON");
     assert_eq!(
         json.get("presentation_ready"),
@@ -4999,7 +4999,7 @@ fn entity_state_snapshot_without_shields_field_defaults_to_none() {
 // ── HTML console bridge (de)serialisation ─────────────────────────────
 
 #[test]
-fn encode_hud_state_round_trips() {
+fn hud_state_json_round_trips() {
     let state = ViewscreenHudState {
         presentation_card: None,
         heading: 90,
@@ -5015,13 +5015,13 @@ fn encode_hud_state_round_trips() {
         scenario_title: None,
         sensor_report: None,
     };
-    let json = encode_hud_state(&state).expect("encode hud");
+    let json = to_json(&state).expect("encode hud");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
     assert_eq!(state, decoded);
 }
 
 #[test]
-fn encode_hud_state_emits_snake_case_fields() {
+fn hud_state_json_emits_snake_case_fields() {
     let state = ViewscreenHudState {
         presentation_card: None,
         heading: 0,
@@ -5037,7 +5037,7 @@ fn encode_hud_state_emits_snake_case_fields() {
         scenario_title: None,
         sensor_report: None,
     };
-    let json = encode_hud_state(&state).expect("encode hud");
+    let json = to_json(&state).expect("encode hud");
     assert!(json.contains("\"heading\":0"), "got: {json}");
     assert!(json.contains("\"hull_pct\":100"), "got: {json}");
     assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
@@ -5045,7 +5045,7 @@ fn encode_hud_state_emits_snake_case_fields() {
 }
 
 #[test]
-fn encode_hud_state_carries_the_computer_message_when_present() {
+fn hud_state_json_carries_the_computer_message_when_present() {
     use crate::core::messages::ComputerMessageWire;
     let state = ViewscreenHudState {
         heading: 0,
@@ -5067,14 +5067,14 @@ fn encode_hud_state_carries_the_computer_message_when_present() {
         scenario_title: None,
         sensor_report: None,
     };
-    let json = encode_hud_state(&state).expect("encode hud");
+    let json = to_json(&state).expect("encode hud");
     assert!(json.contains("\"computer_message\":{"), "got: {json}");
     let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
     assert_eq!(state, decoded);
 }
 
 #[test]
-fn encode_hud_state_omits_absent_computer_message() {
+fn hud_state_json_omits_absent_computer_message() {
     let state = ViewscreenHudState {
         presentation_card: None,
         heading: 0,
@@ -5090,7 +5090,7 @@ fn encode_hud_state_omits_absent_computer_message() {
         scenario_title: None,
         sensor_report: None,
     };
-    let json = encode_hud_state(&state).expect("encode hud");
+    let json = to_json(&state).expect("encode hud");
     assert!(
         !json.contains("computer_message"),
         "absent field must not appear at all: {json}"
@@ -6330,7 +6330,7 @@ fn gm_spawn_projection_encodes_palette_ids_and_labels_only() {
         }],
         results: Vec::new(),
     };
-    let encoded = encode_gm_spawn_projection(&payload).expect("projection encodes");
+    let encoded = to_json(&payload).expect("projection encodes");
     let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert_eq!(value["palette"][0]["id"], "raider");
     assert_eq!(
@@ -6375,7 +6375,7 @@ fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
 
 #[test]
 fn start_grant_result_codec_preserves_the_fixed_source_tick() {
-    let encoded = encode_start_grant_result(&crate::lobby::start_policy::StartGrantResult {
+    let encoded = to_json(&crate::lobby::start_policy::StartGrantResult {
         tick: 41,
         status: crate::lobby::start_policy::StartGrantStatus::Refused,
         operator_id: Some("gm-1".into()),
@@ -6391,7 +6391,7 @@ fn start_grant_result_codec_preserves_the_fixed_source_tick() {
 
 #[test]
 fn fleet_join_status_codec_is_exact_and_generation_stamped() {
-    let encoded = encode_fleet_join_status(&crate::lockstep::FleetJoinStatus {
+    let encoded = to_json(&crate::lockstep::FleetJoinStatus {
         generation: 17,
         status: crate::lockstep::FleetJoinStatusKind::Refused,
         reason: Some("fleet-leave-not-lobby".into()),

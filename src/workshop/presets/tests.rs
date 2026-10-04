@@ -284,7 +284,7 @@ fn the_catalog_choices_are_the_runtimes_own_vocabularies() {
     );
     // The browser owns the panel and quick-action vocabularies (D2); nothing
     // here offers one, and nothing here warns about one.
-    let encoded = crate::core::codec::encode_workshop_preset_catalog(&catalog).unwrap();
+    let encoded = crate::core::codec::to_json(&catalog).unwrap();
     assert!(!encoded.contains("gm-map-panel\",\"origin"), "{encoded}");
     assert!(!encoded.contains("not-drawn"), "{encoded}");
 }

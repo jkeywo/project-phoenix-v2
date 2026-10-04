@@ -108,8 +108,8 @@ fn player_ship_is_fully_backfilled_by_ai() {
 /// Issue #786 wiring guard: the PLAYER ship must carry the per-system AI
 /// components its own template authored.
 ///
-/// The player ship never goes through `entities::spawner::spawn_entity` — only
-/// `server_app::spawn_game_start_entities` builds it — and both Comms AI hosts
+/// GameStart prepares the player ship's crew inputs before shared spawning.
+/// Both Comms AI hosts
 /// (`operate_comms_ai`, `operate_comms_response_ai`) are filtered
 /// `With<LocalShip>`, i.e. they run ONLY on the player ship. So a missing
 /// `server_app` attach meant the feature was dead in production: the hosts fell

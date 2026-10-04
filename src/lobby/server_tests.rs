@@ -1464,3 +1464,30 @@ fn same_frame_teardown_and_reopen_resets_start_id_generation() {
     assert_eq!(tracker.last_sequence, 0);
     assert_eq!(grants.pop_front().unwrap().id, "start-1");
 }
+
+#[test]
+fn resolved_equipment_absence_is_preserved_in_welcome_and_manual() {
+    use crate::entities::{ai_declaration_manifest::AiDeclarationMode, config::EntityConfig};
+    for source in [
+        "",
+        "[repair]",
+        "[repair]\nrepair_team_count = 0",
+        "[shields_console.ai]\ndamage_window_secs = 7.0",
+    ] {
+        let config = EntityConfig::from_toml_in_mode(source, AiDeclarationMode::Lenient).unwrap();
+        assert_eq!(project_ship_client_config(&config).repair_team_count, 0);
+        assert!(!build_manual_system_extras(&config)
+            .contains_key(crate::ship::system_registry::SHIELDS_KIND));
+    }
+    let config = EntityConfig::from_toml_in_mode(
+        "[repair]\nrepair_team_count = 3\n[shields_console.base]\nmax_hp = 67",
+        AiDeclarationMode::Lenient,
+    )
+    .unwrap();
+    assert_eq!(project_ship_client_config(&config).repair_team_count, 3);
+    assert_eq!(
+        build_manual_system_extras(&config)[crate::ship::system_registry::SHIELDS_KIND]["max_hp"]
+            .as_integer(),
+        Some(67)
+    );
+}

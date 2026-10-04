@@ -88,9 +88,7 @@ impl RepairConfig {
     /// way — the teams component is what gates dispatch, so a ship that gains
     /// teams later already has its ranking.
     ///
-    /// The PLAYER ship does not come through here: `spawn_game_start_entities`
-    /// gates its teams on `[hull]` and keeps its own `unwrap_or(2)` fallback,
-    /// so a player hull that omits the count still crews two teams.
+    /// The same presence rule applies to player and NPC ships.
     pub fn declares_teams(&self) -> bool {
         self.repair_team_count > 0
     }

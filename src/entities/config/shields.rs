@@ -85,8 +85,8 @@ pub struct ShieldsConsoleConfig {
     #[serde(default = "default_focus_unfocused_damage_multiplier")]
     pub focus_unfocused_damage_multiplier: f32,
     /// Base shield-system values (number of facings, max HP, regen,
-    /// offline duration). When absent the historical hardcoded defaults
-    /// from `ShieldConfig::default()` are used.
+    /// offline duration). Arcs without a base use `ShieldConfig::default()`;
+    /// without either a base or arcs this table grants no shield equipment.
     #[serde(default)]
     pub base: Option<ShieldsBaseConfig>,
     /// Shield generator frequency (0.0–1.0). Default 0.5. When
@@ -103,9 +103,8 @@ pub struct ShieldsConsoleConfig {
     /// when authored — carries the same four numbers as `param(...)` entries
     /// (`damage_window_secs`, `min_damage_window_secs`, `damage_pct_threshold`,
     /// `health_ratio_threshold`) plus the prioritised rules that gate whether the
-    /// retained arc-ranking kernel acts. Absent, the canonical
-    /// [`default_shields_focus_ai_config`] is synthesised at spawn (baseline
-    /// preservation). Validated in [`crate::entities::config::EntityConfig::from_toml`]
+    /// retained arc-ranking kernel acts. An absent policy adds no automation.
+    /// Validated in [`crate::entities::config::EntityConfig::from_toml`]
     /// against [`SHIELD_FOCUS_CHANNELS`] / [`SHIELD_FOCUS_VERBS`].
     #[serde(default)]
     pub ai_policy: Option<FineSystemAiConfigToml>,

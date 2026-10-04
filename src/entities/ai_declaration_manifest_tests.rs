@@ -101,9 +101,8 @@ fn no_synthesiser_is_defined_or_called_anywhere() {
     assert!(!sites.is_empty(), "the scan has no spawn sites to walk");
     let mut called: Vec<String> = Vec::new();
     for (file, func) in sites {
-        let src = read_non_test_source(file);
-        let body = function_body(&src, func);
-        for name in synthesiser_names(body) {
+        let body = spawn_site_source(file, func);
+        for name in synthesiser_names(&body) {
             called.push(format!("{file}::{func} calls {name}"));
         }
     }

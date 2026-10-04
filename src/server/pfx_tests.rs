@@ -521,6 +521,18 @@ fn beam_test_app() -> App {
     app
 }
 
+// Explicit legacy equipment for the render fixtures. The globals above are
+// compatibility resources and must never equip these shooters implicitly.
+fn beam_equipment() -> impl Bundle {
+    (
+        PhaserRenderConfig {
+            beam_range: 1000.0,
+            ..Default::default()
+        },
+        crate::console::weapons::PhaserCombatConfigResource::default(),
+    )
+}
+
 fn beam_body_translation(app: &mut App) -> Vec3 {
     // Multiple BeamBody entities exist now (crossed glow + core ribbon
     // layers), but they all share the same start/end and therefore the
@@ -543,6 +555,7 @@ fn beam_transform_tracks_target_ship_physics_movement_across_ticks() {
     app.world_mut().spawn((
         crate::server_app::Ship,
         EntityUuid("shooter-uuid-1".to_string()),
+        beam_equipment(),
         Transform::from_xyz(0.0, 0.0, 0.0),
         ShipPhysics::default(),
         {
@@ -614,6 +627,7 @@ fn beam_transform_tracks_shooter_ship_physics_movement_across_ticks() {
             crate::server_app::Ship,
             LocalShip,
             EntityUuid("shooter-uuid-2".to_string()),
+            beam_equipment(),
             Transform::from_xyz(0.0, 0.0, 0.0),
             ShipPhysics::default(),
             {
@@ -682,6 +696,7 @@ fn spawned_beam_bodies_use_the_pinned_u_ribbon_mesh() {
         crate::server_app::Ship,
         LocalShip,
         EntityUuid("shooter-uuid-3".to_string()),
+        beam_equipment(),
         Transform::from_xyz(0.0, 0.0, 0.0),
         ShipPhysics::default(),
         {
@@ -734,4 +749,25 @@ fn spawned_beam_bodies_use_the_pinned_u_ribbon_mesh() {
             corners.iter().map(|(_, uv)| uv[0]).collect::<Vec<_>>()
         );
     }
+}
+
+#[test]
+fn missing_phaser_equipment_never_renders_from_compatibility_resources() {
+    let mut app = beam_test_app();
+    let mut beam = ActiveBeam::default();
+    beam.start("", "target", 10.0, 0.0);
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        EntityUuid("unarmed".into()),
+        Transform::default(),
+        ShipPhysics::default(),
+        beam,
+    ));
+    app.world_mut().spawn((
+        EntityUuid("target".into()),
+        Transform::from_xyz(0.0, 0.0, -10.0),
+    ));
+    app.update();
+    let mut bodies = app.world_mut().query_filtered::<Entity, With<BeamBody>>();
+    assert_eq!(bodies.iter(app.world()).count(), 0);
 }

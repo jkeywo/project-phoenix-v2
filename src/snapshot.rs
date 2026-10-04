@@ -709,7 +709,12 @@ pub const SNAPSHOT_FORMAT: u32 = 36;
 /// human-crewed hull, where it was always zero before; that is presentation
 /// rather than rules, but it is the same write and is named here so the two
 /// are not mistaken for separate changes.
-pub const SIMULATION_RULES: &str = "0.7";
+/// "0.8" — ship capabilities now follow the same authored-presence rules for
+/// player and NPC hulls. Player-only default shields, phasers and repair teams
+/// are removed, impulse steering shares the schema default, and equipment-less
+/// ships cannot borrow weapons from a global resource. Older saves would
+/// continue under different rules despite retaining the same payload shape.
+pub const SIMULATION_RULES: &str = "0.8";
 
 /// The authored data, computed rather than remembered.
 ///

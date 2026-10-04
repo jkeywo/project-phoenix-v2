@@ -24,8 +24,8 @@ struct ProjectileLifecycle;
 // ── Resources ─────────────────────────────────────────────────────────────
 
 /// Rendering config for the phaser beam (colour, max range).
-/// Populated from ship entity TOML during world setup; defaults are used if
-/// the TOML is absent.
+/// Installed only for an authored weapons block. Missing fields within that
+/// block use the legacy defaults; a missing block grants no equipment.
 ///
 /// Derives both `Resource` (existing player-ship singleton path) and
 /// `Component` (per-entity path, PR 5 unification).

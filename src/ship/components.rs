@@ -194,12 +194,8 @@ pub const PER_SHIP_BUS_COMPONENTS: &[&str] = &[
     "PendingTacticalFrequencyHint",
 ];
 
-/// The two functions that attach [`PER_SHIP_BUS_COMPONENTS`]. The player ship
-/// never goes through `spawn_entity`, so both must be checked.
-pub const PER_SHIP_BUS_SPAWN_SITES: &[(&str, &str)] = &[
-    ("src/entities/spawner.rs", "spawn_entity"),
-    ("src/server_app/world_setup.rs", "spawn_game_start_entities"),
-];
+/// One installer attaches these on every generic or GameStart ship.
+pub const PER_SHIP_BUS_SPAWN_SITES: &[(&str, &str)] = &[("src/entities/ship_spawn.rs", "install")];
 
 /// A distinct docking intent (issue #742): the UUID of the dock the Helm AI is
 /// closing on, or `None` when not docking.

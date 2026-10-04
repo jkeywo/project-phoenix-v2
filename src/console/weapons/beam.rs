@@ -794,9 +794,14 @@ pub(crate) fn handle_fire_phaser(
 
             // Resolve the bank id from the target SystemId by running the
             // canonical forward mapping over each authored bank and comparing.
-            let combat_config_default = PhaserCombatConfigResource::default();
-            let combat_config: &PhaserCombatConfigResource =
-                combat_config_opt.unwrap_or(&combat_config_default);
+            let Some(combat_config) = combat_config_opt else {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
+                continue;
+            };
             let Some(bank_id) = (if combat_config.0.banks.is_empty() {
                 // No banks in config: try the raw target string as bank id.
                 let raw = cmd.target.0.strip_prefix("phaser-").map(|s| s.to_string());
@@ -1234,9 +1239,9 @@ pub(crate) fn ai_phaser_auto_fire(
             continue;
         };
 
-        let combat_config_default = PhaserCombatConfigResource::default();
-        let combat_config: &PhaserCombatConfigResource =
-            combat_config_opt.unwrap_or(&combat_config_default);
+        let Some(combat_config) = combat_config_opt else {
+            continue;
+        };
         // Find EVERY bank that is off-cooldown, not already burning, and has the
         // target in its auto arc (issue #790 — this was `find_map`, i.e. at most
         // one bank per ship per tick).
@@ -1380,7 +1385,7 @@ pub(crate) fn ai_phaser_auto_fire(
 /// `Query<..., With<Ship>>` — one loop handles player-fired beams
 /// (LocalShip source) and NPC-fired beams (AI-controlled Ship source). Reads
 /// per-bank config from each shooter's own `PhaserCombatConfigResource`
-/// component (defaulting when absent) and applies the shooter's own
+/// component (skipping unequipped ships) and applies the shooter's own
 /// `ShipModifiers` to damage and range.
 ///
 /// Collects an owned [`ShooterState`] snapshot per live beam — everything the
@@ -1540,12 +1545,10 @@ pub(crate) fn tick_beams_prepare(
             continue;
         }
 
-        // Per-entity component paths (preferred). Fall back to defaults —
-        // and for `ShipModifiers`, also fall back to the global Resource
-        // to preserve legacy test paths that don't insert the component.
-        let combat_default = PhaserCombatConfigResource::default();
-        let combat_config: &PhaserCombatConfigResource =
-            combat_config_opt.unwrap_or(&combat_default);
+        // An injected/restored beam cannot grant an unequipped ship a weapon.
+        let Some(combat_config) = combat_config_opt else {
+            continue;
+        };
 
         let modifiers_default = crate::modifiers::ShipModifiers::new();
         let modifiers: &crate::modifiers::ShipModifiers =

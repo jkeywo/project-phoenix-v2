@@ -1,4 +1,5 @@
 import {describe,it,expect} from 'vitest';
+import {HOST_MESH_PROTOCOL} from '../../gui/host-mesh.js';
 import {createContinuationJournal,reconcileContinuation} from '../../gui/fleet-continuation.js';
 const participants=[1,2,3,4,5,6];
 const fleet=()=>participants.map(local=>createContinuationJournal({local,participants}));
@@ -72,7 +73,7 @@ it.each(['tick','gm-action'])('rejects a survivor-forged old-owner %s suffix',ty
   const tails=hosts.slice(1).map(host=>host.hold());
   const malicious=tails.find(tail=>tail.local===3);
   malicious.seen[1]=1;
-  malicious.rows.push({origin:1,sequence:1,raw:JSON.stringify({m:15,t:type,d:{from:1,kind:'granted'}})});
+  malicious.rows.push({origin:1,sequence:1,raw:JSON.stringify({m:HOST_MESH_PROTOCOL,t:type,d:{from:1,kind:'granted'}})});
   expect(()=>reconcileContinuation({participants,departed:1,coordinator:2,tails})).toThrow('unverifiable-owner-suffix');
 });
 

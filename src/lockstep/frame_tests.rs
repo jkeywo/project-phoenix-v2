@@ -110,7 +110,7 @@ fn every_frame_round_trips() {
 #[test]
 fn the_protocol_revision_is_pinned() {
     assert_eq!(
-        HOST_MESH_PROTOCOL, 15,
+        HOST_MESH_PROTOCOL, 16,
         "bumping this is a fleet-wide incompatible change: gui/host-mesh.js \
              refuses a frame whose `m` it does not know, so both halves and the \
              Vitest pin move together or a mixed fleet fails to agree a tick"

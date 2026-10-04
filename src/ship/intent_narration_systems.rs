@@ -94,18 +94,10 @@ impl ShipIntentNarration {
     }
 }
 
-/// The two functions that must attach [`ShipIntentNarration`].
-///
-/// Same hazard, and same guard technique, as
-/// [`crate::ship::components::PER_SHIP_BUS_SPAWN_SITES`]: the PLAYER ship never
-/// goes through `entities::spawner::spawn_entity`, so a per-ship component
-/// wired into only one of these reaches only NPCs, silently. Issues #785, #786,
-/// #882 and #885 each shipped exactly that. A ship without this component
-/// simply never narrates, and nothing warns.
-pub const INTENT_NARRATION_SPAWN_SITES: &[(&str, &str)] = &[
-    ("src/entities/spawner.rs", "spawn_entity"),
-    ("src/server_app/world_setup.rs", "spawn_game_start_entities"),
-];
+/// One installer attaches narration on every generic or GameStart ship.
+/// See also [`crate::ship::components::PER_SHIP_BUS_SPAWN_SITES`].
+pub const INTENT_NARRATION_SPAWN_SITES: &[(&str, &str)] =
+    &[("src/entities/ship_spawn.rs", "install")];
 
 /// The stations that narrate, and which decision axes each one reports.
 ///

@@ -4815,6 +4815,9 @@ station = "tactical"
             crate::server_app::Ship,
             npc_config,
             EntityUuid(npc_uuid.to_string()),
+            // This fixture intentionally models authored legacy phasers.
+            // Ships without equipment no longer gain implicit beams.
+            PhaserCombatConfigResource::default(),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
@@ -5243,6 +5246,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
+                PhaserCombatConfigResource::default(),
                 // The NPC's Tactical lock. Was seeded on the private
                 // `ShipAiMemory.target` mirror until #702 deleted it;
                 // `TacticalRadarSelection` is the surface every firing path reads.
@@ -5581,6 +5585,19 @@ rank = "Ltn."
         ))
         .id();
 
+    let banks = app
+        .world()
+        .get::<WeaponsConsoleSection>(npc_entity)
+        .unwrap()
+        .0
+        .phaser_banks
+        .clone();
+    app.world_mut()
+        .entity_mut(npc_entity)
+        .insert(PhaserCombatConfigResource(
+            crate::entities::config::PhaserCombatConfig { banks },
+        ));
+
     // Spawn target directly ahead (-Z), well within beam range.
     let _target = app
         .world_mut()
@@ -5678,6 +5695,7 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
+            PhaserCombatConfigResource::default(),
             {
                 let mut beam = ActiveBeam::default();
                 beam.start("", target_uuid, 10.0, 0.0);
@@ -17096,3 +17114,6 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
         "God Mode still reports the (zeroed) DamageTaken message; got {out:?}"
     );
 }
+
+#[path = "equipment_presence_tests.rs"]
+mod equipment_presence_tests;

@@ -1169,3 +1169,95 @@ fn default_pool_keeps_two_crews_in_lockstep() {
         2,
     )]);
 }
+
+/// Different hulls exercise the actual GameStart adapter, including the local
+/// hull selection and frozen crew seed on both sides of the mesh.
+#[test]
+fn different_fleet_hulls_keep_authored_equipment_and_publication_order() {
+    use project_phoenix::console::weapons::{PhaserCombatConfigResource, TorpedoSystemResource};
+    use project_phoenix::ship::power::PowerConfigResource;
+    use project_phoenix::ship_plugin::{ActiveStationRatings, PendingShipConfig};
+    let paths = [SHIP, "assets/entities/alliance_destroyer.toml"];
+    let configs: Vec<_> = paths
+        .iter()
+        .map(|path| project_phoenix::entities::include_resolve::load_entity_config(path).unwrap())
+        .collect();
+    // Only real, unchanged content enters the production cache.
+    for (path, config) in paths.iter().zip(&configs) {
+        project_phoenix::entities::config_cache::insert_native_config(
+            (*path).into(),
+            config.clone(),
+        );
+    }
+    let mut hosts: Vec<_> = [SLOT_ONE, SLOT_TWO]
+        .into_iter()
+        .enumerate()
+        .map(|(index, local)| {
+            let ships = paths
+                .iter()
+                .enumerate()
+                .map(|(i, path)| FleetShip {
+                    host: HostSlot(i as u32 + 1),
+                    ship_path: Some((*path).into()),
+                    authored_slot_id: None,
+                    crew: vec![(StationId("helm".into()), CREWED_RATING.into())],
+                })
+                .collect();
+            let mut host = Host::with_roster(local, FleetRoster::new(ships, local));
+            host.app.insert_resource(PendingShipConfig(
+                configs[index].ship_config.clone().unwrap(),
+            ));
+            host
+        })
+        .collect();
+    for _ in 0..8 {
+        step(&mut hosts);
+    }
+    assert_eq!(hosts[0].fleet_ships(), hosts[1].fleet_ships());
+    for host in &mut hosts {
+        let expected_local = host.fleet_ships()[&host.slot].clone();
+        assert_eq!(host.local_ship_uuid(), expected_local);
+        let mut query = host.app.world_mut().query::<(
+            &FleetSlotOf,
+            &PhaserCombatConfigResource,
+            Option<&TorpedoSystemResource>,
+            &PowerConfigResource,
+            &ActiveStationRatings,
+        )>();
+        let rows: Vec<_> = query.iter(host.app.world()).collect();
+        assert_eq!(rows.len(), 2);
+        for (slot, phasers, torpedoes, power, ratings) in rows {
+            let config = &configs[slot.0 .0 as usize - 1];
+            assert_eq!(
+                phasers.0.banks,
+                config.weapons_console.as_ref().unwrap().phaser_banks
+            );
+            assert_eq!(
+                torpedoes.map(|t| t.0.config.count),
+                config.torpedoes.as_ref().map(|t| t.count)
+            );
+            assert_eq!(power.0.capacity, config.power.as_ref().unwrap().capacity);
+            assert_eq!(
+                ratings.0.get(&StationId("helm".into())).map(String::as_str),
+                Some(CREWED_RATING)
+            );
+        }
+        // Both hosts publish the last authored row, even when their LocalShip differs.
+        assert_eq!(
+            host.app
+                .world()
+                .resource::<PowerConfigResource>()
+                .0
+                .capacity,
+            configs[1].power.as_ref().unwrap().capacity
+        );
+        assert_eq!(
+            host.app
+                .world()
+                .resource::<PhaserCombatConfigResource>()
+                .0
+                .banks,
+            configs[1].weapons_console.as_ref().unwrap().phaser_banks
+        );
+    }
+}

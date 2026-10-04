@@ -804,8 +804,8 @@ fn sync_phaser_beams(
             Option<&ModelMarkers>,
             &ActiveBeam,
             Option<&EntityUuid>,
-            Option<&PhaserRenderConfig>,
-            Option<&PhaserCombatConfigResource>,
+            &PhaserRenderConfig,
+            &PhaserCombatConfigResource,
             bevy::ecs::query::Has<LocalShip>,
         ),
         (
@@ -814,10 +814,6 @@ fn sync_phaser_beams(
             Without<BeamContactGlow>,
         ),
     >,
-    // Resource-level fallbacks kept for legacy code paths that read only the
-    // global resource (pre-PR-5 tests still work).
-    render_cfg_res: Res<PhaserRenderConfig>,
-    combat_cfg_res: Res<PhaserCombatConfigResource>,
     asteroid_q: Query<
         (&AsteroidUuid, &Transform),
         (With<Asteroid>, Without<BeamBody>, Without<BeamContactGlow>),
@@ -851,7 +847,7 @@ fn sync_phaser_beams(
         .ok()
         .and_then(|(_, _, uuid)| uuid.map(|u| u.0.clone()));
 
-    for (src_t, src_markers, beam, src_uuid_opt, render_cfg_opt, combat_cfg_opt, is_local) in
+    for (src_t, src_markers, beam, src_uuid_opt, render_cfg, combat_cfg, is_local) in
         beam_ships_q.iter()
     {
         if !beam.is_firing() {
@@ -867,11 +863,6 @@ fn sync_phaser_beams(
             None if is_local => "local".to_string(),
             None => continue,
         };
-
-        // Per-entity component paths (preferred). Fall back to the global
-        // Resource so pre-PR-5 test paths still render.
-        let render_cfg: &PhaserRenderConfig = render_cfg_opt.unwrap_or(&render_cfg_res);
-        let combat_cfg: &PhaserCombatConfigResource = combat_cfg_opt.unwrap_or(&combat_cfg_res);
 
         // One render entity per LIVE BANK (issue #790). The key format already
         // carried the bank, and its doc already promised "simultaneous beams

@@ -2,8 +2,8 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/collision.rs, src/server_app/broadcast_publish.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/lobby/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/server/bridge.rs, src/headless/app.rs]
-updated: 2026-08-28
+sources: [src/entities/ship_spawn.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/collision.rs, src/server_app/broadcast_publish.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/lobby/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/server/bridge.rs, src/headless/app.rs]
+updated: 2026-10-04
 ---
 
 # Server App Composition
@@ -20,7 +20,7 @@ updated: 2026-08-28
 | `src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`, its entity position/health delta caches, lifecycle reset, and explicit UUID pruning. |
 | `src/server_app/broadcast_publish.rs` | Publish/HUD systems, Blackboard live/lifecycle projection, `modifier_events_broadcaster`, the class-preserving `sim_outbox_broadcaster`, and world-setup publication. |
 | `src/server_app/collision.rs` | Rapier contact handling and collision damage. |
-| `src/server_app/world_setup.rs` | Static world setup and game-start entity spawning. |
+| `src/server_app/world_setup.rs` | World setup, prepared crew inputs for shared ship spawning, fleet metadata and compatibility-resource publication. |
 | `src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
 
 ## Registration contract

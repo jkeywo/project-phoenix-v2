@@ -83,7 +83,9 @@ use crate::lockstep::transfer::SnapshotChunk;
 // symptom, which is exactly the class of change this revision refuses whole.
 // Revision 14 adds one technical peer carrying both ship and GM capabilities.
 // Revision 13 peers would collapse it to one role or count two simulations.
-pub const HOST_MESH_PROTOCOL: u32 = 15;
+// Revision 16 requires unified authored ship initialization. The wire fields
+// are unchanged, but older hosts would simulate different equipment/defaults.
+pub const HOST_MESH_PROTOCOL: u32 = 16;
 
 /// One command a host admitted from its own crew, as it crosses to the fleet.
 ///

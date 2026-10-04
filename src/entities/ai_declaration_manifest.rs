@@ -226,11 +226,9 @@ pub struct FineSystemKind {
     /// player one, which is how #785, #786 and #882 each shipped broken.
     pub component: &'static str,
     pub idle_lever: IdleLever,
-    /// Every function that attaches this kind's `component`. More than one when
-    /// the player ship's own attachment path repeats what `spawn_entity` already
-    /// does (see the #885 comment on the double attachment), and ALL of them are
-    /// checked — wiring a declaration up on one path and not the other is this
-    /// area's most likely failure mode.
+    /// Every attachment site for this kind's `component`. Generic and GameStart
+    /// ships share one installer; Comms conversion remains in its owning helper.
+    /// Each declared site is checked against the source.
     pub spawn_sites: &'static [EvalSite],
 }
 
@@ -238,18 +236,9 @@ const fn site(file: &'static str, func: &'static str) -> EvalSite {
     EvalSite { file, func }
 }
 
-/// The generic per-entity spawn path PLUS the player ship's own attachment
-/// pass. The player ship never goes through `spawn_entity` at all, so anything
-/// listed here that
-/// `server_app` forgets is a declaration the player ship simply does not get.
-/// The four per-weapon kinds joined this list in #885b stage 5d, which is when
-/// their omission stopped being masked by a read-time synthesised fallback.
-const SPAWNER_AND_PLAYER: &[EvalSite] = &[
-    site("src/entities/spawner.rs", "spawn_entity"),
-    site("src/server_app/world_setup.rs", "spawn_game_start_entities"),
-];
-/// Both Comms declarations are resolved by one shared helper that both spawn
-/// paths call, so the helper is the single site.
+/// The single shared capability installer used by generic and GameStart spawns.
+const SHIP_INSTALLER: &[EvalSite] = &[site("src/entities/ship_spawn.rs", "install")];
+/// Comms declarations are resolved by the owning helper called by the installer.
 const COMMS_HELPER: &[EvalSite] = &[site(
     "src/console/comms/server.rs",
     "comms_console_ai_components",
@@ -263,98 +252,98 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
         host: &ai_flag_hosts::CAPTAIN_RED_ALERT,
         component: "CaptainAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Engines,
         host: &ai_flag_hosts::HELM_ENGINES,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Steering,
         host: &ai_flag_hosts::HELM_STEERING,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Lateral,
         host: &ai_flag_hosts::HELM_LATERAL,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Vertical,
         host: &ai_flag_hosts::HELM_VERTICAL,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Impulse,
         host: &ai_flag_hosts::HELM_IMPULSE,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Boost,
         host: &ai_flag_hosts::HELM_BOOST,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::PhaserBank,
         host: &ai_flag_hosts::PHASER_BANK,
         component: "PhaserBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::BlasterBank,
         host: &ai_flag_hosts::BLASTER_BANK,
         component: "BlasterBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoTube,
         host: &ai_flag_hosts::TORPEDO_TUBE,
         component: "TorpedoTubeAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::WeaponsDoctrine,
         host: &ai_flag_hosts::WEAPONS_DOCTRINE,
         component: "WeaponsDoctrineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoMagazine,
         host: &ai_flag_hosts::TORPEDO_MAGAZINE,
         component: "TorpedoMagazineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::ShieldsFocus,
         host: &ai_flag_hosts::SHIELDS_FOCUS,
         component: "ShieldsFocusAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Power,
         host: &ai_flag_hosts::POWER_ALLOCATION,
         component: "PowerAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::CommsResponse,
@@ -368,28 +357,28 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
         host: &ai_flag_hosts::SENSORS_SELECTOR,
         component: "SensorsTargetSelector",
         idle_lever: IdleLever::Absent,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::TacticalSelector,
         host: &ai_flag_hosts::TACTICAL_SELECTOR,
         component: "TacticalTargetSelector",
         idle_lever: IdleLever::Field("[weapons_console] selector_idle"),
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::NavigationSelector,
         host: &ai_flag_hosts::NAVIGATION_SELECTOR,
         component: "NavigationTargetSelector",
         idle_lever: IdleLever::Absent,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::RepairSelector,
         host: &ai_flag_hosts::REPAIR_SELECTOR,
         component: "RepairTargetSelector",
         idle_lever: IdleLever::Absent,
-        spawn_sites: SPAWNER_AND_PLAYER,
+        spawn_sites: SHIP_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::CommsSelector,

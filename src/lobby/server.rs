@@ -570,14 +570,12 @@ pub(crate) fn project_ship_client_config(
             ];
         }
     }
-    // [repair] block — pushes repair-team timings to the client so the
-    // Repair panel can derive its progress-bar durations without knowing
-    // server-side constants. Absent block keeps defaults that match the
-    // historical hardcoded constants.
+    // Resolved content with no team count has no teams, on the client too.
+    next.repair_team_count = ship_config
+        .repair
+        .as_ref()
+        .map_or(0, |rc| rc.repair_team_count as u8);
     if let Some(rc) = &ship_config.repair {
-        if rc.repair_team_count > 0 {
-            next.repair_team_count = rc.repair_team_count as u8;
-        }
         next.repair_travel_secs = rc.travel_duration_secs;
         next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
     }
@@ -863,10 +861,19 @@ fn build_manual_system_extras(
     let f = toml::Value::Float;
     let i = |n: i64| toml::Value::Integer(n);
 
-    // Shields base (issue #772): `[shields_console.base]` HP + regen. Optional
-    // block falls back to the historical shield defaults the runtime also uses.
-    if let Some(sc) = &ship_config.shields_console {
-        let base_cfg = sc.base.clone().unwrap_or_default();
+    // Only installed shields have manual metrics. Arcs can use the legacy
+    // base defaults; a policy declaration alone supplies no equipment.
+    if ship_config
+        .shields_console
+        .as_ref()
+        .is_some_and(|sc| sc.base.is_some())
+        || !ship_config.shield_arcs.is_empty()
+    {
+        let base_cfg = ship_config
+            .shields_console
+            .as_ref()
+            .and_then(|sc| sc.base.clone())
+            .unwrap_or_default();
         let mut base = toml::value::Table::new();
         base.insert("max_hp".into(), i(base_cfg.max_hp as i64));
         base.insert("regen_per_sec".into(), f(base_cfg.regen_per_sec as f64));

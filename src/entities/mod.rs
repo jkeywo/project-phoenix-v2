@@ -35,6 +35,7 @@ pub mod model_rig;
 pub mod pack_assets;
 pub mod planet;
 pub(crate) mod planet_texture;
+pub(crate) mod ship_spawn;
 pub mod spawner;
 pub mod star;
 pub mod tags;

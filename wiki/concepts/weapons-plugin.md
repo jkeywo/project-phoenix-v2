@@ -2,13 +2,19 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
-updated: 2026-09-08
+sources: [src/entities/ship_spawn.rs, src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
+updated: 2026-10-04
 ---
 
 # WeaponsPlugin
 
 The Tactical/weapons module follows the pure-root plus server-adapter convention. `src/console/weapons/mod.rs` declares and re-exports the module tree; `src/console/weapons/server.rs` owns `WeaponsPlugin`, shared resources, registration, and Tactical target selection.
+
+Weapon consumers and projections read each ship's equipment components.
+Missing components produce no mounts or ammunition and never borrow the global
+compatibility resources. Torpedo resource-only harnesses run only with no Ship
+entities; their magazine claims must also be unaddressed. Explicitly authored
+legacy weapon configurations retain their existing construction rules.
 
 ## Module layout
 

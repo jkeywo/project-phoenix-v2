@@ -126,8 +126,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/world/server.rs]
-      symbols: [spawn_entity]
+      paths: [src/entities/spawner.rs, src/entities/ship_spawn.rs, src/server_app/world_setup.rs, src/world/server.rs]
+      symbols: [spawn_entity, spawn_entity_with_ship_seed, ShipSpawnSeed]
       tests: [cargo test]
 
   - state: entity-mass-state
@@ -291,6 +291,9 @@ entities:
       confidence: confirmed
       title: Entity Component Composition
       summary: Applies each present validated template section as the matching runtime component set, including stable IDs/names, transform, physics, ship systems, faction/behaviour, combat, regions, and visual configuration.
+      rationale:
+        - "[ai] One Bevy ship installer constructs core state and authored capabilities for generic and GameStart spawns. GameStart supplies final topology, Station ratings, control sources and yaw before installation; fleet identity/fidelity and ordered compatibility-resource projection remain in its adapter."
+        - "[ai] Core ship initialization requires a prepared seed, Behaviour or static point defence. Independently authored capabilities still attach to nonship entities; neither a tag nor synthesized shield topology alone grants the complete ship substrate."
     architecture:
       kind: entity-composer
       authority: authoritative
@@ -299,8 +302,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/entities/loader.rs, src/ship/config.rs]
-      tests: [cargo test, src/entities/loader_tests.rs]
+      paths: [src/entities/spawner.rs, src/entities/ship_spawn.rs, src/entities/loader.rs, src/ship/config.rs]
+      tests: [cargo test, src/entities/loader_tests.rs, src/entities/spawner_tests.rs, src/server_app/world_setup_ship_spawn_tests.rs]
 
   - component: entity-template-capability-contract
     core:
@@ -308,6 +311,10 @@ entities:
       confidence: confirmed
       title: Entity Template Capability Contract
       summary: Treats ship systems and station topology as authored capabilities rather than fixed categories, so templates may omit engines or any console system while the runtime composes only declared components.
+      rationale:
+        - "[ai] Player and NPC equipment follows identical presence rules: shield base/arcs grant shields; positive repair_team_count grants teams; authored weapon blocks grant their equipment. Policy-only tables grant no shields or repair teams. Existing defaults inside explicitly authored blocks and mandatory physics/reactor state remain; impulse steering uses the schema default of 0.1."
+        - "[ai] A ship without weapon components publishes no mounts/ammunition and cannot fire, render beams or borrow global equipment. Resource-only torpedo harness behavior requires no Ship entities; magazine claims must additionally be unaddressed. Authored legacy-empty weapon configurations remain supported."
+        - "[ai] These rule changes increment SIMULATION_RULES to 0.8 and the host-only mesh revision to 16, refusing incompatible saves and mixed fleet builds without altering snapshot format, crew protocol or content identity."
     architecture:
       kind: configuration-contract
       authority: authoritative
@@ -316,5 +323,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, src/ship/config.rs, src/entities/spawner.rs]
-      tests: [cargo test]
+      paths: [src/entities/config.rs, src/ship/config.rs, src/entities/ship_spawn.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs]
+      tests: [cargo test, src/server_app/world_setup_ship_spawn_tests.rs, src/console/weapons/equipment_presence_tests.rs]

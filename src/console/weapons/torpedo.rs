@@ -305,7 +305,7 @@ pub fn torpedo_magazine_grant_policy_fires(
 pub(crate) fn handle_load_tube(
     mut ship_query: Query<
         (Entity, &ShipSystemControlSources, &AdmittedCommands),
-        With<crate::server_app::Ship>,
+        (With<crate::server_app::Ship>, With<TorpedoSystemResource>),
     >,
     mut inter_system: ResMut<InterSystemQueue>,
 ) {
@@ -366,13 +366,12 @@ pub(crate) fn handle_unload_tube(
         ),
         With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     for (control_sources, admitted, torpedo_sys_comp) in ship_query.iter_mut() {
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let torpedo_sys: &mut TorpedoSystem = match torpedo_sys_comp.as_deref_mut() {
             Some(c) => &mut c.0,
-            None => &mut torpedo_sys_res.0,
+            None => continue,
         };
 
         for cmd in admitted.0.iter() {
@@ -437,10 +436,8 @@ pub(crate) fn handle_unload_tube(
 /// tier) rejects volley orders from either origin.
 ///
 /// A ship with no `TorpedoSystemResource` component simply has no tubes and is
-/// skipped: the global `TorpedoSystemResource` Resource mirrors the LOCAL
-/// ship's magazine, so falling back to it here would let one ship's volley
-/// order retarget another ship's tubes (issue #738 removed the same fallback
-/// from `handle_unload_tube` / `handle_fire_torpedo` for exactly that reason).
+/// skipped: the compatibility resource may describe another fleet ship, so
+/// falling back to it here would let a volley order retarget that ship's tubes.
 ///
 /// Runs in `SimSet::Input`.
 pub(crate) fn handle_set_torpedo_volley_target(
@@ -598,7 +595,6 @@ pub(crate) fn handle_fire_torpedo(
         ),
         With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
@@ -653,12 +649,23 @@ pub(crate) fn handle_fire_torpedo(
         else {
             continue;
         };
-        // Per-entity component first; global Resource fallback for legacy tests.
+        // Equipment belongs to this ship; absence never borrows another magazine.
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let torpedo_sys: &mut crate::weapons::torpedo::TorpedoSystem =
             match torpedo_sys_comp.as_deref_mut() {
                 Some(c) => &mut c.0,
-                None => &mut torpedo_sys_res.0,
+                None => {
+                    for cmd in admitted.0.iter().filter(|cmd| {
+                        matches!(cmd.payload, SystemControlPayload::FireTorpedo { .. })
+                    }) {
+                        super::finish_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                        );
+                    }
+                    continue;
+                }
             };
 
         // Nothing below this point concerns a ship with no launch to gate, and
@@ -965,6 +972,7 @@ pub(crate) fn handle_fire_torpedo(
 /// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
 pub fn handle_torpedo_magazine_inter_system(
     queue: Res<InterSystemQueue>,
+    ships: Query<(), With<crate::server_app::Ship>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -1064,7 +1072,10 @@ pub fn handle_torpedo_magazine_inter_system(
                 continue;
             }
         }
-        // Resource-only fallback (no Ship entity with the component).
+        // Only an unaddressed claim in a resource-only harness may use this state.
+        if source_entity.is_some() || !ships.is_empty() {
+            continue;
+        }
         if !torpedo_sys_res.0.claim_magazine_round() {
             continue;
         }
@@ -1262,7 +1273,10 @@ pub(crate) fn tick_torpedo_lifecycle(
         ),
         With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+    (mut torpedo_sys_res, ships): (
+        ResMut<TorpedoSystemResource>,
+        Query<(), With<crate::server_app::Ship>>,
+    ),
     // `world` + the reported registry bundled into one param to stay under
     // Bevy's 16-parameter ceiling (issue #838). `world_tracked.world` is the
     // former `world: ResMut<WorldResource>`.
@@ -1435,8 +1449,8 @@ pub(crate) fn tick_torpedo_lifecycle(
     }
 
     // Resource-only fallback: tests that only insert the global
-    // `TorpedoSystemResource` (no Ship entity carrying it) still work.
-    if !any_ship_component {
+    // `TorpedoSystemResource` and no Ship entity still work.
+    if !any_ship_component && ships.is_empty() {
         let result = torpedo_sys_res.0.tick(dt, target_positions, &mut || {
             crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
         });

@@ -5,6 +5,7 @@ use bevy_rapier3d::prelude::*;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::core::messages::{DeliveryClass, EntitySnapshot, GamePhase, ServerMessage};
 use crate::lobby::{LobbyOutbox, OutboundMessage, Target, WorldResource};
+#[cfg(test)]
 use crate::weapons::shield::ShieldSystem;
 
 use crate::debug_overlay::{DamageLog, DamageLogEntry};

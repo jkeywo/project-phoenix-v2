@@ -53,25 +53,47 @@ struct CaptureConfig {
     base: Transform,
 }
 
-fn parse_config() -> CaptureConfig {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    if positional.len() < 2 {
-        eprintln!(
-            "usage: capture-billboard <model.glb> <out.png> [--views 8] [--resolution 256] [--pitch 20]"
-        );
-        std::process::exit(2);
-    }
-    let flag = |name: &str, dflt: f32| -> f32 {
-        args.iter()
-            .position(|a| a == name)
-            .and_then(|i| args.get(i + 1))
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(dflt)
-    };
-    let model = positional[0].clone();
-    let output = PathBuf::from(positional[1]);
+/// Validate argv before loading a sidecar or starting Bevy.
+#[derive(clap::Parser, Debug)]
+#[command(
+    name = "capture-billboard",
+    args_override_self = true,
+    about = "Bake a transparent far-LOD billboard atlas using a local GPU",
+    after_help = "Tiles are packed left to right. Hull world size is printed as JSON for the sidecar billboard scale. Orientation comes from the model's [base] rig; framing is measured from live geometry."
+)]
+struct CaptureArgs {
+    /// Model GLB to capture
+    model: String,
+    /// Atlas PNG to write
+    output: PathBuf,
+    /// Number of yaw views around the model
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    views: u32,
+    /// Width and height of each tile in pixels
+    #[arg(long, default_value_t = 256, value_parser = clap::value_parser!(u32).range(1..))]
+    resolution: u32,
+    /// Camera pitch in degrees
+    #[arg(long = "pitch", default_value_t = 20.0, allow_negative_numbers = true, value_parser = finite_pitch)]
+    pitch_deg: f32,
+}
 
+fn finite_pitch(value: &str) -> Result<f32, String> {
+    let number: f32 = value.parse().map_err(|_| "pitch must be a finite number")?;
+    if number.is_finite() {
+        Ok(number)
+    } else {
+        Err("pitch must be a finite number".into())
+    }
+}
+
+fn load_config(args: CaptureArgs) -> CaptureConfig {
+    let CaptureArgs {
+        model,
+        output,
+        views,
+        resolution,
+        pitch_deg,
+    } = args;
     // Orientation comes from the rig sidecar's `[base]` (`<stem>.model.toml`), so
     // the yaw views align with the game's forward. Framing is measured from the
     // live geometry, not the sidecar. Falls back to identity if there is no rig.
@@ -85,14 +107,23 @@ fn parse_config() -> CaptureConfig {
     CaptureConfig {
         model,
         output,
-        views: flag("--views", 8.0) as u32,
-        resolution: flag("--resolution", 256.0) as u32,
-        pitch_deg: flag("--pitch", 20.0),
+        views,
+        resolution,
+        pitch_deg,
         base,
     }
 }
 
 fn main() {
+    use clap::Parser;
+    let args = match CaptureArgs::try_parse() {
+        Ok(args) => args,
+        Err(error) => {
+            let code = error.exit_code();
+            let _ = error.print();
+            std::process::exit(code);
+        }
+    };
     // Root Bevy's asset server at the working directory (the project root), not
     // the exe's folder — this tool is run from the repo root like the other
     // scripts, and its `assets/` is there.
@@ -102,8 +133,8 @@ fn main() {
         }
     }
 
-    let config = parse_config();
-    let res = config.resolution.max(1);
+    let config = load_config(args);
+    let res = config.resolution;
 
     App::new()
         .insert_resource(config)
@@ -359,3 +390,7 @@ fn save_atlas(config: &CaptureConfig, tiles: &[Vec<u8>]) {
         views
     );
 }
+
+#[cfg(test)]
+#[path = "tests/capture_billboard_cli_tests.rs"]
+mod cli_tests;

@@ -1,11 +1,7 @@
 //! Command-line parsing for `phoenix-headless`.
 //!
-//! Hand-rolled rather than `clap`. The crate is a `cdylib` whose primary target
-//! is `wasm32-unknown-unknown`, so every dependency has to be
-//! `cfg(not(wasm32))`-gated or it lands in the shipped `.wasm`; combined with
-//! `lto = true` / `codegen-units = 1`, a ~10-crate argument parser is a real
-//! cost for eight flags. Keeping it a pure function over an iterator also makes
-//! it directly unit-testable, matching how the rest of this crate is tested.
+//! Native-only Clap declarations provide syntax and help; domain validation
+//! remains a non-exiting pure function over an argument iterator.
 
 use crate::headless::duel::MAX_SIDE;
 use crate::logging::{parse_log_entities, parse_log_spec, LogFilterConfig};
@@ -34,158 +30,135 @@ const DEFAULT_SHIP: &str = "assets/entities/alliance_cruiser.toml";
 /// live.
 const DEFAULT_PERF_SCENARIO: &str = "headless-default";
 
-pub const HELP: &str = "\
-phoenix-headless — run the simulation with no window, no renderer, and the
-player ship on AI backfill. Time advances at a fixed step as fast as the CPU
-allows, so a run is wall-clock independent.
+use clap::{CommandFactory, Parser};
 
-USAGE:
-    phoenix-headless [OPTIONS]
+#[derive(Parser)]
+#[command(
+    name = "phoenix-headless",
+    args_override_self = true,
+    about = "Run the simulation without a window or renderer, on AI Backfill at a fixed step"
+)]
+struct Cli {
+    #[arg(
+        long,
+        help = "World TOML to load    [default: assets/worlds/default.toml]"
+    )]
+    world: Option<String>,
+    #[arg(
+        long,
+        help = "Player ship template  [default: assets/entities/alliance_cruiser.toml]"
+    )]
+    ship: Option<String>,
+    #[arg(
+        long,
+        help = "Comma-separated ship classes for side A (max 5). The first is the player ship; the rest are NPC escorts. Mutually exclusive with --ship."
+    )]
+    side_a: Option<String>,
+    #[arg(
+        long,
+        help = "Comma-separated ship classes for side B (max 5), all NPCs hostile to side A. Names resolve in order: alliance_<name>.toml, then <name>.toml (both under assets/entities/), then <name> as a literal path. e.g. --side-a cruiser --side-b destroyer Either flag defaults --world to the duel harness (assets/worlds/duel.toml) — the only world carrying the `// duel:slots` marker, below which the side_a_*/ side_b_* slot drivers are regenerated. An explicit --world still wins, but a world with no such marker is rejected rather than silently run as-is. Without either flag the world's own authored roster runs untouched."
+    )]
+    side_b: Option<String>,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Frame rate the harness drives the app at, in frames per sim-second [default: 60]. Since issue #895 the SIMULATION advances on the world's [global] sim_tick_hz (default 60) inside Bevy's fixed loop, so this flag chooses how much virtual time each update() advances, not how often the sim thinks — any --hz covers the same logical ticks per sim-second — and since issue #896 that includes rapier, which steps once per logical tick too.",
+        value_parser = |value: &str| parse_positive_f64(value, "--hz")
+    )]
+    hz: Option<f64>,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Frame period; mutually exclusive with --hz",
+        value_parser = |value: &str| parse_positive_f64(value, "--dt")
+    )]
+    dt: Option<f64>,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Stop after N frames. Named before issue #895, when a frame and a sim tick were the same thing; it counts update() calls, so the LOGICAL ticks a run covers are N x sim_tick_hz / --hz.",
+        value_parser = whole_number
+    )]
+    ticks: Option<u64>,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Stop after N seconds of simulated time (If neither is given, the run stops at 60 sim-seconds.)",
+        value_parser = |value: &str| parse_positive_f64(value, "--sim-seconds")
+    )]
+    sim_seconds: Option<f64>,
+    #[arg(
+        long,
+        help = "Category levels, e.g. 'info,ai=debug,admit=trace' Categories: ai helm weapons shields damage power sensors comms repair nav captain lobby admit world regions physics broadcast assets config Levels: off error warn info debug trace"
+    )]
+    log: Option<String>,
+    #[arg(
+        long,
+        help = "Only log events for these entities, by display name. Comma-separated; matched exactly, then case-insensitively as a substring. e.g. 'Ironveil,Ashrender'"
+    )]
+    log_entity: Option<String>,
+    #[arg(
+        long,
+        help = "Write the exit summary here instead of stdout ('-' for stdout)"
+    )]
+    report: Option<String>,
+    #[arg(
+        long,
+        help = "'json' (exit summary only) or 'ndjson' (also stream every outbound message, one JSON object per line) [default: json]"
+    )]
+    report_format: Option<String>,
+    #[arg(long, help = "Exit non-zero if the run ends in GamePhase::GameOver")]
+    fail_on_game_over: bool,
+    #[arg(
+        long,
+        help = "Sample per-tick and whole-run wall time and write the capture JSON here ('-' for stdout). Absent, no measurement is collected at all. Sampling brackets the harness loop from outside, so a measured run steps identically to an unmeasured one. FixedUpdate system spans add observed per-phase intervals, not inclusive phase wall time. Coverage and unattributed work are retained in <PATH>.phases.json (stderr with '-')."
+    )]
+    perf_capture: Option<String>,
+    #[arg(
+        long,
+        help = "Scenario the capture is filed under, and the baseline it is compared against, at perf/baselines/<N>.ron [default: headless-default]. A missing baseline is not an error: the capture is still written. Comparison is warnings-only and never changes the exit code."
+    )]
+    perf_scenario: Option<String>,
+    #[arg(
+        long,
+        help = "Write a replay artifact here: the seed, the world, hull, length and pacing, the command log the run accepted, and the digests it passed through. Requires --seed — an artifact with an OS-drawn seed names a run nothing can re-derive."
+    )]
+    record: Option<String>,
+    #[arg(
+        long,
+        help = "Replay an artifact and report whether the second run reproduced the first. Everything the run needs comes from the ARTIFACT, so --world, --ship, --side-a, --side-b, --seed, --ticks, --sim-seconds, --dt and --hz are rejected alongside it rather than accepted and quietly ignored. Exit code 4 when the replay diverges, and the message names the tick window it first disagreed in rather than merely that it disagreed. --log/--log-entity and --report/--report-format are NOT rejected, but they are inert here: a replay prints a verdict, not the ordinary run report or per-tick log output those flags shape, so giving them changes nothing about what --replay does."
+    )]
+    replay: Option<String>,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Sample an authoritative-state digest every N LOGICAL ticks [default: 0 = off, and off costs nothing: no digest is computed at all]. The samples are what turn 'these two runs differ' into 'they agreed at tick 240 and disagreed by tick 250'. A --replay run samples at the interval its artifact recorded, so it compares like with like; this flag chooses the interval a --record run writes down.",
+        value_parser = whole_number
+    )]
+    digest_every: Option<u64>,
+    #[arg(
+        long,
+        help = "Measure console input-to-feedback latency and report the per-action p50/p75/max under 'console_latency' [default: off, and off costs nothing: no wall-clock reading is taken at all]. A headless run has no console client, so the only segment it can measure is the simulation's own admission-to-broadcast service window — the slice of a player's round trip the host is answerable for. Implied by --perf-capture, which files the same samples under the 'sim.console_ack' perf metric."
+    )]
+    console_latency: bool,
+    #[arg(
+        long,
+        help = "Use Bevy's SingleThreaded executor for fixed schedules and their shared StateTransition, plus a one-thread task pool. A fixed timestep alone is not reproducibility."
+    )]
+    deterministic: bool,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        help = "Master seed for the simulation RNG (u64). Implies --deterministic. Every RNG site — damage distribution, region effects, entity UUIDs — derives its own stream from this, so two runs with the same seed produce byte-identical reports. Byte-identical includes the timing fields: a --seed run reports wall_seconds, ticks_per_second and speedup_vs_realtime as 0, because those are measured off the host clock and would otherwise be the only lines that differ between two identical --seed runs. Only --seed gets this, because only --seed pins the scheduler: zeroed timings mean 'this run is replayable'. World-TOML-seeded and unseeded runs report the real figures. Precedence: --seed, then the world TOML's [global] seed, then a seed drawn from the OS. The resolved seed and its source are always in the report, so you can replay any run by feeding that seed back in as --seed. Only --seed pins the scheduler, so a run that took its seed from the world TOML or the OS was not itself reproducible: replaying it with --seed is a single-threaded re-run of the same scenario, and may not match what you saw. CAVEAT: the contract is same binary, same machine. Floating-point differences across CPUs or compiler versions can still diverge.",
+        value_parser = whole_number
+    )]
+    seed: Option<u64>,
+}
 
-WORLD
-    --world <PATH>        World TOML to load    [default: assets/worlds/default.toml]
-    --ship <PATH>         Player ship template  [default: assets/entities/alliance_cruiser.toml]
-
-DUEL (assets/worlds/duel.toml)
-    --side-a <LIST>       Comma-separated ship classes for side A (max 5). The
-                          first is the player ship; the rest are NPC escorts.
-                          Mutually exclusive with --ship.
-    --side-b <LIST>       Comma-separated ship classes for side B (max 5), all
-                          NPCs hostile to side A.
-                          Names resolve in order: alliance_<name>.toml, then
-                          <name>.toml (both under assets/entities/), then <name>
-                          as a literal path. e.g. --side-a cruiser --side-b destroyer
-                          Either flag defaults --world to the duel harness
-                          (assets/worlds/duel.toml) — the only world carrying the
-                          `// duel:slots` marker, below which the side_a_*/
-                          side_b_* slot drivers are regenerated. An explicit
-                          --world still wins, but a world with no such marker is
-                          rejected rather than silently run as-is. Without either
-                          flag the world's own authored roster runs untouched.
-
-TIME
-    --hz <N>              Frame rate the harness drives the app at, in frames
-                          per sim-second [default: 60]. Since issue #895 the
-                          SIMULATION advances on the world's [global]
-                          sim_tick_hz (default 60) inside Bevy's fixed loop,
-                          so this flag chooses how much virtual time each
-                          update() advances, not how often the sim thinks —
-                          any --hz covers the same logical ticks per
-                          sim-second — and since issue #896 that includes
-                          rapier, which steps once per logical tick too.
-    --dt <SECONDS>        Frame period; mutually exclusive with --hz
-    --ticks <N>           Stop after N frames. Named before issue #895, when a
-                          frame and a sim tick were the same thing; it counts
-                          update() calls, so the LOGICAL ticks a run covers are
-                          N x sim_tick_hz / --hz.
-    --sim-seconds <N>     Stop after N seconds of simulated time
-                          (If neither is given, the run stops at 60 sim-seconds.)
-
-LOGGING
-    --log <SPEC>          Category levels, e.g. 'info,ai=debug,admit=trace'
-                          Categories: ai helm weapons shields damage power sensors
-                          comms repair nav captain lobby admit world regions
-                          physics broadcast assets config
-                          Levels: off error warn info debug trace
-    --log-entity <NAMES>  Only log events for these entities, by display name.
-                          Comma-separated; matched exactly, then case-insensitively
-                          as a substring. e.g. 'Ironveil,Ashrender'
-
-OUTPUT
-    --report <PATH>       Write the exit summary here instead of stdout ('-' for stdout)
-    --report-format <F>   'json' (exit summary only) or 'ndjson' (also stream every
-                          outbound message, one JSON object per line) [default: json]
-    --fail-on-game-over   Exit non-zero if the run ends in GamePhase::GameOver
-
-PERFORMANCE
-    --perf-capture <PATH> Sample per-tick and whole-run wall time and write the
-                          capture JSON here ('-' for stdout). Absent, no
-                          measurement is collected at all. Sampling brackets the
-                          harness loop from outside, so a measured run steps
-                          identically to an unmeasured one. FixedUpdate system
-                          spans add observed per-phase intervals, not inclusive
-                          phase wall time. Coverage and unattributed work are
-                          retained in <PATH>.phases.json (stderr with '-').
-    --perf-scenario <N>   Scenario the capture is filed under, and the baseline
-                          it is compared against, at perf/baselines/<N>.ron
-                          [default: headless-default]. A missing baseline is not an
-                          error: the capture is still written. Comparison is
-                          warnings-only and never changes the exit code.
-
-DETERMINISM
-    --deterministic       Use Bevy's SingleThreaded executor for fixed schedules
-                          and their shared StateTransition, plus a one-thread
-                          task pool. A fixed timestep alone is not reproducibility.
-    --seed <N>            Master seed for the simulation RNG (u64). Implies
-                          --deterministic. Every RNG site — damage distribution,
-                          region effects, entity UUIDs — derives its own stream
-                          from this, so two runs with the same seed produce
-                          byte-identical reports.
-                          Byte-identical includes the timing fields: a --seed run
-                          reports wall_seconds, ticks_per_second and
-                          speedup_vs_realtime as 0, because those are measured
-                          off the host clock and would otherwise be the only
-                          lines that differ between two identical --seed runs.
-                          Only --seed gets this, because only --seed pins the
-                          scheduler: zeroed timings mean 'this run is
-                          replayable'. World-TOML-seeded and unseeded runs
-                          report the real figures.
-                          Precedence: --seed, then the world TOML's
-                          [global] seed, then a seed drawn from the OS. The
-                          resolved seed and its source are always in the report,
-                          so you can replay any run by feeding that seed back in
-                          as --seed. Only --seed pins the scheduler, so a run
-                          that took its seed from the world TOML or the OS was
-                          not itself reproducible: replaying it with --seed is a
-                          single-threaded re-run of the same scenario, and may
-                          not match what you saw.
-                          CAVEAT: the contract is same binary, same machine.
-                          Floating-point differences across CPUs or compiler
-                          versions can still diverge.
-
-REPLAY (issue #901)
-    --record <PATH>       Write a replay artifact here: the seed, the world,
-                          hull, length and pacing, the command log the run
-                          accepted, and the digests it passed through. Requires
-                          --seed — an artifact with an OS-drawn seed names a run
-                          nothing can re-derive.
-    --replay <PATH>       Replay an artifact and report whether the second run
-                          reproduced the first. Everything the run needs comes
-                          from the ARTIFACT, so --world, --ship, --side-a,
-                          --side-b, --seed, --ticks, --sim-seconds, --dt and
-                          --hz are rejected alongside it rather than accepted
-                          and quietly ignored. Exit code 4 when the replay
-                          diverges, and the message names the tick window it
-                          first disagreed in rather than merely that it
-                          disagreed.
-                          --log/--log-entity and --report/--report-format are
-                          NOT rejected, but they are inert here: a replay
-                          prints a verdict, not the ordinary run report or
-                          per-tick log output those flags shape, so giving them
-                          changes nothing about what --replay does.
-    --digest-every <N>    Sample an authoritative-state digest every N LOGICAL
-                          ticks [default: 0 = off, and off costs nothing: no
-                          digest is computed at all]. The samples are what turn
-                          'these two runs differ' into 'they agreed at tick 240
-                          and disagreed by tick 250'. A --replay run samples at
-                          the interval its artifact recorded, so it compares
-                          like with like; this flag chooses the interval a
-                          --record run writes down.
-
-OBSERVABILITY (issue #1169)
-    --console-latency     Measure console input-to-feedback latency and report
-                          the per-action p50/p75/max under 'console_latency'
-                          [default: off, and off costs nothing: no wall-clock
-                          reading is taken at all]. A headless run has no
-                          console client, so the only segment it can measure is
-                          the simulation's own admission-to-broadcast service
-                          window — the slice of a player's round trip the host
-                          is answerable for. Implied by --perf-capture, which
-                          files the same samples under the 'sim.console_ack'
-                          perf metric.
-
-    -h, --help            Show this help
-";
+/// Help generated from the same declarations used for parsing.
+pub fn help() -> String {
+    Cli::command().render_long_help().to_string()
+}
 
 /// How the run reports itself.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -316,97 +289,70 @@ pub enum ParseOutcome {
 
 /// Parse an argument list (excluding argv[0]).
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcome, String> {
-    let mut out = HeadlessArgs::default();
-    let mut it = args.into_iter().peekable();
-
-    // Deferred so `--hz`/`--dt` can be given in any order relative to
-    // `--ticks`/`--sim-seconds`, and so we can reject contradictory pairs.
-    let mut hz: Option<f64> = None;
-    let mut dt: Option<f64> = None;
-    let mut ticks: Option<u64> = None;
-    let mut sim_seconds: Option<f64> = None;
-    let mut log_entities: Option<String> = None;
-    // Whether `--ship` was given explicitly, so it can be rejected alongside
-    // `--side-a` (which sets the player ship from its first entry).
-    let mut ship_given = false;
-    // Whether `--world` was given explicitly, so `--side-a`/`--side-b` can
-    // default it to the duel harness without overriding a deliberate choice.
-    let mut world_given = false;
-
-    while let Some(arg) = it.next() {
-        let mut value = || -> Result<String, String> {
-            it.next().ok_or_else(|| format!("{arg} requires a value"))
-        };
-        match arg.as_str() {
-            "-h" | "--help" => return Ok(ParseOutcome::Help),
-            "--world" => {
-                out.world_path = value()?;
-                world_given = true;
-            }
-            "--ship" => {
-                out.ship_path = value()?;
-                ship_given = true;
-            }
-            "--side-a" => out.side_a = parse_ship_list(&value()?),
-            "--side-b" => out.side_b = parse_ship_list(&value()?),
-            "--hz" => hz = Some(parse_positive_f64(&value()?, "--hz")?),
-            "--dt" => dt = Some(parse_positive_f64(&value()?, "--dt")?),
-            "--ticks" => {
-                let v = value()?;
-                ticks = Some(
-                    v.parse()
-                        .map_err(|_| format!("--ticks expects a whole number, got {v:?}"))?,
-                );
-            }
-            "--sim-seconds" => sim_seconds = Some(parse_positive_f64(&value()?, "--sim-seconds")?),
-            "--log" => {
-                let spec = value()?;
-                out.log = parse_log_spec(&spec).map_err(|e| e.to_string())?;
-                out.log_spec = spec;
-            }
-            "--log-entity" => log_entities = Some(value()?),
-            "--report" => out.report_path = Some(value()?),
-            "--report-format" => {
-                let v = value()?;
-                out.report_format = match v.to_lowercase().as_str() {
-                    "json" => ReportFormat::Json,
-                    "ndjson" => ReportFormat::Ndjson,
-                    other => {
-                        return Err(format!(
-                            "--report-format expects 'json' or 'ndjson', got {other:?}"
-                        ))
-                    }
-                };
-            }
-            "--fail-on-game-over" => out.fail_on_game_over = true,
-            "--perf-capture" => out.perf_capture_path = Some(value()?),
-            "--perf-scenario" => {
-                let v = value()?;
-                if v.trim().is_empty() {
-                    return Err("--perf-scenario expects a name".into());
-                }
-                out.perf_scenario = v;
-            }
-            "--record" => out.record_path = Some(value()?),
-            "--replay" => out.replay_path = Some(value()?),
-            "--digest-every" => {
-                let v = value()?;
-                out.digest_every = v.parse().map_err(|_| {
-                    format!("--digest-every expects a whole number of ticks, got {v:?}")
-                })?;
-            }
-            "--console-latency" => out.console_latency = true,
-            "--deterministic" => out.deterministic = true,
-            "--seed" => {
-                let v = value()?;
-                out.seed = Some(
-                    v.parse()
-                        .map_err(|_| format!("--seed expects a whole number, got {v:?}"))?,
-                );
-            }
-            other => return Err(format!("unknown argument {other:?} (try --help)")),
+    let raw = match Cli::try_parse_from(std::iter::once("phoenix-headless".to_string()).chain(args))
+    {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {
+            return Ok(ParseOutcome::Help)
         }
+        Err(error) => return Err(error.to_string()),
+    };
+    let world_given = raw.world.is_some();
+    let ship_given = raw.ship.is_some();
+    let mut out = HeadlessArgs::default();
+    if let Some(world) = raw.world {
+        out.world_path = world;
     }
+    if let Some(ship) = raw.ship {
+        out.ship_path = ship;
+    }
+    out.side_a = raw
+        .side_a
+        .as_deref()
+        .map(parse_ship_list)
+        .unwrap_or_default();
+    out.side_b = raw
+        .side_b
+        .as_deref()
+        .map(parse_ship_list)
+        .unwrap_or_default();
+    let hz = raw.hz;
+    let dt = raw.dt;
+    let sim_seconds = raw.sim_seconds;
+    let ticks = raw.ticks;
+    if let Some(spec) = raw.log {
+        out.log = parse_log_spec(&spec).map_err(|e| e.to_string())?;
+        out.log_spec = spec;
+    }
+    let log_entities = raw.log_entity;
+    out.report_path = raw.report;
+    if let Some(v) = raw.report_format {
+        out.report_format = match v.to_lowercase().as_str() {
+            "json" => ReportFormat::Json,
+            "ndjson" => ReportFormat::Ndjson,
+            other => {
+                return Err(format!(
+                    "--report-format expects 'json' or 'ndjson', got {other:?}"
+                ))
+            }
+        };
+    }
+    out.fail_on_game_over = raw.fail_on_game_over;
+    out.perf_capture_path = raw.perf_capture;
+    if let Some(v) = raw.perf_scenario {
+        if v.trim().is_empty() {
+            return Err("--perf-scenario expects a name".into());
+        }
+        out.perf_scenario = v;
+    }
+    out.record_path = raw.record;
+    out.replay_path = raw.replay;
+    if let Some(interval) = raw.digest_every {
+        out.digest_every = interval;
+    }
+    out.console_latency = raw.console_latency;
+    out.deterministic = raw.deterministic;
+    out.seed = raw.seed;
 
     if hz.is_some() && dt.is_some() {
         return Err("--hz and --dt both set the timestep; give one or the other".into());
@@ -557,6 +503,12 @@ fn parse_ship_list(s: &str) -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn whole_number(value: &str) -> Result<u64, String> {
+    value
+        .parse()
+        .map_err(|_| format!("expects a whole number, got {value:?}"))
 }
 
 fn parse_positive_f64(s: &str, flag: &str) -> Result<f64, String> {

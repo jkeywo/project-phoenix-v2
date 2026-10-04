@@ -16,6 +16,79 @@ fn err(args: &[&str]) -> String {
 }
 
 #[test]
+fn singleton_values_override_while_panes_and_save_actions_append_in_order() {
+    let args = run(&[
+        "--world=first.toml",
+        "--world=last world.toml",
+        "--client-dir=dist",
+        "--pane=Ada",
+        "--save-create=First",
+        "--save-list",
+        "--save-rename",
+        "slot-a",
+        "New name",
+        "--pane=Grace",
+        "--save-export",
+        "slot-a",
+        "export path.json",
+        "--save-list",
+        "--save-create=Second",
+        "--save-delete=slot-b",
+        "--confirm-delete",
+        "--solo",
+        "--solo",
+    ]);
+    let sim = args.sim.unwrap();
+    assert_eq!(sim.world.as_deref(), Some("last world.toml"));
+    assert_eq!(sim.panes, ["Ada", "Grace"]);
+    assert_eq!(
+        sim.save_actions,
+        vec![
+            SaveOperatorAction::Create {
+                display_name: "First".into()
+            },
+            SaveOperatorAction::List,
+            SaveOperatorAction::Rename {
+                slot_id: "slot-a".into(),
+                display_name: "New name".into()
+            },
+            SaveOperatorAction::Export {
+                slot_id: "slot-a".into(),
+                path: "export path.json".into()
+            },
+            SaveOperatorAction::List,
+            SaveOperatorAction::Create {
+                display_name: "Second".into()
+            },
+            SaveOperatorAction::Delete {
+                slot_id: "slot-b".into(),
+                confirmed: true
+            },
+        ]
+    );
+    assert!(sim.solo);
+}
+
+#[test]
+fn action_arity_and_workshop_repetition_are_rejected() {
+    for tail in [
+        vec!["--save-rename", "slot"],
+        vec!["--save-export", "slot"],
+        vec!["extra"],
+    ] {
+        let mut args = vec!["--world=w.toml"];
+        args.extend(tail);
+        assert!(parse(&args).is_err(), "{args:?}");
+    }
+    assert!(err(&[
+        "--workshop-project=one",
+        "--workshop-project=two",
+        "--client-dir=dist"
+    ])
+    .contains("exactly one"));
+}
+
+#[test]
 fn workshop_selects_one_offline_root_and_never_inherits_lan_delivery() {
     for (flag, project) in [("--workshop-project", true), ("--workshop-mod", false)] {
         let args = run(&[flag, "chosen root", "--client-dir", "dist"]);
@@ -252,9 +325,9 @@ fn setup_refuses_a_mod_pack_shelf_like_every_other_simulation_flag() {
 
 #[test]
 fn help_documents_the_exclusive_native_save_directory_claim() {
-    assert!(HELP.contains("one phoenix-host may claim it at a time"));
-    assert!(HELP.contains("authoritative process's lifetime"));
-    assert!(HELP.contains("concurrent native peers need distinct paths"));
+    assert!(help().contains("one phoenix-host may claim it at a time"));
+    assert!(help().contains("authoritative process's lifetime"));
+    assert!(help().contains("concurrent native peers need distinct paths"));
 }
 
 #[test]

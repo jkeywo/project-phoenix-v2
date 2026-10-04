@@ -1,10 +1,7 @@
 //! Command-line parsing for `phoenix-host`.
 //!
-//! Hand-rolled and pure, for the same two reasons `headless::args` is: this
-//! crate ships to `wasm32-unknown-unknown` under `lto = true`, so an argument
-//! parser is a real cost paid by the browser build; and a pure function over an
-//! iterator is directly unit-testable, which is how the rest of the crate is
-//! tested.
+//! Native-only Clap declarations own syntax and generated help. The pure,
+//! non-exiting conversion retains Phoenix's domain and mode validation.
 
 /// Where the client bundle comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,294 +195,272 @@ pub const DEFAULT_CONTENT_DIR: &str = ".";
 pub const DEFAULT_SAVE_DIR: &str = ".phoenix/saves";
 pub const DEFAULT_MOD_PACK_DIR: &str = "./mod-packs";
 
-pub const HELP: &str = "\
-phoenix-host — serve the Phoenix client bundle, the content manifest and the
-scenario catalogue from a native PC process instead of a browser tab, and
-(with --world) run the authoritative simulation with a native viewscreen.
+use clap::{CommandFactory, FromArgMatches, Parser};
 
-USAGE:
-    phoenix-host [OPTIONS]
+#[derive(Parser)]
+#[command(
+    name = "phoenix-host",
+    args_override_self = true,
+    about = "Serve Phoenix content and run the authoritative native viewscreen",
+    after_help = "ENDPOINTS
+/host/stamp.json: protocol and content version stamp.
+/host/manifest.json: version-pinned manifest and catalogue; callers must present ?protocol=&content_id=&content_epoch= or x-phoenix-client-stamp: <protocol>/<id>/<epoch>. Mismatches return 409 naming both sides. Other assets are served from --client-dir."
+)]
+struct Cli {
+    #[arg(
+        long,
+        help = "Bind address [default: 0.0.0.0:8080] — accepts connections from the LAN by default; Windows will prompt to allow it through the firewall on first run. Use 127.0.0.1:<port> to restrict to this machine only."
+    )]
+    addr: Option<String>,
+    #[arg(
+        long,
+        help = "Serve a built client bundle from this directory (a `trunk dist/`). Omit to serve no assets at all and publish only the manifest/stamp endpoints, for a client hosted elsewhere."
+    )]
+    client_dir: Option<String>,
+    #[arg(
+        long,
+        help = "Scenario manifest to serve, relative to --content-dir [default: assets/scenarios.toml]. Point it at assets/scenarios.demo.toml for the curated public catalogue."
+    )]
+    manifest: Option<String>,
+    #[arg(
+        long,
+        help = "Root the manifest and its world TOMLs are read from [default: .]"
+    )]
+    content_dir: Option<String>,
+    #[arg(
+        long,
+        help = "Start even when the bundle's [content] identity cannot be read. Does NOT suppress a real mismatch."
+    )]
+    skip_bundle_check: bool,
+    #[arg(
+        long,
+        help = "Run the authoritative simulation for this world, relative to --content-dir, and open a native viewscreen window. Without it (and without --lobby) this process serves delivery only, exactly as it always has."
+    )]
+    world: Option<String>,
+    #[arg(
+        long,
+        help = "Register with this rendezvous service so browser clients can join, e.g. https://phoenix-rendezvous.project-phoenix.workers.dev The typed code the service issues is printed at startup. A native host has no WebRTC, so every crew member is carried over the service's WebSocket game relay; it registers saying so, and joiners skip the direct ladder rather than spending ninety seconds discovering it. These explicit flags override the built-in rendezvous used by the lobby's GM-only Join as Peer route; New Game remains LAN-direct by default."
+    )]
+    rendezvous: Option<String>,
+    #[arg(
+        long,
+        help = "Join this ship to an existing fleet. Requires --world, --client-dir, --rendezvous and --origin; refuses --solo. The native fleet link uses WebSocket relay."
+    )]
+    fleet_code: Option<String>,
+    #[arg(
+        long,
+        help = "The Origin header that socket claims. REQUIRED with --rendezvous and deliberately not defaulted: the service refuses an upgrade whose Origin is not on its deployed allowlist, and which origins a deployment allows is an operator decision recorded in docs/delivery-checklist.md §3a."
+    )]
+    origin: Option<String>,
+    #[arg(
+        long,
+        help = "The player's hull [default: the world's first [[available_ships]] entry]"
+    )]
+    ship: Option<String>,
+    #[arg(long, help = "Override the world's [global] seed")]
+    seed: Option<u64>,
+    #[arg(long, help = "Log filter, e.g. info,ai=debug,admit=trace")]
+    log: Option<String>,
+    #[arg(long, help = "Restrict logging to these entity names")]
+    log_entity: Option<String>,
+    #[arg(
+        long,
+        help = "Start the mission immediately with nobody connected; every station runs on Backfill. Without it the host waits in the lobby for participants to ready up, Ordinary crew can join on the host's own LAN port; --rendezvous adds a cloud route. With --lobby it starts on the tick the chosen world lands, not at boot: there is nothing to fly until someone has picked something."
+    )]
+    solo: bool,
+    #[arg(
+        long,
+        help = "Private native save-slot directory, relative to the launch directory [default: .phoenix/saves]. Exactly one phoenix-host may claim it at a time; the claim is held for that authoritative process's lifetime, so concurrent native peers need distinct paths."
+    )]
+    save_dir: Option<String>,
+    #[arg(long, action = clap::ArgAction::Append, num_args = 0, default_missing_value = "list", help = "Print this peer's local save catalogue, then run")]
+    save_list: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, help = "Capture a named manual save at this new session's first deterministic in-progress tick; cannot be combined with --resume-save")]
+    save_create: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, num_args = 2, value_names = ["SLOT", "NAME" ], help = " Rename a local manual save (its Store key is unchanged)")]
+    save_rename: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, num_args = 2, value_names = ["SLOT", "PATH"], help = " Export one local slot to a new file; never overwrites")]
+    save_export: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, help = "Delete one local slot only with the explicit paired confirmation flag")]
+    save_delete: Vec<String>,
+    #[arg(long, help = "Confirm all requested save deletions")]
+    confirm_delete: bool,
+    #[arg(
+        long,
+        help = "Boot this --world as a NEW session from a compatible local slot; incompatible saves are refused before run"
+    )]
+    resume_save: Option<String>,
+    #[arg(long, action = clap::ArgAction::Append, help = "Open a local Station pane for a participant of this name, in an embedded browser view showing the ordinary console surface. Repeatable; panes are tiled left to right. Each one joins, claims a Station and readies through exactly the contracts a phone does, with its own minted session token. Needs --client-dir: a pane loads the client bundle this host serves.")]
+    pane: Vec<String>,
+    #[arg(
+        long,
+        help = "Log, once a second at info level (so with --log info), one line saying where each frame went: the Bevy frame time, the embedded panes' update / pump / render / copy phases, pixels copied, Image assets re-uploaded, fixed-tick catch-up, and the residual left to the render thread. A diagnostic for the multi-screen bridge. The PHOENIX_FRAME_EXPERIMENTS environment variable (a comma list of novsync, raf33) switches one suspected cost off per run so the lines can be compared."
+    )]
+    frame_stats: bool,
+    #[arg(
+        long,
+        help = "Scan this directory for mod-pack .zip archives and offer them on the landing screen, relative to the launch directory [default with --lobby: ./mod-packs]. The default folder is created when absent. This window has no file dialog, so the folder IS the file picker. A chosen pack goes through exactly the validation a browser upload does, and is refused whole if any of it fails. Needs --lobby: a pack changes the catalogue a world is chosen FROM, and a --world host was told at the prompt what it is flying."
+    )]
+    mod_pack_dir: Option<String>,
+    #[arg(
+        long,
+        help = "Enumerate the connected monitors, print their stable hardware identities, geometry and current assignment, then exit. Validates --profile against them if given. A standalone diagnostic — needs no --world, and refuses every simulation/crew flag (--world, --lobby, --ship, --seed, --solo, --pane, --log, --log-entity, --rendezvous, --origin) rather than silently discarding them."
+    )]
+    setup: bool,
+    #[arg(
+        long,
+        help = "With --setup --profile, play a quiet one-second tone on each output assigned to that media surface and exit."
+    )]
+    test_output: Option<String>,
+    #[arg(
+        long,
+        help = "With --setup --profile, show microphone levels for five seconds per assigned microphone; no recording."
+    )]
+    meter_microphone: Option<String>,
+    #[arg(
+        long,
+        help = "With --setup --profile, open the assigned camera preview on Windows. Escape or close stops the preview."
+    )]
+    preview_camera: Option<String>,
+    #[arg(
+        long,
+        help = "A bridge-display profile (TOML). With --world the host covers every configured monitor with one borderless full-screen surface — the viewscreen, or a Station hosting one or two panes. With --setup it is validated against the connected displays. A missing or changed monitor is reported, never silently re-homed."
+    )]
+    profile: Option<String>,
+    #[arg(
+        long,
+        help = "Open the same viewscreen window with NO world: the landing offers New Game, Host as GM and Join as Peer. New Game and Host as GM use the scenario/hull picker; Join as Peer uses the typed fleet-code panel. Every flag below still applies to the mission that eventually starts. Mutually exclusive with --world, which is simply the same pick made up front."
+    )]
+    lobby: bool,
+    #[arg(long, action = clap::ArgAction::Append, help = "Open an offline editable project in the shared Workshop UI. Requires --client-dir and an Ultralight build. Delivery binds loopback only; no live session.")]
+    workshop_project: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, help = "Open an offline editable mod workspace instead. --content-dir supplies its read-only base content.")]
+    workshop_mod: Vec<String>,
+    #[arg(
+        long,
+        help = "Initial Workshop panel/source/preview selection. Valid only with one of the two Workshop roots."
+    )]
+    workshop_open: Option<String>,
+}
 
-WORKSHOP
-    --workshop-project <DIR> Open an offline editable project in the shared
-                          Workshop UI. Requires --client-dir and an Ultralight
-                          build. Delivery binds loopback only; no live session.
-    --workshop-mod <DIR>   Open an offline editable mod workspace instead.
-                           --content-dir supplies its read-only base content.
-    --workshop-open <QUERY> Initial Workshop panel/source/preview selection.
-                           Valid only with one of the two Workshop roots.
+/// Help generated from the same declarations used for parsing.
+pub fn help() -> String {
+    Cli::command().render_long_help().to_string()
+}
 
-SIMULATION
-    --world <PATH>        Run the authoritative simulation for this world,
-                          relative to --content-dir, and open a native
-                          viewscreen window. Without it (and without --lobby)
-                          this process serves delivery only, exactly as it
-                          always has.
-    --lobby               Open the same viewscreen window with NO world: the
-                          landing offers New Game, Host as GM and Join as Peer.
-                          New Game and Host as GM use the scenario/hull picker;
-                          Join as Peer uses the typed fleet-code panel. Every
-                          flag below still applies to the mission that
-                          eventually starts. Mutually exclusive with --world,
-                          which is simply the same pick made up front.
-    --ship <PATH>         The player's hull [default: the world's first
-                          [[available_ships]] entry]
-    --seed <N>            Override the world's [global] seed
-    --solo                Start the mission immediately with nobody connected;
-                          every station runs on Backfill. Without it the host
-                          waits in the lobby for participants to ready up,
-                          Ordinary crew can join on the host's own LAN port;
-                          --rendezvous adds a cloud route.
-                          With --lobby it starts on the tick the chosen world
-                          lands, not at boot: there is nothing to fly until
-                          someone has picked something.
-    --save-dir <PATH>     Private native save-slot directory, relative to the
-                          launch directory [default: .phoenix/saves]. Exactly
-                          one phoenix-host may claim it at a time; the claim is
-                          held for that authoritative process's lifetime, so
-                          concurrent native peers need distinct paths.
-    --save-list           Print this peer's local save catalogue, then run
-    --save-create <NAME>  Capture a named manual save at this new session's
-                          first deterministic in-progress tick; cannot be
-                          combined with --resume-save
-    --save-rename <SLOT> <NAME>
-                          Rename a local manual save (its Store key is unchanged)
-    --save-export <SLOT> <PATH>
-                          Export one local slot to a new file; never overwrites
-    --save-delete <SLOT> --confirm-delete
-                          Delete one local slot only with the explicit paired
-                          confirmation flag
-    --resume-save <SLOT>  Boot this --world as a NEW session from a compatible
-                          local slot; incompatible saves are refused before run
-    --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
-    --log-entity <NAMES>  Restrict logging to these entity names
-    --frame-stats         Log, once a second at info level (so with --log
-                          info), one line saying where each frame went: the
-                          Bevy frame time, the embedded panes' update / pump /
-                          render / copy phases, pixels copied, Image assets
-                          re-uploaded, fixed-tick catch-up, and the residual
-                          left to the render thread. A diagnostic for the
-                          multi-screen bridge. The PHOENIX_FRAME_EXPERIMENTS
-                          environment variable (a comma list of novsync,
-                          raf33) switches one suspected cost off per run so
-                          the lines can be compared.
-
-MOD PACKS (issue #1366)
-    --mod-pack-dir <DIR>  Scan this directory for mod-pack .zip archives and
-                          offer them on the landing screen, relative to the
-                          launch directory [default with --lobby: ./mod-packs].
-                          The default folder is created when absent. This window
-                          has no file dialog, so the folder IS the file picker.
-                          A chosen pack goes through exactly the validation a browser upload does,
-                          and is refused whole if any of it fails. Needs
-                          --lobby: a pack changes the catalogue a world is
-                          chosen FROM, and a --world host was told at the prompt
-                          what it is flying.
-
-LOCAL STATIONS (requires a build with --features ultralight)
-    --pane <NAME>         Open a local Station pane for a participant of this
-                          name, in an embedded browser view showing the ordinary
-                          console surface. Repeatable; panes are tiled left to
-                          right. Each one joins, claims a Station and readies
-                          through exactly the contracts a phone does, with its
-                          own minted session token. Needs --client-dir: a pane
-                          loads the client bundle this host serves.
-
-BRIDGE DISPLAYS (issue #1123)
-    --test-output <SURFACE> With --setup --profile, play a quiet one-second tone
-                          on each output assigned to that media surface and exit.
-    --meter-microphone <SURFACE> With --setup --profile, show microphone levels
-                          for five seconds per assigned microphone; no recording.
-    --preview-camera <SURFACE> With --setup --profile, open the assigned camera
-                          preview on Windows. Escape or close stops the preview.
-    --setup               Enumerate the connected monitors, print their stable
-                          hardware identities, geometry and current assignment,
-                          then exit. Validates --profile against them if given.
-                          A standalone diagnostic — needs no --world, and
-                          refuses every simulation/crew flag (--world, --lobby,
-                          --ship, --seed, --solo, --pane, --log, --log-entity,
-                          --rendezvous, --origin) rather than silently
-                          discarding them.
-    --profile <PATH>      A bridge-display profile (TOML). With --world the host
-                          covers every configured monitor with one borderless
-                          full-screen surface — the viewscreen, or a Station
-                          hosting one or two panes. With --setup it is validated
-                          against the connected displays. A missing or changed
-                          monitor is reported, never silently re-homed.
-
-CREW (issue #1113)
-    --rendezvous <URL>    Register with this rendezvous service so browser
-                          clients can join, e.g.
-                          https://phoenix-rendezvous.project-phoenix.workers.dev
-                          The typed code the service issues is printed at
-                          startup. A native host has no WebRTC, so every crew
-                          member is carried over the service's WebSocket game
-                          relay; it registers saying so, and joiners skip the
-                          direct ladder rather than spending ninety seconds
-                          discovering it. These explicit flags override the
-                          built-in rendezvous used by the lobby's GM-only Join
-                          as Peer route; New Game remains LAN-direct by default.
-    --fleet-code <CODE>   Join this ship to an existing fleet. Requires --world,
-                          --client-dir, --rendezvous and --origin; refuses
-                          --solo. The native fleet link uses WebSocket relay.
-    --origin <URL>        The Origin header that socket claims. REQUIRED with
-                          --rendezvous and deliberately not defaulted: the
-                          service refuses an upgrade whose Origin is not on its
-                          deployed allowlist, and which origins a deployment
-                          allows is an operator decision recorded in
-                          docs/delivery-checklist.md §3a.
-
-CLIENT
-    --client-dir <PATH>   Serve a built client bundle from this directory
-                          (a `trunk dist/`). Omit to serve no assets at all and
-                          publish only the manifest/stamp endpoints, for a
-                          client hosted elsewhere.
-    --skip-bundle-check   Start even when the bundle's [content] identity
-                          cannot be read. Does NOT suppress a real mismatch.
-
-CONTENT
-    --manifest <PATH>     Scenario manifest to serve, relative to --content-dir
-                          [default: assets/scenarios.toml]. Point it at
-                          assets/scenarios.demo.toml for the curated public
-                          catalogue.
-    --content-dir <PATH>  Root the manifest and its world TOMLs are read from
-                          [default: .]
-
-NETWORK
-    --addr <ADDR>         Bind address [default: 0.0.0.0:8080] — accepts
-                          connections from the LAN by default; Windows will
-                          prompt to allow it through the firewall on first run.
-                          Use 127.0.0.1:<port> to restrict to this machine only.
-
-    -h, --help            Show this help
-
-ENDPOINTS
-    /host/stamp.json      This host's protocol + content version stamp
-    /host/manifest.json   The version-pinned content manifest and catalogue.
-                          Callers must present their own stamp, either as
-                          ?protocol=&content_id=&content_epoch= or as the
-                          x-phoenix-client-stamp: <protocol>/<id>/<epoch>
-                          header. A mismatch is answered 409 with a body
-                          naming both sides.
-    everything else       Served from --client-dir, when one was given.
-";
+// Clap records each value's occurrence index. Merge the five append-only
+// action streams to preserve the operator's interleaved command order.
+fn ordered_save_actions(matches: &clap::ArgMatches) -> Vec<SaveOperatorAction> {
+    let mut actions = Vec::new();
+    for (id, arity) in [
+        ("save_list", 1),
+        ("save_create", 1),
+        ("save_rename", 2),
+        ("save_export", 2),
+        ("save_delete", 1),
+    ] {
+        let Some(occurrences) = matches.get_occurrences::<String>(id) else {
+            continue;
+        };
+        let indices: Vec<_> = matches.indices_of(id).into_iter().flatten().collect();
+        for (index, values) in indices.into_iter().step_by(arity).zip(occurrences) {
+            let values: Vec<_> = values.cloned().collect();
+            let action = match id {
+                "save_list" => SaveOperatorAction::List,
+                "save_create" => SaveOperatorAction::Create {
+                    display_name: values[0].clone(),
+                },
+                "save_rename" => SaveOperatorAction::Rename {
+                    slot_id: values[0].clone(),
+                    display_name: values[1].clone(),
+                },
+                "save_export" => SaveOperatorAction::Export {
+                    slot_id: values[0].clone(),
+                    path: values[1].clone(),
+                },
+                "save_delete" => SaveOperatorAction::Delete {
+                    slot_id: values[0].clone(),
+                    confirmed: false,
+                },
+                _ => unreachable!(),
+            };
+            actions.push((index, action));
+        }
+    }
+    actions.sort_by_key(|(index, _)| *index);
+    actions.into_iter().map(|(_, action)| action).collect()
+}
 
 /// Parse `phoenix-host`'s arguments.
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcome, String> {
-    let mut addr = DEFAULT_ADDR.to_string();
-    let mut addr_given = false;
-    let mut client_dir: Option<String> = None;
-    let mut manifest = DEFAULT_MANIFEST.to_string();
-    let mut content_dir = DEFAULT_CONTENT_DIR.to_string();
-    let mut skip_bundle_check = false;
-    let mut world: Option<String> = None;
-    let mut rendezvous: Option<String> = None;
-    let mut fleet_code: Option<String> = None;
-    let mut origin: Option<String> = None;
-    let mut ship: Option<String> = None;
-    let mut seed: Option<u64> = None;
-    let mut log_spec = String::new();
-    let mut log_entity = String::new();
-    let mut solo = false;
-    let mut save_dir = DEFAULT_SAVE_DIR.to_string();
-    let mut save_dir_given = false;
-    let mut save_actions = Vec::new();
-    let mut confirm_delete = false;
-    let mut resume_slot: Option<String> = None;
-    let mut panes: Vec<String> = Vec::new();
-    let mut frame_stats = false;
-    let mut mod_pack_dir: Option<String> = None;
-    let mut mod_pack_dir_given = false;
-    let mut setup = false;
-    let mut test_output = None;
-    let mut meter_microphone = None;
-    let mut preview_camera = None;
-    let mut profile: Option<String> = None;
-    let mut lobby = false;
-    let mut workshop: Option<WorkshopArgs> = None;
-    let mut workshop_open: Option<String> = None;
-
-    let mut it = args.into_iter();
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "-h" | "--help" => return Ok(ParseOutcome::Help),
-            "--addr" => {
-                addr = value_for(&arg, &mut it)?;
-                addr_given = true;
-            }
-            "--client-dir" => client_dir = Some(value_for(&arg, &mut it)?),
-            "--manifest" => manifest = value_for(&arg, &mut it)?,
-            "--content-dir" => content_dir = value_for(&arg, &mut it)?,
-            "--skip-bundle-check" => skip_bundle_check = true,
-            "--setup" => setup = true,
-            "--test-output" => test_output = Some(value_for(&arg, &mut it)?),
-            "--meter-microphone" => meter_microphone = Some(value_for(&arg, &mut it)?),
-            "--preview-camera" => preview_camera = Some(value_for(&arg, &mut it)?),
-            "--profile" => profile = Some(value_for(&arg, &mut it)?),
-            "--world" => world = Some(value_for(&arg, &mut it)?),
-            "--workshop-project" | "--workshop-mod" => {
-                if workshop.is_some() {
-                    return Err("Select exactly one Workshop root".into());
-                }
-                workshop = Some(WorkshopArgs {
-                    root: value_for(&arg, &mut it)?,
-                    project: arg == "--workshop-project",
-                    open: None,
-                });
-            }
-            "--workshop-open" => {
-                let value = value_for(&arg, &mut it)?;
-                if value.len() > 2048 || value.contains(['\r', '\n', '#']) {
-                    return Err("--workshop-open needs one bounded URL query".into());
-                }
-                workshop_open = Some(value);
-            }
-            "--lobby" => lobby = true,
-            "--ship" => ship = Some(value_for(&arg, &mut it)?),
-            "--seed" => {
-                let raw = value_for(&arg, &mut it)?;
-                seed = Some(
-                    raw.parse::<u64>()
-                        .map_err(|_| format!("--seed needs a whole number, got {raw:?}"))?,
-                );
-            }
-            "--log" => log_spec = value_for(&arg, &mut it)?,
-            "--log-entity" => log_entity = value_for(&arg, &mut it)?,
-            "--solo" => solo = true,
-            "--save-dir" => {
-                save_dir = value_for(&arg, &mut it)?;
-                save_dir_given = true;
-            }
-            "--save-list" => save_actions.push(SaveOperatorAction::List),
-            "--save-create" => save_actions.push(SaveOperatorAction::Create {
-                display_name: value_for(&arg, &mut it)?,
-            }),
-            "--save-rename" => save_actions.push(SaveOperatorAction::Rename {
-                slot_id: value_for(&arg, &mut it)?,
-                display_name: value_for(&arg, &mut it)?,
-            }),
-            "--save-export" => save_actions.push(SaveOperatorAction::Export {
-                slot_id: value_for(&arg, &mut it)?,
-                path: value_for(&arg, &mut it)?,
-            }),
-            "--save-delete" => save_actions.push(SaveOperatorAction::Delete {
-                slot_id: value_for(&arg, &mut it)?,
-                confirmed: false,
-            }),
-            "--confirm-delete" => confirm_delete = true,
-            "--resume-save" => resume_slot = Some(value_for(&arg, &mut it)?),
-            "--pane" => panes.push(value_for(&arg, &mut it)?),
-            "--frame-stats" => frame_stats = true,
-            "--mod-pack-dir" => {
-                mod_pack_dir = Some(value_for(&arg, &mut it)?);
-                mod_pack_dir_given = true;
-            }
-            "--rendezvous" => rendezvous = Some(value_for(&arg, &mut it)?),
-            "--fleet-code" => fleet_code = Some(value_for(&arg, &mut it)?),
-            "--origin" => origin = Some(value_for(&arg, &mut it)?),
-            other => return Err(format!("unknown argument {other:?}")),
+    let matches = match Cli::command()
+        .no_binary_name(true)
+        .try_get_matches_from(args)
+    {
+        Ok(matches) => matches,
+        Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {
+            return Ok(ParseOutcome::Help)
         }
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut save_actions = ordered_save_actions(&matches);
+    let raw = Cli::from_arg_matches(&matches).map_err(|error| error.to_string())?;
+    let addr_given = raw.addr.is_some();
+    let save_dir_given = raw.save_dir.is_some();
+    let mod_pack_dir_given = raw.mod_pack_dir.is_some();
+    let mut addr = raw.addr.unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    let manifest = raw.manifest.unwrap_or_else(|| DEFAULT_MANIFEST.to_string());
+    let content_dir = raw
+        .content_dir
+        .unwrap_or_else(|| DEFAULT_CONTENT_DIR.to_string());
+    let save_dir = raw.save_dir.unwrap_or_else(|| DEFAULT_SAVE_DIR.to_string());
+    let log_spec = raw.log.unwrap_or_default();
+    let log_entity = raw.log_entity.unwrap_or_default();
+    let panes = raw.pane;
+    let resume_slot = raw.resume_save;
+    if raw.workshop_project.len() + raw.workshop_mod.len() > 1 {
+        return Err("Select exactly one Workshop root".into());
     }
+    let mut workshop = raw
+        .workshop_project
+        .first()
+        .map(|root| WorkshopArgs {
+            root: root.clone(),
+            project: true,
+            open: None,
+        })
+        .or_else(|| {
+            raw.workshop_mod.first().map(|root| WorkshopArgs {
+                root: root.clone(),
+                project: false,
+                open: None,
+            })
+        });
+    let mut workshop_open = raw.workshop_open;
+    if workshop_open
+        .as_ref()
+        .is_some_and(|value| value.len() > 2048 || value.contains(['\r', '\n', '#']))
+    {
+        return Err("--workshop-open needs one bounded URL query".into());
+    }
+    let client_dir = raw.client_dir;
+    let skip_bundle_check = raw.skip_bundle_check;
+    let world = raw.world;
+    let rendezvous = raw.rendezvous;
+    let fleet_code = raw.fleet_code;
+    let origin = raw.origin;
+    let ship = raw.ship;
+    let seed = raw.seed;
+    let solo = raw.solo;
+    let confirm_delete = raw.confirm_delete;
+    let frame_stats = raw.frame_stats;
+    let mut mod_pack_dir = raw.mod_pack_dir;
+    let setup = raw.setup;
+    let test_output = raw.test_output;
+    let meter_microphone = raw.meter_microphone;
+    let preview_camera = raw.preview_camera;
+    let profile = raw.profile;
+    let lobby = raw.lobby;
 
     if let Some(selected) = workshop.as_mut() {
         selected.open = workshop_open.take();
@@ -768,12 +743,6 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         preview_camera,
         profile,
     })))
-}
-
-fn value_for<I: Iterator<Item = String>>(flag: &str, it: &mut I) -> Result<String, String> {
-    it.next()
-        .filter(|v| !v.starts_with("--"))
-        .ok_or_else(|| format!("{flag} needs a value"))
 }
 
 #[cfg(test)]

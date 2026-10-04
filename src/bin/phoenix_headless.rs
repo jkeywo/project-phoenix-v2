@@ -17,9 +17,9 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 use project_phoenix::headless::{
-    build_headless_app, build_headless_app_with_external_logging, build_report, parse_args,
+    build_headless_app, build_headless_app_with_external_logging, build_report, help, parse_args,
     replay::drive_run, run_sampled, run_sampled_with_phases, HeadlessArgs, ParseOutcome,
-    ReplayArtifact, HELP,
+    ReplayArtifact,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use project_phoenix::perf::{self, tick::TickSampler};
@@ -34,7 +34,7 @@ fn main() {
 
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(ParseOutcome::Help) => {
-            print!("{HELP}");
+            print!("{}", help());
             return;
         }
         Ok(ParseOutcome::Run(args)) => *args,

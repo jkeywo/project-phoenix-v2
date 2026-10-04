@@ -304,6 +304,10 @@ jobs:
           cargo build --features host --bin phoenix-host
           cargo build --features capture --bins
 
+      - name: Test native CLI syntax, help and startup refusals
+        run: |
+          cargo test --features host,headless,perf,capture --bin phoenix-perf --bin capture-billboard --bin tune-lods --test native_cli_smoke
+
   # Viewer tests run under their own feature set. --lib avoids building all
   # integration-test binaries, and viewer:: avoids rerunning the general suite.
   # The library test binary still compiles in full; this is not a codegen filter.

@@ -37,7 +37,7 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use project_phoenix::delivery::args::{parse_args, ClientSource, ParseOutcome, HELP};
+    use project_phoenix::delivery::args::{help, parse_args, ClientSource, ParseOutcome};
     use project_phoenix::delivery::serve::{
         preload_templates, HostServer, ManifestSource, ShutdownSignal,
     };
@@ -66,7 +66,7 @@ fn main() {
 
     let mut args = match parse_args(std::env::args().skip(1)) {
         Ok(ParseOutcome::Help) => {
-            print!("{HELP}");
+            print!("{}", help());
             return;
         }
         Ok(ParseOutcome::Run(args)) => *args,

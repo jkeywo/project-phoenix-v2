@@ -26,7 +26,7 @@ pub use app::{
     build_headless_app, build_headless_app_with, build_headless_app_with_external_logging, run,
     run_sampled, run_sampled_with_phases, BuildError, SimRegistrationOverrides,
 };
-pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
+pub use args::{help, parse_args, HeadlessArgs, ParseOutcome, ReportFormat};
 pub use digest::{state_digest, world_digest, DigestLedger, Divergence, FoldKey, Namespace};
 pub use duel::{apply_duel_sides, resolve_template, DuelError, DuelTemplateLoader};
 pub use fingerprint::{fingerprint, RunFingerprint};

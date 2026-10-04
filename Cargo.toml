@@ -490,6 +490,8 @@ bevy = { version = "0.18.1", features = ["debug"] }
 # `the_deterministic_build_runs_rapier_serially` in tests/headless_runner.rs is
 # the guard that makes silently re-adding it fail.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native CLI declarations and generated help; no parser in the browser graph.
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 # Native delivery request parsing; reuses Tungstenite's locked parser without
 # adding it to the browser build.
 httparse = "1.10.1"

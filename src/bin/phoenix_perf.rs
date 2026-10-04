@@ -16,123 +16,111 @@ fn main() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const HELP: &str = "\
-phoenix-perf — asset budgets and baseline comparison.
+use clap::{CommandFactory, Parser};
 
-USAGE:
-    phoenix-perf assets [--root <DIR>] [--capture <PATH>]
-    phoenix-perf mesh   [--root <DIR>] [--capture <PATH>]
-    phoenix-perf report --capture <PATH> [--scenario <NAME>] [--gate]
-    phoenix-perf adopt  (--capture <PATH> [--out <PATH>]
-                        | --artifact <DIR> [--out-dir <DIR>])
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Parser, Debug)]
+#[command(
+    name = "phoenix-perf",
+    args_override_self = true,
+    about = "Measure asset budgets and compare captures with committed baselines",
+    after_help = "Exit codes: 0 success or ungated verdict, 1 malformed baseline, 2 bad arguments or tool failure, 3 gated regression. Captures use '-' for stdin or stdout; baseline output uses '-' for stdout."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<PerfCommand>,
+}
 
-assets      Walk assets/models and assets/entities and write a capture of the
-            shipped byte counts and LOD coverage. No simulation runs, so the
-            same checkout always produces the same numbers.
-    --root <DIR>       Repository root to walk [default: .]
-    --capture <PATH>   Where to write the capture JSON ('-' for stdout)
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(clap::Subcommand, Debug)]
+enum PerfCommand {
+    /// Inventory shipped bytes and LOD coverage without running a simulation
+    #[command(args_override_self = true)]
+    Assets(MeasureArgs),
+    /// Measure mesh triangles and textures through Bevy's headless asset loader
+    #[command(args_override_self = true)]
+    Mesh(MeasureArgs),
+    /// Compare with perf/baselines/<scenario>.ron; warnings-only unless gated
+    #[command(args_override_self = true)]
+    Report(ReportArgs),
+    /// Record expectations while preserving existing statistics and tolerances
+    #[command(args_override_self = true)]
+    Adopt(AdoptArgs),
+}
 
-mesh        Resolve entity templates and their rig sidecars, then load every
-            runtime-reachable GLB level through Bevy's own asset loader and
-            write a capture of the triangle and texture counts it produced.
-            Headless — no window, no renderer, no simulation — but the loader
-            really runs, so this reads what the engine makes of a file rather
-            than a second opinion about its bytes.
-    --root <DIR>       Repository root to load from [default: .]
-    --capture <PATH>   Where to write the capture JSON ('-' for stdout)
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(clap::Args, Debug)]
+struct MeasureArgs {
+    /// Repository root
+    #[arg(long, default_value = ".")]
+    root: String,
+    /// Capture JSON destination ('-' for stdout)
+    #[arg(long, default_value = "-")]
+    capture: String,
+}
 
-report      Compare a capture against perf/baselines/<scenario>.ron and render
-            the findings. Warnings-first by default: the exit code is 0
-            whatever the verdict, because measurement informs optimisation
-            before it gates.
-    --capture <PATH>   Capture JSON to read ('-' for stdin)
-    --scenario <NAME>  Baseline to compare against [default: the capture's own
-                       scenario name]
-    --gate             Exit 3 on a fail or an incomparable finding. Only for
-                       scenarios the gating decision in src/perf/mod.rs says
-                       have earned it.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(clap::Args, Debug)]
+struct ReportArgs {
+    /// Capture JSON to read ('-' for stdin)
+    #[arg(long)]
+    capture: String,
+    /// Baseline name (default: capture's scenario)
+    #[arg(long)]
+    scenario: Option<String>,
+    /// Exit 3 on a failed or incomparable finding for a gating scenario
+    #[arg(long)]
+    gate: bool,
+}
 
-adopt       Record a baseline from a capture, so the numbers a runner is held
-            to are the numbers that runner produced. An existing baseline's
-            statistics and tolerances carry over untouched — only the expected
-            values move.
-    --capture <PATH>   Capture JSON to adopt ('-' for stdin)
-    --out <PATH>       Where to write the baseline ('-' for stdout)
-                       [default: perf/baselines/<scenario>.ron]
-    --artifact <DIR>   Adopt every capture in a downloaded CI artifact
-    --out-dir <DIR>    Where --artifact writes its baselines
-                       [default: perf/baselines]
-
-    -h, --help  Show this help
-";
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(clap::Args, Debug)]
+#[group(skip)]
+#[command(group(clap::ArgGroup::new("source").required(true).multiple(false)))]
+struct AdoptArgs {
+    /// Capture JSON to adopt ('-' for stdin)
+    #[arg(long, group = "source")]
+    capture: Option<String>,
+    /// Downloaded CI artifact directory containing captures
+    #[arg(long, group = "source")]
+    artifact: Option<String>,
+    /// Baseline output (default: perf/baselines/<scenario>.ron; '-' for stdout)
+    #[arg(long)]
+    out: Option<String>,
+    /// Artifact baseline directory (default: perf/baselines)
+    #[arg(long)]
+    out_dir: Option<String>,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
-        print!("{HELP}");
-        return;
-    }
-
-    let result = match args[0].as_str() {
-        "assets" => assets(&args[1..]),
-        "mesh" => mesh(&args[1..]),
-        "report" => report(&args[1..]),
-        "adopt" => adopt(&args[1..]),
-        other => Err(format!("unknown command {other:?} (try --help)")),
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = error.exit_code();
+            let _ = error.print();
+            std::process::exit(code);
+        }
     };
-
-    if let Err(e) = result {
-        eprintln!("phoenix-perf: {e}");
+    let result = match cli.command {
+        Some(PerfCommand::Assets(args)) => assets(args),
+        Some(PerfCommand::Mesh(args)) => mesh(args),
+        Some(PerfCommand::Report(args)) => report(args),
+        Some(PerfCommand::Adopt(args)) => adopt(args),
+        None => {
+            print!("{}", Cli::command().render_long_help());
+            return;
+        }
+    };
+    if let Err(error) = result {
+        eprintln!("phoenix-perf: {error}");
         std::process::exit(2);
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn flag(args: &[String], name: &str) -> Result<Option<String>, String> {
-    match args.iter().position(|a| a == name) {
-        None => Ok(None),
-        Some(i) => args
-            .get(i + 1)
-            .cloned()
-            .map(Some)
-            .ok_or_else(|| format!("{name} requires a value")),
-    }
-}
-
-/// Whether a valueless flag is present.
-#[cfg(not(target_arch = "wasm32"))]
-fn switch(args: &[String], name: &str) -> bool {
-    args.iter().any(|a| a == name)
-}
-
-/// Reject anything that is not a known flag.
-///
-/// `switches` take no value and `known` take one, so the walk has to know
-/// which is which — a value-taking flag consumes the token after it, and a
-/// switch does not. Getting that wrong would either read a switch's successor
-/// as a value or read a value as an unknown argument.
-#[cfg(not(target_arch = "wasm32"))]
-fn reject_unknown(args: &[String], known: &[&str], switches: &[&str]) -> Result<(), String> {
-    let mut i = 0;
-    while i < args.len() {
-        let arg = args[i].as_str();
-        if switches.contains(&arg) {
-            i += 1;
-        } else if known.contains(&arg) {
-            i += 2;
-        } else {
-            return Err(format!("unknown argument {arg:?} (try --help)"));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn assets(args: &[String]) -> Result<(), String> {
-    reject_unknown(args, &["--root", "--capture"], &[])?;
-    let root = flag(args, "--root")?.unwrap_or_else(|| ".".to_string());
-    let out = flag(args, "--capture")?.unwrap_or_else(|| "-".to_string());
+fn assets(args: MeasureArgs) -> Result<(), String> {
+    let MeasureArgs { root, capture: out } = args;
 
     let found = project_phoenix::perf::assets::inventory(std::path::Path::new(&root))
         .map_err(|e| e.to_string())?;
@@ -145,10 +133,8 @@ fn assets(args: &[String]) -> Result<(), String> {
 
 /// The mesh interior, through Bevy's loader (issue #905).
 #[cfg(not(target_arch = "wasm32"))]
-fn mesh(args: &[String]) -> Result<(), String> {
-    reject_unknown(args, &["--root", "--capture"], &[])?;
-    let root = flag(args, "--root")?.unwrap_or_else(|| ".".to_string());
-    let out = flag(args, "--capture")?.unwrap_or_else(|| "-".to_string());
+fn mesh(args: MeasureArgs) -> Result<(), String> {
+    let MeasureArgs { root, capture: out } = args;
 
     let found = project_phoenix::perf::mesh::measure(std::path::Path::new(&root))
         .map_err(|e| e.to_string())?;
@@ -160,13 +146,15 @@ fn mesh(args: &[String]) -> Result<(), String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn report(args: &[String]) -> Result<(), String> {
-    reject_unknown(args, &["--capture", "--scenario"], &["--gate"])?;
-    let path = flag(args, "--capture")?.ok_or("report requires --capture")?;
-    let gate = switch(args, "--gate");
+fn report(args: ReportArgs) -> Result<(), String> {
+    let ReportArgs {
+        capture: path,
+        scenario,
+        gate,
+    } = args;
     let capture = read_capture(&path)?;
 
-    let scenario = flag(args, "--scenario")?.unwrap_or_else(|| capture.scenario.clone());
+    let scenario = scenario.unwrap_or_else(|| capture.scenario.clone());
     let baseline_file = project_phoenix::perf::baseline_path(&scenario);
 
     match project_phoenix::perf::load_baseline(std::path::Path::new(&baseline_file)) {
@@ -201,26 +189,22 @@ fn report(args: &[String]) -> Result<(), String> {
 
 /// Record baselines from captures (issue #905).
 #[cfg(not(target_arch = "wasm32"))]
-fn adopt(args: &[String]) -> Result<(), String> {
-    reject_unknown(
-        args,
-        &["--capture", "--out", "--artifact", "--out-dir"],
-        &[],
-    )?;
-    match (flag(args, "--capture")?, flag(args, "--artifact")?) {
-        (Some(_), Some(_)) => Err("adopt takes --capture or --artifact, not both".to_string()),
-        (None, None) => Err("adopt requires --capture or --artifact".to_string()),
+fn adopt(args: AdoptArgs) -> Result<(), String> {
+    match (args.capture, args.artifact) {
         (Some(path), None) => {
             let capture = read_capture(&path)?;
-            let out = flag(args, "--out")?
+            let out = args
+                .out
                 .unwrap_or_else(|| project_phoenix::perf::baseline_path(&capture.scenario));
             adopt_one(&capture, &out)
         }
         (None, Some(dir)) => {
-            let out_dir = flag(args, "--out-dir")?
+            let out_dir = args
+                .out_dir
                 .unwrap_or_else(|| project_phoenix::perf::BASELINE_DIR.to_string());
             adopt_artifact(&dir, &out_dir)
         }
+        _ => unreachable!("Clap requires exactly one adoption source"),
     }
 }
 
@@ -340,3 +324,7 @@ fn write_raw(path: &str, contents: &str) -> Result<(), String> {
         }
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "tests/phoenix_perf_cli_tests.rs"]
+mod cli_tests;

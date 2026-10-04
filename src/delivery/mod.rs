@@ -19,6 +19,7 @@
 //! [`http`] is the pure transport contract (paths, MIME, caching); [`serve`] is
 //! the only part that touches a socket and is native-only.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod args;
 pub mod http;
 pub mod payload;

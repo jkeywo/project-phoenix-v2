@@ -2,11 +2,19 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-09-20
+sources: [src/bin/capture_billboard.rs, src/bin/tune_lods.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+updated: 2026-10-04
 ---
 
 # LOD Generation
+
+The native `capture-billboard` and `tune-lods` binaries declare their CLI with
+Clap and validate syntax and numbers before reading sidecars or starting Bevy.
+Options can precede the model path, accept `--option=value`, and use the last
+singleton value. Counts and dimensions must be positive integers; a range sweep
+needs at least three distances. Pitch is finite and signed; decimation requires
+candidates and a finite positive near-edge distance. Their parser tests live
+under `src/bin/tests/`.
 
 How a model's decimated LOD levels are produced, and how CI knows the ones in
 the tree still match what the sidecars ask for (issue #919).

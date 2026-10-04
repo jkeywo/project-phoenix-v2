@@ -13,6 +13,42 @@ fn err(args: &[&str]) -> String {
 }
 
 #[test]
+fn singleton_equals_values_override_and_flags_are_idempotent() {
+    let args = parse(&[
+        "--world=first",
+        "--world=last world.toml",
+        "--hz=30",
+        "--hz=60",
+        "--seed=1",
+        "--seed=42",
+        "--deterministic",
+        "--deterministic",
+    ]);
+    assert_eq!(args.world_path, "last world.toml");
+    assert_eq!(args.dt, 1.0 / 60.0);
+    assert_eq!(args.seed, Some(42));
+    assert!(args.deterministic);
+}
+
+#[test]
+fn unknown_flags_and_extra_positionals_are_syntax_errors() {
+    assert!(parse_args(["--world=x".into(), "extra".into()]).is_err());
+    assert!(parse_args(["--world".into(), "--unknown".into()]).is_err());
+    for option in ["--hz=NaN", "--dt=inf", "--sim-seconds=0", "--ticks=1.5"] {
+        assert!(parse_args([option.into()]).is_err(), "{option}");
+    }
+}
+
+#[test]
+fn generated_help_keeps_replay_and_determinism_contract_notes() {
+    let text = help();
+    assert!(text.contains("same binary, same machine"));
+    assert!(text.contains("Exit code 4"));
+    assert!(text.contains("--record"));
+    assert!(text.contains("--console-latency"));
+}
+
+#[test]
 fn defaults_are_sixty_hz_for_sixty_seconds() {
     let a = parse(&[]);
     assert_eq!(a.dt, 1.0 / 60.0);
@@ -131,7 +167,7 @@ fn seed_is_unset_by_default_and_implies_deterministic() {
 fn a_non_numeric_seed_is_rejected() {
     assert!(err(&["--seed", "lucky"]).contains("whole number"));
     assert!(err(&["--seed", "-1"]).contains("whole number"));
-    assert!(err(&["--seed"]).contains("requires a value"));
+    assert!(err(&["--seed"]).contains("a value is required"));
 }
 
 #[test]
@@ -150,8 +186,8 @@ fn bad_log_spec_surfaces_the_parser_error() {
 
 #[test]
 fn unknown_flags_and_missing_values_are_errors() {
-    assert!(err(&["--warp"]).contains("unknown argument"));
-    assert!(err(&["--world"]).contains("requires a value"));
+    assert!(err(&["--warp"]).contains("unexpected argument"));
+    assert!(err(&["--world"]).contains("a value is required"));
 }
 
 #[test]

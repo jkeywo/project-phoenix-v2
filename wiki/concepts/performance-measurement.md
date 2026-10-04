@@ -2,11 +2,19 @@
 title: Performance Measurement
 type: concept
 tags: [profiling, headless, renderer, performance]
-sources: [src/perf/mod.rs, src/perf/native_frames.rs, src/bin/phoenix_headless.rs, examples/profile_systems.rs, examples/profile_systems/timing.rs, examples/profile_systems/gpu.rs, examples/profile_gm.rs, examples/profile_player.js, scripts/profile-gm-current.ps1, scripts/profile-gm-report.mjs, scripts/profile-surface-summary.mjs, scripts/profile-provenance.mjs, scripts/profile-analysis.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, src/native_host/panes/surface_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/panes/frame_stats.rs, docs/profiling.md, pasm/spec/architecture/performance-measurement.yaml]
-updated: 2026-09-22
+sources: [src/bin/phoenix_perf.rs, src/headless/args.rs, src/perf/mod.rs, src/perf/native_frames.rs, src/bin/phoenix_headless.rs, examples/profile_systems.rs, examples/profile_systems/timing.rs, examples/profile_systems/gpu.rs, examples/profile_gm.rs, examples/profile_player.js, scripts/profile-gm-current.ps1, scripts/profile-gm-report.mjs, scripts/profile-surface-summary.mjs, scripts/profile-provenance.mjs, scripts/profile-analysis.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, src/native_host/panes/surface_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/panes/frame_stats.rs, docs/profiling.md, pasm/spec/architecture/performance-measurement.yaml]
+updated: 2026-10-04
 ---
 
 # Performance Measurement
+
+`phoenix-perf` declares typed assets, mesh, report and adopt subcommands with
+native-only Clap. Argument validation precedes capture I/O; help is generated
+from those declarations. An invocation without a subcommand prints help and
+exits zero. Capture/baseline formats, `-` stream conventions and runtime verdict
+exit codes remain in the existing measurement functions. `phoenix-headless`
+uses the same native dependency for syntax while its pure conversion validates
+simulation, duel and replay rules.
 
 `src/perf/` provides Phoenix collectors around the shared `vellum-perf` capture contract. The headless runner records update durations and can write a final tick/digest companion after timing closes. `NativeFrameCapture` observes native App cadence, completed fixed ticks, asset readiness and actual window dimensions; it buffers samples until the runner returns.
 

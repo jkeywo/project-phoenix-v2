@@ -129,41 +129,106 @@ struct TuneConfig {
     mode: TuneMode,
 }
 
-fn parse_config() -> TuneConfig {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    if positional.is_empty() {
-        eprintln!(
-            "usage: tune-lods <model.glb> [--variant <name>] [--resolution WxH] \
-             [--distances N] [--yaws N] [--pitch deg] [--out dir]"
-        );
-        std::process::exit(2);
+/// Syntax and numerical validation have no sidecar or GPU dependencies.
+#[derive(clap::Parser, Debug)]
+#[command(
+    name = "tune-lods",
+    args_override_self = true,
+    about = "Tune LOD switch ranges or mesh decimation using perceptual image differences",
+    after_help = "Range mode sweeps adjacent ladder levels and prints proposed boundaries as JSON. Decimate mode compares candidates with the reference at one near-edge distance and prints diffs plus the knee index. Both write review artifacts to --out (default: the temporary directory). Levels share the near model's rig orientation."
+)]
+struct TuneArgs {
+    /// Near model GLB whose rig sidecar supplies the ladder
+    model: String,
+    /// Rig variant to tune
+    #[arg(long, default_value = DEFAULT_VARIANT)]
+    variant: String,
+    /// Viewport dimensions, WxH
+    #[arg(long, default_value = "1920x1080", value_parser = resolution)]
+    resolution: (u32, u32),
+    /// Number of distances in a range sweep (at least three)
+    #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u32).range(3..))]
+    distances: u32,
+    /// Number of yaw views
+    #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..))]
+    yaws: u32,
+    /// Camera pitch in degrees
+    #[arg(long = "pitch", default_value_t = 20.0, allow_negative_numbers = true, value_parser = finite_pitch)]
+    pitch_deg: f32,
+    /// Directory for review artifacts
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Tune decimation instead of switch ranges
+    #[arg(long)]
+    decimate: bool,
+    /// Reference GLB (default: model)
+    #[arg(long = "ref")]
+    reference: Option<String>,
+    /// Comma-separated candidate GLBs, light to heavy
+    #[arg(long, required_if_eq("decimate", "true"), value_parser = candidate_list)]
+    candidates: Option<String>,
+    /// Near-edge distance to compare candidates at
+    #[arg(long, required_if_eq("decimate", "true"), value_parser = positive_distance)]
+    distance: Option<f32>,
+    /// Filename tag for artifacts (default: model stem)
+    #[arg(long)]
+    label: Option<String>,
+}
+
+fn resolution(value: &str) -> Result<(u32, u32), String> {
+    let Some((width, height)) = value.split_once(['x', 'X']) else {
+        return Err("resolution must be positive integer WxH".into());
+    };
+    match (width.parse::<u32>(), height.parse::<u32>()) {
+        (Ok(w), Ok(h)) if w > 0 && h > 0 => Ok((w, h)),
+        _ => Err("resolution must be positive integer WxH".into()),
     }
-    let str_flag = |name: &str| -> Option<String> {
-        args.iter()
-            .position(|a| a == name)
-            .and_then(|i| args.get(i + 1))
-            .cloned()
-    };
-    let num_flag = |name: &str, dflt: f32| -> f32 {
-        str_flag(name).and_then(|v| v.parse().ok()).unwrap_or(dflt)
-    };
+}
 
-    let model = positional[0].clone();
-    let variant = str_flag("--variant").unwrap_or_else(|| DEFAULT_VARIANT.to_string());
-    let (width, height) = str_flag("--resolution")
-        .and_then(|s| {
-            let mut it = s.split(['x', 'X']);
-            let w = it.next()?.parse().ok()?;
-            let h = it.next()?.parse().ok()?;
-            Some((w, h))
-        })
-        .unwrap_or((1920, 1080));
-    let out_dir = str_flag("--out")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+fn finite_pitch(value: &str) -> Result<f32, String> {
+    let number: f32 = value.parse().map_err(|_| "pitch must be a finite number")?;
+    if number.is_finite() {
+        Ok(number)
+    } else {
+        Err("pitch must be a finite number".into())
+    }
+}
 
-    let decimate = args.iter().any(|a| a == "--decimate");
+fn positive_distance(value: &str) -> Result<f32, String> {
+    let number: f32 = value
+        .parse()
+        .map_err(|_| "distance must be finite and positive")?;
+    if number.is_finite() && number > 0.0 {
+        Ok(number)
+    } else {
+        Err("distance must be finite and positive".into())
+    }
+}
+
+fn candidate_list(value: &str) -> Result<String, String> {
+    if value.split(',').any(|part| !part.is_empty()) {
+        Ok(value.to_string())
+    } else {
+        Err("at least one candidate GLB is required".into())
+    }
+}
+
+fn load_config(args: TuneArgs) -> TuneConfig {
+    let TuneArgs {
+        model,
+        variant,
+        resolution: (width, height),
+        distances,
+        yaws,
+        pitch_deg,
+        out,
+        decimate,
+        reference,
+        candidates,
+        distance,
+        label,
+    } = args;
+    let out_dir = out.unwrap_or_else(std::env::temp_dir);
 
     // The ladder is authored in the rig sidecar (issue #914), at the requested
     // variant. Its `[base]` also orients the yaw ring, and its `[extents]` frame
@@ -200,8 +265,8 @@ fn parse_config() -> TuneConfig {
     // list of GLB `LodLevel`s and co-orient them on the first one's base rig,
     // which for the reference IS this sidecar.
     let (levels, mode) = if decimate {
-        let ref_path = str_flag("--ref").unwrap_or_else(|| model.clone());
-        let candidates: Vec<String> = str_flag("--candidates")
+        let ref_path = reference.unwrap_or_else(|| model.clone());
+        let candidates: Vec<String> = candidates
             .map(|s| {
                 s.split(',')
                     .filter(|c| !c.is_empty())
@@ -209,17 +274,8 @@ fn parse_config() -> TuneConfig {
                     .collect()
             })
             .unwrap_or_default();
-        if candidates.is_empty() {
-            eprintln!("[tune-lods] --decimate needs --candidates <c0.glb,c1.glb,…>");
-            std::process::exit(2);
-        }
-        let distance = str_flag("--distance")
-            .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or_else(|| {
-                eprintln!("[tune-lods] --decimate needs --distance <near-edge>");
-                std::process::exit(2);
-            });
-        let label = str_flag("--label").unwrap_or_else(|| model_stem(&model));
+        let distance = distance.expect("Clap requires distance in decimate mode");
+        let label = label.unwrap_or_else(|| model_stem(&model));
         let glb = |p: &str| LodLevel {
             model: Some(p.to_string()),
             ..Default::default()
@@ -241,11 +297,11 @@ fn parse_config() -> TuneConfig {
     TuneConfig {
         model,
         variant,
-        width: (width as u32).max(1),
-        height: (height as u32).max(1),
-        distances: num_flag("--distances", 12.0) as u32,
-        yaws: num_flag("--yaws", 4.0) as u32,
-        pitch_deg: num_flag("--pitch", 20.0),
+        width,
+        height,
+        distances,
+        yaws,
+        pitch_deg,
         out_dir,
         framing,
         levels,
@@ -254,13 +310,22 @@ fn parse_config() -> TuneConfig {
 }
 
 fn main() {
+    use clap::Parser;
+    let args = match TuneArgs::try_parse() {
+        Ok(args) => args,
+        Err(error) => {
+            let code = error.exit_code();
+            let _ = error.print();
+            std::process::exit(code);
+        }
+    };
     if std::env::var_os("BEVY_ASSET_ROOT").is_none() {
         if let Ok(cwd) = std::env::current_dir() {
             std::env::set_var("BEVY_ASSET_ROOT", cwd);
         }
     }
 
-    let config = parse_config();
+    let config = load_config(args);
 
     App::new()
         .insert_resource(config)
@@ -632,7 +697,7 @@ fn drive(
 
         Phase::Sweep => {
             let dist = tune.distances[tune.di];
-            let yaw = tune.yi as f32 * std::f32::consts::TAU / config.yaws.max(1) as f32;
+            let yaw = tune.yi as f32 * std::f32::consts::TAU / config.yaws as f32;
             aim_camera(&mut cameras, tune.center, dist, yaw, config.pitch_deg);
 
             let want = tune.pair + tune.cap_which as usize;
@@ -671,7 +736,7 @@ fn drive(
             tune.cap_which = 0;
             tune.shown = None;
             tune.yi += 1;
-            if tune.yi >= config.yaws.max(1) as usize {
+            if tune.yi >= config.yaws as usize {
                 tune.yi = 0;
                 tune.di += 1;
                 if tune.di >= tune.distances.len() {
@@ -804,7 +869,7 @@ fn drive_decimate(
         }
 
         Phase::Sweep => {
-            let yaw = tune.d_yi as f32 * std::f32::consts::TAU / config.yaws.max(1) as f32;
+            let yaw = tune.d_yi as f32 * std::f32::consts::TAU / config.yaws as f32;
             aim_camera(cameras, tune.center, distance, yaw, config.pitch_deg);
 
             // Subject 0 is the reference; subject `n` is candidate `n-1`.
@@ -842,7 +907,7 @@ fn drive_decimate(
                 // Finished this yaw ring — next yaw, or finish.
                 tune.d_ci = 0;
                 tune.d_yi += 1;
-                if tune.d_yi >= config.yaws.max(1) as usize {
+                if tune.d_yi >= config.yaws as usize {
                     finish_decimate(tune, config);
                     tune.phase = Phase::Montage;
                     tune.m_which = 0;
@@ -1145,7 +1210,7 @@ fn sweep_distances(config: &TuneConfig, radius: f32) -> Vec<f32> {
     } else {
         (near * 40.0).max(radius * 60.0)
     };
-    let n = config.distances.max(3) as usize;
+    let n = config.distances as usize;
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1) as f32;
@@ -1381,3 +1446,7 @@ fn draw_line(img: &mut image::RgbaImage, x0: i64, y0: i64, x1: i64, y1: i64, c: 
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/tune_lods_cli_tests.rs"]
+mod cli_tests;

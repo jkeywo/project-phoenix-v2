@@ -13,7 +13,9 @@ import { paneWorkloadScript, instrumentNativeGmModule, nativeObserverReporterScr
 // HTTP containment permits only links inside the served root. Copy and resolve
 // input links so the instrumented bundle is independent of the build directory.
 export function stageNativeProbeBundle(bundle, destination) {
-  fs.cpSync(bundle, destination, { recursive: true, dereference: true });
+  // A filter selects Node's JS traversal, which honors dereference on Node 22.
+  // Its unfiltered native traversal preserves links (nodejs/node#59168).
+  fs.cpSync(bundle, destination, { recursive: true, dereference: true, filter: () => true });
 }
 
 export function parseNativeProbeArgs(argv) {

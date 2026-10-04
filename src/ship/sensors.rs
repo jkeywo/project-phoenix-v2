@@ -1295,7 +1295,7 @@ pub fn operate_sensors_ai(
         // gate — the one step it shares with the policy hosts — routes here.
         if !crate::ai::host::ai_operates(
             &sources.0,
-            crate::ship::system_registry::sensors_system_id(),
+            &crate::ship::system_registry::sensors_system_id(),
         ) {
             continue;
         }

@@ -41,6 +41,50 @@ fn tick_with<'a>(facts: &'a AiFacts, flags: &'a [&'a FlagStore]) -> HostTick<'a>
 }
 
 #[test]
+fn direct_gate_and_decide_respect_control_sources_and_overrides() {
+    let policy = threat_policy();
+    let mut facts = AiFacts::new();
+    facts.set("threat", 1.0);
+    let tick = tick_with(&facts, &[]);
+    for (source, operates) in [
+        (None, false),
+        (Some(ControlSource::Human), false),
+        (Some(ControlSource::Offline), false),
+        (Some(ControlSource::Ai), true),
+        (Some(ControlSource::Simplified), true),
+    ] {
+        for (damage_offline, gm_disabled, destroyed) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            let mut sources = ControlSourceResolver::new();
+            if let Some(source) = source {
+                sources.set(sid(), source);
+            }
+            sources.set_offline(sid(), damage_offline);
+            sources.set_gm_disabled(sid(), gm_disabled);
+            sources.set_destroyed(destroyed);
+            let expected = operates && !damage_offline && !gm_disabled && !destroyed;
+            let context = format!(
+                "source={source:?}, damage={damage_offline}, GM={gm_disabled}, destroyed={destroyed}"
+            );
+            assert_eq!(ai_operates(&sources, &tick.system), expected, "{context}");
+            assert_eq!(
+                decide(&sources, Some(&policy), &tick),
+                if expected {
+                    HostOutcome::Act(&AiPolicyVerb::SetRedAlert(true))
+                } else {
+                    HostOutcome::NotAiOperated
+                },
+                "{context}"
+            );
+        }
+    }
+}
+
+#[test]
 fn not_ai_operated_when_a_human_holds_the_system() {
     // Default source is Human → operate_ai is false → the AI stands down
     // before the policy is ever consulted (an armed policy proves the gate,

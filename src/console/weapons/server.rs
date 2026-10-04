@@ -1835,7 +1835,7 @@ fn ai_target_selection(
         // one step it shares with the policy hosts — routes here.
         let radar_operates_ai = crate::ai::host::ai_operates(
             &control_sources.0,
-            crate::ship::system_registry::tactical_radar_system_id(),
+            &crate::ship::system_registry::tactical_radar_system_id(),
         );
         if radar_idle || !radar_operates_ai {
             clear_locked_target_if_present(&mut blackboards);

@@ -11,8 +11,8 @@
 //! / `resolve_channel` preambles — and the fourth went through one of several
 //! byte-identical `emit_*_ai_command` shims.
 //!
-//! This module is the place all four live once. It is purely additive: no host
-//! calls it yet (issue #1205 lands the spine; later slices flip hosts onto it).
+//! This module owns the shared spine. Selector and ranked-channel hosts also
+//! use its Control Source gate through [`ai_operates`].
 //!
 //! ## Two halves, one deliberate split
 //!
@@ -45,6 +45,7 @@ use bevy::prelude::*;
 use crate::command_admission::ai_emit::emit_ai_command;
 
 use crate::ai::policy::{AiPolicy, AiPolicyVerb};
+use crate::core::messages::SystemId;
 use crate::ship::control_source::ControlSourceResolver;
 use crate::world::flags::{AiFacts, AiPolicyMemory, FlagStore};
 
@@ -125,7 +126,7 @@ pub struct HostTick<'a> {
 ///
 /// The three gates run in order and each short-circuits:
 ///
-/// 1. **Control Source.** `sources.policy_for(&tick.system).operate_ai` must
+/// 1. **Control Source.** [`ai_operates`] must
 ///    hold, or the outcome is [`HostOutcome::NotAiOperated`]. This is the one
 ///    place a human (or an offline system) suppresses the AI, and it reads the
 ///    same per-system resolver a human command is admitted against.
@@ -145,7 +146,7 @@ pub fn decide<'p>(
 ) -> HostOutcome<'p> {
     // Gate 1 — the Control Source must be AI. A human holder or a damage/rating
     // offline both resolve `operate_ai == false` here (see `control_tick_policy`).
-    if !sources.policy_for(&tick.system).operate_ai {
+    if !ai_operates(sources, &tick.system) {
         return HostOutcome::NotAiOperated;
     }
 
@@ -174,31 +175,16 @@ pub fn decide<'p>(
     }
 }
 
-/// The Control-Source gate alone, decided through the same [`decide`] spine the
-/// policy hosts walk (issue #1208).
+/// The Control Source gate shared by [`decide`] and selector/ranked hosts.
 ///
 /// A host whose RESOLUTION the spine does not model — a **selector** (Sensors,
 /// Navigation, Repair, the Comms hail selector, Tactical target selection) or a
 /// **ranked** channel (Power allocation) — still shares exactly one step with
-/// the policy hosts: the gate on its fine system's Control Source being AI. This
-/// runs [`decide`]'s gate 1 with a `None` policy (so the declaration and
-/// resolution gates are moot and the tick's facts/flags/channel go unread) and
-/// returns whether the AI may proceed. Routing it here keeps that gate in the
-/// spine for the selector/ranked hosts too, rather than hand-inlined as a
-/// twenty-second copy of `policy_for(sid).operate_ai`.
-pub fn ai_operates(
-    sources: &ControlSourceResolver,
-    system: crate::core::messages::SystemId,
-) -> bool {
-    let facts = AiFacts::new();
-    let tick = HostTick {
-        system,
-        channel: "",
-        facts: &facts,
-        flags: &[],
-        state: None,
-    };
-    !matches!(decide(sources, None, &tick), HostOutcome::NotAiOperated)
+/// the policy hosts: the gate on its fine system's Control Source being AI.
+/// The resolver applies the same damage, GM-disable and destroyed-hull overrides
+/// for every caller, without needing policy-resolution inputs.
+pub fn ai_operates(sources: &ControlSourceResolver, system: &SystemId) -> bool {
+    sources.policy_for(system).operate_ai
 }
 
 /// The read-only world context every AI host reads to seed [`decide`]'s inputs,

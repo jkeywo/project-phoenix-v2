@@ -139,7 +139,7 @@ pub fn operate_civilian_order_ai(
     for (entity_uuid, sources, blackboards, ship_config, mut admitted) in ships.iter_mut() {
         if !crate::ai::host::ai_operates(
             &sources.0,
-            crate::ship::system_registry::navigation_system_id(),
+            &crate::ship::system_registry::navigation_system_id(),
         ) {
             continue;
         }
@@ -866,7 +866,7 @@ pub fn operate_navigation_ai(
         // here.
         if !crate::ai::host::ai_operates(
             &sources.0,
-            crate::ship::system_registry::navigation_system_id(),
+            &crate::ship::system_registry::navigation_system_id(),
         ) {
             continue;
         }

@@ -733,7 +733,7 @@ fn ai_power_allocation(
         // cleanly.
         if !crate::ai::host::ai_operates(
             &control_sources.0,
-            crate::ship::system_registry::power_reactor_system_id(),
+            &crate::ship::system_registry::power_reactor_system_id(),
         ) {
             continue;
         }
@@ -1118,7 +1118,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         // shared bottleneck resource across tubes, and there is no unified
         // torpedo_system_id. The per-tube LAUNCH resolution stays in
         // `torpedo_tube_launch_policy_fires`.
-        if !crate::ai::host::ai_operates(&control_sources.0, policy_sid.clone()) {
+        if !crate::ai::host::ai_operates(&control_sources.0, &policy_sid) {
             continue;
         }
 
@@ -1382,7 +1382,7 @@ pub(crate) fn ai_torpedo_load(
         // Control-Source gate through the shared AI host spine (issue #1208): the
         // torpedo MAGAZINE's own operate_ai. The per-tube LOAD resolution stays in
         // `torpedo_tube_load_policy_fires`.
-        if !crate::ai::host::ai_operates(&control_sources.0, magazine_id.clone()) {
+        if !crate::ai::host::ai_operates(&control_sources.0, &magazine_id) {
             continue;
         }
 

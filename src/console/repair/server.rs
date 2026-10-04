@@ -1149,7 +1149,7 @@ pub fn operate_repair_ai(
         // human holder (or an offline system) stands the auto-dispatcher down.
         // Repair resolves a data-driven SELECTOR the spine does not model, so only
         // its gate — the one step it shares with the policy hosts — routes here.
-        if !crate::ai::host::ai_operates(&sources.0, repair_system_id()) {
+        if !crate::ai::host::ai_operates(&sources.0, &repair_system_id()) {
             continue;
         }
         // The queue + config are always present together on production ships

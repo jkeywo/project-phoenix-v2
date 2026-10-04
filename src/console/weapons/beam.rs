@@ -1292,7 +1292,7 @@ pub(crate) fn ai_phaser_auto_fire(
                         // per-bank FIRE resolution stays in
                         // `phaser_bank_policy_fires`.
                         if system_is_registered(control_sources, &bank_id)
-                            && !crate::ai::host::ai_operates(&control_sources.0, bank_id.clone())
+                            && !crate::ai::host::ai_operates(&control_sources.0, &bank_id)
                         {
                             return None;
                         }

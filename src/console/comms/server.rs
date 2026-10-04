@@ -1752,7 +1752,7 @@ pub fn operate_comms_ai(
         // routes here.
         if !crate::ai::host::ai_operates(
             &sources.0,
-            crate::ship::system_registry::comms_system_id(),
+            &crate::ship::system_registry::comms_system_id(),
         ) {
             continue;
         }
@@ -2573,7 +2573,7 @@ fn weighted_backfill_choice(
 
     if !crate::ai::host::ai_operates(
         &inputs.sources.0,
-        crate::ship::system_registry::comms_system_id(),
+        &crate::ship::system_registry::comms_system_id(),
     ) {
         return WeightedChoiceOutcome::Cancel;
     }

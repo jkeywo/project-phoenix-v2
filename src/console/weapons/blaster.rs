@@ -462,7 +462,7 @@ pub(crate) fn tick_blaster_auto_fire(
                 // (issue #1208): skip offline/human banks. The per-bank FIRE
                 // resolution stays in `blaster_bank_policy_fires`.
                 if system_is_registered(control_sources, bank_sid)
-                    && !crate::ai::host::ai_operates(&control_sources.0, bank_sid.clone())
+                    && !crate::ai::host::ai_operates(&control_sources.0, bank_sid)
                 {
                     continue;
                 }

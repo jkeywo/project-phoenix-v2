@@ -27,6 +27,19 @@ const result = (meta, extra = {}) => ({ operator_id: meta.operatorId, correlatio
   outcome: 'applied', tick: 1, ...extra });
 
 describe('GM action request feedback', () => {
+  it('calls injected timer functions without a feedback-instance receiver', () => {
+    const receivers = [];
+    const feed = new GmActionFeedback({ capacity: 1, timeoutMs: 10,
+      schedule: function () { receivers.push(this); return 7; },
+      cancelSchedule: function (timer) { receivers.push(this); expect(timer).toBe(7); },
+    });
+    const request = { operator_id: 'gm', correlation: 'timer-receiver' };
+    expect(feed.begin(request)).toBe(true);
+    feed.settle({ ...request, outcome: 'applied' });
+    expect(receivers).toEqual([undefined, undefined]);
+    expect(feed.size).toBe(0);
+  });
+
   it('settles exact operators throughout the full feed before limiting display history', () => {
     const { feed, lifecycle, press } = setup(1);
     const meta = press();

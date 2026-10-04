@@ -59,7 +59,8 @@ export class GmActionFeedback {
 
   clearTimer(meta) {
     if (!meta || meta.timerScheduled !== true) return;
-    try { this.cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
+    const { cancelSchedule } = this;
+    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
     meta.timer = null;
     meta.timerScheduled = false;
   }
@@ -67,7 +68,9 @@ export class GmActionFeedback {
   startTimer(meta) {
     if (meta.timerScheduled || this.get(meta.correlation) !== meta) return;
     meta.timerScheduled = true;
-    meta.timer = this.schedule(() => {
+    // Timer callbacks may be bare Window methods; do not give them this feed as receiver.
+    const { schedule } = this;
+    meta.timer = schedule(() => {
       // A cancelled callback cannot affect a later request reusing its correlation.
       if (this.get(meta.correlation) !== meta) return;
       this.lifecycle()?.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);

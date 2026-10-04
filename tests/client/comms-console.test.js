@@ -323,9 +323,9 @@ describe('cruiser comms renderStation', () => {
         course: { ...nav },
       },
     };
-    const payloadFor = station => JSON.parse(withVisitingSystems(
-      station, state, window.buildConsoleStateInner(station, state),
-    ));
+    const payloadFor = station => withVisitingSystems(
+      station, state, JSON.parse(window.buildConsoleStateInner(station, state)),
+    );
     for (const host of [null, 'liaison', null]) {
       state.blackboards.course.host_station = host;
       const projected = payloadFor('liaison');

@@ -18,7 +18,7 @@ const assignment = { id: 'private', text: 'objective.test', mandatory: true,
   status: 'Active', targets: ['seeded', 'spawned'], source: 'Mission' };
 
 function assertNoMarker(state) {
-  const nav = JSON.parse(buildNavigationConsoleState(state));
+  const nav = buildNavigationConsoleState(state);
   expect(nav.blips).toEqual([]);
   expect(nav.regions).toEqual([]);
   expect(buildRadarRegions(state.asteroids, state.objectives)).toEqual([]);
@@ -40,7 +40,7 @@ describe('recipient Objective marker presentation', () => {
     // A recipient gets both annotations from its scoped summary, and loses
     // them on resolution even though the shared metadata was not republished.
     state.apply({ type: 'ObjectiveSummary', data: { objectives: [assignment] } });
-    const shown = JSON.parse(buildNavigationConsoleState(state));
+    const shown = buildNavigationConsoleState(state);
     expect(shown.blips.map(row => row.uuid)).toEqual(['uuid-seeded', 'uuid-spawned']);
     expect(shown.regions).toHaveLength(2);
     state.apply({ type: 'ObjectiveSummary', data: { objectives: [{ ...assignment, status: 'Completed' }] } });
@@ -53,7 +53,7 @@ describe('recipient Objective marker presentation', () => {
     const state = { asteroids: [entity], objectives: [], sensorsRadarShows: ['ship'],
       sensorsRadarRange: 100, helmRadarRange: 100 };
     for (const build of [buildHelmConsoleState, buildSensorsConsoleState]) {
-      const contact = JSON.parse(build(state)).blips.find(row => row.uuid === entity.uuid);
+      const contact = build(state).blips.find(row => row.uuid === entity.uuid);
       expect(contact).toBeDefined();
       expect(contact.objective_target).toBe(false);
     }
@@ -72,7 +72,7 @@ describe('recipient Objective marker presentation', () => {
     assertNoMarker(buildGmStationConsoleInput(projection, ship));
     ship.objectives = [assignment];
     const recipient = buildGmStationConsoleInput(projection, ship);
-    expect(JSON.parse(buildNavigationConsoleState(recipient)).regions).toHaveLength(2);
+    expect(buildNavigationConsoleState(recipient).regions).toHaveLength(2);
     expect(ship.entities.every(row => row.objective_target)).toBe(true);
   });
 });

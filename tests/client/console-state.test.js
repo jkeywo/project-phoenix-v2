@@ -444,10 +444,6 @@ describe('buildTargetBlip', () => {
 
 // ── State builders — all return valid JSON ─────────────────────────────────────
 
-function parse(jsonStr) {
-  return JSON.parse(jsonStr);
-}
-
 const EMPTY = {};
 
 // ── foldTorpedoBadges (issue #957) ──────────────────────────────────────────
@@ -482,11 +478,11 @@ describe('foldTorpedoBadges', () => {
 
 describe('buildWeaponsConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildWeaponsConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildWeaponsConsoleState(EMPTY)).not.toThrow();
   });
 
   it('includes required keys', () => {
-    const s = parse(buildWeaponsConsoleState(EMPTY));
+    const s = buildWeaponsConsoleState(EMPTY);
     expect(s).toHaveProperty('target_uuid');
     expect(s).toHaveProperty('banks');
     expect(s).toHaveProperty('tubes');
@@ -496,25 +492,25 @@ describe('buildWeaponsConsoleState', () => {
   });
 
   it('torpedo_max falls back to torpedo_count when torpedo-magazine blackboard absent', () => {
-    const s = parse(buildWeaponsConsoleState({ weaponsTorpedoCount: 6 }));
+    const s = buildWeaponsConsoleState({ weaponsTorpedoCount: 6 });
     expect(s.torpedo_max).toBe(6);
   });
 
   it('torpedo_max reads capacity from torpedo-magazine blackboard', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       weaponsTorpedoCount: 4,
       blackboards: { 'torpedo-magazine': { capacity: 12 } },
-    }));
+    });
     expect(s.torpedo_max).toBe(12);
   });
 
   it('uses state values when present', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       weaponsTarget: 'tgt-1',
       weaponsTargetName: 'Harrow Patrol',
       weaponsPhaserMode: 'Manual',
       weaponsTorpedoCount: 3,
-    }));
+    });
     expect(s.target_uuid).toBe('tgt-1');
     expect(s.target_name).toBe('Harrow Patrol');
     expect(s.phaser_mode).toBe('Manual');
@@ -522,7 +518,7 @@ describe('buildWeaponsConsoleState', () => {
   });
 
   it('forwards the shared weapon readiness contract for all three families (issue #764)', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: {
         'tactical': {
           target_uuid: 'tgt-1',
@@ -533,7 +529,7 @@ describe('buildWeaponsConsoleState', () => {
           phaser_mode: 'Manual',
         },
       },
-    }));
+    });
     expect(s.banks[0].readiness.blocking_reason).toBe('OutOfArc');
     expect(s.banks[0].readiness.target_range).toBe(42);
     expect(s.tubes[0].readiness.blocking_reason).toBe('Loading');
@@ -542,12 +538,12 @@ describe('buildWeaponsConsoleState', () => {
   });
 
   it('derives target_name from the locked server blip when no explicit name is stored', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       weaponsTarget: 'srv-1',
       weaponsBlips: [
         { uuid: 'srv-1', radar_x: 0.2, radar_y: 0.1, scaled_radius: 0.02, kind: 'ship', selectable: true, name: 'KSV Nemesis' },
       ],
-    }));
+    });
     expect(s.target_name).toBe('KSV Nemesis');
   });
 
@@ -559,7 +555,7 @@ describe('buildWeaponsConsoleState', () => {
         { uuid: 'far', x: WEAPONS_RADAR_RANGE + 1, z: 0, tags: ['asteroid'], radar_icon: 'asteroid' },
       ],
     };
-    const s = parse(buildWeaponsConsoleState(state));
+    const s = buildWeaponsConsoleState(state);
     expect(s.blips.map(b => b.uuid)).toEqual(['close']);
   });
 
@@ -567,10 +563,10 @@ describe('buildWeaponsConsoleState', () => {
     const serverBlips = [
       { uuid: 'srv-1', radar_x: 0.2, radar_y: 0.1, scaled_radius: 0.02, kind: 'ship', selectable: true },
     ];
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       weaponsBlips: serverBlips,
       asteroids: [{ uuid: 'fallback-1', x: 1, z: 0, tags: ['asteroid'] }],
-    }));
+    });
     expect(s.blips).toEqual(serverBlips);
   });
 
@@ -581,12 +577,12 @@ describe('buildWeaponsConsoleState', () => {
     const radarRegions = [
       { uuid: 'neb-1', x: 0, z: 0, shape: 'sphere', radius: 50, color: [0.5, 0.5, 0.5] },
     ];
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: {
         'tactical': { target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto' },
         'tactical-radar': { selected_target: 'lock-1', blips: radarBlips, regions: radarRegions },
       },
-    }));
+    });
     // Combat Lock comes from the tactical-radar blackboard's selected_target.
     expect(s.target_uuid).toBe('lock-1');
     // Blips + regions moved off the Weapons blackboard onto tactical-radar.
@@ -616,13 +612,13 @@ describe('buildWeaponsConsoleState', () => {
     };
     const stored = state.blackboards['tactical-radar'].blips;
 
-    const first = parse(buildWeaponsConsoleState(state));
+    const first = buildWeaponsConsoleState(state);
     // Both markers must actually be appended, or this asserts nothing.
     expect(first.blips.map(b => b.kind)).toContain('science-target');
     expect(first.blips.map(b => b.kind)).toContain('waypoint');
     expect(stored.length).toBe(1);
 
-    const second = parse(buildWeaponsConsoleState(state));
+    const second = buildWeaponsConsoleState(state);
     expect(stored.length).toBe(1);
     expect(second.blips.length).toBe(first.blips.length);
   });
@@ -647,7 +643,7 @@ describe('buildWeaponsConsoleState', () => {
   // happens, and that it never invents a capability the server did not send.
 
   it('folds the server torpedo_armed fact into a localised badge on the blip', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: {
         'tactical-radar': {
           blips: [
@@ -655,14 +651,14 @@ describe('buildWeaponsConsoleState', () => {
           ],
         },
       },
-    }));
+    });
     const badged = s.blips.find(b => b.uuid === 'torp-boat');
     expect(getTable().has('console.radar.torpedo_armed')).toBe(true);
     expect(badged.torpedo_badge).toBe(t('console.radar.torpedo_armed'));
   });
 
   it('leaves a contact the server did not flag without a badge', () => {
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: {
         'tactical-radar': {
           blips: [
@@ -671,7 +667,7 @@ describe('buildWeaponsConsoleState', () => {
           ],
         },
       },
-    }));
+    });
     expect(s.blips.find(b => b.uuid === 'phaser-boat').torpedo_badge).toBeUndefined();
     expect(s.blips.find(b => b.uuid === 'rock').torpedo_badge).toBeUndefined();
   });
@@ -689,7 +685,7 @@ describe('buildWeaponsConsoleState', () => {
       target_count: 3,
       load_progress: 0.5,
     };
-    const s = parse(buildWeaponsConsoleState({ weaponsTubes: [tubeWithVolley] }));
+    const s = buildWeaponsConsoleState({ weaponsTubes: [tubeWithVolley] });
     expect(s.tubes).toHaveLength(1);
     const t = s.tubes[0];
     expect(t.volley_max).toBe(4);
@@ -711,22 +707,22 @@ describe('buildWeaponsConsoleState', () => {
       target_count: 2,
       load_progress: 0,
     };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { tubes: [tubeWithVolley] } },
-    }));
+    });
     expect(s.tubes).toHaveLength(1);
     expect(s.tubes[0].volley_max).toBe(2);
     expect(s.tubes[0].target_count).toBe(2);
   });
 
   it('blasters defaults to empty array when absent', () => {
-    const s = parse(buildWeaponsConsoleState(EMPTY));
+    const s = buildWeaponsConsoleState(EMPTY);
     expect(s.blasters).toEqual([]);
   });
 
   it('passes blasters through from state.blasterBanks', () => {
     const bank = { id: 'fore', fire_ready: true, on_cooldown: false, cooldown_remaining_secs: 0 };
-    const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
+    const s = buildWeaponsConsoleState({ blasterBanks: [bank] });
     expect(s.blasters).toHaveLength(1);
     expect(s.blasters[0].id).toBe('fore');
     expect(s.blasters[0].fire_ready).toBe(true);
@@ -734,9 +730,9 @@ describe('buildWeaponsConsoleState', () => {
 
   it('passes blasters through from blackboard', () => {
     const bank = { id: 'aft', fire_ready: false, on_cooldown: true, cooldown_remaining_secs: 1.5 };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { blasters: [bank] } },
-    }));
+    });
     expect(s.blasters).toHaveLength(1);
     expect(s.blasters[0].id).toBe('aft');
     expect(s.blasters[0].on_cooldown).toBe(true);
@@ -746,41 +742,41 @@ describe('buildWeaponsConsoleState', () => {
   it('blackboard blasters take priority over state.blasterBanks', () => {
     const bbBank  = { id: 'bb-bank',  fire_ready: true,  on_cooldown: false, cooldown_remaining_secs: 0 };
     const stBank  = { id: 'st-bank',  fire_ready: false, on_cooldown: true,  cooldown_remaining_secs: 2 };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { blasters: [bbBank] } },
       blasterBanks: [stBank],
-    }));
+    });
     expect(s.blasters).toHaveLength(1);
     expect(s.blasters[0].id).toBe('bb-bank');
   });
 
   it('passes charge_progress through from blackboard (issue #636)', () => {
     const bank = { id: 'heavy', fire_ready: false, on_cooldown: false, charge_progress: 0.75, has_charge: true };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { blasters: [bank] } },
-    }));
+    });
     expect(s.blasters[0].charge_progress).toBeCloseTo(0.75, 3);
   });
 
   it('has_charge true surfaces in blaster bank state (issue #636)', () => {
     const bank = { id: 'heavy', fire_ready: true, on_cooldown: false, charge_progress: 0.0, has_charge: true };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { blasters: [bank] } },
-    }));
+    });
     expect(s.blasters[0].has_charge).toBe(true);
   });
 
   it('has_charge false for instant-fire bank (issue #636)', () => {
     const bank = { id: 'fore', fire_ready: true, on_cooldown: false, charge_progress: 0.0, has_charge: false };
-    const s = parse(buildWeaponsConsoleState({
+    const s = buildWeaponsConsoleState({
       blackboards: { tactical: { blasters: [bank] } },
-    }));
+    });
     expect(s.blasters[0].has_charge).toBe(false);
   });
 
   it('charge_progress defaults to 0 when absent (issue #636)', () => {
     const bank = { id: 'fore', fire_ready: true, on_cooldown: false };
-    const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
+    const s = buildWeaponsConsoleState({ blasterBanks: [bank] });
     // charge_progress not present → passes through as undefined; treat as falsy
     expect(s.blasters[0].charge_progress == null || s.blasters[0].charge_progress === 0).toBe(true);
   });
@@ -857,7 +853,7 @@ describe('buildWeaponsConsoleState target lock card fields (issue #1378)', () =>
   };
 
   it('gains stance, class, bearing, range, hull and shield rows off the Tactical lock', () => {
-    const s = parse(buildWeaponsConsoleState(LOCKED_STATE));
+    const s = buildWeaponsConsoleState(LOCKED_STATE);
     expect(s.target_stance).toBe('hostile');
     expect(s.target_class).toBe('Corvette');
     expect(s.target_hull_pct).toBe(40);
@@ -871,7 +867,7 @@ describe('buildWeaponsConsoleState target lock card fields (issue #1378)', () =>
   });
 
   it('carries the same all-null shape as Sensors when there is no lock', () => {
-    const s = parse(buildWeaponsConsoleState(EMPTY));
+    const s = buildWeaponsConsoleState(EMPTY);
     expect(s.target_stance).toBeNull();
     expect(s.target_class).toBeNull();
     expect(s.target_hull_pct).toBeNull();
@@ -892,7 +888,7 @@ describe('buildWeaponsConsoleState target lock card fields (issue #1378)', () =>
         { uuid: 'decoy-1', x: 0, z: -9999, radar_icon: 'ship', tags: ['ship'], name: 'Decoy', shipClass: 'Freighter', stance: 'neutral' },
       ],
     };
-    const s = parse(buildWeaponsConsoleState(state));
+    const s = buildWeaponsConsoleState(state);
     expect(s.target_class).toBe('Corvette');
     expect(s.target_name).toBe('Raider');
     expect(s.target_class).not.toBe('Freighter');
@@ -903,7 +899,7 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
   const withBlackboard = (bb, redAlert = false) => ({ blackboards: { command: bb }, redAlert });
 
   it('returns valid JSON with safe defaults when no blackboard has arrived', () => {
-    const s = parse(buildCommandConsoleState(EMPTY));
+    const s = buildCommandConsoleState(EMPTY);
     expect(s.red_alert).toBe(false);
     expect(s.stations).toEqual([]);
   });
@@ -923,7 +919,7 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
         { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
       ],
     };
-    const s = parse(buildCommandConsoleState(withBlackboard(bb)));
+    const s = buildCommandConsoleState(withBlackboard(bb));
     expect(s.stations).toHaveLength(1);
     const card = s.stations[0];
     expect(card.directed_station).toBe('tactical');
@@ -945,7 +941,7 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
         { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
       ],
     };
-    const s = parse(buildCommandConsoleState(withBlackboard(bb, false)));
+    const s = buildCommandConsoleState(withBlackboard(bb, false));
     expect(s.red_alert).toBe(false);
     expect(s.stations[0].default_stance.id).toBe('tactical-normal');
     // The stance in force is a standard one, not either neutral kind.
@@ -961,7 +957,7 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
         { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
       ],
     };
-    const s = parse(buildCommandConsoleState(withBlackboard(bb, true)));
+    const s = buildCommandConsoleState(withBlackboard(bb, true));
     expect(s.red_alert).toBe(true);
     expect(s.stations[0].default_stance.id).toBe('tactical-high');
     expect(s.stations[0].default_selected).toBe(true);
@@ -980,15 +976,15 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
         { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
       ],
     };
-    const s = parse(buildCommandConsoleState(withBlackboard(bb, true)));
+    const s = buildCommandConsoleState(withBlackboard(bb, true));
     expect(s.stations[0].default_selected).toBe(true);
   });
 
   it('carries the human-held (off the board) state through, with no neutral catalogue to resolve a Default from', () => {
-    const s = parse(buildCommandConsoleState(withBlackboard({
+    const s = buildCommandConsoleState(withBlackboard({
       directed_station: 'tactical', directed_station_name: 'Tactical',
       directed_station_ai: false, selected_stance: '', stances: [],
-    })));
+    }));
     expect(s.stations[0].directed_station_ai).toBe(false);
     expect(s.stations[0].default_stance).toBeNull();
   });
@@ -997,28 +993,28 @@ describe('buildCommandConsoleState (issues #1107, #1381)', () => {
   // fix round): the live control-source correction, same pattern as
   // repair_auto above, applied per-card instead of a dead top-level overlay.
   it('command_auto is true when controlSources for this card\'s system id is Ai', () => {
-    const s = parse(buildCommandConsoleState({
+    const s = buildCommandConsoleState({
       blackboards: { command: { directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [] } },
       controlSources: { command: 'Ai' },
-    }));
+    });
     expect(s.stations[0].command_auto).toBe(true);
   });
 
   it('command_auto is false when controlSources for this card\'s system id is Human, even when the raw blackboard says command_auto: true (the live correction wins)', () => {
-    const s = parse(buildCommandConsoleState({
+    const s = buildCommandConsoleState({
       blackboards: { command: {
         directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [],
         command_auto: true,
       } },
       controlSources: { command: 'Human' },
-    }));
+    });
     expect(s.stations[0].command_auto).toBe(false);
   });
 
   it('command_auto is false when controlSources is absent', () => {
-    const s = parse(buildCommandConsoleState(withBlackboard({
+    const s = buildCommandConsoleState(withBlackboard({
       directed_station: 'tactical', directed_station_ai: true, selected_stance: '', stances: [],
-    })));
+    }));
     expect(s.stations[0].command_auto).toBe(false);
   });
 });
@@ -1062,45 +1058,45 @@ describe('commandAdviceFor / withCommandAdvice (issue #1108)', () => {
   });
 
   it('withCommandAdvice attaches command_advice only on the advised console', () => {
-    const advised = JSON.parse(withCommandAdvice('tactical', bb(), '{}'));
+    const advised = withCommandAdvice('tactical', bb(), {});
     expect(advised.command_advice.stance_id).toBe('tactical-weapons-free');
-    const other = JSON.parse(withCommandAdvice('helm', bb(), '{}'));
+    const other = withCommandAdvice('helm', bb(), {});
     expect(other.command_advice).toBeUndefined();
   });
 });
 
 describe('buildCaptainConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildCaptainConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildCaptainConsoleState(EMPTY)).not.toThrow();
   });
 
   it('red_alert false by default', () => {
-    const s = parse(buildCaptainConsoleState(EMPTY));
+    const s = buildCaptainConsoleState(EMPTY);
     expect(s.red_alert).toBe(false);
     expect(s.game_status).toMatch(/nominal/i);
   });
 
   it('red_alert true changes game_status', () => {
-    const s = parse(buildCaptainConsoleState({ redAlert: true }));
+    const s = buildCaptainConsoleState({ redAlert: true });
     expect(s.red_alert).toBe(true);
     expect(s.game_status).toMatch(/RED ALERT/);
   });
 
   it('hull_integrity_pct defaults to 100', () => {
-    expect(parse(buildCaptainConsoleState(EMPTY)).hull_integrity_pct).toBe(100);
+    expect(buildCaptainConsoleState(EMPTY).hull_integrity_pct).toBe(100);
   });
 
   it('passes through objectives', () => {
-    const s = parse(buildCaptainConsoleState({ objectives: ['obj-A'] }));
+    const s = buildCaptainConsoleState({ objectives: ['obj-A'] });
     expect(s.objectives).toEqual(['obj-A']);
   });
 
   it('passes currentView as view_direction for all views', () => {
-    expect(parse(buildCaptainConsoleState({ currentView: 'Radar' })).view_direction).toBe('Radar');
+    expect(buildCaptainConsoleState({ currentView: 'Radar' }).view_direction).toBe('Radar');
   });
 
   it('boosted_objective_id defaults to null when blackboard and legacy state are absent', () => {
-    expect(parse(buildCaptainConsoleState(EMPTY)).boosted_objective_id).toBeNull();
+    expect(buildCaptainConsoleState(EMPTY).boosted_objective_id).toBeNull();
   });
 
   it('forwards boosted_objective_id from the captain blackboard when present', () => {
@@ -1109,7 +1105,7 @@ describe('buildCaptainConsoleState', () => {
         captain: { objectives: [{ id: 'obj-1' }], boosted_objective_id: 'obj-1' },
       },
     };
-    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBe('obj-1');
+    expect(buildCaptainConsoleState(state).boosted_objective_id).toBe('obj-1');
   });
 
   it('boosted_objective_id is null when blackboard present but value absent', () => {
@@ -1118,12 +1114,12 @@ describe('buildCaptainConsoleState', () => {
         captain: { objectives: [{ id: 'obj-1' }] },
       },
     };
-    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBeNull();
+    expect(buildCaptainConsoleState(state).boosted_objective_id).toBeNull();
   });
 
   it('boosted_objective_id is null in legacy fallback (no blackboard)', () => {
     const state = { objectives: ['obj-A'] };
-    expect(parse(buildCaptainConsoleState(state)).boosted_objective_id).toBeNull();
+    expect(buildCaptainConsoleState(state).boosted_objective_id).toBeNull();
   });
 
   // ── Named mission deadlines (issue #1024) ────────────────────────────────
@@ -1136,24 +1132,24 @@ describe('buildCaptainConsoleState', () => {
       { id: 'stand_down', label: 'world.fs.stand_down.label', remaining_secs: -1, state: 'cancelled' },
     ];
     const state = { blackboards: { captain: { deadlines } } };
-    expect(parse(buildCaptainConsoleState(state)).deadlines).toEqual(deadlines);
+    expect(buildCaptainConsoleState(state).deadlines).toEqual(deadlines);
   });
 
   it('deadlines default to an empty list with a blackboard that carries none', () => {
     const state = { blackboards: { captain: { objectives: [] } } };
-    expect(parse(buildCaptainConsoleState(state)).deadlines).toEqual([]);
+    expect(buildCaptainConsoleState(state).deadlines).toEqual([]);
   });
 
   it('deadlines are empty in the legacy fallback (no blackboard)', () => {
     // The fallback has no wire source for them, and an empty list renders the
     // panel's own empty state rather than an undefined the component must guard.
-    expect(parse(buildCaptainConsoleState({ objectives: ['obj-A'] })).deadlines).toEqual([]);
+    expect(buildCaptainConsoleState({ objectives: ['obj-A'] }).deadlines).toEqual([]);
   });
 });
 
 describe('buildHelmConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildHelmConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildHelmConsoleState(EMPTY)).not.toThrow();
   });
 
   it('projects exact command-owner ids from arbitrary authored System kinds', () => {
@@ -1165,7 +1161,7 @@ describe('buildHelmConsoleState', () => {
       'overdrive-cell',
       'berthing-clamps',
     ];
-    const s = parse(buildHelmConsoleState({
+    const s = buildHelmConsoleState({
       systemKinds: {
         'delta-throttle': 'helm_thrust',
         'crosswind-servo': 'helm_steering',
@@ -1180,7 +1176,7 @@ describe('buildHelmConsoleState', () => {
           range: 250, available: true, engaged: false, docked: false,
         },
       },
-    }, ids));
+    }, ids);
 
     expect(s).toMatchObject({
       thrust_system_id: 'delta-throttle',
@@ -1196,7 +1192,7 @@ describe('buildHelmConsoleState', () => {
   });
 
   it('keeps owner ids nullable for a legacy Welcome without the kind projection', () => {
-    expect(parse(buildHelmConsoleState(EMPTY))).toMatchObject({
+    expect(buildHelmConsoleState(EMPTY)).toMatchObject({
       thrust_system_id: null,
       steering_system_id: null,
       lateral_system_id: null,
@@ -1213,7 +1209,7 @@ describe('buildHelmConsoleState', () => {
       { yaw: Math.PI / 2, expectedHeading: 90 },  // yaw=+90 rad → heading=90°
     ];
     for (const { yaw, expectedHeading } of cases) {
-      const s = parse(buildHelmConsoleState({ shipYaw: yaw }));
+      const s = buildHelmConsoleState({ shipYaw: yaw });
       expect(s.ship_heading).toBeCloseTo(expectedHeading, 3);
     }
   });
@@ -1228,48 +1224,48 @@ describe('buildHelmConsoleState', () => {
   };
 
   it('passes the hostile weapon arcs through verbatim at red alert', () => {
-    const s = parse(buildHelmConsoleState({
+    const s = buildHelmConsoleState({
       redAlert: true,
       blackboards: { helm: ARC_BB, captain: { red_alert: true } },
-    }));
+    });
     expect(s.red_alert).toBe(true);
     // Verbatim: the client must not re-derive, re-order or re-scale a sector.
     expect(s.hostile_arcs).toEqual(ARC_BB.hostile_weapon_arcs);
   });
 
   it('shows no hostile weapon arcs when not at red alert', () => {
-    const s = parse(buildHelmConsoleState({
+    const s = buildHelmConsoleState({
       redAlert: false,
       blackboards: { helm: ARC_BB },
-    }));
+    });
     expect(s.red_alert).toBe(false);
     expect(s.hostile_arcs).toEqual([]);
   });
 
   it('hostile_arcs is empty when the server sent none', () => {
-    expect(parse(buildHelmConsoleState({ redAlert: true })).hostile_arcs).toEqual([]);
+    expect(buildHelmConsoleState({ redAlert: true }).hostile_arcs).toEqual([]);
   });
 
   it('hostile_arc_color comes from ship config, not from JS', () => {
-    expect(parse(buildHelmConsoleState({ hostileArcColor: [0.1, 0.2, 0.3, 0.04] })).hostile_arc_color)
+    expect(buildHelmConsoleState({ hostileArcColor: [0.1, 0.2, 0.3, 0.04] }).hostile_arc_color)
       .toEqual([0.1, 0.2, 0.3, 0.04]);
     // Absent config leaves the component to show its own placeholder.
-    expect(parse(buildHelmConsoleState(EMPTY)).hostile_arc_color).toBeNull();
+    expect(buildHelmConsoleState(EMPTY).hostile_arc_color).toBeNull();
   });
 
   it('on_screen true when currentView is Radar', () => {
-    expect(parse(buildHelmConsoleState({ currentView: 'Radar' })).on_screen).toBe(true);
+    expect(buildHelmConsoleState({ currentView: 'Radar' }).on_screen).toBe(true);
   });
 
   it('on_screen false for other views', () => {
-    expect(parse(buildHelmConsoleState({ currentView: 'Fore' })).on_screen).toBe(false);
+    expect(buildHelmConsoleState({ currentView: 'Fore' }).on_screen).toBe(false);
   });
 
   it('includes active waypoint as a helm radar blip', () => {
-    const s = parse(buildHelmConsoleState({
+    const s = buildHelmConsoleState({
       shipX: 0, shipZ: 0, shipYaw: 0, helmRadarRange: 100,
       navigationWaypoint: { x: 50, z: 0 },
-    }));
+    });
     const waypoint = s.blips.find(b => b.kind === 'waypoint');
     expect(waypoint).toBeDefined();
     expect(waypoint.edge).toBe(false);
@@ -1277,10 +1273,10 @@ describe('buildHelmConsoleState', () => {
   });
 
   it('edge-clamps active waypoint when outside helm range', () => {
-    const s = parse(buildHelmConsoleState({
+    const s = buildHelmConsoleState({
       shipX: 0, shipZ: 0, shipYaw: 0, helmRadarRange: 100,
       navigationWaypoint: { x: 500, z: 0 },
-    }));
+    });
     const waypoint = s.blips.find(b => b.kind === 'waypoint');
     expect(waypoint.edge).toBe(true);
     expect(Math.hypot(waypoint.radar_x, waypoint.radar_y)).toBeCloseTo(0.96);
@@ -1295,7 +1291,7 @@ describe('buildHelmConsoleState', () => {
       // legacy props should be ignored when blackboard is present
       shipYaw: 0, forwardSpeed: 0,
     };
-    const s = parse(buildHelmConsoleState(state));
+    const s = buildHelmConsoleState(state);
     expect(s.ship_heading).toBeCloseTo(180, 2);
     expect(s.speed).toBeCloseTo(99.0, 3);
   });
@@ -1307,7 +1303,7 @@ describe('buildHelmConsoleState', () => {
                 impulse_charge: 0.5, boost_battery: 0.75, boost_active: true, boost_enabled: true },
       },
     };
-    const s = parse(buildHelmConsoleState(state));
+    const s = buildHelmConsoleState(state);
     expect(s.impulse_charge_progress).toBeCloseTo(0.5, 3);
     expect(s.boost_battery).toBeCloseTo(0.75, 3);
     expect(s.boost_active).toBe(true);
@@ -1315,7 +1311,7 @@ describe('buildHelmConsoleState', () => {
   });
 
   it('falls back to legacy props when blackboard absent', () => {
-    const s = parse(buildHelmConsoleState({ shipYaw: Math.PI / 2, forwardSpeed: 33 }));
+    const s = buildHelmConsoleState({ shipYaw: Math.PI / 2, forwardSpeed: 33 });
     expect(s.ship_heading).toBeCloseTo(90, 2);
     expect(s.speed).toBeCloseTo(33, 3);
   });
@@ -1330,7 +1326,7 @@ describe('helm dock control (issue #1159)', () => {
     // No dock system → no `dock` blackboard → no control at all, so a hull
     // without a dock is unchanged.
     expect(buildHelmDockView(EMPTY)).toBe(null);
-    expect(parse(buildHelmConsoleState(EMPTY)).dock).toBe(null);
+    expect(buildHelmConsoleState(EMPTY).dock).toBe(null);
   });
 
   it('appears when a berth is in range', () => {
@@ -1346,7 +1342,7 @@ describe('helm dock control (issue #1159)', () => {
         },
       },
     };
-    const dock = parse(buildHelmConsoleState(state)).dock;
+    const dock = buildHelmConsoleState(state).dock;
     expect(dock).not.toBe(null);
     expect(dock.available).toBe(true);
     expect(dock.docked).toBe(false);
@@ -1361,7 +1357,7 @@ describe('helm dock control (issue #1159)', () => {
         dock: { range: 200, available: false, engaged: false, docked: false },
       },
     };
-    const dock = parse(buildHelmConsoleState(state)).dock;
+    const dock = buildHelmConsoleState(state).dock;
     // The view is still present (the hull has a dock), but its gate is closed —
     // the helm HTML hides the panel when !available && !engaged && !docked.
     expect(dock.available).toBe(false);
@@ -1382,7 +1378,7 @@ describe('helm dock control (issue #1159)', () => {
         },
       },
     };
-    const dock = parse(buildHelmConsoleState(state)).dock;
+    const dock = buildHelmConsoleState(state).dock;
     expect(dock.docked).toBe(true);
     expect(dock.docked_to).toBe('berth-uuid');
     expect(dock.docked_to_name).toBe('world.probe_dock.entity.berth.name');
@@ -1394,7 +1390,7 @@ describe('helm dock control (issue #1159)', () => {
         dock: { range: 200, available: false, refusal: 'dock.refused.out_of_range' },
       },
     };
-    expect(parse(buildHelmConsoleState(state)).dock.refusal).toBe('dock.refused.out_of_range');
+    expect(buildHelmConsoleState(state).dock.refusal).toBe('dock.refused.out_of_range');
   });
 });
 
@@ -1405,7 +1401,7 @@ describe('helm under-tow-load indicator (issue #1157)', () => {
   it('is absent when the hull publishes no tractor blackboard', () => {
     // No tractor system → no `tractor` blackboard → no indicator at all.
     expect(buildHelmTowLoadView(EMPTY)).toBe(null);
-    expect(parse(buildHelmConsoleState(EMPTY)).tow_load).toBe(null);
+    expect(buildHelmConsoleState(EMPTY).tow_load).toBe(null);
   });
 
   it('is absent when the tractor is engaged but holding nothing', () => {
@@ -1417,7 +1413,7 @@ describe('helm under-tow-load indicator (issue #1157)', () => {
       },
     };
     expect(buildHelmTowLoadView(state)).toBe(null);
-    expect(parse(buildHelmConsoleState(state)).tow_load).toBe(null);
+    expect(buildHelmConsoleState(state).tow_load).toBe(null);
   });
 
   it('appears while a target is held, naming the towed hull as the reason', () => {
@@ -1432,7 +1428,7 @@ describe('helm under-tow-load indicator (issue #1157)', () => {
         },
       },
     };
-    const tow = parse(buildHelmConsoleState(state)).tow_load;
+    const tow = buildHelmConsoleState(state).tow_load;
     expect(tow).not.toBe(null);
     expect(tow.active).toBe(true);
     // The "why" is a machine name id the console resolves through t() — never
@@ -1453,19 +1449,19 @@ describe('helm under-tow-load indicator (issue #1157)', () => {
 describe('helm engine fields', () => {
   // engine_port_thrust
   it('engine_port_thrust is 0 when no blackboard present', () => {
-    expect(parse(buildHelmConsoleState(EMPTY)).engine_port_thrust).toBe(0);
+    expect(buildHelmConsoleState(EMPTY).engine_port_thrust).toBe(0);
   });
 
   it('engine_port_thrust reads from helm-engine-port blackboard thrust_fraction', () => {
     const state = {
       blackboards: { 'helm-engine-port': { thrust_fraction: 0.72 } },
     };
-    expect(parse(buildHelmConsoleState(state)).engine_port_thrust).toBeCloseTo(0.72);
+    expect(buildHelmConsoleState(state).engine_port_thrust).toBeCloseTo(0.72);
   });
 
   // engine_stbd_thrust
   it('engine_stbd_thrust is 0 when no blackboard present', () => {
-    expect(parse(buildHelmConsoleState(EMPTY)).engine_stbd_thrust).toBe(0);
+    expect(buildHelmConsoleState(EMPTY).engine_stbd_thrust).toBe(0);
   });
 
   it('engine_stbd_thrust reads from helm-engine-starboard blackboard thrust_fraction', () => {
@@ -1475,38 +1471,38 @@ describe('helm engine fields', () => {
         'helm-engine-starboard': { thrust_fraction: 0.55 },
       },
     };
-    expect(parse(buildHelmConsoleState(state)).engine_stbd_thrust).toBeCloseTo(0.55);
+    expect(buildHelmConsoleState(state).engine_stbd_thrust).toBeCloseTo(0.55);
   });
 
   // engine_port_auto — derived from coarse 'helm' station rating
   it('engine_port_auto is true when stationRatings.helm === Backfill', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).engine_port_auto).toBe(true);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } }).engine_port_auto).toBe(true);
   });
 
   it('engine_port_auto is false when stationRatings.helm is a different rating', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).engine_port_auto).toBe(false);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Full' } }).engine_port_auto).toBe(false);
   });
 
   it('engine_port_auto is false when stationRatings is absent', () => {
-    expect(parse(buildHelmConsoleState(EMPTY)).engine_port_auto).toBe(false);
+    expect(buildHelmConsoleState(EMPTY).engine_port_auto).toBe(false);
   });
 
   // engine_stbd_auto — derived from coarse 'helm' station rating
   it('engine_stbd_auto is true when stationRatings.helm === Backfill', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).engine_stbd_auto).toBe(true);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } }).engine_stbd_auto).toBe(true);
   });
 
   it('engine_stbd_auto is false when stationRatings.helm is a different rating', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).engine_stbd_auto).toBe(false);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Full' } }).engine_stbd_auto).toBe(false);
   });
 
   it('engine_stbd_auto is false when stationRatings is absent', () => {
-    expect(parse(buildHelmConsoleState(EMPTY)).engine_stbd_auto).toBe(false);
+    expect(buildHelmConsoleState(EMPTY).engine_stbd_auto).toBe(false);
   });
 
   // both AUTO badges light up together when helm goes to Backfill
   it('engine_port_auto and engine_stbd_auto are both true together on Backfill', () => {
-    const s = parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } }));
+    const s = buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } });
     expect(s.engine_port_auto).toBe(true);
     expect(s.engine_stbd_auto).toBe(true);
   });
@@ -1514,16 +1510,16 @@ describe('helm engine fields', () => {
 
 describe('buildRepairConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildRepairConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildRepairConsoleState(EMPTY)).not.toThrow();
   });
 
   it('travel_duration_secs is always 5', () => {
-    expect(parse(buildRepairConsoleState(EMPTY)).travel_duration_secs).toBe(5.0);
+    expect(buildRepairConsoleState(EMPTY).travel_duration_secs).toBe(5.0);
   });
 
   it('passes repair teams through', () => {
     const teams = [{ id: 1, location: 'Helm' }];
-    expect(parse(buildRepairConsoleState({ repairTeams: teams })).teams).toEqual(teams);
+    expect(buildRepairConsoleState({ repairTeams: teams }).teams).toEqual(teams);
   });
 
   it('damageable_systems derives from consoleHull (SystemId-keyed post issue #618)', () => {
@@ -1535,17 +1531,17 @@ describe('buildRepairConsoleState', () => {
       { system_id: 'tactical', current: 25, max_hp: 25 },
       { system_id: 'power',    current:  6, max_hp: 25 },
     ];
-    const s = parse(buildRepairConsoleState({ consoleHull: hull }));
+    const s = buildRepairConsoleState({ consoleHull: hull });
     expect(s.damageable_systems).toEqual(['helm', 'tactical', 'power']);
   });
 
   it('damageable_systems is empty when consoleHull is empty', () => {
-    const s = parse(buildRepairConsoleState({ consoleHull: [] }));
+    const s = buildRepairConsoleState({ consoleHull: [] });
     expect(s.damageable_systems).toEqual([]);
   });
 
   it('damageable_systems is empty when consoleHull is absent', () => {
-    const s = parse(buildRepairConsoleState({}));
+    const s = buildRepairConsoleState({});
     expect(s.damageable_systems).toEqual([]);
   });
 
@@ -1569,7 +1565,7 @@ describe('buildRepairConsoleState', () => {
   // ── Issues #1161/#1386: the external field-repair view ────────────────────
 
   it('carries the field claim through, naming the team and the target condition', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core', display_name: 'Core', current: 4, max_hp: 10 },
     ], {
       external_dispatch_range: 800,
@@ -1579,7 +1575,7 @@ describe('buildRepairConsoleState', () => {
       external_dispatch_target_condition: 0.42,
       external_dispatch_candidate_name: 'world.probe.entity.next.name',
       external_dispatch_candidate_refusal: 'repair.dispatch.refused.out_of_range',
-    })));
+    }));
     expect(s.external_dispatch).toEqual({
       range: 800,
       target: 'uuid-1',
@@ -1595,9 +1591,9 @@ describe('buildRepairConsoleState', () => {
   it('reads no team abroad as null rather than as team 0', () => {
     // A hull that CAN dispatch but is holding nobody: the two #1386 fields are
     // absent, and `0` would be a card painted ABROAD for a team standing at home.
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core', display_name: 'Core', current: 4, max_hp: 10 },
-    ], { external_dispatch_range: 800 })));
+    ], { external_dispatch_range: 800 }));
     expect(s.external_dispatch.candidate_name).toBeNull();
     expect(s.external_dispatch.candidate_refusal).toBeNull();
     expect(s.external_dispatch.team_idx).toBeNull();
@@ -1606,38 +1602,38 @@ describe('buildRepairConsoleState', () => {
 
   it('renders only the system_hull rows the host sent — it never invents the rest', () => {
     // Engineering pre-arrival: core + its own `repair`, no helm-radar row.
-    const s = parse(parse(JSON.stringify(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 4, max_hp: 10 },
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ])))));
+    ]));
     expect(s.system_hull.map(h => h.system_id)).toEqual(['core', 'repair']);
     expect(s.core_systems.map(h => h.system_id)).toEqual(['core']);
   });
 
   it('uses the host aggregate for the hero bar instead of summing the projection', () => {
     // Visible rows sum to 14/20 = 0.7, but the ship is authoritatively at 0.5.
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ])));
+    ]));
     expect(s.overall_hull.pct).toBe(0.5);
   });
 
   it('offers dispatch targets for stations whose detail it cannot see', () => {
     // Only core + repair are visible, but helm still owns a damageable system,
     // so Engineering must be able to send a team there.
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ])));
+    ]));
     expect(s.dispatch_targets.map(t => t.id).sort()).toEqual(['core', 'engineering', 'helm']);
   });
 
   it('reports damage_pct as null for a station whose detail it cannot see', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ])));
+    ]));
     // Hidden: unknown, not "undamaged".
     expect(s.dispatch_targets.find(t => t.id === 'helm').damage_pct).toBeNull();
     // Visible: a real figure.
@@ -1645,11 +1641,11 @@ describe('buildRepairConsoleState', () => {
   });
 
   it('shows non-core detail once the host includes it (team on site)', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',       display_name: 'Core',   current: 4,  max_hp: 10 },
       { system_id: 'helm-radar', display_name: 'Radar',  current: 2,  max_hp: 10 },
       { system_id: 'repair',     display_name: 'Repair', current: 10, max_hp: 10 },
-    ])));
+    ]));
     expect(s.system_hull.map(h => h.system_id)).toContain('helm-radar');
     expect(s.dispatch_targets.find(t => t.id === 'helm').damage_pct).toBeCloseTo(0.8, 5);
     // The revealed row is helm's, not core's.
@@ -1657,21 +1653,21 @@ describe('buildRepairConsoleState', () => {
   });
 
   it('the legacy consoleHull fallback also reads the host aggregate', () => {
-    const s = parse(buildRepairConsoleState({
+    const s = buildRepairConsoleState({
       consoleHull: [{ system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 }],
       hullAggregate: 0.25,
       stationSystems: { engineering: ['repair'] },
-    }));
+    });
     expect(s.overall_hull.pct).toBe(0.25);
   });
 
   // ── Issue #1014: destroyed capability threads through to overall_hull ───────
 
   it('threads the host destroyed share into overall_hull', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ], { destroyed_hull_fraction: 0.25 })));
+    ], { destroyed_hull_fraction: 0.25 }));
     // The visible rows contain nothing destroyed — the lost system belongs to a
     // station this recipient cannot see, which is exactly why the host sends it.
     expect(s.system_hull.every(h => h.current > 0)).toBe(true);
@@ -1683,81 +1679,81 @@ describe('buildRepairConsoleState', () => {
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
     ]);
     state.hullDestroyed = 0.4;
-    const s = parse(buildRepairConsoleState(state));
+    const s = buildRepairConsoleState(state);
     expect(s.overall_hull.destroyed_pct).toBe(0.4);
   });
 
   it('reports a zero destroyed share on a legacy payload carrying neither', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
-    ])));
+    ]));
     expect(s.overall_hull.destroyed_pct).toBe(0);
   });
 
   it('the legacy consoleHull fallback also carries the destroyed share', () => {
-    const s = parse(buildRepairConsoleState({
+    const s = buildRepairConsoleState({
       consoleHull: [{ system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 }],
       hullAggregate: 0.25,
       hullDestroyed: 0.5,
       stationSystems: { engineering: ['repair'] },
-    }));
+    });
     expect(s.overall_hull.destroyed_pct).toBe(0.5);
   });
 
   // ── Issue #1015: the tap-to-prioritise damaged-systems list ────────────────
 
   it('damaged_systems lists the broken visible rows worst-first', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',       display_name: 'Core',   current: 6, max_hp: 10, tier: 'Damaged' },
       { system_id: 'helm-radar', display_name: 'Radar',  current: 0, max_hp: 10, tier: 'Destroyed' },
       { system_id: 'repair',     display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
-    ])));
+    ]));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['helm-radar', 'repair', 'core']);
     expect(s.damaged_systems[0].display_name).toBe('Radar');
     expect(s.damaged_systems[2].damage_pct).toBeCloseTo(0.4, 5);
   });
 
   it('damaged_systems omits Operational rows, however dented', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core',   display_name: 'Core',   current: 9, max_hp: 10, tier: 'Operational' },
       { system_id: 'repair', display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
-    ])));
+    ]));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['repair']);
   });
 
   it('damaged_systems ranks a worse tier above a bigger damage fraction', () => {
     // `repair` has lost more HP, but `core` is in the worse tier and leads.
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'repair', display_name: 'Repair', current: 3, max_hp: 10, tier: 'Damaged' },
       { system_id: 'core',   display_name: 'Core',   current: 4, max_hp: 10, tier: 'Disabled' },
-    ])));
+    ]));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core', 'repair']);
   });
 
   it('damaged_systems can only be sourced from rows the host sent', () => {
     // helm-radar is damageable (it is in `damageable_systems`) but has no
     // visible hull row, so it cannot appear in a list the player can tap.
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
-    ])));
+    ]));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
   });
 
   it('damaged_systems echoes exact owner-projected priority eligibility', () => {
-    const s = parse(buildRepairConsoleState(projectedState(
+    const s = buildRepairConsoleState(projectedState(
       [
         { system_id: 'core', display_name: 'Core', current: 0, max_hp: 10, tier: 'Destroyed' },
         { system_id: 'repair', display_name: 'Repair', current: 7, max_hp: 10, tier: 'Damaged' },
       ],
       { priority_targets: ['repair'] },
-    )));
+    ));
     const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
     expect(byId.core.prioritisable).toBe(false);
     expect(byId.repair.prioritisable).toBe(true);
   });
 
   it('damaged_systems echoes the host pin rather than deriving a highlight', () => {
-    const s = parse(buildRepairConsoleState(projectedState(
+    const s = buildRepairConsoleState(projectedState(
       [
         { system_id: 'core',       display_name: 'Core',  current: 6, max_hp: 10, tier: 'Damaged' },
         { system_id: 'helm-radar', display_name: 'Radar', current: 0, max_hp: 10, tier: 'Destroyed' },
@@ -1772,7 +1768,7 @@ describe('buildRepairConsoleState', () => {
           },
         }],
       },
-    )));
+    ));
     const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
     // The pin is `core` even though `helm-radar` is the worse system: the host
     // pinned the system directly (the ordinal is untouched), and the console
@@ -1785,25 +1781,25 @@ describe('buildRepairConsoleState', () => {
   });
 
   it('damaged_systems highlights nothing when the host pinned nothing', () => {
-    const s = parse(buildRepairConsoleState(projectedState(
+    const s = buildRepairConsoleState(projectedState(
       [{ system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' }],
       { teams: [{ Repairing: { system_id: 'core', display_name: 'Core', priority: 1 } }] },
-    )));
+    ));
     expect(s.damaged_systems[0].prioritised).toBe(false);
   });
 
   it('damaged_systems is empty on an intact ship', () => {
-    expect(parse(buildRepairConsoleState(EMPTY)).damaged_systems).toEqual([]);
+    expect(buildRepairConsoleState(EMPTY).damaged_systems).toEqual([]);
   });
 
   // Mirrors the host's `current < max` candidate guard. A `max_hp = 0` row is
   // permanently Destroyed AND permanently at max, so listing it would put a
   // 0%-damage row on the panel that no tap could ever act on.
   it('damaged_systems omits a zero-max row that can never be progressed', () => {
-    const s = parse(buildRepairConsoleState(projectedState([
+    const s = buildRepairConsoleState(projectedState([
       { system_id: 'ghost',  display_name: 'Ghost',  current: 0, max_hp: 0,  tier: 'Destroyed' },
       { system_id: 'repair', display_name: 'Repair', current: 2, max_hp: 10, tier: 'Disabled' },
-    ])));
+    ]));
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['repair']);
   });
 
@@ -1811,7 +1807,7 @@ describe('buildRepairConsoleState', () => {
   // flags would be permanently false — "the host decided nothing" rather than
   // "this path cannot tell", which is the quiet lie the flags exist to prevent.
   it('damaged_systems reads the host flags on the legacy consoleHull fallback', () => {
-    const s = parse(buildRepairConsoleState({
+    const s = buildRepairConsoleState({
       consoleHull: [
         { system_id: 'core',       display_name: 'Core',  current: 6, max_hp: 10, tier: 'Damaged' },
         { system_id: 'helm-radar', display_name: 'Radar', current: 0, max_hp: 10, tier: 'Destroyed' },
@@ -1824,7 +1820,7 @@ describe('buildRepairConsoleState', () => {
           priority_system_id: 'core',
         },
       }],
-    }));
+    });
     const byId = Object.fromEntries(s.damaged_systems.map(d => [d.system_id, d]));
     expect(byId.core.prioritised).toBe(true);
     expect(byId['helm-radar'].in_progress).toBe(true);
@@ -1834,12 +1830,12 @@ describe('buildRepairConsoleState', () => {
   // with bare `'Idle'` strings from `repair_team_count` before the first
   // broadcast, and normalizing must survive them rather than throw.
   it('damaged_systems survives the pre-seeded Idle placeholders', () => {
-    const s = parse(buildRepairConsoleState({
+    const s = buildRepairConsoleState({
       consoleHull: [
         { system_id: 'core', display_name: 'Core', current: 6, max_hp: 10, tier: 'Damaged' },
       ],
       repairTeams: ['Idle', 'Idle'],
-    }));
+    });
     expect(s.damaged_systems.map(d => d.system_id)).toEqual(['core']);
     expect(s.damaged_systems[0].prioritised).toBe(false);
     expect(s.damaged_systems[0].in_progress).toBe(false);
@@ -1905,13 +1901,13 @@ describe('overallHull', () => {
 
 describe('buildPowerConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildPowerConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildPowerConsoleState(EMPTY)).not.toThrow();
   });
 
   it('renders empty blackboard-shaped defaults before the first power blackboard', () => {
     // The legacy PowerState fallback (state.powerHelm etc.) was removed in
     // issue #825 — no writer existed. Missing blackboard now yields defaults.
-    const s = parse(buildPowerConsoleState(EMPTY));
+    const s = buildPowerConsoleState(EMPTY);
     expect(s.consoles).toEqual([]);
     expect(s.total).toBe(0);
     expect(s.battery_charge).toBe(0);
@@ -1921,7 +1917,7 @@ describe('buildPowerConsoleState', () => {
   });
 
   it('reads blackboard groups (PowerGroupId-keyed)', () => {
-    const s = parse(buildPowerConsoleState({
+    const s = buildPowerConsoleState({
       blackboards: {
         power: {
           groups: [
@@ -1931,7 +1927,7 @@ describe('buildPowerConsoleState', () => {
           total: 4, total_max: 8, battery_charge: 25, battery_max: 100, draining: true,
         },
       },
-    }));
+    });
     expect(s.consoles).toEqual([
       { id: 'helm',    label: 'HELM',    level: 3, max_level: 4 },
       { id: 'weapons', label: 'WEAPONS', level: 1, max_level: 4 },
@@ -1943,7 +1939,7 @@ describe('buildPowerConsoleState', () => {
   });
 
   it('carries the exact authored reactor SystemId for allocation commands', () => {
-    const s = parse(buildPowerConsoleState({
+    const s = buildPowerConsoleState({
       blackboards: {
         'reactor-main': { is_online: true },
         'battery-port': { is_online: true },
@@ -1952,20 +1948,20 @@ describe('buildPowerConsoleState', () => {
         'reactor-main': 'PowerReactor',
         'battery-port': 'PowerBattery',
       },
-    }, ['reactor-main', 'battery-port']));
+    }, ['reactor-main', 'battery-port']);
     expect(s.system_id).toBe('reactor-main');
   });
 
   it('falls back to empty consoles when groups is missing', () => {
     // A blackboard object without a `groups` field (legacy or upstream bug)
     // must still produce a valid, non-throwing panel state.
-    const s = parse(buildPowerConsoleState({
+    const s = buildPowerConsoleState({
       blackboards: {
         power: {
           total: 2, total_max: 8, battery_charge: 0, battery_max: 100, draining: false,
         },
       },
-    }));
+    });
     expect(s.consoles).toEqual([]);
   });
 
@@ -1975,25 +1971,25 @@ describe('buildPowerConsoleState', () => {
     // bar's pulsing CHARGING indicator must not promise a recovery that will
     // never arrive. So the panel carries both flags and never derives one from
     // the other.
-    const frozen = parse(buildPowerConsoleState({
+    const frozen = buildPowerConsoleState({
       blackboards: {
         power: {
           groups: [], total: 6, total_max: 8, battery_charge: 12, battery_max: 100,
           draining: false, charging: false,
         },
       },
-    }));
+    });
     expect(frozen.draining).toBe(false);
     expect(frozen.charging).toBe(false);
 
-    const filling = parse(buildPowerConsoleState({
+    const filling = buildPowerConsoleState({
       blackboards: {
         power: {
           groups: [], total: 4, total_max: 8, battery_charge: 12, battery_max: 100,
           draining: false, charging: true,
         },
       },
-    }));
+    });
     expect(filling.charging).toBe(true);
   });
 
@@ -2001,14 +1997,14 @@ describe('buildPowerConsoleState', () => {
     // Issue #952: the panel's +/- send an ABSOLUTE level measured against the
     // standing order, so the order has to reach the client or a floored group's
     // controls step from the wrong number and lower it.
-    const s = parse(buildPowerConsoleState({
+    const s = buildPowerConsoleState({
       blackboards: {
         power: {
           groups: [{ id: 'helm', label: 'HELM', level: 2, commanded_level: 4, max_level: 4 }],
           total: 5, total_max: 8, battery_charge: 10, battery_max: 100, draining: true,
         },
       },
-    }));
+    });
     expect(s.consoles[0].level).toBe(2);
     expect(s.consoles[0].commanded_level).toBe(4);
   });
@@ -2018,7 +2014,7 @@ describe('buildPowerConsoleState', () => {
     // `min_level`, published by the server. This fold passes it along verbatim
     // — it is not the place to substitute a default, since the component owns
     // the pre-#1004 fallback and the Rust decoder owns the wire one.
-    const s = parse(buildPowerConsoleState({
+    const s = buildPowerConsoleState({
       blackboards: {
         power: {
           groups: [
@@ -2028,37 +2024,37 @@ describe('buildPowerConsoleState', () => {
           total: 5, total_max: 8, battery_charge: 40, battery_max: 100, draining: false,
         },
       },
-    }));
+    });
     expect(s.consoles.map(c => c.min_level)).toEqual([1, 2]);
   });
 });
 
 describe('buildShieldsConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildShieldsConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildShieldsConsoleState(EMPTY)).not.toThrow();
   });
 
   it('grid_status GRID OFFLINE when no shield facings', () => {
-    expect(parse(buildShieldsConsoleState(EMPTY)).grid_status).toBe('GRID OFFLINE');
+    expect(buildShieldsConsoleState(EMPTY).grid_status).toBe('GRID OFFLINE');
   });
 
   it('grid_status GRID NOMINAL when facings present', () => {
-    const s = parse(buildShieldsConsoleState({ shieldFacings: ['fore', 'aft'] }));
+    const s = buildShieldsConsoleState({ shieldFacings: ['fore', 'aft'] });
     expect(s.grid_status).toBe('GRID NOMINAL');
   });
 
   it('combat_lock_bearing null when no weaponsTarget', () => {
-    expect(parse(buildShieldsConsoleState(EMPTY)).combat_lock_bearing).toBeNull();
+    expect(buildShieldsConsoleState(EMPTY).combat_lock_bearing).toBeNull();
   });
 
   it('computes combat_lock_bearing from entity position', () => {
     // Target is directly to starboard (+X) from ship at origin
     // atan2(dx=10, -dz=0) = atan2(10,0) = 90°
-    const s = parse(buildShieldsConsoleState({
+    const s = buildShieldsConsoleState({
       shipX: 0, shipZ: 0,
       weaponsTarget: 'tgt',
       asteroids: [{ uuid: 'tgt', x: 10, z: 0 }],
-    }));
+    });
     expect(s.combat_lock_bearing).toBeCloseTo(90);
   });
 
@@ -2077,7 +2073,7 @@ describe('buildShieldsConsoleState', () => {
         },
       },
     };
-    const s = parse(buildShieldsConsoleState(state));
+    const s = buildShieldsConsoleState(state);
     expect(s.facings[0].priority).toBe(3);
     expect(s.facings[1].priority).toBe(1);
   });
@@ -2088,7 +2084,7 @@ describe('buildShieldsConsoleState', () => {
         { label: 'Fore', hp: 100, max_hp: 100, online: true, offline_remaining: 0, arc_id: 'fore', center_deg: 0, width_deg: 90, priority: 2 },
       ],
     };
-    const s = parse(buildShieldsConsoleState(state));
+    const s = buildShieldsConsoleState(state);
     expect(s.facings[0].priority).toBe(2);
   });
 
@@ -2110,40 +2106,40 @@ describe('buildShieldsConsoleState', () => {
   };
 
   it('passes threat_bearing through verbatim from the blackboard', () => {
-    const s = parse(buildShieldsConsoleState({ blackboards: { shields: THREAT_BB } }));
+    const s = buildShieldsConsoleState({ blackboards: { shields: THREAT_BB } });
     // Verbatim: the client must not re-derive this from entity positions.
     expect(s.threat_bearing).toBe(THREAT_BB.threat_bearing);
   });
 
   it('threat_bearing is null when the blackboard reports no threat', () => {
-    const s = parse(buildShieldsConsoleState({
+    const s = buildShieldsConsoleState({
       blackboards: { shields: { ...THREAT_BB, threat_bearing: null } },
-    }));
+    });
     expect(s.threat_bearing).toBeNull();
   });
 
   it('threat_bearing is null in the legacy fallback (no blackboard)', () => {
     // Pre-#562 legacy path has no server-side threat-bearing source at all —
     // it must not be synthesised client-side.
-    expect(parse(buildShieldsConsoleState(EMPTY)).threat_bearing).toBeNull();
+    expect(buildShieldsConsoleState(EMPTY).threat_bearing).toBeNull();
   });
 });
 
 describe('buildSensorsConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildSensorsConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildSensorsConsoleState(EMPTY)).not.toThrow();
   });
 
   it('scan_range matches SENSORS_RADAR_RANGE constant', () => {
-    expect(parse(buildSensorsConsoleState(EMPTY)).scan_range).toBe(SENSORS_RADAR_RANGE);
+    expect(buildSensorsConsoleState(EMPTY).scan_range).toBe(SENSORS_RADAR_RANGE);
   });
 
   it('on_screen is true when currentView is SensorsRadar', () => {
-    expect(parse(buildSensorsConsoleState({ currentView: 'SensorsRadar' })).on_screen).toBe(true);
+    expect(buildSensorsConsoleState({ currentView: 'SensorsRadar' }).on_screen).toBe(true);
   });
 
   it('on_screen is false for other views', () => {
-    expect(parse(buildSensorsConsoleState({ currentView: 'NavigationChart' })).on_screen).toBe(false);
+    expect(buildSensorsConsoleState({ currentView: 'NavigationChart' }).on_screen).toBe(false);
   });
 
   it('blips include color, name, stance, faction extra fields', () => {
@@ -2151,7 +2147,7 @@ describe('buildSensorsConsoleState', () => {
       shipX: 0, shipZ: 0, shipYaw: 0,
       asteroids: [{ uuid: 'p', x: 10, z: 0, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate', radar_icon: 'ship' }],
     };
-    const blips = parse(buildSensorsConsoleState(state)).blips;
+    const blips = buildSensorsConsoleState(state).blips;
     expect(blips[0].name).toBe('Raider');
     expect(blips[0].stance).toBe('hostile');
     expect(blips[0].faction).toBe('pirate');
@@ -2168,7 +2164,7 @@ describe('buildSensorsConsoleState', () => {
         { uuid: 'region-1', x: 20, z: 0, tags: ['region'], target_tags: ['region'], radar_icon: 'region' },
       ],
     };
-    const blips = parse(buildSensorsConsoleState(state)).blips;
+    const blips = buildSensorsConsoleState(state).blips;
     expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
     expect(blips.find(b => b.uuid === 'region-1').selectable).toBe(false);
   });
@@ -2178,7 +2174,7 @@ describe('buildSensorsConsoleState', () => {
       shipX: 0, shipZ: 0, shipYaw: Math.PI / 2, sensorsRadarRange: 100,
       asteroids: [{ uuid: 'ahead-after-turn', x: 100, z: 0, radius: 1, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' }],
     };
-    const blip = parse(buildSensorsConsoleState(state)).blips[0];
+    const blip = buildSensorsConsoleState(state).blips[0];
     expect(blip.radar_x).toBeCloseTo(0);
     expect(blip.radar_y).toBeCloseTo(1);
   });
@@ -2198,21 +2194,21 @@ describe('buildSensorsConsoleState', () => {
       flags: [['world.skyhook.transfer.label', false]],
       capacities: [],
     };
-    const s = parse(buildSensorsConsoleState({
+    const s = buildSensorsConsoleState({
       blackboards: { scan: { capable: true, reading, refusal: null } },
-    }));
+    });
     expect(s.scan).toEqual({ capable: true, reading, refusal: null });
   });
 
   it('reports a hull with no scan channel as having no survey suite', () => {
-    expect(parse(buildSensorsConsoleState(EMPTY)).scan)
+    expect(buildSensorsConsoleState(EMPTY).scan)
       .toEqual({ capable: false, reading: null, refusal: null });
   });
 
   it('carries a scan refusal through as its string id', () => {
-    const s = parse(buildSensorsConsoleState({
+    const s = buildSensorsConsoleState({
       blackboards: { scan: { capable: true, refusal: 'scan.refusal.out_of_range' } },
-    }));
+    });
     expect(s.scan.refusal).toBe('scan.refusal.out_of_range');
     expect(s.scan.reading).toBeNull();
   });
@@ -2231,7 +2227,7 @@ describe('buildSensorsConsoleState', () => {
         region_colour: [0.52, 0.32, 0.18],
       }],
     };
-    const s = parse(buildSensorsConsoleState(state));
+    const s = buildSensorsConsoleState(state);
     const blip = s.blips.find(b => b.uuid === 'field-1');
     const region = s.regions.find(r => r.uuid === 'field-1');
     expect(region.radar_x).toBeCloseTo(blip.radar_x);
@@ -2247,14 +2243,14 @@ describe('buildSensorsConsoleState', () => {
       objectives: [{ id: 'obj-1', text: 'Reach patrol zone', mandatory: true, status: 'Active', targets: ['Patrol Zone'] }],
       asteroids: [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 10, z: 0, tags: ['objective_marker'] }],
     };
-    const blips = parse(buildSensorsConsoleState(state)).blips;
+    const blips = buildSensorsConsoleState(state).blips;
     // Objective markers are intentionally excluded from the sensors radar —
     // they only appear on the navigation console's system chart.
     expect(blips).toHaveLength(0);
   });
 
   it('target_uuid and derived fields are null when no sensorsTarget', () => {
-    const s = parse(buildSensorsConsoleState(EMPTY));
+    const s = buildSensorsConsoleState(EMPTY);
     expect(s.target_uuid).toBeNull();
     expect(s.target_name).toBeNull();
     expect(s.target_bearing).toBeNull();
@@ -2270,7 +2266,7 @@ describe('buildSensorsConsoleState', () => {
         hull_pct: 75, yaw: 45 * Math.PI / 180, speed: 10,
       }],
     };
-    const s = parse(buildSensorsConsoleState(state));
+    const s = buildSensorsConsoleState(state);
     expect(s.target_uuid).toBe('target-1');
     expect(s.target_name).toBe('Patrol');
     expect(s.target_kind).toBe('ship');
@@ -2290,7 +2286,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'e1',
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], stance: 'hostile' }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_threat).toBe('high');
+    expect(buildSensorsConsoleState(state).target_threat).toBe('high');
   });
 
   // ── target_shield_fraction (#473) ────────────────────────────────────────
@@ -2301,7 +2297,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'] }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+    expect(buildSensorsConsoleState(state).target_shield_fraction).toBeNull();
   });
 
   it('target_shield_fraction is null when target has shield_fraction = null', () => {
@@ -2310,7 +2306,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: null }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+    expect(buildSensorsConsoleState(state).target_shield_fraction).toBeNull();
   });
 
   it('target_shield_fraction passes through when target has a shield', () => {
@@ -2319,7 +2315,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: 0.42 }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBe(0.42);
+    expect(buildSensorsConsoleState(state).target_shield_fraction).toBe(0.42);
   });
 
   it('target_shield_fraction is 0 for broken shield', () => {
@@ -2328,12 +2324,12 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_fraction: 0 }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBe(0);
+    expect(buildSensorsConsoleState(state).target_shield_fraction).toBe(0);
   });
 
   it('target_shield_fraction is null when sensorsTarget is unset', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
+    expect(buildSensorsConsoleState(state).target_shield_fraction).toBeNull();
   });
 
   // ── target_shield_freq ──────────────────────────────────────────────────
@@ -2344,7 +2340,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'] }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBeNull();
+    expect(buildSensorsConsoleState(state).target_shield_freq).toBeNull();
   });
 
   it('target_shield_freq passes through a non-zero frequency', () => {
@@ -2353,7 +2349,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_freq: 0.42 }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBe(0.42);
+    expect(buildSensorsConsoleState(state).target_shield_freq).toBe(0.42);
   });
 
   it('target_shield_freq passes through 0.0 rather than falling back to null (falsy-zero bug)', () => {
@@ -2364,7 +2360,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'a1',
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['ship'], shield_freq: 0.0 }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_shield_freq).toBe(0.0);
+    expect(buildSensorsConsoleState(state).target_shield_freq).toBe(0.0);
   });
 
   // ── target_alert (#749) — read only from the sensor-radar blackboard ──────
@@ -2376,7 +2372,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
       blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_alert: true } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_alert).toBe(true);
+    expect(buildSensorsConsoleState(state).target_alert).toBe(true);
   });
 
   it('target_alert threads false (capable but calm) from the blackboard', () => {
@@ -2386,7 +2382,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
       blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_alert: false } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_alert).toBe(false);
+    expect(buildSensorsConsoleState(state).target_alert).toBe(false);
   });
 
   it('target_alert is null when the blackboard omits selected_target_alert', () => {
@@ -2396,12 +2392,12 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['asteroid'] }],
       blackboards: { 'sensor-radar': { selected_target: 'a1' } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+    expect(buildSensorsConsoleState(state).target_alert).toBeNull();
   });
 
   it('target_alert is null when there is no sensor-radar blackboard', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
-    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+    expect(buildSensorsConsoleState(state).target_alert).toBeNull();
   });
 
   it('target_alert never derives from the entity snapshot (no-leak boundary)', () => {
@@ -2412,7 +2408,7 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'e1',
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], red_alert: true }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+    expect(buildSensorsConsoleState(state).target_alert).toBeNull();
   });
 
   // ── target_weapons (#1397) — read only from the sensor-radar blackboard ──
@@ -2424,7 +2420,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
       blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_weapons_cold: true } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBe('cold');
+    expect(buildSensorsConsoleState(state).target_weapons).toBe('cold');
   });
 
   it("target_weapons reads 'powered' for a capable target with its weapons up", () => {
@@ -2434,7 +2430,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
       blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_weapons_cold: false } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBe('powered');
+    expect(buildSensorsConsoleState(state).target_weapons).toBe('powered');
   });
 
   it('target_weapons is null when the blackboard omits selected_target_weapons_cold', () => {
@@ -2446,12 +2442,12 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['asteroid'] }],
       blackboards: { 'sensor-radar': { selected_target: 'a1' } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+    expect(buildSensorsConsoleState(state).target_weapons).toBeNull();
   });
 
   it('target_weapons is null when there is no sensor-radar blackboard', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
-    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+    expect(buildSensorsConsoleState(state).target_weapons).toBeNull();
   });
 
   it('target_weapons never derives from the entity snapshot (no-leak boundary)', () => {
@@ -2462,14 +2458,14 @@ describe('buildSensorsConsoleState', () => {
       sensorsTarget: 'e1',
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], weapons_cold: true, power_weapons: 0 }],
     };
-    expect(parse(buildSensorsConsoleState(state)).target_weapons).toBeNull();
+    expect(buildSensorsConsoleState(state).target_weapons).toBeNull();
   });
 
   // ── target_projection (#1339) — trajectory projection geometry ────────────
 
   it('target_projection is null when there is no selection', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
-    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+    expect(buildSensorsConsoleState(state).target_projection).toBeNull();
   });
 
   it('target_projection is null when the blackboard omits relative velocity (unknown)', () => {
@@ -2479,7 +2475,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'a1', x: 50, z: 0, tags: ['asteroid'] }],
       blackboards: { 'sensor-radar': { selected_target: 'a1' } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+    expect(buildSensorsConsoleState(state).target_projection).toBeNull();
   });
 
   it('target_projection is null for a non-ship contact even if somehow selected', () => {
@@ -2492,7 +2488,7 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'station-1', x: 50, z: 0, tags: ['station'] }],
       blackboards: { 'sensor-radar': { selected_target: 'station-1' } },
     };
-    expect(parse(buildSensorsConsoleState(state)).target_projection).toBeNull();
+    expect(buildSensorsConsoleState(state).target_projection).toBeNull();
   });
 
   it('target_projection renders markers at the authored default horizon/spacing (60s/10s)', () => {
@@ -2504,7 +2500,7 @@ describe('buildSensorsConsoleState', () => {
         'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
       },
     };
-    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    const markers = buildSensorsConsoleState(state).target_projection;
     // Default horizon 60s / marker interval 10s → 6 markers (t = 10..60).
     expect(markers).toHaveLength(6);
     // range defaults to SENSORS_RADAR_RANGE (500) with no Sensors blackboard.
@@ -2527,7 +2523,7 @@ describe('buildSensorsConsoleState', () => {
         'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [10, 0] },
       },
     };
-    const markers = parse(buildSensorsConsoleState(state)).target_projection;
+    const markers = buildSensorsConsoleState(state).target_projection;
     // 20s horizon / 5s spacing → 4 markers (t = 5, 10, 15, 20).
     expect(markers).toHaveLength(4);
     expect(markers.map(m => m.t)).toEqual([5, 10, 15, 20]);
@@ -2547,7 +2543,7 @@ describe('buildSensorsConsoleState', () => {
         'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, 0] },
       },
     };
-    const result = parse(buildSensorsConsoleState(state));
+    const result = buildSensorsConsoleState(state);
     const marker = result.target_projection[0];
     const liveBlip = buildTargetBlip('e1', state.asteroids, 0, 0, shipYaw, SENSORS_RADAR_RANGE);
     // Zero relative velocity → every marker sits exactly on the live position.
@@ -2567,14 +2563,14 @@ describe('buildSensorsConsoleState', () => {
         'sensor-radar': { selected_target: 'e1', selected_target_relative_velocity: [0, -20] },
       },
     };
-    expect(parse(buildSensorsConsoleState(withVelocity)).target_projection).not.toBeNull();
+    expect(buildSensorsConsoleState(withVelocity).target_projection).not.toBeNull();
 
     const afterReselect = {
       ...withVelocity,
       sensorsTarget: 'a1',
       blackboards: { 'sensor-radar': { selected_target: 'a1' } },
     };
-    expect(parse(buildSensorsConsoleState(afterReselect)).target_projection).toBeNull();
+    expect(buildSensorsConsoleState(afterReselect).target_projection).toBeNull();
   });
 
   it('target_projection does not disturb existing target_* payload fields (payload compatibility)', () => {
@@ -2590,7 +2586,7 @@ describe('buildSensorsConsoleState', () => {
         },
       },
     };
-    const result = parse(buildSensorsConsoleState(state));
+    const result = buildSensorsConsoleState(state);
     expect(result.target_name).toBe('Raider');
     expect(result.target_kind).toBe('ship');
     expect(result.target_alert).toBe(true);
@@ -2607,7 +2603,7 @@ describe('tractor via buildSystemStationConsoleState (issue #1156)', () => {
   const ENG_SYSTEMS = { engineering: ['repair', 'tractor'] };
 
   it('exposes a tractor view under the tractor id, keyed off the tractor blackboard', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       blackboards: {
         tractor: {
@@ -2618,7 +2614,7 @@ describe('tractor via buildSystemStationConsoleState (issue #1156)', () => {
           refusal: null,
         },
       },
-    }));
+    });
     expect(s.systems['tractor']).toBeTruthy();
     expect(s.systems['tractor'].engaged).toBe(true);
     expect(s.systems['tractor'].range).toBe(600);
@@ -2627,28 +2623,28 @@ describe('tractor via buildSystemStationConsoleState (issue #1156)', () => {
   });
 
   it('surfaces the refusal string id the console shows', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       blackboards: { tractor: { engaged: false, refusal: 'tractor.refused.out_of_range' } },
-    }));
+    });
     // A machine string id, resolved by the console through t() — never English.
     expect(s.systems['tractor'].refusal).toBe('tractor.refused.out_of_range');
   });
 
   it('a station that owns no tractor system gets no tractor view — a hull without one is unchanged', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: { engineering: ['repair'] },
       blackboards: { tractor: { engaged: true } },
-    }));
+    });
     expect(s.systems).not.toHaveProperty('tractor');
   });
 
   it('the tractor auto flag comes from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       controlSources: { tractor: 'Ai' },
       blackboards: { tractor: {} },
-    }));
+    });
     expect(s.systems['tractor'].tractor_auto).toBe(true);
   });
 });
@@ -2659,7 +2655,7 @@ describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
   const ENG_SYSTEMS = { engineering: ['repair', 'umbilical'] };
 
   it('exposes an umbilical view with the rate and both ends levels', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       blackboards: {
         umbilical: {
@@ -2672,7 +2668,7 @@ describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
           refusal: null,
         },
       },
-    }));
+    });
     expect(s.systems['umbilical']).toBeTruthy();
     expect(s.systems['umbilical'].running).toBe(true);
     expect(s.systems['umbilical'].rate).toBe(20);
@@ -2681,28 +2677,28 @@ describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
   });
 
   it('surfaces the refusal string id the console shows', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       blackboards: { umbilical: { running: false, refusal: 'umbilical.refused.undocked' } },
-    }));
+    });
     // A machine string id, resolved by the console through t() — never English.
     expect(s.systems['umbilical'].refusal).toBe('umbilical.refused.undocked');
   });
 
   it('a station that owns no umbilical system gets no umbilical view — a hull without one is unchanged', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: { engineering: ['repair'] },
       blackboards: { umbilical: { running: true } },
-    }));
+    });
     expect(s.systems).not.toHaveProperty('umbilical');
   });
 
   it('the umbilical auto flag comes from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       controlSources: { umbilical: 'Ai' },
       blackboards: { umbilical: {} },
-    }));
+    });
     expect(s.systems['umbilical'].umbilical_auto).toBe(true);
   });
 });
@@ -2731,10 +2727,10 @@ describe('security via buildSystemStationConsoleState (issue #1346)', () => {
   };
 
   it('exposes the team list, the eligible targets and their authored actions', () => {
-    const s = parse(buildSystemStationConsoleState('tactical', {
+    const s = buildSystemStationConsoleState('tactical', {
       stationSystems: TAC_SYSTEMS,
       blackboards: { security: BLACKBOARD },
-    }));
+    });
     const view = s.systems['security'];
     expect(view).toBeTruthy();
     expect(view.range).toBe(400);
@@ -2748,26 +2744,26 @@ describe('security via buildSystemStationConsoleState (issue #1346)', () => {
   });
 
   it('surfaces the refusal string id the console shows, never English', () => {
-    const s = parse(buildSystemStationConsoleState('tactical', {
+    const s = buildSystemStationConsoleState('tactical', {
       stationSystems: TAC_SYSTEMS,
       blackboards: { security: { refusal: 'security.dispatch.refused.team_busy' } },
-    }));
+    });
     expect(s.systems['security'].refusal).toBe('security.dispatch.refused.team_busy');
   });
 
   it('a station that owns no security system gets no security view — a hull without teams is unchanged', () => {
-    const s = parse(buildSystemStationConsoleState('tactical', {
+    const s = buildSystemStationConsoleState('tactical', {
       stationSystems: { tactical: ['tactical-radar'] },
       blackboards: { security: BLACKBOARD },
-    }));
+    });
     expect(s.systems).not.toHaveProperty('security');
   });
 
   it('an empty muster renders as empty arrays rather than throwing', () => {
-    const s = parse(buildSystemStationConsoleState('tactical', {
+    const s = buildSystemStationConsoleState('tactical', {
       stationSystems: TAC_SYSTEMS,
       blackboards: {},
-    }));
+    });
     expect(s.systems['security'].teams).toEqual([]);
     expect(s.systems['security'].targets).toEqual([]);
   });
@@ -2778,14 +2774,14 @@ describe('science station via buildSystemStationConsoleState', () => {
   const SCIENCE_SYSTEMS = { science: ['sensors', 'sensor-radar', 'shields-system'] };
 
   it('returns valid JSON with the generic shape', () => {
-    const s = parse(buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS }));
+    const s = buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS });
     expect(s.station_id).toBe('science');
     expect(s.system_ids).toEqual(SCIENCE_SYSTEMS.science);
     expect(s).toHaveProperty('systems');
   });
 
   it('exposes the sensors view under both owned sensors ids and shields under shields-system', () => {
-    const s = parse(buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS }));
+    const s = buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS });
     expect(s.systems['sensors']).toHaveProperty('blips');
     expect(s.systems['sensor-radar']).toHaveProperty('blips');
     expect(s.systems['shields-system']).toHaveProperty('grid_status');
@@ -2793,10 +2789,10 @@ describe('science station via buildSystemStationConsoleState', () => {
   });
 
   it('per-system auto flags come from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('science', {
+    const s = buildSystemStationConsoleState('science', {
       stationSystems: SCIENCE_SYSTEMS,
       controlSources: { 'sensors': 'Ai', 'sensor-radar': 'Ai', 'shields-system': 'Human' },
-    }));
+    });
     expect(s.systems['sensors'].sensors_auto).toBe(true);
     expect(s.systems['shields-system'].shields_auto).toBe(false);
   });
@@ -2808,7 +2804,7 @@ describe('science station via buildSystemStationConsoleState', () => {
       sensorsTarget: 'tgt-1',
       asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate' }],
     };
-    const s = parse(buildSystemStationConsoleState('science', state));
+    const s = buildSystemStationConsoleState('science', state);
     expect(s.systems['sensors'].target_uuid).toBe('tgt-1');
     expect(s.systems['sensors'].target_name).toBe('Raider');
     expect(s.systems['sensors'].target_stance).toBe('hostile');
@@ -2816,10 +2812,10 @@ describe('science station via buildSystemStationConsoleState', () => {
   });
 
   it('passes shields facings through the shields view', () => {
-    const s = parse(buildSystemStationConsoleState('science', {
+    const s = buildSystemStationConsoleState('science', {
       stationSystems: SCIENCE_SYSTEMS,
       shieldFacings: ['fore', 'port', 'aft', 'starboard'],
-    }));
+    });
     expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
     expect(s.systems['shields-system'].facings).toEqual(['fore', 'port', 'aft', 'starboard']);
   });
@@ -2841,42 +2837,42 @@ describe('science station via buildSystemStationConsoleState', () => {
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('science', state));
+    const s = buildSystemStationConsoleState('science', state);
     expect(s.systems['shields-system'].threat_bearing).toBe(132.0);
   });
 });
 
 describe('buildCommsConsoleState', () => {
   it('returns valid JSON', () => {
-    expect(() => parse(buildCommsConsoleState({}))).not.toThrow();
+    expect(() => buildCommsConsoleState({})).not.toThrow();
   });
 
   it('messages defaults to empty array', () => {
-    expect(parse(buildCommsConsoleState({})).messages).toEqual([]);
+    expect(buildCommsConsoleState({}).messages).toEqual([]);
   });
 
   it('contacts defaults to empty array', () => {
-    expect(parse(buildCommsConsoleState({})).contacts).toEqual([]);
+    expect(buildCommsConsoleState({}).contacts).toEqual([]);
   });
 
   it('passes messages through', () => {
     const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
-    expect(parse(buildCommsConsoleState({ commsMessages: msgs })).messages).toEqual(msgs);
+    expect(buildCommsConsoleState({ commsMessages: msgs }).messages).toEqual(msgs);
   });
 
   it('passes contacts through', () => {
     const contacts = [{ uuid: 'npc-1', name: 'Station Alpha', in_range: true }];
-    expect(parse(buildCommsConsoleState({ commsContacts: contacts })).contacts).toEqual(contacts);
+    expect(buildCommsConsoleState({ commsContacts: contacts }).contacts).toEqual(contacts);
   });
 
   it('on_screen is true when currentView is Comms', () => {
-    expect(parse(buildCommsConsoleState({ currentView: 'Comms' })).on_screen).toBe(true);
+    expect(buildCommsConsoleState({ currentView: 'Comms' }).on_screen).toBe(true);
   });
 
   it('surfaces commsRejection as rejection (#761)', () => {
     const rejection = { message_id: 'm1', response_index: 1, ts: 42 };
-    expect(parse(buildCommsConsoleState({ commsRejection: rejection })).rejection).toEqual(rejection);
-    expect(parse(buildCommsConsoleState({})).rejection).toBeNull();
+    expect(buildCommsConsoleState({ commsRejection: rejection }).rejection).toEqual(rejection);
+    expect(buildCommsConsoleState({}).rejection).toBeNull();
   });
 
   // Issue #1030. Dossiers ride their own blackboard channel, so they are read
@@ -2890,17 +2886,17 @@ describe('buildCommsConsoleState', () => {
       facts: [{ label: 'dossier.fact.condition', value: { kind: 'fraction', value: 0.42 } }],
       evidence: [],
     }];
-    expect(parse(buildCommsConsoleState({ blackboards: { dossiers: { subjects: dossiers } } })).dossiers)
+    expect(buildCommsConsoleState({ blackboards: { dossiers: { subjects: dossiers } } }).dossiers)
       .toEqual(dossiers);
-    expect(parse(buildCommsConsoleState({
+    expect(buildCommsConsoleState({
       blackboards: { comms: { messages: [] }, dossiers: { subjects: dossiers } },
-    })).dossiers).toEqual(dossiers);
+    }).dossiers).toEqual(dossiers);
   });
 
   it('reports an empty dossier list when the world holds no files, or has no blackboard yet', () => {
-    expect(parse(buildCommsConsoleState({})).dossiers).toEqual([]);
-    expect(parse(buildCommsConsoleState({ blackboards: { dossiers: {} } })).dossiers).toEqual([]);
-    expect(parse(buildCommsConsoleState({ blackboards: { comms: {} } })).dossiers).toEqual([]);
+    expect(buildCommsConsoleState({}).dossiers).toEqual([]);
+    expect(buildCommsConsoleState({ blackboards: { dossiers: {} } }).dossiers).toEqual([]);
+    expect(buildCommsConsoleState({ blackboards: { comms: {} } }).dossiers).toEqual([]);
   });
 });
 
@@ -2910,11 +2906,11 @@ describe('buildNavigationConsoleState', () => {
   const EMPTY = {};
 
   it('returns valid JSON', () => {
-    expect(() => parse(buildNavigationConsoleState(EMPTY))).not.toThrow();
+    expect(() => buildNavigationConsoleState(EMPTY)).not.toThrow();
   });
 
   it('radar_range matches NAVIGATION_RADAR_RANGE constant', () => {
-    expect(parse(buildNavigationConsoleState(EMPTY)).radar_range).toBe(NAVIGATION_RADAR_RANGE);
+    expect(buildNavigationConsoleState(EMPTY).radar_range).toBe(NAVIGATION_RADAR_RANGE);
   });
 
   // Issue #1028. The traffic picture is server-derived and passed straight
@@ -2933,17 +2929,17 @@ describe('buildNavigationConsoleState', () => {
       reason: 'civilian.compliance.reason.declined',
     }];
     const state = { blackboards: { navigation: { civilians } } };
-    expect(parse(buildNavigationConsoleState(state)).civilians).toEqual(civilians);
+    expect(buildNavigationConsoleState(state).civilians).toEqual(civilians);
   });
 
   it('reports no civilian traffic when the world carries none, or has no blackboard yet', () => {
-    expect(parse(buildNavigationConsoleState(EMPTY)).civilians).toEqual([]);
-    expect(parse(buildNavigationConsoleState({ blackboards: { navigation: {} } })).civilians)
+    expect(buildNavigationConsoleState(EMPTY).civilians).toEqual([]);
+    expect(buildNavigationConsoleState({ blackboards: { navigation: {} } }).civilians)
       .toEqual([]);
   });
 
   it('blips is empty when no asteroids', () => {
-    expect(parse(buildNavigationConsoleState(EMPTY)).blips).toEqual([]);
+    expect(buildNavigationConsoleState(EMPTY).blips).toEqual([]);
   });
 
   it('includes station entities', () => {
@@ -2952,7 +2948,7 @@ describe('buildNavigationConsoleState', () => {
       navChartShows: ['station'],
       asteroids: [{ uuid: 'st1', x: 100, z: 0, tags: ['station'], name: 'Starbase 1', radar_icon: 'station' }],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.length).toBe(1);
     expect(blips[0].kind).toBe('station');
     expect(blips[0].name).toBe('Starbase 1');
@@ -2967,7 +2963,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 's1', x: 0,  z: 50, tags: ['star'],   radar_icon: 'star'   },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.length).toBe(2);
     expect(blips.map(b => b.kind).sort()).toEqual(['planet', 'star']);
   });
@@ -2980,7 +2976,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'ice-moon', name: 'Ice Moon', x: 120, z: -40, tags: ['moon'], radar_icon: 'planet' },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.map(b => b.uuid)).toEqual(['ice-moon']);
     expect(blips[0].name).toBe('Ice Moon');
   });
@@ -2993,7 +2989,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'ice-moon', name: 'Ice Moon', x: 120, z: -40, tags: ['moon'], radar_icon: 'planet' },
       ],
     };
-    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+    expect(buildNavigationConsoleState(state).blips).toEqual([]);
   });
 
   it('draws a radar_icon star as a star on the navigation chart', () => {
@@ -3004,7 +3000,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'sun', name: 'Sun', x: 0, z: 50, tags: ['star'], radar_icon: 'star', objective_target: true },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips).toHaveLength(1);
     expect(blips[0].kind).toBe('star');
     expect(blips[0].icon).toBe('star');
@@ -3020,7 +3016,7 @@ describe('buildNavigationConsoleState', () => {
       ],
     };
 
-    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+    expect(buildNavigationConsoleState(state).blips).toEqual([]);
   });
 
   it('excludes bare asteroid entities', () => {
@@ -3028,7 +3024,7 @@ describe('buildNavigationConsoleState', () => {
       shipX: 0, shipZ: 0,
       asteroids: [{ uuid: 'a1', x: 10, z: 0, tags: ['asteroid'] }],
     };
-    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+    expect(buildNavigationConsoleState(state).blips).toEqual([]);
   });
 
   it('excludes NPC ship entities (ship tag only)', () => {
@@ -3036,7 +3032,7 @@ describe('buildNavigationConsoleState', () => {
       shipX: 0, shipZ: 0,
       asteroids: [{ uuid: 'npc1', x: 10, z: 0, tags: ['ship'] }],
     };
-    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+    expect(buildNavigationConsoleState(state).blips).toEqual([]);
   });
 
   it('includes alliance_cruiser entities', () => {
@@ -3045,34 +3041,34 @@ describe('buildNavigationConsoleState', () => {
       navChartShows: ['alliance_cruiser'],
       asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['alliance_cruiser'], radar_icon: 'ship' }],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.length).toBe(1);
     expect(blips[0].kind).toBe('ship');
   });
 
   it('cancel_visible is true when impulse_charge_progress > 0', () => {
-    const s = parse(buildNavigationConsoleState({ impulseChargeProgress: 0.5 }));
+    const s = buildNavigationConsoleState({ impulseChargeProgress: 0.5 });
     expect(s.cancel_visible).toBe(true);
     expect(s.impulse_charge_progress).toBeCloseTo(0.5);
   });
 
   it('cancel_visible is false when charge is 0', () => {
-    expect(parse(buildNavigationConsoleState(EMPTY)).cancel_visible).toBe(false);
+    expect(buildNavigationConsoleState(EMPTY).cancel_visible).toBe(false);
   });
 
   it('on_screen is true when currentView is NavigationChart', () => {
-    expect(parse(buildNavigationConsoleState({ currentView: 'NavigationChart' })).on_screen).toBe(true);
+    expect(buildNavigationConsoleState({ currentView: 'NavigationChart' }).on_screen).toBe(true);
   });
 
   it('on_screen is false for other views', () => {
-    expect(parse(buildNavigationConsoleState({ currentView: 'Radar' })).on_screen).toBe(false);
+    expect(buildNavigationConsoleState({ currentView: 'Radar' }).on_screen).toBe(false);
   });
 
   it('passes waypoint through and adds a waypoint blip', () => {
-    const s = parse(buildNavigationConsoleState({
+    const s = buildNavigationConsoleState({
       shipX: 0, shipZ: 0,
       navigationWaypoint: { x: 250, z: 500 },
-    }));
+    });
     expect(s.waypoint).toEqual({ x: 250, z: 500 });
     expect(s.blips.find(b => b.kind === 'waypoint')).toBeDefined();
   });
@@ -3086,7 +3082,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'pl1', x: -200, z: 400, tags: ['planet'], radar_icon: 'planet' },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.length).toBe(2);
     expect(blips[0].world_x).toBe(500);
     expect(blips[0].world_z).toBe(-300);
@@ -3103,7 +3099,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'p1',  x: 200, z: 800, tags: ['planet'],  name: 'Alderaan',  radar_icon: 'planet'  },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.length).toBe(2);
     expect(blips[0].world_x).toBe(500);
     expect(blips[0].world_z).toBe(300);
@@ -3118,7 +3114,7 @@ describe('buildNavigationConsoleState', () => {
       navChartShows: ['station'],
       asteroids: [{ uuid: 'st', x: 500, z: 0, tags: ['station'], radar_icon: 'station' }],
     };
-    const blip = parse(buildNavigationConsoleState(state)).blips[0];
+    const blip = buildNavigationConsoleState(state).blips[0];
     expect(blip.radar_x).toBeCloseTo(500 / NAVIGATION_RADAR_RANGE);
     expect(blip.radar_y).toBeCloseTo(0);
   });
@@ -3128,7 +3124,7 @@ describe('buildNavigationConsoleState', () => {
       shipX: 100, shipZ: 200,
       navigationWaypoint: { x: 800, z: -400 },
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     const wp = blips.find(b => b.kind === 'waypoint');
     expect(wp).toBeDefined();
     expect(wp.world_x).toBe(800);
@@ -3140,7 +3136,7 @@ describe('buildNavigationConsoleState', () => {
       shipX: 0, shipZ: 0,
       navigationWaypoint: { x: 500, z: -300 },
     };
-    const out = parse(buildNavigationConsoleState(state));
+    const out = buildNavigationConsoleState(state);
     const wp = out.blips.find(b => b.kind === 'waypoint');
     expect(wp).toBeDefined();
     expect(wp.selectable).toBe(false);
@@ -3152,7 +3148,7 @@ describe('buildNavigationConsoleState', () => {
       shipX: 0, shipZ: 0,
       navigationWaypoint: { x: 500, z: -300, source_uuid: 'station-alpha' },
     };
-    const out = parse(buildNavigationConsoleState(state));
+    const out = buildNavigationConsoleState(state);
     expect(out.waypoint).toEqual({ x: 500, z: -300, source_uuid: 'station-alpha' });
     const wp = out.blips.find(b => b.kind === 'waypoint');
     expect(wp).toBeDefined();
@@ -3170,7 +3166,7 @@ describe('buildNavigationConsoleState', () => {
         { uuid: 'beacon-2', name: 'Quiet Zone', x: 200, z: 0, tags: ['objective_marker'], radar_icon: 'station' },
       ],
     };
-    const blips = parse(buildNavigationConsoleState(state)).blips;
+    const blips = buildNavigationConsoleState(state).blips;
     expect(blips.map(b => b.uuid)).toEqual(['beacon-1']);
     expect(blips[0].objective_target).toBe(true);
     expect(blips[0].kind).toBe('station');
@@ -3192,7 +3188,7 @@ describe('buildNavigationConsoleState', () => {
         region_colour: [0.3, 0.6, 0.9],
       }],
     };
-    const s = parse(buildNavigationConsoleState(state));
+    const s = buildNavigationConsoleState(state);
     expect(s.regions).toHaveLength(1);
     expect(s.regions[0].objective_target).toBe(true);
   });
@@ -3224,7 +3220,7 @@ describe('buildNavigationConsoleState', () => {
         },
       ],
     };
-    const s = parse(buildNavigationConsoleState(state));
+    const s = buildNavigationConsoleState(state);
     expect(s.regions.map(r => r.uuid).sort()).toEqual(['field-1', 'nebula-1']);
     expect(s.regions.find(r => r.uuid === 'field-1')).toMatchObject({
       shape: 'torus',
@@ -3277,7 +3273,7 @@ describe('buildNavigationConsoleState', () => {
     // No mirror step: the builder consumes the ClientSimState instance
     // directly, exactly as client.html does post-#819 (the `asteroids` /
     // `shipX` / `shipZ` reads resolve through the class getters).
-    const out = parse(buildNavigationConsoleState(sim));
+    const out = buildNavigationConsoleState(sim);
     expect(out.blips.length).toBeGreaterThan(0);
     expect(out.blips.map(b => b.uuid).sort()).toEqual(['pl1', 'st1']);
     expect(out.radar_range).toBe(800);
@@ -3289,15 +3285,15 @@ describe('buildNavigationConsoleState', () => {
 describe('auto fields', () => {
   // helm_auto
   it('helm_auto is true when stationRatings.helm === Backfill', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } })).helm_auto).toBe(true);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Backfill' } }).helm_auto).toBe(true);
   });
 
   it('helm_auto is false when stationRatings.helm is a different rating', () => {
-    expect(parse(buildHelmConsoleState({ stationRatings: { helm: 'Full' } })).helm_auto).toBe(false);
+    expect(buildHelmConsoleState({ stationRatings: { helm: 'Full' } }).helm_auto).toBe(false);
   });
 
   it('helm_auto is false when stationRatings is absent', () => {
-    expect(parse(buildHelmConsoleState(EMPTY)).helm_auto).toBe(false);
+    expect(buildHelmConsoleState(EMPTY).helm_auto).toBe(false);
   });
 
   // tactical_auto — typed PhaserBank scope. Simplified Tactical automates its
@@ -3316,7 +3312,7 @@ describe('auto fields', () => {
       },
       blackboards: { 'phaser-port': {}, 'phaser-starboard': {} },
     };
-    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(true);
+    expect(buildWeaponsConsoleState(state).tactical_auto).toBe(true);
   });
 
   it('tactical_auto is false when only some typed PhaserBank systems are Ai-controlled', () => {
@@ -3325,7 +3321,7 @@ describe('auto fields', () => {
       controlSources: { 'phaser-fore': 'Ai', 'phaser-aft': 'Human' },
       blackboards: { 'phaser-fore': {}, 'phaser-aft': {} },
     };
-    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
+    expect(buildWeaponsConsoleState(state).tactical_auto).toBe(false);
   });
 
   it('tactical_auto is false when no typed PhaserBank projection is available', () => {
@@ -3333,86 +3329,86 @@ describe('auto fields', () => {
       stationSystems: { tactical: ['phaser-fore'] },
       controlSources: { 'phaser-fore': 'Ai' },
     };
-    expect(parse(buildWeaponsConsoleState(state)).tactical_auto).toBe(false);
-    expect(parse(buildWeaponsConsoleState(EMPTY)).tactical_auto).toBe(false);
+    expect(buildWeaponsConsoleState(state).tactical_auto).toBe(false);
+    expect(buildWeaponsConsoleState(EMPTY).tactical_auto).toBe(false);
   });
 
   // repair_auto — per-system: the literal 'repair' system id must be Ai-controlled.
   it('repair_auto is true when controlSources.repair === Ai', () => {
-    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Ai' } })).repair_auto).toBe(true);
+    expect(buildRepairConsoleState({ controlSources: { repair: 'Ai' } }).repair_auto).toBe(true);
   });
 
   it('repair_auto is false when controlSources.repair is a different value', () => {
-    expect(parse(buildRepairConsoleState({ controlSources: { repair: 'Human' } })).repair_auto).toBe(false);
+    expect(buildRepairConsoleState({ controlSources: { repair: 'Human' } }).repair_auto).toBe(false);
   });
 
   it('repair_auto is false when controlSources is absent', () => {
-    expect(parse(buildRepairConsoleState(EMPTY)).repair_auto).toBe(false);
+    expect(buildRepairConsoleState(EMPTY).repair_auto).toBe(false);
   });
 
   // power_auto
   it('power_auto is true when stationRatings.power === Backfill', () => {
-    expect(parse(buildPowerConsoleState({ stationRatings: { power: 'Backfill' } })).power_auto).toBe(true);
+    expect(buildPowerConsoleState({ stationRatings: { power: 'Backfill' } }).power_auto).toBe(true);
   });
 
   it('power_auto is false when stationRatings.power is a different rating', () => {
-    expect(parse(buildPowerConsoleState({ stationRatings: { power: 'Full' } })).power_auto).toBe(false);
+    expect(buildPowerConsoleState({ stationRatings: { power: 'Full' } }).power_auto).toBe(false);
   });
 
   it('power_auto is false when stationRatings is absent', () => {
-    expect(parse(buildPowerConsoleState(EMPTY)).power_auto).toBe(false);
+    expect(buildPowerConsoleState(EMPTY).power_auto).toBe(false);
   });
 
   // shields_auto
   it('shields_auto is true when stationRatings.shields === Backfill', () => {
-    expect(parse(buildShieldsConsoleState({ stationRatings: { shields: 'Backfill' } })).shields_auto).toBe(true);
+    expect(buildShieldsConsoleState({ stationRatings: { shields: 'Backfill' } }).shields_auto).toBe(true);
   });
 
   it('shields_auto is false when stationRatings.shields is a different rating', () => {
-    expect(parse(buildShieldsConsoleState({ stationRatings: { shields: 'Full' } })).shields_auto).toBe(false);
+    expect(buildShieldsConsoleState({ stationRatings: { shields: 'Full' } }).shields_auto).toBe(false);
   });
 
   it('shields_auto is false when stationRatings is absent', () => {
-    expect(parse(buildShieldsConsoleState(EMPTY)).shields_auto).toBe(false);
+    expect(buildShieldsConsoleState(EMPTY).shields_auto).toBe(false);
   });
 
   // sensors_auto
   it('sensors_auto is true when stationRatings.sensors === Backfill', () => {
-    expect(parse(buildSensorsConsoleState({ stationRatings: { sensors: 'Backfill' } })).sensors_auto).toBe(true);
+    expect(buildSensorsConsoleState({ stationRatings: { sensors: 'Backfill' } }).sensors_auto).toBe(true);
   });
 
   it('sensors_auto is false when stationRatings.sensors is a different rating', () => {
-    expect(parse(buildSensorsConsoleState({ stationRatings: { sensors: 'Full' } })).sensors_auto).toBe(false);
+    expect(buildSensorsConsoleState({ stationRatings: { sensors: 'Full' } }).sensors_auto).toBe(false);
   });
 
   it('sensors_auto is false when stationRatings is absent', () => {
-    expect(parse(buildSensorsConsoleState(EMPTY)).sensors_auto).toBe(false);
+    expect(buildSensorsConsoleState(EMPTY).sensors_auto).toBe(false);
   });
 
   // navigation_auto
   it('navigation_auto is true when stationRatings.navigation === Backfill', () => {
-    expect(parse(buildNavigationConsoleState({ stationRatings: { navigation: 'Backfill' } })).navigation_auto).toBe(true);
+    expect(buildNavigationConsoleState({ stationRatings: { navigation: 'Backfill' } }).navigation_auto).toBe(true);
   });
 
   it('navigation_auto is false when stationRatings.navigation is a different rating', () => {
-    expect(parse(buildNavigationConsoleState({ stationRatings: { navigation: 'Full' } })).navigation_auto).toBe(false);
+    expect(buildNavigationConsoleState({ stationRatings: { navigation: 'Full' } }).navigation_auto).toBe(false);
   });
 
   it('navigation_auto is false when stationRatings is absent', () => {
-    expect(parse(buildNavigationConsoleState(EMPTY)).navigation_auto).toBe(false);
+    expect(buildNavigationConsoleState(EMPTY).navigation_auto).toBe(false);
   });
 
   it('navigation_auto follows live system control ahead of the lobby rating', () => {
-    const visiting = parse(buildNavigationConsoleState({
+    const visiting = buildNavigationConsoleState({
       stationRatings: { navigation: 'Backfill' },
       controlSources: { navigation: 'Human' },
-    }));
+    });
     expect(visiting.navigation_auto).toBe(false);
 
-    const delegated = parse(buildNavigationConsoleState({
+    const delegated = buildNavigationConsoleState({
       stationRatings: { navigation: 'Full' },
       controlSources: { navigation: 'Ai' },
-    }));
+    });
     expect(delegated.navigation_auto).toBe(true);
   });
 
@@ -3423,39 +3419,39 @@ describe('auto fields', () => {
       station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
       control_sources: { navigation: 'Human' },
     } } });
-    expect(parse(buildNavigationConsoleState(sim)).navigation_auto).toBe(false);
+    expect(buildNavigationConsoleState(sim).navigation_auto).toBe(false);
 
     sim.apply({ type: 'SimState', data: { snapshot: {
       station_hosts: [{ station: 'navigation', host: null, rating: 'Simplified' }],
       control_sources: { navigation: 'Ai' },
     } } });
-    expect(parse(buildNavigationConsoleState(sim)).navigation_auto).toBe(true);
+    expect(buildNavigationConsoleState(sim).navigation_auto).toBe(true);
   });
 
   // comms_auto
   it('comms_auto is true when stationRatings.comms === Backfill', () => {
-    expect(parse(buildCommsConsoleState({ stationRatings: { comms: 'Backfill' } })).comms_auto).toBe(true);
+    expect(buildCommsConsoleState({ stationRatings: { comms: 'Backfill' } }).comms_auto).toBe(true);
   });
 
   it('comms_auto is false when stationRatings.comms is a different rating', () => {
-    expect(parse(buildCommsConsoleState({ stationRatings: { comms: 'Full' } })).comms_auto).toBe(false);
+    expect(buildCommsConsoleState({ stationRatings: { comms: 'Full' } }).comms_auto).toBe(false);
   });
 
   it('comms_auto is false when stationRatings is absent', () => {
-    expect(parse(buildCommsConsoleState(EMPTY)).comms_auto).toBe(false);
+    expect(buildCommsConsoleState(EMPTY).comms_auto).toBe(false);
   });
 
   it('comms_auto follows live system control ahead of the lobby rating', () => {
-    const visiting = parse(buildCommsConsoleState({
+    const visiting = buildCommsConsoleState({
       stationRatings: { comms: 'Backfill' },
       controlSources: { comms: 'Human' },
-    }));
+    });
     expect(visiting.comms_auto).toBe(false);
 
-    const delegated = parse(buildCommsConsoleState({
+    const delegated = buildCommsConsoleState({
       stationRatings: { comms: 'Std' },
       controlSources: { comms: 'Ai' },
-    }));
+    });
     expect(delegated.comms_auto).toBe(true);
   });
 
@@ -3466,13 +3462,13 @@ describe('auto fields', () => {
       station_hosts: [{ station: 'comms', host: 'tactical', rating: 'Std' }],
       control_sources: { comms: 'Human' },
     } } });
-    expect(parse(buildCommsConsoleState(sim)).comms_auto).toBe(false);
+    expect(buildCommsConsoleState(sim).comms_auto).toBe(false);
 
     sim.apply({ type: 'SimState', data: { snapshot: {
       station_hosts: [{ station: 'comms', host: null, rating: 'Std' }],
       control_sources: { comms: 'Ai' },
     } } });
-    expect(parse(buildCommsConsoleState(sim)).comms_auto).toBe(true);
+    expect(buildCommsConsoleState(sim).comms_auto).toBe(true);
   });
 });
 
@@ -3484,7 +3480,7 @@ describe('cruiser engineering station via buildSystemStationConsoleState', () =>
   const ENG_SYSTEMS = { engineering: ['power-reactor', 'power-battery', 'repair'] };
 
   it('returns the generic shape with power views under both power ids and a repair view', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    const s = buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS });
     expect(s.station_id).toBe('engineering');
     expect(s.system_ids).toEqual(ENG_SYSTEMS.engineering);
     expect(s.systems['power-reactor']).toBeDefined();
@@ -3495,10 +3491,10 @@ describe('cruiser engineering station via buildSystemStationConsoleState', () =>
   });
 
   it('per-system auto flags come from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       controlSources: { 'power-reactor': 'Ai', repair: 'Human' },
-    }));
+    });
     expect(s.systems['power-reactor'].power_auto).toBe(true);
     expect(s.systems['repair'].repair_auto).toBe(false);
   });
@@ -3517,7 +3513,7 @@ describe('cruiser engineering station via buildSystemStationConsoleState', () =>
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['power-reactor'].consoles).toHaveLength(1);
     expect(s.systems['power-reactor'].consoles[0].id).toBe('helm');
     expect(s.systems['power-battery'].battery_charge).toBe(75);
@@ -3535,7 +3531,7 @@ describe('cruiser engineering station via buildSystemStationConsoleState', () =>
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['repair'].teams).toHaveLength(2);
     expect(s.systems['repair'].system_hull[0].system_id).toBe('helm');
   });
@@ -3549,7 +3545,7 @@ describe('cruiser comms station via buildSystemStationConsoleState', () => {
   const COMMS_SYSTEMS = { comms: ['navigation', 'comms'] };
 
   it('returns the generic shape with navigation and comms views', () => {
-    const s = parse(buildSystemStationConsoleState('comms', { stationSystems: COMMS_SYSTEMS }));
+    const s = buildSystemStationConsoleState('comms', { stationSystems: COMMS_SYSTEMS });
     expect(s.station_id).toBe('comms');
     expect(s.system_ids).toEqual(COMMS_SYSTEMS.comms);
     expect(s.systems['navigation']).toHaveProperty('blips');
@@ -3566,24 +3562,24 @@ describe('cruiser comms station via buildSystemStationConsoleState', () => {
     // path overrides it from controlSources like every other family — no
     // cruiser/destroyer hull declares a station named 'navigation', so the
     // rating-derived flag could never light on a composed console.
-    const auto = parse(buildSystemStationConsoleState('comms', {
+    const auto = buildSystemStationConsoleState('comms', {
       stationSystems: COMMS_SYSTEMS, controlSources: { navigation: 'Ai' },
-    }));
+    });
     expect(auto.systems['navigation'].navigation_auto).toBe(true);
-    const manual = parse(buildSystemStationConsoleState('comms', {
+    const manual = buildSystemStationConsoleState('comms', {
       stationSystems: COMMS_SYSTEMS, controlSources: { navigation: 'Human' },
-    }));
+    });
     expect(manual.systems['navigation'].navigation_auto).toBe(false);
   });
 
   it('comms_auto comes from the comms system control source', () => {
-    const auto = parse(buildSystemStationConsoleState('comms', {
+    const auto = buildSystemStationConsoleState('comms', {
       stationSystems: COMMS_SYSTEMS, controlSources: { comms: 'Ai' },
-    }));
+    });
     expect(auto.systems['comms'].comms_auto).toBe(true);
-    const manual = parse(buildSystemStationConsoleState('comms', {
+    const manual = buildSystemStationConsoleState('comms', {
       stationSystems: COMMS_SYSTEMS, controlSources: { comms: 'Human' },
-    }));
+    });
     expect(manual.systems['comms'].comms_auto).toBe(false);
   });
 
@@ -3600,7 +3596,7 @@ describe('cruiser comms station via buildSystemStationConsoleState', () => {
       shipX: 10,
       shipZ: 20,
     };
-    const s = parse(buildSystemStationConsoleState('comms', state));
+    const s = buildSystemStationConsoleState('comms', state);
     expect(s.systems['navigation'].ship_x).toBe(10);
     expect(s.systems['navigation'].ship_z).toBe(20);
     expect(s.systems['navigation'].radar_range).toBe(1000);
@@ -3614,7 +3610,7 @@ describe('cruiser comms station via buildSystemStationConsoleState', () => {
         comms: { messages: msgs, contacts: [], objectives: [] },
       },
     };
-    const s = parse(buildSystemStationConsoleState('comms', state));
+    const s = buildSystemStationConsoleState('comms', state);
     expect(s.systems['comms'].messages).toHaveLength(1);
     expect(s.systems['comms'].messages[0].id).toBe('msg-1');
   });
@@ -3705,7 +3701,7 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
   const CAPTAIN_SYSTEMS = { captain: ['captain', 'red-alert', 'viewscreen', 'sensors', 'sensor-radar'] };
 
   it('returns the generic shape with captain and sensors views', () => {
-    const s = parse(buildSystemStationConsoleState('captain', { stationSystems: CAPTAIN_SYSTEMS }));
+    const s = buildSystemStationConsoleState('captain', { stationSystems: CAPTAIN_SYSTEMS });
     expect(s.station_id).toBe('captain');
     expect(s.system_ids).toEqual(CAPTAIN_SYSTEMS.captain);
     expect(s.systems['captain']).toHaveProperty('red_alert');
@@ -3717,22 +3713,22 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
   });
 
   it('per-system auto flags come from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('captain', {
+    const s = buildSystemStationConsoleState('captain', {
       stationSystems: CAPTAIN_SYSTEMS,
       controlSources: { 'red-alert': 'Ai', viewscreen: 'Human', sensors: 'Ai', 'sensor-radar': 'Ai' },
       blackboards: {
         captain: { red_alert_system_id: 'red-alert', viewscreen_system_id: 'viewscreen' },
       },
-    }));
+    });
     expect(s.systems['captain'].red_alert_auto).toBe(true);
     expect(s.systems['captain'].viewscreen_auto).toBe(false);
     expect(s.systems['sensors'].sensors_auto).toBe(true);
   });
 
   it('passes captain state through the captain view', () => {
-    const s = parse(buildSystemStationConsoleState('captain', {
+    const s = buildSystemStationConsoleState('captain', {
       stationSystems: CAPTAIN_SYSTEMS, redAlert: true,
-    }));
+    });
     expect(s.systems['captain'].red_alert).toBe(true);
     expect(s.systems['captain'].game_status).toMatch(/RED ALERT/);
   });
@@ -3744,7 +3740,7 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
       sensorsTarget: 'tgt-1',
       asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate', radar_icon: 'ship' }],
     };
-    const s = parse(buildSystemStationConsoleState('captain', state));
+    const s = buildSystemStationConsoleState('captain', state);
     expect(s.systems['sensors'].target_uuid).toBe('tgt-1');
     expect(s.systems['sensors'].target_name).toBe('Raider');
   });
@@ -3763,7 +3759,7 @@ describe('destroyer captain station via buildSystemStationConsoleState', () => {
         shield_fraction: 0.5, shield_freq: 0.25,
       }],
     };
-    const s = parse(buildSystemStationConsoleState('captain', state));
+    const s = buildSystemStationConsoleState('captain', state);
     expect(s.systems['sensors'].target_shields).toEqual([{ label: 'Fore', hp: 40, max_hp: 80, online: true }]);
     expect(s.systems['sensors'].target_shield_fraction).toBe(0.5);
     expect(s.systems['sensors'].target_shield_freq).toBe(0.25);
@@ -3801,7 +3797,7 @@ describe('courier captain station via buildSystemStationConsoleState', () => {
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('captain', state));
+    const s = buildSystemStationConsoleState('captain', state);
     expect(s.systems['shields-system'].threat_bearing).toBe(205.5);
   });
 });
@@ -3823,7 +3819,7 @@ describe('courier pilot station via buildSystemStationConsoleState', () => {
   };
 
   it('contains a view for every family the pilot page renders', () => {
-    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    const s = buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS });
     expect(s.station_id).toBe('pilot');
     for (const id of ['tactical-radar', 'blaster-fore', 'sensors', 'navigation', 'comms', 'captain', 'helm-thrust']) {
       expect(s.systems).toHaveProperty(id);
@@ -3831,14 +3827,14 @@ describe('courier pilot station via buildSystemStationConsoleState', () => {
   });
 
   it('omits power, shields and repair — the pilot owns none of those systems', () => {
-    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    const s = buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS });
     expect(s.systems).not.toHaveProperty('power-reactor');
     expect(s.systems).not.toHaveProperty('shields-system');
     expect(s.systems).not.toHaveProperty('repair');
   });
 
   it('weapons view carries the blips and ship position the one radar needs', () => {
-    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    const s = buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS });
     const w = s.systems['tactical-radar'];
     expect(w).toHaveProperty('blips');
     expect(w).toHaveProperty('blasters');
@@ -3848,17 +3844,17 @@ describe('courier pilot station via buildSystemStationConsoleState', () => {
   });
 
   it('helm view carries the flight-control fields', () => {
-    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    const s = buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS });
     for (const key of ['helm_auto', 'lateral_auto', 'boost_enabled', 'boost_active', 'impulse_charge_progress']) {
       expect(s.systems['helm-thrust']).toHaveProperty(key);
     }
   });
 
   it('captain view carries objectives and the camera view for the Fore/Cinematic buttons', () => {
-    const s = parse(buildSystemStationConsoleState('pilot', {
+    const s = buildSystemStationConsoleState('pilot', {
       stationSystems: PILOT_SYSTEMS,
       blackboards: { captain: { red_alert: true, view_direction: 'cinematic', objectives: [] } },
-    }));
+    });
     expect(s.systems['captain'].red_alert).toBe(true);
     expect(s.systems['captain'].view_direction).toBe('cinematic');
     expect(s.systems['captain']).toHaveProperty('objectives');
@@ -3874,7 +3870,7 @@ describe('buildSystemStationConsoleState', () => {
         repair: { teams: [], system_hull: [] },
       },
     };
-    const s = parse(buildSystemStationConsoleState('captain', state));
+    const s = buildSystemStationConsoleState('captain', state);
     expect(s.system_ids).toEqual(['red-alert', 'repair']);
     expect(s.systems['red-alert'].red_alert).toBe(true);
     expect(s.systems).toHaveProperty('repair');
@@ -3896,13 +3892,13 @@ describe('buildSystemStationConsoleState', () => {
         tactical: ['tactical-radar', 'phaser-control', 'navigation'],
       },
     };
-    const commsBefore = parse(buildSystemStationConsoleState('comms', before));
-    const tacticalBefore = parse(buildSystemStationConsoleState('tactical', before));
+    const commsBefore = buildSystemStationConsoleState('comms', before);
+    const tacticalBefore = buildSystemStationConsoleState('tactical', before);
     expect(commsBefore.systems).toHaveProperty('navigation');
     expect(tacticalBefore.systems).not.toHaveProperty('navigation');
 
-    const commsAfter = parse(buildSystemStationConsoleState('comms', after));
-    const tacticalAfter = parse(buildSystemStationConsoleState('tactical', after));
+    const commsAfter = buildSystemStationConsoleState('comms', after);
+    const tacticalAfter = buildSystemStationConsoleState('tactical', after);
     expect(commsAfter.systems).not.toHaveProperty('navigation');
     expect(tacticalAfter.systems).toHaveProperty('navigation');
     expect(tacticalAfter.systems['navigation']).toHaveProperty('blips');
@@ -3926,7 +3922,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
   };
 
   it('returns the generic shape with weapons, navigation and comms views', () => {
-    const s = parse(buildSystemStationConsoleState('tactical', { stationSystems: TACTICAL_SYSTEMS }));
+    const s = buildSystemStationConsoleState('tactical', { stationSystems: TACTICAL_SYSTEMS });
     expect(s.station_id).toBe('tactical');
     expect(s.systems['tactical-radar']).toHaveProperty('banks');
     expect(s.systems['tactical-radar']).toHaveProperty('tubes');
@@ -3941,7 +3937,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
     const stationSystems = {
       tactical: ['tactical-radar', 'phaser-omni', 'torpedo-tube-fore', 'blaster-port'],
     };
-    const simplified = parse(buildSystemStationConsoleState('tactical', {
+    const simplified = buildSystemStationConsoleState('tactical', {
       stationSystems,
       controlSources: {
         'tactical-radar': 'Human',
@@ -3950,11 +3946,11 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
         'blaster-port': 'Human',
       },
       blackboards: { 'phaser-omni': {} },
-    }));
+    });
     expect(simplified.systems['phaser-omni'].tactical_auto).toBe(true);
     expect(simplified.systems['blaster-port'].tactical_auto).toBe(true);
 
-    const mixed = parse(buildSystemStationConsoleState('tactical', {
+    const mixed = buildSystemStationConsoleState('tactical', {
       stationSystems,
       controlSources: {
         'tactical-radar': 'Human',
@@ -3963,7 +3959,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
         'blaster-port': 'Ai',
       },
       blackboards: { 'phaser-omni': {} },
-    }));
+    });
     expect(mixed.systems['phaser-omni'].tactical_auto).toBe(false);
   });
 
@@ -3985,7 +3981,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('tactical', state));
+    const s = buildSystemStationConsoleState('tactical', state);
     expect(s.systems['tactical-radar'].banks).toHaveLength(1);
     expect(s.systems['tactical-radar'].banks[0].id).toBe('fore');
     expect(s.systems['tactical-radar'].torpedo_count).toBe(4);
@@ -4000,7 +3996,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
         comms: { messages: msgs, contacts: [], objectives: [] },
       },
     };
-    const s = parse(buildSystemStationConsoleState('tactical', state));
+    const s = buildSystemStationConsoleState('tactical', state);
     expect(s.systems['comms'].messages).toHaveLength(1);
     expect(s.systems['comms'].messages[0].id).toBe('msg-1');
   });
@@ -4013,10 +4009,10 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
   // owns NO comms-family system, matching the real destroyer's Tactical.
   it('carries dossiers at the top level even when the station owns no comms system', () => {
     const subjects = [{ uuid: 'target-1', name: 'Harrow Raider' }];
-    const s = parse(buildSystemStationConsoleState('tactical', {
+    const s = buildSystemStationConsoleState('tactical', {
       stationSystems: { tactical: ['tactical-radar', 'phaser-omni'] },
       blackboards: { dossiers: { subjects } },
-    }));
+    });
     expect(s.systems.comms).toBeUndefined();
     expect(s.dossiers).toEqual(subjects);
   });
@@ -4034,7 +4030,7 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
       shipX: 10,
       shipZ: 20,
     };
-    const s = parse(buildSystemStationConsoleState('tactical', state));
+    const s = buildSystemStationConsoleState('tactical', state);
     expect(s.systems['navigation'].ship_x).toBe(10);
     expect(s.systems['navigation'].ship_z).toBe(20);
     expect(s.systems['navigation'].radar_range).toBe(800);
@@ -4049,7 +4045,7 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
   const ENG_SYSTEMS = { engineering: ['shields-system', 'power-reactor', 'power-battery', 'repair'] };
 
   it('returns the generic shape with shields, power and repair views', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    const s = buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS });
     expect(s.station_id).toBe('engineering');
     expect(s.systems['shields-system']).toHaveProperty('grid_status');
     expect(s.systems['power-reactor']).toBeDefined();
@@ -4059,10 +4055,10 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
   });
 
   it('per-system auto flags come from controlSources', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS,
       controlSources: { 'shields-system': 'Ai', 'power-reactor': 'Ai', repair: 'Ai' },
-    }));
+    });
     expect(s.systems['shields-system'].shields_auto).toBe(true);
     expect(s.systems['power-reactor'].power_auto).toBe(true);
     expect(s.systems['repair'].repair_auto).toBe(true);
@@ -4085,7 +4081,7 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
     expect(s.systems['shields-system'].facings).toHaveLength(2);
     expect(s.systems['shields-system'].hull_integrity_pct).toBe(75);
@@ -4108,7 +4104,7 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['shields-system'].threat_bearing).toBe(88.0);
   });
 
@@ -4126,7 +4122,7 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['power-reactor'].consoles).toHaveLength(1);
     expect(s.systems['power-battery'].battery_charge).toBe(75);
   });
@@ -4143,20 +4139,20 @@ describe('destroyer engineering station via buildSystemStationConsoleState', () 
         },
       },
     };
-    const s = parse(buildSystemStationConsoleState('engineering', state));
+    const s = buildSystemStationConsoleState('engineering', state);
     expect(s.systems['repair'].teams).toHaveLength(2);
     expect(s.systems['repair'].system_hull[0].system_id).toBe('helm');
   });
 
   it('shields view has GRID OFFLINE when no facings', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    const s = buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS });
     expect(s.systems['shields-system'].grid_status).toBe('GRID OFFLINE');
   });
 
   it('shields view has GRID NOMINAL when facings present', () => {
-    const s = parse(buildSystemStationConsoleState('engineering', {
+    const s = buildSystemStationConsoleState('engineering', {
       stationSystems: ENG_SYSTEMS, shieldFacings: ['fore', 'aft'],
-    }));
+    });
     expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
   });
 });
@@ -4343,8 +4339,7 @@ describe('withTutorialOverlay', () => {
 
   it('merges a tutorial block into the built helm payload', () => {
     const state = helmState();
-    const json = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
-    const s = JSON.parse(json);
+    const s = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
     expect(s.tutorial).toBeTruthy();
     expect(s.tutorial.active.id).toBe('helm-welcome');
     // Content stays a strings.csv id on the payload — the component resolves
@@ -4357,13 +4352,13 @@ describe('withTutorialOverlay', () => {
 
   it('state triggers read the very payload the console renders (boost tip needs boost_enabled)', () => {
     const calm = helmState();
-    const calmPayload = JSON.parse(withTutorialOverlay('helm', calm, buildHelmConsoleState(calm)));
+    const calmPayload = withTutorialOverlay('helm', calm, buildHelmConsoleState(calm));
     expect(calmPayload.boost_enabled).toBe(false);
     expect(calmPayload.tutorial.active.id).toBe('helm-welcome');
     expect(calmPayload.tutorial.remaining).toBe(1);
 
     const boosted = helmState({ blackboards: { helm: { boost_enabled: true } } });
-    const hotPayload = JSON.parse(withTutorialOverlay('helm', boosted, buildHelmConsoleState(boosted)));
+    const hotPayload = withTutorialOverlay('helm', boosted, buildHelmConsoleState(boosted));
     expect(hotPayload.boost_enabled).toBe(true);
     // priority 5 preempts the intro tip.
     expect(hotPayload.tutorial.active.id).toBe('helm-boost');
@@ -4375,7 +4370,7 @@ describe('withTutorialOverlay', () => {
       tutorialProgress: { dismissed: { 'helm/helm-welcome': true }, used: { 'helm/set_boost': true } },
       blackboards: { helm: { boost_enabled: true } },
     });
-    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    const s = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
     expect(s.tutorial).toBeNull();
   });
 
@@ -4387,19 +4382,22 @@ describe('withTutorialOverlay', () => {
       },
       blackboards: { helm: { boost_enabled: true } },
     });
-    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    const s = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
     expect(s.tutorial.active.id).toBe('helm-boost');
     expect(s.tutorial.remaining).toBe(2);
   });
 
   it('a station with no authored overlays gets tutorial: null', () => {
     const state = helmState({ stationTutorials: {} });
-    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    const s = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
     expect(s.tutorial).toBeNull();
   });
 
-  it('returns the input unchanged when the payload is not JSON', () => {
-    expect(withTutorialOverlay('helm', helmState(), 'not-json')).toBe('not-json');
+  it('adds tutorial state without changing the supplied payload', () => {
+    const payload = { boost_enabled: true };
+    const result = withTutorialOverlay('helm', helmState(), payload);
+    expect(result.tutorial.active.id).toBe('helm-boost');
+    expect(payload).toEqual({ boost_enabled: true });
   });
 });
 
@@ -4439,7 +4437,7 @@ describe('withTutorialOverlay (destroyer tactical station, issue #921)', () => {
 
   it('parses and evaluates through buildSystemStationConsoleState: welcome first, then progresses as controls are used', () => {
     const fresh = { stationTutorials: { tactical: tacticalDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: TACTICAL_SYSTEMS };
-    const s1 = parse(withTutorialOverlay('tactical', fresh, buildSystemStationConsoleState('tactical', fresh)));
+    const s1 = withTutorialOverlay('tactical', fresh, buildSystemStationConsoleState('tactical', fresh));
     expect(s1.tutorial.active.id).toBe('tactical-welcome');
     expect(s1.tutorial.remaining).toBe(5);
     expect(getTable().has(s1.tutorial.active.title)).toBe(true);
@@ -4457,7 +4455,7 @@ describe('withTutorialOverlay (destroyer tactical station, issue #921)', () => {
         used: { 'tactical/set_target': true, 'tactical/fire_phaser': true },
       },
     };
-    const s2 = parse(withTutorialOverlay('tactical', progressed, buildSystemStationConsoleState('tactical', progressed)));
+    const s2 = withTutorialOverlay('tactical', progressed, buildSystemStationConsoleState('tactical', progressed));
     expect(s2.tutorial.active.id).toBe('tactical-blaster');
     expect(s2.tutorial.remaining).toBe(2); // blaster, torpedo
   });
@@ -4489,7 +4487,7 @@ describe('withTutorialOverlay (destroyer captain station, issue #921)', () => {
 
   it('parses and evaluates through buildSystemStationConsoleState: welcome calm, red-alert state trigger preempts once live', () => {
     const calm = { stationTutorials: { captain: captainDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: CAPTAIN_SYSTEMS };
-    const s1 = parse(withTutorialOverlay('captain', calm, buildSystemStationConsoleState('captain', calm)));
+    const s1 = withTutorialOverlay('captain', calm, buildSystemStationConsoleState('captain', calm));
     expect(s1.systems['captain'].red_alert).toBe(false);
     expect(s1.tutorial.active.id).toBe('captain-welcome');
     expect(s1.tutorial.remaining).toBe(5); // red-alert-active not yet eligible
@@ -4500,7 +4498,7 @@ describe('withTutorialOverlay (destroyer captain station, issue #921)', () => {
     // composed payload (systems.captain.red_alert), which the captain and
     // sensors families alike derive from `state.redAlert` server truth.
     const hot = { ...calm, redAlert: true };
-    const s2 = parse(withTutorialOverlay('captain', hot, buildSystemStationConsoleState('captain', hot)));
+    const s2 = withTutorialOverlay('captain', hot, buildSystemStationConsoleState('captain', hot));
     expect(s2.systems['captain'].red_alert).toBe(true);
     expect(s2.tutorial.active.id).toBe('captain-red-alert-active'); // priority 5 preempts
     expect(s2.tutorial.remaining).toBe(6);
@@ -4530,7 +4528,7 @@ describe('withTutorialOverlay (destroyer engineering station, issue #921)', () =
 
   it('parses and evaluates through buildSystemStationConsoleState: welcome at full hull, damage state trigger preempts once hurt', () => {
     const healthy = { stationTutorials: { engineering: engineeringDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: ENG_SYSTEMS };
-    const s1 = parse(withTutorialOverlay('engineering', healthy, buildSystemStationConsoleState('engineering', healthy)));
+    const s1 = withTutorialOverlay('engineering', healthy, buildSystemStationConsoleState('engineering', healthy));
     expect(s1.systems['repair'].overall_hull.pct).toBe(1);
     expect(s1.tutorial.active.id).toBe('engineering-welcome');
     expect(s1.tutorial.remaining).toBe(4); // damage tip not yet eligible
@@ -4541,7 +4539,7 @@ describe('withTutorialOverlay (destroyer engineering station, issue #921)', () =
     // off the repair view's own `overall_hull.pct` (the same figure the
     // ph-hull-integrity bar renders), not a re-derived local sum.
     const hurt = { ...healthy, blackboards: { repair: { aggregate_hull_fraction: 0.5 } } };
-    const s2 = parse(withTutorialOverlay('engineering', hurt, buildSystemStationConsoleState('engineering', hurt)));
+    const s2 = withTutorialOverlay('engineering', hurt, buildSystemStationConsoleState('engineering', hurt));
     expect(s2.systems['repair'].overall_hull.pct).toBe(0.5);
     expect(s2.tutorial.active.id).toBe('engineering-damage'); // priority 5 preempts
     expect(s2.tutorial.remaining).toBe(5);
@@ -4629,7 +4627,7 @@ describe('withTutorialOverlay (cruiser stations, issue #1080)', () => {
         stationTutorials: { [station.id]: station.defs },
         tutorialProgress: { dismissed: {}, used: {} },
       };
-      const initial = parse(withTutorialOverlay(station.id, fresh, station.build(fresh)));
+      const initial = withTutorialOverlay(station.id, fresh, station.build(fresh));
       expect(initial.tutorial.active.id).toBe(station.defs[0].id);
 
       for (const def of station.defs) {
@@ -4648,7 +4646,7 @@ describe('withTutorialOverlay (cruiser stations, issue #1080)', () => {
         ...fresh,
         tutorialProgress: { dismissed, used },
       };
-      const settled = parse(withTutorialOverlay(station.id, complete, station.build(complete)));
+      const settled = withTutorialOverlay(station.id, complete, station.build(complete));
       expect(settled.tutorial).toBeNull();
     });
   }
@@ -4660,7 +4658,7 @@ describe('withTutorialOverlay (cruiser stations, issue #1080)', () => {
       tutorialProgress: { dismissed: {}, used: {} },
       blackboards: { helm: { boost_enabled: true } },
     };
-    const payload = parse(withTutorialOverlay('helm', fresh, helm.build(fresh)));
+    const payload = withTutorialOverlay('helm', fresh, helm.build(fresh));
     expect(payload.boost_enabled).toBe(true);
     expect(payload.tutorial.active.id).toBe('helm-boost');
   });
@@ -4710,14 +4708,14 @@ describe('withVisitingSystems', () => {
 
   it('with no seek information at all, hosted_systems is exactly the authored list', () => {
     const state = { stationSystems: DESTROYER };
-    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    const s = withVisitingSystems('tactical', state, {});
     expect(s.hosted_systems).toEqual(DESTROYER.tactical);
     expect(s.systems).toBeUndefined();
   });
 
   it('drops a system the seek has taken away, and keeps everything else', () => {
     const state = seek({ comms: 'engineering', navigation: 'engineering' });
-    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    const s = withVisitingSystems('tactical', state, {});
     expect(s.hosted_systems).toEqual(['tactical-radar', 'phaser-omni']);
   });
 
@@ -4726,18 +4724,18 @@ describe('withVisitingSystems', () => {
   it('does not remove the view of a system it stops offering', () => {
     const state = seek({ comms: 'engineering' });
     const before = buildSystemStationConsoleState('tactical', state);
-    const s = parse(withVisitingSystems('tactical', state, before));
+    const s = withVisitingSystems('tactical', state, before);
     expect(s.systems.comms).toBeDefined();
     expect(s.hosted_systems).not.toContain('comms');
   });
 
   it('adds a visiting system to a station that does not author it', () => {
     const state = seek({ comms: 'engineering' });
-    const s = parse(withVisitingSystems(
+    const s = withVisitingSystems(
       'engineering',
       state,
       buildSystemStationConsoleState('engineering', state),
-    ));
+    );
     expect(s.hosted_systems).toContain('comms');
     expect(s.systems.comms).toHaveProperty('contacts');
     // The station's own systems are untouched by the visit.
@@ -4748,8 +4746,8 @@ describe('withVisitingSystems', () => {
   // holding only the visitor; every field its own console reads is untouched.
   it('gives a flat payload a systems map for the visitor alone', () => {
     const state = seek({ comms: 'helm' });
-    const flat = JSON.stringify({ helm_auto: false, speed: 12 });
-    const s = parse(withVisitingSystems('helm', state, flat));
+    const flat = { helm_auto: false, speed: 12 };
+    const s = withVisitingSystems('helm', state, flat);
     expect(s.speed).toBe(12);
     expect(Object.keys(s.systems)).toEqual(['helm-thrust', 'helm-steering', 'comms']);
     expect(s.hosted_systems).toContain('comms');
@@ -4757,14 +4755,14 @@ describe('withVisitingSystems', () => {
 
   it('the owner keeps the system when the seek chose the owner', () => {
     const state = seek({ comms: 'tactical', navigation: 'tactical' });
-    const s = parse(withVisitingSystems('tactical', state, '{}'));
+    const s = withVisitingSystems('tactical', state, {});
     expect(s.hosted_systems).toEqual(DESTROYER.tactical);
   });
 
   it('exactly one station hosts a sought system', () => {
     const state = seek({ comms: 'engineering' });
     const hosting = ['captain', 'helm', 'tactical', 'engineering']
-      .filter(name => parse(withVisitingSystems(name, state, '{}')).hosted_systems.includes('comms'));
+      .filter(name => withVisitingSystems(name, state, {}).hosted_systems.includes('comms'));
     expect(hosting).toEqual(['engineering']);
   });
 
@@ -4779,7 +4777,7 @@ describe('withVisitingSystems', () => {
         stationSystems: { captain: ['captain'] },
         blackboards: { command: { host_station: 'captain', directed_station_ai: false } },
       };
-      const s = parse(withVisitingSystems('captain', state, '{}'));
+      const s = withVisitingSystems('captain', state, {});
       expect(s.hosted_systems).toEqual(['captain']);
       expect(s.systems).toBeUndefined();
     });
@@ -4790,14 +4788,14 @@ describe('withVisitingSystems', () => {
         systemConsoleFamilies: { command: 'command' },
         blackboards: { command: { host_station: 'captain', directed_station_ai: true } },
       };
-      const s = parse(withVisitingSystems('captain', state, '{}'));
+      const s = withVisitingSystems('captain', state, {});
       expect(s.hosted_systems).toContain('command');
       expect(s.systems.command).toBeDefined();
     });
 
     it('leaves a non-Command visiting system unaffected by the directability rule', () => {
       const state = seek({ comms: 'engineering' });
-      const s = parse(withVisitingSystems('engineering', state, '{}'));
+      const s = withVisitingSystems('engineering', state, {});
       expect(s.hosted_systems).toContain('comms');
     });
   });

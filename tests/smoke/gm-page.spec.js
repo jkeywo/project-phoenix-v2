@@ -1247,7 +1247,7 @@ test('a GM changes Reveal Conceal Normal for one real observing fleet ship', { t
     const { buildSensorsConsoleState } = await import('/gui/console-state.js');
     const state = new ClientSimState();
     for (const message of window.__messages) state.apply(message);
-    const picture = JSON.parse(buildSensorsConsoleState(state));
+    const picture = buildSensorsConsoleState(state);
     const sensorsId = Object.keys(state.blackboardKinds).find(id => state.blackboardKinds[id] === 'Sensors');
     return { mode: state.blackboards[sensorsId]?.contact_overrides?.[target] || 'normal',
       contact: picture.blips.find(blip => blip.uuid === target) || null };

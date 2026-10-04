@@ -22,10 +22,10 @@ it('reveals an out-of-range basic contact without copying protected detail throu
   const input = state('reveal');
   input.blackboards.scan.reading = null;
   const raw = buildSensorsConsoleState(input);
-  const payload = JSON.parse(raw);
+  const payload = raw;
   expect(payload.blips).toHaveLength(1);
   expect(payload.blips[0]).toMatchObject({ uuid: 'target', basic_contact: true, edge: true });
-  expect(raw).not.toContain('SECRET');
+  expect(JSON.stringify(raw)).not.toContain('SECRET');
   for (const key of ['target_kind', 'target_class', 'target_hull_pct', 'target_shield_freq', 'target_faction', 'target_alert', 'target_weapons', 'target_projection', 'target_threat']) expect(payload[key]).toBeNull();
   expect(payload.scan.reading).toBeNull();
   const knowledge = crewContactRows(payload.blips, input.asteroids);
@@ -35,7 +35,7 @@ it('conceals an ordinarily visible target and stale selection, scan, region and 
   const input = state('conceal', 1000);
   input.regions = [{ uuid: 'target', name: 'SECRET-REGION' }];
   input.blackboardKinds.weapons = 'Weapons'; input.blackboards.weapons = { target_uuid: 'target' };
-  const payload = JSON.parse(buildSensorsConsoleState(input));
+  const payload = buildSensorsConsoleState(input);
   expect(payload.blips).toEqual([]); expect(payload.regions).toEqual([]);
   expect(payload.target_uuid).toBeNull(); expect(payload.scan.reading).toBeNull();
   expect(JSON.stringify(payload)).not.toContain('SECRET');
@@ -96,7 +96,7 @@ it('refuses stale target or observer, unadmitted operators and reset state', () 
 it('Reveal is a visibility floor and preserves ordinary contact details and earned scans', () => {
   const normal = state(null, 1000), reveal = state('reveal', 1000);
   expect(buildSensorsConsoleState(reveal)).toEqual(buildSensorsConsoleState(normal));
-  const out = JSON.parse(buildSensorsConsoleState(state('reveal')));
+  const out = buildSensorsConsoleState(state('reveal'));
   expect(out.scan.reading.subject_name).toBe('SECRET-SCAN');
   expect(out.target_class).toBeNull();
 });
@@ -104,7 +104,7 @@ it('an override preserves unrelated Objective region annotations byte for byte',
   const input = state('conceal');
   const region = { uuid: 'objective-region', objective_target: true, name: 'Objective', half_extents: [7, 9], color: [1, 0, 0] };
   input.regions = [region];
-  expect(JSON.parse(buildSensorsConsoleState(input)).regions).toEqual([region]);
+  expect(buildSensorsConsoleState(input).regions).toEqual([region]);
 });
 it('all result outcomes come from the String Table', () => {
   const translate = vi.fn((id, params) => id === 'server.gm.contact.result' ? params.outcome : `translated:${id}`);
@@ -118,21 +118,21 @@ it('misclassification changes the selected observer sensor identity without muta
   const input = state(null, 1000);
   const before = JSON.stringify(input);
   input.blackboards.sensors.contact_classifications = { target: 'Reported freighter' };
-  const crew = JSON.parse(buildSensorsConsoleState(input));
+  const crew = buildSensorsConsoleState(input);
   expect(crew.blips[0].name).toBe('Reported freighter');
   expect(crew.target_name).toBe('Reported freighter');
   expect(crew.target_class).toBe('Reported freighter');
   expect(crew.scan.reading.subject_name).toBe('SECRET-SCAN'); // independent earned reading
   expect(crewContactRows(crew.blips, input.asteroids)[0].name).toBe('Reported freighter');
   expect(input.asteroids[0]).toEqual(secret);
-  expect(buildCommsConsoleState(input)).toBe(buildCommsConsoleState(JSON.parse(before)));
-  expect(JSON.parse(buildSensorsConsoleState(JSON.parse(before))).target_name).toBe('SECRET-NAME');
+  expect(buildCommsConsoleState(input)).toEqual(buildCommsConsoleState(JSON.parse(before)));
+  expect(buildSensorsConsoleState(JSON.parse(before)).target_name).toBe('SECRET-NAME');
 });
 it('classification never reveals a contact; Conceal wins and a revealed basic point gets only its false label', () => {
   for (const mode of [null, 'conceal', 'reveal']) {
     const input = state(mode); input.blackboards.scan.reading = null;
     input.blackboards.sensors.contact_classifications = { target: 'Reported freighter' };
-    const crew = JSON.parse(buildSensorsConsoleState(input));
+    const crew = buildSensorsConsoleState(input);
     if (mode !== 'reveal') expect(crew.blips).toEqual([]);
     else {
       expect(crew.blips[0]).toMatchObject({ name: 'Reported freighter', basic_contact: true });
@@ -194,13 +194,13 @@ it('shows an observer ghost as a basic untargetable crew-only report with no phy
   const input = state(null, 100);
   input.blackboards.sensors.contact_ghosts = [{ uuid: '__gm_ghost:observer:echo', name: 'Reported freighter', position: [200, 0, -20] }];
   input.sensorsTarget = '__gm_ghost:observer:echo';
-  const output = JSON.parse(buildSensorsConsoleState(input));
+  const output = buildSensorsConsoleState(input);
   expect(output.blips).toHaveLength(1);
   expect(output.blips[0]).toMatchObject({ uuid: '__gm_ghost:observer:echo', name: 'Reported freighter', basic_contact: true, selectable: false, edge: true });
   expect(output.target_uuid).toBeNull();
   expect(output.target_alert).toBeNull(); expect(output.target_weapons).toBeNull(); expect(output.target_projection).toBeNull();
   expect(crewContactRows(output.blips, input.asteroids)).toEqual([{ id: '__gm_ghost:observer:echo', name: 'Reported freighter', hull_percent: null, destroyed: null }]);
-  expect(JSON.parse(buildSensorsConsoleState(state(null, 100))).blips).toEqual([]);
+  expect(buildSensorsConsoleState(state(null, 100)).blips).toEqual([]);
 });
 it('lists each ghost an observing ship has been told, with its own Remove, and correlates it exactly', () => {
   // Placing a ghost is a Spawn outcome. What remains on the contact tool is the
@@ -237,19 +237,19 @@ it('uses only the reported position and captured identity across every live Sens
   input.regions = [{ uuid: 'target', name: 'SECRET-REGION' }];
   input.navigationWaypoint = { source_uuid: 'target', x: 200, z: 0, label: 'SECRET-WAYPOINT' };
   input.blackboardKinds.weapons = 'Weapons'; input.blackboards.weapons = { target_uuid: 'target' };
-  const raw = buildSensorsConsoleState(input), payload = JSON.parse(raw);
+  const raw = buildSensorsConsoleState(input), payload = raw;
   expect(payload.target_name).toBe(report.name); expect(payload.target_report).toEqual(report);
   expect(payload.target_range).toBeCloseTo(Math.hypot(10, -20));
   expect(payload.blips.find(blip => blip.uuid === 'target')).toMatchObject({ basic_contact: true, report });
   expect(crewContactRows(payload.blips, input.asteroids)[0].report).toEqual(report);
-  expect(raw).not.toMatch(/SECRET|NEW-CLASSIFICATION/); expect(payload.regions).toEqual([]);
+  expect(JSON.stringify(raw)).not.toMatch(/SECRET|NEW-CLASSIFICATION/); expect(payload.regions).toEqual([]);
   for (const key of ['target_kind', 'target_class', 'target_hull_pct', 'target_shield_freq', 'target_faction', 'target_alert', 'target_weapons', 'target_projection', 'target_threat']) expect(payload[key]).toBeNull();
 });
 it('withholds a pending observation despite Reveal and discards stale selection facts; Conceal wins over a released sample', () => {
   for (const [mode, sample] of [['reveal', null], ['conceal', report]]) {
     const input = state(mode, 1000); input.blackboards.scan.reading = null;
     input.blackboards.sensors.contact_reports = { target: sample };
-    const payload = JSON.parse(buildSensorsConsoleState(input));
+    const payload = buildSensorsConsoleState(input);
     expect(payload.blips).toEqual([]); expect(payload.target_uuid).toBeNull(); expect(payload.target_report).toBeNull();
     expect(payload.target_alert).toBeNull(); expect(payload.target_weapons).toBeNull();
   }
@@ -271,10 +271,10 @@ it('captures an explicit report policy before confirmation and correlates its te
 it('holds independently earned scans off the manipulated Sensors lane and restores them when policy clears', () => {
   const input = state(null, 1000), reading = input.blackboards.scan.reading;
   input.blackboards.sensors.contact_reports = { target: report };
-  expect(JSON.parse(buildSensorsConsoleState(input)).scan.reading).toBeNull();
+  expect(buildSensorsConsoleState(input).scan.reading).toBeNull();
   expect(input.blackboards.scan.reading).toBe(reading);
   input.blackboards.sensors.contact_reports = {};
-  expect(JSON.parse(buildSensorsConsoleState(input)).scan.reading).toEqual(reading);
+  expect(buildSensorsConsoleState(input).scan.reading).toEqual(reading);
 });
 
 // ===== the three complex actions this tool composes (issue #1510) ==========

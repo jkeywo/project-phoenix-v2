@@ -44,9 +44,9 @@ function mount(keyed = false) {
     weaponsView: keyed ? payload => familyView(payload, 'tactical') : payload => payload,
     ids: { radar: 'absent-radar', phasers: 'phasers', blasters: 'blasters' },
   });
-  return state => render(JSON.parse(keyed
+  return state => render(keyed
     ? buildSystemStationConsoleState('tactical', state)
-    : buildWeaponsConsoleState(state)), document);
+    : buildWeaponsConsoleState(state), document);
 }
 
 function fill(family, id) {

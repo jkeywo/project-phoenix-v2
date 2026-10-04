@@ -5,13 +5,13 @@ import { buildSystemStationConsoleState } from '../../gui/console-state.js';
 
 describe('authored station stars', () => {
   it('carries summary authority through the real composed Engineering payload', () => {
-    const payload = JSON.parse(buildSystemStationConsoleState('engineering', {
+    const payload = buildSystemStationConsoleState('engineering', {
       stationSystems: { engineering: ['repair'] },
       systemConsoleFamilies: { repair: 'repair' },
       controlSources: { repair: 'Simplified' },
       blackboardKinds: { repair: 'Repair' },
       blackboards: { repair: {} },
-    }));
+    });
     expect(payload.systems.repair.repair_auto).toBe(true);
     expect(payload.systems.repair.repair_summary).toBe(true);
   });

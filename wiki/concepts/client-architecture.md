@@ -3,7 +3,7 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, gamepad, feedback, gm, host-channel, vitest]
 sources: [gui/client-operator-profile.js, gui/console-mount.js, gui/stations/action-support.js, gui/gamepad-presentation.js, gui/gm-workspace.js, gui/native-gm-workspace.js, src/native_host/panes/operator.rs, src/gm_objective.rs, gui/gm-objective-panel.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, client.html, server.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/entity-inspector.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/gm-action-feedback.js, gui/semantic-controls-remapper.js, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, gui/gamepad-input.js, gui/client-semantic-actions.js, gui/composite-action-routing.js, gui/stations/captain-actions.js, gui/stations/helm-actions.js, gui/stations/tactical-actions.js, gui/stations/comms-actions.js, gui/stations/sensors-actions.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/stations/engineering-actions.js, gui/stations/engineering-action-control.js, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/operator-profile.js, gui/action-map.js, gui/console-core.js, gui/console-latency.js, gui/iframe-bridge.js, gui/client-router.js, gui/coordination-popup.js, gui/accessibility-profile.js, gui/viewscreen-presentation.js, gui/viewscreen-presentation-panel.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/command_admission/mod.rs, src/gm_action.rs, src/gm_projection.rs, src/gm_activity.rs, src/server/bridge.rs, src/console/captain/server.rs, src/console/navigation/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/civilian/server.rs, src/science/server.rs, src/ship/helm_admission.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/power.rs, src/tractor/server.rs, src/umbilical/server.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 ## Summary
@@ -31,7 +31,8 @@ DataChannel message (JSON, reliable or lossy)
                                                systemConsoleFamilies,
                                                blackboardConsoleFamilies)
                                                        # which consoles changed
-  → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
+  → gui/console-state.js buildConsoleView(name, simState)         # rebuild ONLY the dirty consoles as objects
+    → window.buildConsoleState(name, simState)                   # final JSON serialization
     → gui/iframe-bridge.js push()         # __updateConsole(name, json) into the iframe
   → gui/client-router.js routeReducerResult(changes)       # lobby mirror + render guards
   → client.html applySideEffect(effect)   # executes ordered presentation effects
@@ -41,6 +42,18 @@ DataChannel message (JSON, reliable or lossy)
 reducers interpret each inbound message, `dirty-consoles.js` narrows iframe
 publication to the affected consoles, and `client-router.js` consumes only the
 merged reducer result.
+
+Console Family builders return objects. `buildConsoleView` assembles the base
+Station view, visiting Systems, directed Command advice, Station damage,
+tutorials and GM takeover in that order. Enrichments copy the payload and any
+maps they change; nested simulation data remains read-only. The window adapters
+`buildConsoleState` and `buildConsoleStateInner` each serialize their completed
+object once for the existing iframe interface. The full adapter migrates tutorial
+progress before assembly, tolerating unavailable storage while retaining the
+in-memory record. Object transformations propagate programming errors. Tutorial
+comparisons normalize non-finite numbers to null, preserving the previous JSON
+comparison behavior while missing fields remain undefined. GM Crew Knowledge
+comparison consumes Sensors and Comms objects directly.
 
 `createConsoleMounts` in `gui/console-mount.js` owns the parent-side Console
 lifetime: mounted Station identity, load listeners, snapshot publication,

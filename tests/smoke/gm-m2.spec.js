@@ -303,7 +303,7 @@ test('M2 Combat Test directing produces an identical replay of its browser recor
         const { buildSensorsConsoleState } = await import('/gui/console-state.js');
         const state = new ClientSimState();
         for (const message of window.__messages) state.apply(message);
-        return JSON.parse(buildSensorsConsoleState(state)).blips.some(row => row.uuid === id);
+        return buildSensorsConsoleState(state).blips.some(row => row.uuid === id);
       }, npc);
       if (mode === 'reveal') await expect.poll(picture).toBe(true);
       if (mode === 'conceal') await expect.poll(picture).toBe(false);

@@ -292,8 +292,8 @@ export function buildKnowledgeCompare(truthEntities, projection, ship, { display
     return { contacts: empty, objectives: empty, comms: { messages: empty, contacts: empty } };
   }
   const state = buildGmStationConsoleInput(projection || { activity: [] }, ship);
-  const sensors = JSON.parse(buildSensorsConsoleState(state));
-  const comms = JSON.parse(buildCommsConsoleState(state));
+  const sensors = buildSensorsConsoleState(state);
+  const comms = buildCommsConsoleState(state);
 
   const contacts = diffByIdentity(
     truthContactRows(truthEntities, displayText),

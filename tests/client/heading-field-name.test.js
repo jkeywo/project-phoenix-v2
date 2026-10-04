@@ -36,14 +36,14 @@ const BUILDERS = {
 describe('every console payload names the heading the same way', () => {
   for (const [name, build] of Object.entries(BUILDERS)) {
     it(`${name} publishes ship_heading and not heading`, () => {
-      const payload = JSON.parse(build({ shipYaw: Math.PI / 2 }));
+      const payload = build({ shipYaw: Math.PI / 2 });
       expect(payload).toHaveProperty('ship_heading');
       expect(payload).not.toHaveProperty('heading');
     });
   }
 
   it('helm still reports the same degrees under the agreed name', () => {
-    const payload = JSON.parse(buildHelmConsoleState({ shipYaw: Math.PI / 2 }));
+    const payload = buildHelmConsoleState({ shipYaw: Math.PI / 2 });
     expect(payload.ship_heading).toBeCloseTo(90, 3);
   });
 });

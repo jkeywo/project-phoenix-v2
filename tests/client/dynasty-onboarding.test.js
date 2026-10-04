@@ -28,7 +28,7 @@ function reservePayload(role, reserve) {
   const id = power ? 'power' : 'tactical';
   const state = { blackboards: { [id]: { strike_reserve: reserve } },
     blackboardKinds: { [id]: power ? 'Power' : 'Weapons' } };
-  return JSON.parse((power ? buildPowerConsoleState : buildWeaponsConsoleState)(state));
+  return (power ? buildPowerConsoleState : buildWeaponsConsoleState)(state);
 }
 function journey(stationId) {
   const defs = stations.find(s => s.id === stationId).tutorial;

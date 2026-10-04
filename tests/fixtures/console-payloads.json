@@ -1,0 +1,611 @@
+[
+  {
+    "name": "flat",
+    "station": "pilot",
+    "state": {
+      "hullId": "fixture-hull",
+      "stationSystems": {
+        "pilot": [
+          "thrust",
+          "steer"
+        ],
+        "engineering": [
+          "reactor",
+          "repair"
+        ],
+        "liaison": [
+          "radio"
+        ]
+      },
+      "systemConsoleFamilies": {
+        "thrust": "helm",
+        "steer": "helm",
+        "reactor": "power",
+        "repair": "repair",
+        "radio": "comms"
+      },
+      "blackboardKinds": {
+        "flight": "Helm",
+        "reactor": "Power",
+        "repair": "Repair",
+        "radio": "Comms"
+      },
+      "blackboards": {
+        "flight": {
+          "speed": 12,
+          "boost_enabled": true
+        },
+        "reactor": {},
+        "repair": {},
+        "radio": {
+          "messages": [],
+          "contacts": []
+        }
+      },
+      "consoleHull": [
+        {
+          "system_id": "thrust",
+          "current": 8,
+          "max_hp": 10
+        },
+        {
+          "system_id": "reactor",
+          "current": 4,
+          "max_hp": 10
+        }
+      ],
+      "controlSources": {
+        "thrust": "Human",
+        "steer": "Human",
+        "reactor": "Ai",
+        "repair": "Human",
+        "radio": "Human"
+      },
+      "stationTutorials": {
+        "pilot": [
+          {
+            "id": "visitor",
+            "title": "fixture.title",
+            "text": "fixture.text",
+            "trigger": {
+              "kind": "state",
+              "path": "systems.radio.comms_auto",
+              "op": "falsy"
+            }
+          }
+        ]
+      },
+      "tutorialProgress": {
+        "dismissed": {},
+        "used": {}
+      },
+      "stationPuppets": {
+        "pilot": {
+          "operator_id": "gm-fixture"
+        }
+      }
+    },
+    "expected": {
+      "range": 500,
+      "ship_heading": 0,
+      "speed": 0,
+      "x": 0,
+      "z": 0,
+      "yaw": 0,
+      "impulse_charge_progress": 0,
+      "on_screen": false,
+      "blips": [],
+      "waypoint": null,
+      "thrust_system_id": null,
+      "steering_system_id": null,
+      "lateral_system_id": null,
+      "impulse_system_id": null,
+      "boost_system_id": null,
+      "viewscreen_system_id": null,
+      "own_hull": {
+        "entries": [
+          {
+            "system_id": "thrust",
+            "current": 8,
+            "max_hp": 10
+          }
+        ],
+        "totalCurrent": 8,
+        "totalMax": 10,
+        "pct": 0.8,
+        "damagePct": 0.19999999999999996
+      },
+      "boost_enabled": true,
+      "boost_battery": 0,
+      "boost_active": false,
+      "helm_auto": false,
+      "engine_port_thrust": 0,
+      "engine_stbd_thrust": 0,
+      "engine_port_auto": false,
+      "engine_stbd_auto": false,
+      "lateral_speed": 0,
+      "lateral_input": 0,
+      "lateral_auto": false,
+      "lateral_is_online": true,
+      "red_alert": false,
+      "hostile_arcs": [],
+      "hostile_arc_color": null,
+      "dock": null,
+      "tow_load": null,
+      "system_ids": [
+        "thrust",
+        "steer"
+      ],
+      "system_families": {
+        "thrust": "helm",
+        "steer": "helm"
+      },
+      "hosted_systems": [
+        "thrust",
+        "steer"
+      ],
+      "tutorial": null,
+      "gm_takeover": {
+        "operator_id": "gm-fixture"
+      }
+    }
+  },
+  {
+    "name": "composite",
+    "station": "engineering",
+    "state": {
+      "hullId": "fixture-hull",
+      "stationSystems": {
+        "pilot": [
+          "thrust",
+          "steer"
+        ],
+        "engineering": [
+          "reactor",
+          "repair"
+        ],
+        "liaison": [
+          "radio"
+        ]
+      },
+      "systemConsoleFamilies": {
+        "thrust": "helm",
+        "steer": "helm",
+        "reactor": "power",
+        "repair": "repair",
+        "radio": "comms"
+      },
+      "blackboardKinds": {
+        "flight": "Helm",
+        "reactor": "Power",
+        "repair": "Repair",
+        "radio": "Comms"
+      },
+      "blackboards": {
+        "flight": {
+          "speed": 12,
+          "boost_enabled": true
+        },
+        "reactor": {},
+        "repair": {},
+        "radio": {
+          "messages": [],
+          "contacts": []
+        }
+      },
+      "consoleHull": [
+        {
+          "system_id": "thrust",
+          "current": 8,
+          "max_hp": 10
+        },
+        {
+          "system_id": "reactor",
+          "current": 4,
+          "max_hp": 10
+        }
+      ],
+      "controlSources": {
+        "thrust": "Human",
+        "steer": "Human",
+        "reactor": "Ai",
+        "repair": "Human",
+        "radio": "Human"
+      },
+      "stationTutorials": {
+        "pilot": [
+          {
+            "id": "visitor",
+            "title": "fixture.title",
+            "text": "fixture.text",
+            "trigger": {
+              "kind": "state",
+              "path": "systems.radio.comms_auto",
+              "op": "falsy"
+            }
+          }
+        ]
+      },
+      "tutorialProgress": {
+        "dismissed": {},
+        "used": {}
+      },
+      "stationPuppets": {
+        "pilot": {
+          "operator_id": "gm-fixture"
+        }
+      }
+    },
+    "expected": {
+      "station_id": "engineering",
+      "system_ids": [
+        "reactor",
+        "repair"
+      ],
+      "system_families": {
+        "reactor": "power",
+        "repair": "repair"
+      },
+      "systems": {
+        "reactor": {
+          "consoles": [],
+          "strike_reserve": null,
+          "total": 0,
+          "total_max": 8,
+          "battery_charge": 0,
+          "battery_max": 100,
+          "draining": false,
+          "charging": false,
+          "locked": false,
+          "reactor_online": true,
+          "battery_online": true,
+          "system_id": null,
+          "own_hull": {
+            "entries": [],
+            "totalCurrent": 0,
+            "totalMax": 0,
+            "pct": 1,
+            "damagePct": 0
+          },
+          "power_auto": true,
+          "station_rating": "Std"
+        },
+        "repair": {
+          "teams": [],
+          "system_hull": [],
+          "damageable_systems": [],
+          "damaged_systems": [],
+          "overall_hull": {
+            "current": 0,
+            "max": 0,
+            "pct": 1,
+            "destroyed_pct": 0
+          },
+          "core_systems": [],
+          "dispatch_targets": [],
+          "travel_duration_secs": 5,
+          "system_id": "repair",
+          "repair_auto": false,
+          "repair_summary": false,
+          "external_dispatch": null
+        }
+      },
+      "dossiers": [],
+      "hosted_systems": [
+        "reactor",
+        "repair"
+      ],
+      "own_hull": {
+        "entries": [
+          {
+            "system_id": "reactor",
+            "current": 4,
+            "max_hp": 10
+          }
+        ],
+        "totalCurrent": 4,
+        "totalMax": 10,
+        "pct": 0.4,
+        "damagePct": 0.6
+      },
+      "tutorial": null,
+      "gm_takeover": null
+    }
+  },
+  {
+    "name": "visiting",
+    "station": "pilot",
+    "state": {
+      "hullId": "fixture-hull",
+      "stationSystems": {
+        "pilot": [
+          "thrust",
+          "steer"
+        ],
+        "engineering": [
+          "reactor",
+          "repair"
+        ],
+        "liaison": [
+          "radio"
+        ]
+      },
+      "systemConsoleFamilies": {
+        "thrust": "helm",
+        "steer": "helm",
+        "reactor": "power",
+        "repair": "repair",
+        "radio": "comms"
+      },
+      "blackboardKinds": {
+        "flight": "Helm",
+        "reactor": "Power",
+        "repair": "Repair",
+        "radio": "Comms"
+      },
+      "blackboards": {
+        "flight": {
+          "speed": 12,
+          "boost_enabled": true
+        },
+        "reactor": {},
+        "repair": {},
+        "radio": {
+          "messages": [],
+          "contacts": [],
+          "host_station": "pilot"
+        }
+      },
+      "consoleHull": [
+        {
+          "system_id": "thrust",
+          "current": 8,
+          "max_hp": 10
+        },
+        {
+          "system_id": "reactor",
+          "current": 4,
+          "max_hp": 10
+        }
+      ],
+      "controlSources": {
+        "thrust": "Human",
+        "steer": "Human",
+        "reactor": "Ai",
+        "repair": "Human",
+        "radio": "Human"
+      },
+      "stationTutorials": {
+        "pilot": [
+          {
+            "id": "visitor",
+            "title": "fixture.title",
+            "text": "fixture.text",
+            "trigger": {
+              "kind": "state",
+              "path": "systems.radio.comms_auto",
+              "op": "falsy"
+            }
+          }
+        ]
+      },
+      "tutorialProgress": {
+        "dismissed": {},
+        "used": {}
+      },
+      "stationPuppets": {
+        "pilot": {
+          "operator_id": "gm-fixture"
+        }
+      }
+    },
+    "expected": {
+      "range": 500,
+      "ship_heading": 0,
+      "speed": 0,
+      "x": 0,
+      "z": 0,
+      "yaw": 0,
+      "impulse_charge_progress": 0,
+      "on_screen": false,
+      "blips": [],
+      "waypoint": null,
+      "thrust_system_id": null,
+      "steering_system_id": null,
+      "lateral_system_id": null,
+      "impulse_system_id": null,
+      "boost_system_id": null,
+      "viewscreen_system_id": null,
+      "own_hull": {
+        "entries": [
+          {
+            "system_id": "thrust",
+            "current": 8,
+            "max_hp": 10
+          }
+        ],
+        "totalCurrent": 8,
+        "totalMax": 10,
+        "pct": 0.8,
+        "damagePct": 0.19999999999999996
+      },
+      "boost_enabled": true,
+      "boost_battery": 0,
+      "boost_active": false,
+      "helm_auto": false,
+      "engine_port_thrust": 0,
+      "engine_stbd_thrust": 0,
+      "engine_port_auto": false,
+      "engine_stbd_auto": false,
+      "lateral_speed": 0,
+      "lateral_input": 0,
+      "lateral_auto": false,
+      "lateral_is_online": true,
+      "red_alert": false,
+      "hostile_arcs": [],
+      "hostile_arc_color": null,
+      "dock": null,
+      "tow_load": null,
+      "system_ids": [
+        "thrust",
+        "steer"
+      ],
+      "system_families": {
+        "thrust": "helm",
+        "steer": "helm",
+        "radio": "comms"
+      },
+      "hosted_systems": [
+        "thrust",
+        "steer",
+        "radio"
+      ],
+      "systems": {
+        "thrust": {
+          "range": 500,
+          "ship_heading": 0,
+          "speed": 0,
+          "x": 0,
+          "z": 0,
+          "yaw": 0,
+          "impulse_charge_progress": 0,
+          "on_screen": false,
+          "blips": [],
+          "waypoint": null,
+          "thrust_system_id": null,
+          "steering_system_id": null,
+          "lateral_system_id": null,
+          "impulse_system_id": null,
+          "boost_system_id": null,
+          "viewscreen_system_id": null,
+          "own_hull": {
+            "entries": [],
+            "totalCurrent": 0,
+            "totalMax": 0,
+            "pct": 1,
+            "damagePct": 0
+          },
+          "boost_enabled": true,
+          "boost_battery": 0,
+          "boost_active": false,
+          "helm_auto": false,
+          "engine_port_thrust": 0,
+          "engine_stbd_thrust": 0,
+          "engine_port_auto": false,
+          "engine_stbd_auto": false,
+          "lateral_speed": 0,
+          "lateral_input": 0,
+          "lateral_auto": false,
+          "lateral_is_online": true,
+          "red_alert": false,
+          "hostile_arcs": [],
+          "hostile_arc_color": null,
+          "dock": null,
+          "tow_load": null,
+          "system_ids": [
+            "thrust",
+            "steer"
+          ],
+          "system_families": {
+            "thrust": "helm",
+            "steer": "helm",
+            "radio": "comms"
+          },
+          "hosted_systems": [
+            "thrust",
+            "steer",
+            "radio"
+          ]
+        },
+        "steer": {
+          "range": 500,
+          "ship_heading": 0,
+          "speed": 0,
+          "x": 0,
+          "z": 0,
+          "yaw": 0,
+          "impulse_charge_progress": 0,
+          "on_screen": false,
+          "blips": [],
+          "waypoint": null,
+          "thrust_system_id": null,
+          "steering_system_id": null,
+          "lateral_system_id": null,
+          "impulse_system_id": null,
+          "boost_system_id": null,
+          "viewscreen_system_id": null,
+          "own_hull": {
+            "entries": [],
+            "totalCurrent": 0,
+            "totalMax": 0,
+            "pct": 1,
+            "damagePct": 0
+          },
+          "boost_enabled": true,
+          "boost_battery": 0,
+          "boost_active": false,
+          "helm_auto": false,
+          "engine_port_thrust": 0,
+          "engine_stbd_thrust": 0,
+          "engine_port_auto": false,
+          "engine_stbd_auto": false,
+          "lateral_speed": 0,
+          "lateral_input": 0,
+          "lateral_auto": false,
+          "lateral_is_online": true,
+          "red_alert": false,
+          "hostile_arcs": [],
+          "hostile_arc_color": null,
+          "dock": null,
+          "tow_load": null,
+          "system_ids": [
+            "thrust",
+            "steer"
+          ],
+          "system_families": {
+            "thrust": "helm",
+            "steer": "helm",
+            "radio": "comms"
+          },
+          "hosted_systems": [
+            "thrust",
+            "steer",
+            "radio"
+          ]
+        },
+        "radio": {
+          "messages": [],
+          "objectives": [],
+          "contacts": [],
+          "on_screen": false,
+          "own_hull": {
+            "entries": [],
+            "totalCurrent": 0,
+            "totalMax": 0,
+            "pct": 1,
+            "damagePct": 0
+          },
+          "dossiers": [],
+          "comms_auto": false,
+          "rejection": null
+        }
+      },
+      "tutorial": {
+        "active": {
+          "id": "visitor",
+          "title": "fixture.title",
+          "text": "fixture.text",
+          "trigger": {
+            "kind": "state",
+            "path": "systems.radio.comms_auto",
+            "op": "falsy"
+          }
+        },
+        "remaining": 1
+      },
+      "gm_takeover": {
+        "operator_id": "gm-fixture"
+      }
+    }
+  }
+]

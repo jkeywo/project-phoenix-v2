@@ -170,7 +170,7 @@ async function scanCardTextFor(consolePage, radarBlackboard) {
       blackboardKinds: { 'sensor-radar': 'SensorRadar' },
     });
   }, radarBlackboard);
-  await consolePage.evaluate((p) => window.__updateConsole('sensors', p), payload);
+  await consolePage.evaluate((p) => window.__updateConsole('sensors', JSON.stringify(p)), payload);
   return consolePage.locator('ph-sensor-panel').locator('#scan-data');
 }
 

@@ -96,6 +96,7 @@ entities:
         - "A Console Family describes presentation only. Station topology still decides which surface owns a System, and SystemId still targets command authority."
         - "System instance metadata and reserved-channel metadata remain separate because a blackboard channel can affect a console without being commandable, damageable or ownable."
         - "Before Welcome there is no authoritative topology with which to select a builder, so the router emits an empty payload rather than inventing one from a Station name."
+        - "[ai] Console Family builders and enrichments exchange objects, copying changed payload maps while treating nested simulation data as read-only. buildConsoleView applies visiting Systems, Command advice, Station damage, tutorials and GM takeover in order; only the window adapters serialize the completed view for the existing iframe JSON interface. Tutorial storage migration belongs to the full adapter, with non-finite trigger numbers compared as null and missing fields preserved as undefined."
         - "Message interpretation stays at the reducer branch that owns each state mutation. The downstream domain-to-family relation describes presentation consumers rather than repeating ServerMessage variants."
     architecture:
       kind: presentation-router

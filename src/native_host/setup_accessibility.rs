@@ -9,19 +9,16 @@
 //! ([`super::bridge_media`]), and the OS accessibility default layer a pane
 //! imports ([`super::panes::os_prefs`]). This module is the fifth: given a
 //! resolved bridge and the shared Accessibility profile's supported extremes,
-//! *does the configured layout keep every console's controls present and
-//! reachable, is every setup action reachable without touch, and is keyboard
-//! focus shown by shape rather than colour* — the arithmetic and the rules
-//! behind acceptance criteria 1–4, decided here and checked by the ordinary
-//! `cargo test` CI runs on no hardware.
+//! *does the configured layout have room for every console, and in what order
+//! does keyboard focus traverse its panes* — the arithmetic and focus-order
+//! rules behind acceptance criteria 1 and 3, checked by ordinary native tests.
 //!
-//! The one thing it cannot decide is whether real text on a real monitor at a
-//! real scale actually reflows without a clipped pixel; that is the multi-monitor
-//! walkthrough in `docs/acceptance/1128-accessibility.md` and the `#[ignore]`d
-//! `tests/native_bridge_accessibility.rs`, exactly as #1123's real-window proof
-//! is deferred to a machine with the displays.
+//! Actual text reflow and keyboard/mouse reachability of setup actions require
+//! the walkthrough in `docs/acceptance/1128-accessibility.md`. The `#[ignore]`d
+//! `tests/native_bridge_accessibility.rs` checks the same reflow arithmetic and
+//! focus rules against real monitor geometries; it does not operate the controls.
 //!
-//! # The four models
+//! # Layout models
 //!
 //! * **Reflow headroom** ([`PaneContentBox`], [`bridge_preserves_all_consoles`])
 //!   — a pane's rectangle divided by its monitor scale is its console's
@@ -34,10 +31,6 @@
 //!   monitor, monitor by monitor in profile order and pane by pane within each
 //!   monitor. Acceptance criterion 3's "including across monitors and split
 //!   panes", as a deterministic sequence a [`FocusRing`] cycles.
-//! * **Setup-action reachability** ([`SetupAction`], [`InputRoutes`]) — every
-//!   display, pane, touch and media assignment action, and the input modalities
-//!   that can perform it. Acceptance criterion 2's "all reachable by keyboard and
-//!   mouse as well as touch": the invariant is that no action is touch-only.
 
 use super::bridge_profile::{
     pane_rects, DisplayRole, MonitorIdentity, PaneRect, ResolvedBridge, ResolvedSurface,
@@ -234,101 +227,6 @@ pub fn bridge_preserves_all_consoles(resolved: &ResolvedBridge) -> bool {
     bridge_focus_order(resolved)
         .iter()
         .all(FocusablePane::preserves_console)
-}
-
-// ── setup-action reachability (acceptance criterion 2) ───────────────────────
-
-/// A bridge setup action whose reachability by keyboard, mouse and touch
-/// acceptance criterion 2 gates.
-///
-/// Every one of these is an *assignment*: which role a display has, which panes a
-/// Station shows, which monitor a touch device drives, and which media device a
-/// surface uses. In this host all four are performed the same way — by editing
-/// the bridge profile TOML and running `--setup` to check it — which is why none
-/// is touch-only and each carries an equivalent keyboard and mouse route.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SetupAction {
-    /// Assign a monitor the viewscreen or a Station role
-    /// (`[[display]] role = …`).
-    DisplayRole,
-    /// Assign a Station's console panes and their split
-    /// (`[[display.pane]]`, `split = …`).
-    PaneAssignment,
-    /// Map a touch input device to the monitor it drives (`[[touch]]`).
-    TouchMapping,
-    /// Assign a surface's camera, microphone(s) and output(s) (`[[media]]`).
-    MediaAssignment,
-}
-
-/// Which input modalities can perform a [`SetupAction`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InputRoutes {
-    /// Reachable from the keyboard (editing the profile, running `--setup`).
-    pub keyboard: bool,
-    /// Reachable with the mouse (a text editor, a file picker, clicking the
-    /// pane/console controls the profile lays out).
-    pub mouse: bool,
-    /// Reachable by touch (a touch-first affordance), where one exists.
-    pub touch: bool,
-}
-
-impl InputRoutes {
-    /// Whether the action is reachable by keyboard **and** mouse — the guarantee
-    /// acceptance criterion 2 asks of every setup action.
-    pub fn keyboard_and_mouse(&self) -> bool {
-        self.keyboard && self.mouse
-    }
-
-    /// Whether the action is touch-**only** — reachable by touch but not by
-    /// keyboard or mouse. Acceptance criterion 2 forbids this for every action.
-    pub fn is_touch_only(&self) -> bool {
-        self.touch && !(self.keyboard || self.mouse)
-    }
-}
-
-impl SetupAction {
-    /// Every setup action acceptance criterion 2 covers.
-    pub const ALL: [SetupAction; 4] = [
-        SetupAction::DisplayRole,
-        SetupAction::PaneAssignment,
-        SetupAction::TouchMapping,
-        SetupAction::MediaAssignment,
-    ];
-
-    /// A short operator label for the setup report and diagnostics.
-    pub fn label(self) -> &'static str {
-        match self {
-            SetupAction::DisplayRole => "display role assignment",
-            SetupAction::PaneAssignment => "pane assignment",
-            SetupAction::TouchMapping => "touch-device mapping",
-            SetupAction::MediaAssignment => "media-device assignment",
-        }
-    }
-
-    /// The input routes this action is reachable by.
-    ///
-    /// All four assignments live in the profile TOML and the `--setup`/`--profile`
-    /// flow, so all four are reachable by keyboard (editing, the CLI) and by mouse
-    /// (an editor, a file picker, clicking the laid-out controls). None is a
-    /// touch-first affordance today, so `touch` is `false` — which is exactly what
-    /// acceptance criterion 2 wants: a setup action must never be reachable *only*
-    /// by touch. If a touch-first setup surface is ever added, it sets `touch`
-    /// here and the keyboard/mouse routes above are what keep the invariant.
-    pub fn routes(self) -> InputRoutes {
-        InputRoutes {
-            keyboard: true,
-            mouse: true,
-            touch: false,
-        }
-    }
-}
-
-/// Whether every setup action is reachable by keyboard and mouse and none is
-/// touch-only — acceptance criterion 2 over the whole action set.
-pub fn every_setup_action_is_keyboard_and_mouse_reachable() -> bool {
-    SetupAction::ALL
-        .iter()
-        .all(|a| a.routes().keyboard_and_mouse() && !a.routes().is_touch_only())
 }
 
 // ── the accessibility half of the --setup report ─────────────────────────────

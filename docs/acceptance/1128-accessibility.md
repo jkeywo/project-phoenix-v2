@@ -2,11 +2,10 @@
 
 **This is the human half of issue #1128.** The automated half is done and is
 listed at the bottom; it proves the *logic* — the reflow-headroom arithmetic, the
-keyboard-focus order across monitors and split panes, the focus-reticle geometry
-and its contrast/reduced-motion response, and that every setup action is
-keyboard- and mouse-reachable — with pure tests that run in CI on no hardware,
-plus one `#[ignore]`d test that runs the same reflow/focus checks against this
-machine's **real** monitor geometries.
+keyboard-focus order across monitors and split panes, and the setup report —
+with pure tests that run in CI on no hardware, plus one `#[ignore]`d test that
+runs the same reflow/focus checks against this machine's **real** monitor
+geometries.
 
 None of that can prove the only questions that finally matter here: **that real
 text at the supported scaling extremes actually reflows on a real monitor without
@@ -114,6 +113,9 @@ this is the easy case; confirm it anyway, because acceptance criterion 1 names
 
 ## Part B — every setup action by keyboard and mouse (acceptance criterion 2)
 
+Actual keyboard and mouse reachability is established by the steps below. The
+automated layout and focus tests do not operate these setup controls.
+
 The four setup actions are **display-role**, **pane**, **touch-device** and
 **media** assignment. In this host all four are performed by editing the
 `bridge.toml` profile and checking it with `--setup` — a keyboard/CLI route, with
@@ -206,11 +208,6 @@ The pure model in `src/native_host/setup_accessibility.rs` is tested by
 - **focus order (AC 3)** — the keyboard-focus order lists every Station pane once,
   monitor by monitor and split by split, and a `FocusRing` cycles all of them
   across monitors;
-- **the non-colour reticle (AC 3/4)** — the reticle is a frame plus four corner
-  brackets, high contrast bolds and opaques it without making colour the cue, and
-  it never animates (the reduced-motion guarantee for host chrome);
-- **setup-action reachability (AC 2)** — every display/pane/touch/media assignment
-  is keyboard- and mouse-reachable and none is touch-only;
 - **the `--setup` Accessibility report** — the OS defaults, the supported range,
   and the per-pane reflow verdict.
 
@@ -228,7 +225,7 @@ law, issue #1327), so there is no lawful two-pane layout for it to check. Read t
 
 The feature-gated winit/Ultralight adapter
 (`src/native_host/panes/ultralight.rs`, behind `--features ultralight`) is the
-thin layer this kit exercises by hand: it draws the reticle from the pure
-`setup_accessibility::FocusReticle` descriptor and composites each pane onto its
-Station window. It is provable only on a machine with the displays and the SDK —
-which is what Parts A, C and D are for.
+layer this kit exercises by hand: it routes input and composites each pane onto
+its Station window. Visible focus feedback, contrast and reduced-motion behavior
+require the human checks in Parts A, C and D on a machine with the displays and
+the SDK; the setup-layout tests do not establish those results.

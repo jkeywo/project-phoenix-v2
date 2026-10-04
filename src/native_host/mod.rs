@@ -147,8 +147,8 @@ pub mod session_role;
 /// The setup/layout accessibility model (issue #1128) — pure, Bevy-free. The
 /// reflow-headroom check that keeps one- and two-pane layouts operable at the
 /// supported text-scale extremes, the keyboard-focus order across monitors and
-/// split panes, and the setup-action reachability invariant all live here and are
-/// CI-tested.
+/// split panes, and the setup report live here and are CI-tested. Actual setup
+/// control reachability is checked by the human accessibility acceptance kit.
 pub mod setup_accessibility;
 pub mod transport;
 pub mod viewscreen_locale;

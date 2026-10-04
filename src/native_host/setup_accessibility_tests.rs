@@ -1,11 +1,10 @@
 //! Synthetic coverage for the pure setup/layout accessibility model (issue
 //! #1128, acceptance criterion 5): the reflow-headroom check at the supported
 //! scaling extremes for one- and two-pane layouts, the keyboard-focus order
-//! across monitors and split panes, and the setup-action reachability
-//! invariant — all with no hardware, which is the whole point of keeping the
-//! model Bevy-free. The real-monitor, real-text half is the ignored
-//! `tests/native_bridge_accessibility.rs` and the walkthrough in
-//! `docs/acceptance/1128-accessibility.md`.
+//! across monitors and split panes, and the setup report — all with no hardware.
+//! The ignored `tests/native_bridge_accessibility.rs` checks real monitor
+//! geometries. Real text reflow and setup control reachability require the
+//! walkthrough in `docs/acceptance/1128-accessibility.md`.
 
 use super::*;
 use crate::native_host::bridge_profile::{
@@ -367,46 +366,6 @@ fn a_bridge_with_no_stations_has_an_empty_focus_order() {
     assert!(bridge_focus_order(&b).is_empty());
     // Vacuously preserves — there is nothing to fail.
     assert!(bridge_preserves_all_consoles(&b));
-}
-
-// ── setup-action reachability (acceptance criterion 2) ───────────────────────
-
-#[test]
-fn every_setup_action_is_reachable_by_keyboard_and_mouse() {
-    // AC2: display, pane, touch AND media assignment are all reachable by
-    // keyboard and mouse — none is touch-first-only.
-    for action in SetupAction::ALL {
-        let routes = action.routes();
-        assert!(
-            routes.keyboard_and_mouse(),
-            "{} is not keyboard+mouse reachable",
-            action.label()
-        );
-        assert!(!routes.is_touch_only(), "{} is touch-only", action.label());
-    }
-    assert!(every_setup_action_is_keyboard_and_mouse_reachable());
-}
-
-#[test]
-fn the_four_assignment_actions_are_all_covered() {
-    // The set is exactly the display/pane/touch/media assignments AC2 names.
-    assert!(SetupAction::ALL.contains(&SetupAction::DisplayRole));
-    assert!(SetupAction::ALL.contains(&SetupAction::PaneAssignment));
-    assert!(SetupAction::ALL.contains(&SetupAction::TouchMapping));
-    assert!(SetupAction::ALL.contains(&SetupAction::MediaAssignment));
-    assert_eq!(SetupAction::ALL.len(), 4);
-}
-
-#[test]
-fn the_invariant_would_catch_a_touch_only_action() {
-    // A guard on the guard: an action reachable only by touch is flagged.
-    let touch_only = InputRoutes {
-        keyboard: false,
-        mouse: false,
-        touch: true,
-    };
-    assert!(touch_only.is_touch_only());
-    assert!(!touch_only.keyboard_and_mouse());
 }
 
 // ── the accessibility half of the --setup report ─────────────────────────────

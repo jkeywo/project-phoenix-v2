@@ -1,5 +1,6 @@
 /** Hull, Station and System Live Inspector (issue #1491). */
 import { renderInspectorReadOnly, validInspectorDescriptor } from './inspector-field.js';
+import { createInspectorSession, bindInspectorNavigation } from './inspector-session.js';
 
 export const GM_SHIP_INSPECTOR_HISTORY_LIMIT = 20;
 const GROUPS = ['hull', 'station', 'system', 'power', 'runtime'];
@@ -46,8 +47,8 @@ export function createGmShipInspectorPanel({ doc = globalThis.document, t = id =
   focusEffect = null, focusSystem = null, focusStation = null } = {}) {
   const el = suffix => doc?.getElementById(`gm-ship-fields-${suffix}`);
   let domain = emptyDomain(), selected = null, retained = null, gone = false;
-  const retainedById = new Map();
-  const history = []; let cursor = -1; const rendered = new Map();
+  const session = createInspectorSession(GM_SHIP_INSPECTOR_HISTORY_LIMIT);
+  const rendered = new Map();
 
   function groupNode(group) {
     let node = el(`group-${group}`); if (node) return node;
@@ -61,11 +62,6 @@ export function createGmShipInspectorPanel({ doc = globalThis.document, t = id =
     node = doc.createElement('div'); node.dataset.field = field.id;
     const label = doc.createElement('span'); label.textContent = `${t(field.label)} — ${field.id}`; node.append(label);
     groupNode(field.group)?.append(node); rendered.set(field.id, node); return node;
-  }
-  function push(id) {
-    if (!id || history[cursor] === id) return;
-    history.splice(cursor + 1); history.push(id);
-    if (history.length > GM_SHIP_INSPECTOR_HISTORY_LIMIT) history.shift(); cursor = history.length - 1;
   }
   function action(node, field) {
     let button = node.querySelector('[data-inspector-action]');
@@ -93,27 +89,29 @@ export function createGmShipInspectorPanel({ doc = globalThis.document, t = id =
       const input = slot.querySelector('input'); if (input) { input.disabled = true; input.readOnly = true; }
       action(node, field);
     }
-    if (el('back')) el('back').disabled = cursor <= 0;
-    if (el('forward')) el('forward').disabled = cursor < 0 || cursor >= history.length - 1;
+    refreshNavigation();
   }
-  function show(id, { record = true, focus = false } = {}) {
-    selected = id || null; if (record) push(selected); const reading = selected ? domain.readings.get(selected) : null;
+  function show(id, { record = true } = {}) {
+    session.select(id, { record }); selected = session.selected;
+    const reading = selected ? domain.readings.get(selected) : null;
     if (reading) {
-      const prior = retainedById.get(selected);
+      const prior = session.reading(selected);
       retained = prior?.destroyed ? prior : reading;
-      retainedById.set(selected, retained); gone = false;
+      session.remember(selected, retained); gone = false;
     } else if (!selected || domain.liveIds.has(selected)) {
       // A live entity with no ship reading is simply outside this domain. It
       // must not inherit the previously selected hull's stale card.
       retained = null; gone = false;
     } else {
-      retained = retainedById.get(selected) || null;
+      retained = session.reading(selected) || null;
       gone = retained != null;
     }
-    render(); if (focus) el('status')?.focus?.();
+    render();
   }
-  el('back')?.addEventListener('click', () => { if (cursor > 0) { cursor--; show(history[cursor], { record: false, focus: true }); } });
-  el('forward')?.addEventListener('click', () => { if (cursor >= 0 && cursor < history.length - 1) { cursor++; show(history[cursor], { record: false, focus: true }); } });
+  const refreshNavigation = bindInspectorNavigation({ session,
+    back: el('back'), forward: el('forward'), status: el('status'),
+    render: () => show(session.selected, { record: false }),
+  });
   return {
     update(payload) {
       const parsed = parseGmShipInspectorPayload(payload); if (!parsed) return false;
@@ -121,12 +119,12 @@ export function createGmShipInspectorPanel({ doc = globalThis.document, t = id =
       // first destroyed snapshot even if a later projection still happens to
       // carry the ECS entity while cleanup completes.
       for (const [id, reading] of parsed.readings) {
-        if (!retainedById.get(id)?.destroyed) retainedById.set(id, reading);
+        if (!session.reading(id)?.destroyed) session.remember(id, reading);
       }
       domain = parsed; show(selected, { record: false }); return true;
     },
     select(entity) { show(entity?.entity_id || null); },
-    reset() { domain = emptyDomain(); selected = null; retained = null; gone = false; retainedById.clear(); history.length = 0; cursor = -1; rendered.clear(); el('list')?.replaceChildren(); render(); },
-    state: () => ({ selected, gone, destroyed: retained?.destroyed === true, history: [...history], cursor, fields: domain.fields.length }),
+    reset() { domain = emptyDomain(); selected = null; retained = null; gone = false; session.reset(); rendered.clear(); el('list')?.replaceChildren(); render(); },
+    state: () => ({ ...session.state(), gone, destroyed: retained?.destroyed === true, fields: domain.fields.length }),
   };
 }

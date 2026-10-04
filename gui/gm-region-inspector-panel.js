@@ -1,5 +1,6 @@
 /** Read-only Region Live Inspector (issue #1492). */
 import { renderInspectorReadOnly, validInspectorDescriptor } from './inspector-field.js';
+import { createInspectorSession, bindInspectorNavigation } from './inspector-session.js';
 
 export const GM_REGION_INSPECTOR_HISTORY_LIMIT = 20;
 const GROUPS = ['identity', 'transform', 'shape', 'effect', 'presentation', 'runtime'];
@@ -59,7 +60,8 @@ const emptyDomain = () => ({ fields: [], readings: new Map(), liveIds: new Set()
 export function createGmRegionInspectorPanel({ doc = globalThis.document, t = id => id } = {}) {
   const el = suffix => doc?.getElementById(`gm-region-fields-${suffix}`);
   let domain = emptyDomain(), selected = null, retained = null, gone = false;
-  const retainedById = new Map(), rendered = new Map(), history = []; let cursor = -1;
+  const session = createInspectorSession(GM_REGION_INSPECTOR_HISTORY_LIMIT);
+  const rendered = new Map();
 
   function groupNode(group) {
     let node = el(`group-${group}`); if (node) return node;
@@ -75,12 +77,6 @@ export function createGmRegionInspectorPanel({ doc = globalThis.document, t = id
     node = doc.createElement('div'); node.dataset.field = field.id;
     const label = doc.createElement('span'); label.textContent = `${t(field.label)} — ${field.id}`;
     node.append(label); groupNode(field.group)?.append(node); rendered.set(field.id, node); return node;
-  }
-  function push(id) {
-    if (!id || history[cursor] === id) return;
-    history.splice(cursor + 1); history.push(id);
-    if (history.length > GM_REGION_INSPECTOR_HISTORY_LIMIT) history.shift();
-    cursor = history.length - 1;
   }
   function renderOccupants() {
     const list = el('occupants'); if (!list) return;
@@ -121,27 +117,28 @@ export function createGmRegionInspectorPanel({ doc = globalThis.document, t = id
       renderInspectorReadOnly(slot, value, field.descriptor, { t, label: field.label });
     }
     renderOccupants();
-    if (el('back')) el('back').disabled = cursor <= 0;
-    if (el('forward')) el('forward').disabled = cursor < 0 || cursor >= history.length - 1;
+    refreshNavigation();
   }
-  function show(id, { record = true, focus = false } = {}) {
-    selected = id || null; if (record) push(selected);
+  function show(id, { record = true } = {}) {
+    session.select(id, { record }); selected = session.selected;
     const reading = selected ? domain.readings.get(selected) : null;
-    if (reading) { retained = reading; retainedById.set(selected, reading); gone = false; }
+    if (reading) { retained = reading; session.remember(selected, reading); gone = false; }
     else if (!selected || domain.liveIds.has(selected)) { retained = null; gone = false; }
-    else { retained = retainedById.get(selected) || null; gone = retained != null; }
-    render(); if (focus) el('status')?.focus?.();
+    else { retained = session.reading(selected) || null; gone = retained != null; }
+    render();
   }
-  el('back')?.addEventListener('click', () => { if (cursor > 0) { cursor--; show(history[cursor], { record: false, focus: true }); } });
-  el('forward')?.addEventListener('click', () => { if (cursor >= 0 && cursor < history.length - 1) { cursor++; show(history[cursor], { record: false, focus: true }); } });
+  const refreshNavigation = bindInspectorNavigation({ session,
+    back: el('back'), forward: el('forward'), status: el('status'),
+    render: () => show(session.selected, { record: false }),
+  });
   return {
     update(payload) {
       const parsed = parseGmRegionInspectorPayload(payload); if (!parsed) return false;
-      for (const [id, reading] of parsed.readings) retainedById.set(id, reading);
+      for (const [id, reading] of parsed.readings) session.remember(id, reading);
       domain = parsed; show(selected, { record: false }); return true;
     },
     select(entity) { show(entity?.entity_id || null); },
-    reset() { domain = emptyDomain(); selected = null; retained = null; gone = false; retainedById.clear(); history.length = 0; cursor = -1; rendered.clear(); el('list')?.replaceChildren(); render(); },
-    state: () => ({ selected, gone, history: [...history], cursor, fields: domain.fields.length, occupants: retained?.occupants.length || 0 }),
+    reset() { domain = emptyDomain(); selected = null; retained = null; gone = false; session.reset(); rendered.clear(); el('list')?.replaceChildren(); render(); },
+    state: () => ({ ...session.state(), gone, fields: domain.fields.length, occupants: retained?.occupants.length || 0 }),
   };
 }

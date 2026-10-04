@@ -139,6 +139,36 @@ describe('createGmEntityInspectorPanel', () => {
     expect(valueOf('ai_profile.aggression')).toBe('0.800');
   });
 
+  it('retraces a disappeared identity using its own final reading', () => {
+    const panel = mount({ focusDoctrine: vi.fn() });
+    panel.update(PAYLOAD());
+    panel.select({ entity_id: 'raider' });
+    panel.select({ entity_id: 'courier' });
+    panel.update(entityInspectorPayload({ courier: COURIER_READING }));
+
+    document.getElementById('gm-entity-fields-back').click();
+    expect(panel.state()).toMatchObject({ selected: 'raider', gone: true });
+    expect(valueOf('name')).toBe('Raider');
+    expect(valueOf('ai_profile.aggression')).toBe('0.800');
+    expect(row('behaviour.doctrine').querySelector('[data-inspector-action]').disabled).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById('gm-entity-fields-status'));
+
+    document.getElementById('gm-entity-fields-forward').click();
+    expect(panel.state()).toMatchObject({ selected: 'courier', gone: false });
+    expect(valueOf('name')).toBe('Courier');
+  });
+
+  it('never lends a remembered reading to an identity it has not observed', () => {
+    const panel = mount();
+    panel.update(PAYLOAD());
+    panel.select({ entity_id: 'courier' });
+    panel.select({ entity_id: 'unknown' });
+    expect(panel.state()).toMatchObject({ selected: 'unknown', gone: true });
+    expect(row('name').hidden).toBe(true);
+    expect(document.getElementById('gm-entity-fields-status').textContent).toContain('unknown');
+    expect(document.getElementById('gm-entity-fields-status').textContent).not.toContain('Courier');
+  });
+
   it('retraces reference hops through a bounded history', () => {
     const panel = mount();
     panel.update(PAYLOAD());
@@ -243,5 +273,20 @@ describe('createGmEntityInspectorPanel', () => {
     expect(panel.update({ entity_inspector: { fields: 'broken', readings: {} } })).toBe(false);
     expect(valueOf('name')).toBe('Raider');
     expect(panel.state().fields).toBe(ENTITY_FIELDS.length);
+  });
+
+  it('clears retained identities and navigation on reset', () => {
+    const panel = mount();
+    panel.update(PAYLOAD());
+    panel.select({ entity_id: 'raider' });
+    panel.select({ entity_id: 'courier' });
+    panel.reset();
+    expect(panel.state()).toMatchObject({ selected: null, gone: false, history: [], cursor: -1 });
+    expect(document.getElementById('gm-entity-fields-back').disabled).toBe(true);
+    expect(document.getElementById('gm-entity-fields-forward').disabled).toBe(true);
+    panel.update({ ...PAYLOAD(), entity_inspector: { ...PAYLOAD().entity_inspector, readings: {} } });
+    panel.select({ entity_id: 'raider' });
+    expect(panel.state()).toMatchObject({ selected: 'raider', gone: true });
+    expect(row('name').hidden).toBe(true);
   });
 });

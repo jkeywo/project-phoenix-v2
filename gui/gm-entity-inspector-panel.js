@@ -12,6 +12,7 @@
  * reference hop follows a published id for the same reason.
  */
 import { renderInspectorReadOnly, validInspectorDescriptor } from './inspector-field.js';
+import { createInspectorSession, bindInspectorNavigation } from './inspector-session.js';
 
 const text = value => typeof value === 'string';
 const GROUPS = ['identity', 'placement', 'faction', 'tags', 'behaviour', 'ai', 'target', 'derived'];
@@ -70,21 +71,11 @@ export function createGmEntityInspectorPanel({ doc = globalThis.document, t = id
   const el = suffix => doc?.getElementById(`gm-entity-fields-${suffix}`);
   let domain = EMPTY_DOMAIN();
   let selected = null;
-  // The last reading seen for the selected entity, kept so a despawn freezes
-  // what was on screen instead of blanking it.
+  // A missing identity is resolved from its own last visited reading.
   let retained = null;
   let gone = false;
-  const history = [];
-  let cursor = -1;
+  const session = createInspectorSession(GM_INSPECTOR_HISTORY_LIMIT);
   const rendered = new Map();
-
-  function pushHistory(entityId) {
-    if (!entityId || history[cursor] === entityId) return;
-    history.splice(cursor + 1);
-    history.push(entityId);
-    if (history.length > GM_INSPECTOR_HISTORY_LIMIT) history.shift();
-    cursor = history.length - 1;
-  }
 
   function groupNode(group) {
     let node = el(`group-${group}`);
@@ -163,10 +154,7 @@ export function createGmEntityInspectorPanel({ doc = globalThis.document, t = id
       referenceHop(node, field, reading.references.get(field.id));
       if (field.descriptor.live_mutability === 'named-action') linkAction(node, field);
     }
-    const back = el('back');
-    const forward = el('forward');
-    if (back) back.disabled = cursor <= 0;
-    if (forward) forward.disabled = cursor < 0 || cursor >= history.length - 1;
+    refreshNavigation();
   }
 
   /** Follow a reading that names another live object.
@@ -215,27 +203,20 @@ export function createGmEntityInspectorPanel({ doc = globalThis.document, t = id
     link.disabled = gone || !focusDoctrine || !domain.doctrineTargets.has(selected);
   }
 
-  function show(entityId, { record = true, focus = false } = {}) {
-    selected = entityId || null;
-    if (record) pushHistory(selected);
+  function show(entityId, { record = true } = {}) {
+    session.select(entityId, { record });
+    session.pruneReadingsToHistory();
+    selected = session.selected;
     const reading = selected ? domain.readings.get(selected) : null;
-    if (reading) { retained = reading; gone = false; }
-    else if (!selected) { retained = null; gone = false; }
-    else gone = true;
+    if (reading) session.remember(selected, reading);
+    retained = selected ? session.reading(selected) || null : null;
+    gone = !!selected && !reading;
     render();
-    // A retraced hop rewrites every row, so the reader is put back at the
-    // subject line rather than left on a button whose meaning just changed.
-    if (focus) el('status')?.focus?.();
   }
 
-  el('back')?.addEventListener('click', () => {
-    if (cursor > 0) { cursor -= 1; show(history[cursor], { record: false, focus: true }); }
-  });
-  el('forward')?.addEventListener('click', () => {
-    if (cursor >= 0 && cursor < history.length - 1) {
-      cursor += 1;
-      show(history[cursor], { record: false, focus: true });
-    }
+  const refreshNavigation = bindInspectorNavigation({ session,
+    back: el('back'), forward: el('forward'), status: el('status'),
+    render: () => show(session.selected, { record: false }),
   });
 
   return {
@@ -251,15 +232,14 @@ export function createGmEntityInspectorPanel({ doc = globalThis.document, t = id
     select(entity) { show(entity?.entity_id || null); },
     reset() {
       domain = EMPTY_DOMAIN();
+      session.reset();
       selected = null; retained = null; gone = false;
-      history.length = 0; cursor = -1;
       rendered.clear();
       el('list')?.replaceChildren();
       render();
     },
     state() {
-      return { selected, gone, fields: domain.fields.length,
-        history: [...history], cursor };
+      return { ...session.state(), gone, fields: domain.fields.length };
     },
   };
 }

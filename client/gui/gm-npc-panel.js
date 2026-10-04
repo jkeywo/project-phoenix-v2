@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
@@ -32,9 +33,11 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
   submit = () => false, confirmAction = request => request.accept(), correlation = createActionCorrelation,
   schedule = globalThis.setTimeout, cancelSchedule = globalThis.clearTimeout } = {}) {
   const el = suffix => doc?.getElementById(`gm-npc-${suffix}`);
-  let selected = null, choice = '', profiles = {}, entities = [], results = [], pending = null, timer = null, generation = 0, optionsSignature = null;
+  let selected = null, choice = '', profiles = {}, entities = [], results = [], generation = 0, optionsSignature = null;
+  const requests = new GmActionFeedback({ capacity: 1, timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
+    schedule, cancelSchedule, onLocalTerminal: (meta) => { feedback('timed_out'); options(); render(); } });
   const current = () => profiles[selected?.entity_id];
-  const valid = () => !!getOperator() && !pending && entities.some(row => row.entity_id === selected?.entity_id)
+  const valid = () => !!getOperator() && !requests.firstRequest && entities.some(row => row.entity_id === selected?.entity_id)
     && !!current()?.choices.some(row => row.id === choice);
   function feedback(state, reason) {
     if (el('feedback')) {
@@ -73,7 +76,7 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
         for (const item of choices) { const option = doc.createElement('option'); option.value = item.id; option.textContent = wireText(item.label); el('choice').appendChild(option); }
       }
       el('choice').value = choice;
-      el('choice').disabled = !choices.length || !!pending;
+      el('choice').disabled = !choices.length || !!requests.firstRequest;
     }
   }
   function choose() {
@@ -88,15 +91,14 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
       onCancel() { consumed = true; }, accept() {
       if (consumed) return false;
       consumed = true;
-      if (epoch !== generation || pending || getOperator()?.id !== captured.operator_id) return false;
+      if (epoch !== generation || requests.firstRequest || getOperator()?.id !== captured.operator_id) return false;
       // The target or authored choice may have disappeared during confirmation.
       // Submit the captured intent so canonical admission records its refusal.
       const request = { ...captured, correlation: correlation() };
       let accepted = false;
       try { accepted = submit(request) !== false; } catch (_) { /* visible refusal */ }
       if (!accepted) { feedback('refused'); return false; }
-      pending = request; feedback('pending'); options(); render();
-      timer = schedule(() => { timer = null; pending = null; feedback('timed_out'); options(); render(); }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+      requests.begin(request); feedback('pending'); options(); render();
       return true;
     } }) !== false;
   }
@@ -104,11 +106,11 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
     const parsed = parseNpcDoctrinePayload(payload); if (!parsed) return false;
     ({ entities, profiles, results } = parsed);
     if (selected) selected = entities.find(row => row.entity_id === selected.entity_id) || null;
-    const terminal = pending && results.find(row => row.operator_id === pending.operator_id && row.correlation === pending.correlation
-      && row.target === pending.target && row.npc_doctrine === pending.doctrine);
+    const terminal = requests.firstRequest && results.find(row => row.operator_id === requests.firstRequest.operator_id && row.correlation === requests.firstRequest.correlation
+      && row.target === requests.firstRequest.target && row.npc_doctrine === requests.firstRequest.doctrine);
     if (terminal) {
-      if (timer !== null) cancelSchedule(timer);
-      timer = null; pending = null; feedback(terminal.outcome === 'no-op' ? 'no_op' : terminal.outcome, terminal.reason);
+      requests.settle(terminal);
+      feedback(terminal.outcome === 'no-op' ? 'no_op' : terminal.outcome, terminal.reason);
     }
     if (el('results')) {
       el('results').replaceChildren();
@@ -124,8 +126,8 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
     options(); render(); return true;
   }
   function reset() {
-    generation++; if (timer !== null) cancelSchedule(timer);
-    timer = null; pending = null; selected = null; choice = ''; profiles = {}; entities = []; results = [];
+    generation++; requests.reset();
+    selected = null; choice = ''; profiles = {}; entities = []; results = [];
     if (el('feedback')) el('feedback').textContent = '';
     el('results')?.replaceChildren(); options(); render();
   }
@@ -134,5 +136,5 @@ export function createGmNpcPanel({ doc = globalThis.document, t = id => id, getO
   render();
   return { choose, update, reset, refreshAdmission: render,
     select(entity) { if (selected?.entity_id !== entity?.entity_id) { generation++; choice = ''; } selected = entity; options(); render(); },
-    state: () => ({ selected, choice, profiles, pending, results }) };
+    state: () => ({ selected, choice, profiles, pending: requests.firstRequest, results }) };
 }

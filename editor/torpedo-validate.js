@@ -1,3 +1,5 @@
+import { validateBarrelPatterns } from './barrel-pattern-validate.js';
+
 /**
  * torpedo-validate.js
  *
@@ -25,87 +27,7 @@
  * @returns {Array<{path, severity, message}>}
  */
 export function validateTorpedoTubes(tubes) {
-  const findings = [];
-  if (!Array.isArray(tubes)) return findings;
-
-  const seenIds = new Set();
-
-  for (let i = 0; i < tubes.length; i++) {
-    const tube = tubes[i];
-    if (!tube || typeof tube !== 'object') continue;
-    const basePath = `torpedoes.tubes[${i}]`;
-    const id = tube.id ?? i;
-
-    // ── Duplicate id ──
-    if (tube.id !== undefined && tube.id !== null) {
-      if (seenIds.has(tube.id)) {
-        findings.push({
-          path: `${basePath}.id`,
-          severity: 'error',
-          message: `Duplicate torpedo tube id "${tube.id}"`,
-        });
-      }
-      seenIds.add(tube.id);
-    }
-
-    const barrels = Array.isArray(tube.barrels) ? tube.barrels : [];
-    const barrelCount = barrels.length > 0 ? barrels.length : 1;
-    const pattern = Array.isArray(tube.pattern) ? tube.pattern : [];
-
-    // ── Empty pattern with multiple barrels ──
-    if (pattern.length === 0) {
-      if (barrels.length > 1) {
-        findings.push({
-          path: `${basePath}.pattern`,
-          severity: 'error',
-          message: `Torpedo tube "${id}" declares ${barrels.length} barrels but no firing pattern; multiple barrels require a pattern`,
-        });
-      }
-      continue;
-    }
-
-    // ── Per-step validation ──
-    for (let s = 0; s < pattern.length; s++) {
-      const step = pattern[s];
-      const stepPath = `${basePath}.pattern[${s}]`;
-      if (!step || typeof step !== 'object') {
-        findings.push({
-          path: stepPath,
-          severity: 'error',
-          message: `Torpedo tube "${id}" pattern step ${s} is malformed`,
-        });
-        continue;
-      }
-
-      const stepBarrels = Array.isArray(step.barrels) ? step.barrels : null;
-      if (!stepBarrels || stepBarrels.length === 0) {
-        findings.push({
-          path: `${stepPath}.barrels`,
-          severity: 'error',
-          message: `Torpedo tube "${id}" pattern step ${s} fires no barrels`,
-        });
-      } else {
-        for (const b of stepBarrels) {
-          if (!Number.isInteger(b) || b < 0 || b >= barrelCount) {
-            findings.push({
-              path: `${stepPath}.barrels`,
-              severity: 'error',
-              message: `Torpedo tube "${id}" pattern step ${s} references barrel index ${b} but only ${barrelCount} barrel(s) are declared`,
-            });
-          }
-        }
-      }
-
-      const offset = step.offset_secs;
-      if (offset !== undefined && (typeof offset !== 'number' || !isFinite(offset) || offset < 0)) {
-        findings.push({
-          path: `${stepPath}.offset_secs`,
-          severity: 'error',
-          message: `Torpedo tube "${id}" pattern step ${s} has offset_secs=${offset} (must be a number >= 0)`,
-        });
-      }
-    }
-  }
-
-  return findings;
+  return validateBarrelPatterns(tubes, {
+    path: 'torpedoes.tubes', label: 'Torpedo tube', duplicateLabel: 'torpedo tube',
+  });
 }

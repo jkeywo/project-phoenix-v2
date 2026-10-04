@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 /** Selected-entity removal preview. Only canonical results remove world state. */
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
 import { has } from './strings.js';
@@ -10,11 +11,11 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
   const el = (suffix) => doc?.getElementById(`gm-despawn-${suffix}`);
   let selected = null;
   let previewId = null;
-  let pending = null;
-  let timer = null;
+  const requests = new GmActionFeedback({ capacity: 1, timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
+    schedule, cancelSchedule, onLocalTerminal: (meta) => { feedback('timed_out'); render(); } });
   let results = [];
   const name = (entity) => has(entity.name) ? t(entity.name) : entity.name;
-  const eligible = () => selected?.removable === true && !!getOperator() && !pending;
+  const eligible = () => selected?.removable === true && !!getOperator() && !requests.firstRequest;
   function feedback(state) {
     if (!el('feedback')) return;
     el('feedback').dataset.state = state;
@@ -53,9 +54,8 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
     let accepted = false;
     try { accepted = submit(request) !== false; } catch (_) { /* visible refusal below */ }
     if (!accepted) { feedback('refused'); render(); return false; }
-    pending = request;
+    requests.begin(request);
     feedback('pending');
-    timer = schedule(() => { pending = null; timer = null; feedback('timed_out'); render(); }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
     render();
     return true;
   }
@@ -69,10 +69,10 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
         || !Number.isSafeInteger(r.tick) || r.tick < 0 || (r.reason != null && typeof r.reason !== 'string')
         || !['applied', 'no-op', 'refused'].includes(r.outcome))) return false;
     results = next;
-    const terminal = pending && results.find((r) => r.operator_id === pending.operator_id && r.correlation === pending.correlation);
+    const terminal = requests.firstRequest && results.find((r) => r.operator_id === requests.firstRequest.operator_id && r.correlation === requests.firstRequest.correlation && r.target === requests.firstRequest.target);
     if (terminal) {
-      if (timer !== null) cancelSchedule(timer);
-      timer = null; pending = null;
+      requests.settle(terminal);
+      
       feedback(terminal.outcome === 'refused' ? 'refused' : 'applied');
     }
     const list = el('results');
@@ -91,8 +91,8 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
     render(); return true;
   }
   function reset() {
-    if (timer !== null) cancelSchedule(timer);
-    timer = null; pending = null; selected = null; results = [];
+    requests.reset();
+    selected = null; results = [];
     closePreview(); el('results')?.replaceChildren();
     if (el('feedback')) el('feedback').textContent = '';
     render();
@@ -105,5 +105,5 @@ export function createGmDespawnPanel({ doc = globalThis.document, t = (id) => id
   });
   render();
   return { select: (entity) => { selected = entity; render(); }, preview, confirm, update, reset,
-    refreshAdmission: render, state: () => ({ selected, previewId, pending, results }) };
+    refreshAdmission: render, state: () => ({ selected, previewId, pending: requests.firstRequest, results }) };
 }

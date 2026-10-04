@@ -7,6 +7,8 @@
  * sole authority for those facts.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard as key, button, dpad, axis } from './action-support.js';
+
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -23,24 +25,10 @@ export const TACTICAL_TORPEDO_FIRE_ACTION_ID = 'tactical.torpedo-fire';
 export const TACTICAL_STRIKE_BOOST_ACTION_ID = 'tactical.strike-boost';
 
 function action(id, label, accessibility, keyboard, gamepad) {
-  return Object.freeze({
-    id,
-    contexts: Object.freeze([TACTICAL_ACTION_CONTEXT]),
-    labelId: `semantic_action.tactical.${label}.label`,
-    accessibilityLabelId: `semantic_action.tactical.${accessibility}.accessibility`,
-    authoritativeFeedback: true,
-    bindings: Object.freeze([keyboard, gamepad]),
-  });
+  return defineStationAction({ id, contexts: [TACTICAL_ACTION_CONTEXT],
+    labelKey: `tactical.${label}`, accessibilityKey: `tactical.${accessibility}`,
+    bindings: [keyboard, gamepad] });
 }
-
-const key = (code) => Object.freeze({
-  type: 'keyboard', code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
-});
-const button = (control) => Object.freeze({ type: 'gamepad', input: 'button', control });
-const dpad = (control) => Object.freeze({ type: 'gamepad', input: 'dpad', control });
-const axis = (control, direction) => Object.freeze({
-  type: 'gamepad', input: 'axis', control, direction, threshold: 0.5,
-});
 
 export const TACTICAL_ACTIONS = Object.freeze([
   action(TACTICAL_TARGET_ACTION_ID, 'target', 'target', key('KeyT'), dpad('dpad-right')),
@@ -59,11 +47,6 @@ export function tacticalActionView(state) {
   if (!state || typeof state !== 'object') return null;
   const projected = familyView(state, TACTICAL_ACTION_CONTEXT);
   return Object.keys(projected).length > 0 ? projected : state;
-}
-
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return { ...payload, correlation, semantic_action: actionId, __input_ms: inputMs };
 }
 
 function entryWithId(values, id) {
@@ -140,12 +123,7 @@ export function registerTacticalActions(registry, options = {}) {
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
-  const send = (actionId, correlation, inputMs, name, payload) => {
-    const correlated = correlatedPayload(actionId, correlation, inputMs, payload);
-    if (!correlated || !sendAction) return false;
-    sendAction(name, correlated);
-    return true;
-  };
+  const send = createCorrelatedActionSender(sendAction);
 
   registry.register(TACTICAL_ACTIONS[9], ({ actionId, correlation, inputMs } = {}) => {
     const view = tacticalActionView(getState());

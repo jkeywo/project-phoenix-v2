@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 /** Ordinary Comms Studio, with immutable intent before private confirmation. */
 import { ActionFeedbackLifecycle, createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
@@ -15,7 +16,10 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
   const feedback = byId('feedback'), log = byId('log');
   let projection = { routes: [], recipients: [], results: [], max_text_bytes: 0 };
   let generation = 0;
-  const pending = new Map(), local = new Map();
+  const pending = new GmActionFeedback({ lifecycle: () => actionFeedback, capacity: 32,
+    timeoutMs, schedule, cancelSchedule, onLocalTerminal: (_meta, outcome) => {
+      paintFeedback(outcome === 'timed-out' ? 'TimedOut' : 'Refused'); renderLog(); refreshAdmission();
+    } });
   const key = row => `${row.operator_id}\n${row.correlation}`;
   const route = () => projection.routes.find(row => row.id === routeInput?.value);
   const wireText = value => t(value) || value;
@@ -81,7 +85,7 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
   function renderLog() {
     if (!log) return;
     const rows = new Map(projection.results.map(row => [key(row), row]));
-    for (const row of [...local.values(), ...pending.values()]) if (!rows.has(key(row))) rows.set(key(row), row);
+    for (const row of [...pending.localRequests(), ...pending.requests()]) if (!rows.has(key(row))) rows.set(key(row), row);
     log.replaceChildren(...[...rows.values()].slice(-128).map(row => {
       const item = doc.createElement('li'); item.dataset.correlation = row.correlation;
       item.dataset.operatorId = row.operator_id; item.dataset.outcome = row.outcome;
@@ -102,14 +106,6 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
       return item;
     }));
   }
-  function settle(meta, state, outcome, reason) {
-    if (!pending.has(meta.correlation)) return;
-    cancelSchedule(meta.timer); pending.delete(meta.correlation);
-    actionFeedback.settle(meta.correlation, state);
-    local.set(key(meta), { ...meta, outcome, reason });
-    while (local.size > 32) local.delete(local.keys().next().value);
-    paintFeedback(state); renderLog(); refreshAdmission();
-  }
   function requestSend(hail = false) {
     const operator = getOperator(); const intent = intentFor(hail); const born = generation;
     if (!operator?.id || !valid(intent)) return false;
@@ -129,11 +125,12 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
         submitted = true;
         const press = actionFeedback.press('gm.comms.send');
         const meta = { operator_id: operatorId, correlation: press.correlation, transmission: intent, outcome: 'pending' };
-        pending.set(press.correlation, meta); actionFeedback.pending(press.correlation); paintFeedback('Pending');
+        const tracked = pending.trackRequest(meta);
+        if (!tracked) return false;
+        paintFeedback('Pending');
         let accepted = false;
         try { accepted = submitTransmission({ operator_id: operatorId, correlation: press.correlation, transmission: intent }) === true; } catch { /* ingress refuses */ }
-        if (!accepted) settle(meta, 'Refused', 'refused', 'ingress-rejected');
-        else meta.timer = schedule(() => settle(meta, 'TimedOut', 'timed-out', null), timeoutMs);
+        pending.submitted(tracked, accepted, 'ingress-rejected');
         renderLog(); refreshAdmission(); return accepted;
       },
     });
@@ -148,16 +145,17 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
     options(routeInput, projection.routes); options(recipientsInput, projection.recipients);
     for (const result of projection.results) {
       const meta = pending.get(result.correlation);
-      if (meta && meta.operator_id === result.operator_id && ['applied','refused','no-op'].includes(result.outcome)) {
-        settle(meta, result.outcome === 'refused' ? 'Refused' : 'Applied', result.outcome, result.reason);
+      if (meta && meta.operatorId === result.operator_id && ['applied','refused','no-op'].includes(result.outcome)) {
+        const settled = pending.settle(result);
+        pending.remember(settled.meta, result.outcome, result.reason);
+        paintFeedback(settled.state);
       }
     }
     renderLog(); refreshAdmission(); return true;
   }
   function reset() {
     generation++;
-    for (const meta of pending.values()) { cancelSchedule(meta.timer); actionFeedback.cancel(meta.correlation); }
-    pending.clear(); local.clear(); projection = { routes: [], recipients: [], results: [], max_text_bytes: 0 };
+    pending.reset(); projection = { routes: [], recipients: [], results: [], max_text_bytes: 0 };
     for (const input of [routeInput, senderInput, recipientsInput, hailInput]) {
       if (input) { input.replaceChildren(); delete input.dataset.options; }
     }
@@ -194,5 +192,5 @@ export function createGmCommsPanel({ doc = globalThis.document, t = id => id,
   }
   return { update, reset, refreshAdmission, requestSend, focusRoute,
     refreshLanguage() { renderLog(); refreshAdmission(); },
-    state: () => structuredClone({ ...projection, pending: [...pending.values()].map(({ timer, ...row }) => row) }) };
+    state: () => structuredClone({ ...projection, pending: [...pending.requests()] }) };
 }

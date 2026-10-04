@@ -1,3 +1,5 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { createGmFeedbackPresentation, isGmResultEnvelope } from './gm-feedback-presentation.js';
 /** Accessible, authoritative GM session pause/result presentation (#1292). */
 
 import {
@@ -20,8 +22,6 @@ import {
 
 export const GM_SESSION_FEED_CAPACITY = 32;
 
-const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
-
 /**
  * Rust wire identities stay machine-readable while their copy is localised.
  *
@@ -32,13 +32,8 @@ const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 export { GM_ACTION_REFUSAL_REASON_LABELS };
 
 function parseResult(value) {
-  if (!value || typeof value !== 'object'
-      || typeof value.operator_id !== 'string' || value.operator_id.length === 0
-      || typeof value.correlation !== 'string' || value.correlation.length === 0
-      || typeof value.requested_active !== 'boolean'
-      || !RESULT_OUTCOMES.has(value.outcome)
-      || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || (value.reason != null && typeof value.reason !== 'string')) return null;
+  if (!isGmResultEnvelope(value)
+      || typeof value.requested_active !== 'boolean') return null;
   return {
     operator_id: value.operator_id,
     correlation: value.correlation,
@@ -93,10 +88,6 @@ function setAccessibility(region, heading, pause, resume, state, feedback, log) 
   }
 }
 
-function entryKey(operatorId, correlation) {
-  return JSON.stringify([operatorId, correlation]);
-}
-
 /**
  * Mount the GM session controls over injected page/transport seams.
  *
@@ -148,30 +139,23 @@ export function createGmSessionControls({
   }
 
   let paused = null;
-  let authoritativeResults = [];
-  const pending = new Map();
-  const localTerminals = new Map();
   const rows = new Map();
   let actions = suppliedActions;
   let actionFeedback = suppliedActionFeedback;
 
-  function operator() {
-    try {
-      const value = typeof getOperator === 'function' ? getOperator() : null;
-      return value && typeof value.id === 'string' && value.id.length > 0 ? value : null;
-    } catch (_) {
-      return null;
-    }
-  }
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: boundedCapacity, timeoutMs: boundedTimeoutMs,
+    schedule, cancelSchedule,
+    onLocalTerminal() {
+      renderLog();
+    },
+  });
 
-  function operatorName(id) {
-    try {
-      const value = typeof getOperatorName === 'function' ? getOperatorName(id) : id;
-      return typeof value === 'string' && value.length > 0 ? value : id;
-    } catch (_) {
-      return id;
-    }
-  }
+  const { operator, operatorName, refusalText, appendRow, renderLog } = createGmFeedbackPresentation({
+    doc, log, rowClass: 'gm-session-log-entry', feed, t, getOperator, getOperatorName,
+    reasonPrefix: 'server.gm.session', paintResult: paintResultRow, paintLocal: (value, outcome) => outcome === 'pending' ? paintPendingRow(value) : paintLocalTerminalRow(value),
+    beforeRender: () => rows.clear(), onAppend: row => rows.set(row.dataset.entryKey, row),
+  });
 
   function actionLabel(actionId) {
     const definition = actions && actions.action(actionId);
@@ -180,37 +164,6 @@ export function createGmSessionControls({
 
   function requestedState(active) {
     return t(active ? 'server.gm.session.requested_paused' : 'server.gm.session.requested_running');
-  }
-
-  function refusalText(reason) {
-    if (!reason) return t('server.gm.session.reason_unspecified');
-    if (reason === LOCAL_INGRESS_REFUSAL) {
-      return t('server.gm.session.reason.ingress_rejected');
-    }
-    const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
-    return labelId
-      ? t(labelId)
-      : t('server.gm.session.reason_unknown', { reason });
-  }
-
-  function clearPendingTimer(meta) {
-    if (!meta || meta.timerScheduled !== true) return;
-    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
-    meta.timer = null;
-    meta.timerScheduled = false;
-  }
-
-  function appendRow(operatorId, correlationValue) {
-    if (!log) return null;
-    const key = entryKey(operatorId, correlationValue);
-    const row = doc.createElement('li');
-    row.className = 'gm-session-log-entry';
-    row.dataset.entryKey = key;
-    row.dataset.operatorId = operatorId;
-    row.dataset.correlation = correlationValue;
-    rows.set(key, row);
-    log.appendChild(row);
-    return row;
   }
 
   function paintPendingRow(meta) {
@@ -260,50 +213,6 @@ export function createGmSessionControls({
     });
   }
 
-  /** Rebuild deterministically: absolute terminal order, then local live rows. */
-  function renderLog() {
-    if (!log) return;
-    log.replaceChildren();
-    rows.clear();
-    const authoritativeKeys = new Set();
-    for (const result of authoritativeResults) {
-      authoritativeKeys.add(entryKey(result.operator_id, result.correlation));
-      paintResultRow(result);
-    }
-    for (const [key, terminal] of localTerminals) {
-      if (!authoritativeKeys.has(key)) paintLocalTerminalRow(terminal);
-    }
-    for (const meta of pending.values()) {
-      const key = entryKey(meta.operatorId, meta.correlation);
-      if (!authoritativeKeys.has(key)) paintPendingRow(meta);
-    }
-  }
-
-  function rememberLocalTerminal(meta, outcome, reason) {
-    const key = entryKey(meta.operatorId, meta.correlation);
-    localTerminals.set(key, {
-      operatorId: meta.operatorId,
-      operatorName: meta.operatorName,
-      correlation: meta.correlation,
-      active: meta.active,
-      outcome,
-      reason,
-    });
-    while (localTerminals.size > boundedCapacity) {
-      localTerminals.delete(localTerminals.keys().next().value);
-    }
-  }
-
-  function finishLocalPending(correlationValue, outcome, reason) {
-    const meta = pending.get(correlationValue);
-    if (!meta) return false;
-    clearPendingTimer(meta);
-    pending.delete(correlationValue);
-    rememberLocalTerminal(meta, outcome, reason);
-    renderLog();
-    return true;
-  }
-
   function paintFeedback(value) {
     if (!feedbackStatus || value.isCurrent === false) return;
     feedbackStatus.dataset.state = value.state || '';
@@ -319,7 +228,7 @@ export function createGmSessionControls({
     if (!value || (value.actionId !== GM_PAUSE_ACTION_ID
         && value.actionId !== GM_RESUME_ACTION_ID)) return;
     paintFeedback(value);
-    const meta = pending.get(value.correlation);
+    const meta = feed.get(value.correlation);
     if (value.state === ACTION_FEEDBACK_STATE.PENDING && meta) {
       renderLog();
       if (meta.localReason) {
@@ -328,25 +237,17 @@ export function createGmSessionControls({
         // later listeners observe Refused before the outer Pending event.
         if (!meta.refusalScheduled) {
           meta.refusalScheduled = true;
-          defer(() => actionFeedback.settle(
-            value.correlation,
-            ACTION_FEEDBACK_STATE.REFUSED,
-          ));
+          defer(() => {
+            if (feed.get(value.correlation) === meta) actionFeedback.settle(value.correlation, ACTION_FEEDBACK_STATE.REFUSED);
+          });
         }
         return;
       }
-      if (!meta.timerScheduled) {
-        meta.timerScheduled = true;
-        meta.timer = schedule(() => {
-          if (!actionFeedback.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT)) {
-            finishLocalPending(meta.correlation, 'timed-out', null);
-          }
-        }, boundedTimeoutMs);
-      }
+      feed.startTimer(meta);
     } else if (value.state === ACTION_FEEDBACK_STATE.TIMED_OUT && meta) {
-      finishLocalPending(value.correlation, 'timed-out', null);
+      feed.finishLocal(value.correlation, 'timed-out', null);
     } else if (value.state === ACTION_FEEDBACK_STATE.REFUSED && meta && meta.localReason) {
-      finishLocalPending(value.correlation, 'refused', meta.localReason);
+      feed.finishLocal(value.correlation, 'refused', meta.localReason);
     }
   }
 
@@ -372,18 +273,10 @@ export function createGmSessionControls({
     throw new Error('shared host registry has a partial GM session action set');
   }
 
-  function expireOldestPending() {
-    const oldest = pending.keys().next().value;
-    if (!oldest) return;
-    if (!actionFeedback.settle(oldest, ACTION_FEEDBACK_STATE.TIMED_OUT)) {
-      finishLocalPending(oldest, 'timed-out', null);
-    }
-  }
-
   function submit(active, correlationValue) {
     const current = operator();
     if (!current) return false;
-    while (pending.size >= boundedCapacity) expireOldestPending();
+    feed.makeRoom(true);
     const meta = {
       active,
       correlation: correlationValue,
@@ -395,7 +288,7 @@ export function createGmSessionControls({
       localReason: null,
       refusalScheduled: false,
     };
-    pending.set(correlationValue, meta);
+    feed.track(meta);
     let accepted = false;
     try {
       accepted = typeof submitSessionPaused === 'function'
@@ -453,22 +346,7 @@ export function createGmSessionControls({
     const projection = parseGmSessionPayload(payload);
     if (!projection) return false;
     paused = projection.paused;
-    authoritativeResults = projection.results.slice(-boundedCapacity);
-    localTerminals.clear();
-    // Settle every exact local occurrence even if the display capacity trims
-    // it. A same-correlation result attributed to another GM is never ours.
-    for (const result of projection.results) {
-      const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) continue;
-      clearPendingTimer(meta);
-      pending.delete(result.correlation);
-      actionFeedback.settle(
-        result.correlation,
-        result.outcome === 'refused'
-          ? ACTION_FEEDBACK_STATE.REFUSED
-          : ACTION_FEEDBACK_STATE.APPLIED,
-      );
-    }
+    feed.replace(projection.results);
     paintAuthoritativeState();
     renderLog();
     refreshAdmission();
@@ -477,11 +355,7 @@ export function createGmSessionControls({
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
   function reset() {
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    for (const correlationValue of [...pending.keys()]) actionFeedback.cancel(correlationValue);
-    pending.clear();
-    localTerminals.clear();
-    authoritativeResults = [];
+    feed.reset();
     paused = null;
     rows.clear();
     if (log) log.replaceChildren();
@@ -512,8 +386,7 @@ export function createGmSessionControls({
     if (suppliedActionFeedback && win && typeof win.removeEventListener === 'function') {
       win.removeEventListener('phoenix-action-feedback', onFeedbackEvent);
     }
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    pending.clear();
+    feed.reset(false);
   }
 
   return {
@@ -525,9 +398,9 @@ export function createGmSessionControls({
     refreshAdmission,
     state: () => ({
       paused,
-      pending: pending.size,
+      pending: feed.size,
       entries: rows.size,
-      authoritative: authoritativeResults.length,
+      authoritative: feed.authoritativeCount,
     }),
     destroy,
   };

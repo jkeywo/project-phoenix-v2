@@ -1,3 +1,4 @@
+import { runWorkshopMutation } from './workshop-edit-session.js';
 import { entityInventory } from '../editor/workshop-entity-composition.js';
 import { applyShipOperation, inspectShipAuthoring } from '../editor/workshop-ship-authoring.js';
 import { t } from './strings.js';
@@ -161,13 +162,15 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   }
   async function apply(factory) {
     if (busy() || loading || !inspection) return; const draft = getDraft(), token = ++generation, operation = { ...factory(), path: template.value };
-    setBusy(true); controls(); show('workshop.ship.checking');
-    try { const result = await applyShipOperation({ draft, provider, runtime, dependencies, operation,
-      current: () => !disposed && token === generation && getDraft() === draft });
-      if (!disposed && token === generation) { inspection = result.inspection; changed(operation.path); show('workshop.ship.applied'); paint(); } }
-    catch (error) { if (!disposed && token === generation) show('workshop.ship.refused', true,
-      error?.report?.findings?.map(row => `${row.file}${row.line ? `:${row.line}` : ''}: ${row.message}`).join(' ') || String(error?.message || error)); }
-    finally { if (!disposed && token === generation) { setBusy(false); controls(); } }
+    return runWorkshopMutation({ setBusy, current: () => !disposed && token === generation,
+      start: () => { controls(); show('workshop.ship.checking'); },
+      invoke: () => applyShipOperation({ draft, provider, runtime, dependencies, operation,
+        current: () => !disposed && token === generation && getDraft() === draft }),
+      success: result => { inspection = result.inspection; changed(operation.path); show('workshop.ship.applied'); paint(); },
+      error: error => show('workshop.ship.refused', true,
+        error?.report?.findings?.map(row => `${row.file}${row.line ? `:${row.line}` : ''}: ${row.message}`).join(' ') || String(error?.message || error)),
+      release: controls,
+    });
   }
   template.addEventListener('change', inspect); stations.addEventListener('change', () => { paint(); controls(); });
   systems.addEventListener('change', () => { paint(); controls(); }); ratings.addEventListener('change', () => { paint(); controls(); });

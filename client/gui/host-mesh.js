@@ -138,7 +138,8 @@
  * `15` adds authenticated per-origin stream continuation and owner takeover.
  * Older peers cannot reconcile the retained tail or acknowledge the pause.
  */
-export const HOST_MESH_PROTOCOL = 15;
+// Revision 16 requires the same authored ship initialization on every host.
+export const HOST_MESH_PROTOCOL = 16;
 
 import { canonicalStationRatings } from './fleet-crew.js';
 export { canonicalStationRatings } from './fleet-crew.js';

@@ -1,3 +1,5 @@
+import { stationRatingLabel } from './station-rating.js';
+
 /**
  * gui/lobby-view.js — Pure selectors behind the client lobby (issue #827).
  *
@@ -224,7 +226,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
           ? {
               list: myStation.ratings.map(r => ({
                 name: r,
-                label: ratingLabelFor(r),
+                label: stationRatingLabel(myStation.ratings, r, ratingLabelFor(r)),
                 active: r === activeRating,
               })),
               active: activeRating,

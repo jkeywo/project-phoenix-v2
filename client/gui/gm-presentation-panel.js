@@ -1,4 +1,5 @@
-import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { ActionFeedbackLifecycle, createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 
 /** Shared native/browser GM controls; all mutation goes through the typed lane. */
@@ -24,7 +25,14 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
   const sound = input('sound', 'select'), soundSource = input('sound_source', 'select');
   const current = doc.createElement('p'); current.className = 'gm-presentation-current'; root.append(current);
   const status = doc.createElement('p'); status.setAttribute('role', 'status');
-  let ships = [], pending = null, timer = null, state = {}, listKey = '', messages = [], messageKey = '', cameras = {}, cameraKey = '';
+  let ships = [], state = {}, listKey = '', messages = [], messageKey = '', cameras = {}, cameraKey = '';
+  const actionFeedback = new ActionFeedbackLifecycle({ correlation });
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: 1,
+    timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS, schedule, cancelSchedule,
+    onLocalTerminal: (_meta, outcome) => { feedback(outcome === 'timed-out' ? 'timed_out' : outcome); refreshAdmission(); },
+  });
+  const pending = () => feed.values().next().value?.request ?? null;
   let sounds = [], soundKey = '', sources = [], sourceKey = '';
   const buttons = [];
   function feedback(value) { status.textContent = t(`server.gm.presentation.${value}`); status.dataset.state = value; }
@@ -42,7 +50,7 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
     field.value = old;
   }
   function refreshAdmission() {
-    for (const button of buttons) button.disabled = !getOperator() || !!pending || !ships.some(row => row.entity_id === ship.value);
+    for (const button of buttons) button.disabled = !getOperator() || !!pending() || !ships.some(row => row.entity_id === ship.value);
     const cameraChoices = cameras[ship.value] || [];
     const cameraListKey = JSON.stringify(cameraChoices);
     if (cameraListKey !== cameraKey) {
@@ -66,13 +74,17 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
   }
   function send(cue) {
     const operator = getOperator();
-    if (!operator || pending || !ships.some(row => row.entity_id === ship.value)) return false;
-    const request = { operator_id: operator.id, correlation: correlation(), ship: ship.value, cue };
+    if (!operator || pending() || !ships.some(row => row.entity_id === ship.value)) return false;
+    const request = { operator_id: operator.id, correlation: actionFeedback.press('gm.presentation').correlation, ship: ship.value, cue };
+    const meta = { request, operatorId: request.operator_id, correlation: request.correlation };
+    feed.track(meta);
+    actionFeedback.pending(request.correlation);
     let accepted = false;
-    try { accepted = submit(request) !== false; } catch { /* surfaced below */ }
-    if (!accepted) { feedback('refused'); return true; }
-    pending = request; feedback('pending'); refreshAdmission();
-    timer = schedule(() => { pending = null; timer = null; feedback('timed_out'); refreshAdmission(); }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+    try { accepted = submit(request) !== false; } catch (_) { /* local refusal */ }
+    feed.submitted(meta, accepted);
+    if (!accepted) return true;
+    if (feed.get(request.correlation) === meta) feedback('pending');
+    refreshAdmission();
     return true;
   }
   const ticks = () => { const n = Number(duration.value); return Number.isInteger(n) && n > 0 && n <= 4294967295 ? n : null; };
@@ -105,13 +117,14 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
       replaceChoices(ship, ships.map(row => [row.entity_id, wireText(row.name)]));
       listKey = key;
     }
-    const result = pending && (p.presentation_results || []).find(row => row.operator_id === pending.operator_id && row.correlation === pending.correlation);
+    const request = pending();
+    const result = request && (p.presentation_results || []).find(row => row.operator_id === request.operator_id && row.correlation === request.correlation);
     if (result && ['applied', 'no-op', 'refused'].includes(result.outcome)) {
-      cancelSchedule(timer); timer = null; pending = null; feedback(result.outcome);
+      feed.settle(result); feedback(result.outcome);
     }
     refreshAdmission(); return true;
   }
-  function reset() { if (timer !== null) cancelSchedule(timer); timer = null; pending = null; ships = []; state = {}; messages = []; cameras = {}; sounds = []; sources = []; soundKey = ''; sourceKey = ''; listKey = ''; cameraKey = ''; messageKey = ''; ship.replaceChildren(); camera.replaceChildren(); message.replaceChildren(); sound.replaceChildren(); soundSource.replaceChildren(); feedback('ready'); refreshAdmission(); }
+  function reset() { feed.reset(); ships = []; state = {}; messages = []; cameras = {}; sounds = []; sources = []; soundKey = ''; sourceKey = ''; listKey = ''; cameraKey = ''; messageKey = ''; ship.replaceChildren(); camera.replaceChildren(); message.replaceChildren(); sound.replaceChildren(); soundSource.replaceChildren(); feedback('ready'); refreshAdmission(); }
   function focusControls({ ship: shipId = null, field = '', value = '' } = {}) {
     if (shipId && [...ship.options].some(option => option.value === shipId)) {
       ship.value = shipId; ship.dispatchEvent(new doc.defaultView.Event('change'));
@@ -132,5 +145,5 @@ export function createGmPresentationPanel({ doc = globalThis.document, t = id =>
     control.scrollIntoView?.({ block: 'nearest' }); control.focus?.({ preventScroll: true }); return true;
   }
   refreshAdmission();
-  return { update, reset, refreshAdmission, focusControls, state: () => ({ pending, presentation: state }), destroy() { reset(); root.remove(); } };
+  return { update, reset, refreshAdmission, focusControls, state: () => ({ pending: pending(), presentation: state }), destroy() { reset(); root.remove(); } };
 }

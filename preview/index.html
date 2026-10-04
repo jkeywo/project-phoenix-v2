@@ -15,8 +15,8 @@
        read from disk, by construction. -->
   
 <script type="module">
-import init, * as bindings from '/preview/project-phoenix-507fa7c5fd7b5ab4.js';
-const wasm = await init({ module_or_path: '/preview/project-phoenix-507fa7c5fd7b5ab4_bg.wasm' });
+import init, * as bindings from '/preview/project-phoenix-62b4f81514b86e0c.js';
+const wasm = await init({ module_or_path: '/preview/project-phoenix-62b4f81514b86e0c_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
     #canvas { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
   </style>
-<link rel="modulepreload" href="/preview/project-phoenix-507fa7c5fd7b5ab4.js" crossorigin="anonymous" integrity="sha384-nrov3zAqvXFEdyc4IAZnOWzuDgQhw3R7i3+aR71t1aDg7JVO/UZRMlEpa2fdpJbE"><link rel="modulepreload" href="/preview/snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="/preview/project-phoenix-507fa7c5fd7b5ab4_bg.wasm" crossorigin="anonymous" integrity="sha384-my2tTT8xtMyitKmTLlJYHFMjzCzxIVkmOsJTTfYzaAGuuzH01LxLOiPwv9AnKtNA" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/preview/project-phoenix-62b4f81514b86e0c.js" crossorigin="anonymous" integrity="sha384-n7XfjhC8qTL1aSzR2YXaF0iRpsFAMs8VTMTMwLfXqW+zLA6El/1DW8yvZKVoF+/N"><link rel="modulepreload" href="/preview/snippets/project-phoenix-06447516f4d71ff6/inline0.js" crossorigin="anonymous" integrity="sha384-bAE8ul3zgf59O4/OkJiKdwUo7nOWkOpQ/angLB9bhTc6kWCnY2s/fZjX5CjqLiKO"><link rel="preload" href="/preview/project-phoenix-62b4f81514b86e0c_bg.wasm" crossorigin="anonymous" integrity="sha384-ibdCs9QqCk1HDEiZbn1EFfYs4vR8z4nWGmks5j8AE8o+3F0u18wwe/rjdBcXK1If" as="fetch" type="application/wasm"></head>
 <body>
   <canvas id="canvas"></canvas>
   <script type="module" src="../gui/workshop-preview-boot.js"></script>

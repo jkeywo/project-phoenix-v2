@@ -1,34 +1,15 @@
 /**
- * gui/console-mount.js — The DOM mount + `.active` visibility toggle for ship
- * consoles (extracted from client.html for issue #1099 AC1).
- *
- * These two functions are the production seams that make a Station tab's
- * session-local interface context survive a tab switch:
- *
- *  - mountConsoles()          creates exactly one persistent <section>+<iframe>
- *                             per station (from gui/mount-plan.js planMounts),
- *                             fired only on the Welcome `mount-consoles` side
- *                             effect. It is the ONLY place iframe nodes are
- *                             created, so nodes it mounts are stable for the
- *                             session.
- *  - applyConsoleVisibility() is the tab switch: a pure `.active` CSS toggle
- *                             over the already-mounted sections (visibility map
- *                             from gui/content-switcher.js consoleSections). It
- *                             never creates or removes nodes, so switching away
- *                             and back leaves the same iframe node — and any
- *                             interface state living on/in it — untouched.
- *  - stationIdForSource()     reads the mount backwards: given the window a
- *                             postMessage came FROM, which Station is that?
- *                             The shell mounted the frame, so the shell is the
- *                             one that knows (issue #1374).
- *
- * client.html's inline shell calls these via window.mountConsolesDom /
- * window.applyConsoleVisibility / window.consoleStationIdForSource; tests
- * import them directly.
+ * Parent-side Console lifetime: mounted Station identity, load/reload seeding,
+ * snapshot publication and the declarations consumed by the Station Bar.
+ * createConsoleMounts is the client shell's interface. The low-level DOM
+ * helpers remain available to standalone mount/visibility consumers.
  */
 
 import { iframeIdFor, planMounts } from './mount-plan.js';
 import { consoleSections } from './content-switcher.js';
+import { push, setOverlay } from './iframe-bridge.js';
+import { alwaysPushConsoles, dirtyConsolesFor } from './dirty-consoles.js';
+import { PUSH_CAUSE } from './console-latency.js';
 
 /**
  * Mount one persistent section+iframe per plan entry into `container`.
@@ -39,7 +20,7 @@ import { consoleSections } from './content-switcher.js';
  * @param {Element}  container    The #console-container element.
  * @param {object|null} shipStations  Server-supplied ship_stations.
  * @param {(iframe: Element, mount: object) => void} [onIframe]
- *        Optional per-iframe hook (client.html attaches its load listener).
+ *        Optional per-iframe hook for the controller or a standalone consumer.
  */
 export function mountConsoles(doc, container, shipStations, onIframe) {
   if (!container) return;
@@ -127,8 +108,183 @@ export function stationIdForSource(doc, shipStations, source, fallback) {
   return (typeof fallback === 'string') ? fallback : '';
 }
 
+/**
+ * Own the mounted Console documents for one client shell.
+ *
+ * Readers are live: reconnect, profile import and locale changes never leave a
+ * load callback holding an old simulation/profile snapshot. Adapters perform
+ * single presentation operations; this module owns their load ordering.
+ * Declaration caches retain the last report until a console replaces it, as
+ * before. A remount changes frame identity, not that cache policy.
+ *
+ * onDeclaration receives { type, stationId } after an accepted declaration;
+ * the shell retains rendering and decides whether an open popup needs repaint.
+ */
+export function createConsoleMounts({
+  doc,
+  container,
+  readState = () => null,
+  buildState,
+  readActiveStation = () => null,
+  readBindings = () => null,
+  readFeedbackPreferences = () => null,
+  installLocale = () => {},
+  applyAccessibility = () => {},
+  noteSnapshot = () => {},
+  afterBindings = () => {},
+  onDeclaration = () => {},
+}) {
+  const mounted = new Map();
+  const tabs = new Map();
+  const hull = new Map();
+  let shipStations = null;
+  let selectedOverlay = { console: null, id: null };
+  let generation = 0;
+  let disposed = false;
+
+  function frame(stationId) {
+    return mounted.get(stationId)?.iframe || null;
+  }
+
+  function refresh(stationId, cause) {
+    if (disposed || !stationId) return;
+    const state = readState();
+    const json = state && typeof buildState === 'function' ? buildState(stationId, state) : '{}';
+    push(frame(stationId), stationId, json);
+    // Preserve measurement after the attempted publication, even if its
+    // document/hook is unavailable. Cause, not delivery, controls eligibility.
+    noteSnapshot(stationId, cause);
+  }
+
+  function publishChanges(changes) {
+    if (disposed) return;
+    const state = readState();
+    const stationSystems = state?.stationSystems;
+    const families = state?.systemConsoleFamilies;
+    const blackboardFamilies = state?.blackboardConsoleFamilies;
+    const always = alwaysPushConsoles(stationSystems, families);
+    for (const stationId of dirtyConsolesFor(changes, stationSystems, families, blackboardFamilies)) {
+      if (always.has(stationId) || readActiveStation() === stationId) {
+        refresh(stationId, PUSH_CAUSE.SERVER_MESSAGE);
+      }
+    }
+  }
+
+  function publishBindings(iframe) {
+    const bindings = readBindings();
+    if (!iframe || !bindings) return;
+    try {
+      const target = iframe.contentWindow;
+      const update = target?.__updateSemanticActionBindings;
+      if (typeof update === 'function') update(bindings);
+      const updateFeedback = target?.__updateActionFeedbackPreferences;
+      if (typeof updateFeedback === 'function') updateFeedback(readFeedbackPreferences());
+    } catch (_) { /* unavailable documents are retried on load */ }
+    afterBindings();
+  }
+
+  function refreshBindings() {
+    if (disposed) return;
+    for (const { iframe } of mounted.values()) publishBindings(iframe);
+  }
+
+  function selectOverlay(stationId, overlayId) {
+    if (disposed) return;
+    const previous = selectedOverlay;
+    selectedOverlay = { console: overlayId ? stationId : null, id: overlayId || null };
+    if (previous.console && previous.console !== selectedOverlay.console) {
+      setOverlay(frame(previous.console), null);
+    }
+    if (stationId) setOverlay(frame(stationId), overlayId || null);
+  }
+
+  function detachLoads() {
+    generation += 1;
+    for (const { iframe, onLoad } of mounted.values()) iframe.removeEventListener('load', onLoad);
+    mounted.clear();
+  }
+
+  function mount(nextShipStations) {
+    if (disposed || !container) return;
+    detachLoads();
+    shipStations = nextShipStations;
+    const currentGeneration = generation;
+    mountConsoles(doc, container, shipStations, (iframe, plan) => {
+      const stationId = plan.stationId;
+      const record = { iframe, section: iframe.parentElement, onLoad: null };
+      record.onLoad = () => {
+        // Removing a listener does not revoke a callback already queued. In
+        // particular Welcome may request locale reloads before replacing the
+        // frames. An obsolete load must never publish into its replacement.
+        if (disposed || generation !== currentGeneration || mounted.get(stationId) !== record) return;
+        installLocale(iframe);
+        refresh(stationId, PUSH_CAUSE.IFRAME_LOAD);
+        if (selectedOverlay.console === stationId) selectOverlay(null, null);
+        applyAccessibility(iframe);
+        publishBindings(iframe);
+      };
+      mounted.set(stationId, record);
+      iframe.addEventListener('load', record.onLoad);
+    });
+  }
+
+  function show(activeStation, inGame) {
+    if (disposed) return {};
+    const stationIds = (shipStations?.stations || []).map(station => station.id).filter(Boolean);
+    return applyConsoleVisibility(doc, activeStation, inGame, stationIds);
+  }
+
+  function view(stationId) {
+    return {
+      tabs: tabs.get(stationId) || [],
+      hull: hull.get(stationId) || [],
+      activeOverlay: selectedOverlay.console === stationId ? selectedOverlay.id : null,
+    };
+  }
+
+  function handleDeclaration(event) {
+    if (disposed) return false;
+    const data = event?.data;
+    if (data?.type !== 'console_tabs' && data?.type !== 'console_hull') return false;
+    // Preserve the non-frame compatibility paths, including an unmatched
+    // source's claimed name. This is presentation routing, not Admission.
+    let stationId = typeof data.console === 'string' ? data.console : '';
+    if (event.source) {
+      for (const [id, { iframe }] of mounted) {
+        let source = null;
+        try { source = iframe.contentWindow; } catch (_) { /* unavailable */ }
+        if (source && source === event.source) { stationId = id; break; }
+      }
+    }
+    if (!stationId) return true;
+    if (data.type === 'console_tabs') {
+      tabs.set(stationId, Array.isArray(data.tabs) ? data.tabs : []);
+      const open = data.open || null;
+      if (open) selectedOverlay = { console: stationId, id: open };
+      else if (selectedOverlay.console === stationId) selectedOverlay = { console: null, id: null };
+    } else hull.set(stationId, Array.isArray(data.entries) ? data.entries : []);
+    onDeclaration({ type: data.type, stationId });
+    return true;
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (const { section } of mounted.values()) section.remove();
+    detachLoads();
+    shipStations = null;
+    tabs.clear();
+    hull.clear();
+    selectedOverlay = { console: null, id: null };
+  }
+
+  return { mount, show, frame, publishChanges, refresh, refreshBindings,
+    selectOverlay, view, handleDeclaration, dispose };
+}
+
 // Expose for the non-module inline script in client.html.
 if (typeof window !== 'undefined') {
+  window.createConsoleMounts = createConsoleMounts;
   window.mountConsolesDom = mountConsoles;
   window.applyConsoleVisibility = applyConsoleVisibility;
   window.consoleStationIdForSource = stationIdForSource;

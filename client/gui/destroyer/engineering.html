@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title data-i18n="console.engineering.doc_title">Project Phoenix — Engineering Console</title>
   <link rel="stylesheet" href="../console.css">
+  <link rel="stylesheet" href="../stations/contextual-controls.css">
   <style>
     body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
@@ -57,17 +58,12 @@
     .threat-readout.active { visibility: visible; }
     .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-md); }
     /* Tractor beam control (issue #1156). */
-    .tractor-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 6px; margin-top: 8px; }
-    .tractor-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
     /* issue #1425: `flex-wrap: wrap` — see the matching comment on
        gui/destroyer/helm.html's .dock-row. This row's own button can consume
        its full width at 200% text on a narrow pane, and the status span
        (shared by Tractor, Umbilical and the Field Repair dispatch panel,
        which reuse this class) needs to drop to its own line rather than be
        squeezed to zero width. */
-    .tractor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .tractor-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
-    .tractor-btn.engaged { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
     /* issue #1425: this row is `display: flex` and a flex item's default
        min-width is `auto`, not `0` — a long coupled_target_name/target_name
        (a world entity name id, unbounded length; shared by Tractor, Umbilical
@@ -75,8 +71,6 @@
        pushed the status text past the button instead of wrapping. Matches the
        fix gui/cruiser/helm.html's dock-status already carries for the same
        class of value. */
-    .tractor-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
-    .tractor-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     /* First panel in the Operations column (issue #1383): the column's own
        <h2> already draws a divider under "Operations", so the Tractor
        panel's own border-top/margin-top — written for the case where it
@@ -178,30 +172,18 @@
                drops its own top border/margin (issue #1383): it is now the
                first thing in the column, right under the column's own
                heading, which already draws that divider. -->
-          <div class="tractor-panel flush" id="tractor-panel" hidden>
-            <h2 data-i18n="console.engineering.tractor">Tractor</h2>
-            <div class="tractor-row">
-              <button id="tractor-btn" class="tractor-btn" data-i18n="console.tractor.engage">Engage</button>
-              <span id="tractor-status" class="tractor-status">—</span>
-            </div>
-            <div id="tractor-refusal" class="tractor-refusal" hidden></div>
-          </div>
+          <div class="tractor-panel flush" id="tractor-panel" hidden></div>
           <!-- Transfer umbilical (issue #1160): shown only on a hull that authors
                an umbilical system, so a hull without one is unchanged. Reuses the
                tractor panel's styling. -->
-          <div class="tractor-panel" id="umbilical-panel" hidden>
-            <h2 data-i18n="console.engineering.umbilical" style="margin-top:10px">Umbilical</h2>
-            <div class="tractor-row">
-              <button id="umbilical-btn" class="tractor-btn" data-i18n="console.umbilical.start">Start</button>
-              <span id="umbilical-status" class="tractor-status">—</span>
-            </div>
-            <div id="umbilical-refusal" class="tractor-refusal" hidden></div>
-          </div>
+          <div class="tractor-panel" id="umbilical-panel" hidden></div>
         </div>
       </div>
     </div>
   </div>
   <script type="module">
+    import { mountTractorControl, mountUmbilicalControl } from '../stations/contextual-controls.js';
+
     import '../components/ph-shield-facings.js';
     import '../components/ph-power-controls.js';
     import '../components/ph-battery-bar.js';
@@ -223,33 +205,10 @@
     // same renderStation.
     import { renderStation } from './engineering.console.js';
 
+
+    mountTractorControl(document.getElementById('tractor-panel'), { activate: verb => activateEngineeringAction(consoleHandle, TRACTOR_TOGGLE_ACTION_ID, null, verb) });
+    mountUmbilicalControl(document.getElementById('umbilical-panel'), { headingMargin: true, activate: verb => activateEngineeringAction(consoleHandle, UMBILICAL_TOGGLE_ACTION_ID, null, verb) });
     var consoleHandle = initConsole({ name: 'engineering', render: renderStation });
-
-    // The one tractor button toggles engage/release through the action map,
-    // which sends the same admitted command a tractor AI would (issue #1156).
-    // "Which one" is read off the button's own `.engaged` class — renderStation
-    // sets it fresh on every push, so it is never stale.
-    document.getElementById('tractor-btn').addEventListener('click', function() {
-      var engaged = document.getElementById('tractor-btn').classList.contains('engaged');
-      activateEngineeringAction(
-        consoleHandle,
-        TRACTOR_TOGGLE_ACTION_ID,
-        null,
-        engaged ? 'release_tractor' : 'engage_tractor',
-      );
-    });
-
-    // The one umbilical button toggles start/stop through the action map, which
-    // sends the same admitted command an umbilical AI would (issue #1160).
-    document.getElementById('umbilical-btn').addEventListener('click', function() {
-      var running = document.getElementById('umbilical-btn').classList.contains('engaged');
-      activateEngineeringAction(
-        consoleHandle,
-        UMBILICAL_TOGGLE_ACTION_ID,
-        null,
-        running ? 'stop_transfer' : 'start_transfer',
-      );
-    });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).

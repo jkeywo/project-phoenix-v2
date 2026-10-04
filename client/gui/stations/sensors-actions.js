@@ -8,6 +8,8 @@
  * remains the sole authority gate.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard, gamepad } from './action-support.js';
+
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -25,30 +27,9 @@ export const SENSOR_SCIENCE_ACTION_CONTEXTS = Object.freeze([
   'sensors', 'science', 'captain', 'tactical', 'engineering', 'shields',
 ]);
 
-const keyboard = (code, modifiers = {}) => Object.freeze({
-  type: 'keyboard', code,
-  ctrlKey: !!modifiers.ctrlKey,
-  shiftKey: !!modifiers.shiftKey,
-  altKey: !!modifiers.altKey,
-  metaKey: !!modifiers.metaKey,
-});
-
-const gamepad = (input, control) => Object.freeze({ type: 'gamepad', input, control });
-
-function action(
-  id, contexts, label, keyboardCode, gamepadInput, gamepadControl, keyboardModifiers = {},
-) {
-  return Object.freeze({
-    id,
-    contexts,
-    labelId: `semantic_action.${label}.label`,
-    accessibilityLabelId: `semantic_action.${label}.accessibility`,
-    authoritativeFeedback: true,
-    bindings: Object.freeze([
-      keyboard(keyboardCode, keyboardModifiers),
-      gamepad(gamepadInput, gamepadControl),
-    ]),
-  });
+function action(id, contexts, label, keyboardCode, gamepadInput, gamepadControl, keyboardModifiers = {}) {
+  return defineStationAction({ id, contexts, labelKey: label,
+    bindings: [keyboard(keyboardCode, keyboardModifiers), gamepad(gamepadInput, gamepadControl)] });
 }
 
 export const SENSORS_TARGET_ACTION = action(
@@ -131,11 +112,6 @@ export function shieldsActionView(state) {
   return exactFamilyView(state, 'shields');
 }
 
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return { ...payload, correlation, semantic_action: actionId, __input_ms: inputMs };
-}
-
 function visibleTarget(view, selected) {
   const candidates = (Array.isArray(view && view.blips) ? view.blips : [])
     .filter((blip) => blip && typeof blip.uuid === 'string' && blip.uuid)
@@ -171,12 +147,7 @@ export function registerSensorScienceActions(registry, options = {}) {
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
-  const send = (actionId, correlation, inputMs, name, payload) => {
-    const correlated = correlatedPayload(actionId, correlation, inputMs, payload);
-    if (!correlated || !sendAction) return false;
-    sendAction(name, correlated);
-    return true;
-  };
+  const send = createCorrelatedActionSender(sendAction);
 
   registry.register(SENSORS_TARGET_ACTION, ({
     actionId, correlation, inputMs, detail,

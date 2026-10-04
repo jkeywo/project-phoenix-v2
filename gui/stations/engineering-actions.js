@@ -10,6 +10,8 @@
  * non-pointer path without inventing selection state.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard, button, dpad, axis } from './action-support.js';
+
 import { familySystemId, familyView } from '../console-payload.js';
 import { EXTERNAL_REPAIR_TARGET } from '../repair-dispatch.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
@@ -53,28 +55,9 @@ export const ENGINEERING_ACTION_REGISTRATION_CONTEXTS = Object.freeze([
   ENGINEERING_ACTION_CONTEXT,
 ]);
 
-const keyboard = (code, modifiers = {}) => Object.freeze({
-  type: 'keyboard', code,
-  ctrlKey: !!modifiers.ctrlKey,
-  shiftKey: !!modifiers.shiftKey,
-  altKey: !!modifiers.altKey,
-  metaKey: !!modifiers.metaKey,
-});
-const button = (control) => Object.freeze({ type: 'gamepad', input: 'button', control });
-const dpad = (control) => Object.freeze({ type: 'gamepad', input: 'dpad', control });
-const axis = (control, direction) => Object.freeze({
-  type: 'gamepad', input: 'axis', control, direction, threshold: 0.5,
-});
-
 function action(id, contexts, family, label, keyboardBinding, gamepadBinding) {
-  return Object.freeze({
-    id,
-    contexts,
-    labelId: `semantic_action.${family}.${label}.label`,
-    accessibilityLabelId: `semantic_action.${family}.${label}.accessibility`,
-    authoritativeFeedback: true,
-    bindings: Object.freeze([keyboardBinding, gamepadBinding]),
-  });
+  return defineStationAction({ id, contexts, labelKey: `${family}.${label}`,
+    bindings: [keyboardBinding, gamepadBinding] });
 }
 
 export const POWER_DECREASE_ACTION = action(
@@ -178,11 +161,6 @@ export function repairActionView(state) {
       || Array.isArray(value.damaged_systems)
       || value.external_dispatch != null
   ));
-}
-
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return { ...payload, correlation, semantic_action: actionId, __input_ms: inputMs };
 }
 
 function ownerSystemId(state, view, family) {
@@ -311,7 +289,7 @@ function chooseRepairRecall(view, detail) {
 }
 
 function chooseRepairPriority(view, detail) {
-  if (!view || view.repair_auto) return null;
+  if (!view || (view.repair_auto && !view.repair_summary)) return null;
   const rows = Array.isArray(view.damaged_systems) ? view.damaged_systems : [];
   const requested = detail && typeof detail.system_id === 'string' ? detail.system_id : null;
   const candidates = requested
@@ -331,12 +309,7 @@ export function registerEngineeringActions(registry, options = {}) {
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
-  const send = (actionId, correlation, inputMs, name, payload = {}) => {
-    const correlated = correlatedPayload(actionId, correlation, inputMs, payload);
-    if (!correlated || !sendAction) return false;
-    sendAction(name, correlated);
-    return true;
-  };
+  const send = createCorrelatedActionSender(sendAction);
 
   const power = (direction) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const state = getState();

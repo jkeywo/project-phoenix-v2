@@ -1,3 +1,4 @@
+import { runWorkshopMutation } from './workshop-edit-session.js';
 import { modelDocuments, entityDocuments, modelFieldGroup, patchModelFields } from '../editor/workshop-models.js';
 import { applyModelStructureOperation, inspectModelStructure } from '../editor/workshop-model-structure.js';
 import { t } from './strings.js';
@@ -77,23 +78,24 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
   async function commitStructure(operation) {
     if (busy()) return;
     const candidate = draft(), selected = variant.value;
-    setBusy(true);
-    try {
-      const result = await applyModelStructureOperation({ draft: candidate, provider, runtime,
+    return runWorkshopMutation({ setBusy, current: () => !disposed, successCurrent: () => true,
+      invoke: () => applyModelStructureOperation({ draft: candidate, provider, runtime,
         dependencies: dependencies || {}, operation,
-        current: () => !disposed && draft() === candidate && variant.value === selected });
-      snapshot = null; form.replaceChildren(); rows = []; changed(result.selected || operation.path);
-      refreshVariants();
-      if (result.selected) variant.value = result.selected;
-      else if (variant.options.length) variant.selectedIndex = 0;
-      show('workshop.changed'); renderStructure();
-    } catch (error) {
-      if (!disposed) {
+        current: () => !disposed && draft() === candidate && variant.value === selected }),
+      success: result => {
+        snapshot = null; form.replaceChildren(); rows = []; changed(result.selected || operation.path);
+        refreshVariants();
+        if (result.selected) variant.value = result.selected;
+        else if (variant.options.length) variant.selectedIndex = 0;
+        show('workshop.changed'); renderStructure();
+      },
+      error: error => {
         const finding = error.report?.findings?.[0];
         status.textContent = finding ? `${finding.file}:${finding.line} ${finding.message}` : t('workshop.inspector_refused');
         status.setAttribute('role', 'alert'); status.focus();
-      }
-    } finally { if (!disposed) { setBusy(false); refresh(); } }
+      },
+      release: refresh,
+    });
   }
   function provenance(row) {
     const value = node('small', null, { class: 'workshop-model-owner' });

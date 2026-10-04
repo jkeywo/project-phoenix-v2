@@ -138,7 +138,10 @@ export function readPath(obj, path) {
 
 /** Evaluate a `state` trigger's comparison against the console payload. */
 function stateConditionHolds(trigger, payload) {
-  const actual = readPath(payload, trigger.path);
+  const value = readPath(payload, trigger.path);
+  // Console views now remain objects until publication. Preserve the numeric
+  // normalization the previous intermediate JSON performed before comparisons.
+  const actual = typeof value === 'number' && !Number.isFinite(value) ? null : value;
   const op = trigger.op || 'truthy';
   switch (op) {
     case 'truthy': return !!actual;

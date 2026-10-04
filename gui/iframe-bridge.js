@@ -9,13 +9,7 @@
  *   Calls `window.__setConsoleOverlay(overlayId|null)` on the iframe's
  *   contentWindow, swallowing the same errors (issue #1373).
  *
- * wireLoad(iframeEl, refreshFn)
- *   Attaches a 'load' listener so the iframe console receives current state
- *   after a page reload or first load.
- *
- * All three are exposed as `window.iframeBridgePush` /
- * `window.iframeBridgeSetOverlay` / `window.iframeBridgeWireLoad` for
- * non-module inline scripts (client.html).
+ * The parent Console lifetime in console-mount.js owns load listeners.
  */
 
 /**
@@ -56,21 +50,8 @@ export function setOverlay(iframeEl, overlayId) {
   } catch (_) {}
 }
 
-/**
- * Wire a 'load' listener on an iframe so it re-receives the current state
- * snapshot whenever it (re)loads.
- *
- * @param {HTMLIFrameElement|null} iframeEl
- * @param {function():void} refreshFn  Called with no args on every iframe load
- */
-export function wireLoad(iframeEl, refreshFn) {
-  if (!iframeEl) return;
-  iframeEl.addEventListener('load', refreshFn);
-}
-
 // Expose for non-module inline scripts (client.html).
 if (typeof window !== 'undefined') {
   window.iframeBridgePush       = push;
   window.iframeBridgeSetOverlay = setOverlay;
-  window.iframeBridgeWireLoad   = wireLoad;
 }

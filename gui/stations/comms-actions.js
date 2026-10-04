@@ -7,6 +7,8 @@
  * remain authoritative in the existing Rust consumers.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard, gamepad } from './action-support.js';
+
 import { ACTION_FEEDBACK_STATE } from '../action-feedback.js';
 import { isLatestLiveCriticalMessage } from '../comms-state.js';
 import { familyView } from '../console-payload.js';
@@ -19,29 +21,9 @@ export const COMMS_RESPOND_ACTION_ID = 'comms.respond';
 export const COMMS_CLEAR_ACTION_ID = 'comms.clear';
 export const COMMS_SHOW_ON_SCREEN_ACTION_ID = 'comms.show-on-screen';
 
-function keyboard(code, modifiers = {}) {
-  return Object.freeze({
-    type: 'keyboard', code,
-    ctrlKey: !!modifiers.ctrlKey,
-    shiftKey: !!modifiers.shiftKey,
-    altKey: !!modifiers.altKey,
-    metaKey: !!modifiers.metaKey,
-  });
-}
-
-function gamepad(input, control) {
-  return Object.freeze({ type: 'gamepad', input, control });
-}
-
 function action(id, label, keyboardBinding, gamepadBinding, feedback = 'authoritative') {
-  return Object.freeze({
-    id,
-    contexts: Object.freeze([COMMS_ACTION_CONTEXT]),
-    labelId: `semantic_action.comms.${label}.label`,
-    accessibilityLabelId: `semantic_action.comms.${label}.accessibility`,
-    ...(feedback === 'local' ? { feedback: 'local' } : { authoritativeFeedback: true }),
-    bindings: Object.freeze([keyboardBinding, gamepadBinding]),
-  });
+  return defineStationAction({ id, contexts: [COMMS_ACTION_CONTEXT], labelKey: `comms.${label}`,
+    bindings: [keyboardBinding, gamepadBinding], feedback });
 }
 
 export const COMMS_HAIL_ACTION = action(
@@ -94,16 +76,6 @@ export function currentCommsMessage(view) {
     || null;
 }
 
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return {
-    ...payload,
-    correlation,
-    semantic_action: actionId,
-    __input_ms: inputMs,
-  };
-}
-
 function contactId(contact) {
   // `uuid` is the wire identity. `id` remains a compatibility fallback for
   // older fixtures/payloads; it must never win over an authoritative UUID.
@@ -117,6 +89,7 @@ export function registerCommsActions(registry, options = {}) {
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
+  const send = createCorrelatedActionSender(sendAction);
   const selectMessage = typeof options.selectMessage === 'function'
     ? options.selectMessage : null;
   const selectThread = typeof options.selectThread === 'function'
@@ -140,12 +113,9 @@ export function registerCommsActions(registry, options = {}) {
         ? contactId(view.contacts.find((contact) => contact && contact.in_range !== false))
         : '');
     if (!targetUuid) return false;
-    const payload = correlatedPayload(actionId, correlation, inputMs, {
+    return send(actionId, correlation, inputMs, 'hail', {
       target_uuid: targetUuid,
     });
-    if (!payload) return false;
-    sendAction('hail', payload);
-    return true;
   });
 
   // One selection identity for both grains (issue #1380). The inbox lists
@@ -208,20 +178,14 @@ export function registerCommsActions(registry, options = {}) {
       if (response && typeof response === 'object' && response.important === true
           && !(detail && detail.confirmed === true)) return false;
     }
-    const payload = correlatedPayload(actionId, correlation, inputMs, {
+    return send(actionId, correlation, inputMs, 'respond_to_message', {
       message_id: messageId,
       response_index: responseIndex,
     });
-    if (!payload) return false;
-    sendAction('respond_to_message', payload);
-    return true;
   });
 
   registry.register(COMMS_CLEAR_ACTION, ({ actionId, correlation, inputMs } = {}) => {
-    const payload = correlatedPayload(actionId, correlation, inputMs, {});
-    if (!payload || !sendAction) return false;
-    sendAction('clear_comms', payload);
-    return true;
+    return send(actionId, correlation, inputMs, 'clear_comms', {});
   });
 
   registry.register(COMMS_SHOW_ON_SCREEN_ACTION, ({
@@ -232,10 +196,7 @@ export function registerCommsActions(registry, options = {}) {
     const messageId = detail && typeof detail.message_id === 'string'
       ? detail.message_id : activeMessage(view)?.id;
     if (!messageId) return false;
-    const payload = correlatedPayload(actionId, correlation, inputMs, { message_id: messageId });
-    if (!payload) return false;
-    sendAction('show_on_screen', payload);
-    return true;
+    return send(actionId, correlation, inputMs, 'show_on_screen', { message_id: messageId });
   });
   return registry;
 }

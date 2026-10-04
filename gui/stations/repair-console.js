@@ -62,6 +62,7 @@ export function makeRepairRender(variant) {
       teamsEl.state = {
         teams: s.teams || [],
         auto: !!s.repair_auto,
+        summary: !!s.repair_summary,
         targets: s.dispatch_targets || [],
         damaged: s.damaged_systems || [],
         // The field destination an open idle card offers (issue #1384), and

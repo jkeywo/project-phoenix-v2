@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 /**
  * The GM faction-relation control (issue #1442).
  *
@@ -19,7 +20,7 @@
  * reducer decides, and the answer arrives as an ordinary row of the ONE saved
  * journal — which is also what makes the change undoable.
  */
-import { createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
+import { ActionFeedbackLifecycle, createActionCorrelation, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS } from './action-feedback.js';
 import { wireText } from './strings.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
 
@@ -80,8 +81,13 @@ export function createGmFactionPanel({
   const empty = el('empty');
 
   let factions = [];
-  let pending = null;
-  let timer = null;
+  const actionFeedback = new ActionFeedbackLifecycle({ correlation });
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: 1,
+    timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS, schedule, cancelSchedule,
+    onLocalTerminal: (_meta, outcome) => { feedbackState(outcome === 'timed-out' ? 'timed_out' : outcome, { reason: outcome === 'refused' ? t('server.gm.faction.reason_local') : '' }); render(); },
+  });
+  const pending = () => feed.values().next().value?.request ?? null;
 
   if (feedback) {
     feedback.setAttribute('role', 'status');
@@ -97,7 +103,7 @@ export function createGmFactionPanel({
   const enemy = () => enemySelect?.value || '';
   const row = (name) => factions.find((entry) => entry.name === name);
   const hostile = () => !!row(source())?.enemies.includes(enemy());
-  const valid = () => !!getOperator() && !pending && !!row(source()) && !!row(enemy())
+  const valid = () => !!getOperator() && !pending() && !!row(source()) && !!row(enemy())
     && source() !== enemy();
 
   function feedbackState(value, detail) {
@@ -144,14 +150,12 @@ export function createGmFactionPanel({
       applyButton.disabled = !valid();
     }
     for (const select of [sourceSelect, enemySelect]) {
-      if (select) select.disabled = !!pending || factions.length === 0;
+      if (select) select.disabled = !!pending() || factions.length === 0;
     }
   }
 
   function clearPending() {
-    if (timer !== null) cancelSchedule(timer);
-    timer = null;
-    pending = null;
+    feed.reset();
   }
 
   function apply() {
@@ -181,26 +185,20 @@ export function createGmFactionPanel({
       accept() {
         if (consumed) return false;
         consumed = true;
-        if (pending || getOperator()?.id !== captured.operator_id) return false;
+        if (pending() || getOperator()?.id !== captured.operator_id) return false;
         // The relation may have moved while the dialog was open. Submit the
         // captured intent anyway so the canonical journal records the real
         // answer rather than this page silently rewriting the request.
-        const request = { ...captured, correlation: correlation() };
+        const request = { ...captured, correlation: actionFeedback.press('gm.faction').correlation };
+        const meta = { request, operatorId: request.operator_id, correlation: request.correlation };
+        feed.track(meta);
+        actionFeedback.pending(request.correlation);
         let accepted = false;
-        try { accepted = submit(request) !== false; } catch (_) { accepted = false; }
-        if (!accepted) {
-          feedbackState('refused', { reason: t('server.gm.faction.reason_local') });
-          return false;
-        }
-        pending = request;
-        feedbackState('pending');
+        try { accepted = submit(request) !== false; } catch (_) { /* local refusal */ }
+        feed.submitted(meta, accepted);
+        if (!accepted) return false;
+        if (feed.get(request.correlation) === meta) feedbackState('pending');
         render();
-        timer = schedule(() => {
-          timer = null;
-          pending = null;
-          feedbackState('timed_out');
-          render();
-        }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
         return true;
       },
     }) !== false;
@@ -219,12 +217,13 @@ export function createGmFactionPanel({
       try { value = JSON.parse(value); } catch (_) { value = null; }
     }
     const entries = value?.journal?.entries;
-    const terminal = pending && Array.isArray(entries) && entries.find((entry) => (
-      entry && entry.operator_id === pending.operator_id
-        && entry.correlation === pending.correlation
+    const request = pending();
+    const terminal = request && Array.isArray(entries) && entries.find((entry) => (
+      entry && entry.operator_id === request.operator_id
+        && entry.correlation === request.correlation
     ));
     if (terminal) {
-      clearPending();
+      feed.settle(terminal);
       feedbackState(terminal.outcome === 'no-op' ? 'no_op' : terminal.outcome, {
         reason: terminal.reason
           ? t(GM_ACTION_REFUSAL_REASON_LABELS[terminal.reason]
@@ -261,7 +260,7 @@ export function createGmFactionPanel({
       faction: source(),
       enemy: enemy(),
       hostile: hostile(),
-      pending: pending ? { ...pending } : null,
+      pending: pending() ? { ...pending() } : null,
     }),
     destroy: () => {
       clearPending();

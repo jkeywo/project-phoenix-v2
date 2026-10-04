@@ -7,6 +7,8 @@
  * Alert control always did.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard, button } from './action-support.js';
+
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -16,65 +18,19 @@ export const CAPTAIN_VIEW_ACTION_ID = 'captain.view';
 export const CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID = 'captain.objective-priority';
 
 /** Stable metadata plus the two-slot default binding contract. */
-export const CAPTAIN_RED_ALERT_ACTION = Object.freeze({
-  id: CAPTAIN_RED_ALERT_ACTION_ID,
-  contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
-  labelId: 'semantic_action.captain.red_alert.label',
-  accessibilityLabelId: 'semantic_action.captain.red_alert.accessibility',
-  authoritativeFeedback: true,
-  bindings: Object.freeze([
-    Object.freeze({
-      type: 'keyboard',
-      code: 'KeyR',
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    }),
-    Object.freeze({
-      type: 'gamepad',
-      input: 'button',
-      control: 'face-bottom',
-    }),
-  ]),
+export const CAPTAIN_RED_ALERT_ACTION = defineStationAction({
+  id: CAPTAIN_RED_ALERT_ACTION_ID, contexts: [CAPTAIN_ACTION_CONTEXT], labelKey: 'captain.red_alert',
+  bindings: [keyboard('KeyR'), button('face-bottom')],
 });
 
-export const CAPTAIN_VIEW_ACTION = Object.freeze({
-  id: CAPTAIN_VIEW_ACTION_ID,
-  contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
-  labelId: 'semantic_action.captain.view.label',
-  accessibilityLabelId: 'semantic_action.captain.view.accessibility',
-  authoritativeFeedback: true,
-  bindings: Object.freeze([
-    Object.freeze({
-      type: 'keyboard',
-      code: 'KeyV',
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    }),
-    null,
-  ]),
+export const CAPTAIN_VIEW_ACTION = defineStationAction({
+  id: CAPTAIN_VIEW_ACTION_ID, contexts: [CAPTAIN_ACTION_CONTEXT], labelKey: 'captain.view',
+  bindings: [keyboard('KeyV'), null],
 });
 
-export const CAPTAIN_OBJECTIVE_PRIORITY_ACTION = Object.freeze({
-  id: CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID,
-  contexts: Object.freeze([CAPTAIN_ACTION_CONTEXT]),
-  labelId: 'semantic_action.captain.objective_priority.label',
-  accessibilityLabelId: 'semantic_action.captain.objective_priority.accessibility',
-  authoritativeFeedback: true,
-  bindings: Object.freeze([
-    Object.freeze({
-      type: 'keyboard',
-      code: 'KeyO',
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    }),
-    null,
-  ]),
+export const CAPTAIN_OBJECTIVE_PRIORITY_ACTION = defineStationAction({
+  id: CAPTAIN_OBJECTIVE_PRIORITY_ACTION_ID, contexts: [CAPTAIN_ACTION_CONTEXT], labelKey: 'captain.objective_priority',
+  bindings: [keyboard('KeyO'), null],
 });
 
 // Red Alert is the Captain's only firing-posture lever since issue #1398. The
@@ -92,16 +48,6 @@ export function captainActionView(state) {
   if (!state || typeof state !== 'object') return null;
   const projected = familyView(state, CAPTAIN_ACTION_CONTEXT);
   return Object.keys(projected).length > 0 ? projected : state;
-}
-
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return {
-    ...payload,
-    correlation,
-    semantic_action: actionId,
-    __input_ms: inputMs,
-  };
 }
 
 function selectedOrNext(values, current, selected) {
@@ -123,6 +69,7 @@ export function registerCaptainActions(registry, options = {}) {
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
+  const send = createCorrelatedActionSender(sendAction);
   const getAvailableCameraViews = typeof options.getAvailableCameraViews === 'function'
     ? options.getAvailableCameraViews
     : null;
@@ -132,15 +79,7 @@ export function registerCaptainActions(registry, options = {}) {
     // `red_alert_auto` is presentation of authoritative Control Source, not a
     // new authority decision. The host remains responsible for admission.
     if (!view || view.red_alert_auto || !sendAction) return false;
-    const payload = correlatedPayload(
-      actionId,
-      correlation,
-      inputMs,
-      { active: !Boolean(view.red_alert) },
-    );
-    if (!payload) return false;
-    sendAction('set_red_alert', payload);
-    return true;
+    return send(actionId, correlation, inputMs, 'set_red_alert', { active: !Boolean(view.red_alert) });
   });
   registry.register(CAPTAIN_VIEW_ACTION, ({
     actionId, correlation, inputMs, detail,
@@ -153,10 +92,7 @@ export function registerCaptainActions(registry, options = {}) {
       detail && detail.direction,
     );
     if (!direction) return false;
-    const payload = correlatedPayload(actionId, correlation, inputMs, { direction });
-    if (!payload) return false;
-    sendAction('set_view', payload);
-    return true;
+    return send(actionId, correlation, inputMs, 'set_view', { direction });
   });
   registry.register(CAPTAIN_OBJECTIVE_PRIORITY_ACTION, ({
     actionId, correlation, inputMs, detail,
@@ -172,10 +108,7 @@ export function registerCaptainActions(registry, options = {}) {
       detail && detail.id,
     );
     if (!id) return false;
-    const payload = correlatedPayload(actionId, correlation, inputMs, { id });
-    if (!payload) return false;
-    sendAction('set_objective_priority', payload);
-    return true;
+    return send(actionId, correlation, inputMs, 'set_objective_priority', { id });
   });
   return registry;
 }

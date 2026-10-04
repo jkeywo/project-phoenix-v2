@@ -1,4 +1,5 @@
 import { renderInspectorReadOnly, validInspectorDescriptor } from './inspector-field.js';
+import { createInspectorSession, bindInspectorNavigation } from './inspector-session.js';
 
 export const WORLD_INSPECTOR_HISTORY_LIMIT = 32;
 const text = value => typeof value === 'string' ? value : '';
@@ -42,25 +43,19 @@ export function createGmWorldInspectorPanel({ doc = document, t = id => id, focu
   const back = doc.getElementById('gm-world-fields-back');
   const forward = doc.getElementById('gm-world-fields-forward');
   let domain = null; let selected = null; let gone = false;
-  const retained = new Map();
-  let history = []; let cursor = -1;
+  const session = createInspectorSession(WORLD_INSPECTOR_HISTORY_LIMIT);
   const choose = (id, record = true) => {
     if (!id) return;
-    if (record && history[cursor] !== id) {
-      history = history.slice(0, cursor + 1); history.push(id);
-      if (history.length > WORLD_INSPECTOR_HISTORY_LIMIT) {
-        const dropped = history.shift();
-        if (dropped !== selected && !history.includes(dropped)) retained.delete(dropped);
-      }
-      cursor = history.length - 1;
-    }
-    selected = id; render();
+    session.forget(session.select(id, { record }));
+    render();
   };
   const render = () => {
+    selected = session.selected;
+    refreshNavigation();
     const live = domain?.readings.get(selected);
-    if (live) { retained.set(selected, live); gone = false; }
-    else gone = !!selected && retained.has(selected);
-    const reading = live || retained.get(selected);
+    if (live) { session.remember(selected, live); gone = false; }
+    else gone = !!selected && session.reading(selected) != null;
+    const reading = live || session.reading(selected);
     if (select && domain) {
       const options = [...domain.readings].map(([id, row]) => Object.assign(doc.createElement('option'), {
         value: id, textContent: row.label, selected: id === selected,
@@ -99,15 +94,13 @@ export function createGmWorldInspectorPanel({ doc = document, t = id => id, focu
         list.append(row);
       }
     }
-    back.disabled = cursor <= 0; forward.disabled = cursor < 0 || cursor >= history.length - 1;
   };
   select?.addEventListener('change', () => choose(select.value));
-  back?.addEventListener('click', () => { if (cursor > 0) { cursor -= 1; selected = history[cursor]; render(); status.focus(); } });
-  forward?.addEventListener('click', () => { if (cursor + 1 < history.length) { cursor += 1; selected = history[cursor]; render(); status.focus(); } });
+  const refreshNavigation = bindInspectorNavigation({ session, back, forward, status, render });
   return {
     update(raw) { const next = parseGmWorldInspectorPayload(raw); if (!next) return false; domain = next; if (!selected) choose(next.readings.keys().next().value); else render(); return true; },
     select: choose,
-    reset() { domain = null; selected = null; retained.clear(); gone = false; history = []; cursor = -1; render(); },
-    state: () => ({ selected, gone, history: [...history], cursor }),
+    reset() { domain = null; selected = null; session.reset(); gone = false; render(); },
+    state: () => ({ ...session.state(), gone }),
   };
 }

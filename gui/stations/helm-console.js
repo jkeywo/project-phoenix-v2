@@ -148,34 +148,7 @@ export function makeHelmRender(variant) {
  * @param {Document} doc
  * @param {function} tr     the string resolver (the shared `t`)
  */
-export function renderDockPanel(s, doc, tr) {
-  const dockPanel = doc.getElementById('dock-panel');
-  const d = s.dock || null;
-  const dockBtn = doc.getElementById('dock-btn');
-  if (dockBtn) dockBtn.dataset.systemId = d?.system_id || '';
-  if (!dockPanel) return;
-  if (!d || (!d.available && !d.engaged && !d.docked)) {
-    dockPanel.hidden = true;
-    return;
-  }
-  dockPanel.hidden = false;
-  const docked = !!d.docked;
-  if (dockBtn) {
-    dockBtn.classList.toggle('docked', docked);
-    dockBtn.textContent = tr(docked ? 'console.dock.undock' : 'console.dock.dock');
-  }
-  const dockStatus = doc.getElementById('dock-status');
-  if (dockStatus) {
-    dockStatus.textContent = docked
-      ? tr('console.dock.docked') + (d.docked_to_name ? ' · ' + tr(d.docked_to_name) : '')
-      : tr('console.dock.available') + (d.available_target_name ? ' · ' + tr(d.available_target_name) : '');
-  }
-  const dockRefusal = doc.getElementById('dock-refusal');
-  if (dockRefusal) {
-    if (d.refusal) { dockRefusal.hidden = false; dockRefusal.textContent = tr(d.refusal); }
-    else { dockRefusal.hidden = true; dockRefusal.textContent = ''; }
-  }
-}
+export { renderDockPanel } from './contextual-controls.js';
 
 /**
  * The under-tow-load banner (issues #1157, #1390), shared by every hull that
@@ -196,18 +169,7 @@ export function renderDockPanel(s, doc, tr) {
  * @param {Document} doc
  * @param {function} tr   the string resolver (the shared `t`)
  */
-export function renderTowLoadPanel(s, doc, tr) {
-  const towPanel = doc.getElementById('tow-load-panel');
-  if (!towPanel) return;
-  const tl = s.tow_load || null;
-  if (!tl || !tl.active) {
-    towPanel.hidden = true;
-    return;
-  }
-  towPanel.hidden = false;
-  const towTarget = doc.getElementById('tow-load-target');
-  if (towTarget) towTarget.textContent = tl.target_name ? '· ' + tr(tl.target_name) : '';
-}
+export { renderTowLoadPanel } from './contextual-controls.js';
 
 /**
  * The shared target-contact footer. Battleship and cruiser each carry one

@@ -1,3 +1,4 @@
+import { runWorkshopMutation } from './workshop-edit-session.js';
 import { applySlotOperation, inspectSlots, slotWorlds, slotHullCatalogue } from '../editor/workshop-slot-authoring.js';
 import { has, t } from './strings.js';
 
@@ -99,17 +100,17 @@ export function mountWorkshopSlotAuthoring({ root, provider, runtime, draft: get
     const draft = getDraft(), path = world.value, token = ++generation;
     const target = slots.value, operation = { type, target, row: rowValue() };
     if (type === 'remove' && !target) return;
-    setBusy(true); show('workshop.slot.checking');
-    try {
-      await applySlotOperation({ draft, provider, runtime, path, operation,
-        current: () => !disposed && generation === token && getDraft() === draft });
-      if (!disposed && generation === token) { changed(path); refresh(); slots.value = type === 'remove' ? '' : operation.row.id;
-        paintRow(); show('workshop.slot.applied'); }
-    } catch (error) {
-      if (!disposed && generation === token) show('workshop.slot.refused', true,
+    return runWorkshopMutation({ setBusy, current: () => !disposed && generation === token,
+      start: () => show('workshop.slot.checking'),
+      invoke: () => applySlotOperation({ draft, provider, runtime, path, operation,
+        current: () => !disposed && generation === token && getDraft() === draft }),
+      success: () => { changed(path); refresh(); slots.value = type === 'remove' ? '' : operation.row.id;
+        paintRow(); show('workshop.slot.applied'); },
+      error: error => show('workshop.slot.refused', true,
         error?.report?.findings?.map(row => `${row.file}${row.line ? `:${row.line}` : ''}: ${row.message}`).join(' ')
-        || (has(String(error?.message)) ? t(String(error.message)) : String(error?.message || error)));
-    } finally { if (!disposed && generation === token) { setBusy(false); controls(); } }
+        || (has(String(error?.message)) ? t(String(error.message)) : String(error?.message || error))),
+      release: controls,
+    });
   }
   world.addEventListener('change', paintSlots);
   slots.addEventListener('change', paintRow);

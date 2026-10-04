@@ -1,3 +1,5 @@
+import { liveFormPositions, formNeighbours, survivingFormPosition, bindFormMoves } from './ordered-form-controls.js';
+import { createWorkshopEditSession } from './workshop-edit-session.js';
 import { definitionsSnapshot, snapshotIsCurrent, draftFirst } from '../editor/workshop-definitions.js';
 import { presetsForm, planPresetEdits, movePreset, moveWidget, newWidget, presetMovable, widgetMovable,
   widgetOwns, widgetTypeChoices, widgetActionChoices, contactChoices, worldChoices, presetFindings, findingsOn,
@@ -186,7 +188,7 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
     const current = catalog();
     if (!current || !formState) { renderPresetSelector(); return; }
     const form = formState;
-    const live = form.presets.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
+    const live = liveFormPositions(form.presets);
     form.presets.forEach((entry, position) => {
       if (entry.removed) return;
       const set = node('fieldset', null, { class: 'workshop-presets-preset', 'data-preset': String(entry.index) });
@@ -227,39 +229,19 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
         }
       }
       const actions = node('div', null, { class: 'workshop-presets-row' });
-      const rank = live.indexOf(position);
-      // An end preset has nowhere to go in that direction, and a swap needs BOTH
-      // presets to be carriable: one holding widgets or an unknown key is not, so
-      // its neighbour's control is off too rather than being a control whose press
-      // does nothing. Each stays in place, disabled, so the row keeps the same
-      // shape for a keyboard user, and the row says WHY.
-      const carriable = other => other != null && presetMovable(entry) && presetMovable(form.presets[other]);
-      if (rank <= 0 || !carriable(live[rank - 1])) up.dataset.readonly = 'true';
-      if (rank < 0 || rank === live.length - 1 || !carriable(live[rank + 1])) down.dataset.readonly = 'true';
-      // A row whose OWN content cannot be carried says so; a row that can be
-      // carried but whose neighbour cannot says THAT, on its own row. The reason
-      // living only on the neighbour's row is a disabled control with no stated
-      // cause — state without a word, which is the colour-only problem again.
-      const blocked = other => other != null && !presetMovable(form.presets[other]);
-      if (!presetMovable(entry)) set.append(node('p', 'workshop.presets.immovable'));
-      else if (blocked(live[rank - 1]) || blocked(live[rank + 1])) {
-        set.append(node('p', 'workshop.presets.immovable_neighbour'));
-      }
-      const move = direction => () => {
-        const target = movePreset(form, position, direction);
-        if (target == null) return;
-        renderPresets(); refresh();
-        const kind = direction < 0 ? 'up' : 'down', other = direction < 0 ? 'down' : 'up';
-        focusFirst(`preset-${target}-${kind}`, `preset-${target}-${other}`, `preset-${target}-id`);
-      };
-      up.addEventListener('click', move(-1));
-      down.addEventListener('click', move(1));
+      const neighbours = formNeighbours(form.presets, position, presetMovable);
+      if (!neighbours.up) up.dataset.readonly = 'true';
+      if (!neighbours.down) down.dataset.readonly = 'true';
+      if (neighbours.selfBlocked) set.append(node('p', 'workshop.presets.immovable'));
+      else if (neighbours.neighbourBlocked) set.append(node('p', 'workshop.presets.immovable_neighbour'));
+      bindFormMoves(up, down, direction => movePreset(form, position, direction),
+        () => { renderPresets(); refresh(); },
+        (target, kind, other) => focusFirst(`preset-${target}-${kind}`, `preset-${target}-${other}`, `preset-${target}-id`));
       remove.addEventListener('click', () => {
         entry.removed = true;
         renderPresets(); refresh();
         // The next preset left, else the one before, else the add control.
-        const left = form.presets.map((candidate, at) => (candidate.removed ? null : at)).filter(at => at != null);
-        const nearest = left.find(at => at >= position) ?? left.filter(at => at < position).pop();
+        const nearest = survivingFormPosition(form.presets, position);
         focusFirst(nearest == null ? null : `preset-${nearest}-id`, 'add-preset-id');
       });
       actions.append(up, down, remove);
@@ -479,24 +461,14 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
         group.append(labelled('workshop.presets.widget_text', text), text);
       }
       if (!kinds.includes(widget.kind)) group.append(node('p', 'workshop.presets.widget_unknown_type'));
-      // The same rule one level down: a swap needs both widgets to be carriable.
-      const carriable = other => Boolean(other) && widgetMovable(widget) && widgetMovable(other);
-      if (index === 0 || !carriable(preset.widgets[index - 1])) up.dataset.readonly = 'true';
-      if (index === preset.widgets.length - 1 || !carriable(preset.widgets[index + 1])) down.dataset.readonly = 'true';
-      const blocked = other => Boolean(other) && !widgetMovable(other);
-      if (!widgetMovable(widget)) group.append(node('p', 'workshop.presets.immovable_widget'));
-      else if (blocked(preset.widgets[index - 1]) || blocked(preset.widgets[index + 1])) {
-        group.append(node('p', 'workshop.presets.immovable_neighbour_widget'));
-      }
-      const move = direction => () => {
-        const target = moveWidget(preset.widgets, index, direction);
-        if (target == null) return;
-        renderPresetForm(); refresh();
-        const kind = direction < 0 ? 'up' : 'down', other = direction < 0 ? 'down' : 'up';
-        focusFirst(`widget-${target}-${kind}`, `widget-${target}-${other}`, `widget-${target}-id`);
-      };
-      up.addEventListener('click', move(-1));
-      down.addEventListener('click', move(1));
+      const neighbours = formNeighbours(preset.widgets, index, widgetMovable, true);
+      if (!neighbours.up) up.dataset.readonly = 'true';
+      if (!neighbours.down) down.dataset.readonly = 'true';
+      if (neighbours.selfBlocked) group.append(node('p', 'workshop.presets.immovable_widget'));
+      else if (neighbours.neighbourBlocked) group.append(node('p', 'workshop.presets.immovable_neighbour_widget'));
+      bindFormMoves(up, down, direction => moveWidget(preset.widgets, index, direction),
+        () => { renderPresetForm(); refresh(); },
+        (target, kind, other) => focusFirst(`widget-${target}-${kind}`, `widget-${target}-${other}`, `widget-${target}-id`));
       remove.addEventListener('click', () => {
         preset.widgets.splice(index, 1);
         renderPresetForm(); refresh();
@@ -580,18 +552,12 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
    * answer has been rendered. Focus moves AFTER that: every control is disabled
    * while the hold is up, so a landing spot chosen inside it could only ever be
    * one the rebuild happened to recreate. */
-  async function guarded(action) {
-    setBusy(true);
-    let focus = null;
-    try { focus = await action(); }
-    catch (error) { if (!disposed) show(knownId(error), true, { detail: error?.detail ?? '' }); }
-    finally {
-      if (!disposed) {
-        setBusy(false); refresh();
-        if (focus?.length) focusFirst(...focus);
-      }
-    }
-  }
+  const { guarded, land } = createWorkshopEditSession({
+    draft, disposed: () => disposed, setBusy, changed, refresh, reload,
+    showChanged: () => show('workshop.changed'),
+    showError: error => show(knownId(error), true, { detail: error?.detail ?? '' }),
+    restoreFocus: focusFirst,
+  });
 
   /** The runtime's own refusal, mapped to the sentence for its rule and carrying
    * its words as the detail. */
@@ -602,22 +568,7 @@ export function mountWorkshopPresets({ root, runtime, draft, busy, setBusy, chan
     return value;
   }
 
-  /** What a landed answer does to the draft: ONE edit, so one undo reverts it,
-   * then a re-read so the forms show what was written. An answer for a draft that
-   * moved in the meantime is refused as stale rather than written over newer
-   * source. */
-  async function land(read, path, result, focus) {
-    if (disposed) return null;
-    if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
-    if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
-    const current = draft();
-    if (current.edit(path, result)) changed(path);
-    show('workshop.changed');
-    // A failed re-read leaves the reading honestly stale rather than reporting
-    // the landed edit as refused.
-    await reload({ announce: false }).catch(() => {});
-    return focus;
-  }
+
 
   /** ONE edit call for ONE member, then ONE draft edit. The draft is never
    * touched before the runtime answers; a refusal is shown by its category with

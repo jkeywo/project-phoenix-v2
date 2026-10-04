@@ -1,3 +1,4 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 /**
  * The saved GM action history (issue #1441).
  *
@@ -237,9 +238,10 @@ export function createGmJournalPanel({
 
   let state = { capacity: 0, total: 0, entries: [] };
   let selectedKey = null;
-  let pending = null;
-  let timer = null;
+  let generation = 0;
 
+  const requests = new GmActionFeedback({ capacity: 1, timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
+    schedule, cancelSchedule, onLocalTerminal: (meta) => { undoFeedbackState('timed_out'); paintDetail(); } });
   if (region) {
     region.setAttribute('role', 'region');
     if (heading) region.setAttribute('aria-labelledby', heading.id);
@@ -318,9 +320,9 @@ export function createGmJournalPanel({
   }
 
   function clearPending() {
-    if (timer !== null) cancelSchedule(timer);
-    timer = null;
-    pending = null;
+    generation++;
+    requests.reset();
+    
   }
 
   /**
@@ -334,7 +336,7 @@ export function createGmJournalPanel({
   function requestUndo() {
     const entry = selected();
     const operator = getOperator();
-    if (!entry || !operator || pending || !gmJournalEntryIsUndoable(entry)) return false;
+    if (!entry || !operator || requests.firstRequest || !gmJournalEntryIsUndoable(entry)) return false;
     const described = gmAffectedFieldText(entry.affected, t, displayText);
     const description = t('server.gm.journal.undo_confirm', {
       operator: operatorName(entry.operator_id),
@@ -352,6 +354,7 @@ export function createGmJournalPanel({
       original_sequence: entry.sequence,
       expected: entry.affected,
     });
+    const born = generation;
     let consumed = false;
     return confirmAction({
       ...GM_UNDO_CONFIRMATION,
@@ -365,7 +368,7 @@ export function createGmJournalPanel({
       accept() {
         if (consumed) return false;
         consumed = true;
-        if (pending || getOperator()?.id !== captured.operator_id) return false;
+        if (born !== generation || requests.firstRequest || getOperator()?.id !== captured.operator_id) return false;
         const request = { ...captured, correlation: correlation() };
         let accepted = false;
         try { accepted = submitUndo(request) !== false; } catch (_) { accepted = false; }
@@ -373,15 +376,9 @@ export function createGmJournalPanel({
           undoFeedbackState('refused');
           return false;
         }
-        pending = request;
+        requests.begin(request);
         undoFeedbackState('pending');
         paintDetail();
-        timer = schedule(() => {
-          timer = null;
-          pending = null;
-          undoFeedbackState('timed_out');
-          paintDetail();
-        }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
         return true;
       },
     }) !== false;
@@ -437,14 +434,14 @@ export function createGmJournalPanel({
       // worse than no control (PRD #1418 story 29).
       const offerable = gmJournalEntryIsUndoable(entry) && !!getOperator();
       undoButton.hidden = !offerable;
-      undoButton.disabled = !offerable || !!pending;
+      undoButton.disabled = !offerable || !!requests.firstRequest;
       undoButton.setAttribute('aria-label', t('server.gm.journal.undo_entry', {
         action: actionText(entry),
         operator: operatorName(entry.operator_id),
         order: orderText(entry),
       }));
     }
-    if (entry.inverted && undoFeedback && !pending && !undoFeedback.dataset.state) {
+    if (entry.inverted && undoFeedback && !requests.firstRequest && !undoFeedback.dataset.state) {
       undoFeedback.textContent = t('server.gm.journal.undo_already');
     }
   }
@@ -580,11 +577,11 @@ export function createGmJournalPanel({
     state = next;
     // The canonical answer arrives as an ordinary journal row, because an
     // inverse IS an ordinary journal entry. No second result feed.
-    const terminal = pending && state.entries.find((entry) => (
-      entry.operator_id === pending.operator_id && entry.correlation === pending.correlation
+    const terminal = requests.firstRequest && state.entries.find((entry) => (
+      entry.action_kind === 'action-undo' && entry.operator_id === requests.firstRequest.operator_id && entry.correlation === requests.firstRequest.correlation
     ));
     if (terminal) {
-      clearPending();
+      requests.settle(terminal);
       undoFeedbackState(terminal.outcome === 'applied' ? 'applied'
         : terminal.outcome === 'no-op' ? 'no_op' : 'refused');
     }
@@ -635,7 +632,7 @@ export function createGmJournalPanel({
       entries: state.entries.map((entry) => ({ ...entry })),
       selected: selected() ? { ...selected() } : null,
     }),
-    pending: () => (pending ? { ...pending } : null),
+    pending: () => (requests.firstRequest ? { ...requests.firstRequest } : null),
     destroy: () => {
       clearPending();
       operatorFilter?.removeEventListener('change', onFilter);

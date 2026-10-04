@@ -9,6 +9,7 @@ import { createWorkshopTestPreparation } from './workshop-test-snapshot.js';
 import { createBrowserWorkshopPreview, createWorkshopPreviewFrame } from './workshop-preview.js';
 import { createWorkshopBillboardCapture } from './workshop-billboard-capture.js';
 import { createWorkshopLodGeneration } from './workshop-lod-generation.js';
+import { createNativeWorkshopTestView } from './workshop-native-test-view.js';
 
 export function newWorkshopPack(dependencies) {
   const content = parse(dependencies.base_files['assets/scenarios.toml']).content;
@@ -58,6 +59,7 @@ export function createBrowserWorkshopProvider({ loadedPack = null, dependencies,
 }
 
 export function createNativeWorkshopProvider({ request, previewFrame = createWorkshopPreviewFrame,
+  testView = createNativeWorkshopTestView,
   fetcher = (...args) => fetch(...args) }) {
   if (typeof request !== 'function') throw new Error('Native Workshop bridge is unavailable');
   let revision = null;
@@ -73,6 +75,12 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
     return next;
   };
   let previewViewport = null, previewTitle = '';
+  let nativeTestView = null, nativeTestRun = null, testGeneration = 0;
+  const presentTest = (run, generation = testGeneration) => {
+    if (generation !== testGeneration) return;
+    nativeTestRun = run;
+    nativeTestView?.update(run);
+  };
   const textDecoder = new TextDecoder('utf-8', { fatal: true });
   const preview = createBrowserWorkshopPreview({
     async prepare(files, selection) {
@@ -263,6 +271,12 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
     billboardCapture,
     lodGeneration,
     test: {
+      mount(target, title) {
+        nativeTestView?.dispose();
+        nativeTestView = testView({ mount: target, title });
+        nativeTestView.update(nativeTestRun);
+      },
+      cancelStart() { testGeneration++; presentTest(null); },
       async catalog(files) {
         const response = await call({ op: 'test-catalog', files });
         const value = response?.catalog;
@@ -276,23 +290,32 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
         return value;
       },
       async start(files, selection) {
+        const generation = ++testGeneration;
         const { breakpoint = null, ...runtimeSelection } = selection;
         const response = await call({ op: 'test-start', files, selection: runtimeSelection,
           ...(breakpoint ? { breakpoint } : {}) });
         if (response?.status !== 'test' || !response.run) throw new Error('Invalid native Test start');
+        presentTest(response.run, generation);
         return response.run;
       },
       async control(control) {
+        const generation = testGeneration;
         const response = await call({ op: 'test-control', control });
         if (response?.status !== 'test') throw new Error('Invalid native Test control');
+        presentTest(response.run, generation);
         return response.run || { running: false };
       },
       async status() {
-        const response = await call({ op: 'test-status' });
-        if (response?.status !== 'test') throw new Error('Invalid native Test status');
-        return response.run || { running: false };
+        const generation = testGeneration;
+        try {
+          const response = await call({ op: 'test-status' });
+          if (response?.status !== 'test') throw new Error('Invalid native Test status');
+          presentTest(response.run, generation);
+          return response.run || { running: false };
+        } catch (error) { presentTest(null, generation); throw error; }
       },
       async stop() {
+        testGeneration++; presentTest(null);
         const response = await call({ op: 'test-stop' });
         if (response?.status !== 'test' || response.run) throw new Error('Invalid native Test stop');
       },

@@ -1,3 +1,5 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
+import { createGmFeedbackPresentation, isGmResultEnvelope } from './gm-feedback-presentation.js';
 /**
  * Direct damage and repair on the selected entity (issue #1310, PRD #930
  * milestone M2 Directing).
@@ -51,7 +53,6 @@ import {
   createActionCorrelation,
 } from './action-feedback.js';
 import {
-  GM_ACTION_REFUSAL_REASON_LABELS,
   LOCAL_INGRESS_REFUSAL,
 } from './gm-action-reasons.js';
 import {
@@ -72,7 +73,6 @@ export const GM_EFFECT_ACTION_PREFIX = 'gm.effect.apply:';
 /** Milli-HP per hull point — the one place the unit conversion is spelled. */
 export const MILLI_HP_PER_HP = 1000;
 
-const RESULT_OUTCOMES = new Set(['applied', 'no-op', 'refused']);
 const EFFECT_KINDS = new Set(['damage', 'heal']);
 
 const FEEDBACK_STATUS_IDS = Object.freeze({
@@ -100,12 +100,7 @@ export function milliHpFromInput(value) {
 }
 
 function parseEffectResult(value) {
-  if (!value || typeof value !== 'object'
-      || typeof value.operator_id !== 'string' || value.operator_id.length === 0
-      || typeof value.correlation !== 'string' || value.correlation.length === 0
-      || !RESULT_OUTCOMES.has(value.outcome)
-      || !Number.isSafeInteger(value.tick) || value.tick < 0
-      || (value.reason != null && typeof value.reason !== 'string')
+  if (!isGmResultEnvelope(value)
       || (value.target != null && typeof value.target !== 'string')) return null;
   // `effect_scope`, because that is what `LoggedGmAction` calls it — this feed
   // IS that struct, and its sibling is `effect`. (The activity feed's row is a
@@ -212,10 +207,6 @@ export function scopeIsDamageable(entity, scope) {
   return entityIsDamageable(entity) && !!gmEffectScopeTotals(entity, scope);
 }
 
-function entryKey(operatorId, correlation) {
-  return JSON.stringify([operatorId, correlation]);
-}
-
 /** Mount the direct damage/repair panel over injected page/transport seams. */
 export function createGmDirectEffectPanel({
   doc = globalThis.document,
@@ -271,12 +262,9 @@ export function createGmDirectEffectPanel({
   let scopeKey = 'entity';
   // What the picker's DOM currently shows, so an unchanged list is left alone.
   let renderedScopeSignature = null;
-  let authoritativeResults = [];
-  const pending = new Map();
-  const localTerminals = new Map();
   /** Presses this desk stopped waiting for, until the world answers them.
    *
-   * `localTerminals` cannot carry this: it is cleared on every `update()`, and
+   * The shared result feed cannot carry this: it is cleared on every `update()`, and
    * the projection pushes continuously. The world is slower than the local
    * timeout sometimes, and a press it TOOK is a press that finished — a draft
    * left open waiting for something that already happened is how the same
@@ -294,32 +282,24 @@ export function createGmDirectEffectPanel({
     capacity: boundedCapacity,
   });
 
-  function operator() {
-    try {
-      const value = typeof getOperator === 'function' ? getOperator() : null;
-      return value && typeof value.id === 'string' && value.id.length > 0 ? value : null;
-    } catch (_) {
-      return null;
-    }
-  }
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: boundedCapacity, timeoutMs: boundedTimeoutMs,
+    schedule, cancelSchedule,
+    onLocalTerminal(meta, outcome) {
+      if (outcome === 'timed-out') {
+        abandoned.set(meta.correlation, meta);
+        while (abandoned.size > boundedCapacity) abandoned.delete(abandoned.keys().next().value);
+      }
+      paintFeedback(outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED, meta.entity);
+      renderLog();
+      refreshAdmission();
+    },
+  });
 
-  function operatorName(id) {
-    try {
-      const value = typeof getOperatorName === 'function' ? getOperatorName(id) : id;
-      return typeof value === 'string' && value.length > 0 ? value : id;
-    } catch (_) {
-      return id;
-    }
-  }
-
-  function refusalText(reason) {
-    if (!reason) return t('server.gm.effect.reason_unspecified');
-    if (reason === LOCAL_INGRESS_REFUSAL) {
-      return t('server.gm.session.reason.ingress_rejected');
-    }
-    const labelId = GM_ACTION_REFUSAL_REASON_LABELS[reason];
-    return labelId ? t(labelId) : t('server.gm.effect.reason_unknown', { reason });
-  }
+  const { operator, operatorName, refusalText, appendRow, renderLog } = createGmFeedbackPresentation({
+    doc, log, rowClass: 'gm-effect-log-entry', feed, t, getOperator, getOperatorName,
+    reasonPrefix: 'server.gm.effect', paintResult: paintResultRow, paintLocal: paintLocalRow,
+  });
 
   function requestedMilliHp() {
     return milliHpFromInput(amountInput ? amountInput.value : null);
@@ -356,24 +336,6 @@ export function createGmDirectEffectPanel({
   function scopeText(chosen) {
     const name = scopeName(chosen);
     return gmEffectScopeLabel(t, chosen, name == null ? null : displayText(name));
-  }
-
-  function clearPendingTimer(meta) {
-    if (!meta || meta.timerScheduled !== true) return;
-    try { cancelSchedule(meta.timer); } catch (_) { /* timer already completed */ }
-    meta.timer = null;
-    meta.timerScheduled = false;
-  }
-
-  function appendRow(operatorId, correlationValue) {
-    if (!log) return null;
-    const row = doc.createElement('li');
-    row.className = 'gm-effect-log-entry';
-    row.dataset.entryKey = entryKey(operatorId, correlationValue);
-    row.dataset.operatorId = operatorId;
-    row.dataset.correlation = correlationValue;
-    log.appendChild(row);
-    return row;
   }
 
   function paintResultRow(result) {
@@ -436,27 +398,6 @@ export function createGmDirectEffectPanel({
       correlation: meta.correlation,
       reason: refusalText(reason),
     });
-  }
-
-  /** Rebuild deterministically: absolute terminal order, then local live rows. */
-  function renderLog() {
-    if (!log) return;
-    log.replaceChildren();
-    const authoritativeKeys = new Set();
-    for (const result of authoritativeResults) {
-      authoritativeKeys.add(entryKey(result.operator_id, result.correlation));
-      paintResultRow(result);
-    }
-    for (const [key, terminal] of localTerminals) {
-      if (!authoritativeKeys.has(key)) {
-        paintLocalRow(terminal, terminal.outcome, terminal.reason);
-      }
-    }
-    for (const meta of pending.values()) {
-      if (!authoritativeKeys.has(entryKey(meta.operatorId, meta.correlation))) {
-        paintLocalRow(meta, 'pending', null);
-      }
-    }
   }
 
   function paintFeedback(state, entity) {
@@ -623,41 +564,9 @@ export function createGmDirectEffectPanel({
     refreshAdmission();
   }
 
-  function rememberLocalTerminal(meta, outcome, reason) {
-    localTerminals.set(entryKey(meta.operatorId, meta.correlation), {
-      ...meta,
-      outcome,
-      reason,
-    });
-    while (localTerminals.size > boundedCapacity) {
-      localTerminals.delete(localTerminals.keys().next().value);
-    }
-  }
-
-  function finishLocalPending(correlationValue, outcome, reason) {
-    const meta = pending.get(correlationValue);
-    if (!meta) return false;
-    clearPendingTimer(meta);
-    pending.delete(correlationValue);
-    if (outcome === 'timed-out') {
-      abandoned.set(correlationValue, meta);
-      while (abandoned.size > boundedCapacity) {
-        abandoned.delete(abandoned.keys().next().value);
-      }
-    }
-    rememberLocalTerminal(meta, outcome, reason);
-    paintFeedback(
-      outcome === 'timed-out' ? ACTION_FEEDBACK_STATE.TIMED_OUT : ACTION_FEEDBACK_STATE.REFUSED,
-      meta.entity,
-    );
-    renderLog();
-    refreshAdmission();
-    return true;
-  }
-
   /** Whether this operator already has an unsettled press on the selection. */
   function hasPendingFor(entityId) {
-    for (const meta of pending.values()) {
+    for (const meta of feed.values()) {
       if (meta.entity === entityId) return true;
     }
     return false;
@@ -701,11 +610,7 @@ export function createGmDirectEffectPanel({
 
   function submitEffect(kind, current, entityId, amount, chosen) {
     if (operator()?.id !== current.id || hasPendingFor(entityId)) return false;
-    while (pending.size >= boundedCapacity) {
-      const oldest = pending.keys().next().value;
-      if (oldest === undefined) break;
-      finishLocalPending(oldest, 'timed-out', null);
-    }
+    feed.makeRoom();
     const press = actionFeedback.press(
       `${GM_EFFECT_ACTION_PREFIX}${kind}:${entityId}:${gmEffectScopeKey(chosen)}`,
     );
@@ -718,34 +623,15 @@ export function createGmDirectEffectPanel({
       operatorId: current.id,
       operatorName: typeof current.name === 'string' && current.name.length > 0
         ? current.name : operatorName(current.id),
-      timer: null,
-      timerScheduled: false,
     };
-    pending.set(press.correlation, meta);
-    let accepted = false;
-    try {
-      accepted = typeof submitDirectEffect === 'function'
+    if (!feed.submit(meta, () => typeof submitDirectEffect === 'function'
         && submitDirectEffect({
           entity: meta.entity,
           effect: kind,
           amount_milli_hp: amount,
           correlation: press.correlation,
           ...gmEffectScopeRequestFields(chosen),
-        }) !== false;
-    } catch (_) {
-      accepted = false;
-    }
-    actionFeedback.pending(press.correlation);
-    if (!accepted) {
-      actionFeedback.settle(press.correlation, ACTION_FEEDBACK_STATE.REFUSED);
-      finishLocalPending(press.correlation, 'refused', LOCAL_INGRESS_REFUSAL);
-      return true;
-    }
-    meta.timerScheduled = true;
-    meta.timer = schedule(() => {
-      actionFeedback.settle(meta.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
-      finishLocalPending(meta.correlation, 'timed-out', null);
-    }, boundedTimeoutMs);
+        }) !== false, LOCAL_INGRESS_REFUSAL)) return true;
     paintFeedback(ACTION_FEEDBACK_STATE.PENDING, meta.entity);
     renderLog();
     refreshAdmission();
@@ -825,34 +711,19 @@ export function createGmDirectEffectPanel({
     const results = parseGmEffectResults(payload);
     if (results === undefined) return false;
     let settled = false;
-    authoritativeResults = results.slice(-boundedCapacity);
-    localTerminals.clear();
-    for (const result of results) {
-      const meta = pending.get(result.correlation);
-      if (!meta || meta.operatorId !== result.operator_id) {
-        // A press this desk gave up on, answered at last. Any terminal result
-        // answers it, so the memory goes either way; only one the world TOOK
-        // finishes the draft.
+    feed.replace(results, {
+      onSettled(meta, result, state) {
+        paintFeedback(state, meta.entity);
+        if (result.outcome !== 'refused') settled = true;
+      },
+      onUnmatched(result) {
         const gaveUp = abandoned.get(result.correlation);
         if (gaveUp && gaveUp.operatorId === result.operator_id) {
           abandoned.delete(result.correlation);
           if (result.outcome !== 'refused') settled = true;
         }
-        continue;
-      }
-      clearPendingTimer(meta);
-      pending.delete(result.correlation);
-      const state = result.outcome === 'refused'
-        ? ACTION_FEEDBACK_STATE.REFUSED
-        : ACTION_FEEDBACK_STATE.APPLIED;
-      actionFeedback.settle(result.correlation, state);
-      paintFeedback(state, meta.entity);
-      // Only a press the world TOOK finishes the draft. A refusal — a stale
-      // selection, a scope that tracks nothing, a hull already at zero — leaves
-      // it open with its numbers and its reason on screen, which is the whole
-      // point of composing them in a panel of their own.
-      if (result.outcome !== 'refused') settled = true;
-    }
+      },
+    });
     if (settled) {
       composedSincePress = false;
       onSucceeded();
@@ -864,14 +735,8 @@ export function createGmDirectEffectPanel({
 
   /** Explicit run boundary, called from the authoritative Lobby transition. */
   function reset() {
-    for (const meta of pending.values()) {
-      clearPendingTimer(meta);
-      actionFeedback.cancel(meta.correlation);
-    }
-    pending.clear();
-    localTerminals.clear();
+    feed.reset();
     abandoned.clear();
-    authoritativeResults = [];
     composedSincePress = false;
     selected = null;
     scopeKey = 'entity';
@@ -886,8 +751,7 @@ export function createGmDirectEffectPanel({
     if (healButton) healButton.removeEventListener('click', onHealClick);
     if (amountInput) amountInput.removeEventListener('input', onAmountInput);
     if (scopeSelect) scopeSelect.removeEventListener('change', onScopeChange);
-    for (const meta of pending.values()) clearPendingTimer(meta);
-    pending.clear();
+    feed.reset(false);
     abandoned.clear();
   }
 
@@ -920,8 +784,8 @@ export function createGmDirectEffectPanel({
       scope: gmEffectScopeKey(scope()),
       scopeDamageable: scopeIsDamageable(selected, scope()),
       amountMilliHp: requestedMilliHp(),
-      pending: pending.size,
-      authoritative: authoritativeResults.length,
+      pending: feed.size,
+      authoritative: feed.authoritativeCount,
     }),
     destroy,
     /** The shared complex-action contract (issue #1511).
@@ -932,7 +796,7 @@ export function createGmDirectEffectPanel({
      * belongs to the map and the inspector, and asking to discard a draft
      * because a different hull is selected would prompt on every close nobody
      * typed into. */
-    draftDirty: () => pending.size > 0
+    draftDirty: () => feed.size > 0
       || (composedSincePress
         && (scopeKey !== 'entity' || (!!amountInput && amountInput.value !== defaultAmount))),
     /** `keepReusable` is the shared rule Spawn set: after a press the world

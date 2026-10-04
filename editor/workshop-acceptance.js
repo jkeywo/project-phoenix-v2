@@ -3,8 +3,8 @@ import { WorkshopDocument } from './workshop-document.js';
 /** Accept a form's exact-source changes as one chronological edit. Capture
  * before any asynchronous preparation; neither preparation nor validation may
  * borrow the changing live draft. Provider capabilities remain explicit. */
-export async function acceptWorkshopChanges({ draft, provider, runtime, dependencies,
-  prepare, inspect, current = () => true, stale = 'stale-workshop-operation', refused = 'runtime-validation-refused' }) {
+export async function prepareWorkshopChanges({ draft, provider, runtime, dependencies,
+  prepare, inspect, current = () => true, validateUnchanged = false, stale = 'stale-workshop-operation', refused = 'runtime-validation-refused' }) {
   const revision = draft.sourceRevision;
   const fresh = () => {
     if (!current() || draft.sourceRevision !== revision) throw new Error(stale);
@@ -26,7 +26,7 @@ export async function acceptWorkshopChanges({ draft, provider, runtime, dependen
   };
   const changes = await prepare(candidate, effective);
   unchanged();
-  if (!changes.length) return { changes, applied: false, report: null };
+  if (!changes.length && !validateUnchanged) return { candidate, changes, report: null, commit() { unchanged(); return { changes, applied: false, report: null }; } };
   candidate.apply(changes);
   const inspection = inspect?.(candidate, effective);
   const report = await runtime.validate(candidate.kind === 'mod' && !provider?.save ? candidate.archive() : null, candidate);
@@ -34,6 +34,13 @@ export async function acceptWorkshopChanges({ draft, provider, runtime, dependen
   if (!report?.accepted) {
     const error = new Error(refused); error.report = report; throw error;
   }
-  const applied = draft.apply(changes);
-  return { changes, applied, report, inspection };
+  return { candidate, changes, report, inspection, commit() {
+    unchanged();
+    const applied = draft.apply(changes);
+    return { changes, applied, report, inspection };
+  } };
+}
+
+export async function acceptWorkshopChanges(options) {
+  return (await prepareWorkshopChanges(options)).commit();
 }

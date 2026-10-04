@@ -9,16 +9,26 @@ import {
   HELM_LATERAL_ACTION_ID,
 } from '../stations/helm-actions.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { createContinuousHelmInput } from './continuous-helm-input.js';
 
 export class PhLateralThrustJoystick extends PhElement {
   #value = 0;
-  #pointerId = null;
-  #rafId = null;
-  #hbRaf = null;
-  #lastHbSend = 0;
-  #keys = {};
-  #inputRaf = null;
-  #lastKbSend = 0;
+  #input = createContinuousHelmInput({
+    keys: ['KeyQ', 'KeyE', 'ArrowLeft', 'ArrowRight'],
+    auto: () => !!this.state?.auto,
+    immediatePointer: true,
+    pointer: (e) => this.#setFromPointer(e.clientX),
+    keyboard: (keys) => this.#sampleKeys(keys),
+    hasValue: () => this.#value !== 0,
+    reset: () => {
+      this.#value = 0;
+    },
+    paint: () => {
+      this.#applyNubPosition();
+      this.#updateReadout();
+    },
+    send: () => this.#sendAction(),
+  });
 
   template() {
     return `
@@ -64,7 +74,7 @@ export class PhLateralThrustJoystick extends PhElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.#bindEvents();
+    this.#input.connect(this.shadowRoot.getElementById('track'));
     // Focusable, named group (issue #1176). The drag track was a bare <div>
     // the keyboard could not reach or name; the host becomes the one Tab stop.
     // `role="group"` is the honest role for a composite whose continuous axis a
@@ -79,26 +89,10 @@ export class PhLateralThrustJoystick extends PhElement {
     // same path gui/key-relay.js relays — so a focused track adds a Tab stop
     // and a name but no second arrow handler, and the key state is a set keyed
     // by code so a native + relayed press cannot double-fire.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.#onKeyDown);
-      document.addEventListener('keyup', this.#onKeyUp);
-    }
-    if (typeof window !== 'undefined') {
-      window.addEventListener('blur', this.#onBlur);
-    }
   }
 
   disconnectedCallback() {
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('keydown', this.#onKeyDown);
-      document.removeEventListener('keyup', this.#onKeyUp);
-    }
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('blur', this.#onBlur);
-    }
-    if (this.#inputRaf) { cancelAnimationFrame(this.#inputRaf); this.#inputRaf = null; }
-    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
+    this.#input.disconnect();
   }
 
   render(state) {
@@ -108,67 +102,12 @@ export class PhLateralThrustJoystick extends PhElement {
     const track = root.getElementById('track');
     badge.style.display = auto ? 'inline' : 'none';
     track.classList.toggle('auto', auto);
-    if (auto && this.#pointerId === null) {
+    if (auto && !this.#input.hasPointer()) {
       this.#value = 0;
       this.#applyNubPosition();
       this.#updateReadout();
     }
   }
-
-  #bindEvents() {
-    const track = this.shadowRoot.getElementById('track');
-    track.addEventListener('pointerdown', this.#onDown);
-    track.addEventListener('pointermove', this.#onMove);
-    track.addEventListener('pointerup', this.#onUp);
-    track.addEventListener('pointercancel', this.#onUp);
-    track.addEventListener('lostpointercapture', this.#onUp);
-  }
-
-  #onDown = (e) => {
-    const auto = this.state ? !!this.state.auto : false;
-    if (auto) return;
-    if (this.#pointerId !== null) return;
-    this.#pointerId = e.pointerId;
-    const track = this.shadowRoot.getElementById('track');
-    if (track.setPointerCapture) track.setPointerCapture(e.pointerId);
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    if (!this.#hbRaf) {
-      this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
-    }
-    this.#setFromPointer(e.clientX);
-    this.#sendAction();
-    e.preventDefault();
-  };
-
-  #heartbeatLoop = () => {
-    this.#hbRaf = null;
-    if (this.#pointerId === null) return;
-    const now = performance.now();
-    if (now - this.#lastHbSend >= 100) {
-      this.#sendAction();
-      this.#lastHbSend = now;
-    }
-    this.#hbRaf = requestAnimationFrame(this.#heartbeatLoop);
-  };
-
-  #onMove = (e) => {
-    if (e.pointerId !== this.#pointerId) return;
-    this.#setFromPointer(e.clientX);
-    this.#sendAction();
-  };
-
-  #onUp = (e) => {
-    if (e.pointerId !== this.#pointerId) return;
-    this.#pointerId = null;
-    const track = this.shadowRoot.getElementById('track');
-    try { if (track.releasePointerCapture) track.releasePointerCapture(e.pointerId); } catch (_) { }
-    if (this.#hbRaf) { cancelAnimationFrame(this.#hbRaf); this.#hbRaf = null; }
-    if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
-    this.#value = 0;
-    this.#applyNubPosition();
-    this.#updateReadout();
-    this.#sendAction();
-  };
 
   #setFromPointer(clientX) {
     const track = this.shadowRoot.getElementById('track');
@@ -179,16 +118,6 @@ export class PhLateralThrustJoystick extends PhElement {
     if (dx > 1) dx = 1;
     if (dx < -1) dx = -1;
     this.#value = dx;
-    this.#scheduleApply();
-  }
-
-  #scheduleApply() {
-    if (this.#rafId) return;
-    this.#rafId = requestAnimationFrame(() => {
-      this.#rafId = null;
-      this.#applyNubPosition();
-      this.#updateReadout();
-    });
   }
 
   #applyNubPosition() {
@@ -205,67 +134,17 @@ export class PhLateralThrustJoystick extends PhElement {
     root.getElementById('readout').textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
   }
 
-  #onKeyDown = (e) => {
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    const relevant = ['KeyQ', 'KeyE', 'ArrowLeft', 'ArrowRight'];
-    if (relevant.indexOf(e.code) === -1) return;
-    e.preventDefault();
-    this.#keys[e.code] = true;
-    this.#startInputLoop();
-  };
-
-  #onKeyUp = (e) => {
-    delete this.#keys[e.code];
-    this.#startInputLoop();
-  };
-
-  #onBlur = () => {
-    this.#keys = {};
-    this.#startInputLoop();
-  };
-
-  #startInputLoop() {
-    if (this.#inputRaf) return;
-    this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-  }
-
-  #inputLoop = () => {
-    this.#inputRaf = null;
-    const auto = this.state ? !!this.state.auto : false;
-    const keepPolling = Object.keys(this.#keys).length > 0;
-
-    if (auto || this.#pointerId !== null) {
-      if (!auto && keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-      return;
-    }
-
+  #sampleKeys(keys) {
     let kv = 0;
-    if (this.#keys['KeyQ'] || this.#keys['ArrowLeft']) kv -= 1;
-    if (this.#keys['KeyE'] || this.#keys['ArrowRight']) kv += 1;
-
+    if (keys['KeyQ'] || keys['ArrowLeft']) kv -= 1;
+    if (keys['KeyE'] || keys['ArrowRight']) kv += 1;
     let nv = kv;
     if (nv > 1) nv = 1;
     if (nv < -1) nv = -1;
-
-    const hasInput = nv !== 0;
-    if (hasInput) {
-      this.#value = nv;
-      this.#applyNubPosition();
-      this.#updateReadout();
-      const now = Date.now();
-      if (now - this.#lastKbSend >= 100) { this.#sendAction(); this.#lastKbSend = now; }
-      this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-    } else {
-      if (this.#value !== 0) {
-        this.#value = 0;
-        this.#applyNubPosition();
-        this.#updateReadout();
-        this.#sendAction();
-      }
-      if (keepPolling) this.#inputRaf = requestAnimationFrame(this.#inputLoop);
-    }
-  };
+    if (nv === 0) return false;
+    this.#value = nv;
+    return true;
+  }
 
   #sendAction() {
     const activate = typeof window !== 'undefined' && window.activateSemanticAction;

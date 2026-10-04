@@ -1,3 +1,4 @@
+import { swapFormNeighbour } from './ordered-form.js';
 /** World composition and scenario entry points over the Workshop's source
  * owner (issue #1475). No filesystem, live ECS, TOML serializer or separate
  * history: the runtime reads the draft and its read-only dependencies into a
@@ -123,13 +124,7 @@ export function newRoot(id, world) {
  * manifest's comments and blank lines stay with their positions, and an entry
  * cannot be inserted mid-array through the edit vocabulary anyway. */
 export function moveRoot(form, position, direction) {
-  const live = form.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
-  const rank = live.indexOf(position);
-  if (rank < 0) return null;
-  const target = live[rank + direction];
-  if (target == null) return null;
-  [form[position], form[target]] = [form[target], form[position]];
-  return target;
+  return swapFormNeighbour(form, position, direction);
 }
 
 /** The ships a root may offer: what its world declares in `[[available_ships]]`,

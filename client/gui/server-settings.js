@@ -1,3 +1,4 @@
+import { createGamepadPresentation } from './settings-gamepad-presentation.js';
 /**
  * gui/server-settings.js — the host page's settings cog (issue #939).
  *
@@ -774,58 +775,11 @@ export function mountServerSettings(opts = {}) {
         const gamepadSection = section('settings.controls.gamepad.heading');
         gamepadSection.appendChild(hint('settings.controls.gamepad.hint'));
 
-        const label = doc.createElement('label');
-        label.className = 'settings-binding-label';
-        label.textContent = t('settings.controls.gamepad.selector');
-        const selector = doc.createElement('select');
-        selector.setAttribute('data-control', 'semantic-gamepad-select');
-        selector.setAttribute('aria-label', t('settings.controls.gamepad.selector'));
-        const none = doc.createElement('option');
-        none.value = '';
-        none.textContent = t('settings.controls.gamepad.none');
-        selector.appendChild(none);
-        const seen = new Set();
-        for (const device of gamepadState.devices || []) {
-          const option = doc.createElement('option');
-          option.value = String(device.index);
-          option.disabled = !device.supported;
-          option.textContent = t(
-            device.supported
-              ? 'settings.controls.gamepad.device'
-              : 'settings.controls.gamepad.device_unsupported',
-            { slot: String(Number(device.index) + 1) },
-          );
-          seen.add(Number(device.index));
-          selector.appendChild(option);
-        }
-        if (gamepadState.selectedIndex != null
-            && !seen.has(Number(gamepadState.selectedIndex))) {
-          const disconnected = doc.createElement('option');
-          disconnected.value = String(gamepadState.selectedIndex);
-          disconnected.textContent = t('settings.controls.gamepad.device_disconnected', {
-            slot: String(Number(gamepadState.selectedIndex) + 1),
-          });
-          selector.appendChild(disconnected);
-        }
-        selector.value = gamepadState.selectedIndex == null
-          ? '' : String(gamepadState.selectedIndex);
-        selector.addEventListener('change', () => {
-          gamepad.select(selector.value === '' ? null : Number(selector.value));
-          buildPanel();
+        const { label, status } = createGamepadPresentation(doc, gamepadState, {
+          policy: 'host', t, statusClass: 'server-settings-hint settings-gamepad-status',
+          onSelect: index => { gamepad.select(index); buildPanel(); },
         });
-        label.appendChild(selector);
-        gamepadSection.appendChild(label);
-
-        const status = doc.createElement('div');
-        status.className = 'server-settings-hint settings-gamepad-status';
-        status.setAttribute('data-control', 'semantic-gamepad-status');
-        status.setAttribute('role', gamepadState.status === 'disconnected' ? 'alert' : 'status');
-        status.setAttribute(
-          'aria-live',
-          gamepadState.status === 'disconnected' ? 'assertive' : 'polite',
-        );
-        status.textContent = t(`settings.controls.gamepad.status_${gamepadState.status || 'none'}`);
-        gamepadSection.appendChild(status);
+        gamepadSection.append(label, status);
         target.appendChild(gamepadSection);
       },
     });

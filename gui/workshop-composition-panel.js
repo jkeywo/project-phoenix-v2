@@ -1,6 +1,9 @@
-import { definitionsSnapshot, snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
+import { liveFormPositions, formNeighbours, survivingFormPosition, bindFormMoves } from './ordered-form-controls.js';
+import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
+import { snapshotIsCurrent, findingsAt, draftFirst } from '../editor/workshop-definitions.js';
 import { rootsForm, newRoot, moveRoot, offeredShips, planScenarioEdits, worldForm, extraWorldChoices, planExtraWorldEdits,
   worldSlugPath, worldTitle, refusalMessage, refusalStringId } from '../editor/workshop-composition.js';
+import { scriptReferenceForms, applyScriptReference } from '../editor/workshop-script-references.js';
 import { t } from './strings.js';
 
 const PREFIX = 'workshop-composition';
@@ -11,9 +14,9 @@ const PREFIX = 'workshop-composition';
  * compose call per member per Apply that the runtime either lands as exact
  * source or refuses — a missing, cyclic, duplicate or disallowed reference
  * never reaches the draft. Dependency worlds are listed read-only with their
- * origin; script-driven load and unload references are listed, not edited.
+ * origin; literal script load/unload targets use exact-source validated edits.
  * The selections are local presentation, never simulation inputs. */
-export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, changed, win, attach = true }) {
+export function mountWorkshopComposition({ root, runtime, provider, draft, busy, setBusy, changed, win, attach = true }) {
   const doc = root.ownerDocument;
   const node = (tag, id, attrs = {}) => {
     const value = doc.createElement(tag);
@@ -157,7 +160,7 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
     if (worlds.some(entry => entry.path === wantedAdd)) addRootWorld.value = wantedAdd;
     if (!current || !rootsState) return;
     const form = rootsState;
-    const live = form.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
+    const live = liveFormPositions(form);
     form.forEach((entry, position) => {
       if (entry.removed) return;
       const original = entry.index == null ? null : (current.scenarios || []).find(candidate => candidate.index === entry.index);
@@ -234,27 +237,18 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
       if (!shipList.children.length) shipList.append(node('li', 'workshop.composition.no_ships'));
       ships.append(shipList); set.append(ships);
       const actions = node('div', null, { class: 'workshop-composition-row' });
-      const rank = live.indexOf(position);
-      // An end root has nowhere to go in that direction: the control stays in
-      // place, disabled, so the row keeps the same shape for a keyboard user.
-      if (rank === 0) up.dataset.readonly = 'true';
-      if (rank === live.length - 1) down.dataset.readonly = 'true';
-      const move = direction => () => {
-        const target = moveRoot(form, position, direction);
-        if (target == null) return;
-        renderRoots(); refresh();
-        const kind = direction < 0 ? 'up' : 'down', other = direction < 0 ? 'down' : 'up';
-        focusFirst(`root-${target}-${kind}`, `root-${target}-${other}`, `root-${target}-id`);
-      };
-      up.addEventListener('click', move(-1));
-      down.addEventListener('click', move(1));
+      const neighbours = formNeighbours(form, position);
+      if (!neighbours.up) up.dataset.readonly = 'true';
+      if (!neighbours.down) down.dataset.readonly = 'true';
+      bindFormMoves(up, down, direction => moveRoot(form, position, direction),
+        () => { renderRoots(); refresh(); },
+        (target, kind, other) => focusFirst(`root-${target}-${kind}`, `root-${target}-${other}`, `root-${target}-id`));
       remove.addEventListener('click', () => {
         if (entry.index == null) form.splice(position, 1); else entry.removed = true;
         renderRoots(); refresh();
         // Root ids follow the form's positions: the next root left, else the
         // one before, else the add control.
-        const left = form.map((candidate, at) => (candidate.removed ? null : at)).filter(at => at != null);
-        const nearest = left.find(at => at >= position) ?? left.filter(at => at < position).pop();
+        const nearest = survivingFormPosition(form, position);
         focusFirst(nearest == null ? null : `root-${nearest}-id`, 'add-root-id');
       });
       actions.append(up, down, remove);
@@ -332,8 +326,10 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
     addRow.append(labelled('workshop.composition.add_extra', addSelect), addSelect, addButton);
     extras.append(list, addRow);
     worldFormNode.append(extras);
-    // Script-driven references are read-only here: editing Rhai is #1478's.
+    // Runtime references include dependencies and computed forms; supported draft
+    // literals additionally receive exact-source target controls below.
     const refs = fieldset('workshop.composition.script_refs');
+    refs.append(node('p', 'workshop.composition.script_edit_hint'));
     const refList = node('ul', null, { id: `${PREFIX}-script-refs` });
     for (const ref of current.script_refs || []) {
       const row = node('li');
@@ -346,6 +342,34 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
       refList.append(row);
     }
     if (!refList.children.length) refList.append(node('li', 'workshop.composition.no_script_refs'));
+    if (current.origin === 'draft') {
+      const referenceForms = scriptReferenceForms(draft(), current.path);
+      referenceForms.forEach((reference, index) => {
+        const row = node('li');
+        const target = node('select', null, { id: `${PREFIX}-script-${index}-target` });
+        const worlds = draftFirst(choices().worlds);
+        const known = worlds.some(entry => entry.path === reference.path);
+        target.replaceChildren(...(known ? [] : [option(reference.path, reference.path)]), ...worlds.map(worldOption));
+        target.value = reference.path;
+        const label = `${reference.unit.label}:${reference.line} — ${t(reference.kind === 'load'
+          ? 'workshop.composition.ref_load' : 'workshop.composition.ref_unload')}`;
+        const apply = node('button', 'workshop.composition.apply', { type: 'button', id: `${PREFIX}-script-${index}-apply`,
+          'aria-label': `${t('workshop.composition.apply')}: ${label}` });
+        apply.addEventListener('click', () => {
+          if (busy() || apply.disabled || !fresh()) return;
+          const read = reading, selectedDraft = draft(), path = target.value;
+          void guarded(async () => {
+            const result = await applyScriptReference({ draft: selectedDraft, provider, runtime, reference, path,
+              current: () => !disposed && snapshotIsCurrent(read, draft()) });
+            if (result.applied) changed(reference.unit.documentPath);
+            show(result.applied ? 'workshop.changed' : 'workshop.composition.unchanged');
+            await reload({ announce: false }).catch(() => {});
+          }, () => focusFirst(`script-${index}-target`, 'world'));
+        });
+        row.append(labelled(null, target, label), target, apply);
+        refList.append(row);
+      });
+    }
     refs.append(refList);
     worldFormNode.append(refs);
   }
@@ -397,38 +421,34 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
    * the extra world chosen beside them, nor the reverse. An untouched form is
    * rebuilt from the new reading like everything else. */
   async function reload({ announce = true } = {}) {
-    const candidate = draft();
-    if (!candidate) return;
-    const snapshot = definitionsSnapshot(candidate);
-    const result = await runtime.composition(snapshot.files);
-    if (disposed || !snapshotIsCurrent(snapshot, draft())) return;
-    if (!result || !Array.isArray(result.worlds) || !Array.isArray(result.members)
-      || (result.manifest !== null && typeof result.manifest !== 'object')) throw new Error('workshop.inspector_refused');
-    const dirty = (state, fresh) => Boolean(state) && Boolean(fresh) && JSON.stringify(state) !== JSON.stringify(fresh);
-    const previousManifest = manifest(), previousWorld = selectedWorld();
-    const pending = {
-      roots: dirty(rootsState, previousManifest && rootsForm(previousManifest)) ? rootsState : null,
-      manifestPath: previousManifest?.path, manifestSource: reading?.files?.[previousManifest?.path],
-      world: dirty(worldState, previousWorld && worldForm(previousWorld)) ? worldState : null,
-      worldPath: world.value, worldSource: reading?.files?.[world.value],
-    };
-    reading = { ...snapshot, catalog: result };
-    renderAll();
-    if (pending.roots && manifest()?.path === pending.manifestPath && snapshot.files[pending.manifestPath] === pending.manifestSource) {
-      rootsState = pending.roots; renderRoots();
-    }
-    if (pending.world && world.value === pending.worldPath && snapshot.files[world.value] === pending.worldSource) {
-      worldState = pending.world; renderWorldForm();
-    }
-    if (announce) show('workshop.composition.refreshed');
+    return refreshWorkshopReading({
+      draft, disposed: () => disposed,
+      read: files => runtime.composition(files),
+      validate: result => { if (!result || !Array.isArray(result.worlds) || !Array.isArray(result.members)
+      || (result.manifest !== null && typeof result.manifest !== 'object')) throw new Error('workshop.inspector_refused'); },
+      forms: () => {
+        const previousManifest = manifest(), previousWorld = selectedWorld();
+        return [
+          { state: rootsState, baseline: previousManifest && rootsForm(previousManifest),
+            identity: [previousManifest?.path], source: reading?.files?.[previousManifest?.path],
+            current: () => ({ identity: [manifest()?.path], source: reading.files[manifest()?.path] }),
+            restore: state => { rootsState = state; renderRoots(); } },
+          { state: worldState, baseline: previousWorld && worldForm(previousWorld),
+            identity: [world.value], source: reading?.files?.[world.value],
+            current: () => ({ identity: [world.value], source: reading.files[world.value] }),
+            restore: state => { worldState = state; renderWorldForm(); } },
+        ];
+      },
+      install: (snapshot, result) => { reading = { ...snapshot, catalog: result }; renderAll(); },
+      announce: announce ? () => show('workshop.composition.refreshed') : null,
+    });
   }
 
-  async function guarded(action) {
-    setBusy(true);
-    try { await action(); }
-    catch (error) { if (!disposed) show(knownId(error), true, { detail: error?.detail ?? '' }); }
-    finally { if (!disposed) { setBusy(false); refresh(); } }
-  }
+  const { guarded, land } = createWorkshopEditSession({
+    draft, disposed: () => disposed, setBusy, changed, refresh, reload,
+    showChanged: () => show('workshop.changed'),
+    showError: error => show(knownId(error), true, { detail: error?.detail ?? '' }),
+  });
 
   /** ONE compose call for ONE member, then ONE draft edit. The draft is never
    * touched before the runtime answers; a refusal is shown by its category
@@ -445,15 +465,7 @@ export function mountWorkshopComposition({ root, runtime, draft, busy, setBusy, 
       refused.detail = message;
       throw refused;
     }
-    if (disposed) return;
-    if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
-    if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
-    const current = draft();
-    if (current.edit(path, result)) changed(path);
-    show('workshop.changed');
-    // Re-read so the forms show what was written; a failed re-read leaves the
-    // reading honestly stale rather than reporting the landed edit as refused.
-    await reload({ announce: false }).catch(() => {});
+    return land(read, path, result);
   }
 
   refreshButton.addEventListener('click', () => {

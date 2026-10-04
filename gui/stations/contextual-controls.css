@@ -1,0 +1,13 @@
+.dock-panel[hidden] { display: none; }
+.dock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+.dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+.dock-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+.dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
+.tractor-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 6px; margin-top: 8px; }
+.tractor-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
+.tractor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.tractor-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+.tractor-btn.engaged { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+.tractor-status { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+.tractor-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }

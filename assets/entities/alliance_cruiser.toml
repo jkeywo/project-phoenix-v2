@@ -1146,19 +1146,20 @@ description = "entity.alliance_cruiser.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/cruiser/captain.html"
-manual_overview = "You command the bridge from the captain's chair. Set the viewscreen, call Red Alert to bring the crew to combat readiness, and read the room: your job is to direct the crew, not to fly or fire. Simplified rating hands Red Alert to the ship's AI so you can focus on the mission."
+manual_overview = "You command the bridge from the captain's chair. Set the viewscreen, call Red Alert to bring the crew to combat readiness, and read the room: your job is to direct the crew, not to fly or fire. Two stars retains direct control; one star hands Red Alert to the ship's AI so you can focus on the mission."
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["captain","red-alert","viewscreen"]
 
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["red-alert"]
+detailed_systems = ["captain","viewscreen"]
 
-# #1059 has not shipped its lobby depth picker yet, so this content describes
-# the current Std/Simplified rating selector, not selectable star rungs.
-# #1059 RECHECK: revise this wording when #1083 follows the depth framework.
+
+# Authored star ladder, most detailed first (issues #1059, #1083).
 [[station.tutorial]]
 id = "captain-rating"
 title = "entity.alliance_cruiser.station.captain.tutorial.rating.title"
@@ -1200,18 +1201,25 @@ description = "entity.alliance_cruiser.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/cruiser/helm.html"
-manual_overview = "You fly the ship. Throttle and steering set your heading and speed; lateral thrust slides you sideways to line up firing arcs or dodge incoming fire; boost and impulse give you short bursts of speed. Watch the short-range radar for hazards. When a berth comes into range a Dock control appears; press it to mate the ship to a structure or tender, and press it again to back clear. Simplified rating lets the AI hold lateral thrust so you keep the stick and throttle."
+manual_overview = "You fly the ship. Throttle and steering set your heading and speed; lateral thrust slides you sideways to line up firing arcs or dodge incoming fire; boost and impulse give you short bursts of speed. Watch the short-range radar for hazards. When a berth comes into range a Dock control appears; press it to mate the ship to a structure or tender, and press it again to back clear. Three stars retains every flight control; two stars delegates lateral thrust; one star delegates flight while you keep radar and docking."
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["helm-thrust","helm-steering","helm-joystick","helm-engine-port","helm-engine-starboard","helm-radar","helm-impulse","helm-boost","helm-lateral-thrust","dock"]
 
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["helm-lateral-thrust"]
+detailed_systems = ["helm-thrust","helm-steering","helm-joystick","helm-engine-port","helm-engine-starboard","helm-radar","helm-impulse","helm-boost","dock"]
 
-# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
-# not the future star-rung picker.
+[[station.rating]]
+name = "Cruise"
+automated_systems = ["helm-thrust","helm-steering","helm-joystick","helm-engine-port","helm-engine-starboard","helm-impulse","helm-boost","helm-lateral-thrust"]
+detailed_systems = ["helm-radar","dock"]
+
+
+# Authored star ladder, most detailed first (issues #1059, #1083).
 [[station.tutorial]]
 id = "helm-rating"
 title = "entity.alliance_cruiser.station.helm.tutorial.rating.title"
@@ -1261,15 +1269,24 @@ description = "entity.alliance_cruiser.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/cruiser/tactical.html"
-manual_overview = "You run the weapons. Lock a target on the tactical radar, then fire phasers and launch torpedoes as your arcs come to bear. Manage torpedo loading and volley size, and match phaser frequency to punch through enemy shields. Simplified rating lets the AI auto-fire the phaser banks so you concentrate on torpedoes and targeting."
+manual_overview = "You run the weapons. Lock a target on the tactical radar, then fire phasers and launch torpedoes as your arcs come to bear. Manage torpedo loading and volley size, and match phaser frequency to punch through enemy shields. Three stars retains direct weapon control; two stars delegates phasers; one star delegates phasers and torpedoes while you keep target selection and security."
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["tactical-radar","phaser-control","phaser-fore","phaser-aft","torpedo-magazine","torpedo-tube-fore-port","torpedo-tube-fore-starboard","torpedo-tube-aft","security"]
 
 [[station.rating]]
 name = "Simplified"
-automated_systems = ["phaser-fore", "phaser-aft"]
+automated_systems = ["phaser-control","phaser-fore","phaser-aft"]
+detailed_systems = ["tactical-radar","torpedo-magazine","torpedo-tube-fore-port","torpedo-tube-fore-starboard","torpedo-tube-aft","security"]
+
+[[station.rating]]
+name = "Screen"
+ai_tuning = { torpedo_auto_fire = true }
+automated_systems = ["phaser-control","phaser-fore","phaser-aft","torpedo-magazine","torpedo-tube-fore-port","torpedo-tube-fore-starboard","torpedo-tube-aft"]
+detailed_systems = ["tactical-radar","security"]
+
 
 # Command stance catalogue (issues #1107, #1387).
 # The cruiser directs Tactical for the same reason the destroyer does: weapons
@@ -1317,8 +1334,7 @@ label = "entity.alliance_cruiser.station.tactical.stance.high"
 kind = "high_alert_neutral"
 high_alert = true
 
-# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
-# not the future star-rung picker.
+# Authored star ladder, most detailed first (issues #1059, #1083).
 [[station.tutorial]]
 id = "tactical-rating"
 title = "entity.alliance_cruiser.station.tactical.tutorial.rating.title"
@@ -1360,11 +1376,17 @@ description = "entity.alliance_cruiser.station.science.description"
 rank = "Lt. Cmdr."
 short_code = "SCI"
 console = "gui/cruiser/science.html"
-manual_overview = "You run sensors and the shield grid. Sweep the long-range radar to identify contacts and feed target designations to Tactical, and manage the shields: focus an arc to reinforce it against a bearing of incoming fire, and keep an eye on regeneration between hits. The generated Shields section below reads this ship's actual arc strength."
+manual_overview = "You run sensors and the shield grid. Sweep the long-range radar to identify contacts and feed target designations to Tactical, and manage the shields: focus an arc to reinforce it against a bearing of incoming fire, and keep an eye on regeneration between hits. The generated Shields section below reads this ship's actual arc strength. Two stars retains direct control; one star delegates shield focus."
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["sensors","sensor-radar","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
+
+[[station.rating]]
+name = "Guard"
+automated_systems = ["shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
+detailed_systems = ["sensors","sensor-radar"]
 
 [[station.tutorial]]
 id = "science-welcome"
@@ -1394,18 +1416,30 @@ description = "entity.alliance_cruiser.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/cruiser/engineering.html"
-manual_overview = "You keep the ship alive. Allocate reactor power between helm, weapons, and shields as the situation demands, and dispatch repair teams to damaged systems by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. Watch the battery reserve during heavy weapons fire. Simplified rating lets the AI run the repair teams so you concentrate on power allocation."
+manual_overview = "You keep the ship alive. Allocate reactor power between helm, weapons, and shields as the situation demands, and dispatch repair teams to damaged systems by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. Watch the battery reserve during heavy weapons fire. Four stars retains direct control. Three stars lets you prioritise the AI repair teams' work. Two stars delegates repair completely, and one star also delegates power allocation; tractor and umbilical controls remain yours."
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical"]
+
+[[station.rating]]
+name = "Guided"
+automated_systems = []
+detailed_systems = ["power-reactor","power-battery","tractor","umbilical"]
 
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["repair"]
+detailed_systems = ["power-reactor","power-battery","tractor","umbilical"]
 
-# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
-# not the future star-rung picker.
+[[station.rating]]
+name = "Maintenance"
+automated_systems = ["repair","power-reactor","power-battery"]
+detailed_systems = ["tractor","umbilical"]
+
+
+# Authored star ladder, most detailed first (issues #1059, #1083).
 [[station.tutorial]]
 id = "engineering-rating"
 title = "entity.alliance_cruiser.station.engineering.tutorial.rating.title"
@@ -1445,6 +1479,7 @@ manual_overview = "You handle communications and navigation. Hail contacts, read
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["comms"]
 
 [[station.tutorial]]
 id = "comms-welcome"
@@ -1489,6 +1524,7 @@ auxiliary = true
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["navigation"]
 
 # Command station (issues #1107, #1387). An AUXILIARY, human-seeking station:
 # it is mounted and resolved like any other station but is never offered as its
@@ -1518,6 +1554,7 @@ command_target = "tactical"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+detailed_systems = ["command"]
 
 [[system]]
 id = "captain"
@@ -1606,8 +1643,7 @@ power_group = "helm"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
 # system so ToggleBoost/SetBoost admission gates on its own declared system,
-# like every other helm axis. Listed in no rating's `automated_systems` —
-# Backfill automates it with the rest of the station.
+# like every other helm axis. Cruise and Backfill delegate it to the existing AI.
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"

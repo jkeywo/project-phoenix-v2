@@ -1,8 +1,9 @@
+import { GmActionFeedback } from './gm-action-feedback.js';
 /** Authored Objective controls. The absolute projection owns every status and recipient. */
 import { has } from './strings.js';
 import { GM_ACTION_REFUSAL_REASON_LABELS } from './gm-action-reasons.js';
 import {
-  ActionFeedbackLifecycle, ACTION_FEEDBACK_STATE, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
+  ActionFeedbackLifecycle, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS,
 } from './action-feedback.js';
 
 const VERBS = ['activate', 'complete', 'fail'];
@@ -80,8 +81,12 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   const actionFeedback = suppliedFeedback || new ActionFeedbackLifecycle({ ...(correlation ? { correlation } : {}) });
   let projection = { palette: [], objectives: [], results: [] };
   let preview = null;
-  let pending = null;
-  let timer = null;
+  const feed = new GmActionFeedback({
+    lifecycle: () => actionFeedback, capacity: 1,
+    timeoutMs: DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS, schedule, cancelSchedule,
+    onLocalTerminal: (meta, outcome) => { feedback(outcome === 'timed-out' ? 'timed_out' : outcome, meta.chosenId); refreshAdmission(); },
+  });
+  const pending = () => feed.values().next().value?.request ?? null;
   let opener = null;
   // The ship the map has selected, when it is a ship. The list then narrows
   // to the Objectives that address it (an empty recipient list addresses
@@ -98,7 +103,7 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     : scopeText(row.recipients);
   const rowFor = (id, verb) => (verb === 'activate' ? projection.palette : projection.objectives)
     .find((row) => row.id === id);
-  const eligible = (row, verb) => !!getOperator()?.id && !pending && row?.available === true
+  const eligible = (row, verb) => !!getOperator()?.id && !pending() && row?.available === true
     && (row.verbs ? row.verbs[verb] : verb === 'activate' ? row.status === null : row.status === 'Active');
   function closePreview(restoreFocus = false) {
     preview = null;
@@ -147,24 +152,19 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     return submitChosen(chosen);
   }
   function submitChosen(chosen) {
-    if (pending || getOperator()?.id !== chosen.operator) return false;
+    if (pending() || getOperator()?.id !== chosen.operator) return false;
     const action = actionFeedback.press(`gm.objective.${chosen.verb}:${chosen.id}`);
     const request = { operator_id: chosen.operator, correlation: action.correlation,
       objective: chosen.objective_id || chosen.id, verb: chosen.verb,
       ...(chosen.instance_scope ? { scope: chosen.instance_scope } : { recipients: [...chosen.recipients] }) };
-    pending = request;
+    const meta = { request, operatorId: request.operator_id, correlation: request.correlation, chosenId: chosen.id };
+    feed.track(meta);
     actionFeedback.pending(request.correlation);
     let accepted = false;
     try { accepted = submit(request) !== false; } catch (_) { /* visible local refusal */ }
-    if (!accepted) {
-      actionFeedback.settle(request.correlation, ACTION_FEEDBACK_STATE.REFUSED);
-      pending = null; feedback('refused', chosen.id); refreshAdmission(); return false;
-    }
-    feedback('pending', chosen.id);
-    timer = schedule(() => {
-      actionFeedback.settle(request.correlation, ACTION_FEEDBACK_STATE.TIMED_OUT);
-      pending = null; timer = null; feedback('timed_out', chosen.id); refreshAdmission();
-    }, DEFAULT_ACTION_FEEDBACK_TIMEOUT_MS);
+    feed.submitted(meta, accepted);
+    if (!accepted) return false;
+    if (feed.get(request.correlation) === meta) feedback('pending', chosen.id);
     refreshAdmission(); return true;
   }
   // The scope note sits between the heading and the list. Built here rather
@@ -268,23 +268,19 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
     const next = parseGmObjectivePayload(payload);
     if (!next) return false;
     projection = next;
-    const result = pending && projection.results.find((r) => r.operator_id === pending.operator_id
-      && r.correlation === pending.correlation && r.target === pending.objective
-      && r.objective_verb === pending.verb && sameInstanceScope(r.objective_instance_scope, pending.scope)
-      && (pending.scope || sameScope(r.objective_recipients, pending.recipients)));
+    const request = pending();
+    const result = request && projection.results.find((r) => r.operator_id === request.operator_id
+      && r.correlation === request.correlation && r.target === request.objective
+      && r.objective_verb === request.verb && sameInstanceScope(r.objective_instance_scope, request.scope)
+      && (request.scope || sameScope(r.objective_recipients, request.recipients)));
     if (result) {
-      if (timer !== null) cancelSchedule(timer);
-      timer = null;
-      actionFeedback.settle(pending.correlation, result.outcome === 'refused'
-        ? ACTION_FEEDBACK_STATE.REFUSED : ACTION_FEEDBACK_STATE.APPLIED);
-      pending = null; feedback(result.outcome.replace('-', '_'), result.target);
+      feed.settle(result);
+      feedback(result.outcome.replace('-', '_'), result.target);
     }
     renderRows(); renderResults(); return true;
   }
   function reset() {
-    if (timer !== null) cancelSchedule(timer);
-    if (pending) actionFeedback.cancel(pending.correlation);
-    timer = null; pending = null; projection = { palette: [], objectives: [], results: [] };
+    feed.reset(); projection = { palette: [], objectives: [], results: [] };
     closePreview(); feedback(''); renderRows(); renderResults();
   }
   function focusObjective(objectiveId) {
@@ -308,5 +304,5 @@ export function createGmObjectivePanel({ doc = globalThis.document, t = (id) => 
   renderRows();
   return { update, confirm, reset, refreshAdmission, select, focusObjective,
     refreshLanguage() { renderRows(); renderResults(); },
-    state: () => ({ ...projection, preview, pending, scope: scopeShip ? scopeShip.id : null }) };
+    state: () => ({ ...projection, preview, pending: pending(), scope: scopeShip ? scopeShip.id : null }) };
 }

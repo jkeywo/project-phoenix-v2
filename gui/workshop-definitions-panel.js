@@ -1,4 +1,6 @@
-import { definitionsSnapshot, snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
+import { survivingFormPosition } from './ordered-form-controls.js';
+import { createWorkshopEditSession, refreshWorkshopReading } from './workshop-edit-session.js';
+import { snapshotIsCurrent, factionSlugPath, enemyChoices, factionForm, complianceForm,
   complianceIsSeconds, complianceIsResponse, planFactionEdits, ratingForm, planRatingEdits, newRung, rungNames, findingsAt,
   draftFirst } from '../editor/workshop-definitions.js';
 import { t } from './strings.js';
@@ -334,8 +336,7 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
         renderStationForm(); refresh();
         // Rung ids follow the form's positions: the next rung left, else the
         // one before, else the add control.
-        const left = form.ratings.map((entry, at) => (entry.removed ? null : at)).filter(at => at != null);
-        const nearest = left.find(at => at > position) ?? left.filter(at => at < position).pop();
+        const nearest = survivingFormPosition(form.ratings, position, true);
         focusFirst(nearest == null ? null : `rung-${nearest}-name`, 'new-rung');
       });
       set.append(remove);
@@ -376,38 +377,33 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
    * away the rung edits typed beside it, nor the reverse. An untouched form is
    * rebuilt from the new reading like everything else. */
   async function reload({ announce = true } = {}) {
-    const candidate = draft();
-    if (!candidate) return;
-    const snapshot = definitionsSnapshot(candidate);
-    const result = await runtime.definitions(snapshot.files);
-    if (disposed || !snapshotIsCurrent(snapshot, draft())) return;
-    if (!result || !Array.isArray(result.factions) || !Array.isArray(result.hulls)) throw new Error('workshop.inspector_refused');
-    const dirty = (state, fresh) => Boolean(state) && Boolean(fresh) && JSON.stringify(state) !== JSON.stringify(fresh);
-    const previousFaction = selectedFaction(), previousStation = selectedStation();
-    const pending = {
-      faction: dirty(factionState, previousFaction && factionForm(previousFaction, complianceDefaults())) ? factionState : null,
-      factionPath: faction.value, factionSource: reading?.files?.[faction.value],
-      station: dirty(stationState, previousStation && ratingForm(previousStation)) ? stationState : null,
-      hullPath: hull.value, stationIndex: station.value, hullSource: reading?.files?.[hull.value],
-    };
-    reading = { ...snapshot, catalog: result };
-    renderSelectors();
-    if (pending.faction && faction.value === pending.factionPath && snapshot.files[faction.value] === pending.factionSource) {
-      factionState = pending.faction; renderFactionForm();
-    }
-    if (pending.station && hull.value === pending.hullPath && station.value === pending.stationIndex
-      && snapshot.files[hull.value] === pending.hullSource) {
-      stationState = pending.station; renderStationForm();
-    }
-    if (announce) show('workshop.definitions.refreshed');
+    return refreshWorkshopReading({
+      draft, disposed: () => disposed,
+      read: files => runtime.definitions(files),
+      validate: result => { if (!result || !Array.isArray(result.factions) || !Array.isArray(result.hulls)) throw new Error('workshop.inspector_refused'); },
+      forms: () => {
+        const previousFaction = selectedFaction(), previousStation = selectedStation();
+        return [
+          { state: factionState, baseline: previousFaction && factionForm(previousFaction, complianceDefaults()),
+            identity: [faction.value], source: reading?.files?.[faction.value],
+            current: () => ({ identity: [faction.value], source: reading.files[faction.value] }),
+            restore: state => { factionState = state; renderFactionForm(); } },
+          { state: stationState, baseline: previousStation && ratingForm(previousStation),
+            identity: [hull.value, station.value], source: reading?.files?.[hull.value],
+            current: () => ({ identity: [hull.value, station.value], source: reading.files[hull.value] }),
+            restore: state => { stationState = state; renderStationForm(); } },
+        ];
+      },
+      install: (snapshot, result) => { reading = { ...snapshot, catalog: result }; renderSelectors(); },
+      announce: announce ? () => show('workshop.definitions.refreshed') : null,
+    });
   }
 
-  async function guarded(action) {
-    setBusy(true);
-    try { await action(); }
-    catch (error) { if (!disposed) show(knownId(error), true); }
-    finally { if (!disposed) { setBusy(false); refresh(); } }
-  }
+  const { guarded, land } = createWorkshopEditSession({
+    draft, disposed: () => disposed, setBusy, changed, refresh, reload,
+    showChanged: () => show('workshop.changed'),
+    showError: error => show(knownId(error), true),
+  });
 
   /** ONE runtime edit for ONE member, then ONE draft edit. The draft is never
    * touched before the runtime answers, and an answer for a draft that moved in
@@ -415,15 +411,7 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
   async function commit(read, path, edits) {
     const source = read.files[path];
     const result = await runtime.edit(source, { document_path: path, expected_source: source, edits });
-    if (disposed) return;
-    if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
-    if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
-    const current = draft();
-    if (current.edit(path, result)) changed(path);
-    show('workshop.changed');
-    // Re-read so the forms show what was written; a failed re-read leaves the
-    // reading honestly stale rather than reporting the landed edit as refused.
-    await reload({ announce: false }).catch(() => {});
+    return land(read, path, result);
   }
 
   refreshButton.addEventListener('click', () => {

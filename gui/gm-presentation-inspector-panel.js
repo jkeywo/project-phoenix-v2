@@ -1,5 +1,6 @@
 /** Authored Viewscreen presentation/audio Live Inspector (#1493). */
 import { renderInspectorReadOnly, validInspectorDescriptor } from './inspector-field.js';
+import { createInspectorSession, bindInspectorNavigation } from './inspector-session.js';
 
 export const GM_PRESENTATION_INSPECTOR_HISTORY_LIMIT = 20;
 const GROUPS = ['identity', 'provenance', 'views', 'cue', 'comms', 'runtime', 'catalog', 'asset', 'sound'];
@@ -38,19 +39,12 @@ export function parseGmPresentationInspectorPayload(payload) {
 export function createGmPresentationInspectorPanel({ doc = globalThis.document, t = id => id,
   focusPresentation = null } = {}) {
   const el = suffix => doc?.getElementById(`gm-presentation-fields-${suffix}`);
-  let domain = null, selected = null, gone = false, history = [], cursor = -1;
-  const retained = new Map();
-  function choose(id, { record = true, focus = false } = {}) {
+  let domain = null, selected = null, gone = false;
+  const session = createInspectorSession(GM_PRESENTATION_INSPECTOR_HISTORY_LIMIT);
+  function choose(id, { record = true } = {}) {
     if (!id) return;
-    if (record && history[cursor] !== id) {
-      history = history.slice(0, cursor + 1); history.push(id);
-      if (history.length > GM_PRESENTATION_INSPECTOR_HISTORY_LIMIT) {
-        const dropped = history.shift();
-        if (dropped !== selected && !history.includes(dropped)) retained.delete(dropped);
-      }
-      cursor = history.length - 1;
-    }
-    selected = id; render(); if (focus) el('status')?.focus?.();
+    session.forget(session.select(id, { record }));
+    render();
   }
   function action(row, field, reading, id, value) {
     if (field.action_panel !== 'presentation') return;
@@ -63,10 +57,12 @@ export function createGmPresentationInspectorPanel({ doc = globalThis.document, 
     row.append(button);
   }
   function render() {
+    selected = session.selected;
+    refreshNavigation();
     const live = domain?.readings.get(selected);
-    if (live) { retained.set(selected, live); gone = false; }
-    else gone = !!selected && retained.has(selected);
-    const reading = live || retained.get(selected);
+    if (live) { session.remember(selected, live); gone = false; }
+    else gone = !!selected && session.reading(selected) != null;
+    const reading = live || session.reading(selected);
     const select = el('subject');
     if (select && domain) {
       const options = [...domain.readings].map(([id, item]) => Object.assign(doc.createElement('option'), {
@@ -99,18 +95,17 @@ export function createGmPresentationInspectorPanel({ doc = globalThis.document, 
         row.append(label, slot); action(row, field, reading, id, value); currentGroup.append(row);
       }
     }
-    el('back').disabled = cursor <= 0;
-    el('forward').disabled = cursor < 0 || cursor >= history.length - 1;
   }
   el('subject')?.addEventListener('change', () => choose(el('subject').value));
-  el('back')?.addEventListener('click', () => { if (cursor > 0) { cursor--; choose(history[cursor], { record: false, focus: true }); } });
-  el('forward')?.addEventListener('click', () => { if (cursor + 1 < history.length) { cursor++; choose(history[cursor], { record: false, focus: true }); } });
+  const refreshNavigation = bindInspectorNavigation({ session,
+    back: el('back'), forward: el('forward'), status: el('status'), render,
+  });
   return {
     update(payload) { const next = parseGmPresentationInspectorPayload(payload); if (!next) return false;
-      for (const [id, reading] of next.readings) retained.set(id, reading); domain = next;
+      for (const [id, reading] of next.readings) session.remember(id, reading); domain = next;
       if (!selected) choose(next.readings.keys().next().value); else render(); return true; },
     select(entity) { if (entity?.kind === 'player_ship') choose(`ship:${entity.entity_id}`); },
-    reset() { domain = null; selected = null; gone = false; retained.clear(); history = []; cursor = -1; el('list')?.replaceChildren(); render(); },
-    state: () => ({ selected, gone, history: [...history], cursor }),
+    reset() { domain = null; selected = null; gone = false; session.reset(); el('list')?.replaceChildren(); render(); },
+    state: () => ({ ...session.state(), gone }),
   };
 }

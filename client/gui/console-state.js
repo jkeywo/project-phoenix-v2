@@ -2,10 +2,12 @@
  * gui/console-state.js — Pure state builder functions for HTML console iframes.
  *
  * Each build*(state) function accepts the sim-state object maintained by
- * client.html and returns a JSON string ready for __updateConsole(name, json).
+ * client.html and returns a payload object. The window adapters serialize it
+ * for __updateConsole(name, json).
  *
- * All functions are pure (no side effects, no DOM dependency) so they can be
- * unit-tested in Node via Vitest.
+ * Object builders are pure (no side effects, no DOM dependency) so they can be
+ * unit-tested in Node via Vitest. The full window adapter also migrates
+ * client-local tutorial progress before assembly.
  *
  * Exposed on window as `window.buildConsoleState(consoleName, state)` for the
  * inline script in client.html (module scripts run after inline scripts; the
@@ -735,7 +737,7 @@ export function targetFactsFor(state, uuid, range) {
  */
 
 /**
- * Tactical / Weapons console. Returns JSON of {@link WeaponsConsolePayload}.
+ * Tactical / Weapons console. Returns an object of {@link WeaponsConsolePayload}.
  * Reads raw sim truth from the typed Weapons blackboard,
  * falling back to legacy camelCase properties for compatibility.
  *
@@ -841,7 +843,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   );
   if (waypoint) blips.push(waypoint);
 
-  return JSON.stringify({
+  return {
     ...targetFacts,
     target_uuid:   targetUuid,
     target_name:   resolvedTargetName,
@@ -863,7 +865,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: tacticalAuto,
     station_rating: state.stationRatings?.['tactical'] || 'Std',
-  });
+  };
 }
 
 /**
@@ -882,13 +884,13 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
  */
 
 /**
- * CaptainChair console. Returns JSON of {@link CaptainConsolePayload}.
+ * CaptainChair console. Returns an object of {@link CaptainConsolePayload}.
  * @param {{ blackboards, redAlert, currentView, objectives, hullPct, blips }} state
  */
 export function buildCaptainConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Captain', systemIds)?.data;
   if (bb) {
-    return JSON.stringify({
+    return {
       red_alert:             bb.red_alert             ?? false,
       red_alert_system_id:   bb.red_alert_system_id   ?? null,
       red_alert_auto:        bb.red_alert_auto         ?? false,
@@ -907,11 +909,11 @@ export function buildCaptainConsoleState(state, systemIds = []) {
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
       own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
-    });
+    };
   }
   // Legacy fallback.
   const viewDirection = state.currentView || '';
-  return JSON.stringify({
+  return {
     red_alert:             state.redAlert    || false,
     red_alert_system_id:   null,
     red_alert_auto:        false,
@@ -932,7 +934,7 @@ export function buildCaptainConsoleState(state, systemIds = []) {
                              : 'Standing by. All systems nominal.',
     blips:                 state.blips       || [],
     own_hull:              aggregateStationHull('captain', state.consoleHull, state.stationSystems),
-  });
+  };
 }
 
 /**
@@ -1020,7 +1022,7 @@ function authoredSystemIdOfKind(state, kind, preferredIds = []) {
 }
 
 /**
- * Command console (issue #1381). Returns JSON of {@link CommandConsolePayload}.
+ * Command console (issue #1381). Returns an object of {@link CommandConsolePayload}.
  *
  * One card per `Command` blackboard this Station owns, walked through the
  * SAME `blackboardsOfKind` every other multi-instance builder in this file
@@ -1071,7 +1073,7 @@ export function buildCommandConsoleState(state, systemIds = []) {
       default_selected:      selectedKind === 'normal_alert_neutral' || selectedKind === 'high_alert_neutral',
     };
   });
-  return JSON.stringify({ red_alert: redAlert, stations });
+  return { red_alert: redAlert, stations };
 }
 
 /**
@@ -1117,19 +1119,12 @@ export function commandAdviceFor(state, consoleName) {
  *
  * @param {string} consoleName station id
  * @param {object} state simState
- * @param {string} json the console payload built so far
- * @returns {string} json, with `command_advice` when this console is advised
+ * @param {object} payload the console payload built so far
+ * @returns {object} payload, with `command_advice` when this console is advised
  */
-export function withCommandAdvice(consoleName, state, json) {
-  try {
-    const advice = commandAdviceFor(state, consoleName);
-    if (!advice) return json;
-    const obj = JSON.parse(json);
-    obj.command_advice = advice;
-    return JSON.stringify(obj);
-  } catch (_) {
-    return json;
-  }
+export function withCommandAdvice(consoleName, state, payload) {
+  const advice = commandAdviceFor(state, consoleName);
+  return advice ? { ...payload, command_advice: advice } : { ...payload };
 }
 
 /**
@@ -1170,7 +1165,7 @@ export function withCommandAdvice(consoleName, state, json) {
  */
 
 /**
- * Helm console. Returns JSON of {@link HelmConsolePayload}.
+ * Helm console. Returns an object of {@link HelmConsolePayload}.
  *
  * Reads raw sim truth from the typed aggregate Helm blackboard
  * when available, falling back to legacy camelCase properties for compatibility.
@@ -1228,7 +1223,7 @@ export function buildHelmConsoleState(state, systemIds = []) {
   const engineBlackboards = blackboardsOfKind(state, 'HelmEngine', systemIds);
   const lateralBb = blackboardOfKind(state, 'HelmLateralThrust', systemIds)?.data;
 
-  return JSON.stringify({
+  return {
     range,
     ship_heading:            (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,
@@ -1301,7 +1296,7 @@ export function buildHelmConsoleState(state, systemIds = []) {
     // indicator appears. The label and the towed hull's name are both `t()` ids
     // — no English crosses here.
     tow_load:            buildHelmTowLoadView(state),
-  });
+  };
 }
 
 /**
@@ -1586,7 +1581,7 @@ export function repairDamagedSystems(systemHull, teams, priorityTargets = []) {
  */
 
 /**
- * Repair console. Returns JSON of {@link RepairConsolePayload}.
+ * Repair console. Returns an object of {@link RepairConsolePayload}.
  * @param {{ blackboards, repairTeams, consoleHull }} state
  */
 export function buildRepairConsoleState(state, systemIds = []) {
@@ -1606,7 +1601,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
     const destroyed = bb.destroyed_hull_fraction ?? state.hullDestroyed;
     const { coreSystems, targets } =
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems);
-    return JSON.stringify({
+    return {
       teams,
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
@@ -1629,7 +1624,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
       dispatch_targets:     targets,
       travel_duration_secs: bb.travel_duration_secs ?? 5.0,
       system_id:            entry.systemId,
-      repair_auto:          state.controlSources?.[entry.systemId] === 'Ai',
+      repair_auto:          ['Ai', 'Simplified'].includes(state.controlSources?.[entry.systemId]),
+      repair_summary:       state.controlSources?.[entry.systemId] === 'Simplified',
       // External repair-team dispatch (issue #1161). Non-null only on a hull
       // that authored `[repair.external_dispatch]` (its blackboard carries a
       // `range`), so the console shows the dispatch control on exactly those
@@ -1649,7 +1645,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
         team_idx:    bb.external_dispatch_team_idx ?? null,
         target_condition: bb.external_dispatch_target_condition ?? null,
       },
-    });
+    };
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
   // after issue #618) so the repair panel renders even without the blackboard.
@@ -1668,7 +1664,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
   // through the same function the blackboard path uses.
   const legacyTeams = (state.repairTeams || [])
     .map((slot, idx) => normalizeTeamSlot(slot, idx, 5.0));
-  return JSON.stringify({
+  return {
     teams:                state.repairTeams || [],
     system_hull:          legacyHull,
     damageable_systems:   legacyHull.map(h => h.system_id),
@@ -1680,7 +1676,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
     system_id:            systemIds[0] ?? null,
     repair_auto:          systemIds.length > 0
       && systemIds.every(id => state.controlSources?.[id] === 'Ai'),
-  });
+  };
 }
 
 /**
@@ -1697,7 +1693,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
  */
 
 /**
- * Power console. Returns JSON of {@link PowerConsolePayload}.
+ * Power console. Returns an object of {@link PowerConsolePayload}.
  *
  * Reads raw sim truth from the typed aggregate Power blackboard plus typed
  * reactor and battery fine blackboards (issue #513)
@@ -1716,7 +1712,7 @@ export function buildPowerConsoleState(state, systemIds = []) {
   // Default to online when the fine blackboard is missing (legacy safety).
   const reactorOnline = reactorBb ? !!reactorBb.is_online : true;
   const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
-  return JSON.stringify({
+  return {
     // Reads the PowerGroupId-keyed `groups` field from the publisher (the
     // legacy `consoles` mirror was removed from the wire when the parent
     // issue #516 cleanup closed out).
@@ -1748,7 +1744,7 @@ export function buildPowerConsoleState(state, systemIds = []) {
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['power'] === 'Backfill',
     station_rating: state.stationRatings?.['power'] || 'Std',
-  });
+  };
 }
 
 /**
@@ -1772,13 +1768,13 @@ export function buildPowerConsoleState(state, systemIds = []) {
  */
 
 /**
- * Shields console. Returns JSON of {@link ShieldsConsolePayload}.
+ * Shields console. Returns an object of {@link ShieldsConsolePayload}.
  * @param {{ blackboards, shieldFacings, hullIntegrity, shieldFocusedFacing }} state
  */
 export function buildShieldsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Shields')?.data;
   if (bb) {
-    return JSON.stringify({
+    return {
       facings:              bb.facings              ?? [],
       hull_integrity_pct:   bb.hull_integrity_pct   ?? 100,
       focused_facing:       bb.focused_facing       ?? null,
@@ -1789,7 +1785,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
       shields_auto: systemIds.length > 0
         ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
         : state.stationRatings?.['shields'] === 'Backfill',
-    });
+    };
   }
   // Legacy fallback: read from ShieldStatus broadcast fields. Predates the
   // ShieldsBlackboard (issue #562); `threat_bearing` has no legacy source —
@@ -1803,7 +1799,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
       targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
     }
   }
-  return JSON.stringify({
+  return {
     facings:              state.shieldFacings      || [],
     hull_integrity_pct:   state.hullIntegrity       || 100,
     focused_facing:       state.shieldFocusedFacing || null,
@@ -1815,7 +1811,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
     shields_auto: systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['shields'] === 'Backfill',
-  });
+  };
 }
 
 /**
@@ -1871,7 +1867,7 @@ function scanPayload(state) {
 }
 
 /**
- * Sensors console. Returns JSON of {@link SensorsConsolePayload}.
+ * Sensors console. Returns an object of {@link SensorsConsolePayload}.
  * @param {{ blackboards, asteroids, shipX, shipZ, shipYaw, sensorsTarget,
  *           regions, complexity, impulseChargeProgress }} state
  */
@@ -2022,13 +2018,12 @@ export function buildSensorsConsoleState(state, systemIds = []) {
   );
   if (waypoint) blips.push(waypoint);
 
-  return JSON.stringify({
+  return {
     scan_range:              range,
     ship_x:                  state.shipX || 0,
     ship_z:                  state.shipZ || 0,
     ship_heading:            (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
     ship_speed:              state.forwardSpeed || 0,
-    complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
     regions:                 state.regions ? state.regions.filter(region => overrides[region.uuid] !== 'conceal' && !Object.hasOwn(reports, region.uuid)) : projectRadarRegions(
@@ -2069,7 +2064,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     sensors_auto: systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['sensors'] === 'Backfill',
-  });
+  };
 }
 
 /**
@@ -2104,7 +2099,7 @@ function dossiersPayload(state) {
 }
 
 /**
- * Comms console. Returns JSON of {@link CommsConsolePayload}.
+ * Comms console. Returns an object of {@link CommsConsolePayload}.
  * @param {{ blackboards, commsMessages, commsContacts }} state
  */
 export function buildCommsConsoleState(state, systemIds = []) {
@@ -2114,7 +2109,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
   // component flashes the matching button red.
   const rejection = state.commsRejection ?? null;
   if (bb) {
-    return JSON.stringify({
+    return {
       messages:   bb.messages   ?? [],
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
@@ -2133,10 +2128,10 @@ export function buildCommsConsoleState(state, systemIds = []) {
         ? state.controlSources[entry?.systemId ?? systemIds[0]] === 'Ai'
         : state.stationRatings?.['comms'] === 'Backfill',
       rejection,
-    });
+    };
   }
   // Legacy fallback.
-  return JSON.stringify({
+  return {
     messages:  state.commsMessages || [],
     contacts:  state.commsContacts || [],
     on_screen: state.currentView === 'Comms',
@@ -2146,7 +2141,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['comms'] === 'Backfill',
     rejection,
-  });
+  };
 }
 
 // ── Navigation radar range ──────────────────────────────────────────────────
@@ -2167,7 +2162,7 @@ export const NAVIGATION_RADAR_RANGE = 5000.0;
  */
 
 /**
- * Navigation console state builder (issue #458). Returns JSON of
+ * Navigation console state builder (issue #458). Returns an object of
  * {@link NavigationConsolePayload}.
  *
  * Produces a world-centred north-up radar snapshot filtered to strategic
@@ -2234,7 +2229,7 @@ export function buildNavigationConsoleState(state, systemIds = []) {
   const charge = state.impulseChargeProgress || 0;
   const onScreen = state.currentView === 'NavigationChart';
 
-  return JSON.stringify({
+  return {
     blips,
     waypoint:                state.navigationWaypoint || null,
     ship_x:                  state.shipX || 0,
@@ -2260,7 +2255,7 @@ export function buildNavigationConsoleState(state, systemIds = []) {
         && state.controlSources?.[entry?.systemId ?? systemIds[0]] != null
       ? state.controlSources[entry?.systemId ?? systemIds[0]] === 'Ai'
       : state.stationRatings?.['navigation'] === 'Backfill',
-  });
+  };
 }
 
 /**
@@ -2285,7 +2280,7 @@ export function consoleForSystemId(id, systemConsoleFamilies) {
 /**
  * Tractor console family (issue #1156). Reads the raw tractor blackboard the
  * engineering-owned `tractor` system publishes under its own system id and
- * returns JSON of the small view the engineering console's tractor control
+ * returns an object of the small view the engineering console's tractor control
  * renders: the authored reach, whether the beam is engaged, the coupled
  * target's uuid/name id, and the `strings.csv` id of the last refusal (which the
  * console resolves through `t()` — no English crosses the wire). A hull with no
@@ -2297,20 +2292,20 @@ export function consoleForSystemId(id, systemConsoleFamilies) {
 export function buildTractorConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Tractor', systemIds);
   const bb = entry?.data || {};
-  return JSON.stringify({
+  return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     range: bb.range ?? 0,
     engaged: !!bb.engaged,
     coupled_target: bb.coupled_target ?? null,
     coupled_target_name: bb.coupled_target_name ?? null,
     refusal: bb.refusal ?? null,
-  });
+  };
 }
 
 /**
  * Umbilical console family (issue #1160). Reads the raw umbilical blackboard the
  * engineering-owned `umbilical` system publishes under its own system id and
- * returns JSON of the small view the engineering console's umbilical control
+ * returns an object of the small view the engineering console's umbilical control
  * renders: the authored capacity id, rate and direction, whether the flow is
  * running, both docked ends' current levels, and the `strings.csv` id of the last
  * refusal (which the console resolves through `t()` — no English crosses the
@@ -2322,7 +2317,7 @@ export function buildTractorConsoleState(state, systemIds = []) {
 export function buildUmbilicalConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Umbilical', systemIds);
   const bb = entry?.data || {};
-  return JSON.stringify({
+  return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     capacity: bb.capacity ?? null,
     rate: bb.rate ?? 0,
@@ -2331,13 +2326,13 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
     operator_level: bb.operator_level ?? null,
     partner_level: bb.partner_level ?? null,
     refusal: bb.refusal ?? null,
-  });
+  };
 }
 
 /**
  * Security console family (issue #1346). Reads the raw Security blackboard the
  * station-owned `security` system publishes under its own system id and returns
- * JSON of the view the Security panel renders: the authored reach, the team list
+ * An object of the view the Security panel renders: the authored reach, the team list
  * (each team's state, assignment, progress and risk), every target that offers
  * Security work with its separation, whether the SERVER says it is in reach and
  * the actions it offers, and the `strings.csv` id of the last refusal (which the
@@ -2361,13 +2356,13 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
 export function buildSecurityConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Security', systemIds);
   const bb = entry?.data || {};
-  return JSON.stringify({
+  return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     range: bb.range ?? 0,
     teams: Array.isArray(bb.teams) ? bb.teams : [],
     targets: Array.isArray(bb.targets) ? bb.targets : [],
     refusal: bb.refusal ?? null,
-  });
+  };
 }
 
 /**
@@ -2412,14 +2407,14 @@ const FAMILY_BUILDERS = Object.freeze({
 function buildFamilyConsoleView(family, state, systemIds) {
   const descriptor = FAMILY_BUILDERS[family];
   if (!descriptor) return null;
-  const view = JSON.parse(descriptor.build(state, systemIds));
+  const view = descriptor.build(state, systemIds);
   if (descriptor.autoField) {
     const sources = state.controlSources || {};
     const checkedIds = descriptor.autoScope === 'first' ? systemIds.slice(0, 1) : systemIds;
     const hasProjection = checkedIds.some(id => Object.prototype.hasOwnProperty.call(sources, id));
     if (hasProjection) {
       view[descriptor.autoField] = checkedIds.length > 0
-        && checkedIds.every(id => sources[id] === 'Ai');
+        && checkedIds.every(id => sources[id] === 'Ai' || sources[id] === 'Simplified');
     }
   }
   if (descriptor.adjust) descriptor.adjust(view, state, systemIds);
@@ -2454,7 +2449,7 @@ function projectSystemFamilies(systemIds, state) {
 
 /**
  * Build a console payload from the fine systems owned by a station.
- * Returns JSON of {@link SystemStationConsolePayload}.
+ * Returns an object of {@link SystemStationConsolePayload}.
  *
  * Each entry in `systems` is keyed by its actual SystemId. A console therefore
  * receives a view only when its station owns the corresponding fine system;
@@ -2492,44 +2487,29 @@ export function buildSystemStationConsoleState(stationId, state) {
   // once Comms left it) would otherwise lose the feed. Cross-cutting like
   // `own_hull` below, for the same reason: every system-composed station gets
   // it, whether or not it renders it.
-  return JSON.stringify({
+  return {
     station_id: stationId,
     system_ids: ids,
     system_families: projectSystemFamilies(ids, state),
     systems,
     dossiers: dossiersPayload(state),
-  });
+  };
 }
 
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 /**
  * Compute the per-station footer damage aggregate for `consoleName` and merge
- * it into the built console JSON as `own_hull`. `consoleName` is the station id
+ * it into the built console object as `own_hull`. `consoleName` is the station id
  * (issue #12), so `aggregateStationHull` gives the console operator's own
  * systems — the footer `ph-station-damage` bar reads this.
  */
-function withStationDamage(consoleName, state, json) {
-  try {
-    const obj = JSON.parse(json);
-    obj.own_hull = aggregateStationHull(consoleName, state.consoleHull, state.stationSystems);
-    return JSON.stringify(obj);
-  } catch (_) {
-    return json;
-  }
+function withStationDamage(consoleName, state, payload) {
+  return { ...payload,
+    own_hull: aggregateStationHull(consoleName, state.consoleHull, state.stationSystems),
+  };
 }
 
-/**
- * Merge the contextual tutorial block (issue #916) into the built console
- * JSON as `tutorial`, evaluating this station's TOML-authored overlay
- * definitions (`state.stationTutorials`, from Welcome) against the
- * client-local progress (`state.tutorialProgress`) and the payload itself —
- * so `state`-kind triggers reference exactly the fields the console renders.
- * Cross-cutting like `withStationDamage` above: every console gets it, and
- * a station that authored no overlays gets `tutorial: null`. `consoleName`
- * also scopes every progress lookup (`<station>/<id>` keys — see
- * gui/tutorial-state.js), so stations never share dismissal state.
- */
 /**
  * Where each human-seeking system is hosted right now, keyed by system id
  * (issue #984, pasm decision `console-complexity-human-seeking-systems`).
@@ -2592,82 +2572,79 @@ export function soughtSystemHosts(state) {
  *
  * @param {string} consoleName  station id
  * @param {object} state  simState
- * @param {string} json  the console payload built so far
- * @returns {string} json, with `hosted_systems` and any visiting views
+ * @param {object} payload  the console payload built so far
+ * @returns {object} payload, with `hosted_systems` and any visiting views
  */
-export function withVisitingSystems(consoleName, state, json) {
-  try {
-    const hosts = soughtSystemHosts(state);
-    const authored = state.stationSystems?.[consoleName] || [];
-    const kept = authored.filter(id => !(id in hosts) || hosts[id] === consoleName);
-    // Sorted so two clients with the same state produce the same payload
-    // regardless of blackboard key order.
-    //
-    // A Command system whose directed Station is human-held is excluded
-    // outright (never folded into a host's `systems` map) — the same "hide
-    // when there is nothing to direct" rule `gui/hero-bar.js`'s
-    // `commandStationDirectable` applies to the tab, applied here so the
-    // Command console can never be opened by id through a visited payload
-    // either. Any other visiting system (no `directed_station_ai` field on
-    // its board) is untouched.
-    const boards = state.blackboards || {};
-    const visiting = Object.keys(hosts)
-      .filter(id => hosts[id] === consoleName && !authored.includes(id))
-      .filter(id => {
-        const board = boards[id];
-        const isCommandBoard = board && typeof board.directed_station_ai === 'boolean';
-        return !isCommandBoard || isCommandBoardDirectable(board);
-      })
-      .sort();
-    const obj = JSON.parse(json);
-    obj.hosted_systems = kept.concat(visiting);
-    if (visiting.length > 0) {
-      const systems = obj.systems || {};
-      const systemFamilies = obj.system_families || projectSystemFamilies(authored, state);
-      // A flat payload has no keyed owned views yet. Once a visitor adds the
-      // keyed shape, mirror that original flat view under the actual authored
-      // ids first so metadata-driven readers do not lose the owning family.
-      if (!obj.systems) {
-        const ownedView = { ...obj };
-        for (const id of authored) {
-          if (systemFamilies[id]) systems[id] = ownedView;
-        }
+export function withVisitingSystems(consoleName, state, payload) {
+  const hosts = soughtSystemHosts(state);
+  const authored = state.stationSystems?.[consoleName] || [];
+  const kept = authored.filter(id => !(id in hosts) || hosts[id] === consoleName);
+  // Sorted so two clients with the same state produce the same payload
+  // regardless of blackboard key order.
+  //
+  // A Command system whose directed Station is human-held is excluded
+  // outright (never folded into a host's `systems` map) — the same "hide
+  // when there is nothing to direct" rule `gui/hero-bar.js`'s
+  // `commandStationDirectable` applies to the tab, applied here so the
+  // Command console can never be opened by id through a visited payload
+  // either. Any other visiting system (no `directed_station_ai` field on
+  // its board) is untouched.
+  const boards = state.blackboards || {};
+  const visiting = Object.keys(hosts)
+    .filter(id => hosts[id] === consoleName && !authored.includes(id))
+    .filter(id => {
+      const board = boards[id];
+      const isCommandBoard = board && typeof board.directed_station_ai === 'boolean';
+      return !isCommandBoard || isCommandBoardDirectable(board);
+    })
+    .sort();
+  const obj = { ...payload };
+  obj.hosted_systems = kept.concat(visiting);
+  if (visiting.length > 0) {
+    const systems = { ...obj.systems };
+    const systemFamilies = { ...(obj.system_families || projectSystemFamilies(authored, state)) };
+    // A flat payload has no keyed owned views yet. Once a visitor adds the
+    // keyed shape, mirror that original flat view under the actual authored
+    // ids first so metadata-driven readers do not lose the owning family.
+    if (!obj.systems) {
+      const ownedView = { ...obj, system_families: systemFamilies };
+      for (const id of authored) {
+        if (systemFamilies[id]) systems[id] = ownedView;
       }
-      for (const id of visiting) {
-        const family = consoleForSystemId(id, state.systemConsoleFamilies);
-        const view = buildFamilyConsoleView(family, state, [id]);
-        if (view) {
-          systems[id] = view;
-          systemFamilies[id] = family;
-        }
-      }
-      obj.systems = systems;
-      obj.system_families = systemFamilies;
     }
-    return JSON.stringify(obj);
-  } catch (_) {
-    return json;
+    for (const id of visiting) {
+      const family = consoleForSystemId(id, state.systemConsoleFamilies);
+      const view = buildFamilyConsoleView(family, state, [id]);
+      if (view) {
+        systems[id] = view;
+        systemFamilies[id] = family;
+      }
+    }
+    obj.systems = systems;
+    obj.system_families = systemFamilies;
   }
+  return obj;
 }
 
-export function withTutorialOverlay(consoleName, state, json) {
-  try {
-    // v2's station-only persistence may be safely carried to the first hull
-    // seen after upgrade; do it before reading overlay eligibility.
-    const storage = typeof localStorage === 'undefined' ? null : localStorage;
-    migrateTutorialProgressForHull(state, storage);
-    const obj = JSON.parse(json);
-    obj.tutorial = buildTutorialState(
+/**
+ * Add this Station's tutorial, evaluated against the assembled view and
+ * client-local progress. No eligible overlay yields `tutorial: null`.
+ * Progress keys are scoped by hull and Station (gui/tutorial-state.js).
+ * @param {string} consoleName Station id
+ * @param {object} state simState
+ * @param {object} payload the console payload built so far
+ * @returns {object} shallow copy with tutorial presentation
+ */
+export function withTutorialOverlay(consoleName, state, payload) {
+  return { ...payload,
+    tutorial: buildTutorialState(
       (state.stationTutorials || {})[consoleName] || [],
       state.tutorialProgress,
-      obj,
+      payload,
       state.hullId,
       consoleName,
-    );
-    return JSON.stringify(obj);
-  } catch (_) {
-    return json;
-  }
+    ),
+  };
 }
 
 /**
@@ -2675,89 +2652,84 @@ export function withTutorialOverlay(consoleName, state, json) {
  * payload. The iframe remains the authored interface; console-core renders one
  * shared status banner from this metadata without station-specific clones.
  */
-export function withGmTakeover(consoleName, state, json) {
-  try {
-    const obj = JSON.parse(json);
-    obj.gm_takeover = (state.stationPuppets || {})[consoleName] || null;
-    return JSON.stringify(obj);
-  } catch (_) {
-    return json;
+export function withGmTakeover(consoleName, state, payload) {
+  return { ...payload, gm_takeover: (state.stationPuppets || {})[consoleName] || null };
+}
+
+function buildConsoleViewInner(consoleName, state) {
+  // Post issue #618: `consoleName` is a lowercase station id (from each
+  // per-console iframe's `initConsole({ name: '...' })` and from
+  // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
+  // Console enum names.
+  //
+  // Family-span rule (issue #825): a station whose TOML-owned fine systems
+  // span more than one console family is a system-composed console and gets
+  // the generic system-id-keyed payload. This is what lets a TOML move a
+  // system between stations without any change here — no per-hull composite
+  // builders remain. Single-family stations (every battleship station) keep
+  // their flat plain-builder payloads.
+  // AUTHORED ownership, deliberately not the seek-adjusted list (issue
+  // #984): this decides the payload's SHAPE, and a console whose shape
+  // changed under it mid-round would have to re-render as a different
+  // console. A sought system arrives as `systems[<id>]` on whichever shape
+  // the station already has — see `withVisitingSystems`.
+  const owned = state.stationSystems?.[consoleName];
+  if (owned) {
+    const families = [...new Set(
+      owned
+        .map(id => consoleForSystemId(id, state.systemConsoleFamilies))
+        .filter(f => f !== null),
+    )];
+    if (families.length > 1) {
+      return buildSystemStationConsoleState(consoleName, state);
+    }
+    // Single-family station: dispatch by the family it OWNS, not by its
+    // station-id string (issue #925). On the battleship every single-family
+    // station id equals its family name, so this is identical to the switch
+    // below — but an NPC hull can name the seat anything (e.g. `engineering`
+    // owning only the `power` family), and keying on the owned family gives
+    // it the correct flat builder instead of the `default: '{}'` blank that a
+    // station-id mismatch used to produce.
+    if (families.length === 1) {
+      const view = buildFamilyConsoleView(families[0], state, owned);
+      if (view) {
+        view.system_ids = [...owned];
+        view.system_families = projectSystemFamilies(owned, state);
+        return view;
+      }
+    }
   }
+  // Before Welcome there is neither mounted topology nor authoritative
+  // metadata to select a builder. Returning an empty payload makes that boot
+  // boundary explicit instead of reviving a station-name spelling switch.
+  return {};
+}
+
+/**
+ * Build a complete Station payload as an object. Nested simulation data is read-only.
+ * @param {string} consoleName Station id
+ * @param {object} state simState
+ * @returns {object} completed view before JSON publication
+ */
+export function buildConsoleView(consoleName, state) {
+  let view = buildConsoleViewInner(consoleName, state);
+  // Tutorials must see visiting Systems, advice and the Station's damage projection.
+  view = withVisitingSystems(consoleName, state, view);
+  view = withCommandAdvice(consoleName, state, view);
+  view = withStationDamage(consoleName, state, view);
+  view = withTutorialOverlay(consoleName, state, view);
+  return withGmTakeover(consoleName, state, view);
 }
 
 if (typeof window !== 'undefined') {
-  // Station labels for the inline client.html script (lobby chips, console
-  // title) — the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
   window.stationDisplayName = stationDisplayName;
   window.buildConsoleState = function buildConsoleState(consoleName, state) {
-    const inner = buildConsoleStateInner(consoleName, state);
-    // Visiting systems are merged BEFORE the tutorial pass, so a station's
-    // authored `state`-kind triggers can reference a sought system's view the
-    // same way they reference an owned one.
-    return withGmTakeover(
-      consoleName,
-      state,
-      withTutorialOverlay(
-        consoleName,
-        state,
-        withStationDamage(
-          consoleName,
-          state,
-          withCommandAdvice(
-            consoleName,
-            state,
-            withVisitingSystems(consoleName, state, inner),
-          ),
-        ),
-      ),
-    );
+    // Accessing localStorage itself can throw in privacy mode. Its read/write
+    // helpers already handle unavailable storage; object construction stays visible.
+    let storage = null;
+    try { storage = globalThis.localStorage ?? null; } catch (_) { /* best-effort persistence */ }
+    migrateTutorialProgressForHull(state, storage);
+    return JSON.stringify(buildConsoleView(consoleName, state));
   };
-  window.buildConsoleStateInner = function buildConsoleStateInner(consoleName, state) {
-    // Post issue #618: `consoleName` is a lowercase station id (from each
-    // per-console iframe's `initConsole({ name: '...' })` and from
-    // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
-    // Console enum names.
-    //
-    // Family-span rule (issue #825): a station whose TOML-owned fine systems
-    // span more than one console family is a system-composed console and gets
-    // the generic system-id-keyed payload. This is what lets a TOML move a
-    // system between stations without any change here — no per-hull composite
-    // builders remain. Single-family stations (every battleship station) keep
-    // their flat plain-builder payloads.
-    // AUTHORED ownership, deliberately not the seek-adjusted list (issue
-    // #984): this decides the payload's SHAPE, and a console whose shape
-    // changed under it mid-round would have to re-render as a different
-    // console. A sought system arrives as `systems[<id>]` on whichever shape
-    // the station already has — see `withVisitingSystems`.
-    const owned = state.stationSystems?.[consoleName];
-    if (owned) {
-      const families = [...new Set(
-        owned
-          .map(id => consoleForSystemId(id, state.systemConsoleFamilies))
-          .filter(f => f !== null),
-      )];
-      if (families.length > 1) {
-        return buildSystemStationConsoleState(consoleName, state);
-      }
-      // Single-family station: dispatch by the family it OWNS, not by its
-      // station-id string (issue #925). On the battleship every single-family
-      // station id equals its family name, so this is identical to the switch
-      // below — but an NPC hull can name the seat anything (e.g. `engineering`
-      // owning only the `power` family), and keying on the owned family gives
-      // it the correct flat builder instead of the `default: '{}'` blank that a
-      // station-id mismatch used to produce.
-      if (families.length === 1) {
-        const view = buildFamilyConsoleView(families[0], state, owned);
-        if (view) {
-          view.system_ids = [...owned];
-          view.system_families = projectSystemFamilies(owned, state);
-          return JSON.stringify(view);
-        }
-      }
-    }
-    // Before Welcome there is neither mounted topology nor authoritative
-    // metadata to select a builder. Returning an empty payload makes that boot
-    // boundary explicit instead of reviving a station-name spelling switch.
-    return '{}';
-  };
+  window.buildConsoleStateInner = (consoleName, state) => JSON.stringify(buildConsoleViewInner(consoleName, state));
 }

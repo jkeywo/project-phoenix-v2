@@ -13,6 +13,8 @@
  * patch a waypoint or compliance row locally.
  */
 
+import { defineStationAction, createCorrelatedActionSender, keyboard as key, button, axis } from './action-support.js';
+
 import { ACTION_FEEDBACK_STATE } from '../action-feedback.js';
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
@@ -46,26 +48,9 @@ export const NAVIGATION_MAP_PRESENTATION_ACTION_IDS = Object.freeze([
   NAVIGATION_ZOOM_OUT_ACTION_ID,
 ]);
 
-const key = (code, modifiers = {}) => Object.freeze({
-  type: 'keyboard', code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
-  ...modifiers,
-});
-const button = (control) => Object.freeze({ type: 'gamepad', input: 'button', control });
-const axis = (control, direction) => Object.freeze({
-  type: 'gamepad', input: 'axis', control, direction, threshold: 0.5,
-});
-
-function action(
-  id, label, keyboard, gamepad, feedback = 'authoritative', contexts = NAVIGATION_ACTION_CONTEXTS,
-) {
-  return Object.freeze({
-    id,
-    contexts,
-    labelId: `semantic_action.navigation.${label}.label`,
-    accessibilityLabelId: `semantic_action.navigation.${label}.accessibility`,
-    ...(feedback === 'local' ? { feedback: 'local' } : { authoritativeFeedback: true }),
-    bindings: Object.freeze([keyboard, gamepad]),
-  });
+function action(id, label, keyboard, gamepad, feedback = 'authoritative', contexts = NAVIGATION_ACTION_CONTEXTS) {
+  return defineStationAction({ id, contexts, labelKey: `navigation.${label}`,
+    bindings: [keyboard, gamepad], feedback });
 }
 
 // Navigation is embedded inside real Captain and Comms documents.  The parent
@@ -129,11 +114,6 @@ export function civilianOrderActionArgs(target, order) {
   return null;
 }
 
-function correlatedPayload(actionId, correlation, inputMs, payload) {
-  if (typeof correlation !== 'string' || !correlation) return null;
-  return { ...payload, correlation, semantic_action: actionId, __input_ms: inputMs };
-}
-
 function finitePosition(value) {
   return value && Number.isFinite(value.x) && Number.isFinite(value.z)
     ? { x: value.x, z: value.z }
@@ -191,12 +171,7 @@ export function registerNavigationActions(registry, options = {}) {
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const supportsChart = options.supportsChart !== false;
   const supportsCivilianOrders = options.supportsCivilianOrders !== false;
-  const send = (actionId, correlation, inputMs, name, payload) => {
-    const correlated = correlatedPayload(actionId, correlation, inputMs, payload);
-    if (!correlated || !sendAction) return false;
-    sendAction(name, correlated);
-    return true;
-  };
+  const send = createCorrelatedActionSender(sendAction);
 
   registry.register(NAVIGATION_ACTIONS[0], ({ actionId, correlation, inputMs } = {}) => {
     const view = navigationActionView(getState());

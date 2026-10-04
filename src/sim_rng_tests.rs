@@ -13,6 +13,47 @@ fn the_same_seed_reproduces_every_stream() {
     assert_eq!(first_draws(12345), first_draws(12345));
 }
 
+/// Recorded before delegating stream-name hashing to vellum_digest. Literal
+/// draws pin the sequence independently of the current selector implementation.
+#[test]
+fn seed_12345_preserves_the_first_three_draws_of_every_stream() {
+    let rng = SimRng::new(12345, SeedSource::Cli);
+    let cases = [
+        (
+            SimStream::CollisionDamage,
+            [782636948, 597468250, 3304661530],
+        ),
+        (
+            SimStream::RegionDamage,
+            [3041862236, 4115658456, 1734996305],
+        ),
+        (SimStream::BeamDamage, [2895433044, 3826621212, 840269932]),
+        (
+            SimStream::TorpedoDamage,
+            [2335396338, 3559883791, 644951919],
+        ),
+        (
+            SimStream::BlasterDamage,
+            [1183665535, 1278718042, 1558032525],
+        ),
+        (
+            SimStream::BeamCycleJitter,
+            [2278826355, 3730868229, 373798339],
+        ),
+        (
+            SimStream::CommsBackfillChoice,
+            [2609058382, 3464922140, 4053235755],
+        ),
+        (SimStream::EntityUuid, [2447351754, 1062639042, 3560280982]),
+    ];
+    assert_eq!(cases.len(), SimStream::ALL.len());
+    for (stream, expected) in cases {
+        let mut generator = rng.stream(stream);
+        let actual = std::array::from_fn::<_, 3, _>(|_| generator.next_u32());
+        assert_eq!(actual, expected, "{stream:?}");
+    }
+}
+
 #[test]
 fn different_seeds_diverge() {
     assert_ne!(first_draws(1), first_draws(2));
@@ -52,9 +93,8 @@ fn a_streams_seed_depends_only_on_its_name_and_the_master_seed() {
 /// A stream's seed is derived from its [`SimStream::name`], so renaming one
 /// re-seeds it: every seed anyone ever recorded stops reproducing the run
 /// it was recorded from, silently, with the report still claiming that
-/// seed. Nothing else in the build notices — a rename compiles, and every
-/// other test here is written against `name()` rather than against a
-/// literal, so it would pass too.
+/// seed. This test pins the names directly; the literal draw regression above
+/// also guards their effect on each sequence.
 ///
 /// If you are here because this test failed: changing a name is allowed,
 /// but it is a deliberate act that invalidates recorded seeds. Update the

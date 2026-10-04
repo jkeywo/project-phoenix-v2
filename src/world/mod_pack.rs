@@ -151,20 +151,7 @@ pub fn is_pack_asset_path(path: &str) -> bool {
 
 /// CRC-32 (IEEE polynomial 0xedb88320) of `bytes`. Mirrors `crc32` in
 /// `editor/mod-pack-export.js`.
-pub fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc: u32 = 0xffff_ffff;
-    for &b in bytes {
-        crc ^= b as u32;
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                0xedb8_8320 ^ (crc >> 1)
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    crc ^ 0xffff_ffff
-}
+pub use vellum_digest::crc32_ieee as crc32;
 
 // ── Store-only ZIP reader ─────────────────────────────────────────────────────
 

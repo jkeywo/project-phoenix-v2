@@ -479,12 +479,7 @@ fn stream_generator(master: u64, stream_name: &str) -> Pcg32 {
 /// names would have to agree in all of those and differ only in the top bit to
 /// collide, which the six pinned names do not.
 fn stream_selector(stream_name: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in stream_name.as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+    vellum_digest::fnv1a(stream_name.as_bytes())
 }
 
 #[cfg(test)]

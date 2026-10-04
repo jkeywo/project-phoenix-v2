@@ -7,8 +7,9 @@ fn request(head: &str) -> http::Request {
 
 #[test]
 fn a_stamp_header_is_read_as_protocol_content_epoch() {
-    let req =
-        request("GET /host/manifest.json HTTP/1.1\r\nx-phoenix-client-stamp: 1/phoenix-base/2\r\n");
+    let req = request(
+        "GET /host/manifest.json HTTP/1.1\r\nx-phoenix-client-stamp: 1/phoenix-base/2\r\n\r\n",
+    );
     assert_eq!(
         client_stamp_from_request(&req),
         Some(DeliveryStamp {
@@ -22,7 +23,7 @@ fn a_stamp_header_is_read_as_protocol_content_epoch() {
 #[test]
 fn query_parameters_are_the_other_accepted_form() {
     let req = request(
-        "GET /host/manifest.json?protocol=1&content_id=phoenix-base&content_epoch=2 HTTP/1.1\r\n",
+        "GET /host/manifest.json?protocol=1&content_id=phoenix-base&content_epoch=2 HTTP/1.1\r\n\r\n",
     );
     assert_eq!(
         client_stamp_from_request(&req),
@@ -38,7 +39,7 @@ fn query_parameters_are_the_other_accepted_form() {
 fn a_header_wins_over_a_query_string_that_disagrees_with_it() {
     let req = request(
         "GET /host/manifest.json?protocol=9&content_id=other&content_epoch=9 HTTP/1.1\r\n\
-             x-phoenix-client-stamp: 1/phoenix-base/2\r\n",
+             x-phoenix-client-stamp: 1/phoenix-base/2\r\n\r\n",
     );
     let stamp = client_stamp_from_request(&req).unwrap();
     assert_eq!(stamp.content_id, "phoenix-base");
@@ -48,14 +49,14 @@ fn a_header_wins_over_a_query_string_that_disagrees_with_it() {
 fn a_malformed_stamp_header_reads_as_unstamped_rather_than_falling_back() {
     let req = request(
         "GET /host/manifest.json?protocol=1&content_id=phoenix-base&content_epoch=2 HTTP/1.1\r\n\
-             x-phoenix-client-stamp: 1/phoenix-base\r\n",
+             x-phoenix-client-stamp: 1/phoenix-base\r\n\r\n",
     );
     assert_eq!(client_stamp_from_request(&req), None);
 }
 
 #[test]
 fn a_request_carrying_neither_form_is_unstamped() {
-    let req = request("GET /host/manifest.json HTTP/1.1\r\n");
+    let req = request("GET /host/manifest.json HTTP/1.1\r\n\r\n");
     assert_eq!(client_stamp_from_request(&req), None);
     assert_eq!(
         stamp::check_client_stamp(
@@ -252,7 +253,7 @@ fn the_join_handshake_parses_the_same_field_the_http_header_carries() {
     assert_eq!(
         parse_stamp_field(field),
         client_stamp_from_request(&request(&format!(
-            "GET /host/manifest.json HTTP/1.1\r\nx-phoenix-client-stamp: {field}\r\n"
+            "GET /host/manifest.json HTTP/1.1\r\nx-phoenix-client-stamp: {field}\r\n\r\n"
         )))
     );
 }

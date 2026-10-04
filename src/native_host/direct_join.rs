@@ -1176,8 +1176,9 @@ impl ConnectionUpgrade for DirectJoinGate {
     fn accept(
         &self,
         mut stream: TcpStream,
-        _req: &Request,
+        req: &Request,
         key: &str,
+        prefetched: Vec<u8>,
     ) -> Result<(), UpgradeRefusal> {
         if !self.record.open.load(Ordering::Relaxed) {
             return Err(refuse(&mut stream, 503, "join-closed", Duration::ZERO));
@@ -1206,14 +1207,23 @@ impl ConnectionUpgrade for DirectJoinGate {
             ));
         }
 
-        let accept_key = tungstenite::handshake::derive_accept_key(key.as_bytes());
-        let head = format!(
-            "HTTP/1.1 101 Switching Protocols\r\n\
-             Upgrade: websocket\r\n\
-             Connection: Upgrade\r\n\
-             Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
-        );
-        if stream.write_all(head.as_bytes()).is_err() || stream.flush().is_err() {
+        // Delivery has validated the request and combined case-insensitive
+        // token headers. Supply the canonical tokens the library expects.
+        let request = tungstenite::http::Request::builder()
+            .method(req.method.as_str())
+            .version(tungstenite::http::Version::HTTP_11)
+            .header("Upgrade", "websocket")
+            .header("Connection", "Upgrade")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", key)
+            .body(());
+        let written = request
+            .map_err(tungstenite::Error::from)
+            .and_then(|request| tungstenite::handshake::server::create_response(&request))
+            .and_then(|response| {
+                tungstenite::handshake::server::write_response(&mut stream, &response)
+            });
+        if written.is_err() || stream.flush().is_err() {
             self.record.admissions.release_socket(source);
             return Err(UpgradeRefusal {
                 status: 500,
@@ -1236,12 +1246,8 @@ impl ConnectionUpgrade for DirectJoinGate {
             });
         }
 
-        // `from_raw_socket`, not `accept`: `delivery::serve` has already read
-        // the request head off this stream (that is how the path and the key
-        // were known at all), so there is no handshake left for `tungstenite`
-        // to read — only the 101 above to write, which is why this module
-        // writes it. The alternative was peeking the socket without consuming
-        // it, which std cannot do portably.
+        // Delivery consumed the handshake, but may also have read the first
+        // protocol bytes. The library takes those bytes along with the socket.
         //
         // With a CONFIG, not `None`: the default is 64 MiB per message and
         // 16 MiB per frame, and those are buffered and decoded BEFORE this
@@ -1251,8 +1257,9 @@ impl ConnectionUpgrade for DirectJoinGate {
         // consulted, once per un-joined slot. Bounded at the wire instead, where
         // a message past the ceiling is a `Capacity` error and ends the
         // connection.
-        let socket = tungstenite::WebSocket::from_raw_socket(
+        let socket = tungstenite::WebSocket::from_partially_read(
             stream,
+            prefetched,
             tungstenite::protocol::Role::Server,
             Some(socket_config(
                 self.record.table.limits.max_relay_frame_bytes,

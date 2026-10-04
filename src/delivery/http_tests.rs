@@ -1,8 +1,64 @@
 use super::*;
 
 #[test]
+fn strict_complete_heads_and_header_duplicates() {
+    for head in [
+        "GET / HTTP/1.1\r\n",
+        "GET / HTTP/2.0\r\n\r\n",
+        "GET / HTTP/1.1\r\nBad Header: x\r\n\r\n",
+        "GET / HTTP/1.1\r\nBroken\r\n\r\n",
+    ] {
+        assert!(parse_request(head).is_none(), "accepted {head:?}");
+    }
+    assert_eq!(
+        parse_request("GET / HTTP/1.0\r\n\r\n").unwrap().version,
+        HttpVersion::Http10
+    );
+    for header in [
+        "Host",
+        "Sec-WebSocket-Key",
+        "Sec-WebSocket-Version",
+        "X-Phoenix-Client-Stamp",
+        "Content-Length",
+    ] {
+        assert!(parse_request(&format!(
+            "GET / HTTP/1.1\r\n{header}: x\r\n{header}: x\r\n\r\n"
+        ))
+        .is_none());
+    }
+    let request = parse_request("GET / HTTP/1.1\r\nConnection: keep-alive\r\nconnection: Upgrade\r\nUpgrade: other\r\nupgrade: WebSocket\r\nX-Test: first\r\nX-Test: second\r\n\r\n").unwrap();
+    assert_eq!(request.header("connection"), Some("keep-alive, Upgrade"));
+    assert_eq!(request.header("upgrade"), Some("other, WebSocket"));
+    assert_eq!(request.header("x-test"), Some("first"));
+}
+
+#[test]
+fn windows_and_encoded_path_escapes_are_refused() {
+    for path in [
+        "/../secret",
+        "/%2e%2e/secret",
+        "/C:/secret",
+        "/C:secret",
+        "/C%3A/secret",
+        "/dir%5c..%5csecret",
+        "/%5c%5cserver/share",
+        "/file%00",
+        "/file%1f",
+        "/file%7f",
+        "/file:stream",
+    ] {
+        let request = parse_request(&format!("GET {path} HTTP/1.1\r\n\r\n")).unwrap();
+        assert!(
+            resolve_static_path(&request.path).is_err(),
+            "accepted {path}"
+        );
+    }
+    assert_eq!(resolve_static_path("/dir/"), Ok("dir/index.html".into()));
+}
+
+#[test]
 fn a_request_line_yields_method_path_and_query() {
-    let r = parse_request("GET /host/manifest.json?protocol=1&content_id=phoenix-base HTTP/1.1\r\nHost: localhost\r\n").unwrap();
+    let r = parse_request("GET /host/manifest.json?protocol=1&content_id=phoenix-base HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
     assert_eq!(r.method, "GET");
     assert_eq!(r.path, "/host/manifest.json");
     assert_eq!(r.query_param("protocol"), Some("1"));
@@ -13,21 +69,21 @@ fn a_request_line_yields_method_path_and_query() {
 
 #[test]
 fn header_names_are_matched_case_insensitively() {
-    let r =
-        parse_request("GET / HTTP/1.1\r\nX-Phoenix-Client-Stamp: 1/phoenix-base/1\r\n").unwrap();
+    let r = parse_request("GET / HTTP/1.1\r\nX-Phoenix-Client-Stamp: 1/phoenix-base/1\r\n\r\n")
+        .unwrap();
     assert_eq!(r.header(CLIENT_STAMP_HEADER), Some("1/phoenix-base/1"));
 }
 
 #[test]
 fn a_malformed_request_line_is_refused_rather_than_guessed_at() {
-    assert!(parse_request("GET\r\n").is_none());
+    assert!(parse_request("GET\r\n\r\n").is_none());
     assert!(parse_request("").is_none());
-    assert!(parse_request("GET /only-two-fields\r\n").is_none());
+    assert!(parse_request("GET /only-two-fields\r\n\r\n").is_none());
 }
 
 #[test]
 fn a_percent_escape_in_the_path_is_decoded_before_the_traversal_guard_runs() {
-    let r = parse_request("GET /%2e%2e/secrets HTTP/1.1\r\n").unwrap();
+    let r = parse_request("GET /%2e%2e/secrets HTTP/1.1\r\n\r\n").unwrap();
     assert_eq!(r.path, "/../secrets");
     assert_eq!(
         resolve_static_path(&r.path).unwrap_err(),

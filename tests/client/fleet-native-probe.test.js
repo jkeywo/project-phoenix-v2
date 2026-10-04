@@ -1,11 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import vm from 'node:vm';
 import { EventEmitter } from 'node:events';
-import { instrumentNativeFleetModule, nativeProbeOutcome, parseNativeProbeArgs, terminateNativeProbe } from '../../scripts/fleet-native-probe.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { instrumentNativeFleetModule, nativeProbeOutcome, parseNativeProbeArgs, terminateNativeProbe, stageNativeProbeBundle } from '../../scripts/fleet-native-probe.mjs';
 
 const args = ['--binary', 'host.exe', '--bundle', 'dist', '--source', '.', '--out', 'run', '--rendezvous', 'http://127.0.0.1:8788', '--origin', 'http://localhost:8080'];
 
 describe('bounded native runtime bootstrap probe', () => {
+  it('stages a self-contained host and client bundle by dereferencing directory links', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phoenix-probe-stage-'));
+    try {
+      const bundle = path.join(root, 'input'), assets = path.join(root, 'external');
+      fs.mkdirSync(path.join(bundle, 'client'), {recursive:true});
+      fs.mkdirSync(path.join(bundle, 'gui'));
+      fs.mkdirSync(assets);
+      fs.writeFileSync(path.join(assets, 'world.toml'), 'world');
+      fs.writeFileSync(path.join(bundle, 'index.html'), 'host');
+      fs.writeFileSync(path.join(bundle, 'client/index.html'), 'client');
+      fs.writeFileSync(path.join(bundle, 'gui/host.js'), 'script');
+      fs.writeFileSync(path.join(bundle, 'phoenix-hash.wasm'), 'wasm');
+      for (const dir of [bundle, path.join(bundle, 'client')]) {
+        fs.symlinkSync(assets, path.join(dir, 'assets'), process.platform === 'win32' ? 'junction' : 'dir');
+      }
+      const staged = path.join(root, 'staged');
+      stageNativeProbeBundle(bundle, staged);
+      fs.writeFileSync(path.join(assets, 'world.toml'), 'changed');
+      for (const name of ['assets', 'client/assets']) {
+        expect(fs.lstatSync(path.join(staged, name)).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(path.join(staged, name, 'world.toml'), 'utf8')).toBe('world');
+      }
+      for (const [name, value] of [['index.html','host'], ['client/index.html','client'], ['gui/host.js','script'], ['phoenix-hash.wasm','wasm']]) {
+        expect(fs.readFileSync(path.join(staged,name),'utf8')).toBe(value);
+      }
+    } finally { fs.rmSync(root, {recursive:true,force:true}); }
+  });
   it('requires concrete inputs and refuses missing, repeated and unbounded options', () => {
     expect(parseNativeProbeArgs(args).seconds).toBe(45);
     for (const extra of [['--seconds', '0'], ['--seconds', '961'], ['--seconds', '1.5'], ['--seconds', 'NaN'], ['--seconds'], ['--extra', 'x'], ['--out', 'other']]) {

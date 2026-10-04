@@ -322,7 +322,7 @@ fn the_stamp_endpoint_publishes_the_hosts_own_stamp() {
     let fx = Fixture::new("stamp", MANIFEST);
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     let r = route(
-        &request("GET /host/stamp.json HTTP/1.1\r\n"),
+        &request("GET /host/stamp.json HTTP/1.1\r\n\r\n"),
         &content,
         &ClientSource::Hosted,
         &HostedDocuments::default(),
@@ -348,7 +348,9 @@ fn native_asset_revision_capability_tracks_the_current_accepted_stack_without_mu
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     let get = |method: &str| {
         route(
-            &request(&format!("{method} /host/asset-revision.json HTTP/1.1\r\n")),
+            &request(&format!(
+                "{method} /host/asset-revision.json HTTP/1.1\r\n\r\n"
+            )),
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
@@ -392,7 +394,7 @@ fn a_matching_client_gets_the_manifest() {
     let fx = Fixture::new("manifest-ok", MANIFEST);
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     let head = format!(
-        "GET /host/manifest.json?{} HTTP/1.1\r\n",
+        "GET /host/manifest.json?{} HTTP/1.1\r\n\r\n",
         matching_stamp_query()
     );
     match route(
@@ -422,7 +424,7 @@ fn a_mismatched_protocol_is_refused_with_a_body_naming_both_sides() {
     let fx = Fixture::new("manifest-protocol", MANIFEST);
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     let head = format!(
-        "GET /host/manifest.json?protocol={}&content_id=phoenix-base&content_epoch=1 HTTP/1.1\r\n",
+        "GET /host/manifest.json?protocol={}&content_id=phoenix-base&content_epoch=1 HTTP/1.1\r\n\r\n",
         PROTOCOL_VERSION + 7
     );
     match route(
@@ -454,7 +456,7 @@ fn an_unstamped_client_is_refused_rather_than_served_the_catalogue() {
     let fx = Fixture::new("manifest-unstamped", MANIFEST);
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     match route(
-        &request("GET /host/manifest.json HTTP/1.1\r\n"),
+        &request("GET /host/manifest.json HTTP/1.1\r\n\r\n"),
         &content,
         &ClientSource::Hosted,
         &HostedDocuments::default(),
@@ -476,7 +478,7 @@ fn a_host_with_no_bundle_serves_no_static_paths() {
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     assert!(matches!(
         route(
-            &request("GET /index.html HTTP/1.1\r\n"),
+            &request("GET /index.html HTTP/1.1\r\n\r\n"),
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
@@ -495,7 +497,7 @@ fn a_bundled_host_routes_a_directory_request_to_its_index() {
     };
     assert_eq!(
         route(
-            &request("GET / HTTP/1.1\r\n"),
+            &request("GET / HTTP/1.1\r\n\r\n"),
             &content,
             &bundled,
             &HostedDocuments::default(),
@@ -525,7 +527,7 @@ fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
 
     assert_eq!(
         route(
-            &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+            &request("GET /client/pane-0.html HTTP/1.1\r\n\r\n"),
             &content,
             &bundled,
             &documents,
@@ -538,7 +540,7 @@ fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
     // Everything else still routes to the bundle, unchanged.
     assert_eq!(
         route(
-            &request("GET /client/index.html HTTP/1.1\r\n"),
+            &request("GET /client/index.html HTTP/1.1\r\n\r\n"),
             &content,
             &bundled,
             &documents,
@@ -552,7 +554,7 @@ fn a_document_the_host_publishes_itself_is_served_ahead_of_the_bundle() {
     documents.withdraw("/client/pane-0.html");
     assert!(matches!(
         route(
-            &request("GET /client/pane-0.html HTTP/1.1\r\n"),
+            &request("GET /client/pane-0.html HTTP/1.1\r\n\r\n"),
             &content,
             &bundled,
             &documents,
@@ -572,7 +574,7 @@ fn retired_workshop_preview_members_never_fall_through_to_bundle_files() {
     documents.publish_bytes(path, vec![1, 2, 3], "model/gltf-binary", true);
     assert!(matches!(
         route(
-            &request(&format!("GET {path} HTTP/1.1\r\n")),
+            &request(&format!("GET {path} HTTP/1.1\r\n\r\n")),
             &content,
             &bundled,
             &documents,
@@ -588,7 +590,7 @@ fn retired_workshop_preview_members_never_fall_through_to_bundle_files() {
     documents.withdraw(path);
     assert!(matches!(
         route(
-            &request(&format!("GET {path} HTTP/1.1\r\n")),
+            &request(&format!("GET {path} HTTP/1.1\r\n\r\n")),
             &content,
             &bundled,
             &documents,
@@ -616,7 +618,7 @@ fn a_hosted_document_is_never_served_to_a_peer_that_is_not_this_machine() {
     let documents = HostedDocuments::default();
     documents.publish("/client/pane-0-abcd.html", "<html>pane</html>".to_string());
 
-    let pane_request = request("GET /client/pane-0-abcd.html HTTP/1.1\r\n");
+    let pane_request = request("GET /client/pane-0-abcd.html HTTP/1.1\r\n\r\n");
     let remote = route(
         &pane_request,
         &content,
@@ -654,7 +656,7 @@ fn a_hosted_document_is_never_served_to_a_peer_that_is_not_this_machine() {
     // The LAN keeps everything it is meant to have.
     for path in [STAMP_PATH, "/client/index.html"] {
         let r = route(
-            &request(&format!("GET {path} HTTP/1.1\r\n")),
+            &request(&format!("GET {path} HTTP/1.1\r\n\r\n")),
             &content,
             &bundled,
             &documents,
@@ -678,7 +680,7 @@ fn test_frames_are_private_mutable_and_retired_routes_never_fall_through() {
         "/workshop-test-frame/nonce/presentation.json",
     ] {
         documents.publish_bytes(path, vec![1, 2], "application/octet-stream", false);
-        let req = request(&format!("GET {path} HTTP/1.1\r\n"));
+        let req = request(&format!("GET {path} HTTP/1.1\r\n\r\n"));
         assert!(matches!(
             route(&req, &content, &bundled, &documents, PeerOrigin::Loopback),
             Route::Hosted { .. }
@@ -749,7 +751,7 @@ fn the_version_pin_endpoints_cannot_be_shadowed_by_a_published_document() {
         assert!(
             matches!(
                 route(
-                    &request(&format!("GET {path} HTTP/1.1\r\n")),
+                    &request(&format!("GET {path} HTTP/1.1\r\n\r\n")),
                     &content,
                     &ClientSource::Hosted,
                     &documents,
@@ -771,7 +773,7 @@ fn a_traversal_attempt_never_becomes_a_static_route() {
     };
     assert!(matches!(
         route(
-            &request("GET /../../etc/passwd HTTP/1.1\r\n"),
+            &request("GET /../../etc/passwd HTTP/1.1\r\n\r\n"),
             &content,
             &bundled,
             &HostedDocuments::default(),
@@ -787,7 +789,7 @@ fn a_write_method_is_refused_before_anything_else_is_considered() {
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     assert_eq!(
         route(
-            &request("POST /host/manifest.json HTTP/1.1\r\n"),
+            &request("POST /host/manifest.json HTTP/1.1\r\n\r\n"),
             &content,
             &ClientSource::Hosted,
             &HostedDocuments::default(),
@@ -802,7 +804,7 @@ fn the_stamp_header_is_accepted_where_the_query_string_would_be() {
     let fx = Fixture::new("header-stamp", MANIFEST);
     let content = load_content(&fx.path(), "assets/scenarios.toml").unwrap();
     let head = format!(
-            "GET /host/manifest.json HTTP/1.1\r\n{CLIENT_STAMP_HEADER}: {PROTOCOL_VERSION}/phoenix-base/1\r\n"
+            "GET /host/manifest.json HTTP/1.1\r\n{CLIENT_STAMP_HEADER}: {PROTOCOL_VERSION}/phoenix-base/1\r\n\r\n"
         );
     match route(
         &request(&head),
@@ -816,8 +818,179 @@ fn the_stamp_header_is_accepted_where_the_query_string_would_be() {
     }
 }
 
+fn socket_pair() -> (TcpStream, TcpStream) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    (client, listener.accept().unwrap().0)
+}
+
+fn read_bytes(bytes: &[u8]) -> Option<(Request, Vec<u8>)> {
+    let (mut client, mut server) = socket_pair();
+    client.write_all(bytes).unwrap();
+    client.shutdown(std::net::Shutdown::Write).unwrap();
+    read_request(&mut server, std::time::Duration::from_secs(1))
+}
+
 #[test]
-fn a_head_ending_is_found_at_the_blank_line() {
-    assert_eq!(find_head_end(b"GET / HTTP/1.1\r\n\r\n"), Some(16));
-    assert_eq!(find_head_end(b"GET / HTTP/1.1\r\n"), None);
+fn incremental_heads_are_bounded_and_preserve_protocol_bytes() {
+    let (mut client, mut server) = socket_pair();
+    let reader =
+        std::thread::spawn(move || read_request(&mut server, std::time::Duration::from_secs(1)));
+    client.write_all(b"GET / HTTP/1.1\r\nHo").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    client.write_all(b"st: localhost\r\n\r\nFRAME").unwrap();
+    let (request, prefetched) = reader.join().unwrap().unwrap();
+    assert_eq!(request.path, "/");
+    assert_eq!(prefetched, b"FRAME");
+    let prefix = "GET / HTTP/1.1\r\nX-Padding: ";
+    for length in [MAX_HEAD_BYTES, MAX_HEAD_BYTES + 1] {
+        let head = format!("{prefix}{}\r\n\r\n", "x".repeat(length - prefix.len() - 4));
+        assert_eq!(head.len(), length);
+        assert_eq!(
+            read_bytes(head.as_bytes()).is_some(),
+            length == MAX_HEAD_BYTES
+        );
+    }
+    for count in [128, 129] {
+        let head = format!("GET / HTTP/1.1\r\n{}\r\n", "X-Test: x\r\n".repeat(count));
+        assert_eq!(read_bytes(head.as_bytes()).is_some(), count == 128);
+    }
+    for head in [
+        b"GET / HTTP/1.1\r\n".as_slice(),
+        b"GET / HTTP/1.9\r\n\r\n",
+        b"GET / HTTP/1.1\r\nBad Header: x\r\n\r\n",
+    ] {
+        assert!(read_bytes(head).is_none());
+    }
+}
+
+#[test]
+fn fragmented_reads_do_not_renew_the_total_deadline() {
+    let (mut client, mut server) = socket_pair();
+    let started = std::time::Instant::now();
+    let reader = std::thread::spawn(move || {
+        read_request(&mut server, std::time::Duration::from_millis(150))
+    });
+    for _ in 0..8 {
+        let _ = client.write_all(b"G");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert!(reader.join().unwrap().is_none());
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+}
+
+#[cfg(windows)]
+fn directory_link(target: &Path, link: &Path) {
+    assert!(std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .unwrap()
+        .status
+        .success());
+}
+
+#[cfg(unix)]
+fn directory_link(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[test]
+fn filesystem_reads_contain_links_component_wise_and_return_404() {
+    let fixture = Fixture::new("containment", MANIFEST);
+    let bundle = fixture.dir.join("bundle");
+    let sibling = fixture.dir.join("bundle-secret");
+    std::fs::create_dir_all(bundle.join("inside")).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(bundle.join("index.html"), b"host").unwrap();
+    std::fs::write(bundle.join("inside/index.html"), b"internal").unwrap();
+    std::fs::write(sibling.join("index.html"), b"SECRET OUTSIDE BUNDLE").unwrap();
+    directory_link(&bundle.join("inside"), &bundle.join("internal"));
+    directory_link(&sibling, &bundle.join("external"));
+    let root = std::fs::canonicalize(&bundle).unwrap();
+    assert_eq!(read_static_file(&root, "index.html").unwrap(), b"host");
+    assert_eq!(
+        read_static_file(&root, "internal/index.html").unwrap(),
+        b"internal"
+    );
+    assert!(read_static_file(&root, "external/index.html").is_none());
+    assert!(read_static_file(&root, "../bundle-secret/index.html").is_none());
+    let state = ServerState {
+        content: load_content(&fixture.path(), "assets/scenarios.toml").unwrap(),
+        client: ClientSource::Bundled {
+            dir: bundle.to_string_lossy().into_owned(),
+        },
+        client_root: Some(root),
+        documents: HostedDocuments::default(),
+        upgrade: std::sync::RwLock::new(None),
+    };
+    for (target, status, expected) in [
+        ("/ HTTP/1.1", 200, "host"),
+        ("/ HTTP/1.0", 200, "host"),
+        ("/internal/ HTTP/1.1", 200, "internal"),
+        ("/external/ HTTP/1.1", 404, ""),
+        ("/%2e%2e/bundle-secret/ HTTP/1.1", 404, ""),
+        ("/C%3A/secret HTTP/1.1", 404, ""),
+        ("/ HTTP/2.0", 400, ""),
+        ("/ HTTP/1.1\r\nBroken", 400, ""),
+        ("/ HTTP/1.1\r\nHost: x\r\nHost: x", 400, ""),
+    ] {
+        let (mut client, server) = socket_pair();
+        let worker = std::thread::scope(|scope| {
+            scope.spawn(|| handle_connection(server, &state, &|_| {}));
+            client
+                .write_all(format!("GET {target}\r\n\r\n").as_bytes())
+                .unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            response
+        });
+        assert!(
+            worker.starts_with(&format!("HTTP/1.1 {status}")),
+            "{worker}"
+        );
+        assert!(worker.ends_with(expected));
+        assert!(!worker.contains("SECRET OUTSIDE BUNDLE"));
+    }
+}
+
+#[test]
+fn upgrade_requires_http11_and_a_valid_16_byte_nonce() {
+    let head = upgrade_head("/v1/join", WS_LINES);
+    let req = request(&head.replace("HTTP/1.1", "HTTP/1.0"));
+    assert_eq!(
+        websocket_upgrade(&req, true),
+        UpgradeVerdict::Refused {
+            status: 400,
+            reason: "unsupported-http-version"
+        }
+    );
+    for key in [
+        "!!!!!!!!!!!!!!!!!!!!!!!!",
+        "YWJj",
+        "AAAAAAAAAAAAAAAAAAAAAA=A",
+        "AAAAAAAAAAAAAAAAAAAAAAA=",
+    ] {
+        let req = request(&head.replace("dGhlIHNhbXBsZSBub25jZQ==", key));
+        assert_eq!(
+            websocket_upgrade(&req, true),
+            UpgradeVerdict::Refused {
+                status: 400,
+                reason: "missing-websocket-key"
+            }
+        );
+    }
+    let req = request(
+        &head
+            .replace("Upgrade: websocket", "Upgrade: other\r\nUpgrade: WebSocket")
+            .replace(
+                "Connection: Upgrade",
+                "Connection: keep-alive\r\nConnection: uPgRaDe",
+            ),
+    );
+    assert!(matches!(
+        websocket_upgrade(&req, true),
+        UpgradeVerdict::WebSocket { .. }
+    ));
 }

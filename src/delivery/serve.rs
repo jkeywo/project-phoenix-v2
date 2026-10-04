@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use crate::core::codec;
 use crate::delivery::args::{ClientSource, HostArgs};
-use crate::delivery::http::{self, CachePolicy, PathRefusal, Request, MANIFEST_PATH, STAMP_PATH};
+use crate::delivery::http::{
+    self, CachePolicy, HttpVersion, PathRefusal, Request, MANIFEST_PATH, STAMP_PATH,
+};
 use crate::delivery::stamp::{check_bundle_content, check_client_stamp, DeliveryStamp};
 use crate::delivery::{client_stamp_from_request, DeliveryManifest, DeliveryRefusal};
 use crate::world::manifest::{
@@ -544,12 +546,13 @@ pub enum UpgradeVerdict {
 /// the endpoint and is told so instead of being handed a 404 from the static
 /// tree.
 ///
-/// The positive answer needs all four of RFC 6455's request conditions — GET,
+/// The positive answer requires HTTP/1.1 and RFC 6455's request conditions — GET,
 /// `Upgrade: websocket`, `Connection: upgrade`, `Sec-WebSocket-Version: 13` —
 /// plus a key. Missing any of them on a claimed path is a **clean 400**, never
 /// a socket handed to a handshake that will then sit waiting for bytes that
 /// will never come.
 pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
+    use base64::Engine;
     let header_has = |name: &str, token: &str| {
         req.header(name)
             .is_some_and(|v| v.to_ascii_lowercase().split(',').any(|p| p.trim() == token))
@@ -571,6 +574,12 @@ pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
             reason: "upgrade-must-be-get",
         };
     }
+    if req.version != HttpVersion::Http11 {
+        return UpgradeVerdict::Refused {
+            status: 400,
+            reason: "unsupported-http-version",
+        };
+    }
     if !header_has("connection", "upgrade") {
         return UpgradeVerdict::Refused {
             status: 400,
@@ -583,11 +592,13 @@ pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
             reason: "unsupported-websocket-version",
         };
     }
-    // A base64 16-byte nonce is 24 characters. Checked for shape rather than
-    // decoded: this module owns no base64, and a key of the wrong length is the
-    // only malformation that reaches a handshake as an ambiguous stall.
+    // RFC 6455 requires a base64-encoded 16-byte nonce, not just 24 characters.
     match req.header("sec-websocket-key").map(str::trim) {
-        Some(key) if key.len() == 24 && !key.contains(char::is_whitespace) => {
+        Some(key)
+            if base64::engine::general_purpose::STANDARD
+                .decode(key)
+                .is_ok_and(|nonce| nonce.len() == 16) =>
+        {
             UpgradeVerdict::WebSocket {
                 key: key.to_string(),
             }
@@ -607,9 +618,9 @@ pub fn websocket_upgrade(req: &Request, claimed: bool) -> UpgradeVerdict {
 /// module owns the door — detection, the refusal answers, the timeouts — and
 /// [`crate::native_host::direct_join`] owns what is behind it.
 ///
-/// An implementation is handed a stream on which **nothing but the request head
-/// has been read**, so it may write the `101` itself and then wrap the raw
-/// socket. It owns the connection from that moment: the serving loop neither
+/// An implementation receives the stream and any bytes read beyond the request
+/// head. It writes the `101` and supplies those bytes to its protocol reader.
+/// It owns the connection from that moment: the serving loop neither
 /// writes to it nor closes it again.
 pub trait ConnectionUpgrade: Send + Sync + 'static {
     /// Whether this handler serves `path`. Consulted before anything else, so a
@@ -623,7 +634,13 @@ pub trait ConnectionUpgrade: Send + Sync + 'static {
     /// stream by value, so a refusal is the handler's to WRITE as well as to
     /// decide. `Err` therefore reports a refusal that has already been answered
     /// (or a client that had already gone); the serving loop only logs it.
-    fn accept(&self, stream: TcpStream, req: &Request, key: &str) -> Result<(), UpgradeRefusal>;
+    fn accept(
+        &self,
+        stream: TcpStream,
+        req: &Request,
+        key: &str,
+        prefetched: Vec<u8>,
+    ) -> Result<(), UpgradeRefusal>;
 }
 
 /// A handler's refusal of a connection it was offered, for the operator log.
@@ -686,12 +703,14 @@ impl HostServer {
         let client_root = match &args.client {
             ClientSource::Hosted => None,
             ClientSource::Bundled { dir } => {
-                let root = PathBuf::from(dir);
+                let root = std::fs::canonicalize(dir)
+                    .map_err(|e| format!("cannot resolve --client-dir {dir:?}: {e}"))?;
                 if !root.is_dir() {
                     return Err(format!("--client-dir {dir:?} is not a directory"));
                 }
                 let bundle_manifest = root.join(BUNDLE_MANIFEST_REL);
-                let bundle_toml = std::fs::read_to_string(&bundle_manifest).ok();
+                let bundle_toml = read_static_file(&root, BUNDLE_MANIFEST_REL)
+                    .and_then(|bytes| String::from_utf8(bytes).ok());
                 let display = bundle_manifest.display().to_string();
                 match check_bundle_content(
                     &content.manifest.stamp,
@@ -914,9 +933,8 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
     // A caller gets [`HEAD_READ_TIMEOUT`] to finish its head and no longer. The
     // timeout is CLEARED again before the stream is handed to an upgrade
     // handler, which sets its own pumping cadence (issue #1353).
-    let _ = stream.set_read_timeout(Some(HEAD_READ_TIMEOUT));
-    let head = match read_head(&mut stream) {
-        Some(head) => head,
+    let (req, prefetched) = match read_request(&mut stream, HEAD_READ_TIMEOUT) {
+        Some(request) => request,
         None => {
             write_all(
                 &mut stream,
@@ -932,21 +950,6 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
             );
             return;
         }
-    };
-    let Some(req) = http::parse_request(&head) else {
-        write_all(
-            &mut stream,
-            &http::response_head(
-                400,
-                "Bad Request",
-                "text/plain; charset=utf-8",
-                CachePolicy::Revalidate,
-                0,
-                &[],
-            ),
-            &[],
-        );
-        return;
     };
     let head_only = req.method == "HEAD";
 
@@ -969,7 +972,7 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
             let outcome = handler
                 .as_ref()
                 .expect("claimed implies a handler")
-                .accept(stream, &req, &key);
+                .accept(stream, &req, &key, prefetched);
             match outcome {
                 Ok(()) => on_event(HostEvent::Served {
                     method: req.method.clone(),
@@ -1098,12 +1101,11 @@ fn handle_connection<F: Fn(HostEvent)>(mut stream: TcpStream, state: &ServerStat
         }
         Route::Static { rel_path } => {
             let root = state.client_root.as_ref();
-            let full = root.map(|r| r.join(&rel_path));
             let overlay = crate::entities::config_cache::mod_pack_asset(&rel_path);
             let bytes = overlay
                 .as_ref()
                 .map(|bytes| bytes.to_vec())
-                .or_else(|| full.as_ref().and_then(|p| std::fs::read(p).ok()));
+                .or_else(|| root.and_then(|r| read_static_file(r, &rel_path)));
             match bytes {
                 Some(bytes) => {
                     let head = http::response_head(
@@ -1186,27 +1188,55 @@ fn write_all(stream: &mut TcpStream, head: &str, body: &[u8]) {
     let _ = stream.flush();
 }
 
-/// Read up to the blank line that ends an HTTP head, or give up.
-fn read_head(stream: &mut TcpStream) -> Option<String> {
+/// Read only files whose resolved location remains beneath the canonical root.
+/// The operator owns the bundle; concurrent local filesystem replacement is
+/// outside this request-driven containment contract.
+fn read_static_file(root: &Path, relative: &str) -> Option<Vec<u8>> {
+    if !Path::new(relative)
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    let full = std::fs::canonicalize(root.join(relative)).ok()?;
+    if !full.starts_with(root) {
+        return None;
+    }
+    std::fs::read(full).ok()
+}
+
+/// Parse incrementally under a total deadline and retain upgraded-protocol bytes.
+fn read_request(
+    stream: &mut TcpStream,
+    timeout: std::time::Duration,
+) -> Option<(Request, Vec<u8>)> {
+    let deadline = std::time::Instant::now().checked_add(timeout)?;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 1024];
     loop {
+        let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+        if remaining.is_zero() {
+            return None;
+        }
+        stream.set_read_timeout(Some(remaining)).ok()?;
         let n = stream.read(&mut chunk).ok()?;
         if n == 0 {
             return None;
         }
         buf.extend_from_slice(&chunk[..n]);
-        if let Some(end) = find_head_end(&buf) {
-            return String::from_utf8(buf[..end].to_vec()).ok();
+        match http::parse_request_bytes(&buf).ok()? {
+            httparse::Status::Complete((end, request)) => {
+                if end > MAX_HEAD_BYTES || std::time::Instant::now() >= deadline {
+                    return None;
+                }
+                return Some((request, buf.split_off(end)));
+            }
+            httparse::Status::Partial => {}
         }
-        if buf.len() > MAX_HEAD_BYTES {
+        if buf.len() >= MAX_HEAD_BYTES {
             return None;
         }
     }
-}
-
-fn find_head_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 2)
 }
 
 #[cfg(test)]

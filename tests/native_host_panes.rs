@@ -593,7 +593,7 @@ fn a_panes_identity_is_in_its_url_and_never_in_the_body_the_host_serves() {
     let client = ClientSource::Bundled {
         dir: "dist".to_string(),
     };
-    let req = parse_request(&format!("GET {path} HTTP/1.1\r\n")).unwrap();
+    let req = parse_request(&format!("GET {path} HTTP/1.1\r\n\r\n")).unwrap();
     assert!(
         matches!(
             route(&req, &content, &client, &documents, PeerOrigin::Loopback),

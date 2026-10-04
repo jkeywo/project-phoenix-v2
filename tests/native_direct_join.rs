@@ -11,8 +11,8 @@
 //! test could only assert against a live worker is asserted here on every run:
 //!
 //!   * `tungstenite`'s server-side framing against its own client, over the
-//!     handshake `delivery::serve` performs by hand (it has already read the
-//!     request head, so there is none left for `tungstenite` to read);
+//!     handshake constructed through Tungstenite after delivery parses the
+//!     head, with prefetched protocol bytes handed to the WebSocket reader;
 //!   * the frame vocabulary interoperating end to end rather than matching as
 //!     text (`tests/native_relay_protocol.rs` is the text check);
 //!   * the join validation a phone actually meets — code, protocol version,
@@ -1697,4 +1697,46 @@ fn host_memory_stays_bounded_under_a_stalled_peer() {
     );
     println!("stalled-peer buffer peaked at {peak} bytes (ceiling {hard})");
     drop(joiner);
+}
+
+#[test]
+fn a_prefetched_masked_join_frame_reaches_the_join_protocol() {
+    let host = Host::start();
+    let frame = RendezvousFrame {
+        code: Some(CodeField::Typed(host.code.full.clone())),
+        ..RendezvousFrame::new("join")
+    };
+    let mut encoder = tungstenite::WebSocket::from_raw_socket(
+        std::io::Cursor::new(Vec::new()),
+        tungstenite::protocol::Role::Client,
+        None,
+    );
+    encoder
+        .send(tungstenite::Message::Text(
+            encode_rendezvous_frame(&frame).unwrap().into(),
+        ))
+        .unwrap();
+    let mut bytes = upgrade_head(&host.addr).into_bytes();
+    bytes.extend_from_slice(encoder.get_ref().get_ref());
+    let mut stream = TcpStream::connect(&host.addr).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream.write_all(&bytes).unwrap();
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        stream.read_exact(&mut byte).unwrap();
+        head.push(byte[0]);
+        assert!(head.len() < 8192);
+    }
+    assert!(head.starts_with(b"HTTP/1.1 101"));
+    let mut joiner = Joiner {
+        socket: tungstenite::WebSocket::from_raw_socket(
+            tungstenite::stream::MaybeTlsStream::Plain(stream),
+            tungstenite::protocol::Role::Client,
+            None,
+        ),
+    };
+    assert_eq!(joiner.wait_for("joined").admission.as_deref(), Some("open"));
 }

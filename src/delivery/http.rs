@@ -8,11 +8,8 @@
 //! `scripts/check-deploy-headers.mjs` asserts against a *deployed* URL, so the
 //! native host and the Cloudflare path are held to one contract.
 //!
-//! Hand-rolled rather than a web framework, for the reason
-//! `headless::args` is hand-rolled rather than `clap`: this crate's primary
-//! target is `wasm32-unknown-unknown` with `lto = true`, so every dependency is
-//! paid for by the browser build unless it is target-gated, and what is needed
-//! here is a static file server and two JSON endpoints.
+//! Native request parsing uses `httparse`; path, MIME, cache and stamp policy
+//! remain shared with the browser. The parser dependency is native-only.
 
 /// 4 hours — the deliberate cap for a content-addressed asset, matching the
 /// Cloudflare dashboard Cache Rule this contract mirrors rather than the
@@ -130,11 +127,20 @@ pub fn content_type_for(path: &str) -> &'static str {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Request {
     pub method: String,
+    pub version: HttpVersion,
     /// Path with the query string removed, percent-decoded.
     pub path: String,
     pub query: Vec<(String, String)>,
     /// Header names lowercased.
     pub headers: Vec<(String, String)>,
+}
+
+/// Supported versions of the native HTTP request head.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HttpVersion {
+    Http10,
+    #[default]
+    Http11,
 }
 
 impl Request {
@@ -153,22 +159,37 @@ impl Request {
     }
 }
 
-/// Parse an HTTP/1.x request head (everything before the blank line).
+/// Parse an HTTP/1.x request head, including its terminating blank line.
 ///
 /// Returns `None` for anything that is not a well-formed request line, which
 /// the socket loop answers with `400` — this host speaks to browsers and to
 /// `curl`, and guessing at a malformed head is how a static server grows a
 /// parser bug.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_request(head: &str) -> Option<Request> {
-    let mut lines = head.split("\r\n").filter(|l| !l.is_empty());
-    let request_line = lines.next()?;
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next()?.to_string();
-    let target = parts.next()?;
-    // The version is present but unread: this host answers HTTP/1.1 either way
-    // and closes the connection, so there is nothing to negotiate.
-    parts.next()?;
+    match parse_request_bytes(head.as_bytes()).ok()? {
+        httparse::Status::Complete((end, request)) if end == head.len() => Some(request),
+        _ => None,
+    }
+}
 
+/// Incremental native parsing. The completion offset belongs to the HTTP head;
+/// later bytes belong to the upgraded protocol and must travel with the socket.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn parse_request_bytes(bytes: &[u8]) -> Result<httparse::Status<(usize, Request)>, ()> {
+    let mut headers = [httparse::EMPTY_HEADER; 128];
+    let mut parsed = httparse::Request::new(&mut headers);
+    let end = match parsed.parse(bytes).map_err(|_| ())? {
+        httparse::Status::Partial => return Ok(httparse::Status::Partial),
+        httparse::Status::Complete(end) => end,
+    };
+    let method = parsed.method.ok_or(())?.to_string();
+    let target = parsed.path.ok_or(())?;
+    let version = match parsed.version {
+        Some(0) => HttpVersion::Http10,
+        Some(1) => HttpVersion::Http11,
+        _ => return Err(()),
+    };
     let (raw_path, raw_query) = match target.split_once('?') {
         Some((p, q)) => (p, Some(q)),
         None => (target, None),
@@ -176,21 +197,42 @@ pub fn parse_request(head: &str) -> Option<Request> {
     let path = percent_decode(raw_path);
     let query = raw_query.map(parse_query).unwrap_or_default();
 
-    let headers = lines
-        .filter_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            Some((name.trim().to_ascii_lowercase(), value.trim().to_string()))
-        })
-        .collect();
-
-    Some(Request {
-        method,
-        path,
-        query,
-        headers,
-    })
+    let mut headers: Vec<(String, String)> = Vec::new();
+    for header in parsed.headers.iter() {
+        let name = header.name.to_ascii_lowercase();
+        let value = std::str::from_utf8(header.value).map_err(|_| ())?.trim();
+        let existing = headers.iter_mut().find(|(key, _)| key == &name);
+        match (name.as_str(), existing) {
+            ("connection" | "upgrade", Some((_, previous))) => {
+                previous.push_str(", ");
+                previous.push_str(value);
+                continue;
+            }
+            (
+                "host"
+                | "sec-websocket-key"
+                | "sec-websocket-version"
+                | CLIENT_STAMP_HEADER
+                | "content-length",
+                Some(_),
+            ) => return Err(()),
+            _ => {}
+        }
+        headers.push((name, value.to_string()));
+    }
+    Ok(httparse::Status::Complete((
+        end,
+        Request {
+            method,
+            version,
+            path,
+            query,
+            headers,
+        },
+    )))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_query(raw: &str) -> Vec<(String, String)> {
     raw.split('&')
         .filter(|p| !p.is_empty())
@@ -203,6 +245,7 @@ fn parse_query(raw: &str) -> Vec<(String, String)> {
 
 /// Percent-decode, treating `+` as a literal `+` (this is a path/query reader,
 /// not a form decoder) and leaving malformed escapes as written.
+#[cfg(not(target_arch = "wasm32"))]
 fn percent_decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -251,7 +294,9 @@ pub fn resolve_static_path(url_path: &str) -> Result<String, PathRefusal> {
             ".." => return Err(PathRefusal::Traversal),
             // A backslash cannot appear in a path component on the wire, and on
             // Windows it would be a second separator the guard above never saw.
-            c if c.contains('\\') => return Err(PathRefusal::Traversal),
+            c if c.contains(['\\', ':']) || c.chars().any(char::is_control) => {
+                return Err(PathRefusal::Traversal);
+            }
             c => parts.push(c),
         }
     }

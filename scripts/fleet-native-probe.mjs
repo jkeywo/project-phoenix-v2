@@ -10,6 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { fileHash, treeHash } from './profile-provenance.mjs';
 import { paneWorkloadScript, instrumentNativeGmModule, nativeObserverReporterScript } from './fleet-native-workload.mjs';
 
+// HTTP containment permits only links inside the served root. Copy and resolve
+// input links so the instrumented bundle is independent of the build directory.
+export function stageNativeProbeBundle(bundle, destination) {
+  fs.cpSync(bundle, destination, { recursive: true, dereference: true });
+}
+
 export function parseNativeProbeArgs(argv) {
   const allowed = new Set(['binary', 'bundle', 'source', 'out', 'rendezvous', 'origin', 'fleet-code', 'seconds', 'role', 'workload']);
   const values = {};
@@ -306,13 +312,7 @@ export async function runNativeProbe(options) {
     fs.writeFileSync(path.join(privateContent,'matrix-scenarios.toml'),'[content]\nid = "phoenix-base"\nepoch = 1\n[[scenario]]\nid = "matrix_probe"\nworld = "assets/worlds/probe_fleet_six_peer.toml"\n');
     fs.symlinkSync(path.join(source, 'assets'), path.join(privateContent, 'assets'), 'junction');
     const scratchBundle = path.join(output, 'bundle');
-    fs.mkdirSync(scratchBundle);
-    for (const entry of fs.readdirSync(bundle, { withFileTypes: true })) {
-      const input = path.join(bundle, entry.name), target = path.join(scratchBundle, entry.name);
-      if (entry.name === 'gui') fs.cpSync(input, target, { recursive: true });
-      else if (entry.isDirectory()) fs.symlinkSync(input, target, 'junction');
-      else if (entry.name === 'index.html') fs.copyFileSync(input, target);
-    }
+    stageNativeProbeBundle(bundle, scratchBundle);
     const instrumented = instrumentNativeFleetModule(fleetSource, endpoint, {gmJoinCode: options.role === 'gm' ? options['fleet-code'] : null,
       claim: options.claim || null,recoveryControl:!!options.nextFleetCommand,deferJoin:options.deferJoin===true});
     fs.writeFileSync(path.join(scratchBundle, 'gui/native-fleet-peer.js'), instrumented);
@@ -320,12 +320,6 @@ export async function runNativeProbe(options) {
       const gmPath = path.join(scratchBundle, 'gui/native-gm-workspace.js');
       fs.writeFileSync(gmPath, instrumentNativeGmModule(fs.readFileSync(gmPath,'utf8'), endpoint, {deferReady:options.deferGmReady === true}));
       const client = path.join(scratchBundle,'client');
-      fs.unlinkSync(client);
-      fs.mkdirSync(client);
-      for (const entry of fs.readdirSync(path.join(bundle,'client'),{withFileTypes:true})) {
-        const input = path.join(bundle,'client',entry.name), target = path.join(client,entry.name);
-        if (entry.isDirectory()) fs.symlinkSync(input,target,'junction'); else fs.copyFileSync(input,target);
-      }
       const index = path.join(client,'index.html');
       fs.writeFileSync(index, fs.readFileSync(index,'utf8').replace('</body>', '<script>' + paneWorkloadScript(endpoint) + '</script></body>'));
     }

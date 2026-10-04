@@ -32,7 +32,8 @@ It records actual transport callbacks, terminal Station feedback, attributed GM
 activity and outgoing simulation digests. It does not replace fleet factories,
 sockets, admission, lockstep, rendering or authoritative state. Each process has
 its own SDK working directory, explicit fleet identity store and save directory; only authored assets
-are shared through a junction.
+are shared through a junction in the simulation content directory. Served
+bundle directories are dereferenced copies contained beneath the HTTP root.
 
 A workload pass requires all six peers admitted, all five member links observed
 on relay, twelve ready and launched Station documents with at least two distinct

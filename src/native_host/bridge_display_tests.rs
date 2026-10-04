@@ -3238,6 +3238,19 @@ fn home(
     )
 }
 
+/// The production preparation lifecycle against this bridge's live inputs.
+fn prepared_views(
+    app: &App,
+    bus: &crate::native_host::panes::PaneBus,
+) -> Vec<crate::native_host::panes::PendingViewDisposition> {
+    crate::native_host::panes::prepare_pending_views(
+        bus,
+        Some(app.world().resource::<BridgeStationSurfaces>()),
+        Some(&app.world().resource::<BridgeLayoutResource>().layout),
+        &tempting_tile("helm"),
+    )
+}
+
 /// A stored primary-window tile under `name` — the thing a seated console
 /// must never be rebuilt onto. On a real host a station id can never have
 /// one (`app::install_world_selection` refuses a `--pane` label that
@@ -3356,22 +3369,29 @@ fn a_console_that_crashed_and_moved_in_one_frame_lands_on_the_screen_it_moved_to
     seat(&mut app, "helm", ACME);
     app.update();
 
-    let queued: Vec<PaneId> = bus
-        .take_pending_views()
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
-    assert_eq!(queued.len(), 2, "one entry from each close+recreate");
-    assert_eq!(queued[0], after_crash);
-    let open: Vec<PaneId> = queued
-        .iter()
-        .copied()
-        .filter(|id| bus.is_open(*id))
-        .collect();
+    let prepared = prepared_views(&app, &bus);
     assert_eq!(
-        open.len(),
-        1,
-        "and exactly one of them is still open, so exactly one view is built"
+        prepared.len(),
+        2,
+        "one disposition from each close+recreate"
+    );
+    assert_eq!(
+        prepared[0],
+        crate::native_host::panes::PendingViewDisposition::Retired { id: after_crash }
+    );
+    let crate::native_host::panes::PendingViewDisposition::Build {
+        id: surviving,
+        home: PaneHome::Station { window, .. },
+        ..
+    } = prepared[1]
+    else {
+        panic!("the surviving view must build on its live Station home");
+    };
+    let open: Vec<PaneId> = vec![surviving];
+    assert_eq!(window, station_window(&app, ACME));
+    assert!(
+        prepared_views(&app, &bus).is_empty(),
+        "one finite batch is drained once"
     );
     assert_eq!(
         bus.open_count(),
@@ -3463,15 +3483,13 @@ fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() 
     //             AND slot present) reads healthy — for ever, over a black
     //             screen, with no retry and no surrender.
     //
-    // Which is why the answer carries a RETRY decision, pinned per reason in
-    // `panes::placement` because the drain itself is behind
-    // `--features ultralight`. This test drives the two halves that ARE
-    // compilable — the reconciler, and the fault the decision asks for —
+    // SDK-free pending-view preparation applies the placement retry policy
+    // itself. This test drives the production reconciler and preparation —
     // across that interleaving, and ends in a retry rather than in the stuck
     // state. The other terminus, a retry budget spent and the seat given
     // back, is the two tests either side of this one.
-    use crate::native_host::panes::recovery::{service_faults, PaneFault};
-    use crate::native_host::panes::{NoHome, PaneHome};
+    use crate::native_host::panes::recovery::service_faults;
+    use crate::native_host::panes::{NoHome, PaneHome, PendingViewDisposition};
 
     let (mut app, bus) = console_host();
     seat(&mut app, "helm", BENQ);
@@ -3502,7 +3520,12 @@ fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() 
     let mut rebuilt = None;
     for _ in 0..=CONSOLE_MISSING_GRACE_FRAMES {
         app.update();
-        if let Some((id, _url)) = bus.take_pending_views().pop() {
+        if let Some(PendingViewDisposition::Unplaced {
+            id,
+            reason: NoHome::SeatedButUnplaced,
+            ..
+        }) = prepared_views(&app, &bus).pop()
+        {
             rebuilt = Some(id);
             break;
         }
@@ -3516,19 +3539,9 @@ fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() 
 
     // Frame N, second half: the pane host drains that entry, and this is the
     // decision it makes — no home, and a retry rather than a skip.
-    let unbuilt = home(&app, "helm", &tempting_tile("helm"));
-    assert_eq!(
-        unbuilt,
-        PaneHome::Nowhere(NoHome::SeatedButUnplaced),
-        "never the viewscreen, however tempting the tile"
-    );
-    let PaneHome::Nowhere(reason) = unbuilt else {
-        unreachable!("just asserted")
-    };
     assert!(
-        reason.should_retry(),
-        "and a seated console is faulted, not dropped: the pending entry is \
-             already drained, so a skip is the end of the story"
+        prepared_views(&app, &bus).is_empty(),
+        "preparation drained one batch without servicing faults"
     );
 
     // Frame N+1: the slot returns, and with it the trap. Nothing is queued
@@ -3562,7 +3575,8 @@ fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() 
     // What the retry decision actually does, on #1125's own path: the pane is
     // closed and reopened on the same token, and a view is queued again — for
     // the screen it belongs on.
-    bus.fault(rebuilt, PaneFault::ViewCrashed);
+    // Preparation already queued the fault; no test-side injection.
+    assert!(bus.is_open(rebuilt));
     let (retried, _url) = service_faults(&bus)
         .pop()
         .expect("one fault serviced")
@@ -3573,18 +3587,17 @@ fn a_rebuild_this_pass_could_not_place_is_faulted_rather_than_quietly_dropped() 
         Some(token.as_str()),
         "still the same participant, across the reconciler's rebuild and this one"
     );
-    assert_eq!(
-        bus.take_pending_views()
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect::<Vec<_>>(),
-        vec![retried],
-        "so a view IS queued again: the console retries rather than sitting \
-             healthy and black"
-    );
-    let PaneHome::Station { window, .. } = home(&app, "helm", &tempting_tile("helm")) else {
-        panic!("and the retry goes to its own Station window");
+    let pending = prepared_views(&app, &bus);
+    let [PendingViewDisposition::Build {
+        id,
+        home: PaneHome::Station { window, .. },
+        ..
+    }] = pending.as_slice()
+    else {
+        panic!("the retry must build on its own Station window: {pending:?}");
     };
+    assert_eq!(*id, retried);
+    let window = *window;
     assert_eq!(window, station_window(&app, BENQ));
 }
 

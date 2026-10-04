@@ -94,6 +94,7 @@ pub mod mirror;
 pub(crate) mod operator;
 pub mod os_prefs;
 pub mod pane_thread;
+pub mod pending_views;
 pub mod placement;
 pub mod recovery;
 pub mod registry;
@@ -301,6 +302,7 @@ impl LocalPanes {
 pub struct PaneBusResource(pub PaneBus);
 
 pub use identity::{IdentityRefusal, PaneIdentity};
+pub use pending_views::{prepare_pending_views, PendingViewDisposition};
 pub use placement::{home_for_pane, NoHome, PaneHome, PaneTile};
 pub use recovery::{service_faults, FaultOutcome, PaneFault};
 pub use registry::{PaneDispatch, PaneId, PaneLifecycle, PaneRegistry};

@@ -157,7 +157,7 @@ impl NoHome {
     /// note](self#not-built-must-not-mean-forgotten) for the one-frame
     /// interleaving that turns a skipped [`SeatedButUnplaced`](Self::SeatedButUnplaced)
     /// into a station card claiming a screen that is black, with no retry and no
-    /// surrender. `true` therefore means the adapter raises
+    /// surrender. `true` therefore means pending-view preparation raises
     /// [`PaneFault::ViewCrashed`](super::recovery::PaneFault::ViewCrashed) — the
     /// same treatment, for the same written-out reason, a view that fails to
     /// *build* gets — and the pane rides issue #1125's bounded rebuild path to a

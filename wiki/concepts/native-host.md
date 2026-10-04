@@ -2,7 +2,7 @@
 title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
-sources: [src/native_host/console_assignment_tests.rs, src/native_host/fleet_identity.rs, src/delivery/stamp.rs, gui/native-fleet-peer.js, src/native_host/host_lobby/fleet.rs, scripts/fleet-native-matrix.mjs, scripts/fleet-native-probe.mjs, scripts/fleet-native-workload.mjs, assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/panes/pending_views.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js]
+sources: [src/native_host/console_assignment_tests.rs, src/native_host/fleet_identity.rs, src/delivery/stamp.rs, gui/native-fleet-peer.js, src/native_host/host_lobby/fleet.rs, scripts/fleet-native-matrix.mjs, scripts/fleet-native-probe.mjs, scripts/fleet-native-workload.mjs, assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, src/lobby/scenario_arbiter.rs, src/lobby/handler.rs, src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/panes/pending_views.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, src/entities/template_preload.rs, src/delivery/args.rs, src/save_slots_store.rs, src/native_host/audio/private_audition.rs, src/sound_cues.rs, gui/sound-audition-panel.js, src/gm_presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js, tests/native_host_lobby/preparation.rs, src/gm_solo.rs]
 updated: 2026-10-02
 ---
 
@@ -216,17 +216,20 @@ membership and actual composed-world state after different lobby delays. It
 checks the selected hull and roster, layer order, scoped flags and trigger
 continuation, and the next live mint sequence after a deferred load.
 
-- **`boot::ingest_world` takes a `&mut World`, not a `&mut App`**, precisely so
-  both callers are the same function: reset → read → validate → compile →
-  abort-on-broken → native template gate → apply → eager record → freeze →
-  insert `WorldConfig` + `PreCompiledScripts`, once, in one place.
-  `WorldIngest::Deferred` is the "no world yet" mode; it runs only the Rhai
-  hashing-seed pin and deliberately does **not** freeze — freezing seals the
-  content digest for a world that is not there.
-- **`app::install_world_selection`** is the extracted seed precedence, hull
-  resolution, hull template-cache gate, #935 hull re-record + re-freeze,
-  `PendingShipConfig` and canonical `SelectedShipResource`.
-  `build_native_host_app` calls it too.
+- **`boot::prepare_world_ingest` and installation** are shared with the
+  `ingest_world` boot compatibility wrapper. Preparation retains parsed config,
+  compiled scripts, the sound catalogue and captured content-ledger inputs.
+  `WorldIngest::Deferred` still runs only the Rhai seed pin and leaves the ledger
+  unfrozen; `HostPreloaded` still defers its freeze to shared materialization.
+- **`app::prepare_world_selection` and installation** share seed precedence,
+  canonical hull choice, cache/Station/pane-name validation, hull ledger records,
+  `PendingShipConfig` and `SelectedShipResource` with `--world` boot.
+- **`PreparedNativeWorldLoad`** validates curated slots and claimant/hull
+  confirmation and constructs any standalone GM binding before live mutation.
+  Commit installs content, hull, RNG and slot staging, clears the fallback roster,
+  then runs materialization. The prepared GM binding is installed afterwards;
+  no recoverable failure follows the start of materialization. Ship-host slot
+  staging becomes immutable at the existing Lobby exit.
 - **`world::materialization::register`** supplies the same ordered systems to
   `Startup` and `RuntimeWorldLoad`: compilation, anonymous setup, named/asteroid
   spawn, runtime initialization and queued supporting layers. They remain in
@@ -286,21 +289,15 @@ and its distinction from world rematerialization.
 
 ### A refused world leaves a pickable lobby
 
-A load that fails **after** the ingest (an unreadable or malformed world, an
-uncached `--ship`, a hull with no `[[station]]` blocks, a participant pane name
-that shadows one of that hull's station ids) puts the lobby back:
-`WorldConfig` and `PreCompiledScripts` are removed — nothing has spawned at any
-failure point, and leaving them behind would give the operator a host holding a
-world it never built and deaf to every later pick — the arbiter's lock is
-released, the catalogue is re-published, and the **content ledger is reset**.
-That last one matters because `ingest_world` froze it over the refused world's
-file set and `install_world_selection` froze it again after re-recording the
-hull, both *before* the failure points; left alone, `content_ledger::frozen_or_live`
-would go on answering for a world this host does not have — and that is what
-`snapshot::versions` answers a fleet peer's content check with and what a save is
-bound to. `reset` is the whole undo rather than a restore because `ingest_world`
-opens every attempt, including the next successful one, with exactly that reset.
-`--world` has none of these cases; it reports at the prompt and exits.
+Preparation refuses unreadable/malformed worlds, uncached or stationless hulls,
+pane-name collisions, stale catalogue slot claims and incompatible standalone
+GM bindings before changing the live World. Refusal leaves entities, selected
+hull, RNG, mint and sound catalogue intact and empties the attempted content
+ledger without freezing it. The caller releases only selection/claim state,
+logs the refusal and republishes the catalogue. There is no ECS undo inventory.
+`tests/native_host_lobby/preparation.rs` checks those retained values and proves
+another valid selection succeeds. Materialization also leaves the prepared GM
+binding inputs unchanged.
 
 The two paths are **not** equal in what the operator sees, and it is worth
 knowing which: `--world` prints the refusal in the terminal it was launched from
@@ -1441,7 +1438,9 @@ have all closed has its camera despawned; the window itself stays
 ## Operator profiles and controllers in native panes
 
 A pane consumes the same `project-phoenix/operator-profile` v1 JSON as a phone.
-`gui/operator-profile.js` owns schema, migration and export; the private
+`gui/operator-profile.js` owns schema, migration and export.
+`gui/client-operator-profile.js` owns loading, live application, persistence and
+late gamepad attachment for phones and native Station panes. The private
 `panes::operator` adapter stores native preferences outside ephemeral Ultralight
 sessions, scoped by ship class and assigned station or participant label. Only
 whitelisted preferences are stored, with atomic writes and visible storage
@@ -1496,7 +1495,8 @@ and reconnect `Identify`.
 - **Recreation, on the same identity.** A crash's `PaneBus::rebuild` opens a
   fresh pane carrying the **same session token** (a new `PaneId`, ids are never
   reissued), republishes its document at a fresh nonce, and enqueues its view for
-  `open_pending_views` to build next frame in the crashed pane's stored slot. The
+  `prepare_pending_views` to resolve the current live Station home or primary tile
+  next frame, then `open_pending_views` to build the returned disposition. The
   page reloads and its `Identify` is a *reconnect* — `handle_identify` restores
   the held station and pushes the current projection. Host-assigned screens keep
   their station reserved through this gap; participant panes reclaim only if
@@ -2218,9 +2218,9 @@ that work, not with a placement rule.
 *The crash-during-a-move edge.* A crash serviced by `service_faults` queues a
 view for a recreated pane; a move landing before the pane host drains that queue
 closes *that* pane and recreates it again, through the same `close` + `recreate`.
-Two entries, one console: `open_pending_views` skips the first because
-`PaneBus::is_open` says its pane was closed in the interval, and builds the
-second against the surfaces the move rewrote. Nothing double-builds, nothing is
+Two entries, one console: `prepare_pending_views` rejects the first closed
+incarnation and resolves the second against the surfaces the move rewrote.
+`open_pending_views` builds only the returned build disposition. Nothing double-builds, nothing is
 orphaned, and the session token survives both hops — so whoever claimed that
 console keeps it across a crash and a move together.
 

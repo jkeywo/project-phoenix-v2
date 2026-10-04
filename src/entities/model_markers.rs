@@ -285,11 +285,22 @@ pub(crate) fn primary_sidecar_path(mesh: &crate::entities::config::MeshConfig) -
 /// identity.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn record_primary_sidecar_from_fs(config: &crate::entities::config::EntityConfig) {
-    let Some(path) = config.mesh.as_ref().and_then(primary_sidecar_path) else {
-        return;
-    };
+    if let Some(record) = capture_primary_sidecar_from_fs(config) {
+        record.apply();
+    }
+}
+
+/// Capture the same optional sidecar record without changing the content ledger.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn capture_primary_sidecar_from_fs(
+    config: &crate::entities::config::EntityConfig,
+) -> Option<crate::content_ledger::LedgerDigest> {
+    let path = config.mesh.as_ref().and_then(primary_sidecar_path)?;
     let body = std::fs::read_to_string(&path).unwrap_or_default();
-    crate::content_ledger::record(&path, &body);
+    Some(crate::content_ledger::LedgerDigest {
+        key: path,
+        digest: vellum_digest::fnv1a(body.as_bytes()),
+    })
 }
 
 /// Apply the authored `[mesh]` parent transform once, independently of the

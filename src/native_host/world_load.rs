@@ -31,16 +31,12 @@
 //!
 //! The determinism claim rests on reuse, not on prose:
 //!
-//! * The ingest is [`crate::boot::ingest_world`] — literally the function
-//!   [`crate::boot::build`] calls, over a [`BootPlan`](crate::boot::BootPlan)
-//!   built by the same [`app::boot_plan`](crate::native_host::app::boot_plan).
-//!   Ledger reset → read → validate → compile → abort-on-broken → native
-//!   template gate → apply → eager record → freeze → insert `WorldConfig` +
-//!   `PreCompiledScripts`, in that order, once, in one place.
-//! * The hull, the seed precedence, the hull's own cache gate and the two ship
-//!   resources come from
-//!   [`app::install_world_selection`](crate::native_host::app::install_world_selection),
-//!   which `build_native_host_app` also calls.
+//! * Reader ingestion shares [`crate::boot::prepare_world_ingest`] and its
+//!   installation with the boot compatibility wrapper. Preparation retains parsed
+//!   config, compiled scripts, sound catalogue and content-ledger inputs.
+//! * Hull and seed preparation shares [`app::prepare_world_selection`] with
+//!   boot. Slot claims and optional standalone GM binding are validated before
+//!   any live resources are installed. Commitment then consumes these values.
 //! * The spawn pass is [`RuntimeWorldLoad`], registered by the same
 //!   [`world::materialization::register`](crate::world::materialization::register)
 //!   that `WorldPlugin` uses for `Startup`. Both schedules therefore contain the
@@ -60,8 +56,7 @@
 //! the `ShipManual` that always accompanies one) to everyone the moment the load
 //! succeeds — see [`republish_loaded_world`], which also explains why the seats
 //! are cleared first and why a second `Welcome` is safe. A load that is REFUSED
-//! publishes the catalogue again instead, over a lobby put back to genuinely
-//! world-less by [`unwind_failed_load`].
+//! publishes the catalogue again instead, while preparation leaves the live World unchanged.
 //!
 //! What is *not* claimed: that a runtime-loaded host reaches `InProgress` on the
 //! same tick a `--solo --world` host does. It does not, and it never could — the
@@ -575,7 +570,6 @@ fn apply_pending_world_load(world: &mut World) {
                 "loading {} failed, staying in the lobby: {error}",
                 pending.world_path
             );
-            unwind_failed_load(world);
             if let Some(mut selection) = world.get_resource_mut::<LobbySelection>() {
                 selection.0 = ScenarioSelection::default();
             }
@@ -596,56 +590,6 @@ fn apply_pending_world_load(world: &mut World) {
             }
         }
     }
-}
-
-/// Put the lobby back to genuinely world-less after a refused selection.
-///
-/// Three things have to go, and the third is the one that is easy to miss:
-///
-///  * `WorldConfig` and `PreCompiledScripts`. `install_world_selection` can fail
-///    AFTER [`crate::boot::ingest_world`] has already inserted them — an uncached
-///    hull, a hull with no `[[station]]` blocks, or a participant pane name that
-///    shadows one of that hull's station ids
-///    ([`NativeHostError::PaneShadowsStation`], issue #1331) — and leaving them
-///    behind would take [`awaiting_world`] false: a host holding a world it never
-///    spawned, unable to accept another pick.
-///  * The **content ledger**. `ingest_world` froze it over the refused world's
-///    file set, and `install_world_selection` froze it again after re-recording
-///    the hull — both before either failure point. A frozen ledger is the input
-///    to [`crate::content_ledger::frozen_or_live`], which is what
-///    `snapshot::versions` answers a fleet peer's content check with and what a
-///    save is bound to; left alone it would go on answering for a world this
-///    host does not have and never spawned. `reset` is the whole undo rather
-///    than a restore because `ingest_world` opens every attempt — including the
-///    next, successful one — with exactly this `reset`, so an emptied, unfrozen
-///    ledger is precisely the state the next pick starts from. What it discards
-///    is the template preload's records, which the next load's own eager record
-///    re-reads from disk regardless.
-///
-/// Nothing has spawned at any of those failure points, so there are no entities
-/// to unwind alongside them.
-///
-/// # What the operator sees, and how that differs from `--world`
-///
-/// Stated rather than glossed, because the two paths are genuinely not equal and
-/// nothing here can make them so cheaply. A `--world` host meets these same
-/// refusals at the prompt: `phoenix_host`'s `main` prints the
-/// [`NativeHostError`] and exits 1, so the operator reads the sentence in the
-/// terminal they launched from. A `--lobby` host meets them frames into a
-/// running process, where there is no prompt left to fail at — so
-/// [`apply_pending_world_load`] emits one `perror!` on the operator log, clears
-/// the selection, and re-publishes the catalogue so the lobby is pickable again.
-/// **The refusal itself does not cross to any surface.** The phones see the
-/// catalogue return with nothing locked; the host's own lobby surface shows the
-/// same, and its `LayoutNotice` channel is not a route for this — that carries
-/// the bridge LAYOUT's own refusals, and a world that would not load is not a
-/// statement about a monitor. Saying it on a surface needs a message this
-/// protocol does not have; until one exists, the operator log is where the
-/// sentence lives and the lobby is only observably back where it started.
-fn unwind_failed_load(world: &mut World) {
-    world.remove_resource::<crate::world::config::WorldConfig>();
-    world.remove_resource::<crate::world::server::PreCompiledScripts>();
-    crate::content_ledger::reset();
 }
 
 /// Tell every connected participant about the world that just loaded.
@@ -796,11 +740,20 @@ fn publish_world_welcome(world: &mut World) {
         .push((Target::All, ServerMessage::ShipManual { manual }));
 }
 
-/// The whole runtime load, as one fallible step.
-fn load_selected_world(
-    world: &mut World,
+/// All recoverable decisions for a native load, before touching the live World.
+struct PreparedNativeWorldLoad {
+    ingest: crate::boot::PreparedWorldIngest,
+    hull: Option<app::PreparedWorldSelection>,
+    rng: Option<SimRng>,
+    frozen_slots: Option<crate::ship_slots::FrozenShipSlots>,
+    pending_slots: Option<PendingSlotFreeze>,
+    gm: Option<crate::gm_solo::PreparedStandaloneGameMaster>,
+}
+
+fn prepare_selected_world(
+    world: &World,
     pending: &PendingWorldLoad,
-) -> Result<(), NativeHostError> {
+) -> Result<PreparedNativeWorldLoad, NativeHostError> {
     let settings = world
         .get_resource::<LobbyBootSettings>()
         .cloned()
@@ -819,19 +772,15 @@ fn load_selected_world(
         settings.deterministic,
         settings.surface,
     );
-    crate::boot::ingest_world(world, &plan).map_err(NativeHostError::Boot)?;
+    let mut ingest = crate::boot::prepare_world_ingest(&plan).map_err(NativeHostError::Boot)?;
 
     if !pending.curated_ships.is_empty() {
         let curated = crate::ship_slots::curate_ship_slots(
-            &world
-                .resource::<crate::world::config::WorldConfig>()
-                .ship_slots,
+            &ingest.config().ship_slots,
             &pending.curated_ships,
         )
         .map_err(NativeHostError::Ship)?;
-        world
-            .resource_mut::<crate::world::config::WorldConfig>()
-            .ship_slots = curated;
+        ingest.config_mut().ship_slots = curated;
     }
 
     let native_role = world
@@ -846,11 +795,11 @@ fn load_selected_world(
 
     // Step two: only ship hosts install a chosen local hull. A GM owns no
     // ship: standalone slots or the adopted fleet topology supply the ships.
-    let world_config = world
-        .resource::<crate::world::config::WorldConfig>()
-        .clone();
+    let world_config = ingest.config().clone();
+    let mut frozen_slots = None;
+    let mut pending_slots = None;
     if native_role == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster {
-        world.insert_resource(
+        frozen_slots = Some(
             crate::ship_slots::ShipSlotReservations::default()
                 .freeze(&world_config.effective_ship_slots())
                 .expect("empty reservations are confirmed"),
@@ -862,18 +811,13 @@ fn load_selected_world(
                 roster,
             )
             .map_err(NativeHostError::Ship)?;
-            world.insert_resource(frozen);
+            frozen_slots = Some(frozen);
         }
     }
-    let sim_rng = if fleet_gm {
-        world.insert_resource(crate::gm_projection::GameMasterPeer);
-        match (settings.seed, world_config.global.seed) {
-            (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
-            (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
-            (None, None) => SimRng::random(),
-        }
+    let hull = if fleet_gm {
+        None
     } else {
-        app::install_world_selection(
+        Some(app::prepare_world_selection(
             world,
             &world_config,
             &HullChoice {
@@ -882,7 +826,16 @@ fn load_selected_world(
                 curated_ships: &pending.curated_ships,
                 seed: settings.seed,
             },
-        )?
+        )?)
+    };
+    let rng = if fleet_gm {
+        Some(match (settings.seed, world_config.global.seed) {
+            (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
+            (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
+            (None, None) => SimRng::random(),
+        })
+    } else {
+        None
     };
     if !fleet_gm && !world_config.ship_slots.is_empty() {
         let mut reservations = crate::ship_slots::ShipSlotReservations::default();
@@ -911,43 +864,76 @@ fn load_selected_world(
                     "every claimed ship slot must confirm a hull before launch".into(),
                 )
             })?;
-        world.insert_resource(PendingSlotFreeze(frozen));
+        pending_slots = Some(PendingSlotFreeze(frozen));
     }
-    // The seed the world authored (or `--seed` overrode) replaces the OS draw
-    // `add_simulation_plugins_with` left behind. Nothing has consumed the
-    // stream: the simulation sets are gated on `GamePhase::InProgress` and this
-    // host has been sitting in `Lobby`.
-    crate::sim_rng::install(world, sim_rng);
+    let gm = if native_role
+        == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster
+    {
+        Some(
+            crate::gm_solo::prepare_standalone_game_master(world, true).ok_or_else(|| {
+                NativeHostError::Ship("standalone GM identity could not be admitted".into())
+            })?,
+        )
+    } else {
+        None
+    };
+    Ok(PreparedNativeWorldLoad {
+        ingest,
+        hull,
+        rng,
+        frozen_slots,
+        pending_slots,
+        gm,
+    })
+}
 
-    // `update_session_with_config` recomputes the station roster only while it
-    // is empty — deliberately, so a running mission's roster is never rewritten
-    // under it. A world-less lobby has already filled it from
-    // `load_ship_config_from_disk`'s fallback, so clear it here and let the
-    // chain below fill it from the hull that was actually chosen.
-    world.resource_mut::<ShipStations>().stations.clear();
-
-    // Step three: the spawn pass, with the mint parked at tick 0 so the ids it
-    // hands out are the ids a `Startup` ingest would have handed out.
-    let restore = park_mint(world);
-    world.run_schedule(RuntimeWorldLoad);
-    restore_mint(world, restore);
-    if native_role == crate::native_host::session_role::NativeSessionRole::StandaloneGameMaster {
-        crate::gm_solo::bind_standalone_game_master(world).ok_or_else(|| {
-            NativeHostError::Ship("standalone GM identity could not be admitted".into())
-        })?;
-        if let Some(bridge) =
-            world.get_resource::<crate::native_host::host_lobby::HostLobbyBridgeResource>()
+/// Commit is infallible: materialization consumes already validated inputs.
+impl PreparedNativeWorldLoad {
+    fn install(self, world: &mut World) {
+        self.ingest.install(world);
+        let rng = if let Some(hull) = self.hull {
+            hull.install(world)
+        } else {
+            world.insert_resource(crate::gm_projection::GameMasterPeer);
+            self.rng.expect("prepared GM load carries its RNG")
+        };
+        if let Some(slots) = self.frozen_slots {
+            world.insert_resource(slots);
+        }
+        if let Some(slots) = self.pending_slots {
+            world.insert_resource(slots);
+        }
+        crate::sim_rng::install(world, rng);
+        world.resource_mut::<ShipStations>().stations.clear();
+        let restore = park_mint(world);
+        world.run_schedule(RuntimeWorldLoad);
+        restore_mint(world, restore);
+        if let Some(gm) = self.gm {
+            gm.install(world);
+            if let Some(bridge) =
+                world.get_resource::<crate::native_host::host_lobby::HostLobbyBridgeResource>()
+            {
+                bridge
+                    .0
+                    .push_join(crate::native_host::host_lobby::join::JoinInvite::Off.to_json());
+            }
+        }
+        if let Some(mut role) =
+            world.get_resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
         {
-            bridge
-                .0
-                .push_join(crate::native_host::host_lobby::join::JoinInvite::Off.to_json());
+            role.commit();
         }
     }
-    if let Some(mut role) =
-        world.get_resource_mut::<crate::native_host::session_role::NativeSessionRoleState>()
-    {
-        role.commit();
-    }
+}
+
+fn load_selected_world(
+    world: &mut World,
+    pending: &PendingWorldLoad,
+) -> Result<(), NativeHostError> {
+    crate::content_ledger::reset();
+    let prepared =
+        prepare_selected_world(world, pending).inspect_err(|_| crate::content_ledger::reset())?;
+    prepared.install(world);
     Ok(())
 }
 

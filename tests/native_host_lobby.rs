@@ -46,6 +46,9 @@ const SCENARIO: &str = "combat_test";
 /// A fixed seed, so two hosts of one world are comparable.
 const SEED: u64 = 20260894;
 
+#[path = "native_host_lobby/preparation.rs"]
+mod preparation;
+
 #[path = "native_host_lobby/materialization.rs"]
 mod materialization;
 
@@ -1379,22 +1382,7 @@ fn catalog_plus(id: &str, world: &str, ships: &[String]) -> ScenarioCatalog {
 /// claims is the same claim — a refused world leaves a clean lobby, not a host
 /// wedged holding half a world.
 ///
-/// **Read the three callers as one graded set, not three independent tests.**
-/// Only the last of them exercises the whole of `unwind_failed_load`:
-///
-///  * `a_world_file_that_cannot_be_read…` and `a_malformed_world_file…` are two
-///    different ERROR CLASSES arriving at the SAME call site and the same point
-///    in `boot::ingest_world` — after its ledger reset, before its freeze. So
-///    neither of them can fail if the unwind's `content_ledger::reset` is
-///    deleted: at that point there is nothing frozen and nothing inserted. They
-///    are kept as a pair anyway because they pin the two *refusal* shapes a
-///    participant can provoke from the catalogue, and a regression that turned
-///    one into a panic rather than a refusal would show up in exactly one of
-///    them. They do not pin the unwind.
-///  * The unwind's ledger reset is pinned at the two later points instead:
-///    between the freezes by `a_load_that_fails_after_the_ingest_leaves_a_
-///    pickable_lobby`, and past both by
-///    `a_hull_with_no_station_blocks_leaves_a_pickable_lobby`.
+/// Preparation refuses every failure class before installing live resources.
 fn a_refused_pick_then_a_good_one(app: &mut App, bad_id: &str, bad_hull: &str) {
     select(app, "phone-1", bad_id, bad_hull);
     pump(app, 30);
@@ -1480,13 +1468,8 @@ fn a_malformed_world_file_leaves_a_pickable_lobby() {
 
 #[test]
 fn a_hull_with_no_station_blocks_leaves_a_pickable_lobby() {
-    // The third, and the latest of the three: the world ingests cleanly and the
-    // HULL is refused. By then `ingest_world` has inserted `WorldConfig` +
-    // `PreCompiledScripts` and frozen the ledger, and `install_world_selection`
-    // has re-recorded the hull and frozen it AGAIN — all before the
-    // `[[station]]` check that fails. Everything that unwinding has to undo is
-    // in place at this point and nowhere else, which is what makes this the
-    // failure worth pinning.
+    // Reader preparation succeeds, but the selected hull has no Stations.
+    // Hull preparation must refuse before installing config/scripts/content.
     //
     // `assets/entities/planet_earth.toml` is real content the picked world
     // itself declares — so the preload has cached it and it reaches that check,
@@ -2103,13 +2086,12 @@ fn a_profile_pane_named_for_a_station_is_refused_on_the_world_path() {
 fn a_profile_pane_named_for_a_station_is_refused_on_the_lobby_path() {
     // `--lobby --profile`: the roster is not known until a scenario and hull are
     // picked, so the same guard has to fire frames into a running host — through
-    // the same `install_world_selection`, with `unwind_failed_load` putting the
-    // lobby back to genuinely world-less afterwards.
+    // the shared `prepare_world_selection`, before any live state changes.
     //
     // The refusal reaches the operator LOG and nothing else here: the catalogue
     // is re-published with nothing locked, which is what a phone sees. That
     // asymmetry with the `--world` path above is documented on
-    // `world_load::unwind_failed_load` rather than papered over.
+    // `world_load::apply_pending_world_load` rather than papered over.
     let preload = preload();
     let (scenario_id, hull) = pick();
     let station = first_station_of(&hull);
@@ -2125,7 +2107,7 @@ fn a_profile_pane_named_for_a_station_is_refused_on_the_lobby_path() {
 
     assert!(
         app.world().get_resource::<WorldConfig>().is_none(),
-        "the pick is refused, and the ingest it had already done is unwound"
+        "the pick is refused, and preparation installs nothing"
     );
     assert_eq!(
         app.world().resource::<State<GamePhase>>().get(),
@@ -2140,8 +2122,7 @@ fn a_profile_pane_named_for_a_station_is_refused_on_the_lobby_path() {
     );
     assert!(
         !project_phoenix::content_ledger::is_frozen(),
-        "`PaneShadowsStation` is a failure point past `ingest_world`'s freeze, \
-         so the unwind has to unfreeze the ledger as it does for an uncached hull"
+        "`PaneShadowsStation` refuses during preparation and leaves no frozen ledger"
     );
 
     // The same host with the collision removed loads that very pick — the

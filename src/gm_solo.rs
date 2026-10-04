@@ -50,6 +50,29 @@ pub const SOLO_GM_OPERATOR_ID: &str = "gm-1";
 /// (`enforce_fleet_managed_countdown`) exactly as the native local GM does, so
 /// the session starts when this operator presses Start and not before.
 pub fn bind_standalone_game_master(world: &mut World) -> Option<GmOperator> {
+    let scenario_only = world.contains_resource::<crate::gm_projection::GameMasterPeer>();
+    Some(prepare_standalone_game_master(world, scenario_only)?.install(world))
+}
+
+/// The admission binding, checked before a deferred World is materialized.
+pub(crate) struct PreparedStandaloneGameMaster {
+    roster: FleetRoster,
+    replacement: GmRoster,
+    operator: GmOperator,
+}
+
+impl PreparedStandaloneGameMaster {
+    pub(crate) fn install(self, world: &mut World) -> GmOperator {
+        world.insert_resource(self.roster);
+        world.insert_resource(self.replacement);
+        self.operator
+    }
+}
+
+pub(crate) fn prepare_standalone_game_master(
+    world: &World,
+    scenario_only: bool,
+) -> Option<PreparedStandaloneGameMaster> {
     if world.contains_resource::<crate::lockstep::FleetLockstep>()
         || world
             .get_resource::<FleetRoster>()
@@ -59,7 +82,7 @@ pub fn bind_standalone_game_master(world: &mut World) -> Option<GmOperator> {
     }
     // A scenario-only GM has no locally owned hull. Its unclaimed launch slots
     // supply AI ships separately; do not inherit the legacy solo ship row.
-    let roster = if world.contains_resource::<crate::gm_projection::GameMasterPeer>() {
+    let roster = if scenario_only {
         let slot = crate::command_admission::HostSlot::SOLO;
         FleetRoster::with_participants_and_gms(
             Vec::new(),
@@ -92,9 +115,11 @@ pub fn bind_standalone_game_master(world: &mut World) -> Option<GmOperator> {
         .collect();
     rows.push(operator.clone());
     let replacement = GmRoster::try_new(rows).ok()?;
-    world.insert_resource(roster);
-    world.insert_resource(replacement);
-    Some(operator)
+    Some(PreparedStandaloneGameMaster {
+        roster,
+        replacement,
+        operator,
+    })
 }
 
 /// The public operator row this peer's own privileged actions are attributed

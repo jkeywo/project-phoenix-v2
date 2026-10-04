@@ -76,7 +76,7 @@ use bevy::transform::TransformPlugin;
 use std::fmt;
 
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
-use crate::world::load::{load, LoadPolicy, LoadRequest, WorldReader};
+use crate::world::load::{load, LoadPolicy, LoadRequest, LoadedWorld, WorldReader};
 use crate::world::script::load::ScriptResolver;
 
 // ── Profile ──────────────────────────────────────────────────────────────────
@@ -938,10 +938,10 @@ fn register_render_contract(app: &mut App) {
 
 // ── ingest_world ─────────────────────────────────────────────────────────────
 
-/// The sole caller of [`crate::world::load::load`], and the sole owner of the
-/// content-ledger and Rhai-seed order a boot must run in.
+/// Compatibility entry point for boot ingestion. Reader preparation and
+/// installation below own the content-ledger and Rhai-seed order.
 ///
-/// Two modes, per the plan's [`WorldIngest`]. Under
+/// Ingestion mode comes from the plan's [`WorldIngest`]. Under
 /// [`HostPreloaded`](WorldIngest::HostPreloaded) the host loaded the world by
 /// another route (the browser's JS preload), so boot runs step 1 and then only the
 /// pending freeze from step 5 — it does not reset, read, or insert the world.
@@ -972,17 +972,9 @@ fn register_render_contract(app: &mut App) {
 ///    aborted browser root carries its findings through so the downstream gate
 ///    blocks activation. Static-child compiled sets do not cross this boundary.
 ///
-/// # Called twice, deliberately
-///
-/// [`build`] calls this on the `World` of the `App` it is composing. The native
-/// host's runtime world load (issue #1326) calls it on the `World` of an `App`
-/// that is **already running** — a host that booted into an empty lobby and has
-/// since had a scenario chosen. That is why it takes a `&mut World` rather than
-/// a `&mut App`: there is no `App` to hand it at the second call site, and there
-/// must not be a second implementation of this order. Everything the runtime
-/// path needs to be the boot path — the reset/apply/eager-record/freeze
-/// sequence, the abort-vs-block policy, the native template gate, and which two
-/// resources are inserted — is therefore stated once, here.
+/// Reader-based boot and deferred native loading share preparation and
+/// installation. This compatibility wrapper completes both immediately;
+/// deferred native loading validates hull/slot/GM inputs before installing.
 pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), BootError> {
     // Step 1 for both modes: the Rhai hashing-seed pin. Genuinely first, before any
     // script engine — `set_hashing_seed` no-ops once a hash is taken. Idempotent
@@ -1014,14 +1006,60 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
             return Ok(());
         }
         // No world yet (issue #1326) — the seed pin above is the whole of boot's
-        // job, and a later call to this same function on the running `World` owns
+        // job, and later preparation/installation on the running `World` owns
         // everything below. Deliberately no freeze: see [`WorldIngest::Deferred`].
         WorldIngest::Deferred => return Ok(()),
         WorldIngest::FromReader => {}
     }
 
     crate::content_ledger::reset();
+    prepare_world_ingest(plan)?.install(world);
+    Ok(())
+}
 
+/// Reader-based ingestion, validated before any live World resources change.
+/// Installation retains the shared content-recording and freeze order.
+pub(crate) struct PreparedWorldIngest {
+    loaded: LoadedWorld,
+    catalog: crate::gm_presentation::sound::LiveSoundCatalog,
+    sound_source: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    entity_inputs: Vec<crate::content_ledger::LedgerDigest>,
+}
+
+impl PreparedWorldIngest {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn config(&self) -> &crate::world::config::WorldConfig {
+        &self.loaded.config
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn config_mut(&mut self) -> &mut crate::world::config::WorldConfig {
+        &mut self.loaded.config
+    }
+
+    pub(crate) fn install(self, world: &mut World) {
+        self.loaded.ledger.apply();
+        crate::content_ledger::record(crate::gm_presentation::sound::PATH, &self.sound_source);
+        #[cfg(not(target_arch = "wasm32"))]
+        for input in self.entity_inputs {
+            input.apply();
+        }
+        crate::content_ledger::freeze();
+
+        world.insert_resource(self.loaded.config);
+        world.insert_resource(self.catalog);
+        world.insert_resource(crate::world::server::PreCompiledScripts(
+            self.loaded.scripts,
+        ));
+    }
+}
+
+/// Prepare the FromReader path without inserting resources or sealing content.
+/// The caller owns the new-attempt ledger reset, including refused attempts.
+pub(crate) fn prepare_world_ingest(plan: &BootPlan) -> Result<PreparedWorldIngest, BootError> {
+    debug_assert!(matches!(plan.world_ingest, WorldIngest::FromReader));
+    crate::world::script::init_hashing_seed();
     let mut request = LoadRequest::new(
         plan.world_path.clone(),
         plan.reader.as_ref(),
@@ -1098,27 +1136,25 @@ pub(crate) fn ingest_world(world: &mut World, plan: &BootPlan) -> Result<(), Boo
         plan.reader.read(crate::gm_presentation::sound::PATH),
     )
     .map_err(BootError::WorldInvalid)?;
-    loaded.ledger.apply();
-    crate::content_ledger::record(crate::gm_presentation::sound::PATH, &sound_source);
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        crate::content_ledger::eager_record_world_entities_with_scripts(
-            &loaded.config,
-            loaded.scripts.as_ref(),
-        );
-        for child in &loaded.children {
-            crate::content_ledger::eager_record_world_entities_with_scripts(
-                &child.config,
-                child.scripts.as_ref(),
-            );
-        }
-    }
-    crate::content_ledger::freeze();
-
-    world.insert_resource(loaded.config);
-    world.insert_resource(catalog);
-    world.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
-    Ok(())
+    let entity_inputs = std::iter::once((&loaded.config, loaded.scripts.as_ref()))
+        .chain(
+            loaded
+                .children
+                .iter()
+                .map(|child| (&child.config, child.scripts.as_ref())),
+        )
+        .flat_map(|(config, scripts)| {
+            crate::content_ledger::capture_world_entity_inputs(config, scripts)
+        })
+        .collect();
+    Ok(PreparedWorldIngest {
+        loaded,
+        catalog,
+        sound_source,
+        #[cfg(not(target_arch = "wasm32"))]
+        entity_inputs,
+    })
 }
 
 /// Refuse to compose a native host whose world declares templates the native

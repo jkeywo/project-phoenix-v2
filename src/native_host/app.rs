@@ -37,7 +37,6 @@ use bevy::prelude::*;
 use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
 use crate::boot::{BootError, BootPlan, BootProfile, NativeRenderSurface, WorldIngest};
 use crate::core::messages::{GamePhase, ServerMessage};
-use crate::entities::loader::TemplateLoader;
 use crate::entities::template_preload::{preload_entity_templates, TemplatePreload};
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::{LogFilterConfig, LoggingPlugin};
@@ -471,17 +470,45 @@ pub(crate) fn pane_labels_shadowing_stations(
 /// two ship resources `LobbyPlugin` reads — returning the [`SimRng`] this run
 /// should adopt.
 ///
-/// Extracted from [`build_native_host_app`] so the runtime world load
-/// ([`world_load`](crate::native_host::world_load)) performs the *same* steps in
-/// the same order rather than a second version of them: seed precedence, hull
-/// choice, the cache gate whose failure is otherwise silent, the #935 hull
-/// re-record + re-freeze, `PendingShipConfig`, and the canonical
-/// `SelectedShipResource`.
+/// Boot and deferred loading share preparation of seed precedence, canonical
+/// hull choice, cache presence, Station configuration and pane-name collisions.
+/// Installation consumes that exact configuration and its captured content
+/// records, preserving hull re-recording and freeze semantics.
+pub(crate) struct PreparedWorldSelection {
+    ship_key: String,
+    ship_config: crate::ship::config::ShipConfig,
+    sim_rng: SimRng,
+    hull_record: crate::content_ledger::LedgerDigest,
+    sidecar: Option<crate::content_ledger::LedgerDigest>,
+}
+
+impl PreparedWorldSelection {
+    pub(crate) fn install(self, world: &mut World) -> SimRng {
+        self.hull_record.apply();
+        if let Some(sidecar) = self.sidecar {
+            sidecar.apply();
+        }
+        crate::content_ledger::freeze();
+        world.insert_resource(PendingShipConfig(self.ship_config));
+        world.insert_resource(SelectedShipResource(self.ship_key));
+        self.sim_rng
+    }
+}
+
+/// Preserve the boot-time entry point over the same preparation and installation.
 pub(crate) fn install_world_selection(
     world: &mut World,
     world_config: &crate::world::config::WorldConfig,
     choice: &HullChoice<'_>,
 ) -> Result<SimRng, NativeHostError> {
+    Ok(prepare_world_selection(world, world_config, choice)?.install(world))
+}
+
+pub(crate) fn prepare_world_selection(
+    world: &World,
+    world_config: &crate::world::config::WorldConfig,
+    choice: &HullChoice<'_>,
+) -> Result<PreparedWorldSelection, NativeHostError> {
     // Seed precedence: `--seed`, then the world's `[global] seed`, then the OS.
     let sim_rng = match (choice.seed, world_config.global.seed) {
         (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
@@ -552,14 +579,13 @@ pub(crate) fn install_world_selection(
     // back to `load_ship_config_from_disk`, which returns the *battleship*
     // roster regardless of the hull chosen — so every station, and therefore
     // every backfilled AI system, would belong to the wrong ship.
-    let ship_entity_config = crate::entities::include_resolve::load_entity_config(&ship_path)
+    let resolved = crate::entities::include_resolve::resolve_from_disk(&ship_path)
         .map_err(|e| NativeHostError::Ship(format!("{ship_path:?} failed to parse: {e}")))?;
-    // Issue #935: the player's own hull is authored content too and need not be
-    // among the world's declared entities, so re-record and re-freeze. The
-    // ledger fold is path-sorted and order-independent, so the frozen digest is
-    // byte-identical whichever route the hull rode in on.
-    let _ = crate::entities::loader::FsTemplateLoader.load_template(&ship_path);
-    crate::content_ledger::freeze();
+    let ship_entity_config = resolved
+        .parse()
+        .map_err(|e| NativeHostError::Ship(format!("{ship_path:?} failed to parse: {e}")))?;
+    let sidecar =
+        crate::entities::model_markers::capture_primary_sidecar_from_fs(&ship_entity_config);
     let ship_config = ship_entity_config
         .ship_config
         .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
@@ -571,9 +597,8 @@ pub(crate) fn install_world_selection(
     // which is why the guard lives here rather than in `phoenix_host`'s main.
     // Refused rather than warned: the two names resolve to one pane on the bus,
     // so whichever of the two the operator meant, one of them is going to close
-    // the other's console (see `pane_labels_shadowing_stations`). Refusing
-    // BEFORE `PendingShipConfig` lands leaves the world-less lobby's unwind
-    // nothing extra to undo.
+    // the other's console (see `pane_labels_shadowing_stations`).
+    // Preparation validates the whole choice before any hull resources land.
     let stations: Vec<crate::core::messages::StationId> =
         ship_config.stations.iter().map(|s| s.id.clone()).collect();
     let shadowed = pane_labels_shadowing_stations(
@@ -586,18 +611,16 @@ pub(crate) fn install_world_selection(
     if !shadowed.is_empty() {
         return Err(NativeHostError::PaneShadowsStation(shadowed));
     }
-    world.insert_resource(PendingShipConfig(ship_config));
-    // Store the CANONICAL key, not the raw `--ship` string: every downstream
-    // reader (`lobby::server::update_session_with_config`, `server::radar`,
-    // `server::reference_grid`, `server_app::world_setup`) looks this path up
-    // in the native template cache with NO filesystem fallback, and that cache
-    // is keyed canonically. The gate two lines above already canonicalises
-    // before checking, so a raw string here would let a `--ship` spelled with
-    // `./` or Windows backslashes pass the gate and then miss every one of
-    // those lookups, silently keeping a Default `ShipClientConfig`.
-    world.insert_resource(SelectedShipResource(ship_key));
-
-    Ok(sim_rng)
+    Ok(PreparedWorldSelection {
+        ship_key,
+        ship_config,
+        sim_rng,
+        hull_record: crate::content_ledger::LedgerDigest {
+            key: resolved.path,
+            digest: vellum_digest::fnv1a(resolved.toml.as_bytes()),
+        },
+        sidecar,
+    })
 }
 
 /// Assemble the native host's `App`. Does not run it — see [`run`].

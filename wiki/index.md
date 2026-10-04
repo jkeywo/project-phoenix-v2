@@ -11,7 +11,7 @@ Current implementation orientation only. For intended design use
 - [Client Architecture](./concepts/client-architecture.md)
 - [Server App](./concepts/server-app.md)
 - [Game Loop](./concepts/game-loop.md)
-- [World Plugin](./concepts/world-plugin.md)
+- [World Plugin](./concepts/world-plugin.md) - materialization and native load preparation
 - [PASM Runtime](./concepts/pasm-runtime.md)
 
 ## Domain entities

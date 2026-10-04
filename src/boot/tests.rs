@@ -593,7 +593,7 @@ fn deferred_ingest_reads_nothing_inserts_nothing_and_does_not_freeze(/* issue #1
     // the reader or insert either resource. It also leaves the content ledger
     // unfrozen, without requesting a Startup freeze: freezing seals the digest for
     // the world being loaded, and there is no world yet. The runtime load
-    // (`native_host::world_load`) calls this same `ingest_world` again under
+    // (`native_host::world_load`) uses the shared preparation/installation under
     // `FromReader`, which resets and freezes in the documented order.
     crate::content_ledger::reset();
     let plan = BootPlan {
@@ -621,5 +621,25 @@ fn deferred_ingest_reads_nothing_inserts_nothing_and_does_not_freeze(/* issue #1
         "Deferred must not freeze an empty content ledger — the runtime load \
          owns the reset/apply/freeze sequence for the world it actually ingests"
     );
+    crate::content_ledger::reset();
+}
+
+#[test]
+fn reader_preparation_retains_content_until_explicit_installation() {
+    crate::content_ledger::reset();
+    let plan = plan_for(BootProfile::Headless);
+    let prepared = super::prepare_world_ingest(&plan).unwrap();
+    assert_eq!(prepared.config().global.seed, Some(1));
+    assert!(!crate::content_ledger::is_frozen());
+    assert!(crate::content_ledger::snapshot().is_empty());
+    let mut world = World::new();
+    assert!(!world.contains_resource::<crate::world::config::WorldConfig>());
+    prepared.install(&mut world);
+    let expected = crate::content_ledger::frozen_or_live();
+    assert!(crate::content_ledger::is_frozen());
+    assert!(world.contains_resource::<PreCompiledScripts>());
+    assert!(world.contains_resource::<crate::gm_presentation::sound::LiveSoundCatalog>());
+    super::ingest_world(&mut World::new(), &plan).unwrap();
+    assert_eq!(crate::content_ledger::frozen_or_live(), expected);
     crate::content_ledger::reset();
 }

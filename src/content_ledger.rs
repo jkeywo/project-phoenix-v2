@@ -335,7 +335,17 @@ pub fn eager_record_world_entities_with_scripts(
     world_config: &crate::world::config::WorldConfig,
     scripts: Option<&crate::world::script::load::CompiledScripts>,
 ) {
-    use crate::entities::loader::TemplateLoader;
+    for input in capture_world_entity_inputs(world_config, scripts) {
+        input.apply();
+    }
+}
+
+/// Capture the native template/sidecar inputs without changing the ledger.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn capture_world_entity_inputs(
+    world_config: &crate::world::config::WorldConfig,
+    scripts: Option<&crate::world::script::load::CompiledScripts>,
+) -> Vec<LedgerDigest> {
     use std::collections::HashSet;
 
     let scripted_paths: Vec<String> = match scripts {
@@ -379,17 +389,30 @@ pub fn eager_record_world_entities_with_scripts(
         .collect();
     let mut visited: HashSet<String> = HashSet::new();
 
+    let mut inputs = Vec::new();
     while let Some(path) = queue.pop() {
         let key = normalize_key(&path);
         if !visited.insert(key) {
             continue;
         }
-        if let Some(config) = crate::entities::loader::FsTemplateLoader.load_template(&path) {
-            queue.extend(crate::entities::config_cache::nested_template_paths(
-                &config,
-            ));
+        if let Ok(resolved) = crate::entities::include_resolve::resolve_from_disk(&path) {
+            inputs.push(LedgerDigest {
+                key: resolved.path.clone(),
+                digest: vellum_digest::fnv1a(resolved.toml.as_bytes()),
+            });
+            if let Ok(config) = resolved.parse() {
+                if let Some(sidecar) =
+                    crate::entities::model_markers::capture_primary_sidecar_from_fs(&config)
+                {
+                    inputs.push(sidecar);
+                }
+                queue.extend(crate::entities::config_cache::nested_template_paths(
+                    &config,
+                ));
+            }
         }
     }
+    inputs
 }
 
 #[cfg(test)]

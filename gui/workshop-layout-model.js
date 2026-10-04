@@ -1,5 +1,6 @@
-import { createDockLayoutModel, PANEL_KIND } from './dock-layout-model.js';
-import { addMigrationPanel, createDockLayoutMigration } from './dock-layout-migration.js';
+import { PANEL_KIND } from './dock-layout-model.js';
+import { addMigrationPanel } from './dock-layout-migration.js';
+import { createDockLayoutHistory } from './dock-layout-history.js';
 
 export const WORKSHOP_LAYOUT_VERSION = 11;
 // id, introduction version, migration order, preferred target, default column, kind.
@@ -25,47 +26,36 @@ const introductions = Object.freeze([
   ['scripts', 10, 12, 'source', 1, PANEL_KIND.DOCUMENT],
   ['localisation', 11, 13, 'dependencies', 0, PANEL_KIND.TOOL],
 ]);
-export const WORKSHOP_PANEL_REGISTRY = Object.freeze(introductions.map(([id, , , , , kind]) => Object.freeze({ id, kind })));
-export const WORKSHOP_PANELS = Object.freeze(WORKSHOP_PANEL_REGISTRY.map(panel => panel.id));
-const vocabulary = version => introductions.filter(([, introduced]) => introduced <= Math.max(2, version)).map(([id]) => id);
-const additions = version => introductions.filter(([, introduced]) => introduced === version)
-  .sort((a, b) => a[2] - b[2]).map(([id, , , preferred]) => [id, preferred]);
-const LEGACY_PANELS = vocabulary(2);
+const records = introductions.map(([id, since, order, target, , kind]) => ({
+  id, since, kind, ...(target ? { migration: { order, target } } : {}),
+}));
 const historicalDefault = version => ({ version,
   root: { type: 'split', axis: 'horizontal', sizes: [22, 56, 22],
     children: ['files', 'source', 'inspector'].map((active, column) => ({ type: 'tabs', active,
       tabs: introductions.filter(([, introduced, , , home]) => introduced <= version && home === column).map(([id]) => id) })) },
   floats: [], closed: [], selected: 'source' });
 export const defaultWorkshopLayout = () => historicalDefault(WORKSHOP_LAYOUT_VERSION);
-const base = createDockLayoutModel({ version: WORKSHOP_LAYOUT_VERSION, panels: WORKSHOP_PANEL_REGISTRY,
-  defaultLayout: defaultWorkshopLayout, compatibleVersions: [WORKSHOP_LAYOUT_VERSION] });
-const legacy = createDockLayoutModel({ version: 2, panels: LEGACY_PANELS,
-  defaultLayout: () => historicalDefault(2), compatibleVersions: [1, 2] });
-const generations = Array.from({ length: WORKSHOP_LAYOUT_VERSION }, (_, index) => {
-  const version = index + 1;
-  const model = version <= 2 ? legacy : version === WORKSHOP_LAYOUT_VERSION ? base
-    : createDockLayoutModel({ version, panels: vocabulary(version),
-      defaultLayout: () => historicalDefault(version), compatibleVersions: [version] });
-  return { version, model, added: version <= 2 ? [] : additions(version) };
-});
 
 // Version 1 held `add` and `recovery` as fixed chrome rather than as placements.
 // They are rehomed first, so a v1 tree ends up where a v2 tree of the same shape
 // would have — and a panel that tree explicitly closed is left closed.
-function rehomeVersionOne(state, from, value) {
+function rehomeVersionOne(state, from, value, generation) {
   if (from !== 1) return state;
+  const legacy = generation.model;
   const preservedClosed = Array.isArray(value.closed)
-    ? value.closed.filter(panel => LEGACY_PANELS.includes(panel)) : [];
+    ? value.closed.filter(panel => legacy.panels.includes(panel)) : [];
   const rehomed = ['add', 'recovery'].reduce(
     (current, panel) => addMigrationPanel(current, panel, 'inspector', legacy, preservedClosed),
     { ...state, version: 2 });
   return { ...rehomed, version: WORKSHOP_LAYOUT_VERSION };
 }
 
-const migrate = createDockLayoutMigration({
-  version: WORKSHOP_LAYOUT_VERSION, current: base, rehome: rehomeVersionOne,
-  generations,
+const { current: base, registry, migrate } = createDockLayoutHistory({
+  version: WORKSHOP_LAYOUT_VERSION, panels: records, aliases: { 1: 2 },
+  defaultLayout: historicalDefault, rehome: rehomeVersionOne,
 });
+export const WORKSHOP_PANEL_REGISTRY = registry;
+export const WORKSHOP_PANELS = base.panels;
 export const workshopLayoutModel = Object.freeze({ ...base, normalize: migrate });
 export const normalizeWorkshopLayout = migrate;
 export const selectWorkshopPanel = base.select;

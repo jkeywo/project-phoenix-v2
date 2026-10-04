@@ -2,7 +2,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { mountGmWorkspaceShell } from '../../gui/gm-workspace-shell.js';
-import { defaultLiveLayout, liveLayoutModel } from '../../gui/live-layout-model.js';
+import { defaultLiveLayout, liveLayoutModel, restorePreviousLiveLayout } from '../../gui/live-layout-model.js';
+import { createDefaultOperatorProfile, prepareOperatorProfileImport, serializeOperatorProfile } from '../../gui/operator-profile.js';
+import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
 const source = readFileSync('server.html', 'utf8');
 const observers = [];
 // Every mounted shell must be disposed: it registers a document-level keydown
@@ -28,6 +30,30 @@ function mount(extra = {}, translate = id => id, has = () => false) {
   mountedShells.push(shell);
   return {shell,selectEntity,win};
 }
+it('restores an imported Live backup through the layout menu and preserves it across export', () => {
+  const registry = createSemanticActionRegistry();
+  const old = { version: 18, root: { type: 'tabs', tabs: ['roster', 'station', 'journal'],
+    active: 'station' }, floats: [], closed: ['map'], selected: 'station' };
+  let profile = prepareOperatorProfileImport(JSON.stringify({
+    ...createDefaultOperatorProfile(), liveLayout: old, gmDensity: 'touch',
+  }), { registry }).profile;
+  const backup = structuredClone(profile.previousLiveLayout);
+  const { shell } = mount({ __hostGmConfirmationProfile: {
+    previousLiveLayout: () => profile.previousLiveLayout,
+    setLiveLayout: value => { profile = { ...profile, liveLayout: value }; return { status: 'saved' }; },
+  } });
+  shell.setLiveLayout(profile.liveLayout);
+  const button = [...document.querySelectorAll('[role="menuitem"]')]
+    .find(node => node.textContent === 'server.gm.layout.restore_previous');
+  expect(button).toBeDefined();
+  button.click();
+  expect(shell.liveLayoutState()).toEqual(restorePreviousLiveLayout(backup));
+  expect(profile.liveLayout).toEqual(shell.liveLayoutState());
+  const again = prepareOperatorProfileImport(serializeOperatorProfile(profile), { registry }).profile;
+  expect(again.liveLayout).toEqual(profile.liveLayout);
+  expect(again.previousLiveLayout).toEqual(backup);
+  expect(again.gmDensity).toBe('touch');
+});
 it('docks the desk when the page BECOMES a Game Master page, not only when it loaded as one', async () => {
   // The Host as GM landing route raises the Game Master request in place and
   // deliberately does NOT reload — `requestStandaloneGameMaster` commits the

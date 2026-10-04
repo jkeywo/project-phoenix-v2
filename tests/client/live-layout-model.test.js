@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { defaultLiveLayout, liveLayoutModel, normalizeLiveLayout, restorePreviousLiveLayout } from '../../gui/live-layout-model.js';
 import { prepareOperatorProfileImport, serializeOperatorProfile, createDefaultOperatorProfile } from '../../gui/operator-profile.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
+import restoration from './live-layout-restoration.json';
 
 const group = tabs => ({ type: 'tabs', tabs, active: tabs[0] });
 const tabs = node => !node ? [] : node.type === 'tabs' ? node.tabs : node.children.flatMap(tabs);
 describe('compact Live dock layout', () => {
+  it.each(restoration.cases)('preserves explicit restoration: $name', ({ value, result }) => {
+    const input = structuredClone(value);
+    expect(restorePreviousLiveLayout(input)).toEqual(restoration.outputs[result]);
+    expect(input).toEqual(value);
+  });
   it('starts with exactly four panes, leaving detail tools and saves closed', () => {
     const layout = defaultLiveLayout();
     expect(layout.version).toBe(19);

@@ -199,6 +199,49 @@ impl MeshSnapshotReceiver {
     }
 }
 
+/// A recovery driver's read of its receiver's latest restore outcome.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RestoreResolution {
+    /// No terminal outcome yet — the record has not arrived or is not ready.
+    Pending,
+    /// The record gated, restored and folded to itself.
+    Recovered { tick: u64, digest: u64 },
+    /// The record was refused, with the diagnostic supplied to the operator.
+    Failed(String),
+}
+
+/// Share outcome classification and diagnostics across both recovery drivers.
+pub(super) fn classify_restore_outcome(outcome: Option<&MeshRestoreOutcome>) -> RestoreResolution {
+    match outcome {
+        None | Some(MeshRestoreOutcome::NotReady) => RestoreResolution::Pending,
+        Some(MeshRestoreOutcome::Committed { tick, digest }) => RestoreResolution::Recovered {
+            tick: *tick,
+            digest: *digest,
+        },
+        Some(MeshRestoreOutcome::RefusedGate(why) | MeshRestoreOutcome::RefusedChunk(why)) => {
+            RestoreResolution::Failed(why.clone())
+        }
+        Some(MeshRestoreOutcome::RefusedIntegrity { recorded, restored }) => {
+            RestoreResolution::Failed(format!(
+                "the restored world folds to {restored:#018x}, not the {recorded:#018x} the \
+                 record recorded"
+            ))
+        }
+        Some(MeshRestoreOutcome::Incomplete { tick, gaps }) => {
+            RestoreResolution::Failed(format!("the restore left {gaps} gap(s) at tick {tick}"))
+        }
+        Some(MeshRestoreOutcome::RefusedWrongSender { armed_from, from }) => {
+            RestoreResolution::Failed(format!(
+                "the record came from {from:?}, not the leader {}",
+                armed_from.slot_id()
+            ))
+        }
+        Some(MeshRestoreOutcome::RefusedUnarmed) => {
+            RestoreResolution::Failed("this host was not armed to restore".to_string())
+        }
+    }
+}
+
 /// Whether this host will let a staged record overwrite its world, and from whom
 /// (issue #1118, AC2 — the receiver arm).
 ///

@@ -60,7 +60,8 @@ use crate::world::server::BridgeWorldSource;
 
 use super::recovery_plan::{self, DivergenceWindow, NoRecovery, RecoveryDecision, RecoveryRole};
 use super::snapshot_relay::{
-    send_snapshot, MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver,
+    classify_restore_outcome, send_snapshot, MeshRestoreArm, MeshSnapshotReceiver,
+    RestoreResolution,
 };
 use super::{FleetLockstep, FleetRoster, MeshAgreement};
 
@@ -516,7 +517,11 @@ fn advance_recovery(world: &mut World, local: HostSlot, delay: u64, sim_tick: u6
                 resolution = Some(RecoveryResult::Witnessed);
             }
         }
-        RecoveryRole::Recovering => match restore_result(world) {
+        RecoveryRole::Recovering => match classify_restore_outcome(
+            world
+                .get_resource::<MeshSnapshotReceiver>()
+                .and_then(MeshSnapshotReceiver::last_outcome),
+        ) {
             RestoreResolution::Pending => {}
             RestoreResolution::Recovered { tick, digest } => {
                 resolved = true;
@@ -585,52 +590,6 @@ fn try_send_record(
                 local.slot_id(),
             );
             None
-        }
-    }
-}
-
-/// A recovering host's read of its restore outcome.
-enum RestoreResolution {
-    /// No terminal outcome yet — the record has not arrived or is not ready.
-    Pending,
-    /// The record gated, restored and folded to itself.
-    Recovered { tick: u64, digest: u64 },
-    /// The record was refused; the world was rolled back, not left half-restored.
-    Failed(String),
-}
-
-/// Classify the receiver's latest restore outcome for the recovering host.
-fn restore_result(world: &World) -> RestoreResolution {
-    let Some(outcome) = world
-        .get_resource::<MeshSnapshotReceiver>()
-        .and_then(|rx| rx.last_outcome().cloned())
-    else {
-        return RestoreResolution::Pending;
-    };
-    match outcome {
-        MeshRestoreOutcome::Committed { tick, digest } => {
-            RestoreResolution::Recovered { tick, digest }
-        }
-        MeshRestoreOutcome::NotReady => RestoreResolution::Pending,
-        MeshRestoreOutcome::RefusedGate(why) => RestoreResolution::Failed(why),
-        MeshRestoreOutcome::RefusedChunk(why) => RestoreResolution::Failed(why),
-        MeshRestoreOutcome::RefusedIntegrity { recorded, restored } => {
-            RestoreResolution::Failed(format!(
-                "the restored world folds to {restored:#018x}, not the {recorded:#018x} the \
-                 record recorded"
-            ))
-        }
-        MeshRestoreOutcome::Incomplete { tick, gaps } => {
-            RestoreResolution::Failed(format!("the restore left {gaps} gap(s) at tick {tick}"))
-        }
-        MeshRestoreOutcome::RefusedWrongSender { armed_from, from } => {
-            RestoreResolution::Failed(format!(
-                "the record came from {from:?}, not the leader {}",
-                armed_from.slot_id()
-            ))
-        }
-        MeshRestoreOutcome::RefusedUnarmed => {
-            RestoreResolution::Failed("this host was not armed to restore".to_string())
         }
     }
 }

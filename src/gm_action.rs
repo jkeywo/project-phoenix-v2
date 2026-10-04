@@ -3221,6 +3221,7 @@ pub fn apply_due_actions(
         mut frozen_ship_slots,
         world_config,
         game_phase,
+        consumers,
     ): (
         crate::gm_despawn::RemovalQuery,
         crate::gm_objective::ObjectiveControl,
@@ -3235,6 +3236,7 @@ pub fn apply_due_actions(
         Option<ResMut<crate::ship_slots::FrozenShipSlots>>,
         Option<Res<crate::world::config::WorldConfig>>,
         Option<Res<State<crate::core::messages::GamePhase>>>,
+        Option<Res<crate::command_admission::AdmittedConsumerRegistry>>,
     ),
 ) {
     // Outside a fleet, an empty typed lane must not overwrite the ordinary
@@ -4403,18 +4405,13 @@ pub fn apply_due_actions(
                                 hosts,
                             ) {
                                 Ok(command) => {
-                                    let target_kind = config
-                                        .0
-                                        .systems
-                                        .iter()
-                                        .find(|system| system.id == command.target)
-                                        .map(|system| system.kind.as_str());
-                                    let awaits_terminal_consumer = crate::command_admission::
-                                        supports_correlated_action_feedback_for_kind(
-                                            &command.target,
-                                            &command.payload,
-                                            target_kind,
-                                        );
+                                    let support = consumers.as_deref().map_or(crate::command_admission::FeedbackSupport::Unsupported, |registry| registry.feedback_support(&command.target, &command.payload, &config.0));
+                                    let installed_owner = consumers.as_deref().is_some_and(|registry| config.0.system(&command.target).map_or_else(|| registry.is_routed(&command.target.0), |system| registry.is_system_routed(system)));
+                                    if support == crate::command_admission::FeedbackSupport::Ambiguous
+                                        || (support == crate::command_admission::FeedbackSupport::Unsupported && !installed_owner) {
+                                        (GmActionOutcome::Refused, Some(GmActionRefusalReason::SystemUnavailable))
+                                    } else {
+                                    let awaits_terminal_consumer = support == crate::command_admission::FeedbackSupport::Supported;
                                     station_commands.as_deref_mut().expect("checked above").push(
                                         crate::gm_puppet::PendingGmStationCommand {
                                             tick: grant.apply_tick,
@@ -4435,6 +4432,7 @@ pub fn apply_due_actions(
                                         },
                                         None,
                                     )
+                                    }
                                 }
                                 Err(
                                     crate::command_admission::StationCommandPolicyFailure::SystemOutsideStation,

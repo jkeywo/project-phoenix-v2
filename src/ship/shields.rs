@@ -1,4 +1,5 @@
 use crate::core::broadcast::sim::SimProducer;
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use crate::simmath;
 use bevy::prelude::*;
 
@@ -276,10 +277,13 @@ impl Plugin for ShipShieldsPlugin {
         // Admitted-command consumer (issue #833): `handle_shields_messages`
         // reads every generated `shield-arc-*` instance (one id per authored
         // facing), so the claim names both its kind and generated-id prefix.
-        app.register_admitted_consumer(ConsumerMatcher::prefix(
-            crate::ship::system_registry::SHIELD_ARC_KIND,
-            "shield-arc-",
-        ));
+        app.register_admitted_consumer(
+            ConsumerMatcher::prefix(crate::ship::system_registry::SHIELD_ARC_KIND, "shield-arc-")
+                .with_feedback(
+                    crate::command_admission::FeedbackAddress::LowercasePrefixSpelling,
+                    &[Payload::SetShieldArcFocus],
+                ),
+        );
         register_shields_replication_lifecycle(app);
         app.add_message::<CoordinationEnqueue>()
             .add_message::<DeliveredCoordination>()

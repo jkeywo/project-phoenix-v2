@@ -19,7 +19,10 @@
 //!
 //! - Each console/ship plugin registers its consumer address domain at `build`
 //!   time with one line
-//!   ([`RegisterAdmittedConsumer::register_admitted_consumer`]).
+//!   ([`RegisterAdmittedConsumer::register_admitted_consumer`]), including the
+//!   payloads and legacy spellings for which it supplies terminal feedback.
+//! - Explicit correlations must have exactly one installed feedback owner;
+//!   Admission refuses missing or ambiguous ownership before queue/log writes.
 //! - [`warn_unrouted_admitted_commands`] runs after every consumer set and
 //!   warns (never drops, never mutates) if an admitted command's target
 //!   matches no registered consumer. It is warning-only: it changes no
@@ -30,7 +33,9 @@
 
 use bevy::prelude::*;
 
-use crate::core::messages::AdmittedCommands;
+use crate::core::messages::{
+    AdmittedCommands, SystemControlPayload, SystemControlPayloadDiscriminants, SystemId,
+};
 
 /// A matcher identifying one registered admitted-command consumer.
 ///
@@ -80,6 +85,32 @@ impl ConsumerMatcher {
         Self::UndeclaredExact(id.into())
     }
 
+    /// Declare the terminal-feedback promise beside its actual consumer.
+    pub fn with_feedback(
+        self,
+        address: FeedbackAddress,
+        payloads: &'static [SystemControlPayloadDiscriminants],
+    ) -> ConsumerRegistration {
+        assert!(
+            matches!(
+                (&self, address),
+                (
+                    Self::Exact { .. } | Self::Prefix { .. } | Self::UndeclaredExact(_),
+                    FeedbackAddress::MatcherSpelling
+                ) | (Self::Kind(_), FeedbackAddress::DeclaredKindOrCanonical(_))
+                    | (
+                        Self::Prefix { .. },
+                        FeedbackAddress::LowercasePrefixSpelling
+                    )
+            ),
+            "feedback address mode must match the consumer address domain"
+        );
+        ConsumerRegistration {
+            matcher: self,
+            feedback: Some(CorrelatedFeedback { address, payloads }),
+        }
+    }
+
     fn matches_target(&self, target: &str) -> bool {
         match self {
             Self::UndeclaredExact(id) => target == id,
@@ -108,6 +139,103 @@ impl ConsumerMatcher {
     }
 }
 
+/// Compatibility spellings accepted by an installed terminal-feedback owner.
+/// These are intentionally independent of command authority. In particular,
+/// legacy canonical/generated spellings need not have an authored topology row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedbackAddress {
+    MatcherSpelling,
+    DeclaredKindOrCanonical(&'static str),
+    LowercasePrefixSpelling,
+}
+
+#[derive(Clone, Debug)]
+struct CorrelatedFeedback {
+    address: FeedbackAddress,
+    payloads: &'static [SystemControlPayloadDiscriminants],
+}
+
+impl CorrelatedFeedback {
+    fn equivalent(&self, other: &Self) -> bool {
+        self.address == other.address
+            && self
+                .payloads
+                .iter()
+                .all(|payload| other.payloads.contains(payload))
+            && other
+                .payloads
+                .iter()
+                .all(|payload| self.payloads.contains(payload))
+    }
+}
+
+/// Registration metadata only: no callback or schedule is dispatched here.
+#[derive(Clone, Debug)]
+pub struct ConsumerRegistration {
+    matcher: ConsumerMatcher,
+    feedback: Option<CorrelatedFeedback>,
+}
+
+impl From<ConsumerMatcher> for ConsumerRegistration {
+    fn from(matcher: ConsumerMatcher) -> Self {
+        Self {
+            matcher,
+            feedback: None,
+        }
+    }
+}
+
+impl ConsumerRegistration {
+    fn supports_feedback(
+        &self,
+        target: &SystemId,
+        payload: &SystemControlPayload,
+        config: Option<&crate::ship::config::ShipConfig>,
+    ) -> bool {
+        let Some(feedback) = &self.feedback else {
+            return false;
+        };
+        if !feedback
+            .payloads
+            .contains(&SystemControlPayloadDiscriminants::from(payload))
+        {
+            return false;
+        }
+        match (&self.matcher, feedback.address) {
+            (
+                ConsumerMatcher::Exact { id, .. } | ConsumerMatcher::UndeclaredExact(id),
+                FeedbackAddress::MatcherSpelling,
+            ) => target.0 == *id,
+            (ConsumerMatcher::Prefix { prefix, .. }, FeedbackAddress::MatcherSpelling) => {
+                target.0.starts_with(prefix)
+            }
+            (ConsumerMatcher::Kind(kind), FeedbackAddress::DeclaredKindOrCanonical(canonical)) => {
+                target.0 == canonical
+                    || config
+                        .and_then(|config| config.system(target))
+                        .is_some_and(|system| system.kind == *kind)
+            }
+            (ConsumerMatcher::Prefix { prefix, .. }, FeedbackAddress::LowercasePrefixSpelling) => {
+                target.0.strip_prefix(prefix).is_some_and(|suffix| {
+                    !suffix.is_empty()
+                        && suffix.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                        })
+                })
+            }
+            _ => unreachable!("feedback mode validated at registration"),
+        }
+    }
+}
+
+/// A correlation must have exactly one installed terminal owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedbackSupport {
+    Unsupported,
+    Supported,
+    Ambiguous,
+}
+
 /// The one table answering "which module handles commands for this system?".
 ///
 /// Populated at app build: each consumer plugin registers the System kind and
@@ -117,16 +245,69 @@ impl ConsumerMatcher {
 /// matching instead.
 #[derive(Resource, Default, Debug)]
 pub struct AdmittedConsumerRegistry {
-    matchers: Vec<ConsumerMatcher>,
+    registrations: Vec<ConsumerRegistration>,
 }
 
 impl AdmittedConsumerRegistry {
     /// Record that a consumer exists for `matcher`. Idempotent — registering
     /// the same matcher twice is a no-op, so a plugin added twice (test
     /// harnesses do this) cannot inflate the table.
-    pub fn register(&mut self, matcher: ConsumerMatcher) {
-        if !self.matchers.contains(&matcher) {
-            self.matchers.push(matcher);
+    pub fn register(&mut self, registration: impl Into<ConsumerRegistration>) {
+        let registration = registration.into();
+        if let Some(existing) = self
+            .registrations
+            .iter()
+            .find(|entry| entry.matcher == registration.matcher)
+        {
+            let identical = match (&existing.feedback, &registration.feedback) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.equivalent(right),
+                _ => false,
+            };
+            assert!(
+                identical,
+                "contradictory feedback metadata for consumer {:?}",
+                registration.matcher
+            );
+            return;
+        }
+        self.registrations.push(registration);
+    }
+
+    /// Read the promise without running a consumer or changing its schedule.
+    pub fn feedback_support(
+        &self,
+        target: &SystemId,
+        payload: &SystemControlPayload,
+        config: &crate::ship::config::ShipConfig,
+    ) -> FeedbackSupport {
+        self.lookup_feedback(target, payload, Some(config))
+    }
+
+    /// Legacy spelling-only lookup for advisory activity, where authored
+    /// uncorrelated controls historically counted as worked controls.
+    pub(crate) fn legacy_feedback_support(
+        &self,
+        target: &SystemId,
+        payload: &SystemControlPayload,
+    ) -> FeedbackSupport {
+        self.lookup_feedback(target, payload, None)
+    }
+
+    fn lookup_feedback(
+        &self,
+        target: &SystemId,
+        payload: &SystemControlPayload,
+        config: Option<&crate::ship::config::ShipConfig>,
+    ) -> FeedbackSupport {
+        let mut matching = self
+            .registrations
+            .iter()
+            .filter(|entry| entry.supports_feedback(target, payload, config));
+        match (matching.next(), matching.next()) {
+            (None, _) => FeedbackSupport::Unsupported,
+            (Some(_), None) => FeedbackSupport::Supported,
+            (Some(_), Some(_)) => FeedbackSupport::Ambiguous,
         }
     }
 
@@ -136,29 +317,33 @@ impl AdmittedConsumerRegistry {
     /// matcher without ship topology. Runtime linting and descriptor coverage
     /// use [`Self::is_system_routed`] for declared Systems.
     pub fn is_routed(&self, target: &str) -> bool {
-        self.matchers.iter().any(|m| m.matches_target(target))
+        self.registrations
+            .iter()
+            .any(|entry| entry.matcher.matches_target(target))
     }
 
     /// Does any registered consumer claim this authored System instance?
     pub fn is_system_routed(&self, system: &crate::ship::config::SystemInstanceConfig) -> bool {
-        self.matchers.iter().any(|m| m.matches_system(system))
+        self.registrations
+            .iter()
+            .any(|entry| entry.matcher.matches_system(system))
     }
 
     /// Does production declare any consumer address domain for this System kind?
     pub fn claims_kind(&self, kind: &str) -> bool {
-        self.matchers
+        self.registrations
             .iter()
-            .any(|matcher| matcher.claims_kind(kind))
+            .any(|entry| entry.matcher.claims_kind(kind))
     }
 
     /// Number of distinct registered matchers (for coverage assertions).
     pub fn len(&self) -> usize {
-        self.matchers.len()
+        self.registrations.len()
     }
 
     /// Whether no consumer has registered yet.
     pub fn is_empty(&self) -> bool {
-        self.matchers.is_empty()
+        self.registrations.is_empty()
     }
 }
 
@@ -168,17 +353,23 @@ impl AdmittedConsumerRegistry {
 /// does not matter.
 pub trait RegisterAdmittedConsumer {
     /// Register a consumer matcher, returning `&mut Self` for chaining.
-    fn register_admitted_consumer(&mut self, matcher: ConsumerMatcher) -> &mut Self;
+    fn register_admitted_consumer(
+        &mut self,
+        registration: impl Into<ConsumerRegistration>,
+    ) -> &mut Self;
 }
 
 impl RegisterAdmittedConsumer for App {
-    fn register_admitted_consumer(&mut self, matcher: ConsumerMatcher) -> &mut Self {
+    fn register_admitted_consumer(
+        &mut self,
+        registration: impl Into<ConsumerRegistration>,
+    ) -> &mut Self {
         if !self.world().contains_resource::<AdmittedConsumerRegistry>() {
             self.init_resource::<AdmittedConsumerRegistry>();
         }
         self.world_mut()
             .resource_mut::<AdmittedConsumerRegistry>()
-            .register(matcher);
+            .register(registration);
         self
     }
 }

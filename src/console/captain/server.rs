@@ -1,10 +1,10 @@
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, CameraView, CaptainBlackboard,
-    DeliveryClass, ObjectiveSnapshot, ServerMessage, SystemBlackboard, SystemControlPayload,
-    SystemId, ViewMode,
+    ActionFeedbackOutcome, AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot,
+    SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
 };
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -26,23 +26,45 @@ pub struct CaptainAiPolicy(pub crate::ai::policy::AiPolicy);
 
 pub struct CaptainPlugin;
 
-impl Plugin for CaptainPlugin {
-    fn build(&self, app: &mut App) {
-        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // Admitted-command consumers (issue #833): `handle_set_red_alert`
-        // (red-alert), `handle_set_objective_priority` (captain), and
-        // `handle_set_view` (viewscreen SetView).
-        app.register_admitted_consumer(ConsumerMatcher::exact(
+/// Register the command ownership installed with this module's input handlers.
+pub(crate) fn register_captain_consumers(app: &mut App) {
+    use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+    // Admitted-command consumers (issue #833): `handle_set_red_alert`
+    // (red-alert), `handle_set_objective_priority` (captain), and
+    // `handle_set_view` (viewscreen SetView).
+    app.register_admitted_consumer(
+        ConsumerMatcher::exact(
             crate::ship::system_registry::RED_ALERT_KIND,
             crate::ship::system_registry::RED_ALERT_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
+        )
+        .with_feedback(
+            crate::command_admission::FeedbackAddress::MatcherSpelling,
+            &[Payload::SetRedAlert],
+        ),
+    )
+    .register_admitted_consumer(
+        ConsumerMatcher::exact(
             crate::ship::system_registry::CAPTAIN_KIND,
             crate::ship::system_registry::CAPTAIN_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::kind(
-            crate::ship::system_registry::VIEWSCREEN_KIND,
-        ));
+        )
+        .with_feedback(
+            crate::command_admission::FeedbackAddress::MatcherSpelling,
+            &[Payload::SetObjectivePriority],
+        ),
+    )
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::VIEWSCREEN_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID,
+            ),
+            &[Payload::SetView],
+        ),
+    );
+}
+
+impl Plugin for CaptainPlugin {
+    fn build(&self, app: &mut App) {
+        register_captain_consumers(app);
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         // The ONE shared AI decision cadence (issues #889, #895).
         crate::ai::cadence::register_ai_cadence(app);
@@ -94,29 +116,7 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
-fn finish_action_feedback(
-    cmd: &AdmittedCommand,
-    outbound: &mut Option<
-        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
-    >,
-    outcome: ActionFeedbackOutcome,
-) {
-    let (Some(correlation), Some(token), Some(messages)) = (
-        cmd.feedback_correlation.as_ref(),
-        cmd.response_token.as_ref(),
-        outbound.as_deref_mut(),
-    ) else {
-        return;
-    };
-    messages.write(crate::lobby::server::OutboundMessage {
-        target: crate::lobby::Target::Token(token.clone()),
-        msg: ServerMessage::ActionFeedback {
-            correlation: correlation.clone(),
-            outcome,
-        },
-        delivery: DeliveryClass::Reliable,
-    });
-}
+use crate::command_admission::finish_action_feedback;
 
 /// Applies `SetRedAlert { active }` commands from every ship's own
 /// `AdmittedCommands` to that ship's own `ShipRedAlert` (issue #748).

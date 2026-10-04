@@ -323,6 +323,7 @@ fn gm_commands_follow_human_admission_in_canonical_order_and_keep_attribution_si
     let mut sources = ShipSystemControlSources::default();
     sources.0.set(helm_target.clone(), ControlSource::Human);
     let mut app = App::new();
+    crate::console::helm::dispatch::register_helm_dispatch(&mut app);
     app.insert_resource(crate::sim_tick::SimTick(12))
         .init_resource::<PendingGmStationCommands>()
         .init_resource::<PendingGmStationFeedbackRoutes>()
@@ -400,12 +401,25 @@ fn authentic_helm_consumer_settles_gm_correlation_applied_or_refused_exactly_onc
         GmActionRefusalReason, LoggedGmAction,
     };
 
-    for (with_impulse_owner, expected_outcome, expected_reason) in [
-        (true, GmActionOutcome::Applied, None),
+    for (with_impulse_owner, registration_mode, expected_outcome, expected_reason) in [
+        (true, 1, GmActionOutcome::Applied, None),
         (
             false,
+            1,
             GmActionOutcome::Refused,
             Some(GmActionRefusalReason::SystemRefused),
+        ),
+        (
+            true,
+            0,
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::SystemUnavailable),
+        ),
+        (
+            true,
+            2,
+            GmActionOutcome::Refused,
+            Some(GmActionRefusalReason::SystemUnavailable),
         ),
     ] {
         let order = crate::gm_action::GmActionOrder::new(crate::command_admission::HostSlot(2), 1);
@@ -477,6 +491,16 @@ fn authentic_helm_consumer_settles_gm_correlation_applied_or_refused_exactly_onc
                 )
                     .chain(),
             );
+        app.init_resource::<crate::command_admission::AdmittedConsumerRegistry>();
+        if registration_mode != 0 {
+            crate::console::helm::dispatch::register_helm_dispatch(&mut app);
+        }
+        if registration_mode == 2 {
+            use crate::command_admission::{
+                ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer,
+            };
+            app.register_admitted_consumer(ConsumerMatcher::exact(crate::ship::system_registry::HELM_IMPULSE_KIND, "impulse-drive").with_feedback(FeedbackAddress::MatcherSpelling, &[crate::core::messages::SystemControlPayloadDiscriminants::StartImpulseCharge]));
+        }
         let entity = app
             .world_mut()
             .spawn((
@@ -521,6 +545,24 @@ fn authentic_helm_consumer_settles_gm_correlation_applied_or_refused_exactly_onc
             "the authentic consumer's first terminal answer closes its route",
         );
         let admitted = app.world().get::<AdmittedCommands>(entity).unwrap();
+        if registration_mode != 1 {
+            assert!(
+                admitted.0.is_empty(),
+                "missing or ambiguous installed owner must refuse before admission"
+            );
+            assert!(app
+                .world()
+                .resource::<StationPuppetActivity>()
+                .entries()
+                .is_empty());
+            let terminal = result.clone();
+            app.update();
+            assert_eq!(
+                app.world().resource::<GmActionJournal>().applied_results()[0],
+                terminal
+            );
+            continue;
+        }
         assert_eq!(
             admitted.0[0]
                 .feedback_correlation

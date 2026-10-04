@@ -1,3 +1,4 @@
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use crate::simmath;
 use bevy::prelude::*;
 
@@ -99,10 +100,16 @@ impl Plugin for ShipSensorsPlugin {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Admitted-command consumer (issue #833): `handle_sensors_messages`
         // reads the `sensors` system's admitted commands.
-        app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::ship::system_registry::SENSORS_KIND,
-            crate::ship::system_registry::SENSORS_SYSTEM_ID,
-        ));
+        app.register_admitted_consumer(
+            ConsumerMatcher::exact(
+                crate::ship::system_registry::SENSORS_KIND,
+                crate::ship::system_registry::SENSORS_SYSTEM_ID,
+            )
+            .with_feedback(
+                crate::command_admission::FeedbackAddress::MatcherSpelling,
+                &[Payload::SetScienceTarget, Payload::ScanTarget],
+            ),
+        );
         // The ONE shared AI decision cadence (issue #889), which also derives
         // the slower snapshot latch `operate_sensors_ai` gates on.
         crate::ai::cadence::register_ai_cadence(app);

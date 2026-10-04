@@ -362,3 +362,57 @@ fn unrouted_lint_flags_unregistered_but_not_registered_ids() {
     let after = app.world().entity(ship).get::<AdmittedCommands>().unwrap();
     assert_eq!(after.0.len(), 2, "the lint must not drop admitted commands");
 }
+
+#[test]
+fn feedback_registrations_are_idempotent_and_detect_ambiguous_ownership() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    let owner = ConsumerMatcher::kind("dock").with_feedback(
+        FeedbackAddress::DeclaredKindOrCanonical("dock"),
+        &[Payload::Dock],
+    );
+    registry.register(owner.clone());
+    registry.register(owner);
+    assert_eq!(registry.len(), 1);
+    let config = ship_config(vec![system("berthing-clamps", "dock")]);
+    assert_eq!(
+        registry.feedback_support(
+            &SystemId("berthing-clamps".into()),
+            &SystemControlPayload::Dock,
+            &config
+        ),
+        FeedbackSupport::Supported
+    );
+    registry.register(
+        ConsumerMatcher::exact("dock", "berthing-clamps")
+            .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::Dock]),
+    );
+    assert_eq!(
+        registry.feedback_support(
+            &SystemId("berthing-clamps".into()),
+            &SystemControlPayload::Dock,
+            &config
+        ),
+        FeedbackSupport::Ambiguous
+    );
+    assert_eq!(
+        registry.feedback_support(
+            &SystemId("ghost".into()),
+            &SystemControlPayload::Dock,
+            &config
+        ),
+        FeedbackSupport::Unsupported
+    );
+}
+
+#[test]
+#[should_panic(expected = "contradictory feedback metadata")]
+fn conflicting_consumer_feedback_is_a_build_error() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    registry.register(ConsumerMatcher::exact("dock", "dock"));
+    registry.register(
+        ConsumerMatcher::exact("dock", "dock")
+            .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::Dock]),
+    );
+}

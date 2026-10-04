@@ -1,4 +1,24 @@
 use super::*;
+fn counts_as_worked_control(command: &AdmittedCommand) -> bool {
+    let mut app = bevy::prelude::App::new();
+    crate::server_app::add_simulation_plugins_with(
+        &mut app,
+        crate::server_app::SimPluginOptions {
+            render: false,
+            ..Default::default()
+        },
+    );
+    app.add_plugins(crate::world::server::WorldPlugin);
+    let registry = app
+        .world()
+        .resource::<crate::command_admission::AdmittedConsumerRegistry>();
+    super::counts_as_worked_control(
+        command,
+        registry.legacy_feedback_support(&command.target, &command.payload)
+            != crate::command_admission::FeedbackSupport::Unsupported,
+    )
+}
+
 fn world(quiet_time_secs: f32, quiet_time_disabled: bool) -> WorldConfig {
     let mut world = WorldConfig::default();
     world.global.sim_tick_hz = 60.0;
@@ -159,4 +179,61 @@ fn an_uncorrelated_seat_control_counts() {
         },
         SEAT
     )));
+}
+
+#[test]
+fn observer_preserves_authored_legacy_controls_and_counts_correlations_only_from_results() {
+    for (correlated, outcome, expected) in [
+        (false, None, 12),
+        (true, None, 0),
+        (true, Some(ActionFeedbackOutcome::Refused), 0),
+        (true, Some(ActionFeedbackOutcome::Applied), 12),
+    ] {
+        let mut production = App::new();
+        crate::server_app::add_simulation_plugins_with(
+            &mut production,
+            crate::server_app::SimPluginOptions {
+                render: false,
+                ..Default::default()
+            },
+        );
+        production.add_plugins(crate::world::server::WorldPlugin);
+        let registry = production
+            .world_mut()
+            .remove_resource::<crate::command_admission::AdmittedConsumerRegistry>()
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(registry)
+            .insert_resource(SimTick(12))
+            .init_resource::<GmCrewActivity>()
+            .add_message::<OutboundMessage>()
+            .add_systems(Update, observe_crew_activity);
+        let correlation =
+            crate::core::messages::ActionCorrelationId::new("authored-impulse").unwrap();
+        let mut action = command(
+            "authored-impulse",
+            SystemControlPayload::StartImpulseCharge,
+            SEAT,
+        );
+        if correlated {
+            action.feedback_correlation = Some(correlation.clone());
+        }
+        app.world_mut().spawn(AdmittedCommands(vec![action]));
+        if let Some(outcome) = outcome {
+            app.world_mut()
+                .resource_mut::<Messages<OutboundMessage>>()
+                .write(crate::command_admission::feedback::action_feedback(
+                    SEAT,
+                    &correlation,
+                    outcome,
+                ));
+        }
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<GmCrewActivity>()
+                .last_activity_tick(),
+            expected
+        );
+    }
 }

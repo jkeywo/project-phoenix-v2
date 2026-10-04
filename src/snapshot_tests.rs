@@ -1031,6 +1031,8 @@ station = "captain"
             .set(SystemId("red-alert".into()), ControlSource::Ai);
 
         let mut app = App::new();
+        // Recovery replays the real Captain consumer, including its ownership promise.
+        crate::console::captain::server::register_captain_consumers(&mut app);
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::lobby::server::OutboundMessage>();
         // `capture_entities` deliberately refuses a partial Option-query when

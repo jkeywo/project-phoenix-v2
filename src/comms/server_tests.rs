@@ -17,6 +17,8 @@ fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>)
 
 pub(crate) fn comms_test_app() -> App {
     let mut app = App::new();
+    // These are the real Comms handlers below, so install their production promise.
+    register_comms_consumer(&mut app);
     // Mirror production's total fixed-tick order. In particular, the layer
     // applier lives in Physics while response retirement + routing live in
     // Input; tests must not manufacture a direct edge that production lacks.

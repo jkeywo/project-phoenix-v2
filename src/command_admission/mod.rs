@@ -26,15 +26,15 @@
 
 use bevy::prelude::*;
 
-use crate::core::messages::{
-    ActionCorrelationId, ActionFeedbackOutcome, AdmittedCommand, ClientMessage, DeliveryClass,
-    ServerMessage,
-};
-use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target};
+use crate::core::messages::{ActionFeedbackOutcome, ClientMessage};
+use crate::lobby::{InboundMessage, OutboundMessage, Sessions};
 use crate::server_app::LocalShip;
 
 pub mod ai_emit;
 pub mod debug_route;
+pub(crate) mod feedback;
+use feedback::write_action_feedback;
+pub(crate) use feedback::{finish_action_feedback, finish_admitted_action_feedback};
 pub mod log;
 pub mod policy;
 pub mod router;
@@ -53,7 +53,8 @@ pub use policy::{
 };
 pub use router::{
     unrouted_command_targets, unrouted_commandable_systems, warn_unrouted_admitted_commands,
-    AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer,
+    AdmittedConsumerRegistry, ConsumerMatcher, ConsumerRegistration, FeedbackAddress,
+    FeedbackSupport, RegisterAdmittedConsumer,
 };
 
 /// System set that `admit_system_commands` belongs to. Handlers that run in
@@ -69,164 +70,6 @@ pub struct AdmissionSet;
 /// Include this in plugin-level test apps so handlers have a populated
 /// `AdmittedCommands` to read from.
 pub struct AdmissionPlugin;
-
-/// Exact target/payload pairs whose owning consumers complete the correlated
-/// operator lifecycle. A correlation never widens command authority: this is
-/// only the protocol allowlist for commands that can promise a terminal reply.
-pub(crate) fn supports_correlated_action_feedback_for_kind(
-    target: &crate::core::messages::SystemId,
-    payload: &crate::core::messages::SystemControlPayload,
-    target_kind: Option<&str>,
-) -> bool {
-    use crate::core::messages::SystemControlPayload;
-
-    let authored_terminal_owner = match target_kind {
-        Some(crate::ship::system_registry::HELM_IMPULSE_KIND) => matches!(
-            payload,
-            SystemControlPayload::StartImpulseCharge | SystemControlPayload::CancelImpulse
-        ),
-        Some(crate::ship::system_registry::HELM_BOOST_KIND) => matches!(
-            payload,
-            SystemControlPayload::SetBoost { .. } | SystemControlPayload::ToggleBoost
-        ),
-        Some(crate::ship::system_registry::VIEWSCREEN_KIND) => {
-            matches!(payload, SystemControlPayload::SetView { .. })
-        }
-        Some(crate::ship::system_registry::DOCK_KIND) => {
-            matches!(
-                payload,
-                SystemControlPayload::Dock | SystemControlPayload::Undock
-            )
-        }
-        _ => false,
-    };
-
-    authored_terminal_owner
-        || (target.0 == crate::ship::system_registry::RED_ALERT_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::SetRedAlert { .. }))
-        || (target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::SetView { .. }))
-        || (target.0 == crate::ship::system_registry::CAPTAIN_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::SetObjectivePriority { .. }))
-        || (target.0 == crate::ship::system_registry::NAVIGATION_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetNavigationWaypoint { .. }
-                    | SystemControlPayload::ClearNavigationWaypoint
-                    | SystemControlPayload::OrderCivilian { .. }
-            ))
-        || (target.0 == crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID
-            && matches!(payload, SystemControlPayload::SetTarget { .. }))
-        || (target.0 == crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetPhaserMode { .. }
-                    | SystemControlPayload::SetStrikeBoost { .. }
-            ))
-        || (target.0.starts_with("phaser-") && matches!(payload, SystemControlPayload::FirePhaser))
-        || (target.0.starts_with("blaster-")
-            && matches!(
-                payload,
-                SystemControlPayload::FireBlaster
-                    | SystemControlPayload::ChargeBlasterStart
-                    | SystemControlPayload::ChargeBlasterCancel
-            ))
-        || (target.0.starts_with("torpedo-tube-")
-            && matches!(
-                payload,
-                SystemControlPayload::FireTorpedo { .. }
-                    | SystemControlPayload::SetTorpedoVolleyTarget { .. }
-            ))
-        || (target.0 == crate::ship::system_registry::COMMS_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::Hail { .. }
-                    | SystemControlPayload::RespondToMessage { .. }
-                    | SystemControlPayload::ClearComms
-                    | SystemControlPayload::ShowOnScreen { .. }
-            ))
-        || (target.0 == crate::ship::system_registry::SENSORS_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetScienceTarget { .. }
-                    | SystemControlPayload::ScanTarget { .. }
-            ))
-        || (target.0 == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::StartImpulseCharge | SystemControlPayload::CancelImpulse
-            ))
-        || (target.0 == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetBoost { .. } | SystemControlPayload::ToggleBoost
-            ))
-        || (target.0 == crate::ship::system_registry::DOCK_KIND
-            && matches!(
-                payload,
-                SystemControlPayload::Dock | SystemControlPayload::Undock
-            ))
-        || (is_shield_arc_target(&target.0)
-            && matches!(payload, SystemControlPayload::SetShieldArcFocus { .. }))
-        || (target.0 == crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::SetPowerGroupAllocation { .. }
-            ))
-        || (target.0 == crate::ship::system_registry::REPAIR_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::DispatchRepairTeam { .. }
-                    | SystemControlPayload::RecallRepairTeam { .. }
-                    | SystemControlPayload::SetRepairTargetPriority { .. }
-                    | SystemControlPayload::DispatchExternalRepair
-                    | SystemControlPayload::RecallExternalRepair
-            ))
-        || (target.0 == crate::ship::system_registry::TRACTOR_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::EngageTractor | SystemControlPayload::ReleaseTractor
-            ))
-        || (target.0 == crate::ship::system_registry::UMBILICAL_SYSTEM_ID
-            && matches!(
-                payload,
-                SystemControlPayload::StartTransfer | SystemControlPayload::StopTransfer
-            ))
-}
-
-#[cfg(test)]
-fn supports_correlated_action_feedback(
-    target: &crate::core::messages::SystemId,
-    payload: &crate::core::messages::SystemControlPayload,
-) -> bool {
-    supports_correlated_action_feedback_for_kind(target, payload, None)
-}
-
-fn is_shield_arc_target(target: &str) -> bool {
-    target.strip_prefix("shield-arc-").is_some_and(|arc| {
-        !arc.is_empty()
-            && arc
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    })
-}
-
-/// Complete one correlated action only after its owning consumer has actually
-/// handled it. AI and legacy commands carry no correlation/token and are a
-/// deliberate no-op here.
-pub(crate) fn finish_action_feedback(
-    cmd: &AdmittedCommand,
-    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
-    outcome: ActionFeedbackOutcome,
-) {
-    let (Some(correlation), Some(token)) = (
-        cmd.feedback_correlation.as_ref(),
-        cmd.response_token.as_deref(),
-    ) else {
-        return;
-    };
-    write_action_feedback(outbound, token, correlation, outcome);
-}
 
 impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
@@ -293,6 +136,7 @@ pub enum AdmissionGate {
 /// of the seam, and only an app with a real game phase has one.
 pub fn register_admission_seam(app: &mut App, gate: AdmissionGate) {
     log::register_command_log(app);
+    app.init_resource::<AdmittedConsumerRegistry>();
     let systems = (
         admit_system_commands.in_set(crate::sim_sets::FixedStep::AdmitSystemCommands),
         clear_inter_system_queue,
@@ -501,6 +345,7 @@ pub fn admit_system_commands(
     )>,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
+    consumers: Res<AdmittedConsumerRegistry>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     delay: Res<log::CommandDelay>,
     mut command_log: ResMut<log::CommandLog>,
@@ -578,20 +423,12 @@ pub fn admit_system_commands(
             }
             continue;
         };
-        // Resolve the authored instance before evaluating the correlation
-        // allowlist. Discrete Helm, viewscreen and dock SystemIds are
-        // designer-owned; their registered kind identifies the terminal
-        // consumer. Continuous Helm axes deliberately stay uncorrelated.
-        let target_kind = ship_config
-            .0
-            .systems
-            .iter()
-            .find(|system| system.id == *target)
-            .map(|system| system.kind.as_str());
-        if let Some(correlation) = correlation
-            .as_ref()
-            .filter(|_| !supports_correlated_action_feedback_for_kind(target, payload, target_kind))
-        {
+        // Only an installed owner may promise a terminal response. The registry
+        // preserves each owner's legacy spellings and never dispatches it.
+        if let Some(correlation) = correlation.as_ref().filter(|_| {
+            consumers.feedback_support(target, payload, &ship_config.0)
+                != FeedbackSupport::Supported
+        }) {
             write_action_feedback(
                 &mut outbound,
                 &ev.token,
@@ -718,45 +555,6 @@ pub fn admit_system_commands(
         }
         admitted.0.push(due.command);
     }
-}
-
-/// Emit one reliable, token-targeted lifecycle result.  `Option` keeps the
-/// admission system valid in reduced apps that do not register outbound
-/// messages; production's LobbyPlugin always does.
-fn write_action_feedback(
-    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
-    token: &str,
-    correlation: &ActionCorrelationId,
-    outcome: ActionFeedbackOutcome,
-) {
-    let Some(messages) = outbound.as_deref_mut() else {
-        return;
-    };
-    messages.write(OutboundMessage {
-        target: Target::Token(token.to_string()),
-        msg: ServerMessage::ActionFeedback {
-            correlation: correlation.clone(),
-            outcome,
-        },
-        delivery: DeliveryClass::Reliable,
-    });
-}
-
-/// Complete one admitted semantic action at the system that owns its gameplay
-/// result. Commands without a response token/correlation are ordinary AI or
-/// legacy traffic and deliberately produce no lifecycle message.
-pub(crate) fn finish_admitted_action_feedback(
-    outbound: &mut Option<ResMut<Messages<OutboundMessage>>>,
-    command: &crate::core::messages::AdmittedCommand,
-    outcome: ActionFeedbackOutcome,
-) {
-    let (Some(token), Some(correlation)) = (
-        command.response_token.as_deref(),
-        command.feedback_correlation.as_ref(),
-    ) else {
-        return;
-    };
-    write_action_feedback(outbound, token, correlation, outcome);
 }
 
 #[cfg(test)]

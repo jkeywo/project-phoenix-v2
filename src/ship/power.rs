@@ -291,7 +291,7 @@ impl Plugin for ShipPowerPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::ship::system_registry::POWER_REACTOR_KIND,
             crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID,
-        ));
+        ).with_feedback(crate::command_admission::FeedbackAddress::MatcherSpelling, &[crate::core::messages::SystemControlPayloadDiscriminants::SetPowerGroupAllocation]));
         app.init_resource::<crate::core::messages::InterSystemQueue>()
             .add_message::<CoordinationEnqueue>();
         // The scripted power-order queue `drain_scripted_power_orders` drains

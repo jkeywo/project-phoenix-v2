@@ -3,7 +3,7 @@ title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
 sources: [src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, gui/gm-mission-panel.js, gui/gm-spawn-panel.js, src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/gm_activity.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
-updated: 2026-09-07
+updated: 2026-10-04
 ---
 
 # Message Flow
@@ -36,7 +36,7 @@ The host simulation is authoritative. Clients submit intent and render projected
 
 Lobby/session variants are handled by dedicated systems in `src/lobby/server.rs`, with pure state transitions in `src/lobby/handler.rs`. Identification and station selection remain available where reconnect/seat changes require them.
 
-In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically.
+In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically. Correlated discrete actions first consult the installed `ConsumerRegistration` metadata in `src/command_admission/router.rs`; missing or ambiguous terminal owners are refused before queue/log insertion. Gameplay owners complete through the shared `src/command_admission/feedback.rs` envelope builder, using existing reliable message/outbox adapters. The GM journal derives Pending and puppet delivery checks ownership from the same registry; uncorrelated continuous actions require installed owners. The quiet-activity observer uses registry spelling compatibility for legacy traffic and observes actual correlations only from terminal outcomes.
 
 Host-class GM actions use a separate typed control-plane lane. The GM page
 queues `GmActionRequest`; Rust authenticates its operator against the frozen

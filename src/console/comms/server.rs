@@ -23,25 +23,7 @@ use crate::world::server::{EffectQueues, ShipModifiersParams, WorldLayerParams};
 /// Complete one correlated Comms action for the client that submitted it.
 /// The token is routing metadata only; all gameplay decisions are made before
 /// this helper is called and never branch on whether the source was human/AI.
-fn finish_action_feedback(
-    cmd: &crate::core::messages::AdmittedCommand,
-    outbox: &mut crate::server_app::SimOutbox,
-    outcome: crate::core::messages::ActionFeedbackOutcome,
-) {
-    let (Some(correlation), Some(token)) = (
-        cmd.feedback_correlation.as_ref(),
-        cmd.response_token.as_ref(),
-    ) else {
-        return;
-    };
-    outbox.push_reliable((
-        crate::lobby::Target::Token(token.clone()),
-        crate::core::messages::ServerMessage::ActionFeedback {
-            correlation: correlation.clone(),
-            outcome,
-        },
-    ));
-}
+use crate::command_admission::feedback::finish_outbox_action_feedback as finish_action_feedback;
 
 pub struct CommsConsolePlugin;
 

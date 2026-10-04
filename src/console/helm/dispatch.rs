@@ -17,6 +17,7 @@
 //! each kind to the owning ship's authored System id, so alternate ship-specific
 //! ids remain inside the same consumer address domain.
 
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 /// Register the six per-axis Helm System kinds as admitted-command consumers
 /// (issue #833): `process_helm_inputs` applies all six in one applier — the
 /// four per-axis helm ids plus vertical thrust and, since issue #881,
@@ -35,16 +36,26 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
     .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::HELM_STEERING_KIND,
     ))
-    .register_admitted_consumer(ConsumerMatcher::kind(
-        crate::ship::system_registry::HELM_IMPULSE_KIND,
-    ))
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::HELM_IMPULSE_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID,
+            ),
+            &[Payload::StartImpulseCharge, Payload::CancelImpulse],
+        ),
+    )
     .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::LATERAL_THRUST_KIND,
     ))
     .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::VERTICAL_THRUST_KIND,
     ))
-    .register_admitted_consumer(ConsumerMatcher::kind(
-        crate::ship::system_registry::HELM_BOOST_KIND,
-    ));
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::HELM_BOOST_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::HELM_BOOST_SYSTEM_ID,
+            ),
+            &[Payload::SetBoost, Payload::ToggleBoost],
+        ),
+    );
 }

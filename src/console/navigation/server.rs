@@ -1,9 +1,10 @@
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::messages::{
-    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, DeliveryClass, NavigationBlackboard,
-    ServerMessage, SystemBlackboard, SystemControlPayload, SystemId, WaypointSnapshot,
+    ActionFeedbackOutcome, AdmittedCommands, NavigationBlackboard, SystemBlackboard,
+    SystemControlPayload, SystemId, WaypointSnapshot,
 };
 use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
@@ -24,10 +25,20 @@ impl Plugin for NavigationPlugin {
         crate::ai::cadence::register_ai_cadence(app);
         // Admitted-command consumer (issue #833): `handle_navigation_waypoint`
         // reads the `navigation` system's admitted commands.
-        app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::ship::system_registry::NAVIGATION_KIND,
-            NAVIGATION_SYSTEM_ID,
-        ));
+        app.register_admitted_consumer(
+            ConsumerMatcher::exact(
+                crate::ship::system_registry::NAVIGATION_KIND,
+                NAVIGATION_SYSTEM_ID,
+            )
+            .with_feedback(
+                crate::command_admission::FeedbackAddress::MatcherSpelling,
+                &[
+                    Payload::SetNavigationWaypoint,
+                    Payload::ClearNavigationWaypoint,
+                    Payload::OrderCivilian,
+                ],
+            ),
+        );
         // The admitted-waypoint applier moves Input→Physics (issue #830):
         // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
         // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`
@@ -398,29 +409,7 @@ impl NavClearanceIssueState {
     }
 }
 
-fn finish_waypoint_action_feedback(
-    cmd: &AdmittedCommand,
-    outbound: &mut Option<
-        ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
-    >,
-    outcome: ActionFeedbackOutcome,
-) {
-    let (Some(correlation), Some(token), Some(messages)) = (
-        cmd.feedback_correlation.as_ref(),
-        cmd.response_token.as_ref(),
-        outbound.as_deref_mut(),
-    ) else {
-        return;
-    };
-    messages.write(crate::lobby::server::OutboundMessage {
-        target: crate::lobby::Target::Token(token.clone()),
-        msg: ServerMessage::ActionFeedback {
-            correlation: correlation.clone(),
-            outcome,
-        },
-        delivery: DeliveryClass::Reliable,
-    });
-}
+use crate::command_admission::finish_action_feedback as finish_waypoint_action_feedback;
 
 fn handle_navigation_waypoint(
     mut ship_query: Query<

@@ -34,10 +34,19 @@ pub fn register_repair_dispatch(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
     // Admitted-command consumer (issue #833): `handle_dispatch_repair_team`
     // reads the `repair` system's admitted commands.
-    app.register_admitted_consumer(ConsumerMatcher::exact(
-        crate::ship::system_registry::REPAIR_KIND,
-        REPAIR_SYSTEM_ID,
-    ));
+    app.register_admitted_consumer(
+        ConsumerMatcher::exact(crate::ship::system_registry::REPAIR_KIND, REPAIR_SYSTEM_ID)
+            .with_feedback(
+            crate::command_admission::FeedbackAddress::MatcherSpelling,
+            &[
+                crate::core::messages::SystemControlPayloadDiscriminants::DispatchRepairTeam,
+                crate::core::messages::SystemControlPayloadDiscriminants::RecallRepairTeam,
+                crate::core::messages::SystemControlPayloadDiscriminants::SetRepairTargetPriority,
+                crate::core::messages::SystemControlPayloadDiscriminants::DispatchExternalRepair,
+                crate::core::messages::SystemControlPayloadDiscriminants::RecallExternalRepair,
+            ],
+        ),
+    );
     app.add_systems(
         FixedUpdate,
         // CHAINED, not merely grouped (issue #1385). Every applier here takes

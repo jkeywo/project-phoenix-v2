@@ -14,6 +14,7 @@
 //! Comms console System — and are registered here so the Input → Broadcast
 //! chain is owned by one plugin.
 
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -388,16 +389,32 @@ pub(crate) fn retire_dialogues_for_pending_layer_unloads(
 /// Added by `WorldPlugin`, whose systems the ordering constraints reference.
 pub struct CommsWorldPlugin;
 
-impl Plugin for CommsWorldPlugin {
-    fn build(&self, app: &mut App) {
-        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // Admitted-command consumer (issue #833): the comms input handlers
-        // (`handle_hail` / `handle_respond_to_message` / `handle_clear_comms`)
-        // all read the `comms` system's admitted commands.
-        app.register_admitted_consumer(ConsumerMatcher::exact(
+/// Register the command ownership installed with this module's input handlers.
+pub(crate) fn register_comms_consumer(app: &mut App) {
+    use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+    // Admitted-command consumer (issue #833): the comms input handlers
+    // (`handle_hail` / `handle_respond_to_message` / `handle_clear_comms`)
+    // all read the `comms` system's admitted commands.
+    app.register_admitted_consumer(
+        ConsumerMatcher::exact(
             crate::ship::system_registry::COMMS_KIND,
             crate::ship::system_registry::COMMS_SYSTEM_ID,
-        ));
+        )
+        .with_feedback(
+            crate::command_admission::FeedbackAddress::MatcherSpelling,
+            &[
+                Payload::Hail,
+                Payload::RespondToMessage,
+                Payload::ClearComms,
+                Payload::ShowOnScreen,
+            ],
+        ),
+    );
+}
+
+impl Plugin for CommsWorldPlugin {
+    fn build(&self, app: &mut App) {
+        register_comms_consumer(app);
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<OnScreenMessage>()

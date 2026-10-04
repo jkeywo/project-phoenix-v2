@@ -63,26 +63,12 @@ pub(crate) fn finish_action_feedback(
     >,
     result: WeaponActionResult,
 ) {
-    let (Some(correlation), Some(token), Some(messages)) = (
-        cmd.feedback_correlation.as_ref(),
-        cmd.response_token.as_ref(),
-        outbound.as_deref_mut(),
-    ) else {
-        return;
-    };
-    messages.write(crate::lobby::server::OutboundMessage {
-        target: crate::lobby::Target::Token(token.clone()),
-        msg: crate::core::messages::ServerMessage::ActionFeedback {
-            correlation: correlation.clone(),
-            outcome: match result {
-                WeaponActionResult::Applied => {
-                    crate::core::messages::ActionFeedbackOutcome::Applied
-                }
-                WeaponActionResult::Refused(_) => {
-                    crate::core::messages::ActionFeedbackOutcome::Refused
-                }
-            },
+    crate::command_admission::finish_action_feedback(
+        cmd,
+        outbound,
+        match result {
+            WeaponActionResult::Applied => crate::core::messages::ActionFeedbackOutcome::Applied,
+            WeaponActionResult::Refused(_) => crate::core::messages::ActionFeedbackOutcome::Refused,
         },
-        delivery: crate::core::messages::DeliveryClass::Reliable,
-    });
+    );
 }

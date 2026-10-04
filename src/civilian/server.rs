@@ -273,13 +273,12 @@ pub fn tick_civilian_traffic(
                 ServerMessage::CivilianOrderRejected { target, reason },
             ));
             if let Some(correlation) = correlation {
-                outbox.push_reliable((
-                    crate::lobby::Target::Token(token.clone()),
-                    ServerMessage::ActionFeedback {
-                        correlation,
-                        outcome: ActionFeedbackOutcome::Refused,
-                    },
-                ));
+                let feedback = crate::command_admission::feedback::action_feedback(
+                    &token,
+                    &correlation,
+                    ActionFeedbackOutcome::Refused,
+                );
+                outbox.push_reliable((feedback.target, feedback.msg));
             }
         }
     }
@@ -322,13 +321,12 @@ pub fn tick_civilian_traffic(
         // state, not a transport-level command refusal.
         if let Some(outbox) = outbox.as_deref_mut() {
             for (_, token, correlation) in accepted_feedback.iter().filter(|(id, ..)| id == &uuid) {
-                outbox.push_reliable((
-                    crate::lobby::Target::Token(token.clone()),
-                    ServerMessage::ActionFeedback {
-                        correlation: correlation.clone(),
-                        outcome: ActionFeedbackOutcome::Applied,
-                    },
-                ));
+                let feedback = crate::command_admission::feedback::action_feedback(
+                    token,
+                    correlation,
+                    ActionFeedbackOutcome::Applied,
+                );
+                outbox.push_reliable((feedback.target, feedback.msg));
             }
         }
 

@@ -197,10 +197,19 @@ impl Plugin for TractorPlugin {
             app.declare_state::<TractorAiEngaged>(StateClass::Derived, "tractor-beam-state")
                 .declare_state::<HeldResponseSection>(StateClass::Derived, "tractor-beam-coupler");
         }
-        app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::ship::system_registry::TRACTOR_KIND,
-            TRACTOR_SYSTEM_ID,
-        ))
+        app.register_admitted_consumer(
+            ConsumerMatcher::exact(
+                crate::ship::system_registry::TRACTOR_KIND,
+                TRACTOR_SYSTEM_ID,
+            )
+            .with_feedback(
+                crate::command_admission::FeedbackAddress::MatcherSpelling,
+                &[
+                    crate::core::messages::SystemControlPayloadDiscriminants::EngageTractor,
+                    crate::core::messages::SystemControlPayloadDiscriminants::ReleaseTractor,
+                ],
+            ),
+        )
         .add_message::<PendingTractorActionFeedback>();
         app.add_systems(
             FixedUpdate,

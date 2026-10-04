@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::messages::{
-    AdmittedCommands, RepairTarget, StationId, SystemControlPayload, SystemId,
+    ActionCorrelationId, ActionFeedbackOutcome, AdmittedCommands, DeliveryClass, RepairTarget,
+    ServerMessage, StationId, SystemControlPayload, SystemId,
 };
-use crate::lobby::LobbyPlugin;
+use crate::lobby::{LobbyPlugin, Target};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship::test_support::{drive_one_fixed_step_per_update, TEST_TICK};
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
@@ -118,6 +119,32 @@ fn send_correlated(
 #[test]
 fn correlated_action_feedback_allowlist_is_exact_by_target_and_payload() {
     use crate::core::messages::{CameraView, ViewMode};
+    let mut app = App::new();
+    crate::server_app::add_simulation_plugins_with(
+        &mut app,
+        crate::server_app::SimPluginOptions {
+            render: false,
+            ..Default::default()
+        },
+    );
+    app.add_plugins(crate::world::server::WorldPlugin);
+    let registry = app.world().resource::<AdmittedConsumerRegistry>();
+    let supports_correlated_action_feedback_for_kind =
+        |target: &SystemId, payload: &SystemControlPayload, kind: Option<&str>| {
+            let mut topology = config();
+            topology.systems.clear();
+            if let Some(kind) = kind {
+                let mut instance = config().systems.remove(0);
+                instance.id = target.clone();
+                instance.kind = kind.into();
+                topology.systems.push(instance);
+            }
+            registry.feedback_support(target, payload, &topology) == FeedbackSupport::Supported
+        };
+    let supports_correlated_action_feedback =
+        |target: &SystemId, payload: &SystemControlPayload| {
+            supports_correlated_action_feedback_for_kind(target, payload, None)
+        };
 
     let red_alert = SystemControlPayload::SetRedAlert { active: true };
     let view = SystemControlPayload::SetView {
@@ -863,4 +890,292 @@ fn the_recorder_does_not_ask_where_an_inbound_command_came_from() {
         1,
         "an inbound command is recorded on arrival, not on its token shape"
     );
+}
+
+#[test]
+fn installed_owners_settle_authored_actions_once_after_delayed_admission() {
+    use crate::ship::system_registry as sr;
+    let mut registry_app = App::new();
+    crate::server_app::add_simulation_plugins_with(
+        &mut registry_app,
+        crate::server_app::SimPluginOptions {
+            render: false,
+            ..Default::default()
+        },
+    );
+    registry_app.add_plugins(crate::world::server::WorldPlugin);
+    let registry = registry_app
+        .world_mut()
+        .remove_resource::<AdmittedConsumerRegistry>()
+        .unwrap();
+    let (mut app, ship) = admission_app(ControlSource::Human);
+    app.insert_resource(registry)
+        .insert_resource(log::CommandDelay(2));
+    app.add_systems(
+        FixedUpdate,
+        (
+            crate::ship::helm_admission::process_helm_inputs,
+            crate::dock::server::handle_dock_commands,
+            crate::console::captain::server::handle_set_view,
+        )
+            .after(AdmissionSet),
+    );
+    let mut topology = config();
+    topology.systems.clear();
+    let mut resolver = ControlSourceResolver::new();
+    for (id, kind) in [
+        ("custom-impulse", sr::HELM_IMPULSE_KIND),
+        ("custom-boost", sr::HELM_BOOST_KIND),
+        ("custom-dock", sr::DOCK_KIND),
+        ("custom-view", sr::VIEWSCREEN_KIND),
+        ("custom-captain", sr::CAPTAIN_KIND),
+    ] {
+        let mut instance = config().systems.remove(0);
+        instance.id = SystemId(id.into());
+        instance.kind = kind.into();
+        resolver.set(instance.id.clone(), ControlSource::Human);
+        topology.systems.push(instance);
+    }
+    let mut dock = crate::dock::server::DockControl::new(
+        SystemId("custom-dock".into()),
+        crate::dock::mating::DockConfig {
+            range: 200.0,
+            engage_distance: 400.0,
+            approach_speed: 60.0,
+            mate_tolerance: 4.0,
+            undock_clear_distance: 120.0,
+            min_power_level: 2,
+        },
+        crate::core::messages::PowerGroupId("dock".into()),
+    );
+    dock.available_target = Some("berth".into());
+    app.world_mut().entity_mut(ship).insert((
+        ShipConfigComponent(topology),
+        ShipSystemControlSources(resolver),
+        Transform::default(),
+        dock,
+        crate::ship::helm::ImpulseCommand::default(),
+        crate::ship::helm::BoostCommand::default(),
+        crate::ship::components::BoostConfigResource {
+            enabled: true,
+            ..Default::default()
+        },
+        crate::server_app::ShipBoost::default(),
+        crate::ship::state::ShipViewMode::default(),
+    ));
+    let mut cursor = app
+        .world()
+        .resource::<Messages<OutboundMessage>>()
+        .get_cursor();
+    for (correlation, target, payload) in [
+        (
+            "impulse",
+            "custom-impulse",
+            SystemControlPayload::StartImpulseCharge,
+        ),
+        (
+            "boost",
+            "custom-boost",
+            SystemControlPayload::SetBoost { active: true },
+        ),
+        ("dock", "custom-dock", SystemControlPayload::Dock),
+        (
+            "view",
+            "custom-view",
+            SystemControlPayload::SetView {
+                mode: crate::core::messages::ViewMode::Camera(
+                    crate::core::messages::CameraView::new("camera_fore"),
+                ),
+            },
+        ),
+    ] {
+        send_correlated(
+            &mut app,
+            HOLDER,
+            correlation,
+            SystemId(target.into()),
+            payload,
+        );
+    }
+    app.update();
+    assert!(admitted(&mut app, ship).is_empty());
+    assert!(command_log(&app).is_empty());
+    assert!(!cursor
+        .read(app.world().resource::<Messages<OutboundMessage>>())
+        .any(|message| matches!(message.msg, ServerMessage::ActionFeedback { .. })));
+    app.update();
+    app.update();
+    let feedback: Vec<_> = cursor
+        .read(app.world().resource::<Messages<OutboundMessage>>())
+        .cloned()
+        .collect();
+    for correlation in ["impulse", "boost", "dock", "view"] {
+        let outcomes: Vec<_> = feedback
+            .iter()
+            .filter_map(|message| match &message.msg {
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome,
+                } if actual.as_str() == correlation => {
+                    assert_eq!(message.target, Target::Token(HOLDER.into()));
+                    assert_eq!(message.delivery, DeliveryClass::Reliable);
+                    Some(*outcome)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![ActionFeedbackOutcome::Applied],
+            "{correlation}"
+        );
+    }
+    assert_eq!(command_log(&app).entries().len(), 4);
+    app.update();
+    assert!(!cursor
+        .read(app.world().resource::<Messages<OutboundMessage>>())
+        .any(|message| matches!(message.msg, ServerMessage::ActionFeedback { .. })));
+    app.insert_resource(log::CommandDelay(0));
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::ship::helm::ImpulseCommand>();
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::ship::helm::BoostCommand>();
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::ship::state::ShipViewMode>();
+    for (correlation, target, payload) in [
+        (
+            "impulse-refused",
+            "custom-impulse",
+            SystemControlPayload::StartImpulseCharge,
+        ),
+        (
+            "boost-refused",
+            "custom-boost",
+            SystemControlPayload::SetBoost { active: true },
+        ),
+        ("dock-refused", "custom-dock", SystemControlPayload::Dock),
+        (
+            "view-refused",
+            "custom-view",
+            SystemControlPayload::SetView {
+                mode: crate::core::messages::ViewMode::Camera(
+                    crate::core::messages::CameraView::new("camera_fore"),
+                ),
+            },
+        ),
+    ] {
+        send_correlated(
+            &mut app,
+            HOLDER,
+            correlation,
+            SystemId(target.into()),
+            payload,
+        );
+    }
+    app.update();
+    let refused: Vec<_> = cursor
+        .read(app.world().resource::<Messages<OutboundMessage>>())
+        .cloned()
+        .collect();
+    for correlation in [
+        "impulse-refused",
+        "boost-refused",
+        "dock-refused",
+        "view-refused",
+    ] {
+        let matches: Vec<_> = refused.iter().filter(|message| matches!(&message.msg,
+            ServerMessage::ActionFeedback { correlation: actual, outcome: ActionFeedbackOutcome::Refused }
+                if actual.as_str() == correlation)).collect();
+        assert_eq!(matches.len(), 1, "{correlation}");
+        assert_eq!(matches[0].target, Target::Token(HOLDER.into()));
+        assert_eq!(matches[0].delivery, DeliveryClass::Reliable);
+    }
+    app.world_mut().entity_mut(ship).insert((
+        crate::ship::helm::ImpulseCommand::default(),
+        crate::ship::helm::BoostCommand::default(),
+    ));
+    app.world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: HOLDER.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId("custom-boost".into()),
+                payload: SystemControlPayload::SetBoost { active: false },
+            },
+        });
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(ship)
+        .unwrap()
+        .0
+        .set(SystemId("custom-impulse".into()), ControlSource::Ai);
+    app.world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: ai_emit::AI_BACKFILL_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId("custom-impulse".into()),
+                payload: SystemControlPayload::CancelImpulse,
+            },
+        });
+    app.update();
+    assert_eq!(admitted(&mut app, ship).len(), 2);
+    assert!(
+        !app.world()
+            .get::<crate::ship::helm::BoostCommand>(ship)
+            .unwrap()
+            .0
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::helm::ImpulseCommand>(ship)
+            .unwrap()
+            .0,
+        crate::ship::impulse::ImpulsePhase::Idle
+    );
+    assert!(!cursor
+        .read(app.world().resource::<Messages<OutboundMessage>>())
+        .any(|message| matches!(message.msg, ServerMessage::ActionFeedback { .. })));
+}
+
+#[test]
+fn missing_or_ambiguous_feedback_owner_refuses_before_queue_and_log() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    for ambiguous in [false, true] {
+        let (mut app, ship) = admission_app(ControlSource::Human);
+        if ambiguous {
+            let mut registry = app.world_mut().resource_mut::<AdmittedConsumerRegistry>();
+            registry.register(
+                ConsumerMatcher::exact("repair_control", "repair").with_feedback(
+                    FeedbackAddress::MatcherSpelling,
+                    &[Payload::DispatchRepairTeam],
+                ),
+            );
+            registry.register(ConsumerMatcher::kind("repair_control").with_feedback(
+                FeedbackAddress::DeclaredKindOrCanonical("repair"),
+                &[Payload::DispatchRepairTeam],
+            ));
+        }
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor();
+        send_correlated(
+            &mut app,
+            HOLDER,
+            "missing-or-ambiguous",
+            SystemId("repair".into()),
+            dispatch(0),
+        );
+        app.update();
+        assert!(admitted(&mut app, ship).is_empty());
+        assert!(command_log(&app).is_empty());
+        assert!(app.world().resource::<log::PendingCommands>().is_empty());
+        let replies: Vec<_> = cursor.read(app.world().resource::<Messages<OutboundMessage>>()).filter(|message| matches!(&message.msg, ServerMessage::ActionFeedback { correlation, outcome: ActionFeedbackOutcome::Refused } if correlation.as_str() == "missing-or-ambiguous")).collect();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].target, Target::Token(HOLDER.into()));
+        assert_eq!(replies[0].delivery, DeliveryClass::Reliable);
+    }
 }

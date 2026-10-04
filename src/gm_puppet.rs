@@ -700,6 +700,7 @@ pub fn enforce_station_puppet_control(
 /// accepted command loses operator identity here; attribution goes only to the
 /// parallel activity record.
 pub fn admit_station_puppet_commands(
+    consumers: Option<Res<crate::command_admission::AdmittedConsumerRegistry>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut pending: ResMut<PendingGmStationCommands>,
     mut activity: ResMut<StationPuppetActivity>,
@@ -739,18 +740,28 @@ pub fn admit_station_puppet_commands(
         };
         let action: &'static str =
             crate::core::messages::SystemControlPayloadDiscriminants::from(&command.payload).into();
-        let target_kind = config
-            .0
-            .systems
-            .iter()
-            .find(|system| system.id == command.target)
-            .map(|system| system.kind.as_str());
+        let support = consumers.as_deref().map_or(
+            crate::command_admission::FeedbackSupport::Unsupported,
+            |registry| registry.feedback_support(&command.target, &command.payload, &config.0),
+        );
+        let installed_owner = consumers.as_deref().is_some_and(|registry| {
+            config.0.system(&command.target).map_or_else(
+                || registry.is_routed(&command.target.0),
+                |system| registry.is_system_routed(system),
+            )
+        });
+        if support == crate::command_admission::FeedbackSupport::Ambiguous
+            || (support == crate::command_admission::FeedbackSupport::Unsupported
+                && !installed_owner)
+        {
+            refuse_delivery(
+                command.order,
+                crate::gm_action::GmActionRefusalReason::SystemUnavailable,
+            );
+            continue;
+        }
         let (response_token, feedback_correlation) =
-            if crate::command_admission::supports_correlated_action_feedback_for_kind(
-                &command.target,
-                &command.payload,
-                target_kind,
-            ) {
+            if support == crate::command_admission::FeedbackSupport::Supported {
                 let correlation = crate::core::messages::ActionCorrelationId::new(
                     command.correlation.as_str().to_string(),
                 )

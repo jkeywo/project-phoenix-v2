@@ -194,15 +194,11 @@ fn is_inert(payload: &SystemControlPayload) -> bool {
 /// correlated result is counted from THAT result instead (source 1), so a
 /// refused press is excluded and no press is counted twice. See the module
 /// header for the three exclusions and why each one is structural.
-pub fn counts_as_worked_control(command: &AdmittedCommand) -> bool {
+pub fn counts_as_worked_control(command: &AdmittedCommand, has_terminal_owner: bool) -> bool {
     if is_ai_token(command.response_token.as_deref()) {
         return false;
     }
-    if crate::command_admission::supports_correlated_action_feedback_for_kind(
-        &command.target,
-        &command.payload,
-        None,
-    ) {
+    if has_terminal_owner {
         return false;
     }
     !is_inert(&command.payload)
@@ -218,6 +214,7 @@ pub fn counts_as_worked_control(command: &AdmittedCommand) -> bool {
 pub fn observe_crew_activity(
     tick: Res<SimTick>,
     admitted: Query<&AdmittedCommands>,
+    consumers: Option<Res<crate::command_admission::AdmittedConsumerRegistry>>,
     outbound: Option<Res<Messages<OutboundMessage>>>,
     balance: Option<Res<Messages<BalanceEvent>>>,
     mut outbound_cursor: Local<MessageCursor<OutboundMessage>>,
@@ -248,11 +245,19 @@ pub fn observe_crew_activity(
     // of its own. Every hull is walked, not only `LocalShip`: on a peer that is
     // not the crew's own host, a relayed command is the only trace their seat
     // leaves.
-    if admitted
-        .iter()
-        .flat_map(|commands| commands.0.iter())
-        .any(counts_as_worked_control)
-    {
+    if admitted.iter().any(|commands| {
+        commands.0.iter().any(|command| {
+            // Preserve legacy spelling exclusions for uncorrelated traffic.
+            // Authored controls without a correlation retain their historical
+            // worked-control meaning; actual feedback actions count at completion.
+            let has_terminal_owner = command.feedback_correlation.is_some()
+                || consumers.as_deref().is_some_and(|registry| {
+                    registry.legacy_feedback_support(&command.target, &command.payload)
+                        != crate::command_admission::FeedbackSupport::Unsupported
+                });
+            counts_as_worked_control(command, has_terminal_owner)
+        })
+    }) {
         active = true;
     }
 

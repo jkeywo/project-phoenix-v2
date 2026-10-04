@@ -323,6 +323,7 @@ station = "helm"
         journal.insert(grant).unwrap();
     }
     let mut app = App::new();
+    crate::console::helm::dispatch::register_helm_dispatch(&mut app);
     app.insert_resource(crate::sim_tick::SimTick(tick))
         .insert_resource(SimulationPaused(false))
         .insert_resource(journal)
@@ -3976,4 +3977,72 @@ fn a_targetless_direct_effect_refusal_is_a_malformed_frame() {
         validate_fleet_frame(&GmActionFrame::Refused(named), &roster),
         Ok(())
     );
+}
+
+#[test]
+fn station_command_missing_or_ambiguous_owner_is_refused_before_queueing() {
+    use crate::command_admission::{AdmittedConsumerRegistry, ConsumerMatcher, FeedbackAddress};
+    use crate::core::messages::{
+        StationId, SystemControlPayload, SystemControlPayloadDiscriminants as Payload, SystemId,
+    };
+    for ambiguous in [false, true] {
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let station = StationId("helm".into());
+        let mut puppets = crate::gm_puppet::StationPuppets::default();
+        puppets.set_operator(
+            crate::gm_puppet::StationPuppetTarget::new(ship.clone(), station.clone()),
+            "gm-1".into(),
+            true,
+        );
+        let action = GmAction::IssueStationCommand {
+            ship,
+            station,
+            target: SystemId("helm-thrust".into()),
+            payload: crate::core::codec::canonical_system_command(
+                &SystemControlPayload::SetThrust { value: 0.75 },
+            )
+            .unwrap(),
+        };
+        let mut app = station_apply_app(
+            20,
+            crate::ship::components::ActiveStationRatings::default(),
+            puppets,
+            [station_grant(1, 20, "ownership-check", action)],
+        );
+        if ambiguous {
+            let mut registry = app.world_mut().resource_mut::<AdmittedConsumerRegistry>();
+            registry.register(
+                ConsumerMatcher::exact(
+                    crate::ship::system_registry::HELM_THRUST_KIND,
+                    "helm-thrust",
+                )
+                .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::SetThrust]),
+            );
+            registry.register(
+                ConsumerMatcher::undeclared_exact("helm-thrust")
+                    .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::SetThrust]),
+            );
+        } else {
+            app.insert_resource(AdmittedConsumerRegistry::default());
+        }
+        app.update();
+        assert!(app
+            .world()
+            .resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .entries()
+            .is_empty());
+        assert_eq!(
+            outcomes(&app),
+            vec![(
+                GmActionOutcome::Refused,
+                Some(GmActionRefusalReason::SystemUnavailable)
+            )]
+        );
+        assert!(app
+            .world()
+            .resource::<GmActionLog>()
+            .entries()
+            .iter()
+            .all(|entry| entry.outcome == GmActionOutcome::Refused));
+    }
 }

@@ -23,6 +23,7 @@
 //! reads; berth-side occupancy (one docker per target) is not enforced here.
 
 use crate::ai::standing_operation::OperationFacts;
+use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -218,9 +219,14 @@ impl Plugin for DockPlugin {
         // Registry coverage is keyed by the authoritative System kind, so an
         // arbitrary authored Dock id is linted through the same identity the
         // instance-correct consumer below reads.
-        app.register_admitted_consumer(ConsumerMatcher::kind(
-            crate::ship::system_registry::DOCK_KIND,
-        ));
+        app.register_admitted_consumer(
+            ConsumerMatcher::kind(crate::ship::system_registry::DOCK_KIND).with_feedback(
+                crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                    crate::ship::system_registry::DOCK_KIND,
+                ),
+                &[Payload::Dock, Payload::Undock],
+            ),
+        );
         app.add_systems(
             FixedUpdate,
             (

@@ -174,7 +174,6 @@ impl CommsInbox {
         if let Some(rec) = self.records.iter_mut().find(|r| r.message.id == message_id) {
             if rec.message.effective_priority() == CommsPriority::Critical {
                 rec.message.priority = CommsPriority::Routine;
-                rec.message.is_urgent = false;
                 self.dirty = true;
             }
         }

@@ -25,7 +25,6 @@ fn msg(id: &str) -> CommsMessage {
         sender_in_range: true,
         thread_id: id.into(),
         priority: crate::core::messages::CommsPriority::Routine,
-        is_urgent: false,
     }
 }
 
@@ -1182,7 +1181,7 @@ fn an_unrelated_inbound_message_does_not_suppress_a_legitimate_hail() {
     {
         let mut message = msg("axiom-briefing");
         message.sender_uuid = "axiom-station-uuid".to_string();
-        message.is_urgent = true;
+        message.priority = crate::core::messages::CommsPriority::Urgent;
         app.world_mut()
             .resource_mut::<CommsInboxRes>()
             .0
@@ -3211,7 +3210,7 @@ fn seat_scripted_dialogue(
     let mut message = msg(&id);
     message.sender_uuid = sender_uuid.to_string();
     message.body = body.to_string();
-    message.is_urgent = urgent;
+    message.priority = urgent.into();
     message.responses = crate::comms::content::response_views(&responses, true);
     app.world_mut()
         .resource_mut::<CommsInboxRes>()
@@ -3822,7 +3821,7 @@ fn a_scripted_follow_up_inherits_the_threads_urgency() {
         .find(|m| m.body == "Docking clamps released.")
         .expect("the follow-up is injected");
     assert!(
-        follow.is_urgent,
+        follow.priority.is_urgent(),
         "an urgent scripted thread stays urgent as it advances"
     );
 }
@@ -3953,7 +3952,6 @@ fn clear_comms_removes_orphaned_messages_and_broadcasts_update() {
         sender_in_range: true,
         thread_id: "orphaned-001".into(),
         priority: crate::core::messages::CommsPriority::Routine,
-        is_urgent: false,
     };
     // Orphan it before injection so clear() will remove it.
     app.world_mut()

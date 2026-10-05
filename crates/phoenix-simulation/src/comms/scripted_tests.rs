@@ -586,7 +586,7 @@ fn a_queued_open_injects_the_root_node_and_records_a_scripted_dialogue() {
         msg.sender_name, "Axiom Control",
         "display_name overrides the reference id, as a template's does"
     );
-    assert!(msg.is_urgent, "urgency rides on the OPEN");
+    assert!(msg.priority.is_urgent(), "urgency rides on the OPEN");
     assert!(!msg.thread_id.is_empty(), "an absent thread_id is minted");
     assert_eq!(
         msg.responses
@@ -1099,7 +1099,7 @@ fn a_scripted_thread_delivers_its_authored_body_and_responses() {
     let script = only_message(&app);
     assert_eq!(script.sender_uuid, STATION_UUID);
     assert_eq!(script.sender_name, "Starbase Alpha");
-    assert!(!script.is_urgent);
+    assert!(!script.priority.is_urgent());
     assert!(script.sender_in_range);
     assert_eq!(script.body, "USS Phoenix, please identify yourself.");
     assert_eq!(
@@ -1485,7 +1485,7 @@ fn default_worlds_hail_delivers_the_same_body_and_responses_as_its_template() {
         "with no `display_name` the label falls back to the CONTACT's name — \
          which after #985 is the entity's own reference id"
     );
-    assert!(!msg.is_urgent);
+    assert!(!msg.priority.is_urgent());
     assert_eq!(
         msg.responses
             .iter()
@@ -1615,7 +1615,7 @@ fn queued_one_way_reports_reach_the_inbox_in_order_with_their_body_and_urgency()
     assert_eq!(
         messages
             .iter()
-            .map(|m| (m.body.as_str(), m.is_urgent))
+            .map(|m| (m.body.as_str(), m.priority.is_urgent()))
             .collect::<Vec<_>>(),
         vec![
             ("Report A.", false),

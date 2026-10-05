@@ -849,11 +849,6 @@ pub struct CommsMessage {
     /// from the latest live message in each thread; reading a message does not
     /// acknowledge it.
     pub priority: CommsPriority,
-    /// True when this message was flagged as urgent by the world template.
-    /// Urgent messages are shown with a `!` marker and an amber tint in the
-    /// inbox; the sender's Hail button also receives the `!` marker while any
-    /// unread urgent message from that sender exists.
-    pub is_urgent: bool,
 }
 
 /// Decode helper that can distinguish an absent new field from an explicitly
@@ -930,7 +925,6 @@ impl<'de> Deserialize<'de> for CommsMessage {
             sender_in_range: wire.sender_in_range,
             thread_id: wire.thread_id,
             priority,
-            is_urgent: priority.is_urgent(),
         })
     }
 }
@@ -1020,7 +1014,6 @@ impl CommsMessage {
             sender_in_range,
             thread_id,
             priority,
-            is_urgent: priority.is_urgent(),
         }
     }
 
@@ -1033,14 +1026,9 @@ impl CommsMessage {
             .is_none_or(|recipient| Some(recipient.0.as_str()) == ship_uuid)
     }
 
-    /// Priority used by runtime consumers. The boolean arm exists only for
-    /// hand-built legacy values; decoded values are normalised in `Deserialize`.
+    /// Canonical runtime priority; compatibility is handled only by the codec.
     pub fn effective_priority(&self) -> CommsPriority {
-        if self.priority == CommsPriority::Routine && self.is_urgent {
-            CommsPriority::Urgent
-        } else {
-            self.priority
-        }
+        self.priority
     }
 }
 

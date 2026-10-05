@@ -1565,7 +1565,7 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             };
             acc = fold_u64(acc, u64::from(message.is_read));
             acc = fold_u64(acc, u64::from(message.is_orphaned));
-            acc = fold_u64(acc, u64::from(message.is_urgent));
+            acc = fold_u64(acc, u64::from(message.priority.is_urgent()));
             acc = fold_u64(acc, comms_priority_code(message.priority));
         }
     }

@@ -727,7 +727,6 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     sender_in_range: true,
                     thread_id: "thread-001".into(),
                     priority: CommsPriority::Routine,
-                    is_urgent: false,
                 }],
                 objectives: vec![],
                 contacts: vec![CommsContact {
@@ -4896,20 +4895,20 @@ fn comms_priority_decodes_legacy_urgency_but_new_field_is_authoritative() {
     let legacy = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"is_urgent":true}"#;
     let legacy: CommsMessage = serde_json::from_str(legacy).expect("legacy message decodes");
     assert_eq!(legacy.priority, CommsPriority::Urgent);
-    assert!(legacy.is_urgent);
+    assert!(legacy.priority.is_urgent());
 
     let explicit = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"priority":"Routine","is_urgent":true}"#;
     let explicit: CommsMessage = serde_json::from_str(explicit).expect("priority message decodes");
     assert_eq!(explicit.priority, CommsPriority::Routine);
     assert!(
-        !explicit.is_urgent,
+        !explicit.priority.is_urgent(),
         "the compatibility boolean is normalised from authoritative priority"
     );
 }
 
 #[test]
 fn critical_serializes_with_legacy_urgent_projection() {
-    let mut message = CommsMessage::injected(
+    let message = CommsMessage::injected(
         "m".into(),
         "s".into(),
         "Sender".into(),
@@ -4920,8 +4919,6 @@ fn critical_serializes_with_legacy_urgent_projection() {
         true,
         CommsPriority::Critical,
     );
-    // Even a stale hand-built compatibility value is projected from priority.
-    message.is_urgent = false;
     let json = serde_json::to_value(&message).expect("message encodes");
     assert_eq!(json["priority"], "Critical");
     assert_eq!(json["is_urgent"], true);
@@ -4935,7 +4932,7 @@ fn critical_serializes_with_legacy_urgent_projection() {
     );
     let round_trip: CommsMessage = ron::from_str(&ron).expect("RON message decodes");
     assert_eq!(round_trip.priority, CommsPriority::Critical);
-    assert!(round_trip.is_urgent);
+    assert!(round_trip.priority.is_urgent());
 }
 
 #[test]
@@ -4953,7 +4950,7 @@ fn ron_comms_message_without_priority_uses_legacy_urgency() {
     )"#;
     let decoded: CommsMessage = ron::from_str(legacy).expect("legacy RON message decodes");
     assert_eq!(decoded.priority, CommsPriority::Urgent);
-    assert!(decoded.is_urgent);
+    assert!(decoded.priority.is_urgent());
 
     let explicit = r#"(
         id: "m",
@@ -4971,7 +4968,7 @@ fn ron_comms_message_without_priority_uses_legacy_urgency() {
         ron::from_str(explicit).expect("priority-bearing RON message decodes");
     assert_eq!(decoded.priority, CommsPriority::Routine);
     assert!(
-        !decoded.is_urgent,
+        !decoded.priority.is_urgent(),
         "a present authoritative priority overrides the compatibility boolean"
     );
 }

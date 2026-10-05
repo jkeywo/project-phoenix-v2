@@ -1152,7 +1152,7 @@ pub(crate) fn deliver_comms_message(
                 "responses",
                 NarrativeValue::Int(message.responses.len() as i64),
             )
-            .detail("urgent", NarrativeValue::Flag(message.is_urgent));
+            .detail("urgent", NarrativeValue::Flag(message.priority.is_urgent()));
         if let Some(recipient) = message.recipient_ship {
             event = event.to_target(recipient.0);
         }

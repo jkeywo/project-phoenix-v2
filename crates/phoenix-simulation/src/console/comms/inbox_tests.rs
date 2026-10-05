@@ -28,7 +28,6 @@ fn msg(id: &str) -> CommsMessage {
         sender_in_range: true,
         thread_id: id.into(),
         priority: CommsPriority::Routine,
-        is_urgent: false,
     }
 }
 
@@ -130,7 +129,6 @@ fn critical_is_latest_live_thread_state_not_an_unread_edge() {
     let mut critical = msg("critical");
     critical.thread_id = "safety".into();
     critical.priority = CommsPriority::Critical;
-    critical.is_urgent = true;
     critical.is_read = true;
     inbox.inject(critical);
 
@@ -154,14 +152,12 @@ fn response_or_invalidation_clears_critical_idempotently() {
     let mut inbox = CommsInbox::new();
     let mut critical = msg("critical");
     critical.priority = CommsPriority::Critical;
-    critical.is_urgent = true;
     inbox.inject(critical);
     inbox.record_response("critical", 0);
     assert!(!inbox.has_live_critical_thread());
 
     let mut invalidated = msg("invalidated");
     invalidated.priority = CommsPriority::Critical;
-    invalidated.is_urgent = true;
     inbox.inject(invalidated);
     assert!(inbox.has_live_critical_thread());
     inbox.acknowledge_priority("invalidated");

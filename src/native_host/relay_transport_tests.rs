@@ -33,6 +33,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Default)]
 struct FakeSocket {
     inbound: Arc<Mutex<Vec<String>>>,
+    lifecycle: Arc<Mutex<Vec<phoenix_transport::socket::RelaySocketEvent>>>,
     outbound: Arc<Mutex<Vec<String>>>,
     buffered: Arc<Mutex<usize>>,
     open: Arc<Mutex<bool>>,
@@ -78,6 +79,16 @@ impl FakeSocket {
 }
 
 impl RelaySocket for FakeSocket {
+    fn poll_events(&mut self) -> Vec<phoenix_transport::socket::RelaySocketEvent> {
+        let mut events: Vec<_> = self.lifecycle.lock().unwrap().drain(..).collect();
+        events.extend(
+            self.poll()
+                .into_iter()
+                .map(phoenix_transport::socket::RelaySocketEvent::Text),
+        );
+        events
+    }
+
     fn poll(&mut self) -> Vec<String> {
         self.inbound.lock().unwrap().drain(..).collect()
     }
@@ -1225,3 +1236,25 @@ fn native_adapters_follow_the_shared_browser_ownership_transcript() {
 }
 
 use crate::native_host::transport::NativeTransport;
+
+#[test]
+fn a_complete_redial_between_polls_registers_again_and_retires_old_crew() {
+    use phoenix_transport::socket::RelaySocketEvent::{Closed, Opened};
+    let (mut transport, socket) = transport();
+    socket.arrive(&frame("ready"));
+    transport.poll();
+    let token = "3f1a6c2e-0a11-4b3c-9d55-000000000001";
+    admit(&mut transport, &socket, "old-peer", token);
+    socket.lifecycle.lock().unwrap().extend([Closed, Opened]);
+    socket.arrive(&frame("ready"));
+    let events = transport.poll();
+    assert_eq!(socket.sent_of("host-open").len(), 2);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, TransportEvent::Disconnected { .. }))
+            .count(),
+        1
+    );
+    assert!(transport.poll().is_empty());
+}

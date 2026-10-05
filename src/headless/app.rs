@@ -22,22 +22,16 @@
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
 use crate::boot::{BootError, BootPlan, BootProfile, NativeRenderSurface, WorldIngest};
 use crate::core::messages::{GamePhase, ServerMessage};
-use crate::entities::loader::TemplateLoader;
 use crate::entities::template_preload::preload_entity_templates;
-use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
+use crate::lobby::{LobbyOutbox, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
-use crate::modifiers::coordination::ModifierCoordinationPlugin;
 use crate::perf::tick::TickSampler;
-use crate::server_app::{
-    add_simulation_plugins_with, RegistrationOrder, RegistrationProbes, SimPluginOptions,
-};
+use crate::server_app::{RegistrationOrder, RegistrationProbes, SimPluginOptions};
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};
 use crate::world::load::LoadError;
-use crate::world::WorldPlugin;
 
 use super::args::HeadlessArgs;
 
@@ -324,46 +318,34 @@ fn build_headless_inner(
     // then resolves any `includes` the hull declares (issue #869) so the native
     // `PendingShipConfig` matches the composed hull the cache holds.
     let _ = read_toml(&ship_path, "ship")?;
-    let ship_entity_config = crate::entities::include_resolve::load_entity_config(&ship_path)
+    let prepared = crate::boot::prepare_hull_content(&ship_path)
         .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
-    // Issue #935: the player's own hull is authored content too, and it is not
-    // necessarily among `world_config.entities` (a duel side is chosen by
-    // `--ship`/`--side-a`, not authored into the world), so boot's freeze of the
-    // world's declared set need not have named it. `FsTemplateLoader` records the
-    // composed hull into the content ledger as a side effect of resolving it (see
-    // its doc comment); re-freezing then folds it into the frozen digest a save
-    // is checked against, exactly as the single inline freeze did before boot
-    // owned the first one. The ledger fold is path-sorted and order-independent,
-    // so the frozen digest is byte-identical whether the hull rode in on boot's
-    // eager walk or here.
-    let _ = crate::entities::loader::FsTemplateLoader.load_template(&ship_path);
-    crate::content_ledger::freeze();
-    let ship_config = ship_entity_config
+    let ship_config = prepared
+        .config
         .ship_config
         .ok_or_else(|| BuildError(format!("ship {ship_path:?} has no [[station]] blocks")))?;
+    prepared.hull_record.apply();
+    if let Some(sidecar) = prepared.sidecar {
+        sidecar.apply();
+    }
+    crate::content_ledger::freeze();
     app.insert_resource(PendingShipConfig(ship_config));
     app.insert_resource(SelectedShipResource(ship_path.clone()));
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done above) and the faction registry, which `add_simulation_plugins`
     // already inserts from the `include_str!`ed native registry.
-    app.add_plugins(AsteroidLifecyclePlugin)
-        .add_plugins(ModifierCoordinationPlugin)
-        .add_plugins(LobbyPlugin)
-        .add_plugins(crate::lobby::lobby_outbox_broadcaster());
-
-    add_simulation_plugins_with(
+    crate::server_app::compose_live_host(
         &mut app,
+        BootProfile::Headless,
         SimPluginOptions {
-            render: false,
             physics_last: sim_overrides.physics_last,
             registration_order: sim_overrides.registration_order,
             extra_registration_probes: sim_overrides.extra_registration_probes,
+            ..Default::default()
         },
+        Some(sim_rng),
     );
-    // After the plugins, so it overrides their OS-seeded `init_resource`.
-    crate::sim_rng::install(app.world_mut(), sim_rng);
-    app.add_plugins(WorldPlugin);
 
     // Frame clock. `ManualDuration` makes every `Time` clock advance by exactly
     // `dt` per `update()` regardless of wall clock. Since issue #895 the

@@ -643,3 +643,26 @@ fn reader_preparation_retains_content_until_explicit_installation() {
     assert_eq!(crate::content_ledger::frozen_or_live(), expected);
     crate::content_ledger::reset();
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn preparing_a_hull_captures_composed_content_without_mutating_ledger() {
+    crate::content_ledger::reset();
+    let prepared = super::prepare_hull_content("assets/entities/alliance_cruiser.toml").unwrap();
+    assert!(prepared.config.ship_config.is_some());
+    assert_eq!(crate::content_ledger::snapshot().entries().count(), 0);
+    let resolved = crate::entities::include_resolve::resolve_from_disk(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    assert_eq!(prepared.hull_record.key, resolved.path);
+    assert_eq!(
+        prepared.hull_record.digest,
+        vellum_digest::fnv1a(resolved.toml.as_bytes())
+    );
+    prepared.hull_record.apply();
+    if let Some(sidecar) = prepared.sidecar {
+        sidecar.apply();
+    }
+    assert!(crate::content_ledger::snapshot().entries().count() > 0);
+}

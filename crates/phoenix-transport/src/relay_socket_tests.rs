@@ -61,3 +61,31 @@ fn it_refuses_something_that_is_not_a_service_url() {
         );
     }
 }
+
+#[test]
+fn lifecycle_edges_survive_a_redial_that_finishes_before_poll() {
+    let (inbound, receive) = mpsc::channel();
+    let (outbound, _send_queue) = mpsc::channel();
+    let mut socket = WsRelaySocket {
+        inbound: std::sync::Mutex::new(receive),
+        outbound,
+        open: Arc::new(AtomicBool::new(true)),
+        queued: Arc::new(AtomicUsize::new(0)),
+        shutdown: Arc::new(AtomicBool::new(false)),
+    };
+    inbound.send(RelaySocketEvent::Closed).unwrap();
+    inbound.send(RelaySocketEvent::Opened).unwrap();
+    inbound
+        .send(RelaySocketEvent::Text("ready".into()))
+        .unwrap();
+    assert!(socket.is_open());
+    assert_eq!(
+        socket.poll_events(),
+        [
+            RelaySocketEvent::Closed,
+            RelaySocketEvent::Opened,
+            RelaySocketEvent::Text("ready".into())
+        ]
+    );
+    assert!(socket.poll_events().is_empty());
+}

@@ -18,7 +18,7 @@
 // `include!`d rather than declared here because `build.rs` needs the same
 // literal and cannot `use` this crate; one source means the two halves of the
 // gate cannot compare against different strings.
-include!("demo_build_value.rs");
+include!("../../../src/demo_build_value.rs");
 
 /// True when this binary was compiled with `PHOENIX_DEMO_BUILD=true`.
 ///

@@ -48,10 +48,10 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-use crate::entities::config_cache::{active_packs, overlay_conflicts, push_mod_pack, ActivePack};
+use crate::entities::config_cache::{active_packs, overlay_conflicts, push_mod_pack};
 use crate::entities::loader::TemplateLoader;
 use crate::native_host::mod_packs::{self, ShelfPack};
-use crate::world::manifest::{parse_content_identity, parse_pack_manifest};
+use crate::world::manifest::parse_content_identity;
 use crate::world::mod_pack::validate_mod_pack_with_assets;
 use crate::world::validate::Severity;
 
@@ -301,29 +301,14 @@ pub fn install_pack_with_assets(
         .iter()
         .map(PackFinding::from_world_finding)
         .collect();
-    if !result.is_accepted() {
+    let Some(pack) = result.into_active_pack() else {
         return InstallOutcome {
             accepted: false,
             findings,
         };
-    }
-    // Atomic, and the stack is NOT cleared first: installing B after A keeps A
-    // (issue #987), with B merely shadowing it for the paths they share. That
-    // shadowing is what `active_conflicts` above reports.
-    let (id, name, version) = parse_pack_manifest(&result.manifest_toml)
-        .ok()
-        .and_then(|pm| pm.pack)
-        .map(|p| (p.id, p.name, p.version))
-        .unwrap_or_default();
-    push_mod_pack(ActivePack {
-        id,
-        name,
-        version,
-        files: result.files.into_iter().collect(),
-        manifest_toml: result.manifest_toml,
-        assets: result.assets,
-        source_archive: result.source_archive,
-    });
+    };
+    // Installing B preserves A; the candidate shadows only shared paths.
+    push_mod_pack(pack);
     InstallOutcome {
         accepted: true,
         findings,

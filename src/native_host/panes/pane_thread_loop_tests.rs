@@ -1344,3 +1344,36 @@ fn shutdown_is_the_last_command_the_loop_takes() {
     );
     assert!(out.is_empty());
 }
+
+#[test]
+fn loop_configures_pool_at_create_and_equal_byte_size_resize() {
+    let mut driver = PaneLoop::new(RecordingRuntime::default());
+    let mut sink = PooledFrames::new(1);
+    let mut out = Vec::new();
+    driver.apply(create(HUD, PaneKind::Hud), &mut sink, &mut out);
+    driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH, HEIGHT));
+    driver.iterate(&mut sink, &mut out);
+    assert_eq!(sink.frames.len(), 1);
+    let old_frames = std::mem::take(&mut sink.frames);
+    driver.apply(
+        PaneCommand::Resize {
+            id: HUD,
+            width: HEIGHT,
+            height: WIDTH,
+            epoch: 7,
+        },
+        &mut sink,
+        &mut out,
+    );
+    driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(HEIGHT, WIDTH));
+    driver.iterate(&mut sink, &mut out);
+    assert_eq!(
+        sink.frames.len(),
+        1,
+        "resize creates a fresh pool despite an unrecycled old frame"
+    );
+    assert_eq!(sink.frames[0].epoch, 7);
+    drop(old_frames);
+    driver.apply(PaneCommand::Close(HUD), &mut sink, &mut out);
+    assert!(sink.stage(HUD, (WIDTH * HEIGHT * 4) as usize).is_none());
+}

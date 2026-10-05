@@ -494,26 +494,8 @@ fn apply_thread_command<R: PaneRuntime>(
     command: PaneCommand,
     events: &Sender<PaneEvent>,
 ) -> bool {
-    let configure = match &command {
-        PaneCommand::Create { id, kind, spec, .. } => {
-            Some((*id, *kind, spec.width as usize * spec.height as usize * 4))
-        }
-        PaneCommand::Resize {
-            id, width, height, ..
-        } => driver
-            .panes
-            .iter()
-            .find(|p| p.id == *id)
-            .map(|p| (*id, p.kind, *width as usize * *height as usize * 4)),
-        _ => None,
-    };
     let mut out = Vec::new();
     let stop = driver.apply(command, sink, &mut out) == LoopControl::Stop;
-    if let Some((id, kind, len)) = configure {
-        if driver.contains(id) {
-            sink.configure(id, kind.pixel_mode(), len);
-        }
-    }
     for event in out {
         if events.send(event).is_err() {
             return false;
@@ -852,6 +834,11 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 let result = match self.runtime.create(id, kind, &spec, &url) {
                     Ok(mut view) => {
                         view.set_visible(visible);
+                        sink.configure(
+                            id,
+                            kind.pixel_mode(),
+                            spec.width as usize * spec.height as usize * 4,
+                        );
                         self.panes.push(LoopPane {
                             id,
                             kind,
@@ -908,6 +895,11 @@ impl<R: PaneRuntime> PaneLoop<R> {
                 if let Some(pane) = self.pane_mut(id) {
                     pane.view.resize(width, height);
                     pane.size = (width, height);
+                    sink.configure(
+                        id,
+                        pane.kind.pixel_mode(),
+                        width as usize * height as usize * 4,
+                    );
                     // The generation is the *other* side's to number — it is the
                     // side that minted the new texture — so it is carried on the
                     // command rather than incremented here.

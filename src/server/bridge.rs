@@ -51,7 +51,6 @@ use crate::lobby::FleetManagedLobby;
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmActivityFeedChanged,
@@ -69,15 +68,13 @@ use {
     crate::gm_workload::GmWorkloadPlugin,
     crate::lobby::stations_config::ShipStations,
     crate::lobby::{
-        FleetLobbyInput, FleetManagedLobby, InboundMessage, LobbyPlugin, OutboundMessage,
-        PendingStartGrants, PlayerDisconnected, SelectedShipResource, StartGrantResults, Target,
+        FleetLobbyInput, FleetManagedLobby, InboundMessage, OutboundMessage, PendingStartGrants,
+        PlayerDisconnected, SelectedShipResource, StartGrantResults, Target,
     },
-    crate::modifiers::coordination::ModifierCoordinationPlugin,
-    crate::server_app::{add_simulation_plugins_with, SimPluginOptions},
+    crate::server_app::SimPluginOptions,
     crate::ship::config::ShipConfig,
     crate::ship_plugin::PendingShipConfig,
     crate::world::load::WasmReader,
-    crate::world::WorldPlugin,
     bevy::{log::LogPlugin, prelude::*},
     js_sys::{Array, Function, Object, Reflect},
     wasm_bindgen::prelude::*,
@@ -158,7 +155,7 @@ use browser_edge as edge;
 // consumer in `crate::world::server`. The wasm edge below only mirrors, drains,
 // and inserts them through those new paths.
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 struct PendingFleetJoin {
     generation: u64,
     roster_json: String,
@@ -187,7 +184,7 @@ struct PendingGmJoinRefusal {
     reason: crate::gm_join::GmJoinRefusal,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 enum PendingFleetAdoption {
     Join(PendingFleetJoin),
     Leave { generation: u64 },
@@ -950,29 +947,14 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
 
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
-    app.add_plugins(ConfigCachePlugin)
-        .add_plugins(AsteroidLifecyclePlugin)
-        .add_plugins(ModifierCoordinationPlugin);
+    app.add_plugins(ConfigCachePlugin);
     // Insert ShipConfigResource before LobbyPlugin so its
     // .init_resource::<ShipConfigResource>() is a no-op (the default
     // calls load_ship_config_from_disk which uses std::fs — panics in WASM).
     if let Some(config) = edge::take_ship_config() {
         app.insert_resource(PendingShipConfig(config));
     };
-    app.add_plugins(LobbyPlugin)
-        .add_plugins(crate::lobby::lobby_outbox_broadcaster());
-    // Keep simulation registration on the same renderer axis as boot. The
-    // WebDriver profile has no RenderPlugin, so installing render-coupled
-    // systems here would create an AssetPreloadResource that can never finish
-    // and would leave every fleet start validation permanently false.
-    add_simulation_plugins_with(
-        &mut app,
-        SimPluginOptions {
-            render: !(is_automation || is_browser_gm),
-            ..default()
-        },
-    );
-    app.add_plugins(WorldPlugin);
+    crate::server_app::compose_live_host(&mut app, profile, SimPluginOptions::default(), None);
     // Insert the selected ship resource (set by wasm_select_ship before
     // wasm_init was called).
     //
@@ -3949,22 +3931,8 @@ fn add_mod_pack_with_assets(
     // Atomic: PUSH the pack onto the overlay stack only when no finding is an
     // error (AC1). The stack is NOT cleared first — installing B after A keeps A
     // (issue #987); the candidate simply shadows earlier packs for shared paths.
-    if result.is_accepted() {
-        let (id, name, version) =
-            crate::world::manifest::parse_pack_manifest(&result.manifest_toml)
-                .ok()
-                .and_then(|pm| pm.pack)
-                .map(|p| (p.id, p.name, p.version))
-                .unwrap_or_default();
-        crate::entities::config_cache::push_mod_pack(crate::entities::config_cache::ActivePack {
-            id,
-            name,
-            version,
-            files: result.files.into_iter().collect(),
-            manifest_toml: result.manifest_toml,
-            assets: result.assets,
-            source_archive: result.source_archive,
-        });
+    if let Some(pack) = result.into_active_pack() {
+        crate::entities::config_cache::push_mod_pack(pack);
     }
     arr
 }
@@ -5074,3 +5042,7 @@ fn publish_continuation_status(
 mod tests;
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "fleet_staging.rs"]
+mod fleet_staging;

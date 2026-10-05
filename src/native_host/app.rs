@@ -34,18 +34,15 @@
 
 use bevy::prelude::*;
 
-use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
 use crate::boot::{BootError, BootPlan, BootProfile, NativeRenderSurface, WorldIngest};
 use crate::core::messages::{GamePhase, ServerMessage};
 use crate::entities::template_preload::{preload_entity_templates, TemplatePreload};
-use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
+use crate::lobby::{LobbyOutbox, SelectedShipResource, Target};
 use crate::logging::{LogFilterConfig, LoggingPlugin};
-use crate::modifiers::coordination::ModifierCoordinationPlugin;
 use crate::native_host::transport::NativeTransportPlugin;
-use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
+use crate::server_app::SimPluginOptions;
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};
-use crate::world::WorldPlugin;
 
 /// The OS window caption.
 ///
@@ -579,14 +576,10 @@ pub(crate) fn prepare_world_selection(
     // back to `load_ship_config_from_disk`, which returns the *battleship*
     // roster regardless of the hull chosen — so every station, and therefore
     // every backfilled AI system, would belong to the wrong ship.
-    let resolved = crate::entities::include_resolve::resolve_from_disk(&ship_path)
+    let prepared = crate::boot::prepare_hull_content(&ship_path)
         .map_err(|e| NativeHostError::Ship(format!("{ship_path:?} failed to parse: {e}")))?;
-    let ship_entity_config = resolved
-        .parse()
-        .map_err(|e| NativeHostError::Ship(format!("{ship_path:?} failed to parse: {e}")))?;
-    let sidecar =
-        crate::entities::model_markers::capture_primary_sidecar_from_fs(&ship_entity_config);
-    let ship_config = ship_entity_config
+    let ship_config = prepared
+        .config
         .ship_config
         .ok_or_else(|| NativeHostError::Ship(format!("{ship_path:?} has no [[station]] blocks")))?;
 
@@ -615,11 +608,8 @@ pub(crate) fn prepare_world_selection(
         ship_key,
         ship_config,
         sim_rng,
-        hull_record: crate::content_ledger::LedgerDigest {
-            key: resolved.path,
-            digest: vellum_digest::fnv1a(resolved.toml.as_bytes()),
-        },
-        sidecar,
+        hull_record: prepared.hull_record,
+        sidecar: prepared.sidecar,
     })
 }
 
@@ -744,33 +734,12 @@ pub fn build_native_host_app(
     // (done by the preload) and the faction registry, which
     // `add_simulation_plugins` already inserts from the `include_str!`ed native
     // registry.
-    app.add_plugins(AsteroidLifecyclePlugin)
-        .add_plugins(ModifierCoordinationPlugin)
-        .add_plugins(LobbyPlugin)
-        .add_plugins(crate::lobby::lobby_outbox_broadcaster());
-
-    // `render: true` — the same option the browser host takes, and the reason
-    // this host draws anything: the star and planet renderers, the procedural
-    // mesh cache and LOD swap, the viewscreen radar, the reference grid and the
-    // asset preloader that gates `Loading → InProgress`. Every type it adds is
-    // declared `Presentation`/`DeferredFold` in the authoritative census, which
-    // is the claim `tests/native_host_sim.rs` pins by digest against a headless
-    // run of the same world and seed.
-    add_simulation_plugins_with(
+    crate::server_app::compose_live_host(
         &mut app,
-        SimPluginOptions {
-            render: true,
-            ..Default::default()
-        },
+        BootProfile::NativeHost,
+        SimPluginOptions::default(),
+        sim_rng,
     );
-    // After the plugins, so it overrides their OS-seeded `init_resource`. A
-    // world-less host has no `[global] seed` to read yet and keeps the
-    // OS-seeded default until `world_load` applies the same precedence to the
-    // world it ingests.
-    if let Some(sim_rng) = sim_rng {
-        crate::sim_rng::install(app.world_mut(), sim_rng);
-    }
-    app.add_plugins(WorldPlugin);
 
     // The runtime world load (issue #1326). Selection runs only while there is
     // no WorldConfig. Both native entry paths also re-Welcome existing crew
@@ -1170,4 +1139,3 @@ pub fn run(mut app: App) {
 #[path = "app_tests.rs"]
 mod tests;
 
-use crate::entities::include_resolve::ParseEntityTemplate as _;

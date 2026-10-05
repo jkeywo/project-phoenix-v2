@@ -139,7 +139,7 @@ impl BootProfile {
 
     /// Whether this profile drives the real renderer ([`render_stack`]) rather
     /// than the [`render_surrogate`].
-    fn has_render_stack(self) -> bool {
+    pub(crate) fn has_render_stack(self) -> bool {
         matches!(
             self,
             BootProfile::BrowserHost | BootProfile::NativeHost | BootProfile::NativeWorkshop
@@ -1247,3 +1247,28 @@ fn describe_findings(kind: &str, findings: &[crate::world::validate::WorldFindin
 
 #[cfg(test)]
 mod tests;
+
+/// Prepared filesystem hull content, without mutating the active ledger.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PreparedHullContent {
+    pub config: crate::entities::config::EntityConfig,
+    pub hull_record: crate::content_ledger::LedgerDigest,
+    pub sidecar: Option<crate::content_ledger::LedgerDigest>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn prepare_hull_content(path: &str) -> Result<PreparedHullContent, String> {
+    let resolved =
+        crate::entities::include_resolve::resolve_from_disk(path).map_err(|e| e.to_string())?;
+    use crate::entities::include_resolve::ParseEntityTemplate as _;
+    let config = resolved.parse().map_err(|e| e.to_string())?;
+    let sidecar = crate::entities::model_markers::capture_primary_sidecar_from_fs(&config);
+    Ok(PreparedHullContent {
+        config,
+        hull_record: crate::content_ledger::LedgerDigest {
+            key: resolved.path,
+            digest: vellum_digest::fnv1a(resolved.toml.as_bytes()),
+        },
+        sidecar,
+    })
+}

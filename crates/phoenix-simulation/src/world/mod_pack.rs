@@ -72,6 +72,24 @@ impl ValidatedModPack {
     pub fn is_accepted(&self) -> bool {
         !has_error(&self.findings)
     }
+
+    /// Consume an accepted candidate into the overlay handoff. Hosts do not
+    /// reconstruct identity or install a partially validated candidate.
+    pub fn into_active_pack(self) -> Option<ActivePack> {
+        if !self.is_accepted() {
+            return None;
+        }
+        let identity = parse_pack_manifest(&self.manifest_toml).ok()?.pack?;
+        Some(ActivePack {
+            id: identity.id,
+            name: identity.name,
+            version: identity.version,
+            files: self.files.into_iter().collect(),
+            manifest_toml: self.manifest_toml,
+            assets: self.assets,
+            source_archive: self.source_archive,
+        })
+    }
 }
 
 use phoenix_content::string_catalogue::{

@@ -207,6 +207,10 @@ impl Drop for PaneFrameBuffer {
 /// unioning its dirty bounds until the next successful copy, so the pixels are
 /// deferred, not lost.
 pub trait PaneFrameSink {
+    /// Configure the pool after a surface is successfully created or resized.
+    /// Recording sinks need no pool; production sinks replace its generation.
+    fn configure(&mut self, _id: PaneId, _pixels: PixelMode, _len: usize) {}
+
     /// Lend a buffer of at least `len` bytes for `id` to copy into, or `None`
     /// when the pane's pool is empty.
     ///
@@ -317,6 +321,10 @@ impl PooledFrames {
     }
 }
 impl PaneFrameSink for PooledFrames {
+    fn configure(&mut self, id: PaneId, pixels: PixelMode, len: usize) {
+        PooledFrames::configure(self, id, pixels, len);
+    }
+
     fn stage(&mut self, id: PaneId, len: usize) -> Option<&mut [u8]> {
         self.return_staged();
         let pool = self.pools.get_mut(&id)?;

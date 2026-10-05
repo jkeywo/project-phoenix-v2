@@ -537,26 +537,36 @@ impl<P: RelayProtocol> Transport<P> for RelayTransport<P> {
                 self.drop_peer(&peer, &mut out);
             }
         }
-        if !self.socket.is_open() {
-            // The link died. Report every identified crew member gone, once —
-            // `lose_relay` empties the map, so a second poll produces nothing.
-            // It also clears `registered`, which is what lets a socket that
-            // redials (relay_socket.rs's supervisor) re-send `host-open` on the
-            // service's next `ready` and put a fresh code on the viewscreen.
-            if self.link_up {
-                self.link_up = false;
-                self.lose_relay("unreachable".to_string(), &mut out);
+        // Consume lifecycle edges before consulting the current level: the
+        // socket may have redialled completely between two simulation polls.
+        for event in self.socket.poll_events() {
+            match event {
+                crate::socket::RelaySocketEvent::Opened => self.link_up = true,
+                crate::socket::RelaySocketEvent::Closed => {
+                    if self.link_up {
+                        self.link_up = false;
+                        self.lose_relay("unreachable".to_string(), &mut out);
+                    }
+                }
+                crate::socket::RelaySocketEvent::Text(text) => {
+                    // Non-redialling adapters supply frames and a level only.
+                    if !self.link_up && self.socket.is_open() {
+                        self.link_up = true;
+                    }
+                    if self.link_up && self.socket.is_open() {
+                        match decode_rendezvous_frame(&text) {
+                            Ok(frame) => self.on_frame(frame, &mut out),
+                            Err(_) => self.notices.push(RelayNotice::Fault {
+                                reason: "undecodable frame from the rendezvous service".to_string(),
+                            }),
+                        }
+                    }
+                }
             }
-            return out;
         }
-        self.link_up = true;
-        for text in self.socket.poll() {
-            match decode_rendezvous_frame(&text) {
-                Ok(frame) => self.on_frame(frame, &mut out),
-                Err(_) => self.notices.push(RelayNotice::Fault {
-                    reason: "undecodable frame from the rendezvous service".to_string(),
-                }),
-            }
+        if !self.socket.is_open() && self.link_up {
+            self.link_up = false;
+            self.lose_relay("unreachable".to_string(), &mut out);
         }
         self.retire_superseded();
         out

@@ -68,3 +68,24 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .before(crate::server::bridge::flush_host_channels),
     );
 }
+
+/// Compose the live host in schedule-sensitive order. The boot profile owns
+/// the renderer axis; callers only supply simulation registration probes.
+pub(crate) fn compose_live_host(
+    app: &mut App,
+    profile: crate::boot::BootProfile,
+    mut options: SimPluginOptions,
+    rng: Option<crate::sim_rng::SimRng>,
+) {
+    assert!(profile != crate::boot::BootProfile::NativeWorkshop);
+    options.render = profile.has_render_stack();
+    app.add_plugins(crate::asteroids::lifecycle::AsteroidLifecyclePlugin)
+        .add_plugins(crate::modifiers::coordination::ModifierCoordinationPlugin)
+        .add_plugins(crate::lobby::LobbyPlugin)
+        .add_plugins(crate::lobby::lobby_outbox_broadcaster());
+    add_simulation_plugins_with(app, options);
+    if let Some(rng) = rng {
+        crate::sim_rng::install(app.world_mut(), rng);
+    }
+    app.add_plugins(crate::world::WorldPlugin);
+}

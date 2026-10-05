@@ -68,16 +68,7 @@ thread_local! {
     /// roster, applied once on the next frame. Deferred for the same reason
     /// every other JS→Bevy handoff here is — `wasm_join_fleet` is called from a
     /// socket callback, which holds no `World`.
-    static PENDING_FLEET_ADOPTIONS: RefCell<VecDeque<PendingFleetAdoption>> =
-        const { RefCell::new(VecDeque::new()) };
-    static FLEET_JOIN_GENERATION: RefCell<u64> = const { RefCell::new(0) };
-    static FLEET_JOIN_STATUS: RefCell<crate::lockstep::FleetJoinStatus> = const {
-        RefCell::new(crate::lockstep::FleetJoinStatus {
-            generation: 0,
-            status: crate::lockstep::FleetJoinStatusKind::Idle,
-            reason: None,
-        })
-    };
+    static FLEET_STAGING: RefCell<super::fleet_staging::FleetStaging> = RefCell::new(Default::default());
 
     /// A validated crew-public GM roster waiting for its full replacement in
     /// Bevy (issue #1289). Decoded at the WASM boundary so no `serde_json`
@@ -122,15 +113,6 @@ thread_local! {
     /// leave(false) -> reopen(true) -> start-1 sequence must not collapse its
     /// teardown generation or let a pre-teardown grant cross into the new
     /// fleet.
-    static PENDING_FLEET_LOBBY_INPUTS: RefCell<VecDeque<PendingFleetLobbyInput>> =
-        const { RefCell::new(VecDeque::new()) };
-    /// Latest absolute projections are rebound onto a newly allocated join
-    /// generation. The page commonly publishes managed/validation immediately
-    /// before calling `wasm_join_fleet`; without these mirrors those samples
-    /// would still carry generation zero and be discarded after adoption.
-    static LATEST_FLEET_MANAGED: RefCell<Option<bool>> = const { RefCell::new(None) };
-    static LATEST_FLEET_VALIDATION: RefCell<Option<bool>> = const { RefCell::new(None) };
-
     /// Fixed-tick start outcomes mirrored back to the World-less JS poller.
     static START_GRANT_RESULTS: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
 
@@ -708,7 +690,7 @@ pub(super) fn clear_start_grant_results() {
 }
 
 pub(super) fn read_fleet_join_status() -> crate::lockstep::FleetJoinStatus {
-    FLEET_JOIN_STATUS.with(|value| value.borrow().clone())
+    FLEET_STAGING.with(|value| value.borrow().status.clone())
 }
 
 pub(super) fn publish_gm_join_status(value: crate::gm_join::GmJoinProgress) {
@@ -744,7 +726,7 @@ pub(super) fn take_slot_claim_queue() -> Vec<u32> {
 }
 
 pub(super) fn take_pending_fleet_adoptions() -> VecDeque<PendingFleetAdoption> {
-    PENDING_FLEET_ADOPTIONS.with(|value| std::mem::take(&mut *value.borrow_mut()))
+    FLEET_STAGING.with(|value| std::mem::take(&mut value.borrow_mut().adoptions))
 }
 
 pub(super) fn drain_pending_gm_join_bootstraps() -> Vec<PendingGmJoinBootstrap> {
@@ -788,11 +770,11 @@ pub(super) fn read_mesh_status() -> String {
 }
 
 pub(super) fn publish_latest_fleet_validation(value: Option<bool>) {
-    LATEST_FLEET_VALIDATION.with(|slot| *slot.borrow_mut() = value);
+    FLEET_STAGING.with(|slot| slot.borrow_mut().validation = value);
 }
 
 pub(super) fn publish_latest_fleet_managed(value: Option<bool>) {
-    LATEST_FLEET_MANAGED.with(|slot| *slot.borrow_mut() = value);
+    FLEET_STAGING.with(|slot| slot.borrow_mut().managed = value);
 }
 
 pub(super) fn publish_pending_gm_roster(value: Option<crate::gm_roster::GmRoster>) {
@@ -800,15 +782,15 @@ pub(super) fn publish_pending_gm_roster(value: Option<crate::gm_roster::GmRoster
 }
 
 pub(super) fn publish_fleet_join_status(value: crate::lockstep::FleetJoinStatus) {
-    FLEET_JOIN_STATUS.with(|slot| *slot.borrow_mut() = value);
+    FLEET_STAGING.with(|slot| slot.borrow_mut().status = value);
 }
 
 pub(super) fn read_latest_fleet_validation() -> Option<bool> {
-    LATEST_FLEET_VALIDATION.with(|value| *value.borrow())
+    FLEET_STAGING.with(|value| value.borrow().validation)
 }
 
 pub(super) fn read_latest_fleet_managed() -> Option<bool> {
-    LATEST_FLEET_MANAGED.with(|value| *value.borrow())
+    FLEET_STAGING.with(|value| value.borrow().managed)
 }
 
 pub(super) fn enqueue_slot_claim_queue(value: u32) {
@@ -885,19 +867,11 @@ pub(super) fn read_local_gm_operator() -> String {
 }
 
 pub(super) fn read_fleet_join_generation() -> u64 {
-    FLEET_JOIN_GENERATION.with(|value| *value.borrow())
+    FLEET_STAGING.with(|value| value.borrow().generation)
 }
 
 pub(super) fn queue_fleet_lobby_input(input: FleetLobbyInput) -> bool {
-    let generation = self::read_fleet_join_generation();
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        queue_fleet_lobby_input_bounded(
-            &mut pending.borrow_mut(),
-            generation,
-            input,
-            MAX_FLEET_LOBBY_INPUTS,
-        )
-    })
+    FLEET_STAGING.with(|state| state.borrow_mut().queue(input))
 }
 
 pub(super) fn browser_save_namespace() -> String {
@@ -959,81 +933,16 @@ pub(super) fn take_mesh_frames() -> String {
 }
 
 pub(super) fn join_fleet(roster_json: &str) -> String {
-    let generation = FLEET_JOIN_GENERATION.with(|counter| {
-        let mut counter = counter.borrow_mut();
-        *counter = counter.wrapping_add(1).max(1);
-        *counter
-    });
-    if crate::core::codec::decode_fleet_roster(roster_json).is_none() {
-        PENDING_FLEET_ADOPTIONS.with(|pending| {
-            let mut pending = pending.borrow_mut();
-            if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
-                pending.pop_back();
-            }
-        });
-        self::publish_fleet_join_status(crate::lockstep::FleetJoinStatus {
-            generation,
-            status: crate::lockstep::FleetJoinStatusKind::Refused,
-            reason: Some("fleet-roster-unreadable".to_string()),
-        });
-        return "fleet-roster-unreadable".to_string();
-    }
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        // This join supersedes any not-yet-drained control projection from the
-        // previous generation. Rebind the latest absolute values so the common
-        // setters→join ordering cannot leave the freshly adopted World at its
-        // unmanaged/fail-closed defaults.
-        rebind_fleet_lobby_projections(
-            &mut pending,
-            generation,
-            self::read_latest_fleet_managed(),
-            self::read_latest_fleet_validation(),
-        );
-    });
-    PENDING_FLEET_ADOPTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        // A newer join cancels an older join that Bevy has not adopted yet.
-        // Preserve a preceding Leave: leave→reopen→join in one animation frame
-        // must tear down the old generation before installing the new one.
-        if matches!(pending.back(), Some(PendingFleetAdoption::Join(_))) {
-            pending.pop_back();
-        }
-        pending.push_back(PendingFleetAdoption::Join(PendingFleetJoin {
-            generation,
-            roster_json: roster_json.to_string(),
-        }));
-    });
-    self::publish_fleet_join_status(crate::lockstep::FleetJoinStatus {
-        generation,
-        status: crate::lockstep::FleetJoinStatusKind::Pending,
-        reason: None,
-    });
-    generation.to_string()
+    FLEET_STAGING.with(|state| state.borrow_mut().join(roster_json))
 }
 
 pub(super) fn leave_fleet() -> String {
-    let generation = FLEET_JOIN_GENERATION.with(|counter| {
-        let mut counter = counter.borrow_mut();
-        *counter = counter.wrapping_add(1).max(1);
-        *counter
-    });
-    PENDING_FLEET_ADOPTIONS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        pending.clear();
-        pending.push_back(PendingFleetAdoption::Leave { generation });
-    });
-    self::publish_fleet_join_status(crate::lockstep::FleetJoinStatus {
-        generation,
-        status: crate::lockstep::FleetJoinStatusKind::Pending,
-        reason: None,
-    });
-    generation.to_string()
+    FLEET_STAGING.with(|state| state.borrow_mut().leave())
 }
 
 pub(super) fn fleet_join_status() -> String {
-    FLEET_JOIN_STATUS
-        .with(|status| crate::core::codec::to_json(&*status.borrow()).unwrap_or_default())
+    FLEET_STAGING
+        .with(|state| crate::core::codec::to_json(&state.borrow().status).unwrap_or_default())
 }
 
 pub(super) fn submit_gm_action(request_json: &str) -> bool {
@@ -1242,23 +1151,7 @@ pub(super) fn snapshot_scenario() -> Option<String> {
 }
 
 pub(super) fn complete_fleet_adoption(generation: u64, accepted: bool, refusal: &str) {
-    FLEET_JOIN_STATUS.with(|status| {
-        let mut status = status.borrow_mut();
-        // A cancelled older action can still precede the latest generation
-        // in this same drain (leave→join). Never let its completion regress
-        // the poller to a stale generation.
-        if status.generation == generation {
-            *status = crate::lockstep::FleetJoinStatus {
-                generation,
-                status: if accepted {
-                    crate::lockstep::FleetJoinStatusKind::Accepted
-                } else {
-                    crate::lockstep::FleetJoinStatusKind::Refused
-                },
-                reason: (!accepted).then(|| refusal.to_string()),
-            };
-        }
-    })
+    FLEET_STAGING.with(|state| state.borrow_mut().complete(generation, accepted, refusal));
 }
 
 pub(super) fn publish_mesh_frames(frames: &[crate::lockstep::MeshFrame]) {
@@ -1318,30 +1211,11 @@ pub(super) fn host_channel_callback() -> Option<Function> {
 pub(super) fn take_fleet_lobby_inputs(
     adoption: &crate::lockstep::FleetJoinStatus,
 ) -> Option<VecDeque<FleetLobbyInput>> {
-    let wrapped =
-        PENDING_FLEET_LOBBY_INPUTS.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
-    let inputs = wrapped
-        .into_iter()
-        .filter(|row| row.generation == adoption.generation)
-        .map(|row| row.input)
-        .collect();
-    match adoption.status {
-        crate::lockstep::FleetJoinStatusKind::Pending => {
-            retry_fleet_lobby_inputs(adoption.generation, inputs);
-            None
-        }
-        crate::lockstep::FleetJoinStatusKind::Refused => None,
-        _ => Some(inputs),
-    }
+    FLEET_STAGING.with(|state| state.borrow_mut().take_inputs(adoption))
 }
 
 pub(super) fn retry_fleet_lobby_inputs(generation: u64, inputs: VecDeque<FleetLobbyInput>) {
-    PENDING_FLEET_LOBBY_INPUTS.with(|pending| {
-        let mut pending = pending.borrow_mut();
-        for input in inputs.into_iter().rev() {
-            pending.push_front(PendingFleetLobbyInput { generation, input });
-        }
-    });
+    FLEET_STAGING.with(|state| state.borrow_mut().retry(generation, inputs));
 }
 
 /// One pending operation at a time; JS waits for its matching readback.

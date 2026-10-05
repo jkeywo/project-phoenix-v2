@@ -1588,3 +1588,27 @@ fn fixture_overlapping_pair_warns_but_accepts() {
         rb.findings
     );
 }
+
+#[test]
+fn accepted_handoff_preserves_identity_content_and_archive_and_refuses_errors() {
+    let manifest = manifest_for("handoff", "assets/worlds/handoff.toml");
+    let world = simple_world("world.handoff.title");
+    let archive = create_store_zip(&[
+        ("scenarios.toml", &manifest),
+        ("assets/worlds/handoff.toml", &world),
+    ]);
+    let candidate = validate_mod_pack(&archive, &base_identity(), no_base, &no_templates(), &[]);
+    assert!(candidate.is_accepted(), "{:?}", candidate.findings);
+    let pack = candidate.into_active_pack().expect("accepted handoff");
+    assert_eq!(pack.id, "handoff");
+    assert_eq!(pack.manifest_toml, manifest);
+    assert_eq!(pack.files.get("assets/worlds/handoff.toml"), Some(&world));
+    assert_eq!(pack.source_archive.as_deref(), Some(archive.as_slice()));
+    let broken = create_store_zip(&[("assets/worlds/handoff.toml", &world)]);
+    assert!(
+        validate_mod_pack(&broken, &base_identity(), no_base, &no_templates(), &[])
+            .into_active_pack()
+            .is_none()
+    );
+    assert!(ValidatedModPack::default().into_active_pack().is_none());
+}

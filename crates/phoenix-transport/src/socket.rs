@@ -4,10 +4,26 @@
 /// (`tungstenite`, or a test's in-process fake). Deliberately narrow and
 /// non-blocking: `Transport::poll` is called from Bevy's `PreUpdate`
 /// once per frame and may not block the simulation for a network round trip.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RelaySocketEvent {
+    Opened,
+    Closed,
+    Text(String),
+}
+
 pub trait RelaySocket: Send + Sync + 'static {
     /// Every text frame that has arrived since the last poll, in order.
     /// Returns empty rather than blocking when nothing has.
     fn poll(&mut self) -> Vec<String>;
+
+    /// Ordered lifecycle edges and frames. Redialling adapters retain edges
+    /// even when an entire disconnect/reconnect occurs between game frames.
+    fn poll_events(&mut self) -> Vec<RelaySocketEvent> {
+        self.poll()
+            .into_iter()
+            .map(RelaySocketEvent::Text)
+            .collect()
+    }
 
     /// Queue one text frame. Failures are the socket's to report through
     /// [`RelaySocket::is_open`] — a send that cannot happen is a dead link, not

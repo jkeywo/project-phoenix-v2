@@ -50,7 +50,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{mpsc, Arc};
 
-use crate::socket::RelaySocket;
+use crate::socket::{RelaySocket, RelaySocketEvent};
 
 /// A `tungstenite` client socket, pumped by a reader thread and a writer thread.
 pub struct WsRelaySocket {
@@ -58,7 +58,7 @@ pub struct WsRelaySocket {
     /// resource and every resource must be, while `mpsc::Receiver` is `Send`
     /// and not `Sync`. Nothing ever contends for it — the only reader is
     /// `poll(&mut self)`, which takes it with `get_mut` and never locks.
-    inbound: std::sync::Mutex<Receiver<String>>,
+    inbound: std::sync::Mutex<Receiver<RelaySocketEvent>>,
     outbound: Sender<String>,
     open: Arc<AtomicBool>,
     /// Bytes handed to the writer thread and not yet written. The backpressure
@@ -159,7 +159,7 @@ impl WsRelaySocket {
         // accept it.
         let socket = dial(&url, origin)?;
 
-        let (inbound_tx, inbound_rx) = mpsc::channel::<String>();
+        let (inbound_tx, inbound_rx) = mpsc::channel::<RelaySocketEvent>();
         let (outbound_tx, outbound_rx) = mpsc::channel::<String>();
         let open = Arc::new(AtomicBool::new(true));
         let queued = Arc::new(AtomicUsize::new(0));
@@ -240,7 +240,7 @@ enum PumpEnd {
 struct Supervisor {
     url: String,
     origin: String,
-    inbound: Sender<String>,
+    inbound: Sender<RelaySocketEvent>,
     outbound: Receiver<String>,
     open: Arc<AtomicBool>,
     queued: Arc<AtomicUsize>,
@@ -254,6 +254,9 @@ impl Supervisor {
         loop {
             if let Some(s) = socket.take() {
                 self.open.store(true, Ordering::Relaxed);
+                if self.inbound.send(RelaySocketEvent::Opened).is_err() {
+                    return;
+                }
                 attempt = 0;
                 let end = pump(
                     s,
@@ -263,6 +266,9 @@ impl Supervisor {
                     &self.shutdown,
                 );
                 self.open.store(false, Ordering::Relaxed);
+                if self.inbound.send(RelaySocketEvent::Closed).is_err() {
+                    return;
+                }
                 if end == PumpEnd::Finished {
                     return;
                 }
@@ -304,7 +310,7 @@ const PUMP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(
 
 fn pump(
     mut socket: WsStream,
-    inbound: &Sender<String>,
+    inbound: &Sender<RelaySocketEvent>,
     outbound: &Receiver<String>,
     queued: &Arc<AtomicUsize>,
     shutdown: &Arc<AtomicBool>,
@@ -347,7 +353,10 @@ fn pump(
 
         match socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
-                if inbound.send(text.to_string()).is_err() {
+                if inbound
+                    .send(RelaySocketEvent::Text(text.to_string()))
+                    .is_err()
+                {
                     return PumpEnd::Finished;
                 }
             }
@@ -367,6 +376,16 @@ fn pump(
 
 impl RelaySocket for WsRelaySocket {
     fn poll(&mut self) -> Vec<String> {
+        self.poll_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                RelaySocketEvent::Text(text) => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn poll_events(&mut self) -> Vec<RelaySocketEvent> {
         let mut out = Vec::new();
         let inbound = self.inbound.get_mut().expect("relay inbox poisoned");
         loop {

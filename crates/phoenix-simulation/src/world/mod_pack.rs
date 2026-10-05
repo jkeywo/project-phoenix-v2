@@ -65,6 +65,7 @@ pub struct ValidatedModPack {
     pub manifest_toml: String,
     pub assets: BTreeMap<String, std::sync::Arc<[u8]>>,
     pub source_archive: Option<std::sync::Arc<[u8]>>,
+    identity: Option<(String, String, String)>,
 }
 
 impl ValidatedModPack {
@@ -79,11 +80,11 @@ impl ValidatedModPack {
         if !self.is_accepted() {
             return None;
         }
-        let identity = parse_pack_manifest(&self.manifest_toml).ok()?.pack?;
+        let (id, name, version) = self.identity?;
         Some(ActivePack {
-            id: identity.id,
-            name: identity.name,
-            version: identity.version,
+            id,
+            name,
+            version,
             files: self.files.into_iter().collect(),
             manifest_toml: self.manifest_toml,
             assets: self.assets,
@@ -564,6 +565,7 @@ pub fn validate_mod_pack_with_assets(
 
     // 6. Validate the manifest, resolving worlds against pack THEN the active
     //    stack THEN base (issue #987 precedence: candidate → active → base).
+    let identity = Some((pack.id.clone(), pack.name.clone(), pack.version.clone()));
     let manifest = pack_manifest.manifest;
     // The active stack, newest active first, falling through to base content.
     // This is what a NEW pack composes against for anything it does not carry
@@ -656,6 +658,7 @@ pub fn validate_mod_pack_with_assets(
         manifest_toml,
         assets,
         source_archive: Some(std::sync::Arc::from(zip_bytes)),
+        identity,
     }
 }
 

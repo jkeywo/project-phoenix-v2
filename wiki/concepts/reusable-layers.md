@@ -76,6 +76,20 @@ capabilities a host installs. Start with [`boot`](../../src/boot/mod.rs),
 [`presentation_adapters.rs`](../../src/presentation_adapters.rs).
 Follow a re-export to its owning crate before changing game behavior.
 
+`server_app::compose_live_host` owns Asteroid, Modifier, Lobby, simulation, RNG
+and World registration in that order. The Boot Profile selects presentation;
+headless registration perturbations stay explicit options. Native and headless
+hull preparation resolves and parses once, returning ledger records for the
+adapter to apply after its admission checks. Browser fleet callbacks stage
+joins, leaves, control projections and completions through
+[`FleetStaging`](../../src/server/fleet_staging.rs).
+
+
+Accepted pack installation consumes `ValidatedModPack::into_active_pack` from
+Simulation. The semantic validator retains the parsed identity and hands off
+content, assets and source archive together; browser and native adapters do not
+reconstruct an accepted pack.
+
 ## Simulation composition and adapters
 
 **Owner:** [`phoenix-simulation`](../../crates/phoenix-simulation/src/lib.rs).
@@ -275,6 +289,10 @@ transport is its JavaScript counterpart on the wire, not a Rust crate importer.
 implementations are paired. A payload's game meaning belongs in Model and the
 simulation domains.
 
+Native redialling sockets queue ordered Opened/Closed/Text events. The protocol
+consumes a missed disconnect even if redial completed between two frame polls,
+retiring old crew and registration before handling a new Ready.
+
 ## Platform
 
 **Owner:** [`phoenix-platform`](../../crates/phoenix-platform/src/lib.rs).
@@ -292,6 +310,9 @@ and rendering libraries through features.
 **Work here for:** a surface allocation, frame upload, file replacement or input
 coordinate calculation. Native host code still chooses which Station occupies
 a pane and orders its game bridge; Platform supplies the underlying surfaces.
+The pane loop configures its frame sink only after successful surface creation
+or resize, replacing the bounded pool generation together with the surface.
+
 
 ## Maths
 

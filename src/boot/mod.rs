@@ -1245,9 +1245,6 @@ fn describe_findings(kind: &str, findings: &[crate::world::validate::WorldFindin
     )
 }
 
-#[cfg(test)]
-mod tests;
-
 /// Prepared filesystem hull content, without mutating the active ledger.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct PreparedHullContent {
@@ -1272,3 +1269,6 @@ pub(crate) fn prepare_hull_content(path: &str) -> Result<PreparedHullContent, St
         sidecar,
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -187,7 +187,7 @@ entities:
         - crates/phoenix-presentation/src/server/pfx.rs
         - src/headless/app.rs
       symbols: [ModelRig, MarkerFinding, MarkerRole, validate_entity_markers, duplicate_marker_findings]
-      tests: [cargo test, crates/phoenix-simulation/src/entities/model_rig_tests.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/model_rig_tests.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate_tests.rs, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
     exceptions:
       - rule: every-marker-reference-is-validated-before-attachment
         scope:

@@ -5037,12 +5037,12 @@ fn publish_continuation_status(
     edge::publish_continuation(lane.status());
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "fleet_staging.rs"]
+mod fleet_staging;
+
 #[cfg(test)]
 #[path = "bridge_tests.rs"]
 mod tests;
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;
-
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "fleet_staging.rs"]
-mod fleet_staging;

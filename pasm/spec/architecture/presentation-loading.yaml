@@ -136,7 +136,7 @@ entities:
     implementation:
       status: declared
       paths: [crates/phoenix-presentation/src/server/pfx.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-presentation/src/entities/star.rs]
-      tests: [cargo test, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]
+      tests: [cargo test, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]
 
   - component: client-audio-presentation
     core:

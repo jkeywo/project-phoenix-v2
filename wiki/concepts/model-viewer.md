@@ -3,7 +3,7 @@ title: Workshop Model Preview
 type: concept
 tags: [tooling, rendering, shaders, workshop, native]
 sources: [workshop.html, editor/workshop-launch.js, editor/workshop-model-preview.js, editor/workshop-model-structure.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, scripts/dev-workshop.mjs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, crates/phoenix-presentation/src/viewer/preview.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/stats.rs, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/glb_visual.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-presentation/src/entities/mesh_stats.rs]
-updated: 2026-09-20
+updated: 2026-10-05
 ---
 
 # Workshop Model Preview
@@ -12,6 +12,13 @@ Workshop is the only supported model, rig and entity preview surface. Its Models
 document previews a GLB, one named sidecar variant, or a composed entity such as
 a ship, star or planet. Preview input is an immutable capture of the selected
 draft revision; source changes mark that picture stale until the author refreshes.
+
+Ordinary `ViewerPlugin` consumes captured preview input. Retained ladder mutation,
+asset reload and browser baking exports require explicit
+`LegacyViewerWorkflowPlugin` installation. Camera, gizmo and LOD commands no
+longer rebuild lights. Generated identity tiers use the shared effective primary
+rig; pending scenes retain their accepted-pack asset path and variant, so a
+superseded load cannot attach to a newer selection.
 
 `crates/phoenix-presentation/src/viewer/` remains the shared renderer plugin. It is used by the Workshop
 preview and by render-parity tests, but no longer owns an independent HTML shell,

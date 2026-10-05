@@ -1061,7 +1061,7 @@ entities:
       status: declared
       paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/pfx.rs]
       symbols: [AmbientLightConfig]
-      tests: [cargo test, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
+      tests: [cargo test, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
 
   - component: world-authoring-validator
     core:

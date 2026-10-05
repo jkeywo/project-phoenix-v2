@@ -19,9 +19,9 @@
 //!
 //! So the thread is a supervisor rather than a single pump: dial, pump until
 //! the socket dies, discard whatever was queued for the dead socket, wait a
-//! backoff, dial again. `is_open()` goes false in between, which is what
-//! `RelayTransport::poll` reads to report the crew gone and clear both the code
-//! and its `registered` flag; when the redial lands, the service's `ready`
+//! backoff, dial again. Ordered lifecycle events retain each disconnect even
+//! when redial finishes between game frames. `RelayTransport::poll` reports
+//! the crew gone and clears the code and registration before a new `ready`
 //! frame re-registers the host and issues a FRESH code, which the operator log
 //! prints. The old code really is dead — the record went with it — and keeping
 //! the same letters across a host drop needs persistence in the service

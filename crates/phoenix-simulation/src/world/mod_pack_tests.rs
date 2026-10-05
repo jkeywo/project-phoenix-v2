@@ -1597,9 +1597,27 @@ fn accepted_handoff_preserves_identity_content_and_archive_and_refuses_errors() 
         ("scenarios.toml", &manifest),
         ("assets/worlds/handoff.toml", &world),
     ]);
-    let candidate = validate_mod_pack(&archive, &base_identity(), no_base, &no_templates(), &[]);
+    let mut candidate =
+        validate_mod_pack(&archive, &base_identity(), no_base, &no_templates(), &[]);
     assert!(candidate.is_accepted(), "{:?}", candidate.findings);
-    let pack = candidate.into_active_pack().expect("accepted handoff");
+    candidate.findings.push(WorldFinding::warning(
+        "handoff-warning",
+        "scenarios.toml",
+        &manifest,
+        "[pack]",
+        "non-blocking warning",
+    ));
+    let binary: std::sync::Arc<[u8]> = std::sync::Arc::from([0u8, 255, 17].as_slice());
+    candidate
+        .assets
+        .insert("assets/test.bin".into(), binary.clone());
+    let pack = candidate
+        .into_active_pack()
+        .expect("accepted handoff with warning");
+    assert!(std::sync::Arc::ptr_eq(
+        pack.assets.get("assets/test.bin").unwrap(),
+        &binary
+    ));
     assert_eq!(pack.id, "handoff");
     assert_eq!(pack.manifest_toml, manifest);
     assert_eq!(pack.files.get("assets/worlds/handoff.toml"), Some(&world));

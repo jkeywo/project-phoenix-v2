@@ -198,12 +198,11 @@ fn all_five_profiles_register_the_same_asset_and_message_floor() {
         // `boot::build` deliberately leaves simulation plugins to the adapters.
         // Exercise their real shared registration rather than installing the
         // collision resource directly or moving it into the render/core floor.
-        crate::server_app::add_simulation_plugins_with(
+        crate::server_app::compose_live_host(
             &mut app,
-            crate::server_app::SimPluginOptions {
-                render: false,
-                ..Default::default()
-            },
+            profile,
+            crate::server_app::SimPluginOptions::default(),
+            None,
         );
         assert!(
             !app.world()

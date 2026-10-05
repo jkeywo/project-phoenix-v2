@@ -518,7 +518,7 @@ entities:
         - tick_torpedo_lifecycle
         - handle_fire_torpedo
         - sync_torpedo_pfx
-      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/console/weapons/shared_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/console/weapons/shared_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
 
   - component: weapon-family-arc-bearing-coordination
     core:

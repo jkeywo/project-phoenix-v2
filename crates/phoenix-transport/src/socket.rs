@@ -1,9 +1,4 @@
-/// A duplex text-frame pipe to the rendezvous service.
-///
-/// The seam between the protocol (everything in this module) and the socket
-/// (`tungstenite`, or a test's in-process fake). Deliberately narrow and
-/// non-blocking: `Transport::poll` is called from Bevy's `PreUpdate`
-/// once per frame and may not block the simulation for a network round trip.
+/// Socket transitions and text frames retained in arrival order.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RelaySocketEvent {
     Opened,
@@ -11,6 +6,12 @@ pub enum RelaySocketEvent {
     Text(String),
 }
 
+/// A duplex text-frame pipe to the rendezvous service.
+///
+/// The seam between the protocol (everything in this module) and the socket
+/// (`tungstenite`, or a test's in-process fake). Deliberately narrow and
+/// non-blocking: `Transport::poll` is called from Bevy's `PreUpdate`
+/// once per frame and may not block the simulation for a network round trip.
 pub trait RelaySocket: Send + Sync + 'static {
     /// Every text frame that has arrived since the last poll, in order.
     /// Returns empty rather than blocking when nothing has.

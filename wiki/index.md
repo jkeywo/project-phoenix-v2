@@ -7,7 +7,7 @@ Current implementation orientation only. For intended design use
 
 - [Project Overview](./concepts/project-overview.md)
 - [Architecture](./concepts/architecture.md)
-- [Reusable Layers](./concepts/reusable-layers.md)
+- [Reusable Layers](./concepts/reusable-layers.md) — module responsibilities, direct dependencies, callers and where to make changes
 - [Message Flow](./concepts/message-flow.md)
 - [Client Architecture](./concepts/client-architecture.md)
 - [Server App](./concepts/server-app.md)

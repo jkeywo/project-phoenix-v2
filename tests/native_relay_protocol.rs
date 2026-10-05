@@ -138,13 +138,31 @@ fn the_transport_names_are_the_ones_the_service_will_relay() {
 fn the_delivery_classes_are_spelled_the_same_in_both_languages() {
     // The service refuses a class it cannot read rather than guessing one, so a
     // spelling difference here is every snapshot frame refused.
-    let relay = read("packages/transport/src/service-relay.js");
-    assert!(relay.contains(&format!(
-        "export const RELAY_RELIABLE = '{CLASS_RELIABLE}';"
+    let protocol = read("packages/transport/src/rendezvous-protocol.js");
+    assert!(protocol.contains(&format!(
+        "export const RELIABLE_CHANNEL = '{CLASS_RELIABLE}';"
     )));
-    assert!(relay.contains(&format!(
-        "export const RELAY_SNAPSHOT = '{CLASS_SNAPSHOT}';"
+    assert!(protocol.contains(&format!(
+        "export const SNAPSHOT_CHANNEL = '{CLASS_SNAPSHOT}';"
     )));
+    for (module, reliable, snapshot) in [
+        ("service-relay", "RELAY_RELIABLE", "RELAY_SNAPSHOT"),
+        (
+            "rendezvous-relay",
+            "RELAY_RELIABLE_LABEL",
+            "RELAY_SNAPSHOT_LABEL",
+        ),
+        (
+            "rendezvous-transport",
+            "RELIABLE_CHANNEL",
+            "SNAPSHOT_CHANNEL",
+        ),
+    ] {
+        let source = read(&format!("packages/transport/src/{module}.js"));
+        assert!(source.contains("RELIABLE_CHANNEL as SHARED_RELIABLE, SNAPSHOT_CHANNEL as SHARED_SNAPSHOT } from './rendezvous-protocol.js'"));
+        assert!(source.contains(&format!("export const {reliable} = SHARED_RELIABLE;")));
+        assert!(source.contains(&format!("export const {snapshot} = SHARED_SNAPSHOT;")));
+    }
 }
 
 #[test]

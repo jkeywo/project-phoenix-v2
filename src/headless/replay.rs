@@ -460,14 +460,7 @@ fn seed_replay_world(world: &mut World, source: &GmActionJournal) {
     }
     if paused {
         if let Some(mut fixed) = world.get_resource_mut::<bevy::time::Time<bevy::time::Fixed>>() {
-            let remaining = fixed.overstep();
-            let timestep = fixed.timestep();
-            let remainder_nanos = remaining.as_nanos() % timestep.as_nanos();
-            let remainder = std::time::Duration::new(
-                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
-                (remainder_nanos % 1_000_000_000) as u32,
-            );
-            fixed.discard_overstep(remaining - remainder);
+            crate::lockstep::discard_whole_fixed_overstep(&mut fixed);
         }
     }
 }

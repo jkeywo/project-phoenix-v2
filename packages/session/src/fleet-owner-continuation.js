@@ -7,7 +7,7 @@ export const isContinuationEnvelope = value => value?.continuation === CONTINUAT
 
 /** One owner-loss transaction. Network ownership remains in fleet-session. */
 export function createOwnerContinuation({ local, owner, participants, request, deliver, replayFrame = null,
-  send, onHeld = () => {}, onCommit = () => {}, onError = () => {} }) {
+  send, onCommit = () => {}, onError = () => {} }) {
   const journal = createContinuationJournal({ local, participants });
   let phase = 'live', epoch = 0, successor = null, plan = null;
   let survivors = participants.filter(slot => slot !== owner);
@@ -100,7 +100,6 @@ export function createOwnerContinuation({ local, owner, participants, request, d
     get epoch() { return epoch; },
     get owner() { return owner; },
     get successor() { return successor; },
-    get participants() { return [...participants]; },
     frontier() { return journal.frontier(); },
     updateRoster(active, baseline=null) {
       if (phase !== 'live') return;
@@ -144,7 +143,7 @@ export function createOwnerContinuation({ local, owner, participants, request, d
       phase = 'pending'; epoch = nextEpoch; successor = Math.min(...survivors);
       beginPromise = (async () => {
         await checked({ op: 'begin', epoch, previous_owner: owner, next_owner: successor, participants: survivors }, 'held');
-        journal.hold(); phase = 'held'; onHeld(); return true;
+        journal.hold(); phase = 'held'; return true;
       })().catch(refuse);
       return beginPromise;
     },

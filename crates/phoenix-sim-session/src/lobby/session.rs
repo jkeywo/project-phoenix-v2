@@ -41,6 +41,7 @@ pub enum RegisterError {
 ///
 /// Net: correctness of reconnect semantics outweighs the bookkeeping win of
 /// pruning, so this module deliberately does not prune session records.
+#[derive(Default)]
 pub struct SessionManager {
     players: Vec<Player>,
     /// Host-owned native screen assignments. Kept apart from connected tenure:
@@ -81,21 +82,9 @@ pub struct SessionManager {
     afk_prev_rating: std::collections::HashMap<String, String>,
 }
 
-impl Default for SessionManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SessionManager {
     pub fn new() -> Self {
-        Self {
-            players: Vec::new(),
-            native_station_assignments: std::collections::HashMap::new(),
-            pending_ratings: std::collections::HashMap::new(),
-            eligibility: std::collections::HashMap::new(),
-            afk_prev_rating: std::collections::HashMap::new(),
-        }
+        Self::default()
     }
 
     fn idx(&self, token: &str) -> Option<usize> {

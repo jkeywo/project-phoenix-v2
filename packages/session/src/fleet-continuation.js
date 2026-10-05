@@ -5,7 +5,7 @@ const ordinal = value => Number.isSafeInteger(value) && value > 0;
 const sequence = value => Number.isSafeInteger(value) && value >= 0;
 const keyOf = row => `${row.origin}:${row.sequence}`;
 const rowBytes = row => row.raw.length * 2 + 32; // conservative UTF-16 bound
-const clone = value => JSON.parse(JSON.stringify(value));
+const copyRow = ({ origin, sequence, raw }) => ({ origin, sequence, raw });
 function membersOf(values) {
   if (!Array.isArray(values) || values.length < 2 || values.length > 32 || values.some(value=>!ordinal(value)) || new Set(values).size !== values.length) throw new Error('invalid-continuation-participants');
   return [...values].sort((a,b)=>a-b);
@@ -86,7 +86,7 @@ export function createContinuationJournal({local,participants,limits=CONTINUATIO
       compact();
     },
     hold(){live();holding=true;return this.tail();},
-    tail(){live();return {local,participants:[...members],seen:{...seen},rows:[...rows.values()].map(clone)};},
+    tail(){live();return {local,participants:[...members],seen:{...seen},rows:[...rows.values()].map(copyRow)};},
     /** Replays only unseen rows after a fully validated survivor union. */
     replay(plan,deliver){
       live();if(!holding)throw new Error('continuation-not-held');
@@ -94,7 +94,7 @@ export function createContinuationJournal({local,participants,limits=CONTINUATIO
       if(!target || JSON.stringify(target.before)!==JSON.stringify(seen))throw new Error('stale-continuation-plan');
       for(const row of target.rows){
         if(row.sequence!==seen[row.origin]+1)refuse('continuation-stream-gap');
-        retain(clone(row));deliver(row.raw,row.origin);seen[row.origin]=row.sequence;
+        retain(copyRow(row));deliver(row.raw,row.origin);seen[row.origin]=row.sequence;
       }
       if (!validVector(plan.frontier,members) || members.some(slot=>seen[slot]!==plan.frontier[slot])) refuse('invalid-continuation-frontier');
       acknowledgements.set(local,{...seen});
@@ -128,11 +128,11 @@ export function reconcileContinuation({participants,departed,tails,coordinator=M
       if(row.sequence>tail.seen[row.origin])throw new Error('unseen-continuation-row');
       const key=keyOf(row),previous=rows.get(key);
       if(previous && previous.raw!==row.raw)throw new Error('conflicting-continuation-frame');
-      if(!previous){rows.set(key,clone(row));bytes+=rowBytes(row);}
+      if(!previous){rows.set(key,copyRow(row));bytes+=rowBytes(row);}
       // Preserve the existing star trust boundary. A survivor may prove its
       // own stream; only the elected successor's locally authenticated history
       // can prove a departed owner's row. A foreign carrier is not its origin.
-      if(tail.local===(row.origin===departed?coordinator:row.origin))authorizedRows.set(key,clone(row));
+      if(tail.local===(row.origin===departed?coordinator:row.origin))authorizedRows.set(key,copyRow(row));
       if(rows.size>limits.frames || bytes>limits.bytes)throw new Error('continuation-tail-overflow');
     }
   }

@@ -6,7 +6,7 @@
 //
 // This module has no Bevy dependency — it is fully unit-testable on native.
 
-use crate::entities::tags::EntityTag;
+use crate::entities::tags::{parse_tags, EntityTag};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Configuration for a single radar instance.
@@ -82,22 +82,7 @@ impl RadarConfig {
     /// # Errors
     /// Returns a `String` error description if the TOML is malformed.
     pub fn from_toml(toml_str: &str) -> Result<Self, String> {
-        let raw: RawRadarConfig = toml::from_str(toml_str).map_err(|e| e.to_string())?;
-        let shows = raw
-            .shows
-            .iter()
-            .filter_map(|s| EntityTag::from_str(s))
-            .collect();
-        let selects = raw
-            .selects
-            .iter()
-            .filter_map(|s| EntityTag::from_str(s))
-            .collect();
-        Ok(RadarConfig {
-            range: raw.range,
-            shows,
-            selects,
-        })
+        toml::from_str(toml_str).map_err(|e| e.to_string())
     }
 }
 
@@ -107,16 +92,8 @@ impl<'de> Deserialize<'de> for RadarConfig {
         D: Deserializer<'de>,
     {
         let raw = RawRadarConfig::deserialize(deserializer)?;
-        let shows = raw
-            .shows
-            .iter()
-            .filter_map(|s| EntityTag::from_str(s))
-            .collect();
-        let selects = raw
-            .selects
-            .iter()
-            .filter_map(|s| EntityTag::from_str(s))
-            .collect();
+        let shows = parse_tags(&raw.shows);
+        let selects = parse_tags(&raw.selects);
         Ok(RadarConfig {
             range: raw.range,
             shows,

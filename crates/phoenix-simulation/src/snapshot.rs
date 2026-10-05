@@ -5362,14 +5362,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
             // A canonical capture carries only interpolation remainder here.
             // Preserve that exact fraction while refusing any malformed whole
             // step of pre-restore debt from running in the restore frame.
-            let restored = fixed.overstep();
-            let timestep = fixed.timestep();
-            let remainder_nanos = restored.as_nanos() % timestep.as_nanos();
-            let remainder = std::time::Duration::new(
-                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
-                (remainder_nanos % 1_000_000_000) as u32,
-            );
-            fixed.discard_overstep(restored - remainder);
+            crate::lockstep::discard_whole_fixed_overstep(&mut fixed);
         }
     }
 

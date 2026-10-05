@@ -2498,83 +2498,17 @@ fn save_slot_js(
     row
 }
 
-/// Marshal one shared preflight answer into the catalogue row's `preflight`.
-///
-/// Field-by-field rather than through a serializer, for the reason every other
-/// object on this boundary is: `serde_json` is the crate's `core::codec`
-/// exception and save metadata does not take it.
+/// Marshal the shared serialized preflight shape, refusing on conversion failure.
 #[cfg(target_arch = "wasm32")]
 fn candidate_preflight_js(answer: &crate::gm_checkpoint::CandidatePreflight) -> Object {
-    use crate::gm_checkpoint::CandidateBlock;
-
-    let object = Object::new();
-    save_js_field(&object, "eligible", &JsValue::from_bool(answer.eligible));
-    let blocks = Array::new();
-    for block in &answer.blocks {
-        let row = Object::new();
-        let stations = |ids: &[String]| {
-            let list = Array::new();
-            for id in ids {
-                list.push(&JsValue::from_str(id));
-            }
-            JsValue::from(list)
-        };
-        let kind = match block {
-            CandidateBlock::Unreadable => "unreadable",
-            CandidateBlock::NoFleetRecord => "no-fleet-record",
-            CandidateBlock::ScenarioDiffers { candidate, live } => {
-                save_js_field(&row, "candidate", &JsValue::from_str(candidate));
-                save_js_field(&row, "live", &JsValue::from_str(live));
-                "scenario-differs"
-            }
-            CandidateBlock::FormatMoved => "format-moved",
-            CandidateBlock::RulesMoved => "rules-moved",
-            CandidateBlock::ContentMoved => "content-moved",
-            CandidateBlock::ContentUnverified => "content-unverified",
-            CandidateBlock::MissingShip {
-                slot,
-                stations: ids,
-            } => {
-                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
-                save_js_field(&row, "stations", &stations(ids));
-                "missing-ship"
-            }
-            CandidateBlock::HullDiffers {
-                slot,
-                candidate,
-                live,
-                stations: ids,
-            } => {
-                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
-                save_js_field(
-                    &row,
-                    "candidate",
-                    &candidate
-                        .as_deref()
-                        .map_or(JsValue::NULL, JsValue::from_str),
-                );
-                save_js_field(
-                    &row,
-                    "live",
-                    &live.as_deref().map_or(JsValue::NULL, JsValue::from_str),
-                );
-                save_js_field(&row, "stations", &stations(ids));
-                "hull-differs"
-            }
-            CandidateBlock::HullUnknown {
-                slot,
-                stations: ids,
-            } => {
-                save_js_field(&row, "slot", &JsValue::from_f64(f64::from(*slot)));
-                save_js_field(&row, "stations", &stations(ids));
-                "hull-unknown"
-            }
-        };
-        save_js_field(&row, "kind", &JsValue::from_str(kind));
-        blocks.push(&row);
-    }
-    save_js_field(&object, "blocks", &JsValue::from(blocks));
-    object
+    let value = crate::core::codec::to_json(answer)
+        .ok()
+        .and_then(|json| js_sys::JSON::parse(&json).ok());
+    Object::from(value.unwrap_or_else(|| {
+        warn!("Could not marshal checkpoint preflight; refusing the candidate");
+        js_sys::JSON::parse(r#"{"eligible":false,"blocks":[{"kind":"unreadable"}]}"#)
+            .expect("literal refusal is valid JSON")
+    }))
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

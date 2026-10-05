@@ -252,10 +252,8 @@ ultralight = ["host", "phoenix-platform/ultralight"]
 [dependencies]
 phoenix-simulation = { path = "crates/phoenix-simulation", default-features = false }
 phoenix-presentation = { path = "crates/phoenix-presentation", default-features = false }
-# The ordinary glTF parser and audio decoder also validate Workshop assets.
-gltf = { version = "1.4.1", default-features = false, features = ["utils"] }
+# The audio decoder also validates Workshop assets.
 base64 = "0.22.1"
-ktx2 = "0.4.0"
 symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "ogg", "vorbis", "wav", "pcm"] }
 # The deterministic-math foundation (issue #1184), extracted into its own
 # Bevy-free workspace crate. The root crate re-exports every module here
@@ -332,11 +330,11 @@ glam = { version = "0.30", features = ["libm"] }
 # throughput trade, not a free win, and "just turn on SIMD for the physics" is
 # a build break rather than a tuning knob.
 #
-# Not covered by any of this: the `noise` crate below (0.9.0, which exposes no
+# Not covered by any of this: Simulation's `noise` crate (0.9.0, which exposes no
 # `libm` feature at all). Verified exact by reading its source rather than
 # assumed: the Perlin path this repo uses — `core/perlin.rs::perlin_2d` via
 # `noise_fns/generators/perlin.rs`, reached from
-# `src/asteroids/spawner.rs::perlin2d_octaves` — computes with nothing but
+# `crates/phoenix-simulation/src/asteroids/spawner.rs::perlin2d_octaves` — computes with nothing but
 # `floor`-to-integer, integer permutation-table hashing (`permutationtable.rs`,
 # an XorShift-seeded `[u8; 256]`), gradient dot-products that are plain ± of
 # two components, `math/s_curve/quintic.rs` (`x*x*x*(x*(x*6−15)+10)`),
@@ -359,13 +357,7 @@ serde_json = "1.0.149"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 wasm-bindgen = "0.2.120"
 rand = "0.9"
-# No `libm` feature exists on this crate, and none is needed — its Perlin path
-# is transcendental-free, so it is already bit-exact cross-target. Reasoning
-# recorded in the nalgebra/parry3d/rapier3d determinism block above (#909 AC-5).
-noise = "0.9"
 toml = "1.0"
-toml_edit = "=0.25.11"
-strum = { version = "0.28.0", features = ["derive"] }
 # Pure-Rust libm backing `crate::simmath` (issue #908). Simulation code must
 # not call std's float transcendentals (`sin`, `cos`, `atan2`, …): std routes
 # them to the platform's libm (native links the system one, wasm gets Rust's),

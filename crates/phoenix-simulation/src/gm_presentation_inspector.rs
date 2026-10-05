@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PresentationInspectorField {
@@ -58,20 +58,12 @@ fn field(
         label: "inspector.presentation.field".into(),
         group: group(path),
         descriptor: FieldDescriptor {
-            kind: kind.into(),
-            default_source: None,
-            live_mutability: mutability,
-            origin: FieldOrigin {
-                schema_path: path.into(),
-                document: None,
-                line: None,
-                layer: None,
-            },
             validation: if mutability == LiveMutability::RecreateRequired {
                 vec!["inspector.presentation.recreate_explanation".into()]
             } else {
                 Vec::new()
             },
+            ..FieldDescriptor::runtime(kind, mutability, path)
         },
         action_panel: action_panel.map(str::to_owned),
     }

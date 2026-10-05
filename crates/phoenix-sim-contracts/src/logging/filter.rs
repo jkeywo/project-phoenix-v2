@@ -1,6 +1,6 @@
 //! The runtime filter resource and the system that keeps its entity set fresh.
 
-use super::{empty_entities, empty_per_cat, LevelFilter, LogCat};
+use super::{LevelFilter, LogCat};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -24,7 +24,7 @@ impl EntityFilter {
     pub fn new(names: Vec<String>) -> Self {
         Self {
             names,
-            allowed: empty_entities(),
+            allowed: HashSet::new(),
         }
     }
 
@@ -53,7 +53,7 @@ impl Default for LogFilterConfig {
     fn default() -> Self {
         Self {
             default_level: LevelFilter::Warn,
-            per_cat: empty_per_cat(),
+            per_cat: HashMap::new(),
             entity_filter: None,
         }
     }

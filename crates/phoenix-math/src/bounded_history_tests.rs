@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn extrema_preserve_nan_and_signed_zero_operand_order() {
+    for values in [
+        [0.0_f64, -0.0, 0.0],
+        [-0.0_f64, 0.0, -0.0],
+        [f64::NAN, 3.0, f64::NAN],
+        [f64::NEG_INFINITY, f64::NAN, f64::INFINITY],
+    ] {
+        let mut history = BoundedHistory::new(3);
+        for value in values {
+            history.push(value);
+        }
+        let legacy_min = values
+            .iter()
+            .fold(None, |acc: Option<f64>, &value| {
+                Some(acc.map_or(value, |current| value.min(current)))
+            })
+            .unwrap();
+        let legacy_max = values
+            .iter()
+            .fold(None, |acc: Option<f64>, &value| {
+                Some(acc.map_or(value, |current| value.max(current)))
+            })
+            .unwrap();
+        assert_eq!(history.min().unwrap().to_bits(), legacy_min.to_bits());
+        assert_eq!(history.max().unwrap().to_bits(), legacy_max.to_bits());
+    }
+}
+
+#[test]
 fn a_new_window_is_empty_and_not_full() {
     let w = BoundedHistory::new(3);
     assert!(w.is_empty());

@@ -69,13 +69,7 @@ impl WorldFinding {
     ) -> Self {
         WorldFinding {
             severity: Severity::Warning,
-            category,
-            message,
-            source: SourceLocation {
-                file: file.to_string(),
-                line: line_of(source_text, reference),
-                reference: reference.to_string(),
-            },
+            ..Self::error(category, file, source_text, reference, message)
         }
     }
 }

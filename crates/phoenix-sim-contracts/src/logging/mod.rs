@@ -45,9 +45,6 @@
 //! should keep using a bare `warn!(target: LogCat::Config.target(), ...)`
 //! rather than growing a parameter for it.
 
-use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
-
 mod filter;
 mod macros;
 mod spec;
@@ -181,13 +178,4 @@ impl LevelFilter {
     pub fn allows(self, level: LevelFilter) -> bool {
         level != LevelFilter::Off && level <= self
     }
-}
-
-/// Convenience for constructing a config in tests and in the two front ends.
-pub(crate) fn empty_per_cat() -> HashMap<LogCat, LevelFilter> {
-    HashMap::new()
-}
-
-pub(crate) fn empty_entities() -> HashSet<Entity> {
-    HashSet::new()
 }

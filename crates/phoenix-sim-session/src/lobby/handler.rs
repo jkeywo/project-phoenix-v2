@@ -19,6 +19,7 @@ pub enum CountdownAction {
     Cancel,
 }
 
+#[derive(Default)]
 pub struct LobbyHandlerResult {
     pub new_phase: Option<GamePhase>,
     pub outbound: Vec<(Target, ServerMessage)>,
@@ -136,12 +137,7 @@ pub fn handle_identify(
     // `return_to_lobby_authority` both read as host authority. Silent — there
     // is no legitimate sender to explain this to.
     if is_reserved_token(&id_token) {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound: Vec::new(),
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
     let is_reconnect = sessions.reconnect(&id_token).is_some();
     let joined = if is_reconnect {
@@ -317,50 +313,25 @@ pub fn handle_select_station(
 
     if ship_stations.stations.is_empty() {
         // No station config loaded — silently ignore (no backward-compat toggle).
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     let station_def = get_station(ship_stations, station);
     let Some(station_def) = station_def else {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     };
     if station_def.auxiliary {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     if !sessions.station_claim_allowed(token, &station_def.id) {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     // Check if sender already holds this station (own station → no-op)
     let sender_station = sessions.station_for_token(token).cloned();
     if sender_station.as_ref() == Some(&station_def.id) {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     // Check if occupied by another connected player
@@ -369,12 +340,7 @@ pub fn handle_select_station(
         .iter()
         .any(|p| p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id));
     if occupied {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     // Defense-in-depth accessibility guard (issue #1103 AC1). The client already
@@ -384,12 +350,7 @@ pub fn handle_select_station(
     // on the wire — the host holds only the anonymous boolean. DEFAULT TRUE keeps
     // a silent/legacy client (never reported) claimable as today.
     if !sessions.is_eligible(token, &station_def.id) {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     let mid_game_claim = phase == GamePhase::InProgress;
@@ -415,31 +376,13 @@ pub fn handle_select_station(
                 station_id: None,
             },
         ));
-        if mid_game_claim {
-            let backfill = BACKFILL_RATING.to_string();
-            outbound.push((
-                Target::All,
-                ServerMessage::RatingChanged {
-                    station_id: previous_station.clone(),
-                    rating_name: backfill.clone(),
-                },
-            ));
-            station_rating_update = Some((previous_station, backfill));
-        } else {
-            // Pre-InProgress: don't let a new claimant inherit a
-            // stranger's lobby-chosen complexity toggle.
-            sessions.clear_pending_rating(&previous_station);
-            let base_rating = get_station(ship_stations, &previous_station.0)
-                .and_then(|def| def.ratings.first().cloned())
-                .unwrap_or_else(|| "Std".to_string());
-            outbound.push((
-                Target::All,
-                ServerMessage::RatingChanged {
-                    station_id: previous_station,
-                    rating_name: base_rating,
-                },
-            ));
-        }
+        station_rating_update = reset_vacated_rating(
+            sessions,
+            ship_stations,
+            previous_station,
+            mid_game_claim,
+            &mut outbound,
+        );
     }
 
     // Assign the station.
@@ -476,12 +419,7 @@ pub fn handle_release_station(
     let mut station_rating_update: Option<(StationId, String)> = None;
 
     if sessions.native_station_for_token(token).is_some() {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     let released_station = sessions.station_for_token(token).cloned();
@@ -502,32 +440,14 @@ pub fn handle_release_station(
             ready: false,
         },
     ));
-    if phase == GamePhase::InProgress {
-        if let Some(station_id) = released_station {
-            let backfill = BACKFILL_RATING.to_string();
-            outbound.push((
-                Target::All,
-                ServerMessage::RatingChanged {
-                    station_id: station_id.clone(),
-                    rating_name: backfill.clone(),
-                },
-            ));
-            station_rating_update = Some((station_id, backfill));
-        }
-    } else if let Some(station_id) = released_station {
-        // Pre-InProgress: don't let a new claimant inherit a
-        // stranger's lobby-chosen complexity toggle.
-        sessions.clear_pending_rating(&station_id);
-        let base_rating = get_station(ship_stations, &station_id.0)
-            .and_then(|def| def.ratings.first().cloned())
-            .unwrap_or_else(|| "Std".to_string());
-        outbound.push((
-            Target::All,
-            ServerMessage::RatingChanged {
-                station_id,
-                rating_name: base_rating,
-            },
-        ));
+    if let Some(station_id) = released_station {
+        station_rating_update = reset_vacated_rating(
+            sessions,
+            ship_stations,
+            station_id,
+            phase == GamePhase::InProgress,
+            &mut outbound,
+        );
     }
 
     LobbyHandlerResult {
@@ -559,12 +479,7 @@ pub fn handle_set_ready(
     // already excludes spectators in `all_ready`; this stops a spectator's own
     // flag from ever being set true in the first place.)
     if sessions.is_spectator(token) {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     sessions.set_ready(token, ready);
@@ -643,12 +558,7 @@ pub fn handle_set_spectator(
     let mut station_rating_update: Option<(StationId, String)> = None;
 
     if sessions.native_station_for_token(token).is_some() {
-        return LobbyHandlerResult {
-            new_phase: None,
-            outbound,
-            station_rating_update: None,
-            countdown_action: None,
-        };
+        return LobbyHandlerResult::default();
     }
 
     if spectator {
@@ -677,31 +587,13 @@ pub fn handle_set_spectator(
         ));
         // Reset the vacated seat's rating, mirroring `handle_release_station`.
         if let Some(station_id) = vacated_station {
-            if phase == GamePhase::InProgress {
-                let backfill = BACKFILL_RATING.to_string();
-                outbound.push((
-                    Target::All,
-                    ServerMessage::RatingChanged {
-                        station_id: station_id.clone(),
-                        rating_name: backfill.clone(),
-                    },
-                ));
-                station_rating_update = Some((station_id, backfill));
-            } else {
-                // Pre-InProgress: don't let a new claimant inherit a
-                // stranger's lobby-chosen complexity toggle.
-                sessions.clear_pending_rating(&station_id);
-                let base_rating = get_station(ship_stations, &station_id.0)
-                    .and_then(|def| def.ratings.first().cloned())
-                    .unwrap_or_else(|| "Std".to_string());
-                outbound.push((
-                    Target::All,
-                    ServerMessage::RatingChanged {
-                        station_id,
-                        rating_name: base_rating,
-                    },
-                ));
-            }
+            station_rating_update = reset_vacated_rating(
+                sessions,
+                ship_stations,
+                station_id,
+                phase == GamePhase::InProgress,
+                &mut outbound,
+            );
         }
     } else {
         sessions.set_spectator(token, false);
@@ -1092,4 +984,31 @@ pub fn process_disconnect(
         station_rating_update: None,
         countdown_action,
     }
+}
+
+/// Publish the vacated seat's rating at its caller's existing outbound position.
+fn reset_vacated_rating(
+    sessions: &mut SessionManager,
+    ship_stations: &ShipStations,
+    station_id: StationId,
+    mid_game: bool,
+    outbound: &mut Vec<(Target, ServerMessage)>,
+) -> Option<(StationId, String)> {
+    let rating_name = if mid_game {
+        BACKFILL_RATING.to_string()
+    } else {
+        // A new claimant must not inherit a stranger's lobby complexity choice.
+        sessions.clear_pending_rating(&station_id);
+        get_station(ship_stations, &station_id.0)
+            .and_then(|def| def.ratings.first().cloned())
+            .unwrap_or_else(|| "Std".to_string())
+    };
+    outbound.push((
+        Target::All,
+        ServerMessage::RatingChanged {
+            station_id: station_id.clone(),
+            rating_name: rating_name.clone(),
+        },
+    ));
+    mid_game.then_some((station_id, rating_name))
 }

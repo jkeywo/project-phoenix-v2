@@ -1,42 +1,6 @@
 //! Entity schema: celestial. Public paths remain in the parent module.
 use super::*;
 
-fn default_star_radius() -> f32 {
-    40.0
-}
-
-fn default_star_longitude_segments() -> u32 {
-    64
-}
-
-fn default_star_latitude_segments() -> u32 {
-    32
-}
-
-fn default_star_surface_colour() -> [f32; 3] {
-    [1.0, 0.72, 0.12]
-}
-
-fn default_star_hot_colour() -> [f32; 3] {
-    [1.0, 0.96, 0.65]
-}
-
-fn default_star_cell_colour() -> [f32; 3] {
-    [0.95, 0.32, 0.04]
-}
-
-fn default_star_halo_colour() -> [f32; 3] {
-    [1.0, 0.78, 0.18]
-}
-
-fn default_star_halo_radius_multiplier() -> f32 {
-    2.4
-}
-
-fn default_star_animation_speed() -> f32 {
-    1.0
-}
-
 /// Animated procedural star/sun visual definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -59,15 +23,15 @@ pub struct StarConfig {
 impl Default for StarConfig {
     fn default() -> Self {
         Self {
-            radius: default_star_radius(),
-            longitude_segments: default_star_longitude_segments(),
-            latitude_segments: default_star_latitude_segments(),
-            surface_colour: default_star_surface_colour(),
-            hot_colour: default_star_hot_colour(),
-            cell_colour: default_star_cell_colour(),
-            halo_colour: default_star_halo_colour(),
-            halo_radius_multiplier: default_star_halo_radius_multiplier(),
-            animation_speed: default_star_animation_speed(),
+            radius: 40.0,
+            longitude_segments: 64,
+            latitude_segments: 32,
+            surface_colour: [1.0, 0.72, 0.12],
+            hot_colour: [1.0, 0.96, 0.65],
+            cell_colour: [0.95, 0.32, 0.04],
+            halo_colour: [1.0, 0.78, 0.18],
+            halo_radius_multiplier: 2.4,
+            animation_speed: 1.0,
         }
     }
 }

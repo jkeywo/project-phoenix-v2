@@ -1,4 +1,4 @@
-import { CONTINUATION_WIRE, isContinuationEnvelope } from './fleet-owner-continuation.js';
+import { continuationEnvelope, isContinuationEnvelope } from './fleet-owner-continuation.js';
 
 const CHARS_PER_CHUNK = 12000;
 const MAX_MESSAGE_CHARS = 8 * 1024 * 1024;
@@ -8,9 +8,8 @@ export function sendContinuationWire(send, raw) {
   if (raw.length <= CHARS_PER_CHUNK) return send(raw);
   if (raw.length > MAX_MESSAGE_CHARS) throw new Error('continuation-message-overflow');
   const count = Math.ceil(raw.length / CHARS_PER_CHUNK);
-  for (let index = 0; index < count; index++) send(JSON.stringify({
-    continuation: CONTINUATION_WIRE, kind: 'chunk',
-    body: { index, count, text: raw.slice(index * CHARS_PER_CHUNK, (index + 1) * CHARS_PER_CHUNK) },
+  for (let index = 0; index < count; index++) send(continuationEnvelope('chunk', {
+    index, count, text: raw.slice(index * CHARS_PER_CHUNK, (index + 1) * CHARS_PER_CHUNK),
   }));
 }
 

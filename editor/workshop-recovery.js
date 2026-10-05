@@ -1,23 +1,15 @@
+import { createDatabaseOpener } from './indexed-db.js';
 /** One origin-local browser draft, stored as structured data in IndexedDB.
  * Independent of project-root's filesystem handles and private operator profile.
  * Writes serialize so an older edit cannot overwrite a newer snapshot. */
 export function createWorkshopRecovery({ indexedDB = globalThis.indexedDB } = {}) {
-  let database;
   let queue = Promise.resolve();
-  async function open() {
-    if (!indexedDB) throw new Error('Browser draft storage is unavailable.');
-    if (!database) database = new Promise((resolve, reject) => {
-      const request = indexedDB.open('phoenix-workshop-draft', 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('draft');
-      request.onsuccess = () => {
-        request.result.onversionchange = () => { request.result.close(); database = null; };
-        resolve(request.result);
-      };
-      request.onerror = () => reject(request.error || new Error('Could not open browser draft storage.'));
-      request.onblocked = () => reject(new Error('Browser draft storage is blocked by another window.'));
-    }).catch(error => { database = null; throw error; });
-    return database;
-  }
+  const open = createDatabaseOpener({
+    indexedDB, name: 'phoenix-workshop-draft', store: 'draft',
+    unavailable: 'Browser draft storage is unavailable.',
+    failed: error => error || Error('Could not open browser draft storage.'),
+    blocked: () => Error('Browser draft storage is blocked by another window.'),
+  });
   async function transact(mode, operation) {
     const db = await open();
     return new Promise((resolve, reject) => {

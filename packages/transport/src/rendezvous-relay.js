@@ -1,3 +1,4 @@
+import { RELIABLE_CHANNEL as SHARED_RELIABLE, SNAPSHOT_CHANNEL as SHARED_SNAPSHOT } from './rendezvous-protocol.js';
 /**
  * gui/rendezvous-relay.js — the game's own frames over the rendezvous socket
  * (issue #1113).
@@ -68,9 +69,9 @@
 import { relayPayloadBytes } from './rendezvous-protocol.js';
 
 /** Label of the reliable relayed channel — the same label the DataChannel uses. */
-export const RELAY_RELIABLE_LABEL = 'reliable';
+export const RELAY_RELIABLE_LABEL = SHARED_RELIABLE;
 /** Label of the lossy relayed channel. */
-export const RELAY_SNAPSHOT_LABEL = 'snapshot';
+export const RELAY_SNAPSHOT_LABEL = SHARED_SNAPSHOT;
 
 /**
  * Fallback ceilings, used only until the service's `relay-ready` frame arrives
@@ -124,7 +125,7 @@ export function createRelayChannelPair({
   onLog = () => {},
   limits = RELAY_LIMIT_DEFAULTS,
 } = {}) {
-  let bounds = limits;
+  const bounds = limits;
   /** Snapshot frames shed over this pair's whole life, for diagnostics. */
   let dropped = 0;
   /** Set by `failLink` so closing both channels cannot re-enter it. */
@@ -192,11 +193,6 @@ export function createRelayChannelPair({
   return {
     reliable,
     snapshot,
-
-    /** Adopt the limits the service advertised. */
-    applyLimits(next) {
-      bounds = next || bounds;
-    },
 
     /** How many snapshot frames this pair has shed. */
     get droppedSnapshots() {

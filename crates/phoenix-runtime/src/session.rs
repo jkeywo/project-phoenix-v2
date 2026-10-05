@@ -249,7 +249,7 @@ impl LockstepSession {
     /// `boundary + delay + 1`. It is a monotone liveness signal, never a
     /// simulation decision — the barrier still governs which ticks actually run.
     pub fn observed(&self, slot: HostSlot) -> Option<u64> {
-        self.ready_through.get(&slot).copied()
+        self.watermark_of(slot)
     }
 
     /// Whether every peer's input for `tick` is in hand.

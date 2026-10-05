@@ -56,16 +56,12 @@ pub const CLASS_SNAPSHOT: &str = "snapshot";
 /// A join code as the service issues it. Opaque to a host: `full` is what a QR
 /// encodes and `suffix` is what a guest types, and neither is ever built here.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct JoinCode {
-    #[serde(default)]
     pub full: String,
-    #[serde(default)]
     pub suffix: String,
-    #[serde(default)]
     pub project: String,
-    #[serde(default)]
     pub version: String,
-    #[serde(default)]
     pub namespace: String,
 }
 

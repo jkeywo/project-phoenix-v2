@@ -1116,23 +1116,7 @@ fn ribbon_quad_mesh(u_at_tail: f32, u_at_head: f32) -> Mesh {
 /// Unit quad (-0.5..0.5 both axes) for camera-facing billboards (muzzle
 /// flash, contact glow, impact ring, sparks).
 fn unit_billboard_mesh() -> Mesh {
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    let positions: Vec<[f32; 3]> = vec![
-        [-0.5, -0.5, 0.0],
-        [0.5, -0.5, 0.0],
-        [0.5, 0.5, 0.0],
-        [-0.5, 0.5, 0.0],
-    ];
-    let normals: Vec<[f32; 3]> = vec![[0.0, 0.0, 1.0]; 4];
-    let uvs: Vec<[f32; 2]> = vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
-    mesh
+    Mesh::from(Rectangle::new(1.0, 1.0))
 }
 
 /// Additive-blended, unlit, double-sided textured material for a phaser PFX

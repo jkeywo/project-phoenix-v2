@@ -4,6 +4,15 @@ import {createContinuationJournal,reconcileContinuation} from '../../gui/fleet-c
 const participants=[1,2,3,4,5,6];
 const fleet=()=>participants.map(local=>createContinuationJournal({local,participants}));
 const frame=label=>JSON.stringify({label});
+it('isolates retained rows from mutations to returned tails',()=>{
+  const host=createContinuationJournal({local:1,participants});
+  const raw=frame('original');
+  host.record(raw);
+  const tail=host.tail();
+  tail.rows[0].raw=frame('changed');
+  tail.rows[0].sequence=999;
+  expect(host.tail().rows[0]).toEqual({origin:1,sequence:1,raw});
+});
 const send=(hosts,from,raw,recipients=participants.filter(slot=>slot!==from))=>{
   const envelope=hosts[from-1].record(raw);
   for(const slot of recipients)hosts[slot-1].receive(envelope,from);

@@ -142,23 +142,9 @@ impl FlagStore {
     }
 }
 
-/// Resolve `name` against a layer chain, walking up `parent:` prefixes.
-///
-/// `chain[0]` is the innermost (current) layer; subsequent entries are
-/// successively outer parents. Each leading `parent:` token advances one
-/// step up the chain. Walking past the end resolves as not-found (returns
-/// `None`, evaluated as `0` / `false`).
-fn resolve_chain<'a>(chain: &'a [&'a FlagStore], name: &str) -> Option<(&'a FlagStore, String)> {
-    let (depth, rest) = strip_parent_prefixes(name);
-    chain
-        .get(depth)
-        .copied()
-        .map(|store| (store, rest.to_string()))
-}
-
 /// Split `name` into its `parent:` step count and the bare name beneath them.
 ///
-/// The one place the prefix is parsed, shared by [`resolve_chain`] (borrowed
+/// The one place the prefix is parsed, shared by [`counter_in_chain`] (borrowed
 /// chains, the `when`-predicate path) and [`counter_in_owned_chain`] (owned
 /// chains, the script host's flag view) so the two cannot drift — a scripted
 /// handler's read must resolve exactly as a predicate's does (issue #1045).
@@ -173,11 +159,14 @@ fn strip_parent_prefixes(name: &str) -> (usize, &str) {
 }
 
 /// Read the counter at `name` from a layer chain, honouring `parent:` prefixes.
+/// `chain[0]` is the current layer; each prefix advances to its parent.
+/// Walking past the chain reads zero, without allocating a name copy.
 pub fn counter_in_chain(chain: &[&FlagStore], name: &str) -> i64 {
-    match resolve_chain(chain, name) {
-        Some((store, key)) => store.counter(&key),
-        None => 0,
-    }
+    let (depth, rest) = strip_parent_prefixes(name);
+    chain
+        .get(depth)
+        .map(|store| store.counter(rest))
+        .unwrap_or(0)
 }
 
 /// [`counter_in_chain`] over an OWNED chain — the shape a script call holds
@@ -213,21 +202,7 @@ pub enum CmpOp {
 }
 
 impl CmpOp {
-    fn apply(self, lhs: i64, rhs: i64) -> bool {
-        match self {
-            CmpOp::Ge => lhs >= rhs,
-            CmpOp::Gt => lhs > rhs,
-            CmpOp::Eq => lhs == rhs,
-            CmpOp::Ne => lhs != rhs,
-            CmpOp::Le => lhs <= rhs,
-            CmpOp::Lt => lhs < rhs,
-        }
-    }
-
-    /// Float comparison, used by the typed-fact atoms (issue #775). Facts and
-    /// authored parameters are real-valued (durations, margins, weights), so
-    /// they compare as `f64` rather than the integer counter view.
-    fn apply_f64(self, lhs: f64, rhs: f64) -> bool {
+    fn apply<T: PartialOrd>(self, lhs: T, rhs: T) -> bool {
         match self {
             CmpOp::Ge => lhs >= rhs,
             CmpOp::Gt => lhs > rhs,
@@ -971,7 +946,7 @@ impl Predicate {
                     FactContext::StateTime => Some(memory.state_time_secs()),
                 };
                 match (lhs, rhs.resolve(params)) {
-                    (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
+                    (Some(lhs), Some(rhs)) => op.apply(lhs, rhs),
                     // Absent fact or unresolved parameter → false, never panic.
                     _ => false,
                 }
@@ -993,7 +968,7 @@ impl Predicate {
                     memory.history().reduce(&spec, *reducer),
                     rhs.resolve(params),
                 ) {
-                    (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
+                    (Some(lhs), Some(rhs)) => op.apply(lhs, rhs),
                     _ => false,
                 }
             }

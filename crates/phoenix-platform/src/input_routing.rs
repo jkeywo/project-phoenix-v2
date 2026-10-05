@@ -74,7 +74,7 @@ impl PanePlacement {
     }
 
     /// A window-local physical point turned into this pane's own logical
-    /// coordinate. Assumes the point is inside [`rect`](Self::rect).
+    /// coordinate, including points outside the pane during captured drags.
     fn local_of_window(&self, wx: f64, wy: f64) -> PaneHit {
         let scale = if self.scale_factor > 0.0 {
             self.scale_factor
@@ -178,15 +178,8 @@ impl PaneRouter {
     /// pane edge and exactly what a page expects to see for one.
     pub fn project_into_pane(&self, pane: PaneId, wx: f64, wy: f64) -> Option<(i32, i32)> {
         self.placement(pane).map(|p| {
-            let scale = if p.scale_factor > 0.0 {
-                p.scale_factor
-            } else {
-                1.0
-            };
-            (
-                ((wx - p.rect.x as f64) / scale) as i32,
-                ((wy - p.rect.y as f64) / scale) as i32,
-            )
+            let hit = p.local_of_window(wx, wy);
+            (hit.local_x, hit.local_y)
         })
     }
 }

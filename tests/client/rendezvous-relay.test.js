@@ -113,9 +113,8 @@ describe('the bounded mailbox', () => {
     const h = hub();
     h.attach('peer-1', 'record');
     for (const n of [1, 2, 3]) h.enqueue('peer-1', 'host', RELAY_RELIABLE, { n }, `${n}`);
-    expect(h.hasOverflowed('peer-1')).toBe(false);
+    expect(h.overflowedSources('peer-1')).toEqual([]);
     h.enqueue('peer-1', 'host', RELAY_RELIABLE, { n: 4 }, '4');
-    expect(h.hasOverflowed('peer-1')).toBe(true);
     expect(h.overflowedSources('peer-1')).toEqual(['host']);
     // Everything that was queued is still there. A command the service accepted
     // and then silently discarded would be worse than a closed session, because

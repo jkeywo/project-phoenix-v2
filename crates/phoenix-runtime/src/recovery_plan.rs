@@ -196,27 +196,15 @@ pub fn earliest_divergence(
     for checkpoint in &local_ledger.checkpoints {
         let tick = checkpoint.tick;
         let mut digests = BTreeMap::new();
-        let mut complete = true;
         for &slot in fleet {
             let fold = if slot == local {
                 Some(checkpoint.digest)
             } else {
                 peers.get(&slot).and_then(|ledger| ledger.digest_at(tick))
             };
-            match fold {
-                Some(value) => {
-                    digests.insert(slot, value);
-                }
-                None => {
-                    complete = false;
-                    break;
-                }
-            }
-        }
-        if !complete {
-            // The shared view for this tick is incomplete, and every later
-            // checkpoint's is too. Defer rather than judge on a partial fleet.
-            break;
+            // Stop at the first incomplete checkpoint, before judging any
+            // later checkpoint on a partial fleet.
+            digests.insert(slot, fold?);
         }
         let distinct: BTreeSet<u64> = digests.values().copied().collect();
         if distinct.len() <= 1 {

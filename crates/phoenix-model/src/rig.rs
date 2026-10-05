@@ -1,36 +1,26 @@
 //! Authored primary-rig geometry and visual LOD descriptors.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-fn zeros() -> [f32; 3] {
-    [0.0, 0.0, 0.0]
-}
-
-fn ones() -> [f32; 3] {
-    [1.0, 1.0, 1.0]
-}
 
 /// The `[base]` rig: corrects a raw GLB into game space. All fields default so
 /// a sparse or empty sidecar parses to an identity rig.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct BaseTransform {
     /// Non-uniform translation applied to the model, in model-local units.
-    #[serde(default = "zeros")]
     pub offset: [f32; 3],
     /// XYZ-order euler rotation in radians.
-    #[serde(default = "zeros")]
     pub rotation: [f32; 3],
     /// Non-uniform scale applied to the model.
-    #[serde(default = "ones")]
     pub scale: [f32; 3],
 }
 
 impl Default for BaseTransform {
     fn default() -> Self {
         BaseTransform {
-            offset: zeros(),
-            rotation: zeros(),
-            scale: ones(),
+            offset: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
         }
     }
 }

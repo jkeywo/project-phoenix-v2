@@ -1,3 +1,4 @@
+import { createDatabaseOpener } from './indexed-db.js';
 /** A one-use source bundle carried across a full page navigation. No live
  * simulation state, operator identity, credentials or draft history belongs here. */
 const TTL = 5 * 60 * 1000;
@@ -41,20 +42,11 @@ export function copyWorkshopSource({ selectedId, archives, base }) {
 
 export function createWorkshopHandoffStore({ indexedDB = globalThis.indexedDB,
   now = () => Date.now(), mint = () => globalThis.crypto.randomUUID() } = {}) {
-  let database;
-  async function open() {
-    if (!indexedDB) throw Error('Workshop source storage is unavailable');
-    if (!database) database = new Promise((resolve, reject) => {
-      const request = indexedDB.open('phoenix-workshop-handoff', 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('source');
-      request.onsuccess = () => {
-        request.result.onversionchange = () => { request.result.close(); database = null; };
-        resolve(request.result);
-      };
-      request.onerror = request.onblocked = () => reject(request.error || Error('Workshop source storage is unavailable'));
-    }).catch(error => { database = null; throw error; });
-    return database;
-  }
+  const open = createDatabaseOpener({
+    indexedDB, name: 'phoenix-workshop-handoff', store: 'source',
+    unavailable: 'Workshop source storage is unavailable',
+    failed: error => error || Error('Workshop source storage is unavailable'),
+  });
   async function transact(operation) {
     const db = await open();
     return new Promise((resolve, reject) => {

@@ -78,7 +78,7 @@ pub enum ModifierSlot {
 /// order f32 bonuses are summed in. Every field the derive compares is
 /// authored or minted content (a uuid, a world id/tag, a group or system id),
 /// so the resulting order is identical in every process.
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModifierSource {
     ImpulseDrive,
     RegionEffect {
@@ -107,42 +107,6 @@ pub enum ModifierSource {
     TractorLoad,
     /// An independent GM availability latch: suppresses this capability slot.
     SystemDisabled(SystemId),
-}
-
-impl Eq for ModifierSource {}
-
-impl std::hash::Hash for ModifierSource {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            ModifierSource::ImpulseDrive => {
-                1u8.hash(state);
-            }
-            ModifierSource::RegionEffect { uuid } => {
-                2u8.hash(state);
-                uuid.hash(state);
-            }
-            ModifierSource::World { id, tag } => {
-                3u8.hash(state);
-                id.hash(state);
-                tag.hash(state);
-            }
-            ModifierSource::PowerGroup(g) => {
-                4u8.hash(state);
-                g.hash(state);
-            }
-            ModifierSource::SystemDamage(sid) => {
-                5u8.hash(state);
-                sid.hash(state);
-            }
-            ModifierSource::SystemDisabled(sid) => {
-                7u8.hash(state);
-                sid.hash(state);
-            }
-            ModifierSource::TractorLoad => {
-                6u8.hash(state);
-            }
-        }
-    }
 }
 
 /// Per-system hull integrity snapshot broadcast in `SimSnapshot` — the
@@ -5146,20 +5110,10 @@ pub struct PowerGroupEntry {
     /// from a server whose floor was `GROUP_LEVEL_MIN` for every group, and
     /// decoding it to `0` would tell the panel that server's groups could be
     /// switched off — offering an order it would silently refuse.
-    #[serde(default = "default_min_power_level")]
+    #[serde(default = "crate::wire::default_min_power_level")]
     pub min_level: u8,
     /// Maximum power level for this power group.
     pub max_level: u8,
-}
-
-/// The `min_level` a payload without the field decodes to. A module-local
-/// wrapper (serde's `default = "…"` would accept the cross-module path too)
-/// so the wire default is spelled beside the struct it defaults — it forwards
-/// to [`crate::wire::default_min_power_level`], the same parse default
-/// the authored TOML gets and the same value `GROUP_LEVEL_MIN` is defined
-/// from, so the wire default cannot drift from the engine's floor.
-fn default_min_power_level() -> u8 {
-    crate::wire::default_min_power_level()
 }
 
 /// Preview of a queued repair request for blackboard publication (issue #682).

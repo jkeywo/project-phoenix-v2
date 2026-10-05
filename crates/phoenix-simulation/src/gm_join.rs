@@ -1069,14 +1069,7 @@ fn set_join_pause(world: &mut World) {
         time.advance_by(std::time::Duration::ZERO);
     }
     if let Some(mut fixed) = world.get_resource_mut::<Time<Fixed>>() {
-        let overstep = fixed.overstep();
-        let timestep = fixed.timestep();
-        let remainder_nanos = overstep.as_nanos() % timestep.as_nanos();
-        let remainder = std::time::Duration::new(
-            u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
-            (remainder_nanos % 1_000_000_000) as u32,
-        );
-        fixed.discard_overstep(overstep - remainder);
+        crate::lockstep::discard_whole_fixed_overstep(&mut fixed);
     }
     // The canonical peer may enter the transfer hold before another fixed
     // step re-arms these derived latches, while the returning peer necessarily

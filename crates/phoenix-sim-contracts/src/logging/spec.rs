@@ -4,7 +4,7 @@
 //! and `server.html?log=ai=debug,admit=trace` produce the same
 //! [`LogFilterConfig`].
 
-use super::{empty_per_cat, EntityFilter, LevelFilter, LogCat, LogFilterConfig};
+use super::{EntityFilter, LevelFilter, LogCat, LogFilterConfig};
 use std::str::FromStr;
 
 /// A log spec that could not be parsed. Carries the offending fragment so the
@@ -47,10 +47,7 @@ fn parse_level(s: &str) -> Result<LevelFilter, LogSpecError> {
 /// override earlier ones. Entries with `=` set one category. Empty spec yields
 /// the default config.
 pub fn parse_log_spec(spec: &str) -> Result<LogFilterConfig, LogSpecError> {
-    let mut cfg = LogFilterConfig {
-        per_cat: empty_per_cat(),
-        ..Default::default()
-    };
+    let mut cfg = LogFilterConfig::default();
 
     for entry in spec.split(',') {
         let entry = entry.trim();

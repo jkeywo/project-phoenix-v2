@@ -2,7 +2,7 @@
 //! choice. Derived AI scores, hull, position and unrelated choices do not stale
 //! a doctrine edit. This is optimistic concurrency, never an authority token.
 use super::*;
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 
 pub fn valid_revision(revision: &str) -> bool {
     revision.len() == 16
@@ -41,20 +41,7 @@ pub fn revision(
 }
 
 pub fn descriptor(kind: &str, mutability: LiveMutability, schema_path: &str) -> FieldDescriptor {
-    FieldDescriptor {
-        kind: kind.into(),
-        default_source: None,
-        live_mutability: mutability,
-        origin: FieldOrigin {
-            schema_path: schema_path.into(),
-            // Runtime retains the origin layer, not the exact source member or
-            // scalar span. Do not fabricate a filename or capture live source.
-            document: None,
-            line: None,
-            layer: None,
-        },
-        validation: Vec::new(),
-    }
+    FieldDescriptor::runtime(kind, mutability, schema_path)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -14,17 +14,14 @@ use super::*;
 /// `ShipClientConfig.repair_rate_hp_per_sec` so that the Repair panel UI
 /// can derive its progress-bar timings without redefining the constants.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct RepairConfig {
     /// Number of repair teams available to this ship. Absent ⇒ 0 ⇒ this ship
     /// has no repair teams — see [`Self::declares_teams`].
-    #[serde(default)]
     pub repair_team_count: u32,
     /// Seconds a team spends travelling to a console (and the same again returning).
-    #[serde(default = "default_repair_travel_duration_secs")]
     pub travel_duration_secs: f32,
     /// HP restored per second while a team is at a console.
-    #[serde(default = "default_repair_rate_hp_per_sec")]
     pub repair_rate_hp_per_sec: f32,
     /// Inline per-system target selector (issue #785). Loaded from
     /// `[repair.selector]`; absent ⇒ the canonical
@@ -36,7 +33,6 @@ pub struct RepairConfig {
     /// section: repair teams are a ship-wide engineering capability whose
     /// tunables already live under `[repair]`, so the selector joins them there
     /// rather than inventing a `[repair_console]` table the wire never uses.
-    #[serde(default)]
     pub selector: Option<FineSystemAiSelectorToml>,
     /// External repair-team dispatch (issue #1161). Loaded from
     /// `[repair.external_dispatch]`; present on a hull whose repair console can
@@ -46,23 +42,16 @@ pub struct RepairConfig {
     /// `selector`'s reason: a team crossing over is a repair-console capability,
     /// not a `[[system]]` of its own. The reach and the repair rate are its two
     /// authored numbers (AGENTS.md rule 11).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_dispatch: Option<crate::console::repair::external::ExternalRepairConfig>,
-}
-
-fn default_repair_travel_duration_secs() -> f32 {
-    5.0
-}
-fn default_repair_rate_hp_per_sec() -> f32 {
-    0.5
 }
 
 impl Default for RepairConfig {
     fn default() -> Self {
         Self {
             repair_team_count: 0,
-            travel_duration_secs: default_repair_travel_duration_secs(),
-            repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
+            travel_duration_secs: 5.0,
+            repair_rate_hp_per_sec: 0.5,
             selector: None,
             external_dispatch: None,
         }

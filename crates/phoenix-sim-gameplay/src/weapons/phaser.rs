@@ -22,7 +22,6 @@
 //! `angle_diff(bearing, facing_rad).abs() <= arc_deg.to_radians() / 2`.
 
 use crate::simmath;
-use std::f32::consts::PI;
 
 /// String identifier for a phaser bank (matches the `id` field in TOML).
 pub type PhaserBankId = String;
@@ -296,16 +295,7 @@ pub fn target_geometry(
 }
 
 /// Signed angular difference `a − b` wrapped to `[−π, π]`.
-fn angle_diff(a: f32, b: f32) -> f32 {
-    let mut d = a - b;
-    while d > PI {
-        d -= 2.0 * PI;
-    }
-    while d < -PI {
-        d += 2.0 * PI;
-    }
-    d
-}
+use super::arc_geometry::signed_difference as angle_diff;
 
 #[cfg(test)]
 #[path = "phaser_tests.rs"]

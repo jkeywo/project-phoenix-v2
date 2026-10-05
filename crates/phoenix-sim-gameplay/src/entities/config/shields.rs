@@ -49,7 +49,7 @@ fn default_shields_ai_health_ratio_threshold() -> f32 {
 /// Damage multiplier fields `focus_focused_damage_multiplier` and
 /// `focus_unfocused_damage_multiplier` default to 1.0 (no change).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct ShieldsConsoleConfig {
     /// Per-level bonus table for the `shields` power group (issue #952),
     /// indexed by level-1. Feeds `ModifierSlot::ShieldRegen`, so it decides
@@ -59,43 +59,32 @@ pub struct ShieldsConsoleConfig {
     /// This field moved here from `[sensors_console]` when `shields` replaced
     /// `sensors` as a power group: nothing reads a `sensors` curve any more,
     /// because `ModifierSlot::RadarRange` no longer has a power producer.
-    #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
     /// Extra max HP applied to the focused facing.
-    #[serde(default = "default_focus_bonus_max_hp")]
     pub focus_bonus_max_hp: i32,
     /// Extra regen per second applied to the focused facing.
-    #[serde(default = "default_focus_bonus_regen")]
     pub focus_bonus_regen: f32,
     /// Max HP subtracted from each non-focused facing.
-    #[serde(default = "default_focus_penalty_max_hp")]
     pub focus_penalty_max_hp: i32,
     /// Regen per second subtracted from each non-focused facing.
-    #[serde(default = "default_focus_penalty_regen")]
     pub focus_penalty_regen: f32,
     /// HP per second decay applied to non-focused facings when above reduced max.
-    #[serde(default = "default_focus_decay_rate")]
     pub focus_decay_rate: f32,
     /// Damage multiplier applied to incoming damage on the focused arc.
     /// 1.0 = no change, 0.7 = 30% reduction.
-    #[serde(default = "default_focus_focused_damage_multiplier")]
     pub focus_focused_damage_multiplier: f32,
     /// Damage multiplier applied to incoming damage on non-focused arcs
     /// (when another arc is focused). 1.0 = no change, 1.25 = 25% increase.
-    #[serde(default = "default_focus_unfocused_damage_multiplier")]
     pub focus_unfocused_damage_multiplier: f32,
     /// Base shield-system values (number of facings, max HP, regen,
     /// offline duration). Arcs without a base use `ShieldConfig::default()`;
     /// without either a base or arcs this table grants no shield equipment.
-    #[serde(default)]
     pub base: Option<ShieldsBaseConfig>,
     /// Shield generator frequency (0.0–1.0). Default 0.5. When
     /// `[[shield_arc]]` blocks are present, the first arc's frequency
     /// takes precedence.
-    #[serde(default = "default_shield_frequency")]
     pub frequency: f32,
     /// AI tuning parameters for the shields focus controller.
-    #[serde(default)]
     pub ai: Option<ShieldsAiConfigToml>,
     /// Inline stateless AI policy for the Shields focus fine system (issue
     /// #783), loaded from `[shields_console.ai_policy]`. Sibling to `ai`: the
@@ -106,43 +95,20 @@ pub struct ShieldsConsoleConfig {
     /// retained arc-ranking kernel acts. An absent policy adds no automation.
     /// Validated in [`crate::entities::config::EntityConfig::from_toml`]
     /// against [`SHIELD_FOCUS_CHANNELS`] / [`SHIELD_FOCUS_VERBS`].
-    #[serde(default)]
     pub ai_policy: Option<FineSystemAiConfigToml>,
-}
-
-fn default_focus_bonus_max_hp() -> i32 {
-    50
-}
-fn default_focus_bonus_regen() -> f32 {
-    5.0
-}
-fn default_focus_penalty_max_hp() -> i32 {
-    25
-}
-fn default_focus_penalty_regen() -> f32 {
-    1.0
-}
-fn default_focus_decay_rate() -> f32 {
-    10.0
-}
-fn default_focus_focused_damage_multiplier() -> f32 {
-    1.0
-}
-fn default_focus_unfocused_damage_multiplier() -> f32 {
-    1.0
 }
 
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
         Self {
             power_multipliers: None,
-            focus_bonus_max_hp: default_focus_bonus_max_hp(),
-            focus_bonus_regen: default_focus_bonus_regen(),
-            focus_penalty_max_hp: default_focus_penalty_max_hp(),
-            focus_penalty_regen: default_focus_penalty_regen(),
-            focus_decay_rate: default_focus_decay_rate(),
-            focus_focused_damage_multiplier: default_focus_focused_damage_multiplier(),
-            focus_unfocused_damage_multiplier: default_focus_unfocused_damage_multiplier(),
+            focus_bonus_max_hp: 50,
+            focus_bonus_regen: 5.0,
+            focus_penalty_max_hp: 25,
+            focus_penalty_regen: 1.0,
+            focus_decay_rate: 10.0,
+            focus_focused_damage_multiplier: 1.0,
+            focus_unfocused_damage_multiplier: 1.0,
             base: None,
             frequency: default_shield_frequency(),
             ai: None,
@@ -161,44 +127,27 @@ impl Default for ShieldsConsoleConfig {
 /// `num_facings` is exposed for symmetry but the client panel UI assumes
 /// 4 quadrants — values other than 4 will break the Shields panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct ShieldsBaseConfig {
     /// Number of equally-spaced shield facings. The client panel UI
     /// assumes 4 (fore/port/aft/starboard); other values will not render
     /// correctly.
-    #[serde(default = "default_shields_num_facings")]
     pub num_facings: usize,
     /// Maximum HP per facing.
-    #[serde(default = "default_shields_max_hp")]
     pub max_hp: i32,
     /// HP regenerated per second per online facing.
-    #[serde(default = "default_shields_regen_per_sec")]
     pub regen_per_sec: f32,
     /// Seconds a facing stays offline after its HP is depleted.
-    #[serde(default = "default_shields_offline_duration")]
     pub offline_duration: f32,
-}
-
-fn default_shields_num_facings() -> usize {
-    4
-}
-fn default_shields_max_hp() -> i32 {
-    100
-}
-fn default_shields_regen_per_sec() -> f32 {
-    2.0
-}
-fn default_shields_offline_duration() -> f32 {
-    10.0
 }
 
 impl Default for ShieldsBaseConfig {
     fn default() -> Self {
         Self {
-            num_facings: default_shields_num_facings(),
-            max_hp: default_shields_max_hp(),
-            regen_per_sec: default_shields_regen_per_sec(),
-            offline_duration: default_shields_offline_duration(),
+            num_facings: 4,
+            max_hp: 100,
+            regen_per_sec: 2.0,
+            offline_duration: 10.0,
         }
     }
 }

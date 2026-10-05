@@ -400,10 +400,12 @@ impl std::error::Error for BootError {}
 
 /// Marks that [`render_surrogate`] ran (Headless / BrowserAutomation).
 #[derive(Resource, Debug, Default, Clone, Copy)]
+#[cfg(test)]
 struct RenderSurrogateApplied;
 
 /// Marks that [`render_stack`] ran (BrowserHost).
 #[derive(Resource, Debug, Default, Clone, Copy)]
+#[cfg(test)]
 struct RenderStackApplied;
 
 // ── build ────────────────────────────────────────────────────────────────────
@@ -670,6 +672,7 @@ fn browser_shell(app: &mut App) {
 /// real stack's contract.
 fn render_surrogate(app: &mut App) {
     register_render_contract(app);
+    #[cfg(test)]
     app.insert_resource(RenderSurrogateApplied);
 }
 
@@ -695,9 +698,8 @@ fn render_surrogate(app: &mut App) {
 ///   at runtime from [`BootPlan::native_surface`] instead — see
 ///   [`native_render_stack`].
 ///
-/// Either way [`RenderStackApplied`] is inserted, because the profile named the
-/// real renderer; whether wgpu could actually be stood up on this target is a
-/// separate fact.
+/// Unit tests record which profile chose the renderer; whether wgpu could
+/// actually be stood up on this target is a separate fact.
 fn render_stack(
     app: &mut App,
     log_filter: &str,
@@ -705,6 +707,7 @@ fn render_stack(
     surface: NativeRenderSurface,
     single_threaded: bool,
 ) {
+    #[cfg(test)]
     app.insert_resource(RenderStackApplied);
 
     #[cfg(not(target_arch = "wasm32"))]

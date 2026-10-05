@@ -1,3 +1,4 @@
+import { RELIABLE_CHANNEL as SHARED_RELIABLE, SNAPSHOT_CHANNEL as SHARED_SNAPSHOT } from './rendezvous-protocol.js';
 /**
  * gui/rendezvous-transport.js — the Phoenix crew transport (issues #1111, #1112).
  *
@@ -149,9 +150,9 @@ export { RENDEZVOUS_PROTOCOL };
 function pageRendezvousBase() { return globalThis.location?.origin || ''; }
 
 /** Label of the reliable ordered channel: commands and reliable messages. */
-export const RELIABLE_CHANNEL = 'reliable';
+export const RELIABLE_CHANNEL = SHARED_RELIABLE;
 /** Label of the lossy unordered channel: the snapshot delivery class. */
-export const SNAPSHOT_CHANNEL = 'snapshot';
+export const SNAPSHOT_CHANNEL = SHARED_SNAPSHOT;
 
 /**
  * Refusals a retry cannot fix. Everything NOT in here — an unreachable

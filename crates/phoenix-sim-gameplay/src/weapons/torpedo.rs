@@ -1217,16 +1217,7 @@ impl TorpedoSystem {
 
 // ── private math helpers ───────────────────────────────────────────────────
 
-fn angle_diff(a: f32, b: f32) -> f32 {
-    let mut d = a - b;
-    while d > PI {
-        d -= 2.0 * PI;
-    }
-    while d < -PI {
-        d += 2.0 * PI;
-    }
-    d
-}
+use super::arc_geometry::signed_difference as angle_diff;
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 

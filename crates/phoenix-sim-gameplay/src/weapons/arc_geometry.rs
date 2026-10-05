@@ -229,3 +229,16 @@ fn signed_deg_diff(a: f32, b: f32) -> f32 {
 #[cfg(test)]
 #[path = "arc_geometry_tests.rs"]
 mod tests;
+
+/// Signed radian difference, retaining both endpoints of [-PI, PI].
+pub(super) fn signed_difference(a: f32, b: f32) -> f32 {
+    use std::f32::consts::PI;
+    let mut d = a - b;
+    while d > PI {
+        d -= 2.0 * PI;
+    }
+    while d < -PI {
+        d += 2.0 * PI;
+    }
+    d
+}

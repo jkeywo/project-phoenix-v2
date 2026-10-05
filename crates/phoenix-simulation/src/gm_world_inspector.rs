@@ -3,7 +3,7 @@
 //! The projection deliberately owns no mutation route. Named actions are links
 //! to the mission, Objective and session panels; Flags and every other value
 //! are either derived runtime context or require recreating the simulation.
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -49,18 +49,7 @@ fn field(
         id: id.into(),
         label: format!("inspector.world.{}", id.replace(['.', '[', ']'], "_")),
         group: group.into(),
-        descriptor: FieldDescriptor {
-            kind: kind.into(),
-            default_source: None,
-            live_mutability: mutability,
-            origin: FieldOrigin {
-                schema_path: id.into(),
-                document: None,
-                line: None,
-                layer: None,
-            },
-            validation: Vec::new(),
-        },
+        descriptor: FieldDescriptor::runtime(kind, mutability, id),
         action_panel: panel.map(str::to_owned),
     }
 }

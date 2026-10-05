@@ -28,11 +28,6 @@
 // simmath.rs; same opt-out as crates/phoenix-presentation/src/viewer/camera.rs).
 #![allow(clippy::disallowed_methods)]
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use bevy::{
     asset::RenderAssetUsages,
     prelude::*,
@@ -162,7 +157,7 @@ pub struct MainWorldReceiver(pub Receiver<Vec<u8>>);
 #[derive(Resource, Deref)]
 struct RenderWorldSender(Sender<Vec<u8>>);
 
-/// Copies every enabled [`ImageCopier`]'s render target into its mappable buffer
+/// Copies every [`ImageCopier`]'s render target into its mappable buffer
 /// each frame and ships the mapped bytes to [`MainWorldReceiver`].
 pub struct ImageCopyPlugin;
 
@@ -192,7 +187,6 @@ struct ImageCopiers(Vec<ImageCopier>);
 #[derive(Clone, Component)]
 pub struct ImageCopier {
     buffer: Buffer,
-    enabled: Arc<AtomicBool>,
     src_image: Handle<Image>,
 }
 
@@ -218,14 +212,7 @@ impl ImageCopier {
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        ImageCopier {
-            buffer,
-            src_image,
-            enabled: Arc::new(AtomicBool::new(true)),
-        }
-    }
-    fn enabled(&self) -> bool {
-        self.enabled.load(Ordering::Relaxed)
+        ImageCopier { buffer, src_image }
     }
 }
 
@@ -251,9 +238,6 @@ impl render_graph::Node for ImageCopyDriver {
             .get_resource::<RenderAssets<bevy::render::texture::GpuImage>>()
             .unwrap();
         for image_copier in image_copiers.iter() {
-            if !image_copier.enabled() {
-                continue;
-            }
             let Some(src_image) = gpu_images.get(&image_copier.src_image) else {
                 continue;
             };
@@ -294,9 +278,6 @@ fn receive_image_from_buffer(
     sender: Res<RenderWorldSender>,
 ) {
     for image_copier in image_copiers.0.iter() {
-        if !image_copier.enabled() {
-            continue;
-        }
         let buffer_slice = image_copier.buffer.slice(..);
         let (s, r) = crossbeam_channel::bounded(1);
         buffer_slice.map_async(MapMode::Read, move |r| match r {

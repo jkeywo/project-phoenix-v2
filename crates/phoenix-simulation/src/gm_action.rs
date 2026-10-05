@@ -4473,14 +4473,7 @@ pub fn apply_due_actions(
         // those unbegun whole steps so an apply-at-now Pause cannot leak one
         // simulation tick before the next frame observes the stopped clock.
         if let Some(fixed) = fixed_time.as_deref_mut() {
-            let remaining = fixed.overstep();
-            let timestep = fixed.timestep();
-            let remainder_nanos = remaining.as_nanos() % timestep.as_nanos();
-            let remainder = std::time::Duration::new(
-                u64::try_from(remainder_nanos / 1_000_000_000).unwrap_or(u64::MAX),
-                (remainder_nanos % 1_000_000_000) as u32,
-            );
-            fixed.discard_overstep(remaining - remainder);
+            crate::lockstep::discard_whole_fixed_overstep(fixed);
         }
     }
 }

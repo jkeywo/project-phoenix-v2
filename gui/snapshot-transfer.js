@@ -28,6 +28,7 @@
  */
 
 import { t } from './strings.js';
+import { downloadBlob } from './blob-download.js';
 
 /** The class a `"<class>\t<message>"` answer carries when it names none. */
 const UNKNOWN_CLASS = 'damaged';
@@ -109,23 +110,7 @@ export function downloadArtifact(doc, name, text) {
   // `text/plain`, because that is what it is: `Store` moves `String` and the
   // record is RON. A save a human can open is the feature, not a leak.
   const blob = new view.Blob([text], { type: 'text/plain;charset=utf-8' });
-  const href = url.createObjectURL(blob);
-  const anchor = doc.createElement('a');
-  anchor.href = href;
-  anchor.download = name;
-  anchor.style.display = 'none';
-  doc.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  if (typeof view.setTimeout === 'function') {
-    view.setTimeout(function () {
-      try {
-        url.revokeObjectURL(href);
-      } catch (_) {
-        /* the download already took it */
-      }
-    }, 0);
-  }
+  downloadBlob(doc, view, name, blob);
   return true;
 }
 

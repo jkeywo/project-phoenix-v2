@@ -1708,7 +1708,7 @@ pub fn discard_gm_boundary_overstep(
     discard_whole_fixed_overstep(fixed);
 }
 
-fn discard_whole_fixed_overstep(fixed: &mut Time<Fixed>) {
+pub fn discard_whole_fixed_overstep(fixed: &mut Time<Fixed>) {
     let remaining = fixed.overstep();
     let timestep = fixed.timestep();
     // Preserve the sub-step remainder: render interpolation legitimately reads

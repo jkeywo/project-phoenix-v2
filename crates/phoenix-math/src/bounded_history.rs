@@ -149,22 +149,12 @@ impl BoundedHistory {
 
     /// The smallest retained sample, or `None` when empty.
     pub fn min(&self) -> Option<f64> {
-        self.samples.iter().copied().fold(None, |acc, v| {
-            Some(match acc {
-                Some(m) => v.min(m),
-                None => v,
-            })
-        })
+        self.samples.iter().copied().reduce(|acc, v| v.min(acc))
     }
 
     /// The largest retained sample, or `None` when empty.
     pub fn max(&self) -> Option<f64> {
-        self.samples.iter().copied().fold(None, |acc, v| {
-            Some(match acc {
-                Some(m) => v.max(m),
-                None => v,
-            })
-        })
+        self.samples.iter().copied().reduce(|acc, v| v.max(acc))
     }
 
     /// The most recently pushed sample.

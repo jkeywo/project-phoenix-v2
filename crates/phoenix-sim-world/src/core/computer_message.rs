@@ -180,20 +180,10 @@ impl ActiveComputerMessage {
     }
 }
 
-/// Convert a positive `duration_secs` to a tick count, rounding the same way
-/// [`crate::world::script::schedule::seconds_to_ticks`] does.
-///
-/// Not a call to that function: this module lives under `core`, which must
-/// not depend on `world` (see `crate::narrative`'s module doc for the same
-/// rule applied to the narrative-event producers). The one-line rounding
-/// formula is duplicated rather than shared through an extra crate seam for
-/// two call sites. Floors at 1 tick, so a message always shows for at least
-/// one tick even authored at a fractional-second duration below the tick
-/// period, and can never expire on the very tick it was shown.
+/// Convert using the shared cadence rule, retaining the message's minimum
+/// duration of one second and one tick.
 fn duration_ticks(duration_secs: i64, tick_hz: f32) -> u64 {
-    ((duration_secs.max(1) as f64) * (tick_hz as f64))
-        .round()
-        .max(1.0) as u64
+    crate::sim_tick::seconds_to_ticks(duration_secs.max(1), tick_hz).max(1)
 }
 
 #[cfg(test)]

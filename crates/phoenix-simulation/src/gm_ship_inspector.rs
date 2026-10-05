@@ -10,7 +10,7 @@
 
 use crate::core::messages::{SystemBlackboard, SystemId};
 use crate::entities::config::EntityConfig;
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 use crate::ship::components::ActiveStationRatings;
 use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSourceResolver;
@@ -83,18 +83,7 @@ fn field(
         label: "inspector.ship.field".into(),
         group: group_for(&id),
         action_panel: action_panel.map(str::to_owned),
-        descriptor: FieldDescriptor {
-            kind: kind.into(),
-            default_source: None,
-            live_mutability: mutability,
-            origin: FieldOrigin {
-                schema_path: id.clone(),
-                document: None,
-                line: None,
-                layer: None,
-            },
-            validation: Vec::new(),
-        },
+        descriptor: FieldDescriptor::runtime(kind, mutability, id.clone()),
         id,
     }
 }

@@ -216,11 +216,8 @@ impl<P: RelayProtocol> RelayTransport<P> {
     /// through `wasm_check_client_stamp` there and directly here — so a build
     /// this host would refuse in a browser is refused here for the same reason
     /// and with the same machine code on the phone's screen.
-    fn answer_handshake(&mut self, peer: &str, payload: &str) {
-        let stamp = decode_handshake_frame(payload)
-            .ok()
-            .and_then(|f| f.data.stamp);
-        let verdict = P::check_stamp(&self.config.stamp, stamp.as_deref());
+    fn answer_handshake(&mut self, peer: &str, stamp: Option<&str>) {
+        let verdict = P::check_stamp(&self.config.stamp, stamp);
         let (frame, admitted, refusal) = match verdict {
             Ok(()) => (HandshakeFrame::accepted(), true, None),
             Err(mismatch) => (
@@ -260,11 +257,10 @@ impl<P: RelayProtocol> RelayTransport<P> {
             // A build the host is about to refuse has no business queuing
             // simulation traffic, so anything else is DROPPED rather than
             // buffered — exactly what the browser host does.
-            if decode_handshake_frame(payload)
-                .map(|f| f.kind == JOIN_HANDSHAKE)
-                .unwrap_or(false)
-            {
-                self.answer_handshake(peer, payload);
+            if let Ok(frame) = decode_handshake_frame(payload) {
+                if frame.kind == JOIN_HANDSHAKE {
+                    self.answer_handshake(peer, frame.data.stamp.as_deref());
+                }
             }
             return;
         }

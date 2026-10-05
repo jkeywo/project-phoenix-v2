@@ -1101,18 +1101,8 @@ pub(crate) fn publish_tactical_radar_blackboard(
         if is_local {
             // ── Radar blips ──────────────────────────────────────────────────
             let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
-            let shows: Vec<crate::entities::tags::EntityTag> = ship_config
-                .0
-                .tactical_radar_shows
-                .iter()
-                .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
-                .collect();
-            let selects: Vec<crate::entities::tags::EntityTag> = ship_config
-                .0
-                .tactical_radar_selects
-                .iter()
-                .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
-                .collect();
+            let shows = crate::entities::tags::parse_tags(&ship_config.0.tactical_radar_shows);
+            let selects = crate::entities::tags::parse_tags(&ship_config.0.tactical_radar_selects);
 
             let ship_id = ship_id.map_or("", |id| id.0.as_str());
             let scoped_objectives = objectives

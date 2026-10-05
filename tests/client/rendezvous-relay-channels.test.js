@@ -233,16 +233,13 @@ describe('the advertised limits', () => {
     expect(relayLimitsFromFrame(undefined)).toEqual(RELAY_LIMIT_DEFAULTS);
   });
 
-  it('adopts a later advertisement without rebuilding the pair', () => {
-    // On the lossy channel, because an oversized RELIABLE frame now ends the
-    // link — there would be no pair left to re-measure.
-    const { pair, sent } = pairOn({ limits: { maxFrameBytes: 4, maxSendBufferBytes: 1024 } });
-    pair.open();
-    pair.snapshot.send('12345');
-    expect(sent).toEqual([]);
-    pair.applyLimits({ maxFrameBytes: 64, maxSendBufferBytes: 1024 });
-    pair.snapshot.send('12345');
-    expect(sent).toHaveLength(1);
+  it('uses the advertised limits supplied when the pair is constructed', () => {
+    for (const [maxFrameBytes, delivered] of [[4, false], [64, true]]) {
+      const { pair, sent } = pairOn({ limits: { maxFrameBytes, maxSendBufferBytes: 1024 } });
+      pair.open();
+      pair.snapshot.send('12345');
+      expect(sent).toHaveLength(delivered ? 1 : 0);
+    }
   });
 });
 

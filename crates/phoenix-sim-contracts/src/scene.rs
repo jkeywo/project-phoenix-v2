@@ -298,18 +298,7 @@ impl GlobalConfig {
     /// hot path use [`Self::snapshot_every_ticks`], which is only reachable
     /// after `parse_world` has rejected that case.
     pub fn checked_snapshot_every_ticks(&self) -> Option<u32> {
-        if !(self.ai_tick_hz.is_finite() && self.ai_tick_hz > 0.0) {
-            return None;
-        }
-        if !(self.ai_snapshot_hz.is_finite() && self.ai_snapshot_hz > 0.0) {
-            return None;
-        }
-        let ratio = self.ai_tick_hz / self.ai_snapshot_hz;
-        let rounded = ratio.round();
-        if rounded < 1.0 || (ratio - rounded).abs() > SNAPSHOT_RATIO_EPSILON {
-            return None;
-        }
-        Some(rounded as u32)
+        checked_cadence_ratio(self.ai_tick_hz, self.ai_snapshot_hz)
     }
 
     /// [`Self::checked_snapshot_every_ticks`] with the parse-time default
@@ -326,18 +315,7 @@ impl GlobalConfig {
     /// `None` when it is not — a content error `parse_world` rejects, exactly
     /// like [`Self::checked_snapshot_every_ticks`].
     pub fn checked_sim_ticks_per_ai_tick(&self) -> Option<u32> {
-        if !(self.sim_tick_hz.is_finite() && self.sim_tick_hz > 0.0) {
-            return None;
-        }
-        if !(self.ai_tick_hz.is_finite() && self.ai_tick_hz > 0.0) {
-            return None;
-        }
-        let ratio = self.sim_tick_hz / self.ai_tick_hz;
-        let rounded = ratio.round();
-        if rounded < 1.0 || (ratio - rounded).abs() > SNAPSHOT_RATIO_EPSILON {
-            return None;
-        }
-        Some(rounded as u32)
+        checked_cadence_ratio(self.sim_tick_hz, self.ai_tick_hz)
     }
 
     /// [`Self::checked_sim_ticks_per_ai_tick`] with the parse-time default
@@ -393,3 +371,15 @@ fn default_ai_snapshot_hz() -> f32 {
 }
 
 pub const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
+
+fn checked_cadence_ratio(faster: f32, slower: f32) -> Option<u32> {
+    if !(faster.is_finite() && faster > 0.0 && slower.is_finite() && slower > 0.0) {
+        return None;
+    }
+    let ratio = faster / slower;
+    let rounded = ratio.round();
+    if rounded < 1.0 || (ratio - rounded).abs() > SNAPSHOT_RATIO_EPSILON {
+        return None;
+    }
+    Some(rounded as u32)
+}

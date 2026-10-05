@@ -93,3 +93,7 @@ export function relayPayloadBytes(payload) {
  * relay-close behavior. The service does not select a simulation watermark,
  * merge frame histories, restore snapshots or guarantee partition reunification.
  */
+
+/** Delivery classes shared by direct and relayed channels. */
+export const RELIABLE_CHANNEL = 'reliable';
+export const SNAPSHOT_CHANNEL = 'snapshot';

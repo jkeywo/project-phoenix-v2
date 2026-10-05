@@ -354,7 +354,7 @@ export function createRegistry({
 
   /**
    * Drop records that have gone quiet for longer than the TTL — measured from
-   * `lastSeen`, not `createdAt`, so a host that has been live and talking for
+   * `lastSeen`, the most recent activity, so a host that has been live and talking for
    * days is never mistaken for an orphan just because it is old. A host
    * record normally dies with its socket; this is the sweep for the case
    * where the close never arrived (an evicted instance, a half-open socket),
@@ -481,9 +481,8 @@ export function createRegistry({
       // dead surface #1114 and #1115 would have had to keep maintaining.
       admission: 'open',
       peers: new Set(),
-      createdAt: now(),
       // The TTL sweep expires on THIS, refreshed by every inbound frame from
-      // `host` below (see `receive()`) — not on `createdAt` — so a record
+      // `host` below (see `receive()`) rather than the registration time so a record
       // stays alive for as long as its host keeps talking, however long that
       // is, and only a host that has genuinely gone quiet gets swept.
       lastSeen: now(),
@@ -704,7 +703,6 @@ export function createRegistry({
       host: connId,
       admission: 'open',
       peers: new Set(),
-      createdAt: now(),
       lastSeen: now(),
       secret: mintSecret(),
       graceUntil: null,

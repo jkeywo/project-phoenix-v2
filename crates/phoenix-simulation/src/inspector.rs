@@ -28,3 +28,25 @@ pub struct FieldDescriptor {
     /// schema evaluator in JavaScript.
     pub validation: Vec<String>,
 }
+
+impl FieldDescriptor {
+    /// Runtime metadata carries no fabricated source document or scalar span.
+    pub fn runtime(
+        kind: &str,
+        live_mutability: LiveMutability,
+        schema_path: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            default_source: None,
+            live_mutability,
+            origin: FieldOrigin {
+                schema_path: schema_path.into(),
+                document: None,
+                line: None,
+                layer: None,
+            },
+            validation: Vec::new(),
+        }
+    }
+}

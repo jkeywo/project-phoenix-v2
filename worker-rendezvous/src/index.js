@@ -98,7 +98,6 @@ const json = (body, status, headers) =>
  */
 export class RendezvousRegistry {
   constructor(state, env) {
-    this.env = env;
     this.registry = createRegistry({ data: format });
     /** @type {Map<string, WebSocket>} */
     this.sockets = new Map();

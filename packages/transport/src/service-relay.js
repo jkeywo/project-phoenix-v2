@@ -1,3 +1,4 @@
+import { RELIABLE_CHANNEL as SHARED_RELIABLE, SNAPSHOT_CHANNEL as SHARED_SNAPSHOT } from './rendezvous-protocol.js';
 /**
  * worker-rendezvous/src/relay.js — the secure-WebSocket game relay, as a pure
  * bounded mailbox hub (issue #1113).
@@ -74,8 +75,8 @@ export { relayPayloadBytes as payloadBytes };
  * refused rather than guessed at — a frame whose class the service cannot read
  * is one whose delivery guarantee it cannot honour.
  */
-export const RELAY_RELIABLE = 'reliable';
-export const RELAY_SNAPSHOT = 'snapshot';
+export const RELAY_RELIABLE = SHARED_RELIABLE;
+export const RELAY_SNAPSHOT = SHARED_SNAPSHOT;
 
 /** True for a class name this hub will carry. */
 export function isRelayClass(value) {
@@ -244,12 +245,6 @@ export function createRelayHub({ limits } = {}) {
       if (p) p.writable = !!writable;
     },
 
-    /** True when `drain` will hand this peer's frames over. */
-    isWritable(peer) {
-      const p = participants.get(peer);
-      return !p || p.writable;
-    },
-
     /**
      * Detach `peer`, discarding everything queued FOR it and everything queued
      * BY it. Both halves matter: a pair has two ends, and leaving the other
@@ -307,10 +302,6 @@ export function createRelayHub({ limits } = {}) {
     /**
      * True once any queue held FOR `owner` has passed its reliable bound.
      */
-    hasOverflowed(owner) {
-      return boxesOwnedBy(owner).some((b) => b.overflowed);
-    },
-
     /**
      * Which SENDERS overflowed a queue held for `owner`. The caller ends the
      * session of the crew member on each of those pairs — see `enqueue`.

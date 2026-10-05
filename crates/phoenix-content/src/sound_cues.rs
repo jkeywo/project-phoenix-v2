@@ -62,17 +62,8 @@ fn text(value: &str) -> bool {
 }
 fn asset_path(file: &str) -> bool {
     file.starts_with("assets/sounds/")
-        && file
-            .rsplit_once('.')
-            .is_some_and(|(_, extension)| matches!(extension, "mp3" | "ogg" | "wav"))
-        && file.split('/').all(|part| {
-            !part.is_empty()
-                && part != "."
-                && part != ".."
-                && !part.ends_with(['.', ' '])
-                && !part.contains(['\\', ':', '%', '?', '#', '<', '>', '"', '|', '*'])
-                && !part.chars().any(char::is_control)
-        })
+        && crate::archive::is_pack_asset_path(file)
+        && !file.contains(['%', '?', '#', '<', '>', '"', '|', '*'])
 }
 impl Catalog {
     pub fn validate(&self, cue: &SoundDefinition) -> Result<(), &'static str> {

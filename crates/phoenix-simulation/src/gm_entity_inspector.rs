@@ -18,7 +18,7 @@
 //!   (`NpcDoctrinePaletteEntry.origin_layer`) but not for a spawned entity, so
 //!   entity descriptors report it unavailable too rather than guessing from the
 //!   world the entity happens to be standing in.
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -91,20 +91,7 @@ fn field(
         label: label.into(),
         group,
         action_panel: None,
-        descriptor: FieldDescriptor {
-            kind: kind.into(),
-            default_source: None,
-            live_mutability: mutability,
-            origin: FieldOrigin {
-                schema_path: id.into(),
-                // See the module header: resolution provenance does not survive
-                // spawn, so a Live reading reports its location unavailable.
-                document: None,
-                line: None,
-                layer: None,
-            },
-            validation: Vec::new(),
-        },
+        descriptor: FieldDescriptor::runtime(kind, mutability, id),
     }
 }
 

@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const out = path.resolve(root, process.argv[2] || 'dist');
 const editorModules = [
-  'asset-dependencies', 'crc32', 'workshop-assets', 'workshop-handoff', 'workshop-source-provider',
+  'asset-dependencies', 'crc32', 'indexed-db', 'workshop-assets', 'workshop-handoff', 'workshop-source-provider',
   'workshop-models', 'workshop-model-structure', 'workshop-model-preview', 'workshop-entity-composition', 'workshop-ship-authoring', 'workshop-spatial', 'workshop-preview', 'workshop-preview-runtime',
   'workshop-document', 'workshop-asset-job', 'workshop-acceptance', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-launch', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'ordered-form', 'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity',

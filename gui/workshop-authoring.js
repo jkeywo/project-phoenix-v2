@@ -1,3 +1,4 @@
+import { downloadBlob } from './blob-download.js';
 import { createWorkshopOperations } from './workshop-edit-session.js';
 /** Standalone browser Authoring adapter. Only user-selected pack bytes enter;
  * no filesystem provider, GM connection, simulation or live-state capture.
@@ -1112,10 +1113,5 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
 }
 
 function downloadZip(bytes, filename, doc, win) {
-  const url = win.URL.createObjectURL(new win.Blob([bytes], { type: 'application/zip' }));
-  const link = doc.createElement('a');
-  link.href = url; link.download = filename;
-  doc.body.append(link);
-  try { link.click(); }
-  finally { link.remove(); win.setTimeout(() => win.URL.revokeObjectURL(url), 0); }
+  downloadBlob(doc, win, filename, new win.Blob([bytes], { type: 'application/zip' }));
 }

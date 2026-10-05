@@ -69,6 +69,7 @@ use crate::HostSlot;
 /// the knob, and it is documented rather than inlined so a transport change moves
 /// one number.
 pub const SNAPSHOT_CHUNK_BYTES: usize = 32 * 1024;
+const _: () = assert!(SNAPSHOT_CHUNK_BYTES >= 4);
 
 /// The largest whole payload a receiver will reassemble, in bytes.
 ///
@@ -226,15 +227,6 @@ pub fn chunk(text: &str, from: HostSlot, transfer_id: u64, tick: u64) -> Vec<Sna
         let mut end = hard_end;
         while end > start && !text.is_char_boundary(end) {
             end -= 1;
-        }
-        // A single codepoint larger than the chunk budget cannot be split at all;
-        // take the whole codepoint. This cannot exceed 4 bytes over budget, and a
-        // budget below 4 bytes is not a configuration this ships.
-        if end == start {
-            end = hard_end;
-            while end < text.len() && !text.is_char_boundary(end) {
-                end += 1;
-            }
         }
         slices.push(&text[start..end]);
         start = end;
@@ -409,20 +401,8 @@ impl SnapshotReceiver {
     /// a definite refusal — a dropped chunk names itself here as
     /// [`TransferError::Incomplete`] rather than leaving the receiver waiting.
     pub fn finish(&mut self) -> Result<String, TransferError> {
-        let Some(reassembly) = self.active.take() else {
-            return Err(TransferError::Incomplete {
-                received: 0,
-                total: 0,
-            });
-        };
-        let received = reassembly.chunks.len() as u32;
-        if received < reassembly.total {
-            let total = reassembly.total;
-            // Put it back so a caller can keep waiting if it chooses.
-            self.active = Some(reassembly);
-            return Err(TransferError::Incomplete { received, total });
-        }
-        reassembly.reassemble()
+        let (received, total) = self.progress().unwrap_or((0, 0));
+        Err(TransferError::Incomplete { received, total })
     }
 }
 
@@ -433,18 +413,8 @@ impl Reassembly {
     /// The caller guarantees every sequence `0..total` is present before calling
     /// this.
     fn reassemble(self) -> Result<String, TransferError> {
-        let mut text = String::new();
-        for seq in 0..self.total {
-            match self.chunks.get(&seq) {
-                Some(part) => text.push_str(part),
-                None => {
-                    return Err(TransferError::Incomplete {
-                        received: self.chunks.len() as u32,
-                        total: self.total,
-                    })
-                }
-            }
-        }
+        debug_assert_eq!(self.chunks.len() as u32, self.total);
+        let text: String = self.chunks.into_values().collect();
         let actual = vellum_digest::fnv1a(text.as_bytes());
         if actual != self.whole_hash {
             return Err(TransferError::WholeHashMismatch {

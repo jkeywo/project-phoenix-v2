@@ -10,7 +10,7 @@ use crate::entities::spawner::{
     EntityId, EntityName, EntityTagsSection, EntityTemplatePath, EntityUuid,
     RadarAppearanceSection, RegionEffectsSection, RegionShapeSection,
 };
-use crate::inspector::{FieldDescriptor, FieldOrigin, LiveMutability};
+use crate::inspector::{FieldDescriptor, LiveMutability};
 use crate::regions::effects::RegionEffectKind;
 use crate::world::server::EntityOriginLayer;
 use bevy::prelude::*;
@@ -91,20 +91,12 @@ fn descriptor(path: &str, kind: &str, mutability: LiveMutability) -> RegionInspe
         label: "inspector.region.field".into(),
         group: group(path),
         descriptor: FieldDescriptor {
-            kind: kind.into(),
-            default_source: None,
-            live_mutability: mutability,
-            origin: FieldOrigin {
-                schema_path: path.into(),
-                document: None,
-                line: None,
-                layer: None,
-            },
             validation: if mutability == LiveMutability::RecreateRequired {
                 vec!["inspector.region.recreate_explanation".into()]
             } else {
                 Vec::new()
             },
+            ..FieldDescriptor::runtime(kind, mutability, path)
         },
     }
 }

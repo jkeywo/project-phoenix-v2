@@ -436,7 +436,7 @@ pub(crate) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
                             if i + 1 < n {
                                 body.push(chars[i + 1]);
                             }
-                            i += 2;
+                            i = (i + 2).min(n);
                         }
                         ch if ch == quote => {
                             i += 1;

@@ -2,7 +2,7 @@
 title: Reusable Layers
 type: concept
 tags: [architecture, packages, reuse, testing]
-sources: [Cargo.toml, scripts/check-layers.mjs, src/lib.rs, src/boot/mod.rs, crates/phoenix-runtime/src/lib.rs, crates/phoenix-transport/src/lib.rs, crates/phoenix-platform/src/lib.rs, crates/phoenix-model/src/lib.rs, crates/phoenix-content/src/lib.rs, crates/phoenix-simulation/src/lib.rs, crates/phoenix-sim-contracts/src/lib.rs, crates/phoenix-sim-gameplay/src/lib.rs, crates/phoenix-sim-world/src/lib.rs, crates/phoenix-sim-session/src/lib.rs, crates/phoenix-presentation/src/lib.rs, examples/grid/src/lib.rs, packages/transport/src/rendezvous-transport.js, packages/session/src/session-token.js, gui/action-map.js, editor/workshop-provider.js, worker-rendezvous/src/index.js, worker/src/index.js, pasm/spec/architecture/reusable-layers.yaml]
+sources: [Cargo.toml, scripts/check-layers.mjs, src/lib.rs, src/boot/mod.rs, crates/phoenix-runtime/src/lib.rs, crates/phoenix-transport/src/lib.rs, crates/phoenix-platform/src/lib.rs, crates/phoenix-model/src/lib.rs, crates/phoenix-content/src/lib.rs, crates/phoenix-simulation/src/lib.rs, crates/phoenix-sim-contracts/src/lib.rs, crates/phoenix-sim-gameplay/src/lib.rs, crates/phoenix-sim-world/src/lib.rs, crates/phoenix-sim-session/src/lib.rs, crates/phoenix-presentation/src/lib.rs, examples/grid/src/lib.rs, packages/transport/src/rendezvous-transport.js, packages/session/src/session-token.js, gui/action-map.js, editor/workshop-provider.js, worker-rendezvous/src/index.js, worker/src/index.js, pasm/spec/architecture/reusable-layers.yaml, src/server/fleet_staging.rs, src/server_app/mod.rs, crates/phoenix-simulation/src/world/mod_pack.rs]
 updated: 2026-10-05
 ---
 
@@ -113,6 +113,12 @@ an entity into the live world, or captures/restores a complete mission. The
 parent supplies live borrowed inputs and applies script effects in their
 scheduled order; the branches do not keep copied mission-input caches or call
 one another through a generic event bus.
+
+Shared summary-control permission and Objective visibility live in Contracts.
+World owns ship-effective legacy/instance Objective reads. Runtime owns guarded
+continuation transitions; adapters apply game ownership effects before consuming
+its prepared completion. Readiness and bounded histories validate their
+invariants at decode and aggregation boundaries.
 
 ## Simulation gameplay
 
@@ -443,6 +449,12 @@ Phoenix does not need Grid to run.
 **Work here for:** demonstrating a foundation capability independently of the
 spaceship game. See the [Grid guide](../../examples/grid/README.md) for launch
 and verification commands.
+
+Grid native and WASM adapters share typed application admission in
+`protocol::apply` and reusable connection ownership. The browser adapter owns
+physical peer handles and terminal callbacks. The smoke suite exercises actual
+native checkpoint-file restart and exact native/WASM continuation from the same
+checkpoint, including pending moves and issuer sequence.
 
 ## Cross-module tests
 

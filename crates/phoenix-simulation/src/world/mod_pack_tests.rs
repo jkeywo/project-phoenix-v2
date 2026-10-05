@@ -1605,7 +1605,7 @@ fn accepted_handoff_preserves_identity_content_and_archive_and_refuses_errors() 
         "scenarios.toml",
         &manifest,
         "[pack]",
-        "non-blocking warning",
+        "non-blocking warning".to_string(),
     ));
     let binary: std::sync::Arc<[u8]> = std::sync::Arc::from([0u8, 255, 17].as_slice());
     candidate
@@ -1618,7 +1618,9 @@ fn accepted_handoff_preserves_identity_content_and_archive_and_refuses_errors() 
         pack.assets.get("assets/test.bin").unwrap(),
         &binary
     ));
-    assert_eq!(pack.id, "handoff");
+    assert_eq!(pack.id, "test-pack");
+    assert_eq!(pack.name, "Test Pack");
+    assert_eq!(pack.version, "1.0.0");
     assert_eq!(pack.manifest_toml, manifest);
     assert_eq!(pack.files.get("assets/worlds/handoff.toml"), Some(&world));
     assert_eq!(pack.source_archive.as_deref(), Some(archive.as_slice()));

@@ -2,7 +2,7 @@
 title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
-sources: [crates/phoenix-presentation/src/server/pfx.rs, AGENTS.md, crates/phoenix-simulation/src/lib.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
+sources: [crates/phoenix-presentation/src/server/pfx.rs, AGENTS.md, crates/phoenix-simulation/src/lib.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
 updated: 2026-10-05
 ---
 

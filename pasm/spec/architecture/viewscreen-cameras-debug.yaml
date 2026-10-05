@@ -363,7 +363,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/command_admission/debug_route.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, crates/phoenix-simulation/src/debug_overlay.rs, src/server/bridge.rs, crates/phoenix-simulation/src/build_flags.rs, crates/phoenix-simulation/src/demo_build_value.rs, build.rs, gui/settings-panel.js]
+      paths: [crates/phoenix-simulation/src/command_admission/debug_route.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, crates/phoenix-simulation/src/debug_overlay.rs, src/server/bridge.rs, crates/phoenix-simulation/src/build_flags.rs, src/demo_build_value.rs, build.rs, gui/settings-panel.js]
       symbols: [DebugSurface, admits_debug_command, is_demo_build, admitted_flag_toggles, admitted_pause_toggles, drain_client_debug_flags, drain_client_pause]
       tests: [cargo test, npx vitest run tests/client/settings-panel.test.js, crates/phoenix-simulation/src/command_admission/debug_route_tests.rs, crates/phoenix-simulation/src/command_admission/policy_tests.rs, crates/phoenix-model/src/debug_surface_tests.rs, crates/phoenix-simulation/src/debug/catalogue_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs, src/server/bridge_tests.rs, crates/phoenix-simulation/src/build_flags_tests.rs]
 

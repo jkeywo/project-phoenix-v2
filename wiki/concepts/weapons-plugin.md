@@ -2,11 +2,13 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
-updated: 2026-10-04
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+updated: 2026-10-05
 ---
 
 # WeaponsPlugin
+
+Gameplay `ActiveBeam::complete_bank` ends an ordinary phaser cycle and applies its recorded pending cooldown. Exceptional relight uses the existing end path. Shared damage selection retains authored system order and the original RNG draw count.
 
 The Tactical/weapons module follows the pure-root plus server-adapter convention. `crates/phoenix-simulation/src/console/weapons/mod.rs` declares and re-exports the module tree; `crates/phoenix-simulation/src/console/weapons/server.rs` owns `WeaponsPlugin`, shared resources, registration, and Tactical target selection.
 

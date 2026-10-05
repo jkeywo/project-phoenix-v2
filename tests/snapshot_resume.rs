@@ -4664,7 +4664,7 @@ fn a_scripted_dialogue_open_at_the_save_is_answerable_after_a_resume() {
         "the captured message must be UNANSWERED, or this test measures nothing"
     );
     assert!(
-        comms.inbox[0].is_urgent,
+        comms.inbox[0].priority.is_urgent(),
         "the fixture opens the thread urgent, so the flag should have travelled"
     );
     assert_eq!(

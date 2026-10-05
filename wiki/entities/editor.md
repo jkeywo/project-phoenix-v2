@@ -3,10 +3,12 @@ title: Workshop Authoring
 type: entity
 tags: [workshop, editor, tooling, scenario, entity, models, mod]
 sources: [gui/workshop-edit-session.js, src/native_host/workshop/asset_job.rs, workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-objective-snippet.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/workshop-native-test-view.js, gui/workshop-native-test-document.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-scripts-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, crates/phoenix-simulation/src/workshop/mod.rs, crates/phoenix-simulation/src/workshop/document.rs, crates/phoenix-simulation/src/workshop/provider.rs, crates/phoenix-simulation/src/workshop/test_source.rs, crates/phoenix-simulation/src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/native_host/workshop/test_frames.rs, src/native_host/workshop/test_render.rs, crates/phoenix-simulation/src/delivery/args.rs, crates/phoenix-presentation/src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
-updated: 2026-10-01
+updated: 2026-10-05
 ---
 
 # Workshop Authoring
+
+Workspace operation admission and release capabilities are owned by `createWorkshopOperations` in `gui/workshop-edit-session.js`. Shell operations and runtime-backed panels share this exclusion gate; `editor/workshop-acceptance.js` retains exact-source acceptance. Raw Source repair remains a distinct unvalidated path.
 
 Workshop is the single authoring shell for worlds, entities, roles, scripts,
 spatial composition, models and mod archives. Native Workshop opens an explicit

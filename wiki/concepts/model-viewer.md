@@ -2,7 +2,7 @@
 title: Workshop Model Preview
 type: concept
 tags: [tooling, rendering, shaders, workshop, native]
-sources: [workshop.html, editor/workshop-launch.js, editor/workshop-model-preview.js, editor/workshop-model-structure.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, scripts/dev-workshop.mjs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, crates/phoenix-presentation/src/viewer/preview.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/stats.rs, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/glb_visual.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-presentation/src/entities/mesh_stats.rs]
+sources: [workshop.html, editor/workshop-launch.js, editor/workshop-model-preview.js, editor/workshop-model-structure.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, scripts/dev-workshop.mjs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, crates/phoenix-presentation/src/viewer/preview.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/stats.rs, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/glb_visual.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-presentation/src/entities/mesh_stats.rs, crates/phoenix-presentation/src/viewer/mod.rs]
 updated: 2026-10-05
 ---
 
@@ -70,3 +70,9 @@ CI keeps the `viewer` Rust feature as an architectural boundary test: it must
 compile without the server feature, its focused tests must run, and the shared
 preview plugin must continue to render non-flat models through Workshop. This
 feature name describes the renderer, not a standalone application.
+
+Ordinary `ViewerPlugin` consumes captured preview input. Ladder mutation, asset
+reload and legacy browser baking require explicit `LegacyViewerWorkflowPlugin`
+installation. Lighting entities change only for lighting commands. Shared GLB
+loading retains accepted-pack path and variant with each pending scene, so an
+outdated completion cannot replace the current selection.

@@ -404,7 +404,7 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Candidate-private topology bootstrap. This deliberately does not enter
-    /// `PENDING_FLEET_ADOPTIONS`: it may prepare entities for restore, but only
+    /// `FleetStaging::adoptions`: it may prepare entities for restore, but only
     /// the typed Commit may install the authoritative roster/wait-set.
     static PENDING_GM_JOIN_BOOTSTRAPS: RefCell<VecDeque<PendingGmJoinBootstrap>> =
         const { RefCell::new(VecDeque::new()) };
@@ -781,18 +781,6 @@ pub(super) fn publish_pending_gm_roster(value: Option<crate::gm_roster::GmRoster
     PENDING_GM_ROSTER.with(|slot| *slot.borrow_mut() = value);
 }
 
-pub(super) fn publish_fleet_join_status(value: crate::lockstep::FleetJoinStatus) {
-    FLEET_STAGING.with(|slot| slot.borrow_mut().status = value);
-}
-
-pub(super) fn read_latest_fleet_validation() -> Option<bool> {
-    FLEET_STAGING.with(|value| value.borrow().validation)
-}
-
-pub(super) fn read_latest_fleet_managed() -> Option<bool> {
-    FLEET_STAGING.with(|value| value.borrow().managed)
-}
-
 pub(super) fn enqueue_slot_claim_queue(value: u32) {
     SLOT_CLAIM_QUEUE.with(|queue| queue.borrow_mut().push(value));
 }
@@ -864,10 +852,6 @@ pub(super) fn publish_local_gm_operator(value: String) {
 
 pub(super) fn read_local_gm_operator() -> String {
     LOCAL_GM_OPERATOR.with(|value| value.borrow().clone())
-}
-
-pub(super) fn read_fleet_join_generation() -> u64 {
-    FLEET_STAGING.with(|value| value.borrow().generation)
 }
 
 pub(super) fn queue_fleet_lobby_input(input: FleetLobbyInput) -> bool {

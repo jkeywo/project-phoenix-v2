@@ -593,3 +593,14 @@ fn a_world_with_neither_deadlines_nor_registrations_is_silent() {
     );
     assert!(findings.is_empty(), "{findings:?}");
 }
+
+#[test]
+fn raw_lexer_handles_truncated_escape_at_end_of_source() {
+    for quote in ['"', '\''] {
+        let source = format!("ctx.spawn({quote}truncated\\");
+        let tokens = lex_significant_raw(&source);
+        assert!(!tokens.is_empty());
+        assert!(tokens.last().unwrap().1.ends_with('\\'));
+        assert!(named_function_lines(&source).is_empty());
+    }
+}

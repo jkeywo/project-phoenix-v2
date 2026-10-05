@@ -3,10 +3,12 @@ title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
 sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm_comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
-updated: 2026-09-27
+updated: 2026-10-05
 ---
 
 # Comms Panel
+
+Runtime messages keep canonical `priority`. Legacy `is_urgent` is derived at the wire boundary and at its historical digest fold position; deserialization promotes legacy urgency only when no priority was supplied.
 
 The Comms client is a mounted station controller plus three reusable components: contacts, hail threads, and the current message/reply surface. It renders authoritative `CommsState`; it does not advance dialogue locally.
 

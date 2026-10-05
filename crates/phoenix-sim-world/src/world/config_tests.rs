@@ -4464,3 +4464,10 @@ spawn_entity(#{ template_path: "prefix" + path });
         ("raw.toml", 6, Some(OverrideShape::MayRestateDoctrine))
     );
 }
+
+#[test]
+fn spawn_discovery_handles_truncated_quoted_escape_before_script_validation() {
+    for source in ["ctx.spawn(\"truncated\\", "ctx.spawn('truncated\\"] {
+        assert!(resolved_script_spawn_refs("malformed.rhai", source).is_empty());
+    }
+}

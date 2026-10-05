@@ -8145,7 +8145,7 @@ fn falling_skyway_silent_act_one_fails_the_unfiled_survey_loudly() {
         .find(|message| message.body == "world.falling_skyway.comms.survey_unfiled")
         .expect("Control must say that it is proceeding on the uncorrected record");
     assert!(
-        control_message.is_urgent,
+        control_message.priority.is_urgent(),
         "the missed survey deadline must be an urgent, visible failure"
     );
 

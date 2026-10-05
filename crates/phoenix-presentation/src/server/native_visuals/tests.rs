@@ -82,11 +82,12 @@ fn mote_pool_rebuilds_count_and_stays_hidden_outside_3d_then_retires_on_disable_
         .iter(app.world())
         .all(|v| *v == Visibility::Hidden));
     let before = mote_ids(&mut app);
-    let mut config = app.world_mut().resource_mut::<WorldConfig>();
-    let render = config.render.as_mut().unwrap();
-    render.native.mote_count = 3;
-    render.web.mote_count = 3;
-    drop(config);
+    {
+        let mut config = app.world_mut().resource_mut::<WorldConfig>();
+        let render = config.render.as_mut().unwrap();
+        render.native.mote_count = 3;
+        render.web.mote_count = 3;
+    }
     app.update();
     let rebuilt = mote_ids(&mut app);
     assert_eq!(rebuilt.len(), 3);
@@ -107,8 +108,10 @@ fn mote_pool_rebuilds_count_and_stays_hidden_outside_3d_then_retires_on_disable_
 }
 #[test]
 fn preload_discovery_uses_selected_platform_textures_and_master_switch() {
-    let mut world = WorldConfig::default();
-    world.render = Some(toml::from_str("[native]\nmote_textures = ['native/a.png', 'native/a.png', 'native/b.png']\n[web]\nmote_textures = ['web/a.png', 'web/a.png', 'web/b.png']").unwrap());
+    let mut world = WorldConfig {
+        render: Some(toml::from_str("[native]\nmote_textures = ['native/a.png', 'native/a.png', 'native/b.png']\n[web]\nmote_textures = ['web/a.png', 'web/a.png', 'web/b.png']").unwrap()),
+        ..Default::default()
+    };
     let prefix = if cfg!(target_arch = "wasm32") {
         "web"
     } else {

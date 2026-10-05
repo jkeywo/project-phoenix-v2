@@ -1,14 +1,16 @@
 use super::*;
 
 fn roster() -> String {
-    crate::core::codec::to_json(&crate::lockstep::FleetRoster::default()).unwrap()
+    r#"{"local":1,"owner":1,"participants":[1],"ships":[{"host":1,"crew":[]}]}"#.to_string()
 }
 
 #[test]
 fn supersession_preserves_leave_and_rebinds_latest_projections() {
-    let mut state = FleetStaging::default();
-    state.managed = Some(true);
-    state.validation = Some(true);
+    let mut state = FleetStaging {
+        managed: Some(true),
+        validation: Some(true),
+        ..Default::default()
+    };
     assert!(state.queue(FleetLobbyInput::Managed(false)));
     let first: u64 = state.join(&roster()).parse().unwrap();
     let left: u64 = state.leave().parse().unwrap();

@@ -2,7 +2,7 @@
 title: ShipPlugin
 type: concept
 tags: [ship, helm, physics, coordination, control-source, ai]
-sources: [crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/ship/helm_admission.rs, crates/phoenix-simulation/src/ship/physics_systems.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/server_app/collision.rs]
+sources: [crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/server_app/collision.rs]
 updated: 2026-08-27
 ---
 
@@ -37,7 +37,7 @@ The generic router no longer reads any of those domains' private state.
 
 ## Physics ownership
 
-`integrate_ship_physics` is the normal helm-path writer. `sync_ship_position` projects authoritative `ShipPhysics` into the entity `Transform` before Rapier sync. The sanctioned out-of-band writers are documented on `ShipPhysics` in `crates/phoenix-simulation/src/ship/state.rs`.
+`integrate_ship_physics` is the normal helm-path writer. `sync_ship_position` projects authoritative `ShipPhysics` into the entity `Transform` before Rapier sync. The sanctioned out-of-band writers are documented on `ShipPhysics` in `crates/phoenix-sim-gameplay/src/ship/state.rs`.
 
 Collision response is deliberately outside `ShipPlugin`: `handle_collisions` lives in `crates/phoenix-simulation/src/server_app/collision.rs`, where it can consume Rapier contacts and apply damage while remaining explicitly ordered between the physics and damage sets.
 

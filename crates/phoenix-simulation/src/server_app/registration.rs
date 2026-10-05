@@ -315,7 +315,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // replacing the hand-maintained `EXCLUSIONS` const that used to live in
     // `tests/authoritative_state_enumeration.rs`; the enumeration guard now reads
     // the exclusion set back out of `StateCensus`. The declaration is inert to the
-    // digest (see `crates/phoenix-simulation/src/authoritative.rs`), so nothing here moves a byte of the
+    // digest (see `crates/phoenix-sim-contracts/src/authoritative.rs`), so nothing here moves a byte of the
     // authoritative-state digest — the determinism guard proves that directly.
     {
         use crate::authoritative::{DeclareState, StateClass};
@@ -503,7 +503,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     //   beside `Folded`, but marking it `Folded` would claim a fold that does not
     //   exist yet.
     //
-    // The declaration is inert to the digest (`crates/phoenix-simulation/src/authoritative.rs`): nothing in
+    // The declaration is inert to the digest (`crates/phoenix-sim-contracts/src/authoritative.rs`): nothing in
     // `world_digest` or the snapshot reads `StateCensus`, and the declaration-order
     // determinism guard proves it directly. `GamePhase` and `EntitySpawnOrigin` are
     // forward declarations — real authoritative types this world never registers

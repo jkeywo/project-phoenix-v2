@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::report::{MissionReport, ReportRow, ReportRowState};
+use std::collections::BTreeMap;
 
 fn hit(attacker: Option<&str>, victim: &str, shield: f32, hull: f32) -> BalanceEvent {
     BalanceEvent::DamageApplied {

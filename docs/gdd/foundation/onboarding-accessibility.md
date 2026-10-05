@@ -169,6 +169,6 @@ Accessibility is delivered incrementally from T1 rather than held for a late ret
 ## Canonical sources
 
 - `gui/tutorial-state.js`, `gui/components/ph-tutorial-overlay.js`, and tutorial tests.
-- `crates/phoenix-simulation/src/ship/manual.rs` and `pasm/spec/design/ship-manuals.yaml`.
+- `crates/phoenix-sim-gameplay/src/ship/manual.rs` and `pasm/spec/design/ship-manuals.yaml`.
 - `assets/entities/alliance_destroyer.toml` and `assets/strings/strings.csv` for current tutorial content.
 - [Game Design Overview](./overview.md) for the initial accessibility target.

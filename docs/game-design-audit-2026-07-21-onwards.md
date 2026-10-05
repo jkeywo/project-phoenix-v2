@@ -68,7 +68,7 @@ Records live in-repo in:
 | Field | Value |
 |---|---|
 | **Decision** | The blaster lead solver was mis-aiming (~26 units behind a straight course at hold range); does neither course change before launch always saves you. Now solves the exact intercept. |
-| **File** | `crates/phoenix-simulation/src/weapons/blaster.rs` (intent), `pasm/spec/architecture/weapons.yaml` |
+| **File** | `crates/phoenix-sim-gameplay/src/weapons/blaster.rs` (intent), `pasm/spec/architecture/weapons.yaml` |
 | **Date** | 2026-07-26 |
 
 ---
@@ -114,7 +114,7 @@ Records live in-repo in:
 | Field | Value |
 |---|---|
 | **Decision** | Vertical separation and rate-limited pitch threaded through guidance/collision/detonation; vertical offset genuinely changes homing. No new constant — pitch clamped by the same `turn_rate` as yaw. |
-| **File** | `pasm/spec/architecture/weapons.yaml`, `crates/phoenix-simulation/src/weapons/torpedo.rs` |
+| **File** | `pasm/spec/architecture/weapons.yaml`, `crates/phoenix-sim-gameplay/src/weapons/torpedo.rs` |
 | **Date** | 2026-07-24 |
 
 ### Weapon-family arc-bearing coordination
@@ -128,7 +128,7 @@ Records live in-repo in:
 | Field | Value |
 |---|---|
 | **Decision** | A homing round has no bounded threat radius, so a wedge would "lie about where it is safe"; offline banks drop out of the list so arcs and standoff can't disagree. Arc data is authored, never a scan sweep. *Audit resolution (2026-08-05): overlays stay energy-arcs-only, but add a "torpedo-armed" badge on hostiles (launched-missile markers plus a tube-capability badge) so players know a ship can run torpedoes before it fires.* |
-| **File** | `crates/phoenix-simulation/src/weapons/arc_geometry.rs`, `pasm/spec/architecture/weapons.yaml` |
+| **File** | `crates/phoenix-sim-gameplay/src/weapons/arc_geometry.rs`, `pasm/spec/architecture/weapons.yaml` |
 | **Date** | 2026-07-30 |
 
 ---
@@ -394,7 +394,7 @@ need implementation:
 1. **Remove the Lancer (ln) fleet hull** — *DONE (#954), by relocation rather than
    deletion.* The action as written asked `rng_coverage.toml` to author a local entity
    clone, and the world schema cannot express one: `WorldEntity.template_path`
-   (`crates/phoenix-simulation/src/world/config.rs`) is a required `String` and `overrides` is a keyed deep-merge
+   (`crates/phoenix-sim-world/src/world/config.rs`) is a required `String` and `overrides` is a keyed deep-merge
    ON TOP OF a template, so there is no such thing as a template-free local entity.
    The hull moved to `assets/entities/test/rng_coverage_lancer.toml` instead, which
    achieves the actual goal: every shipped-fleet walk reads `assets/entities/*.toml`
@@ -409,7 +409,7 @@ need implementation:
    chokepoint's damage to another.
 2. **Revert phaser/blaster power range-coupling (#923)** — weapons power should scale
    **damage**, not range; phasers/blasters attack independent of radar range. Remove
-   the sensors→RadarRange→phaser-range chain in `crates/phoenix-simulation/src/modifiers/coordination.rs`
+   the sensors→RadarRange→phaser-range chain in `crates/phoenix-sim-gameplay/src/modifiers/coordination.rs`
    (`apply_power_modifiers_from_read_state`).
    *DONE (#955).* The chain was severed at the CONSUMER end rather than the producer:
    every firing and reach-reporting path (`console/weapons/beam.rs`,

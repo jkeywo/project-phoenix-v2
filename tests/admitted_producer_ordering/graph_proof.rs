@@ -28,8 +28,8 @@ pub const PRODUCERS: [&str; 4] = [
     "phoenix_simulation::console::repair::server::operate_repair_ai",
 ];
 pub const CONSUMERS: [&str; 4] = [
-    "phoenix_simulation::ship::power::handle_power_messages",
-    "phoenix_simulation::ship::shields::handle_shields_messages",
+    "phoenix_sim_gameplay::ship::power::handle_power_messages",
+    "phoenix_sim_gameplay::ship::shields::handle_shields_messages",
     "phoenix_simulation::console::navigation::server::handle_navigation_waypoint",
     "phoenix_simulation::console::repair::dispatch::handle_dispatch_repair_team",
 ];

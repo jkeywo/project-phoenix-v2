@@ -8,6 +8,9 @@ use crate::ship::physics::ShipPhysicsConfig;
 use crate::ship::test_support::*;
 use crate::sim_rng::InstallSimRng;
 use crate::simmath;
+use phoenix_sim_gameplay::ship::helm_ai::{
+    impulse::ImpulseAxis, lateral::LateralAxis, vertical::VerticalAxis,
+};
 
 // ── Table-driven per-axis wiring guard (issue #1208) ──────────────────────
 //
@@ -4387,15 +4390,15 @@ fn every_helm_policy_host_seeds_a_real_posture_reading() {
     // barrier (the test module holds the literal in this test's own `CALL`
     // constant and in a fixture helper, neither of which is a policy host).
     const FILES: [&str; 9] = [
-        "crates/phoenix-simulation/src/ship/helm_ai/mod.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/facts.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/engines.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/steering.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/impulse.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/lateral.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/vertical.rs",
-        "crates/phoenix-simulation/src/ship/helm_ai/boost.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/engines.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/steering.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/impulse.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/lateral.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/vertical.rs",
+        "crates/phoenix-sim-gameplay/src/ship/helm_ai/boost.rs",
     ];
     let mut whole = String::new();
     for path in FILES {

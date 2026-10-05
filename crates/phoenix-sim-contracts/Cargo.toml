@@ -1,0 +1,24 @@
+[package]
+name = "phoenix-sim-contracts"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dev-dependencies]
+ron = "0.12"
+
+[dependencies]
+phoenix-model = { path = "../phoenix-model", features = ["ecs"] }
+bevy = { version = "0.18.1", default-features = false, features = ["std", "async_executor", "multi_threaded", "bevy_asset", "bevy_state", "bevy_log"] }
+serde = { version = "1.0.228", features = ["derive"] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+vellum-rng = { workspace = true }
+vellum-digest = { workspace = true }
+
+rand = "0.9"
+phoenix-transport = { path = "../phoenix-transport" }
+phoenix-runtime = { path = "../phoenix-runtime" }
+strum = { version = "0.28.0", features = ["derive"] }
+phoenix-math = { path = "../phoenix-math" }
+toml = "1.0"
+phoenix-content = { path = "../phoenix-content" }

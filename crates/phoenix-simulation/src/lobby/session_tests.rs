@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::messages::{PowerGroupId, SystemId};
+use crate::lobby::start_policy::ReadinessTally;
 use crate::lobby::stations_config::{ShipStations, StationDef};
 use crate::ship::config::{PowerGroupConfig, StationConfig, SystemInstanceConfig};
 
@@ -228,7 +229,9 @@ fn holder_for_station_returns_none_when_holder_disconnected() {
 fn available_stations_returns_all_when_none_claimed() {
     let ship_config = test_ship_config();
     let sm = sm();
-    let available = sm.available_stations(&ship_config);
+    let available = sm.available_stations(
+        &crate::lobby::stations_config::stations_from_ship_config(&ship_config),
+    );
     assert!(available.contains(&StationId("captain".into())));
     assert!(available.contains(&StationId("helm".into())));
     assert!(available.contains(&StationId("tactical".into())));
@@ -246,7 +249,9 @@ fn available_stations_excludes_claimed_stations() {
     let mut sm = sm();
     sm.register("t1".into(), "Alice".into()).unwrap();
     sm.set_station("t1", Some(StationId("captain".into())));
-    let available = sm.available_stations(&ship_config);
+    let available = sm.available_stations(
+        &crate::lobby::stations_config::stations_from_ship_config(&ship_config),
+    );
     assert!(!available.contains(&StationId("captain".into())));
     assert!(available.contains(&StationId("helm".into())));
 }
@@ -258,11 +263,15 @@ fn available_stations_reappears_on_disconnect() {
     sm.register("t1".into(), "Alice".into()).unwrap();
     sm.set_station("t1", Some(StationId("captain".into())));
     assert!(!sm
-        .available_stations(&ship_config)
+        .available_stations(&crate::lobby::stations_config::stations_from_ship_config(
+            &ship_config
+        ))
         .contains(&StationId("captain".into())));
     sm.disconnect("t1");
     assert!(sm
-        .available_stations(&ship_config)
+        .available_stations(&crate::lobby::stations_config::stations_from_ship_config(
+            &ship_config
+        ))
         .contains(&StationId("captain".into())));
 }
 
@@ -275,14 +284,20 @@ fn available_stations_excludes_disconnected_station_holders() {
     sm.set_station("t1", Some(StationId("captain".into())));
     sm.set_station("t2", Some(StationId("helm".into())));
     assert!(!sm
-        .available_stations(&ship_config)
+        .available_stations(&crate::lobby::stations_config::stations_from_ship_config(
+            &ship_config
+        ))
         .contains(&StationId("captain".into())));
     assert!(!sm
-        .available_stations(&ship_config)
+        .available_stations(&crate::lobby::stations_config::stations_from_ship_config(
+            &ship_config
+        ))
         .contains(&StationId("helm".into())));
     sm.disconnect("t1");
     assert!(sm
-        .available_stations(&ship_config)
+        .available_stations(&crate::lobby::stations_config::stations_from_ship_config(
+            &ship_config
+        ))
         .contains(&StationId("captain".into())));
 }
 

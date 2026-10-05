@@ -50,15 +50,6 @@ use crate::infrastructure::InfrastructureCondition;
 
 use super::projection::{project, DossierSubject, SubjectCondition};
 
-/// The blackboard channel key dossiers are published under.
-///
-/// **Not a system id.** No `[[system]]` block declares it, no station owns it,
-/// it registers no `ControlSource` and no `ControlSystem` message may target it
-/// — a dossier is something the crew *knows*, not a thing aboard the ship. It is
-/// carried inside a [`SystemId`] value for `operations`' reason: the blackboard
-/// map and the `BlackboardUpdate` wire message are typed that way.
-pub const DOSSIER_BLACKBOARD_KEY: &str = "dossiers";
-
 /// The blackboard channel key as a [`SystemId`].
 pub fn dossier_blackboard_key() -> SystemId {
     SystemId(DOSSIER_BLACKBOARD_KEY.to_string())
@@ -257,3 +248,5 @@ fn contact_in_range(runtime: &CommsRuntime, uuid: &str) -> bool {
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_gameplay::dossier::DOSSIER_BLACKBOARD_KEY;

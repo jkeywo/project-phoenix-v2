@@ -19,7 +19,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/debug/mod.rs, crates/phoenix-simulation/src/debug/payload.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-simulation/src/debug/station_activity.rs, crates/phoenix-simulation/src/debug/ai_state.rs, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-simulation/src/debug/modifiers.rs, crates/phoenix-simulation/src/debug/damage.rs, crates/phoenix-simulation/src/debug/entities.rs, crates/phoenix-simulation/src/debug/inspector.rs]
+      paths: [crates/phoenix-simulation/src/debug/mod.rs, crates/phoenix-simulation/src/debug/payload.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-simulation/src/debug/station_activity.rs, crates/phoenix-simulation/src/debug/ai_state.rs, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-simulation/src/debug/modifiers.rs, crates/phoenix-simulation/src/debug/damage.rs, crates/phoenix-simulation/src/debug/entities.rs, crates/phoenix-simulation/src/debug/inspector.rs, crates/phoenix-sim-contracts/src/debug_schema.rs]
       symbols: [DebugPlugin, DEBUG_SCHEMA_VERSION]
       tests: [cargo test, crates/phoenix-simulation/src/debug/payload_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-simulation/src/debug/station_activity_tests.rs, crates/phoenix-simulation/src/debug/ai_state_tests.rs, crates/phoenix-simulation/src/debug/scenario_tests.rs, crates/phoenix-simulation/src/debug/damage_tests.rs, crates/phoenix-simulation/src/debug/entities_tests.rs, crates/phoenix-simulation/src/debug/inspector_tests.rs]
 

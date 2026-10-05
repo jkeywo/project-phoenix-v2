@@ -2206,7 +2206,7 @@ fn beam_severs_when_target_vanishes() {
 /// driving the *other* bank (starboard) into cooldown must not disturb the port
 /// bank's live captured beam, and the two banks' cooldown state stays
 /// independent. This is the LIVE counterpart to the pure `banks_are_independent`
-/// test in `crates/phoenix-simulation/src/weapons/phaser.rs`.
+/// test in `crates/phoenix-sim-gameplay/src/weapons/phaser.rs`.
 ///
 /// The premise changed under issue #790 — `ActiveBeam` is per-bank now, so
 /// "only one bank fires a beam at a time" is no longer true and this fixture
@@ -2394,7 +2394,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(npc_ai_sources),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipPhysics::default(),
             TacticalRadarSelection::default(),
             TorpedoSystemResource(npc_torpedo_sys),
@@ -6155,7 +6155,7 @@ fn arc_request_ship(target_uuid: &str, sources: ShipSystemControlSources) -> imp
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
     )
 }
 
@@ -7901,7 +7901,7 @@ fn tactical_ai_does_not_acquire_an_unfactioned_static_point_defence_station() {
 /// real `spawn_entity` (`crates/phoenix-simulation/src/entities/spawner.rs`), the same two calls
 /// `entity_without_audio_block_parses_to_none` /
 /// `station_axiom_template_parses_hull_integrity`
-/// (`crates/phoenix-simulation/src/entities/config.rs`) and `npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker`
+/// (`crates/phoenix-sim-gameplay/src/entities/config.rs`) and `npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker`
 /// (`crates/phoenix-simulation/src/entities/spawner.rs`) already use in lib tests — no
 /// `config_cache::insert_native_config` involved, since that helper belongs
 /// to the headless integration target, not this in-process `App`. Spawning
@@ -9623,7 +9623,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             npc_sources(),
             crate::ship_plugin::ActiveStationRatings::default(),
             ShipPhysics::default(),
@@ -9645,7 +9645,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             npc_sources(),
             crate::ship_plugin::ActiveStationRatings::default(),
             ShipPhysics::default(),
@@ -9972,7 +9972,7 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid("harrow-cruiser".into()),
-                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship::components::load_ship_config_from_disk(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 ShipPhysics::default(),
@@ -10132,7 +10132,7 @@ fn spawn_shipped_warhawk_battery(
         .spawn((
             crate::server_app::Ship,
             EntityUuid("harrow-warhawk".into()),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::ship_plugin::ActiveStationRatings::default(),
             ShipPhysics::default(),
@@ -12364,7 +12364,7 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
         .flat_map(|t| world.call(&t.handler, &flags).commands)
         .find_map(|e| match e {
             crate::world::script::effects::BufferedEffect::Cmd(
-                crate::world::dispatch::ActionCmd::MutateFlag {
+                phoenix_sim_world::commands::ActionCmd::MutateFlag {
                     name,
                     mutation: crate::world::dispatch::FlagMutation::SetValue(value),
                     ..

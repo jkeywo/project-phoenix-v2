@@ -49,7 +49,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
+      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [ScenarioCatalog, build_catalog, build_merged_catalog, ScenarioCatalogPayload, catalogue_snapshot, WorldConfig]
       tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/payload_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
@@ -71,7 +71,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/scenario-arbiter.js, server.html, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs]
+      paths: [gui/scenario-arbiter.js, server.html, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [build_catalog, ScenarioCatalog]
       tests: [npx vitest run, cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter_tests.rs, src/native_host/world_load_tests.rs]
 
@@ -143,7 +143,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-presentation/src/server/asset_preload.rs]
+      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-presentation/src/server/asset_preload.rs, crates/phoenix-sim-contracts/src/lifecycle.rs]
       symbols: [GameOverReason]
       messages: [GameStarted, GameOver, LoadingProgress, ReturnedToLobby]
       tests: [cargo test, tests/client/lobby-state.test.js, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-presentation/src/server/asset_preload_tests.rs]
@@ -178,7 +178,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-contracts/src/lifecycle.rs]
       symbols: [GameOverReason]
 
       tests: [crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
@@ -196,7 +196,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/session.rs, client.html, server.html]
+      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-sim-session/src/lobby/session.rs, client.html, server.html, crates/phoenix-sim-contracts/src/lifecycle.rs]
       messages: [ReturnToLobby, ReturnedToLobby, StationAssigned]
       tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/lobby/session_tests.rs]
 

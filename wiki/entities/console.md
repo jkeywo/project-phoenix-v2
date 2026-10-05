@@ -2,7 +2,7 @@
 title: Console
 type: entity
 tags: [console, role, lobby, station]
-sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/command_admission/policy.rs, gui/mount-plan.js, gui/console-resolver.js, gui/action-map.js]
+sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/command_admission/policy.rs, gui/mount-plan.js, gui/console-resolver.js, gui/action-map.js]
 updated: 2026-08-27
 ---
 

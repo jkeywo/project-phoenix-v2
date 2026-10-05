@@ -5,12 +5,12 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [features]
-test-support = []
+test-support = ["phoenix-sim-gameplay/test-support"]
 default = ["server"]
-server = []
+server = ["phoenix-sim-gameplay/server"]
 viewer = []
-debug = ["bevy/debug"]
-headless = ["dep:bevy_ecs", "bevy/debug"]
+debug = ["bevy/debug", "phoenix-sim-gameplay/debug"]
+headless = ["dep:bevy_ecs", "bevy/debug", "phoenix-sim-gameplay/headless"]
 host = ["server", "dep:tungstenite"]
 perf = []
 capture = []
@@ -18,6 +18,10 @@ ultralight = []
 falling-skyway-sim-tests = ["headless"]
 
 [dependencies]
+phoenix-sim-world = { path = "../phoenix-sim-world" }
+phoenix-sim-gameplay = { path = "../phoenix-sim-gameplay" }
+phoenix-sim-session = { path = "../phoenix-sim-session" }
+phoenix-sim-contracts = { path = "../phoenix-sim-contracts" }
 base64 = "0.22.1"
 phoenix-math = { path = "../phoenix-math" }
 phoenix-model = { path = "../phoenix-model", features = ["ecs"] }
@@ -70,6 +74,8 @@ web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "
 console_error_panic_hook = "0.1"
 
 [dev-dependencies]
+phoenix-sim-world = { path = "../phoenix-sim-world", features = ["test-support"] }
+phoenix-sim-gameplay = { path = "../phoenix-sim-gameplay", features = ["test-support"] }
 phoenix-transport = { path = "../phoenix-transport", features = ["test-support"] }
 phoenix-content = { path = "../phoenix-content", features = ["test-support"] }
 vellum-replay = { workspace = true, features = ["testkit"] }

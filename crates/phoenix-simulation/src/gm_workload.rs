@@ -145,14 +145,6 @@ pub const MAX_GM_WORKLOAD_STATIONS: usize = 64;
 /// still the true count — this bounds only how many source demands are named.
 pub const MAX_GM_WORKLOAD_EVIDENCE: usize = 16;
 
-/// Distinct outstanding demands at which a Station becomes a candidate for
-/// Overloaded, before the duration is considered.
-pub const DEFAULT_OVERLOAD_COUNT: u32 = 3;
-
-/// How long the count must stay at or above the threshold, in SIMULATION
-/// seconds, before Overloaded is the answer.
-pub const DEFAULT_OVERLOAD_SECS: f32 = 30.0;
-
 // ── The producer inventory ────────────────────────────────────────────────────
 
 /// Source id of the pending-Comms producer.
@@ -1228,3 +1220,5 @@ pub fn restore_watch(world: &mut World, watch: &GmWorkloadWatch) {
 #[cfg(test)]
 #[path = "gm_workload_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_world::gm_workload::*;

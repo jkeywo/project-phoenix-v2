@@ -1,5 +1,6 @@
 use super::*;
 use crate::world::config::AvailableShipEntry;
+use crate::world::manifest::{ScenarioCatalog, ScenarioCatalogEntry};
 
 fn ship(path: &str) -> AvailableShipEntry {
     AvailableShipEntry {

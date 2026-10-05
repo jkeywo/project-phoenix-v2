@@ -7,7 +7,7 @@
 | Owner | Unassigned |
 | Last updated | 2026-08-18 |
 | Scope | Generic entity templates, composition, world instances, and TOML authoring contract |
-| Authority | Design and authoring overview. `crates/phoenix-simulation/src/entities/config.rs`, the validators, and shipped assets are runtime truth; PASM is architecture truth. |
+| Authority | Design and authoring overview. `crates/phoenix-sim-gameplay/src/entities/config.rs`, the validators, and shipped assets are runtime truth; PASM is architecture truth. |
 
 This document defines the common design model for things that exist in a Phoenix world. It deliberately stops before the detailed ship-system model, which is covered by [Ships and Ship Systems](./ships-and-systems.md), and before scenario choreography, which is covered by [Scenario Authoring](./scenario-authoring.md).
 
@@ -182,8 +182,8 @@ An override should express a property of this instance, such as damage, local ca
 
 ## Canonical sources
 
-- `crates/phoenix-simulation/src/entities/config.rs` — live template schema and strict validation.
-- `crates/phoenix-simulation/src/entities/include_resolve.rs` and `crates/phoenix-simulation/src/entities/entity_override.rs` — composition and instance-override semantics.
-- `crates/phoenix-simulation/src/world/config.rs` — `[[entity]]` instance schema.
+- `crates/phoenix-sim-gameplay/src/entities/config.rs` — live template schema and strict validation.
+- `crates/phoenix-simulation/src/entities/include_resolve.rs` and `crates/phoenix-sim-gameplay/src/entities/entity_override.rs` — composition and instance-override semantics.
+- `crates/phoenix-sim-world/src/world/config.rs` — `[[entity]]` instance schema.
 - `assets/entities/` — shipped examples.
 - `pasm/spec/architecture/ship-entity-configuration.yaml` and `pasm/spec/architecture/world-files.yaml` — intended architecture and decisions.

@@ -330,13 +330,15 @@ const UNPLUMBED_PROBE: AiHost = AiHost {
     // exists to exercise the empty flag chain, not an empty fact vocabulary.
     // Any OTHER fact name on it is still rejected, which is what
     // `an_unplumbed_probe_rejects_an_unseeded_fact` proves.
-    facts: &[cand(
-        DETECTABLE,
-        "probe",
-        "1.0 for a detectable candidate",
-        "false",
-        "test fixture",
-    )],
+    facts: &[FactDescriptor {
+        name: DETECTABLE,
+        scope: FactScope::Candidate,
+        shape: FactShape::Exact,
+        owner: "probe",
+        context: "1.0 for a detectable candidate",
+        absent_means: "false",
+        seed_site: "test fixture",
+    }],
 };
 
 #[test]
@@ -987,8 +989,8 @@ fn production_validation_names_its_host() {
     // occurrence must be the definition itself (never a call), and the
     // definition must be seen exactly once across the two sources.
     let sources = [
-        read_non_test_source("crates/phoenix-simulation/src/entities/ai_policy_schema.rs"),
-        read_non_test_source("crates/phoenix-simulation/src/entities/config.rs"),
+        read_non_test_source("crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs"),
+        read_non_test_source("crates/phoenix-sim-gameplay/src/entities/config.rs"),
     ];
     for hostless in [
         "validate_fine_system_ai_policy(",

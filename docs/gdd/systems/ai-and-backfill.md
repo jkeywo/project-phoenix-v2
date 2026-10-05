@@ -137,6 +137,6 @@ Backfill is primarily workload support, not a difficulty selector. Making a stat
 
 - `pasm/spec/architecture/data-driven-fine-system-ai.yaml`, `npc-ai-factions.yaml`, and `station-system-authority.yaml`.
 - `pasm/spec/design/console-complexity.yaml` and `station-ratings.yaml`.
-- `crates/phoenix-simulation/src/entities/ai_flag_hosts.rs`, `src/command_admission/`, and fine-system AI hosts.
+- `crates/phoenix-sim-gameplay/src/entities/ai_flag_hosts.rs`, `src/command_admission/`, and fine-system AI hosts.
 - `assets/entities/fragments/ai/` and shipped hull TOML.
 - `wiki/concepts/information-parity-audit.md`.

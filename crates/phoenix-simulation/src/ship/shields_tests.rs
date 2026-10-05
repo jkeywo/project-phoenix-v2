@@ -7,7 +7,9 @@ use crate::server_app::{
 use crate::server_app::{LocalShip, ShipSystemBlackboards};
 use crate::ship::control_source::ControlSource;
 use crate::ship::system_registry::SHIELDS_SYSTEM_ID;
+use crate::ship_plugin::CoordinationDelivery;
 use crate::ship_plugin::CoordinationEnqueue;
+use crate::ship_plugin::ShipSystemControlSources;
 
 #[derive(Resource)]
 struct ShipEntity(Entity);
@@ -95,7 +97,7 @@ ai_only = true
 
 #[test]
 fn human_popup_threat_bearing_cannot_latch_the_ai_inbox() {
-    let mut ship_config = ShipConfigComponent::default();
+    let mut ship_config = crate::ship::components::load_ship_config_from_disk();
     crate::ship::test_support::add_default_shield_arc_systems(&mut ship_config.0);
     let shields_address = crate::ship::coordination::address_for_system_kind(
         &ship_config.0,
@@ -293,7 +295,7 @@ fn test_app() -> App {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
                 // Post-#514: coordination emitter looks up the first
@@ -618,7 +620,7 @@ fn publish_shields_blackboard_four_facings() {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
                 // Post-#514: emit_shields_coordination reads the first
@@ -724,7 +726,7 @@ fn test_app_with_helm() -> App {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
                 // Post-#514: emit_shields_coordination looks up the first
@@ -1028,7 +1030,7 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),
             red_alert(),
@@ -1041,7 +1043,7 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),
             red_alert(),

@@ -494,7 +494,7 @@ describe('the report on the Viewscreen', () => {
     const rows = reportRows([
       { id: 'lyra', heading: 'h.lyra', outcome: 'o.lyra', state: 'SAVED' },
       // An empty heading is what `report_row`'s boundary now refuses to author
-      // (crates/phoenix-simulation/src/world/script/effects.rs); a host that predates that check can
+      // (crates/phoenix-sim-world/src/world/script/effects.rs); a host that predates that check can
       // still send one, and both surfaces must drop it rather than draw a
       // blank line.
       { id: 'blank', heading: '', outcome: 'o.blank', state: 'lost' },

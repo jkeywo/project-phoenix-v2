@@ -15,7 +15,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs]
       symbols: [parse_world, WorldConfig, WorldEntity]
       tests: [cargo test]
 
@@ -31,7 +31,7 @@ entities:
       writers: [world-file-parser]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs]
       symbols: [WorldConfig]
 
   - component: mission-ship-slot-contract
@@ -49,7 +49,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/ship_slots.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/ship_slots.rs, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [ShipSlotConfig, UnclaimedSlotPolicy, ShipSlotReservations, FrozenShipSlots, ClaimOutcome, HullOutcome]
       tests: [cargo test, crates/phoenix-simulation/src/ship_slots_tests.rs]
 
@@ -84,7 +84,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/config.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/config.rs]
       symbols: [spawn_world_entities, assign_named_entity_uuids, partition_immediate_entities_three_way]
       tests: [cargo test]
 
@@ -100,7 +100,7 @@ entities:
       writers: [world-entity-spawner]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/config.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/config.rs]
       symbols: [assign_named_entity_uuids, WorldConfig]
       tests: [cargo test]
 
@@ -117,7 +117,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/flags.rs]
+      paths: [crates/phoenix-sim-contracts/src/flags.rs]
       symbols: [FlagStore, Predicate, parse_predicate]
       tests: [cargo test]
 
@@ -133,7 +133,7 @@ entities:
       writers: [world-flag-store]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/flags.rs]
+      paths: [crates/phoenix-sim-contracts/src/flags.rs]
       symbols: [FlagStore]
       tests: [cargo test]
 
@@ -163,16 +163,16 @@ entities:
       # flag payload and needed no `SNAPSHOT_FORMAT` move, because this slice
       # adds no field - it writes names into a map that was already saved.
       paths:
-        - crates/phoenix-simulation/src/world/flags.rs
+        - crates/phoenix-sim-contracts/src/flags.rs
         - crates/phoenix-simulation/src/world/server.rs
-        - crates/phoenix-simulation/src/world/commitments.rs
+        - crates/phoenix-sim-world/src/world/commitments.rs
       symbols:
         - FlagStore
         - Predicate
         - WorldContentRuntime
         - CommitmentLedger
         - CommitmentState
-      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway", crates/phoenix-simulation/src/world/commitments_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway", crates/phoenix-sim-world/src/world/commitments_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word; ::a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back; ::the_lift_runs_out_and_the_third_claimant_is_never_offered_one; ::the_early_collapse_leaves_one_berth_and_control_asks_for_a_name"
@@ -203,7 +203,7 @@ entities:
       status: declared
       paths:
         - crates/phoenix-simulation/src/campaign/projection.rs
-        - crates/phoenix-simulation/src/world/flags.rs
+        - crates/phoenix-sim-contracts/src/flags.rs
       symbols:
         - CampaignFacts
         - CampaignPromise
@@ -247,7 +247,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/infrastructure/condition.rs
+        - crates/phoenix-sim-gameplay/src/infrastructure/condition.rs
         - crates/phoenix-simulation/src/infrastructure/server.rs
       symbols:
         - InfrastructureConfig
@@ -256,7 +256,7 @@ entities:
         - InfrastructurePlugin
         - tick_infrastructure_condition
         - CapacityAdjustment
-      tests: [cargo test, crates/phoenix-simulation/src/infrastructure/condition_tests.rs, crates/phoenix-simulation/src/infrastructure/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/infrastructure/condition_tests.rs, crates/phoenix-simulation/src/infrastructure/server_tests.rs]
 
   - state: infrastructure-condition-state
     core:
@@ -277,7 +277,7 @@ entities:
       replicas: [infrastructure-published-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/infrastructure/condition.rs]
+      paths: [crates/phoenix-sim-gameplay/src/infrastructure/condition.rs]
       symbols:
         - InfrastructureState
         - ConditionAdjustment
@@ -286,7 +286,7 @@ entities:
         - CapacityConfig
         - CapacityAdjustment
         - ThresholdConfig
-      tests: [cargo test, crates/phoenix-simulation/src/infrastructure/condition_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/infrastructure/condition_tests.rs]
 
   - state: infrastructure-published-state
     core:
@@ -329,8 +329,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/tractor/coupling.rs
-        - crates/phoenix-simulation/src/tractor/held_response.rs
+        - crates/phoenix-sim-gameplay/src/tractor/coupling.rs
+        - crates/phoenix-sim-gameplay/src/tractor/held_response.rs
         - crates/phoenix-simulation/src/tractor/server.rs
       symbols:
         - TractorConfig
@@ -349,7 +349,7 @@ entities:
         - condition_delta
         - publish_tractor_blackboard
       messages: [EngageTractor, ReleaseTractor]
-      tests: [cargo test, crates/phoenix-simulation/src/tractor/coupling_tests.rs, crates/phoenix-simulation/src/tractor/held_response_tests.rs, crates/phoenix-simulation/src/tractor/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/tractor/coupling_tests.rs, crates/phoenix-sim-gameplay/src/tractor/held_response_tests.rs, crates/phoenix-simulation/src/tractor/server_tests.rs]
 
   - state: tractor-beam-state
     core:
@@ -420,7 +420,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/console/repair/external.rs
+        - crates/phoenix-sim-gameplay/src/console/repair/external.rs
         - crates/phoenix-simulation/src/console/repair/external_server.rs
       symbols:
         - ExternalRepairConfig
@@ -434,7 +434,7 @@ entities:
         - apply_external_repair
         - register_external_repair
       messages: [DispatchExternalRepair, RecallExternalRepair, DispatchRepairTeam]
-      tests: [cargo test, crates/phoenix-simulation/src/console/repair/external_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/console/repair/external_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs]
 
   - component: named-external-repair-claim
     core:
@@ -457,10 +457,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/console/repair/external.rs
+        - crates/phoenix-sim-gameplay/src/console/repair/external.rs
         - crates/phoenix-simulation/src/console/repair/external_server.rs
         - crates/phoenix-simulation/src/console/repair/dispatch.rs
-        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
         - crates/phoenix-model/src/messages.rs
         - crates/phoenix-simulation/src/snapshot.rs
         - crates/phoenix-simulation/src/sim_digest.rs
@@ -476,7 +476,7 @@ entities:
         - is_committed_to_operation
         - fold_external_repair_namespace
       messages: [DispatchRepairTeam, RecallRepairTeam]
-      tests: [cargo test, npx vitest run, npx playwright test, crates/phoenix-simulation/src/console/repair/external_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, crates/phoenix-simulation/src/console/repair/dispatch_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, npx playwright test, crates/phoenix-sim-gameplay/src/console/repair/external_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, crates/phoenix-simulation/src/console/repair/dispatch_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: external-repair-dispatch-state
     core:
@@ -543,14 +543,14 @@ entities:
       readers: [tractor-beam-coupler]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/tractor/held_response.rs]
+      paths: [crates/phoenix-sim-gameplay/src/tractor/held_response.rs]
       symbols:
         - HeldResponseConfig
         - HeldResponseKind
         - HeldResponse
         - held_offset
         - condition_delta
-      tests: [cargo test, crates/phoenix-simulation/src/tractor/held_response_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/tractor/held_response_tests.rs]
 
   - component: dock-controller
     core:
@@ -575,7 +575,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/dock/mating.rs
+        - crates/phoenix-sim-gameplay/src/dock/mating.rs
         - crates/phoenix-simulation/src/dock/server.rs
       symbols:
         - DockConfig
@@ -591,7 +591,7 @@ entities:
         - publish_dock_blackboard
         - resolve_dock_markers
       messages: [Dock, Undock]
-      tests: [cargo test, crates/phoenix-simulation/src/dock/mating_tests.rs, crates/phoenix-simulation/src/dock/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/dock/mating_tests.rs, crates/phoenix-simulation/src/dock/server_tests.rs]
 
   - state: dock-relationship-state
     core:
@@ -662,7 +662,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/umbilical/flow.rs
+        - crates/phoenix-sim-gameplay/src/umbilical/flow.rs
         - crates/phoenix-simulation/src/umbilical/server.rs
       symbols:
         - UmbilicalConfig
@@ -677,7 +677,7 @@ entities:
         - tick_umbilical
         - publish_umbilical_blackboard
       messages: [StartTransfer, StopTransfer]
-      tests: [cargo test, crates/phoenix-simulation/src/umbilical/flow_tests.rs, crates/phoenix-simulation/src/umbilical/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/umbilical/flow_tests.rs, crates/phoenix-simulation/src/umbilical/server_tests.rs]
 
   - state: umbilical-flow-state
     core:
@@ -753,8 +753,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/dossier/projection.rs
-        - crates/phoenix-simulation/src/dossier/server.rs
+        [crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/dossier/server.rs, crates/phoenix-sim-gameplay/src/dossier/mod.rs]
       symbols:
         - DossierSubject
         - SubjectCondition
@@ -814,8 +813,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/dossier/evidence.rs
-        - crates/phoenix-simulation/src/world/script/dossier.rs
+        - crates/phoenix-sim-world/src/dossier/evidence.rs
+        - crates/phoenix-sim-world/src/world/script/dossier.rs
         - crates/phoenix-simulation/src/world/server.rs
         - crates/phoenix-simulation/src/snapshot.rs
       symbols:
@@ -826,7 +825,7 @@ entities:
         - Dossier
         - register_dossier
         - RecordDossierEvidence
-      tests: [cargo test, crates/phoenix-simulation/src/dossier/evidence_tests.rs, crates/phoenix-simulation/src/world/script/dossier_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/dossier/evidence_tests.rs, crates/phoenix-sim-world/src/world/script/dossier_tests.rs]
 
   - component: science-scan-deriver
     core:
@@ -856,8 +855,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/science/scan.rs
-        - crates/phoenix-simulation/src/science/server.rs
+        [crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/mod.rs]
       symbols:
         - ScanConfig
         - ScanBandConfig
@@ -871,7 +869,7 @@ entities:
         - tick_scans
         - publish_scan_blackboard
         - SCAN_BLACKBOARD_KEY
-      tests: [cargo test, crates/phoenix-simulation/src/science/scan_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/science/scan_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs]
 
   - state: science-scan-state
     core:
@@ -893,7 +891,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/science/scan.rs
+        - crates/phoenix-sim-gameplay/src/science/scan.rs
         - crates/phoenix-simulation/src/science/server.rs
         - crates/phoenix-simulation/src/snapshot.rs
       symbols:
@@ -901,7 +899,7 @@ entities:
         - ScanReading
         - ScanRefusal
         - ScanSaveState
-      tests: [cargo test, crates/phoenix-simulation/src/science/scan_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/science/scan_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs]
 
   - state: science-scan-published-state
     core:
@@ -954,7 +952,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/debris/threat.rs
+        - crates/phoenix-sim-gameplay/src/debris/threat.rs
         - crates/phoenix-simulation/src/debris/server.rs
       symbols:
         - DebrisConfig
@@ -967,7 +965,7 @@ entities:
         - DebrisSaveState
         - tick_debris_drift
         - tick_debris_state
-      tests: [cargo test, crates/phoenix-simulation/src/debris/threat_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/debris/threat_tests.rs]
 
   - state: debris-threat-state
     core:
@@ -989,13 +987,13 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/debris/threat.rs
+        - crates/phoenix-sim-gameplay/src/debris/threat.rs
         - crates/phoenix-simulation/src/debris/server.rs
         - crates/phoenix-simulation/src/snapshot.rs
       symbols:
         - DebrisThreat
         - DebrisSaveState
-      tests: [cargo test, crates/phoenix-simulation/src/debris/threat_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/debris/threat_tests.rs]
 
   - component: world-trigger-evaluator
     core:
@@ -1011,7 +1009,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/content.rs, crates/phoenix-simulation/src/world/trigger_registry.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/flags.rs]
+      paths: [crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-contracts/src/flags.rs]
       symbols: [Trigger, TriggerAction, Predicate, TriggerState, evaluate_single_trigger]
       tests: [cargo test]
 
@@ -1027,7 +1025,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [ObjectiveManagerRes, ObjectiveManager]
 
       tests: [crates/phoenix-simulation/src/objectives_tests.rs]
@@ -1044,7 +1042,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/console/comms/inbox.rs]
+      paths: [crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/console/comms/inbox.rs]
       symbols: [CommsInboxRes, mark_comms_dirty_on_game_start]
       tests: [cargo test, crates/phoenix-simulation/src/console/comms/inbox_tests.rs]
 
@@ -1061,7 +1059,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/pfx.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/pfx.rs]
       symbols: [AmbientLightConfig]
       tests: [cargo test, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
 
@@ -1082,7 +1080,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/world/manifest.rs, src/headless/app.rs]
+      paths: [crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/world/manifest.rs, src/headless/app.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate.rs]
       symbols: [validate_composition, validate_supporting_world, validate_entity_identity, validate_manifest, WorldSource, WorldFinding, has_error]
       tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs]
 
@@ -1115,7 +1113,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/validate.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/validate.rs]
       symbols: [WorldEntity, validate_entity_identity]
       tests: [cargo test]
 
@@ -1131,7 +1129,7 @@ entities:
       writers: [world-identity-contract]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs]
       symbols: [WorldEntity]
 
   - component: world-composition-contract
@@ -1184,7 +1182,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/headless/app.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/validate.rs]
+      paths: [src/headless/app.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate.rs]
       symbols: [validate_composition, validate_supporting_world, LayerValidationContext, evaluate_layer_load, activation_findings, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
       tests: [cargo test, crates/phoenix-simulation/src/world/layers_tests.rs]
 
@@ -1216,7 +1214,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/validate.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [ObjectiveManager, apply_world_layer_changes, validate_objectives]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
@@ -1233,9 +1231,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/content.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/delayed.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-world/src/world/delayed.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [Trigger, TriggerState, cooldown_elapsed, reset_triggers_by_id, DelayedUnloadPolicy, partition_delayed_actions_on_unload]
-      tests: [cargo test, crates/phoenix-simulation/src/world/delayed_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/world/delayed_tests.rs]
 
   - component: world-comms-identity-contract
     core:
@@ -1251,7 +1249,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs]
       symbols: [OpenCommsRequest, open_scripted_comms_threads, entity_contact_label]
       tests: [cargo test]
 
@@ -1273,7 +1271,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/load/mod.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/entities/config_cache.rs, src/server/bridge.rs, server.html]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/load/mod.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/entities/config_cache.rs, src/server/bridge.rs, server.html]
       symbols: [LayerValidationContext, evaluate_layer_load, validate_supporting_world, apply_world_layer_changes, WorldLayerMap, WorldRuntime]
       tests: [cargo test, "npx playwright test layer-sibling-script.spec.js", crates/phoenix-simulation/src/world/layers_tests.rs, crates/phoenix-simulation/src/entities/config_cache_tests.rs, src/server/bridge_tests.rs]
 
@@ -1289,7 +1287,7 @@ entities:
       writers: [world-layer-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-sim-contracts/src/identity.rs]
       symbols: [WorldLayerMap, WorldRuntime, PendingWorldLayerChanges, WorldLayerChange, EntityOriginLayer, AwaitingScript, WorldFetchState]
 
       tests: [crates/phoenix-simulation/src/world/layers_tests.rs]
@@ -1312,7 +1310,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/content.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/content.rs]
       tests: [cargo test]
 
   - component: world-runtime-spawn-resolver
@@ -1329,7 +1327,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs]
       tests: [cargo test]
 
   - component: world-unload-cleanup-controller
@@ -1346,6 +1344,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/deadlines.rs, crates/phoenix-simulation/src/world/script/schedule.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/delayed.rs, crates/phoenix-simulation/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-sim-world/src/world/deadlines.rs, crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-sim-world/src/world/delayed.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [apply_world_layer_changes, evaluate_layer_unload, remove_origin, remove_layer_script_triggers, partition_delayed_actions_on_unload]
-      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume a_layer_deadline_resumes", crates/phoenix-simulation/src/world/layers_tests.rs, crates/phoenix-simulation/src/world/deadlines_tests.rs, crates/phoenix-simulation/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/world/delayed_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs]
+      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume a_layer_deadline_resumes", crates/phoenix-simulation/src/world/layers_tests.rs, crates/phoenix-sim-world/src/world/deadlines_tests.rs, crates/phoenix-sim-world/src/world/script/schedule_tests.rs, crates/phoenix-sim-world/src/world/delayed_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs]

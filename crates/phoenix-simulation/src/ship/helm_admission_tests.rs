@@ -467,7 +467,7 @@ fn spawn_admission_npc_with_thrust_id(
     source: ControlSource,
     thrust_id: &str,
 ) -> (Entity, String) {
-    let mut config = crate::ship::components::ShipConfigComponent::default();
+    let mut config = crate::ship::components::load_ship_config_from_disk();
     config
         .0
         .systems
@@ -632,7 +632,7 @@ fn admitted_set_boost_engages_a_non_local_npc() {
         .spawn((
             crate::server_app::Ship,
             crate::ai::server::AiHighFidelity,
-            crate::ship::components::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             sources,
             crate::core::messages::AdmittedCommands::default(),
             crate::ship::components::BoostConfigResource {
@@ -697,7 +697,7 @@ fn admitted_toggle_boost_engages_a_non_local_npc() {
         .spawn((
             crate::server_app::Ship,
             crate::ai::server::AiHighFidelity,
-            crate::ship::components::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             sources,
             crate::core::messages::AdmittedCommands::default(),
             crate::ship::components::BoostConfigResource {
@@ -748,7 +748,7 @@ fn admitted_set_boost_is_ignored_without_an_enabled_boost_config() {
         .spawn((
             crate::server_app::Ship,
             crate::ai::server::AiHighFidelity,
-            crate::ship::components::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             sources,
             crate::core::messages::AdmittedCommands::default(),
             // No BoostConfigResource at all: no authored boost.

@@ -12,7 +12,7 @@ use crate::modifiers::ShipModifiers;
 use crate::server_app::{LocalShip, Ship, ShipBoost, ShipImpulse};
 use crate::ship::components::{
     ActiveStationRatings, CoordinationQueue, HelmWaypointClearance, LastHelmInput,
-    ShipConfigComponent, ShipSystemControlSources,
+    ShipSystemControlSources,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::helm::{SteeringInput, ThrustInput};
@@ -93,7 +93,7 @@ pub fn test_app() -> App {
             ),
             Transform::default(),
             ShipPhysics::default(),
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
@@ -385,7 +385,7 @@ pub fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
 
 /// Add the shield-arc fine Systems that `EntityConfig::from_toml` synthesises
 /// from a real hull's `[[shield_arc]]` blocks to the lightweight default ship
-/// fixture. `ShipConfigComponent::default()` predates that parse-time step, so
+/// fixture. `crate::ship::components::load_ship_config_from_disk()` predates that parse-time step, so
 /// a Coordination test that resolves the Station owning `shield_arc` must add
 /// the same topology explicitly rather than inventing a literal destination.
 pub fn add_default_shield_arc_systems(config: &mut crate::ship::config::ShipConfig) {
@@ -680,7 +680,7 @@ pub fn test_app_with_engine_hull() -> App {
             ),
             Transform::default(),
             ShipPhysics::default(),
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),

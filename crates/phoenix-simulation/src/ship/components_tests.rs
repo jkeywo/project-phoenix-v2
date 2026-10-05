@@ -54,8 +54,8 @@ fn every_pending_ship_component_either_joins_the_bus_class_or_is_excused() {
 
     let mut found: BTreeSet<String> = BTreeSet::new();
     for file in [
-        "crates/phoenix-simulation/src/ship/components.rs",
-        "crates/phoenix-simulation/src/ship/shields.rs",
+        "crates/phoenix-sim-gameplay/src/ship/components.rs",
+        "crates/phoenix-sim-gameplay/src/ship/shields.rs",
     ] {
         for line in read_non_test_source(file).lines() {
             let Some(rest) = line.trim_start().strip_prefix("pub struct Pending") else {

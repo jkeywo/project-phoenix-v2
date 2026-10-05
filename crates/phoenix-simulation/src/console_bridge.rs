@@ -10,16 +10,6 @@
 
 use bevy::prelude::*;
 
-/// Session token used for actions originating from the local HTML consoles
-/// (browser server viewscreen / native wry server), where the operator drives
-/// a console directly rather than through a remote network session. The host
-/// page routes its console actions through `gui/action-map.js` into full
-/// `ClientMessage` JSON and submits them via `wasm_receive_message` under this
-/// token (issue #822); the gameplay console handlers treat it as an authorized
-/// local operator (see the weapons fire guards). Defined here — ungated — so
-/// both the wasm bridge and the (non-wasm) gameplay handlers can reference it.
-pub const LOCAL_CONSOLE_TOKEN: &str = "__local_console__";
-
 /// Emitted by `viewscreen_border::push_hud_state` when the serialised HUD
 /// state changes. `json` is the output of `codec::to_json`. Drained
 /// by `bridge::flush_host_channels` (wasm) onto the `"hud"` host channel.
@@ -163,3 +153,5 @@ pub struct GmHealthChanged {
 pub struct GmWorkloadChanged {
     pub payload: crate::gm_workload::GmWorkloadProjection,
 }
+
+pub use phoenix_sim_contracts::authority::LOCAL_CONSOLE_TOKEN;

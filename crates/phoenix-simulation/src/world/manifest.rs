@@ -18,7 +18,7 @@
 // testable on native with an in-memory world map, and keeps the wasm/native
 // accessors a thin wrapper over the pure core.
 
-use crate::world::config::{parse_world, AvailableShipEntry, ShipSlotConfig};
+use crate::world::config::{parse_world, AvailableShipEntry};
 use crate::world::validate::{line_of, Severity, SourceLocation, WorldFinding};
 
 pub use phoenix_content::manifest::*;
@@ -174,41 +174,6 @@ pub fn validate_manifest(
     }
 
     findings
-}
-
-/// One player-ship option offered by a scenario (reuses the world's
-/// [`AvailableShipEntry`]).
-pub type CatalogShip = AvailableShipEntry;
-
-/// One selectable scenario in the pre-load catalog, with its display metadata
-/// and the ships it offers.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScenarioCatalogEntry {
-    /// Stable scenario id from the manifest.
-    pub id: String,
-    /// World TOML path.
-    pub world: String,
-    /// Display label: the manifest entry's `label`, else the world's
-    /// `[global] title`, else `None`.
-    pub label: Option<String>,
-    /// The world's `[global] description`, when present.
-    pub description: Option<String>,
-    /// The ships this scenario offers — `[[available_ships]]` for a legacy
-    /// world, or the deduplicated hull options of its explicit ship slots.
-    pub ships: Vec<CatalogShip>,
-    /// Authored mission slots after legacy one-slot compatibility synthesis.
-    pub slots: Vec<ShipSlotConfig>,
-    /// Provenance: the pack id this scenario came from, or `None` for a
-    /// base-manifest scenario (issue #987). `build_catalog` always sets `None`;
-    /// [`build_merged_catalog`] stamps each mod scenario with its pack id.
-    pub origin: Option<String>,
-}
-
-/// The authoritative pre-load catalog: the selectable scenarios and their
-/// per-scenario ship lists, built from the manifest before any world is active.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ScenarioCatalog {
-    pub scenarios: Vec<ScenarioCatalogEntry>,
 }
 
 /// Build the authoritative scenario/ship catalog from a parsed manifest.
@@ -386,3 +351,5 @@ fn finding(
 #[cfg(test)]
 #[path = "manifest_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_contracts::catalogue::{CatalogShip, ScenarioCatalog, ScenarioCatalogEntry};

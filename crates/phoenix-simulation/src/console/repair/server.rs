@@ -332,25 +332,6 @@ pub(crate) fn receive_repair_coordination(
     }
 }
 
-impl RepairHumanAlerted {
-    /// Accept the first sub-Disabled damage report for a station, and every
-    /// Disabled/Destroyed report. The latter intentionally includes repeated
-    /// deliveries at the same tier: that is the pre-#1257 escalation behavior,
-    /// not a worsening-only comparison.
-    fn accepts_popup(&mut self, station_id: &str, tier: DamageTier) -> bool {
-        let already = self
-            .0
-            .get(station_id)
-            .copied()
-            .unwrap_or(DamageTier::Operational);
-        if tier < DamageTier::Disabled && already != DamageTier::Operational {
-            return false;
-        }
-        self.0.insert(station_id.to_string(), tier);
-        true
-    }
-}
-
 // ── Broadcaster ───────────────────────────────────────────────────────────────
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `RepairState` producer.

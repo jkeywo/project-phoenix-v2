@@ -64,7 +64,7 @@ fn test_app() -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::core::messages::AdmittedCommands::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -182,7 +182,7 @@ fn dispatch_local(app: &mut App, idx: usize, sid: SystemId, name: &str) {
 /// the fixture hull does not already carry.
 ///
 /// The ids passed here are always systems the shipped battleship config
-/// (`ShipConfigComponent::default()`) OWNS from the station under test, so a
+/// (`crate::ship::components::load_ship_config_from_disk()`) OWNS from the station under test, so a
 /// `RepairTarget::Station` dispatch resolves through `systems_for_station`
 /// rather than through the station-name fallback.
 ///
@@ -1884,7 +1884,7 @@ fn set_repair_target_priority_from_a_non_engineering_token_is_rejected() {
 // AC6: every assertion below reads OBSERVABLE state — `TeamSlot` variants
 // and their `system_id`, `RepairRequestQueue.entries`, and
 // `EntitySystemHull` HP — never a `TargetSelector::select` return value.
-// The selector's own semantics are unit-tested in `crates/phoenix-simulation/src/ai/selector.rs`.
+// The selector's own semantics are unit-tested in `crates/phoenix-sim-gameplay/src/ai/selector.rs`.
 
 /// Two stations, each owning one fine system, so a station dispatch resolves
 /// to a distinct observable `system_id`.
@@ -2675,7 +2675,7 @@ fn repair_delivery_app() -> (App, Entity) {
         .spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             RepairRequestQueue::default(),
             RepairHumanAlerted::default(),
         ))
@@ -3023,7 +3023,7 @@ fn tick_repair_teams_sweeps_the_station_using_the_ship_config() {
 
     // `helm-engine-port` and `helm-engine-starboard` are BOTH owned by the
     // `helm` station in the shipped battleship config
-    // `ShipConfigComponent::default()` loads, so they share a sweep group.
+    // `crate::ship::components::load_ship_config_from_disk()` loads, so they share a sweep group.
     // The fixture REPLACES the hull with exactly those two rows: the shipped
     // battleship authors 13 `[[hull.system_hull]]` rows and none of them is
     // named `helm` (a station name is not a hull row), so nothing in this

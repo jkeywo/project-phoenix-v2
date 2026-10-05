@@ -676,7 +676,7 @@ station = "captain"
     app.world_mut().spawn((
         crate::server_app::Ship,
         EntityUuid("npc-ship".into()),
-        ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         ActiveStationRatings::default(),
         ShipSystemControlSources::default(),
         crate::server_app::ShipSystemBlackboards::default(),

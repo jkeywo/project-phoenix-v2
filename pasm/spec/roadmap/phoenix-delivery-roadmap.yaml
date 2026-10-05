@@ -233,14 +233,14 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/ship/system_registry.rs
-        - crates/phoenix-simulation/src/ship/coordination.rs
+        - crates/phoenix-sim-gameplay/src/ship/system_registry.rs
+        - crates/phoenix-sim-gameplay/src/ship/coordination.rs
         - gui/reducer-result.js
         - crates/phoenix-simulation/src/server_app/components.rs
         - crates/phoenix-simulation/src/core/broadcast/lifecycle.rs
         - crates/phoenix-simulation/src/debug/catalogue.rs
         - scripts/generate-debug-surfaces.mjs
-        - crates/phoenix-simulation/src/objectives/directive.rs
+        - crates/phoenix-sim-contracts/src/directive.rs
       tests:
         - crates/phoenix-simulation/src/ship/system_registry_tests.rs
         - crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs

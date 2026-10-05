@@ -9,7 +9,7 @@
 //! into testing a shape the other does not produce.
 //!
 //! Refusal cases live beside the rest of the world grammar in
-//! `crates/phoenix-simulation/src/world/config_tests.rs`, where `parse_world`'s other semantic errors are.
+//! `crates/phoenix-sim-world/src/world/config_tests.rs`, where `parse_world`'s other semantic errors are.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use project_phoenix::core::codec::encode_gm_role_presets;

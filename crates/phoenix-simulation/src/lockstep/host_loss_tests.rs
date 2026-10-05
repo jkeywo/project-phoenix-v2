@@ -1,4 +1,5 @@
 use super::*;
+use crate::command_admission::log::HostSlot;
 use bevy::{app::Update, prelude::App};
 
 fn gm_loss_app(

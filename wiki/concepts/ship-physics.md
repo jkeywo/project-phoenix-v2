@@ -2,7 +2,7 @@
 title: Ship Physics
 type: concept
 tags: [ship, physics, rapier, controller, pure-function]
-sources: [crates/phoenix-simulation/src/ship/physics.rs, crates/phoenix-simulation/src/ship/physics_systems.rs, crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/registration.rs, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/registration.rs, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 

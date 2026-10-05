@@ -80,6 +80,7 @@
 
 use bevy::prelude::*;
 use project_phoenix::authoritative::{StateCensus, StateClass};
+use project_phoenix::headless::determinism_audit::migrated_symbol;
 use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
 
 /// `rng_coverage.toml` (issue #837), same as
@@ -98,7 +99,7 @@ const SEED: u64 = 20260894;
 /// Since issue #1222 (Track 3 step C10) every authoritative type that used to
 /// live in the local `AUTHORITATIVE_SYMBOLS` const is declared at its owning
 /// `build()` site via `App::declare_state::<T>(class, pasm)` (see
-/// `crates/phoenix-simulation/src/authoritative.rs` and the block in `server_app::add_simulation_plugins_with`),
+/// `crates/phoenix-sim-contracts/src/authoritative.rs` and the block in `server_app::add_simulation_plugins_with`),
 /// and this guard reads the set back out of the census — the mirror image of
 /// [`census_excluded_short_names`] below. The two authoritative fold shapes count
 /// here: `Folded` (state `crates/phoenix-simulation/src/sim_digest.rs`'s `world_digest` walks every tick)
@@ -147,7 +148,7 @@ fn census_authoritative_short_names(app: &App) -> std::collections::BTreeSet<Str
 /// Since issue #1221 (Track 3 step C9) every non-authoritative type that used to
 /// live in a local `EXCLUSIONS` const is declared at its OWNING plugin's
 /// `build()` via `App::declare_state::<T>(class, pasm)` (see
-/// `crates/phoenix-simulation/src/authoritative.rs`), and this guard reads the set back out of the census
+/// `crates/phoenix-sim-contracts/src/authoritative.rs`), and this guard reads the set back out of the census
 /// instead. The reason classes are unchanged — presentation / cache / timer /
 /// derived / cleared-at-fold, exactly the `deterministic-simulation.yaml`
 /// `digest-exclusion-classes` vocabulary — they now live as a [`StateClass`] at
@@ -172,7 +173,7 @@ fn census_authoritative_short_names(app: &App) -> std::collections::BTreeSet<Str
 /// C9 nothing declares those, so the filter is belt-and-suspenders — but it keeps
 /// the set honest the day a folded declaration lands beside these.
 ///
-/// `EntitySnapshot` (`crates/phoenix-simulation/src/core/messages.rs`) is deliberately covered by NEITHER
+/// `EntitySnapshot` (`crates/phoenix-sim-gameplay/src/core/messages.rs`) is deliberately covered by NEITHER
 /// this set nor the census-derived authoritative set
 /// ([`census_authoritative_short_names`]): it carries no
 /// `#[derive(Component)]`/`#[derive(Resource)]` at all (a plain wire-message
@@ -235,7 +236,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::ai::server::AiTokenRegistry",
     "phoenix_simulation::ai::server::ObjectiveCursors",
     // The authoritative-state declaration registry itself (issue #1220's
-    // `StateCensus`, `crates/phoenix-simulation/src/authoritative.rs`). It first ENTERS the registry as of
+    // `StateCensus`, `crates/phoenix-sim-contracts/src/authoritative.rs`). It first ENTERS the registry as of
     // issue #1221: `declare_state` `init_resource`s it on first use, and #1221 is
     // when production plugins begin declaring, so a real run now inserts it. It is
     // a build-time coverage/diagnostic surface — populated once as plugins build,
@@ -392,7 +393,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `#[derive(Resource)]` and no `#[derive(Component)]`, nothing new appears in
     // the registry this guard scans, and both baseline entries keep covering
     // exactly what they did before — with more state behind them. See
-    // `crates/phoenix-simulation/src/world/deadlines.rs` for why a deadline is a record over the existing
+    // `crates/phoenix-sim-world/src/world/deadlines.rs` for why a deadline is a record over the existing
     // queue rather than a scheduler (and a resource) of its own, and
     // pasm/spec/architecture/scenario-scripting.yaml's `mission-deadline-state`
     // entity for the `implementation.symbols` naming those Rust types.
@@ -407,7 +408,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `WorldScriptRuntime` either: there is no `[[commitment]]` block and so no
     // load-time declaration table to hold — a promise exists because of what a
     // player said, not because of what an author wrote down. See
-    // `crates/phoenix-simulation/src/world/commitments.rs`, and
+    // `crates/phoenix-sim-world/src/world/commitments.rs`, and
     // pasm/spec/architecture/scenario-scripting.yaml's `commitment-ledger-state`
     // entity for the `implementation.symbols` naming those Rust types.
     //
@@ -426,7 +427,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // The one place it DOES touch a scanned type is `InfrastructureState`,
     // which gained an authored, immutable `workforce` naming the side that
     // staffs a structure — a field on state `InfrastructureCondition` already
-    // covers, not a registration. See `crates/phoenix-simulation/src/world/workforce.rs`, and
+    // covers, not a registration. See `crates/phoenix-sim-world/src/world/workforce.rs`, and
     // pasm/spec/architecture/scenario-scripting.yaml's `workforce-register-state`
     // entity for the `implementation.symbols` naming those Rust types.
     //
@@ -461,7 +462,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // that writes it (`ctx.dossier.append`) buffers an ordinary `ActionCmd` on
     // the existing effect sink and adds no `WorldScriptRuntime` field either:
     // there is no `[[evidence]]` block, so there is no load-time declaration
-    // table to hold. See `crates/phoenix-simulation/src/dossier/evidence.rs`, and
+    // table to hold. See `crates/phoenix-sim-world/src/dossier/evidence.rs`, and
     // pasm/spec/architecture/world-files.yaml's `dossier-evidence-state` entity
     // for the `implementation.symbols` naming those Rust types.
     //
@@ -482,7 +483,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // have been a second authoritative record of something the flag store can
     // already hold, needing its own classification, its own snapshot field and
     // its own fold decision, to answer a question a counter answers. See
-    // `crates/phoenix-simulation/src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
+    // `crates/phoenix-sim-gameplay/src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
     // #1035's `FlagMirror` two paragraphs up for the precedent.
     //
     // Issue #1043's CAMPAIGN FLAG HANDOFF registers nothing either, and it is the
@@ -658,6 +659,10 @@ fn build_and_run() -> App {
 const CRATE_PREFIXES: &[&str] = &[
     "project_phoenix::",
     "phoenix_simulation::",
+    "phoenix_sim_contracts::",
+    "phoenix_sim_gameplay::",
+    "phoenix_sim_world::",
+    "phoenix_sim_session::",
     "phoenix_presentation::",
     "phoenix_model::",
     "phoenix_content::",
@@ -747,8 +752,11 @@ fn every_registered_type_maps_to_the_digest_record() {
     // (`StateCensus`), not a local `EXCLUSIONS` const (issue #1221). Still
     // consulted by SHORT name, as it always was.
     let excluded: std::collections::BTreeSet<String> = census_excluded_short_names(&app);
-    let baseline: std::collections::BTreeSet<&str> =
-        UNCLASSIFIED_BASELINE.iter().copied().collect();
+    // Keep the existing rows; map only reviewed package relocations.
+    let baseline: std::collections::BTreeSet<String> = UNCLASSIFIED_BASELINE
+        .iter()
+        .map(|name| migrated_symbol(name))
+        .collect();
 
     let mut newly_unclassified: Vec<&str> = registered
         .iter()
@@ -815,9 +823,9 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
     let authoritative: std::collections::BTreeSet<String> = census_authoritative_short_names(&app);
     let excluded: std::collections::BTreeSet<String> = census_excluded_short_names(&app);
 
-    let mut stale: Vec<&str> = UNCLASSIFIED_BASELINE
+    let mut stale: Vec<String> = UNCLASSIFIED_BASELINE
         .iter()
-        .copied()
+        .map(|name| migrated_symbol(name))
         .filter(|full| {
             // Baseline entries are FULL paths now, so `registered` (also full
             // paths) is checked directly; the two short-name superset lists are
@@ -828,7 +836,7 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
                 .resource::<StateCensus>()
                 .alias_owner(full)
                 .is_some()
-                || !registered.contains(*full)
+                || !registered.contains(full)
                 || authoritative.contains(short.as_str())
                 || excluded.contains(short.as_str())
         })
@@ -887,7 +895,7 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
     // digest boundary.
     assert!(
         !authoritative.contains("EntitySnapshot"),
-        "EntitySnapshot (crates/phoenix-simulation/src/core/messages.rs) is the #894 HITL thread's \
+        "EntitySnapshot (crates/phoenix-sim-gameplay/src/core/messages.rs) is the #894 HITL thread's \
          rejected shortcut — it carries authored presentation fields \
          (radar_icon, region_colour, colour, radar_size) and must never stand \
          in for the digest boundary. See digest-boundary-reviewer-answers in \

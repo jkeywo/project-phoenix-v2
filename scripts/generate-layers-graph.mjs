@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, relative, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as toml } from 'smol-toml';
+import { dependencyEntries } from './layer-policy.mjs';
 import { init, parse as modules } from 'es-module-lexer';
 await init;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -11,7 +12,11 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const descriptions = {
   'project-phoenix': 'Host composition, native and browser adapters, headless runner and Workshop host.',
   'phoenix-presentation': 'Shared 3D view: renderer, effects, cameras, HUD and Workshop preview.',
-  'phoenix-simulation': 'Game rules, ECS schedules, AI, scripts, command admission and snapshots.',
+  'phoenix-simulation': 'Composition: schedules, live cross-domain adapters, materialization, snapshots and recovery.',
+  'phoenix-sim-gameplay': 'EntityConfig, ship mechanics, physics, weapon rules, policy machines and Helm AI operators.',
+  'phoenix-sim-world': 'WorldConfig, scripts, objectives, commitments, deadlines and narrative state.',
+  'phoenix-sim-session': 'Crew, Station tenure, lobby decisions, connection lifecycle and fleet protocol state.',
+  'phoenix-sim-contracts': 'Shared identities, tick and RNG, commands, authority, schedules and authored vocabulary.',
   'phoenix-content': 'Asset preparation, archives, includes, manifests, strings and content ledger.',
   'phoenix-model': 'Shared Phoenix types, identities, messages and visual declarations.',
   'phoenix-runtime': 'Generic command ordering, continuation, digests and recovery.',
@@ -28,21 +33,16 @@ const rustNodes = ['.', ...workspace.workspace.members].map(path => {
 const rustIds = new Set(rustNodes.map(n => n.id));
 const rustEdges = new Map();
 for (const node of rustNodes) {
-  for (const [target, section] of [['all targets', node.manifest], ...Object.entries(node.manifest.target || {})]) {
-    for (const kind of ['dependencies', 'dev-dependencies', 'build-dependencies']) {
-      for (const [alias, definition] of Object.entries(section[kind] || {})) {
-        const to = definition.package || alias;
-        if (!rustIds.has(to)) continue;
-        const key = `${node.id}/${to}`;
-        if (!rustEdges.has(key)) rustEdges.set(key, { from: node.id, to, evidence: [], normal: false });
-        const edge = rustEdges.get(key);
-        edge.normal ||= kind === 'dependencies';
-        edge.evidence.push(`${node.source}: ${kind}, ${target}${definition.optional ? ', optional' : ''}`);
-      }
-    }
+  for (const { name: to, definition, kind, target, alias } of dependencyEntries(node.manifest, workspace.workspace)) {
+    if (!rustIds.has(to)) continue;
+    const key = `${node.id}/${to}`;
+    if (!rustEdges.has(key)) rustEdges.set(key, { from: node.id, to, evidence: [], normal: false });
+    const edge = rustEdges.get(key);
+    edge.normal ||= kind === 'dependencies';
+    edge.evidence.push(`${node.source}: ${kind}, ${target}${definition.optional ? ', optional' : ''}${alias !== to ? `, alias ${alias}` : ''}${definition.workspace ? ', inherited' : ''}`);
   }
   delete node.manifest;
-  node.group = node.id === 'project-phoenix' || node.id === 'phoenix-grid' ? 'host' : ['phoenix-runtime','phoenix-transport','phoenix-platform','phoenix-math'].includes(node.id) ? 'shared' : 'game';
+  node.group = node.id === 'project-phoenix' || node.id === 'phoenix-grid' ? 'host' : ['phoenix-runtime','phoenix-transport','phoenix-platform','phoenix-math','phoenix-sim-contracts'].includes(node.id) ? 'shared' : 'game';
 }
 const jsNodes = [
   { id: 'browser-ui', label: 'Phoenix browser UI', path: 'gui', source: 'server.html', description: 'Phone consoles, shared screen controls and Workshop. Includes root HTML entry points.', group: 'host' },

@@ -2,7 +2,7 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
-sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/radar.rs, crates/phoenix-simulation/src/radar_config.rs, crates/phoenix-simulation/src/entities/tags.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, CONTEXT.md]
+sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/radar.rs, crates/phoenix-sim-gameplay/src/radar_config.rs, crates/phoenix-sim-gameplay/src/entities/tags.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, CONTEXT.md]
 updated: 2026-09-07
 ---
 

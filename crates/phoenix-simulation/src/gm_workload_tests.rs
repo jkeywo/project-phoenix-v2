@@ -7,7 +7,7 @@ fn every_shipped_task_verb_has_a_recorded_decision() {
     // demand" through the unknown-verb rule.
     let source = crate::repo_fixtures::fs::read_to_string(concat!(
         concat!(env!("CARGO_MANIFEST_DIR"), "/../.."),
-        "/crates/phoenix-simulation/src/core/task_lifecycle.rs"
+        "/crates/phoenix-sim-world/src/core/task_lifecycle.rs"
     ))
     .expect("task_lifecycle.rs is readable");
     let declared: Vec<String> = source

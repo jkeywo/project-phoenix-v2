@@ -390,9 +390,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/world/manifest.rs
-        - src/server/bridge.rs
-        - server.html
+        [crates/phoenix-simulation/src/world/manifest.rs, src/server/bridge.rs, server.html, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [build_merged_catalog, MergedCatalog, ScenarioCatalogEntry]
       tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:

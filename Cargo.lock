@@ -5059,6 +5059,83 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-sim-contracts"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "phoenix-content",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-runtime",
+ "phoenix-transport",
+ "rand 0.9.4",
+ "ron",
+ "serde",
+ "strum",
+ "toml",
+ "uuid",
+ "vellum-digest",
+ "vellum-rng",
+]
+
+[[package]]
+name = "phoenix-sim-gameplay"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_rapier3d",
+ "glam 0.30.10",
+ "libm",
+ "phoenix-content",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-sim-contracts",
+ "rand 0.9.4",
+ "ron",
+ "serde",
+ "serde_json",
+ "strum",
+ "toml",
+ "uuid",
+ "vellum-rng",
+]
+
+[[package]]
+name = "phoenix-sim-session"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "phoenix-model",
+ "phoenix-runtime",
+ "phoenix-sim-contracts",
+ "phoenix-transport",
+ "ron",
+ "serde",
+ "serde_json",
+ "vellum-replay",
+]
+
+[[package]]
+name = "phoenix-sim-world"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "libm",
+ "phoenix-content",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-sim-contracts",
+ "rhai",
+ "ron",
+ "serde",
+ "serde_json",
+ "toml",
+ "uuid",
+ "vellum-rng",
+ "vellum-script",
+]
+
+[[package]]
 name = "phoenix-simulation"
 version = "0.1.0"
 dependencies = [
@@ -5082,6 +5159,10 @@ dependencies = [
  "phoenix-model",
  "phoenix-platform",
  "phoenix-runtime",
+ "phoenix-sim-contracts",
+ "phoenix-sim-gameplay",
+ "phoenix-sim-session",
+ "phoenix-sim-world",
  "phoenix-transport",
  "rand 0.9.4",
  "rapier3d",

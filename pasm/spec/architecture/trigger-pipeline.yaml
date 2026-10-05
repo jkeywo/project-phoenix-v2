@@ -137,7 +137,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/world/trigger_registry.rs]
+      paths: [crates/phoenix-sim-world/src/world/trigger_registry.rs]
       symbols: [WorldTriggerRegistry, ScriptHandlerRef, TriggerRuntimeState, TriggerRestoreError, FiredWorldTrigger]
       tests: ["cargo test --lib --features headless trigger_registry", "cargo test --lib --features headless middle_layer_removal_restore_and_append", "cargo test --lib --features headless snapshot_reports_incompatible_trigger_rows"]
     evidence:
@@ -145,7 +145,7 @@ entities:
         reference: "crates/phoenix-simulation/src/world/server_tests.rs::middle_layer_removal_restore_and_append_keep_same_named_handlers_with_their_owners"
         summary: "Loads A/B/C with identically named handler functions, removes B, restores layered latches into a fresh app, fires only C's own script, then reloads B at the end and verifies its owner and continuation."
       - kind: test
-        reference: "crates/phoenix-simulation/src/world/trigger_registry_tests.rs"
+        reference: "crates/phoenix-sim-world/src/world/trigger_registry_tests.rs"
         summary: "Mixed declarative/scripted order, same-length replacement generation, handler-preserving continuation, atomic mismatch refusal and the unchanged RON row shape."
 
   - component: world-trigger-chaining-loop
@@ -174,9 +174,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/content.rs, crates/phoenix-simulation/src/world/trigger_registry.rs, crates/phoenix-simulation/src/world/script/engine.rs, crates/phoenix-simulation/src/world/script/schedule.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/script/engine.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
       symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
-      tests: [cargo test, crates/phoenix-simulation/src/world/script/engine_tests.rs, crates/phoenix-simulation/src/world/script/schedule_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/world/script/engine_tests.rs, crates/phoenix-sim-world/src/world/script/schedule_tests.rs]
     evidence:
       - kind: test
         reference: trigger_chain_exceeding_max_passes_stops_at_the_cap
@@ -214,7 +214,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/entities/loader.rs]
+      paths: [crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols: [dispatch_action, dispatch_state_action, dispatch_entity_modifier_action, dispatch_world_flag_action, dispatch_destroy_entity, dispatch_spawn_entity, DispatchContext, DispatchResult, ActionCmd, TemplateLoader]
       tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs]
     evidence:
@@ -229,7 +229,7 @@ entities:
       title: Trigger Action Extension Contract
       summary: The authored procedure for adding a new trigger action variant. Exhaustive matches in the dispatch table's routing match and the applier mean the compiler walks the author to every site that must change; the one runtime-only gap is the group functions' unreachable! guards (covered by should_panic tests). There were TWO dispatch sites until issue #985 — the comms-response handler carried an intentionally parallel match — and that duplication is what the retired parity enumeration protected.
       goals:
-        - "declare the new variant on the TriggerAction enum and, if a script should be able to buffer it, give it a host fn (crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/script/effects.rs). It is no longer parsed from world TOML - issue #985 deleted the `[[trigger.action]]` array, so a variant reaches the world either as a `BufferedEffect::Action` from a script or as a `DelayedAction` from `ctx.schedule.in_seconds`"
+        - "declare the new variant on the TriggerAction enum and, if a script should be able to buffer it, give it a host fn (crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-world/src/world/script/effects.rs). It is no longer parsed from world TOML - issue #985 deleted the `[[trigger.action]]` array, so a variant reaches the world either as a `BufferedEffect::Action` from a script or as a `DelayedAction` from `ctx.schedule.in_seconds`"
         - add a dispatch arm in the pure table (crates/phoenix-simulation/src/world/dispatch.rs), routed into the matching per-group function or a new group function for a new action family
         - when the action needs a new ECS effect, add an ActionCmd variant and an applier arm (apply_dispatch_result in crates/phoenix-simulation/src/world/server.rs); actions that resolve to existing commands need no applier change
         - add pure unit tests beside the dispatch table and pipeline tests beside the Bevy systems
@@ -244,7 +244,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols: [TriggerAction, ActionCmd]
       tests: [cargo test]
 
@@ -265,9 +265,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/delayed.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/delayed.rs]
       symbols: [tick_delayed_actions, DelayedAction, partition_delayed_actions]
-      tests: [cargo test, crates/phoenix-simulation/src/world/delayed_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/world/delayed_tests.rs]
     evidence:
       - kind: test
         reference: delayed_action_dispatches_and_queues_event_for_next_tick

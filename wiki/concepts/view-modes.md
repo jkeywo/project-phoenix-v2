@@ -2,7 +2,7 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/radar.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, gui/console-state.js, crates/phoenix-simulation/src/crew_spectator.rs, gui/crew-spectator-view.js]
+sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/ship/viewscreen.rs, crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/radar.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, gui/console-state.js, crates/phoenix-simulation/src/crew_spectator.rs, gui/crew-spectator-view.js]
 updated: 2026-09-27
 ---
 

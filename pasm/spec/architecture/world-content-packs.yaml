@@ -29,7 +29,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [assets/scenarios.toml, crates/phoenix-simulation/src/world/manifest.rs, src/server/bridge.rs]
+      paths: [assets/scenarios.toml, crates/phoenix-simulation/src/world/manifest.rs, src/server/bridge.rs, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [Manifest, ScenarioEntry, parse_manifest, validate_manifest, ScenarioCatalog, build_catalog]
       tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
@@ -45,7 +45,7 @@ entities:
       writers: [world-content-pack-catalog]
     implementation:
       status: declared
-      paths: [assets/worlds, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/world/config.rs]
+      paths: [assets/worlds, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-contracts/src/catalogue.rs]
       # The catalog listing is Manifest/ScenarioCatalog (see
       # base-scenario-manifest); WorldConfig is the parsed per-world content
       # each catalog entry resolves to once loaded.

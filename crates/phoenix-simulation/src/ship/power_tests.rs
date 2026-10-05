@@ -1,5 +1,6 @@
 use super::*;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
+use crate::modifiers::power_system::PowerConfig;
 
 /// Issue #977: the label producer emits `strings.csv` ids, never composed
 /// English. Every id it can return must exist in the table (so `localiseTree`
@@ -97,7 +98,7 @@ fn test_app() -> App {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         crate::server_app::ShipSystemBlackboards::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
         crate::core::messages::AdmittedCommands::default(),
@@ -884,7 +885,7 @@ fn reactor_offline_refuses_allocation_input() {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         crate::server_app::ShipSystemBlackboards::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
         crate::core::messages::AdmittedCommands::default(),

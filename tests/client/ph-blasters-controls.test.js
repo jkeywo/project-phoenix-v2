@@ -164,7 +164,7 @@ describe('PhBlastersControls', () => {
 
   // ── Shared weapon readiness contract (issue #764) ──────────────────────
   // Mirrors the same observable blocking cases the pure blaster model reports
-  // (crates/phoenix-simulation/src/weapons/blaster.rs bank_state tests): Ready / NoTarget / OutOfRange /
+  // (crates/phoenix-sim-gameplay/src/weapons/blaster.rs bank_state tests): Ready / NoTarget / OutOfRange /
   // OutOfArc / Cooldown / Loading / Offline.
 
   function blasterBank(reason, extra) {

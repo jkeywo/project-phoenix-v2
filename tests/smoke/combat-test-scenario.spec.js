@@ -11,7 +11,7 @@
 //
 // Combat balance / wave timing / victory conditions are NOT tested
 // here — they're too time-sensitive for fast smoke runs. The unit
-// tests in crates/phoenix-simulation/src/world/config.rs and crates/phoenix-simulation/src/world/server.rs cover the
+// tests in crates/phoenix-sim-world/src/world/config.rs and crates/phoenix-simulation/src/world/server.rs cover the
 // trigger-evaluation invariants.
 
 import {

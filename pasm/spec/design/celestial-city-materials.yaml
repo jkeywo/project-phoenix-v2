@@ -21,5 +21,5 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-presentation/src/entities/planet.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-simulation/src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_ecumenopolis.toml, scripts/planets]
+      paths: [crates/phoenix-presentation/src/entities/planet.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-sim-gameplay/src/entities/config/celestial.rs, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, assets/entities/planet_ecumenopolis.toml, scripts/planets]
       tests: [cargo test --lib entities::planet::tests, node scripts/planets/check-ecumenopolis.mjs, crates/phoenix-presentation/src/entities/planet_tests.rs]

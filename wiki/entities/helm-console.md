@@ -2,7 +2,7 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
-sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_admission.rs, crates/phoenix-simulation/src/ship/physics_systems.rs, crates/phoenix-simulation/src/ship/physics.rs, crates/phoenix-simulation/src/ship/impulse.rs, crates/phoenix-simulation/src/ship/boost.rs, crates/phoenix-simulation/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
+sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
 updated: 2026-09-06
 ---
 
@@ -17,10 +17,10 @@ the shipped hull families provide their own HTML layouts.
 The panel emits `ControlSystem` commands to the fine Helm systems, including
 thrust, steering, impulse, boost, and any lateral or vertical axes the hull
 mounts. `crates/phoenix-simulation/src/console/helm/server.rs` publishes Helm state, while
-`crates/phoenix-simulation/src/ship/helm_admission.rs` applies admitted commands to the per-axis command
-components. `crates/phoenix-simulation/src/ship/physics_systems.rs` consumes those components during the
+`crates/phoenix-sim-gameplay/src/ship/helm_admission.rs` applies admitted commands to the per-axis command
+components. `crates/phoenix-sim-gameplay/src/ship/physics_systems.rs` consumes those components during the
 fixed simulation tick and passes the resulting inputs through the pure physics
-model in `crates/phoenix-simulation/src/ship/physics.rs`.
+model in `crates/phoenix-sim-gameplay/src/ship/physics.rs`.
 
 Human and Backfill Helm use the same commands and physics path. Admission and
 the station's active rating decide which source may operate each fine system;

@@ -41,7 +41,7 @@ fn shield_test_app() -> App {
         offline_duration: 10.0,
     };
     let mut app = App::new();
-    let mut ship_config = ShipConfigComponent::default();
+    let mut ship_config = crate::ship::components::load_ship_config_from_disk();
     crate::ship::test_support::add_default_shield_arc_systems(&mut ship_config.0);
     let control_sources = ai_shield_control_sources(&ship_config.0);
     let mut world_config = crate::world::config::WorldConfig::default();

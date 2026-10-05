@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+pub use phoenix_sim_session::lobby::stations_config::{get_station, StationAssignments};
 
 /// A single station in the fixed roster.
 pub use phoenix_model::wire::StationDef;
@@ -32,14 +32,3 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
         .collect();
     ShipStations { stations }
 }
-
-/// Look up a station by name. Returns `None` if not found.
-pub fn get_station<'a>(stations: &'a ShipStations, name: &str) -> Option<&'a StationDef> {
-    stations
-        .stations
-        .iter()
-        .find(|d| d.name == name || d.id.0 == name)
-}
-
-/// Maps session token → station name.  A token absent from this map is a spectator.
-pub type StationAssignments = HashMap<String, String>;

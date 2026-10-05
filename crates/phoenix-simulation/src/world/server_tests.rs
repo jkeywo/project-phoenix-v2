@@ -8965,7 +8965,7 @@ fn region_trigger_test_app() -> App {
         crate::server_app::LocalShip,
         Transform::default(),
         crate::ship::state::ShipPhysics::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::modifiers::ShipModifiers::new(),
     ));
@@ -9134,7 +9134,7 @@ fn nonlocal_fleet_ship_region_entry_matches_local_peer() {
                 FleetSlotOf(HostSlot(1)),
                 Transform::default(),
                 crate::ship::state::ShipPhysics::default(),
-                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship::components::load_ship_config_from_disk(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::modifiers::ShipModifiers::new(),
             ))

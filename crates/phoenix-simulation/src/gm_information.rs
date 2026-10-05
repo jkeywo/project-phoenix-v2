@@ -5,43 +5,6 @@ pub(crate) mod pair_map;
 pub mod reports;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ContactInformationChange {
-    SetGhost {
-        id: String,
-        palette: String,
-        position_mm: [i32; 3],
-    },
-    RemoveGhost {
-        id: String,
-    },
-    SetReportPolicy {
-        target: String,
-        policy: reports::ReportPolicy,
-    },
-    ClearReportPolicy {
-        target: String,
-    },
-}
-impl ContactInformationChange {
-    pub fn target(&self) -> &str {
-        match self {
-            Self::SetGhost { id, .. } | Self::RemoveGhost { id } => id,
-            Self::SetReportPolicy { target, .. } | Self::ClearReportPolicy { target } => target,
-        }
-    }
-    pub fn bounded(&self) -> bool {
-        let id = |v: &str| !v.is_empty() && v.len() <= 128 && !v.chars().any(char::is_control);
-        id(self.target())
-            && match self {
-                Self::SetGhost { palette, .. } => id(palette),
-                Self::SetReportPolicy { policy, .. } => policy.changes_report(),
-                _ => true,
-            }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GhostContact {
     pub id: String,
     pub palette: String,
@@ -225,3 +188,5 @@ pub fn viewscreen_ghosts(
 #[cfg(test)]
 #[path = "gm_information_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_world::gm_information::*;

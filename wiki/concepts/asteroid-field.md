@@ -2,7 +2,7 @@
 title: Asteroid Field
 type: concept
 tags: [asteroid, world, deterministic, density, streaming]
-sources: [crates/phoenix-simulation/src/asteroids/spawner.rs, crates/phoenix-simulation/src/asteroids/window.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/asteroids/mod.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/config_cache.rs, tests/asteroid_streaming.rs]
+sources: [crates/phoenix-simulation/src/asteroids/spawner.rs, crates/phoenix-simulation/src/asteroids/window.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/asteroids/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/config_cache.rs, tests/asteroid_streaming.rs]
 updated: 2026-09-07
 ---
 

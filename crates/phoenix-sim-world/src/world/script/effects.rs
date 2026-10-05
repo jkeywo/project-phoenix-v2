@@ -1,0 +1,1823 @@
+//! The per-call effect buffer (issue #979, Rhai milestone M1; issue #984, M6).
+//!
+//! Registered runtime host functions push onto a call-scoped [`EffectSink`],
+//! which drains into the **existing** dispatch boundary in `world::dispatch`.
+//! Script gets no new effect vocabulary: every host function here maps to
+//! something the declarative trigger front-end already produces, so the applier
+//! (`world::server`) grows no new arm.
+//!
+//! The buffer holds [`BufferedEffect`]s, of which there are two shapes sharing
+//! ONE ordered `Vec` so a flag write, an immediate command effect, and a
+//! name-resolving effect all apply in the order the script authored them:
+//!
+//! * [`BufferedEffect::Cmd`] — a fully-resolved [`ActionCmd`] needing no dispatch
+//!   context (the M1 set: `complete_objective`, `game_over`, … — plus the flag
+//!   writes [`flags`] pushes). The applier applies it directly.
+//! * [`BufferedEffect::Action`] — a declarative [`TriggerAction`] still holding
+//!   entity NAMES, buffered for the applier to resolve through the SAME
+//!   `dispatch_action` the declarative evaluator runs (issue #984, M6). The three
+//!   name-resolving verbs (`add_objective`, `spawn_entity`, `add_faction_enemy`)
+//!   need context absent at this host-fn boundary — no `WorldIdMint`,
+//!   `FactionRegistry`, `TemplateLoader`, or anchors — so they buffer the
+//!   unresolved action rather than a resolved command. Because a converted world
+//!   literally re-runs declarative dispatch, its `ActionCmd` sequence AND its
+//!   `SpawnEntity` UUID mint order are identical to its TOML twin's — byte-identity
+//!   is STRUCTURAL, not a re-implementation kept in sync (this is what a converted
+//!   world's authoritative digest, #894, rides on).
+//!
+//! One verb does NOT go through that buffer: `open_comms` (issue #984), which
+//! asks the comms module to open a scripted dialogue thread. Its
+//! [`OpenCommsRequest`] is comms vocabulary, not the world/entity vocabulary the
+//! applier dispatches, so it buffers separately and is materialised by a later
+//! comms system — see [`EffectSink`].
+//!
+//! The sink is an `Arc<Mutex<Vec<BufferedEffect>>>` so it can be registered on the
+//! shared runtime engine once and still be a fresh, per-call buffer: the host
+//! builds one sink per call, hands a clone into the context map, and — because
+//! the handle is reference-counted with interior mutability — the retained
+//! clone observes everything the script pushed. See [`engine::RuntimeHost`].
+//!
+//! The vocabulary is deliberately integer-and-string-only (the API is
+//! integer-only, `no_float`): `position` / `base_priority` / an `overrides`
+//! numeric leaf are authored as INTs and converted to the declarative `f32` /
+//! toml-float at this boundary, the same rule `after_secs`/`in_seconds` use.
+//!
+//! A FRACTIONAL leaf an int cannot express (`target_speed = 0.9`, a modifier
+//! `weight = 1.5`) is authored through the `flt("…")` marker: it carries a parsed
+//! `f64` as OPAQUE DATA (a [`RealLit`], never arithmetic), so `no_float`
+//! determinism is preserved AND the value is byte-identical to the declarative
+//! `0.9` — Rust's `f64` `FromStr` and toml's float parse agree on canonical
+//! decimals, which the parity tests pin. `map_f32` and `dynamic_to_toml` accept a
+//! `RealLit` wherever they already accept an int.
+//!
+//! An `overrides` leaf that targets a genuine INTEGER `EntityConfig` field
+//! (issue #1048) is the mirror-image problem: `dynamic_to_toml`'s ambient
+//! numeric-leaf rule renders a bare int as a toml FLOAT, because that is what
+//! the overwhelming majority of `EntityConfig` numeric fields are. A script
+//! that needs the rare int-target field instead says so explicitly with the
+//! `int(3)` marker (an [`IntLit`]), the same escape-hatch shape `flt("…")`
+//! already uses for the opposite rare case.
+//!
+//! [`ActionCmd`]: crate::world::dispatch::ActionCmd
+//! [`TriggerAction`]: crate::world::config::TriggerAction
+//! [`engine::RuntimeHost`]: crate::world::script::engine::RuntimeHost
+//! [`flags`]: crate::world::script::flags
+
+use std::sync::{Arc, Mutex};
+
+use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position};
+
+use crate::comms::content::OpenCommsRequest;
+use crate::world::config::{
+    parse_action_entry, RawActionEntry, RawCommandStance, RawModifier, RawZeroGate, TriggerAction,
+};
+use crate::world::dispatch::{ActionCmd, FlagMutation};
+use crate::world::script::registry::{host_fn, HostRegistry};
+
+/// A fractional literal carried as OPAQUE DATA, the `no_float`-safe fractional-leaf
+/// marker (issue #984, Rhai M6 follow-on).
+///
+/// Rhai is `no_float`, so an author cannot write `0.9` and the API is otherwise
+/// integer-only. `flt("0.9")` parses the string ONCE, at map-build time, into this
+/// wrapper; the `f64` is then only ever *read* (by [`dynamic_to_toml`] and
+/// [`map_f32`]) and never arithmetic'd in script, so determinism is untouched — a
+/// converted world does no float math, it merely transports a constant the toml
+/// crate would have parsed identically. Rust's `f64::from_str` and toml's float
+/// parse agree on canonical decimals, so `flt("0.9")` produces the SAME `f64` a
+/// declarative `0.9` does; the override / utility parity tests pin it.
+#[derive(Clone, Debug)]
+pub struct RealLit(pub f64);
+
+/// An integer literal carried as an explicit INTEGER-target marker, the
+/// `no_float`-safe mirror of [`RealLit`] (issue #1048).
+///
+/// # Why a marker, and not schema-aware conversion
+///
+/// `dynamic_to_toml` cannot tell, from a bare Rhai int alone, whether the
+/// author means "the target field is a float, and `200` is shorthand for
+/// `200.0`" (the overwhelming common case — `range`, `base_priority`,
+/// `target_speed`, …) or "the target field is a genuine integer, and `3`
+/// must render as a toml INTEGER" (`repair.repair_team_count`, `volley_count`,
+/// …). Resolving that honestly would mean knowing `EntityConfig`'s declared
+/// field type before rendering the leaf — real schema awareness, which this
+/// codebase has no reflection story for short of either (a) parsing serde's
+/// derive output at compile time (nothing here does that, and bolting it on
+/// for one conversion function is a disproportionate lift), or (b) a
+/// hand-maintained field-name → type table, which is the option the #1048
+/// review explicitly rejected: it rots the moment a new integer field is
+/// added to `EntityConfig` and nothing forces the table to be told.
+///
+/// So the marker: `int(3)` says, at the ONE leaf that needs it, "this is an
+/// integer target" — mirroring `flt("0.9")`'s "this is a fractional value"
+/// for the opposite rare case. Both are opt-in escape hatches over one
+/// ambient default (bare int ⇒ float), so the vastly more common float-target
+/// override needs no annotation at all, exactly as today.
+///
+/// # Why a plain `i64`, not a parsed string like `flt`
+///
+/// `flt` parses a STRING because Rhai's `no_float` build has no float literal
+/// at all — there is no other way to get an `f64` into a script. An integer
+/// target has no such gap: Rhai's native int type already IS the value an
+/// integer field wants, so `int(3)` wraps the `i64` directly. `int("3")`
+/// would add a parse step this marker has no reason to pay for.
+#[derive(Clone, Debug)]
+pub struct IntLit(pub i64);
+
+/// One buffered runtime effect, in authored order in the shared [`EffectSink`].
+///
+/// See the module docs for why two shapes share one buffer: a `Cmd` is a
+/// resolved [`ActionCmd`] the applier applies directly; an `Action` is an
+/// unresolved [`TriggerAction`] the applier resolves through the same
+/// `dispatch_action` the declarative front-end uses (so a scripted spawn mints
+/// its `EntityUuid` in the same order as its TOML twin — issue #984, M6).
+#[derive(Clone, Debug, PartialEq)]
+pub enum BufferedEffect {
+    /// A resolved command effect (the M1 set + flag writes).
+    Cmd(ActionCmd),
+    /// A declarative action still holding entity names, resolved at apply time.
+    Action(TriggerAction),
+}
+
+/// A call-scoped buffer of the [`BufferedEffect`]s a script produced.
+///
+/// Cloneable and interior-mutable: every clone shares one underlying `Vec`, so
+/// the runtime host can register the effect host-fns on the engine once and
+/// still collect exactly one call's effects.
+///
+/// A SECOND buffer holds the call's [`OpenCommsRequest`]s (issue #984). They are
+/// deliberately not `BufferedEffect`s: an open is comms vocabulary, materialised
+/// by a later comms system, while the ordered buffer is the world/entity
+/// `ActionCmd`/`TriggerAction` vocabulary the applier dispatches (the #816
+/// split). The cost is that an open is not interleaved with flag writes in
+/// authored order — unobservable, since nothing reads the thread within the
+/// call, and the same trade `delayed`/`callbacks` already make. Both buffers are
+/// drained together on the success path and dropped whole on the failure path,
+/// so a raising call discards its opens exactly as it discards its effects
+/// (settled decision 10).
+#[derive(Clone, Default)]
+pub struct EffectSink {
+    effects: Arc<Mutex<Vec<BufferedEffect>>>,
+    opens: Arc<Mutex<Vec<OpenCommsRequest>>>,
+}
+
+impl EffectSink {
+    /// A fresh, empty buffer for one call.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Push one resolved command onto the buffer (as [`BufferedEffect::Cmd`]).
+    ///
+    /// `pub` because [`Flags`](super::flags::Flags) shares this one buffer
+    /// so a flag mutation lands in the emitted sequence *at the point the script
+    /// authored it*, interleaved with effects, rather than being appended after
+    /// them (issue #981 flag-ordering hazard). The M1 command effects push here too.
+    pub fn push(&self, cmd: ActionCmd) {
+        self.effects
+            .lock()
+            .expect("effect sink lock")
+            .push(BufferedEffect::Cmd(cmd));
+    }
+
+    /// Push one unresolved declarative action (as [`BufferedEffect::Action`]),
+    /// onto the SAME ordered buffer as [`push`](Self::push) so a name-resolving
+    /// effect keeps its authored position relative to flag writes and command
+    /// effects. The applier resolves it through `dispatch_action` (issue #984, M6).
+    pub fn push_action(&self, action: TriggerAction) {
+        self.effects
+            .lock()
+            .expect("effect sink lock")
+            .push(BufferedEffect::Action(action));
+    }
+
+    /// Push one comms-thread open onto the SECOND buffer (issue #984). The
+    /// request arrives without its `script_path` — the sink cannot know which
+    /// unit is running — and [`take_opens`](Self::take_opens) stamps it.
+    pub fn push_open(&self, open: OpenCommsRequest) {
+        self.opens.lock().expect("effect sink lock").push(open);
+    }
+
+    /// Drain the buffer, leaving it empty. Called by the host on the success
+    /// path only — on the failure path the buffer is dropped whole, which is
+    /// how "discard the call's effects" (settled decision 10) is enforced.
+    pub fn take(&self) -> Vec<BufferedEffect> {
+        std::mem::take(&mut self.effects.lock().expect("effect sink lock"))
+    }
+
+    /// Drain the comms-open buffer, stamping every request with the running
+    /// unit's `script_path` — the same host-boundary stamping
+    /// [`ScheduleSink::drain`](super::schedule::ScheduleSink::drain) applies to a
+    /// callback's path, and for the same reason (a short or anonymous fn name is
+    /// not unique across units). Success path only, like [`take`](Self::take).
+    pub fn take_opens(&self, script_path: &str) -> Vec<OpenCommsRequest> {
+        self.take_opens_scoped(script_path, None)
+    }
+
+    /// Scoped form of [`take_opens`](Self::take_opens). `origin_layer` is
+    /// authoritative ownership; `script_path` alone cannot distinguish two
+    /// loaded layers sharing one sibling unit.
+    pub fn take_opens_scoped(
+        &self,
+        script_path: &str,
+        origin_layer: Option<&str>,
+    ) -> Vec<OpenCommsRequest> {
+        std::mem::take(&mut *self.opens.lock().expect("effect sink lock"))
+            .into_iter()
+            .map(|open| OpenCommsRequest {
+                script_path: script_path.to_string(),
+                origin_layer: origin_layer.map(str::to_string),
+                ..open
+            })
+            .collect()
+    }
+
+    /// Number of buffered effects (test/introspection helper).
+    pub fn len(&self) -> usize {
+        self.effects.lock().expect("effect sink lock").len()
+    }
+
+    /// Whether the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Register the effect vocabulary on a runtime engine.
+///
+/// Each function is a method on the `Effects` custom type, so a script calls
+/// them as `ctx.effects.complete_objective("obj1")`. The M1 set pushes a resolved
+/// `ActionCmd`; the three M6 name-resolving verbs buffer a declarative
+/// `TriggerAction` for the applier to resolve.
+/// Register the `no_float`-safe fractional-leaf marker on an engine.
+///
+/// `flt("0.9")` parses the string into a [`RealLit`] its readers unwrap; the
+/// parse happens ONCE, at map-build time, and the `f64` is never arithmetic'd in
+/// script — so a fractional constant reaches the declarative boundary with
+/// determinism intact. A bad string raises (discarding the call, settled
+/// decision 10), exactly as a malformed declarative float fails the world load.
+///
+/// Registered on BOTH engines: the runtime engine reads it inside handler maps
+/// (`target_speed: flt("0.9")`), and the LOADING engine needs it because a
+/// trigger registration can carry a fractional condition field —
+/// `on_hull_below(entity, flt("0.75"), handler)` is authored at a unit's top
+/// level, which only the loading engine ever runs. One marker, one spelling,
+/// wherever a fraction has to be said.
+pub fn register_real_lit(engine: &mut Engine) {
+    engine.register_type_with_name::<RealLit>("RealLit");
+    engine.register_fn(
+        "flt",
+        |s: ImmutableString| -> Result<RealLit, Box<EvalAltResult>> {
+            s.parse::<f64>()
+                .map(RealLit)
+                .map_err(|e| raise(format!("flt(\"{s}\"): not a real number: {e}")))
+        },
+    );
+}
+
+/// Register the `no_float`-safe INTEGER-target marker on an engine (issue
+/// #1048). See [`IntLit`] for why this exists and why it wraps an `i64`
+/// directly rather than parsing a string the way `flt` does.
+///
+/// Runtime engine only, unlike [`register_real_lit`]: `int(…)` is only ever
+/// meaningful inside a `spawn_entity` `overrides` map, which is `Effects`
+/// vocabulary (registered by [`register_effects`], runtime-only) — nothing
+/// authored at a unit's top level (the loading engine's whole surface) ever
+/// reaches `dynamic_to_toml`.
+pub fn register_int_lit(engine: &mut Engine) {
+    engine.register_type_with_name::<IntLit>("IntLit");
+    engine.register_fn("int", |i: i64| IntLit(i));
+}
+
+pub fn register_effects(engine: &mut HostRegistry) {
+    engine.register_type_with_name::<EffectSink>("Effects");
+
+    // The `flt(…)` / `int(…)` markers are not editor-exposed, so bare
+    // registrations.
+    register_real_lit(engine.engine_mut());
+    register_int_lit(engine.engine_mut());
+
+    engine.register_fn(
+        "complete_objective",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            sink.push(ActionCmd::CompleteObjective { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "complete_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id"],
+        summary =
+            "Mark one named objective instance complete; omit instance_id for a legacy objective.",
+        |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
+            sink.push(ActionCmd::CompleteObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
+        },
+    );
+    engine.register_fn(
+        "fail_objective",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            sink.push(ActionCmd::FailObjective { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "fail_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id"],
+        summary =
+            "Mark one named objective instance failed; omit instance_id for a legacy objective.",
+        |sink: &mut EffectSink, id: ImmutableString, instance_id: ImmutableString| {
+            sink.push(ActionCmd::FailObjectiveInstance {
+                key: crate::objective_instances::ObjectiveInstanceKey {
+                    objective_id: id.to_string(),
+                    instance_id: instance_id.to_string(),
+                },
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "set_objective_progress",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "instance_id", "progress"],
+        summary = "Set non-negative progress on one named objective instance.",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         instance_id: ImmutableString,
+         progress: RealLit| {
+            let progress = progress.0 as f32;
+            if progress.is_finite() && progress >= 0.0 {
+                sink.push(ActionCmd::SetObjectiveInstanceProgress {
+                    key: crate::objective_instances::ObjectiveInstanceKey {
+                        objective_id: id.to_string(),
+                        instance_id: instance_id.to_string(),
+                    },
+                    progress,
+                });
+            }
+        },
+    );
+    host_fn!(
+        engine,
+        "narrative_beat",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Record an authored story beat on the mission timeline.",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            // Issue #1338. Nothing in the world moves — this is the scenario's
+            // own punctuation, and it exists so a headless after-action reading
+            // carries the beats the AUTHOR considered beats rather than every
+            // event the simulation happened to produce.
+            sink.push(ActionCmd::NarrativeBeat { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "narrative_outcome",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "outcome"],
+        summary = "Record a marked entity's authored outcome: spawned, disabled, \
+                   destroyed, escaped, rescued or abandoned.",
+        |sink: &mut EffectSink,
+         entity: ImmutableString,
+         outcome: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            // Validated at the boundary through the SAME parser the vocabulary
+            // defines, exactly as `game_over`'s outcome is: a typo raises,
+            // discarding this call's effects (settled decision 10), rather than
+            // recording a silently different beat.
+            let kind =
+                crate::core::narrative::NarrativeKind::parse_outcome(&outcome).map_err(raise)?;
+            sink.push(ActionCmd::NarrativeOutcome {
+                entity: entity.to_string(),
+                outcome: kind,
+            });
+            Ok(())
+        },
+    );
+    host_fn!(engine, "force_view", receiver = "effects", category = "effect",
+        params = ["ship", "mode", "duration_ticks"], summary = "Force a receiving player's Viewscreen until the explicit simulation-tick duration expires.",
+        |sink: &mut EffectSink, ship: ImmutableString, mode: ImmutableString, duration_ticks: i64| -> Result<(), Box<EvalAltResult>> {
+            let view = crate::gm_presentation::PresentationView::parse(&mode).ok_or_else(|| raise("unknown presentation view".into()))?;
+            sink.push_action(presentation_action(&ship, crate::gm_presentation::PresentationCue::ForceView {
+                view, duration_ticks: u32::try_from(duration_ticks).map_err(|_| raise("invalid duration_ticks".into()))?,
+            }).map_err(raise)?); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "title_card",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "title", "subtitle", "duration_ticks"],
+        summary = "Show a timed title card on the receiving ship's Viewscreen.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         title: ImmutableString,
+         subtitle: ImmutableString,
+         duration_ticks: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(
+                presentation_action(
+                    &ship,
+                    crate::gm_presentation::PresentationCue::TitleCard {
+                        title: title.to_string(),
+                        subtitle: subtitle.to_string(),
+                        duration_ticks: u32::try_from(duration_ticks)
+                            .map_err(|_| raise("invalid duration_ticks".into()))?,
+                    },
+                )
+                .map_err(raise)?,
+            );
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "incoming_comms",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "message", "duration_ticks"],
+        summary =
+            "Take over a receiving ship's Viewscreen with an existing message that ship may read.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         message: ImmutableString,
+         duration_ticks: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(
+                presentation_action(
+                    &ship,
+                    crate::gm_presentation::PresentationCue::IncomingComms {
+                        message: message.to_string(),
+                        duration_ticks: u32::try_from(duration_ticks)
+                            .map_err(|_| raise("invalid duration_ticks".into()))?,
+                    },
+                )
+                .map_err(raise)?,
+            );
+            Ok(())
+        },
+    );
+    host_fn!(engine, "sound", receiver = "effects", category = "effect",
+        params = ["ship", "id", "source"], summary = "Play one validated authored Viewscreen sound; source is an entity name or empty for a static authored signal.",
+        |sink: &mut EffectSink, ship: ImmutableString, id: ImmutableString, source: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(presentation_action(&ship, crate::gm_presentation::PresentationCue::Sound {
+                id: id.to_string(), source: (!source.is_empty()).then(|| source.to_string()),
+            }).map_err(raise)?); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "clear_presentation",
+        receiver = "effects",
+        category = "effect",
+        params = ["ship", "part"],
+        summary = "Release a forced view or clear the current card; part is view or card.",
+        |sink: &mut EffectSink,
+         ship: ImmutableString,
+         part: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let cue = match part.as_str() {
+                "view" => crate::gm_presentation::PresentationCue::ReleaseView,
+                "card" => crate::gm_presentation::PresentationCue::ClearCard,
+                _ => return Err(raise("part must be view or card".into())),
+            };
+            sink.push_action(presentation_action(&ship, cue).map_err(raise)?);
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "show_message",
+        receiver = "effects",
+        category = "effect",
+        params = ["id", "text", "severity", "duration_secs"],
+        summary = "Show a timed ship's-computer message on the Viewscreen: \
+                   severity is info, advisory, warning or critical, and \
+                   duration_secs must be positive.",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64|
+         -> Result<(), Box<EvalAltResult>> {
+            // Issue #1342. Validated at the boundary, exactly as
+            // `narrative_outcome`'s outcome word is: an unknown severity or a
+            // non-positive duration raises HERE, discarding this call's
+            // effects (settled decision 10), rather than reaching the
+            // authoritative `ActiveComputerMessage` as a silently different
+            // message.
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: None,
+            });
+            Ok(())
+        },
+    );
+    // The Station-cue overload is not a separate editor entry — one
+    // descriptor per callable name — so a bare registration, mirroring
+    // `game_over`'s outcome-declaring overload below.
+    engine.register_fn(
+        "show_message",
+        |sink: &mut EffectSink,
+         id: ImmutableString,
+         text: ImmutableString,
+         severity: ImmutableString,
+         duration_secs: i64,
+         station: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let severity = crate::core::computer_message::ComputerMessageSeverity::parse(&severity)
+                .map_err(raise)?;
+            if duration_secs <= 0 {
+                return Err(raise(format!(
+                    "show_message(\"{id}\"): duration_secs must be positive, got {duration_secs}"
+                )));
+            }
+            sink.push(ActionCmd::ShowComputerMessage {
+                id: id.to_string(),
+                text: text.to_string(),
+                severity,
+                duration_secs,
+                station: Some(crate::core::messages::StationId(station.to_string())),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "report_row",
+        receiver = "effects",
+        category = "effect",
+        params = ["spec"],
+        summary = "Write one post-mission report row: `#{id, heading, outcome, state, \
+                   score?}`. `state` is saved, lost, partial or neutral; `score` is the \
+                   hidden signed diagnostic value players never see. Writing the same \
+                   `id` again updates the row in place.",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Issue #1344. A map rather than five positional arguments: the row
+            // is a record, and a five-string call is a row four of whose fields
+            // can be swapped without anything noticing. Every required key is
+            // checked here so a malformed row raises at the boundary —
+            // discarding this call's effects (settled decision 10) — rather than
+            // reaching a player surface half-built.
+            let row = report_row(&spec).map_err(raise)?;
+            sink.push(ActionCmd::SetReportRow(row));
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine, "set_ghost_contact", receiver = "effects", category = "effect",
+        params = ["observer", "id", "palette", "position_mm"],
+        summary = "Set a false Sensors report for one observing ship. Position is three integer world millimetres; no physical entity is created.",
+        |sink: &mut EffectSink, observer: ImmutableString, id: ImmutableString, palette: ImmutableString, position: rhai::Array| -> Result<(), Box<EvalAltResult>> {
+            let values: Result<Vec<i32>, _> = position.iter().map(|value| value.as_int().ok().and_then(|n| i32::try_from(n).ok()).ok_or_else(|| raise("ghost position requires three i32 millimetres".into()))).collect();
+            let position_mm = values?.try_into().map_err(|_| raise("ghost position requires three i32 millimetres".into()))?;
+            let change = crate::gm_information::ContactInformationChange::SetGhost { id: id.to_string(), palette: palette.to_string(), position_mm };
+            if !crate::gm_npc::bounded_id(&observer) || !change.bounded() { return Err(raise("invalid contact information identity".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "remove_ghost_contact",
+        receiver = "effects",
+        category = "effect",
+        params = ["observer", "id"],
+        summary = "Remove one observing ship's false Sensors report.",
+        |sink: &mut EffectSink,
+         observer: ImmutableString,
+         id: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            let change =
+                crate::gm_information::ContactInformationChange::RemoveGhost { id: id.to_string() };
+            if !crate::gm_npc::bounded_id(&observer) || !change.bounded() {
+                return Err(raise("invalid contact information identity".into()));
+            }
+            sink.push_action(TriggerAction::SetContactInformation {
+                ship: observer.to_string(),
+                change,
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine, "set_contact_report", receiver = "effects", category = "effect",
+        params = ["observer", "target", "delay_ticks", "position_step_mm", "hide_identity"],
+        summary = "Apply one observing ship's basic Sensors report policy. Delay and position grid are explicit non-negative integers; samples contain only allowed observations and expose their age.",
+        |sink: &mut EffectSink, observer: ImmutableString, target: ImmutableString, delay: rhai::INT, step: rhai::INT, hide_identity: bool| -> Result<(), Box<EvalAltResult>> {
+            let delay_ticks = u32::try_from(delay).map_err(|_| raise("report delay requires u32 ticks".into()))?;
+            let position_step_mm = u32::try_from(step).map_err(|_| raise("report position step requires u32 millimetres".into()))?;
+            let change = crate::gm_information::ContactInformationChange::SetReportPolicy { target: target.to_string(), policy: crate::gm_information::reports::ReportPolicy { delay_ticks, position_step_mm, hide_identity } };
+            if !crate::gm_npc::bounded_id(&observer) || observer == target || !change.bounded() { return Err(raise("invalid contact report policy".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
+        engine, "clear_contact_report", receiver = "effects", category = "effect", params = ["observer", "target"],
+        summary = "Remove one observing ship's Sensors report policy and its samples, returning to the current allowed picture.",
+        |sink: &mut EffectSink, observer: ImmutableString, target: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            let change = crate::gm_information::ContactInformationChange::ClearReportPolicy { target: target.to_string() };
+            if !crate::gm_npc::bounded_id(&observer) || observer == target || !change.bounded() { return Err(raise("invalid contact report identity".into())); }
+            sink.push_action(TriggerAction::SetContactInformation { ship: observer.to_string(), change }); Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "set_npc_doctrine",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "id"],
+        summary = "Apply an authored NPC doctrine palette id to a compatible live NPC.",
+        |sink: &mut EffectSink,
+         entity: ImmutableString,
+         id: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            if !crate::gm_npc::bounded_id(&entity) || !crate::gm_npc::bounded_id(&id) {
+                return Err(raise(
+                    "set_npc_doctrine requires bounded entity and palette identities".into(),
+                ));
+            }
+            sink.push_action(TriggerAction::SetNpcDoctrine {
+                entity: entity.to_string(),
+                id: id.to_string(),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "reset_trigger",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Re-arm a fired trigger by id.",
+        |sink: &mut EffectSink, id: ImmutableString| {
+            sink.push(ActionCmd::ResetTrigger { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "load_world",
+        receiver = "effects",
+        category = "effect",
+        params = ["path"],
+        summary = "Load the world layer at `path`.",
+        |sink: &mut EffectSink, path: ImmutableString| {
+            // The effect object is intentionally call-owner agnostic. The live
+            // applier stamps the running script call's `origin_layer`, matching
+            // the delayed builder path; a base-world call therefore remains
+            // `None` and a layer call becomes that layer's child.
+            sink.push(ActionCmd::LoadWorld {
+                path: path.to_string(),
+                loader_path: None,
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "unload_world",
+        receiver = "effects",
+        category = "effect",
+        params = ["path"],
+        summary = "Unload the world layer at `path`.",
+        |sink: &mut EffectSink, path: ImmutableString| {
+            sink.push(ActionCmd::UnloadWorld {
+                path: path.to_string(),
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "game_over",
+        receiver = "effects",
+        category = "effect",
+        params = ["reason"],
+        summary = "End the game with a reason string.",
+        |sink: &mut EffectSink, reason: ImmutableString| {
+            // Reason first, then the transition — `OnEnter(GamePhase::GameOver)`
+            // reads the reason, so the ordering is load-bearing. Mirrors
+            // `dispatch_state_action`'s `GameOver` handling. `outcome` is `None`:
+            // an undeclared scripted end (the headless classifier defaults it to
+            // victory), matching `TriggerAction::GameOver { outcome: None }`.
+            sink.push(ActionCmd::SetGameOverReason {
+                reason: reason.to_string(),
+                outcome: None,
+            });
+            sink.push(ActionCmd::SetNextState {
+                phase: crate::core::messages::GamePhase::GameOver,
+            });
+        },
+    );
+    // The outcome-DECLARING overload is not a separate editor entry — one
+    // descriptor per callable name — so a bare registration.
+    engine.register_fn(
+        "game_over",
+        |sink: &mut EffectSink,
+         reason: ImmutableString,
+         outcome: ImmutableString|
+         -> Result<(), Box<EvalAltResult>> {
+            // The outcome-DECLARING end (#843). The outcome is validated through
+            // the SAME `crate::core::balance::Outcome::parse` the declarative `game_over`
+            // action uses, so a scripted typo (`"victni"`) raises a Rhai error —
+            // discarding this call's effects (settled decision 10) — exactly as a
+            // bad `outcome = "…"` fails the declarative world load. Only
+            // `victory`/`defeat` are accepted (`Outcome` has no `Draw`). Emits the
+            // same two commands as the 1-arg form, reason first, differing only in
+            // `outcome: Some(_)`.
+            let outcome = crate::core::balance::Outcome::parse(&outcome)
+                .map_err(|e| raise(format!("game_over: {e}")))?;
+            sink.push(ActionCmd::SetGameOverReason {
+                reason: reason.to_string(),
+                outcome: Some(outcome),
+            });
+            sink.push(ActionCmd::SetNextState {
+                phase: crate::core::messages::GamePhase::GameOver,
+            });
+            Ok(())
+        },
+    );
+    // Infrastructure condition hooks (issue #1025). Two verbs rather than one
+    // signed one: the sign convention lives in the name, so a scenario cannot
+    // repair a skyhook by getting a minus sign wrong. Each takes whole
+    // condition POINTS, with a `flt("…")` overload for the fractional slice a
+    // timed operation applies per tick — the same `no_float` boundary
+    // `on_hull_below(entity, flt("0.75"), …)` uses.
+    //
+    // Both buffer a resolved `ActionCmd` carrying the entity NAME; the applier
+    // resolves it and queues the delta for `tick_infrastructure_condition`,
+    // which is where every operational-flag edge is detected and mirrored.
+    host_fn!(
+        engine,
+        "repair_infrastructure",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "points"],
+        summary = "Raise the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice. No delayed form — a timed \
+                  repair applies a slice per tick.",
+        |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: points as f32,
+            });
+        },
+    );
+    // The fractional `flt(…)` overload shares the one editor entry above.
+    engine.register_fn(
+        "repair_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: points.0 as f32,
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "damage_infrastructure",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "points"],
+        summary = "Lower the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice.",
+        |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: -(points as f32),
+            });
+        },
+    );
+    // The fractional `flt(…)` overload shares the one editor entry above.
+    engine.register_fn(
+        "damage_infrastructure",
+        |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
+            sink.push(ActionCmd::AdjustInfrastructureCondition {
+                entity: entity.to_string(),
+                delta: -(points.0 as f32),
+            });
+        },
+    );
+    // Infrastructure CAPACITY (issue #1042). The third door onto a structure's
+    // published numbers, beside the two condition verbs above and the
+    // `transfer` operation below, and the only one a scenario can aim at a
+    // quantity it worked out for itself.
+    //
+    // ONE signed verb rather than the spend/return pair the condition hooks
+    // are, which is the opposite call and deliberately so: a condition move has
+    // a different FICTION on each side — repairing and damaging are two things a
+    // crew do — where a capacity move has one, "this published count moves by
+    // this much". Splitting it would force a scenario publishing a computed
+    // value to branch on the sign of its own arithmetic before it could name the
+    // verb it wanted.
+    //
+    // Whole units, and no `flt` overload, because a capacity is a count and the
+    // world counter it mirrors onto is an `i64` (`CapacityConfig::amount` says
+    // so at length).
+    engine.register_fn(
+        "adjust_capacity",
+        |sink: &mut EffectSink, entity: ImmutableString, capacity: ImmutableString, delta: i64| {
+            sink.push(ActionCmd::AdjustInfrastructureCapacity {
+                entity: entity.to_string(),
+                capacity: capacity.to_string(),
+                delta,
+            });
+        },
+    );
+    // Civilian order hooks (issue #1028). Four verbs rather than one taking a
+    // verb string, for the reason the two infrastructure verbs are two: the
+    // vocabulary lives in the name, so a scenario cannot divert a hauler onto a
+    // lane by misspelling an anchor and having it read as an anchor anyway.
+    // `divert` is split by destination for exactly that reason — a single
+    // `order_divert(entity, "depot_run")` could not tell a route id from an
+    // anchor name, and guessing is how a mistyped lane becomes a silent no-op.
+    //
+    // Each buffers a resolved `ActionCmd` carrying the civilian's NAME; the
+    // applier resolves it and queues the order for `tick_civilian_traffic`,
+    // which is where the acknowledgement delay and the authored disposition are
+    // applied. A scripted order is a request, not a remote control: a civilian
+    // whose disposition refuses `divert` refuses a scripted divert too.
+    host_fn!(
+        engine,
+        "order_hold",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity"],
+        summary = "Order the named civilian to stop where it is. A request, not a \
+                  remote control: it is answered after the hull's authored \
+                  acknowledgement delay and may be refused.",
+        |sink: &mut EffectSink, entity: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::Hold,
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "order_divert_route",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "route"],
+        summary = "Order the named civilian onto another authored `[[route]]`, by \
+                  route id. Refusable.",
+        |sink: &mut EffectSink, entity: ImmutableString, route: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::divert_to_route(route.to_string()),
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "order_divert_anchor",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "anchor"],
+        summary = "Order the named civilian to make for a single world anchor, by \
+                  anchor name. Refusable.",
+        |sink: &mut EffectSink, entity: ImmutableString, anchor: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::divert_to_anchor(anchor.to_string()),
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "order_dock",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "structure"],
+        summary = "Order the named civilian to proceed to and berth at the named \
+                  structure. Refusable, and lands in `non_compliant` if the \
+                  structure is not there.",
+        |sink: &mut EffectSink, entity: ImmutableString, structure: ImmutableString| {
+            sink.push(ActionCmd::OrderCivilian {
+                entity: entity.to_string(),
+                order: crate::civilian::CivilianOrder::dock_at(structure.to_string()),
+            });
+        },
+    );
+    // Labour dispute hooks (issue #1035). Three verbs rather than one setter,
+    // for the reason `repair_infrastructure` and `damage_infrastructure` are
+    // two: the direction lives in the name, so a scenario cannot end a strike by
+    // getting a boolean the wrong way round.
+    //
+    // Each pushes TWO commands, in this order: the register move, then the
+    // mirror flag. The flag is an ordinary `MutateFlag` on the same ordered
+    // buffer `ctx.flags.x = 1` uses, so `apply_script_commands` previews its
+    // transition and an `on_flag_cleared("workforce.<id>.on_strike", …)` trigger
+    // authored by the negotiation slice chains off a settlement — through
+    // machinery that was already there, and without this vocabulary knowing
+    // triggers exist.
+    //
+    // A settlement that changes nothing still writes its flag to the value it
+    // already held: `preview_mutation` sees no transition and emits no event, so
+    // the idempotent case costs a redundant write and never a spurious chain.
+    for (name, mutation, flag_value) in [
+        (
+            "call_strike",
+            crate::world::workforce::WorkforceMutation::CallStrike,
+            1,
+        ),
+        (
+            "settle_strike",
+            crate::world::workforce::WorkforceMutation::Settle,
+            0,
+        ),
+    ] {
+        engine.register_fn(name, move |sink: &mut EffectSink, id: ImmutableString| {
+            sink.push(ActionCmd::SetWorkforceState {
+                id: id.to_string(),
+                mutation,
+            });
+            sink.push(ActionCmd::MutateFlag {
+                target_layer: None,
+                name: crate::world::workforce::strike_flag(&id),
+                mutation: FlagMutation::SetValue(flag_value),
+            });
+        });
+    }
+    // The tactical restraint lever, from the scenario's side (issues #1041,
+    // #1398). Two verbs rather than one setter, for the reason the strike hooks
+    // above are two and `repair_infrastructure`/`damage_infrastructure` are two:
+    // the direction lives in the name, so a scenario cannot arm a ship it meant
+    // to silence by getting a boolean the wrong way round.
+    //
+    // THE VERBS ARE POWER ORDERS since issue #1398. They kept their names — a
+    // scenario says "hold fire", not "command the weapons group to zero" — and
+    // lost the per-ship boolean they used to write. What they push now is a
+    // reactor order on the ship's `weapons` group, applied by
+    // `ship::power::drain_scripted_power_orders` through the same
+    // `PowerSystem::set_group_allocation` an Engineering officer's console
+    // command reaches. Two consequences a scenario author should know:
+    //
+    //   * A hull can REFUSE. `set_group_allocation` clamps to the group's own
+    //     authored `[power_groups.weapons] min_level`, so `hold_fire` silences a
+    //     hull that authors `min_level = 0` and leaves one that authors `1`
+    //     shooting. Which hulls may be taken cold is a designer's decision in
+    //     the entity TOML, not this vocabulary's.
+    //   * `release_fire` restores the group's authored `default_level` rather
+    //     than a number written here, so a hull that boots its weapons at 3 gets
+    //     3 back.
+    //
+    // ONE command each, and still no flag pushed beside it: the mirror
+    // (`weapons_cold.own_ship` / `weapons_cold.<name>`) is written off the
+    // ship's own reactor by `ship::power::mirror_weapons_cold_flags`, because
+    // the reactor has a second author — the crew's Engineering officer — and a
+    // flag pushed here would have covered the scenario's orders and silently
+    // missed theirs.
+    for (name, level) in [
+        (
+            "hold_fire",
+            crate::modifiers::power_system::ScriptedPowerLevel::Exact(0),
+        ),
+        (
+            "release_fire",
+            crate::modifiers::power_system::ScriptedPowerLevel::AuthoredDefault,
+        ),
+    ] {
+        engine.register_fn(
+            name,
+            move |sink: &mut EffectSink, entity: ImmutableString| {
+                sink.push(ActionCmd::SetGroupPower {
+                    entity: entity.to_string(),
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                    ),
+                    level,
+                });
+            },
+        );
+    }
+    engine.register_fn(
+        "set_workforce_disposition",
+        |sink: &mut EffectSink, id: ImmutableString, value: i64| {
+            // Clamped here as well as in the register, because the mirror flag
+            // is written from THIS value and a script that asked for 9,000 must
+            // not leave the flag saying 9,000 while the record says 100.
+            let value = value.clamp(
+                crate::world::workforce::DISPOSITION_MIN,
+                crate::world::workforce::DISPOSITION_MAX,
+            );
+            sink.push(ActionCmd::SetWorkforceState {
+                id: id.to_string(),
+                mutation: crate::world::workforce::WorkforceMutation::SetDisposition(value),
+            });
+            sink.push(ActionCmd::MutateFlag {
+                target_layer: None,
+                name: crate::world::workforce::disposition_flag(&id),
+                mutation: FlagMutation::SetValue(value),
+            });
+        },
+    );
+    engine.register_fn(
+        "add_faction_enemy",
+        |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {
+            // Buffers the DECLARATIVE action carrying faction NAMES: no
+            // `FactionRegistry` is in scope at this boundary, so name→UUID
+            // resolution is deferred to the applier's `dispatch_action`, exactly
+            // as the declarative `add_faction_enemy` action resolves it (#984 M6).
+            sink.push_action(TriggerAction::AddFactionEnemy {
+                faction: faction.to_string(),
+                enemy: enemy.to_string(),
+            });
+        },
+    );
+    engine.register_fn(
+        "remove_faction_enemy",
+        |sink: &mut EffectSink, faction: ImmutableString, enemy: ImmutableString| {
+            // The counterpart to `add_faction_enemy` (issue #1349), buffered the
+            // same way and for the same reason: no `FactionRegistry` is in scope
+            // at this boundary, so the name→UUID resolution is the applier's.
+            //
+            // TWO verbs rather than one setter, the rule `hold_fire`/
+            // `release_fire` and `call_strike`/`settle_strike` already keep: the
+            // direction lives in the name, so a scenario cannot make peace with
+            // somebody it meant to declare war on by getting a boolean the wrong
+            // way round.
+            //
+            // Nothing downstream of here is new. The declarative
+            // `remove_faction_enemy` action, its `dispatch_state_action` arm and
+            // its applier all predate this; what the applier does on a SUCCESSFUL
+            // removal is the reason a scenario wants it (issue #710): it
+            // re-validates every AI controller's target, so ending a hostility
+            // also drops the locks that hostility licensed. That is what lets a
+            // mission stop a fight it started without having to destroy the hull
+            // it started it with — issue #1349's "the threshold ends the hostile
+            // directive without requiring hull destruction".
+            sink.push_action(TriggerAction::RemoveFactionEnemy {
+                faction: faction.to_string(),
+                enemy: enemy.to_string(),
+            });
+        },
+    );
+    engine.register_fn(
+        "destroy_entity",
+        |sink: &mut EffectSink, entity: ImmutableString| -> Result<(), Box<EvalAltResult>> {
+            // The counterpart to `spawn_entity` (issue #1033), and buffered for the
+            // SAME reason `add_faction_enemy` is: the name→uuid map lives on
+            // `WorldContentRuntime`, not at this host-fn boundary, so resolution is
+            // deferred to the applier's `dispatch_action` → `dispatch_destroy_entity`.
+            //
+            // That deferral is what makes a scripted destruction chain. The pure
+            // dispatcher pushes `WorldEvent::Destroyed` onto `DispatchResult::new_events`
+            // beside the `ActionCmd::DestroyEntity`, and `apply_script_commands` feeds
+            // the WHOLE result to `apply_dispatch_result` — whose `events_out` is
+            // `tick_trigger_pipeline`'s `next_events`. So an `on_destroyed` handler and
+            // an `on_all_destroyed` group both fire on the next chaining pass of the
+            // SAME tick, exactly as they do for a combat kill. Emitting the despawn
+            // from here instead would kill the entity and chain nothing.
+            //
+            // `parse_action_entry`, not a hand-built variant: the required-`entity`
+            // check is then the declarative one rather than a second copy of it.
+            let action = destroy_entity_action(&entity).map_err(raise)?;
+            sink.push_action(action);
+            Ok(())
+        },
+    );
+    engine.register_fn(
+        "addressed",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            sink.push_action(addressed_action(&spec).map_err(raise)?);
+            Ok(())
+        },
+    );
+    engine.register_fn(
+        "add_objective",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Read the script map into a `RawActionEntry` and run the SHARED
+            // `parse_action_entry`, so directive-kind validation and utility
+            // parsing are byte-identical to the declarative `add_objective`; the
+            // resulting `TriggerAction::AddObjective` is buffered for the applier
+            // to resolve `targets` through the same dispatch (#984 M6).
+            let action = add_objective_action(&spec).map_err(raise)?;
+            sink.push_action(action);
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine,
+        "open_comms",
+        receiver = "effects",
+        category = "effect",
+        params = ["spec"],
+        summary = "Open a scripted comms thread: `#{from, node_fn, display_name?, \
+                  thread_id?, priority?, urgent?}`. No delayed form — defer it with \
+                  `schedule.after`.",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Comms vocabulary, so it buffers onto the sink's SECOND buffer
+            // rather than the ordered `ActionCmd`/`TriggerAction` one (see
+            // `EffectSink`). `open_comms_request` reads the fields it owns and,
+            // like `spawn_entity_action`, remains permissive about unrelated map
+            // keys. `add_objective_action` is deliberately stricter: it forwards
+            // unknown spellings to the shared `Directive` contract, which rejects
+            // them. A missing required comms key still raises, discarding the call.
+            let open = open_comms_request(&spec).map_err(raise)?;
+            sink.push_open(open);
+            Ok(())
+        },
+    );
+    engine.register_fn(
+        "spawn_entity",
+        |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
+            // Same reuse as `add_objective`: read the map into a `RawActionEntry`,
+            // run `parse_action_entry` (which enforces the anchor/position XOR),
+            // and buffer `TriggerAction::SpawnEntity`. The applier resolves the
+            // anchor, loads the template, and — crucially — mints the `EntityUuid`
+            // inside `dispatch_spawn_entity` from the SAME `uuid_source` the
+            // declarative path uses, so a converted world mints in the same order
+            // (#984 M6). Nothing is minted here.
+            let action = spawn_entity_action(&spec).map_err(raise)?;
+            sink.push_action(action);
+            Ok(())
+        },
+    );
+}
+
+/// Build a Rhai runtime error from a host-fn message. Raising discards the
+/// call's whole effect buffer under the failure policy (settled decision 10),
+/// so a malformed `add_objective` / `spawn_entity` map or a bad `game_over`
+/// outcome drops the call rather than emitting a half-built effect.
+///
+/// `pub(super)` because the sibling `commitments` (issue #1029) and `dossier`
+/// (issue #1031) vocabularies raise on the same terms — a malformed map, a
+/// duplicate id, an unknown provenance — and must produce the same kind of
+/// error: two spellings of "raise" would be two failure policies.
+pub(super) fn raise(message: String) -> Box<EvalAltResult> {
+    Box::new(EvalAltResult::ErrorRuntime(message.into(), Position::NONE))
+}
+
+/// Read an optional string field out of a script map (mirrors the comms map
+/// readers). `None` when the key is absent or not a string.
+pub(super) fn map_str(spec: &Map, key: &str) -> Option<String> {
+    spec.get(key).and_then(|d| d.clone().into_string().ok())
+}
+
+/// Read an optional bool field. `None` when absent or not a bool.
+fn map_bool(spec: &Map, key: &str) -> Option<bool> {
+    spec.get(key).and_then(|d| d.as_bool().ok())
+}
+
+/// Read a KNOWN-`f32` scalar (`base_priority`, a modifier `weight` / `threshold`).
+/// `no_float`: authored as an INT (`80` → `80.0`, the seconds→elapsed rule) OR — for
+/// a fractional value an int cannot express — as a [`RealLit`] via `flt("0.9")`,
+/// unwrapped `.0 as f32`. Both routes land on the SAME `f32` the declarative float
+/// parses to: an int through `as f32`, and a `flt("0.9")` through the identical
+/// `f64` → `f32` narrowing the toml `f32` deserializer applies to `0.9`. `None`
+/// when the key is absent (or present but neither an int nor a `RealLit`).
+fn map_f32(spec: &Map, key: &str) -> Option<f32> {
+    let d = spec.get(key)?;
+    if let Some(real) = d.clone().try_cast::<RealLit>() {
+        return Some(real.0 as f32);
+    }
+    d.as_int().ok().map(|i| i as f32)
+}
+
+/// Read an optional `#{ … }` of runtime values to interpolate into a text id's
+/// `{placeholder}` tokens (see `messages::TEXT_PARAMS_SUFFIX`).
+///
+/// Collected into a `BTreeMap` so the wire encoding is key-ordered and the same
+/// authored call always produces the same bytes — a `HashMap` here would make
+/// the payload's encoding depend on hash order.
+///
+/// Values are rendered to `String` at this seam rather than carried as a typed
+/// union, because interpolation is textual substitution and the client has no
+/// use for the distinction. A script authors an INT (this engine is built
+/// `no_float`, so a computed figure arrives as `14`), a string, or a bool;
+/// anything else — a map, an array, a unit — is an authoring error and raises,
+/// discarding the call rather than rendering Rhai's debug form into crew-facing
+/// copy.
+pub(super) fn map_text_params(
+    spec: &Map,
+    key: &str,
+) -> Result<Option<std::collections::BTreeMap<String, String>>, String> {
+    let Some(d) = spec.get(key) else {
+        return Ok(None);
+    };
+    let map = d
+        .clone()
+        .try_cast::<Map>()
+        .ok_or_else(|| format!("`{key}` must be a #{{ name: value }} map"))?;
+    let mut out = std::collections::BTreeMap::new();
+    for (name, value) in map {
+        let type_name = value.type_name();
+        let rendered = if value.is_string() {
+            value
+                .into_string()
+                .map_err(|actual| format!("`{key}.{name}` must be a string, got {actual}"))?
+        } else if let Ok(i) = value.as_int() {
+            i.to_string()
+        } else if let Ok(b) = value.as_bool() {
+            b.to_string()
+        } else {
+            return Err(format!(
+                "`{key}.{name}` must be a string, an integer or a bool, got {type_name}"
+            ));
+        };
+        out.insert(name.to_string(), rendered);
+    }
+    Ok(Some(out))
+}
+
+/// Read an optional array-of-strings field (`targets` / `groups` /
+/// `directive_anchors`). `Ok(None)` when absent; `Err` when present but not an
+/// array of strings, so a malformed spec raises rather than silently dropping.
+fn map_string_array(spec: &Map, key: &str) -> Result<Option<Vec<String>>, String> {
+    let Some(d) = spec.get(key) else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`{key}` must be an array of strings, got {actual}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.into_iter().enumerate() {
+        out.push(
+            el.into_string()
+                .map_err(|actual| format!("`{key}`[{i}] must be a string, got {actual}"))?,
+        );
+    }
+    Ok(Some(out))
+}
+
+/// Read a KNOWN-`[f32; 3]` field (`position` / `rotation` / `scale`). Each
+/// coordinate is authored as an INT (`no_float`) and converted here, so a script
+/// `[900, 0, -560]` becomes the identical `[f32; 3]` a declarative
+/// `[900.0, 0.0, -560.0]` parses to (pinned by the mint / structural parity
+/// tests). `Ok(None)` when absent; `Err` when present but not a 3-element integer
+/// array. [`RealLit`] support is deliberately omitted: no shipped world authors a
+/// fractional transform, and a stray `flt()` here raises loudly rather than
+/// silently diverging — add the branch only when a world actually needs it.
+fn map_f32_array3(spec: &Map, key: &str) -> Result<Option<[f32; 3]>, String> {
+    let Some(d) = spec.get(key) else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`{key}` must be a 3-element array, got {actual}"))?;
+    if arr.len() != 3 {
+        return Err(format!(
+            "`{key}` must have exactly 3 elements, got {}",
+            arr.len()
+        ));
+    }
+    let mut out = [0.0f32; 3];
+    for (i, el) in arr.into_iter().enumerate() {
+        out[i] = el
+            .as_int()
+            .map_err(|actual| format!("`{key}`[{i}] must be an integer, got {actual}"))?
+            as f32;
+    }
+    Ok(Some(out))
+}
+
+/// Read an `add_objective` `modifiers` array — `[#{ condition, threshold?, weight }]`
+/// — into `Vec<RawModifier>`, so the SHARED `parse_utility_config` builds the exact
+/// same `UtilityConfig` the declarative twin does; nothing utility-specific is
+/// re-implemented here. `weight` is required and `threshold` optional, both read
+/// through [`map_f32`] so each is authored as `flt("…")` or an int and lands on the
+/// byte-identical `f32` the declarative `weight = …` / `threshold = …` parses to.
+/// `Ok(None)` when absent; `Err` — which discards the whole call (settled decision
+/// 10) — when present but not an array of well-formed maps, rather than silently
+/// dropping a modifier the declarative path would have parsed.
+fn map_modifiers(spec: &Map) -> Result<Option<Vec<RawModifier>>, String> {
+    let Some(d) = spec.get("modifiers") else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`modifiers` must be an array of maps, got {actual}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.into_iter().enumerate() {
+        let ty = el.type_name();
+        let m = el
+            .try_cast::<Map>()
+            .ok_or_else(|| format!("`modifiers`[{i}] must be a map, got {ty}"))?;
+        let condition = map_str(&m, "condition")
+            .ok_or_else(|| format!("`modifiers`[{i}] requires a string `condition`"))?;
+        let weight = map_f32(&m, "weight")
+            .ok_or_else(|| format!("`modifiers`[{i}] requires a `weight` (`flt(\"…\")` or int)"))?;
+        out.push(RawModifier {
+            condition,
+            threshold: map_f32(&m, "threshold"),
+            weight,
+        });
+    }
+    Ok(Some(out))
+}
+
+/// Read an `add_objective` `zero_gates` array — `[#{ condition, threshold? }]` — into
+/// `Vec<RawZeroGate>`, the veto twin of [`map_modifiers`] (no `weight`). Same reuse,
+/// same `flt`-or-int `threshold`, same discard-on-malformed policy.
+fn map_zero_gates(spec: &Map) -> Result<Option<Vec<RawZeroGate>>, String> {
+    let Some(d) = spec.get("zero_gates") else {
+        return Ok(None);
+    };
+    let arr = d
+        .clone()
+        .into_array()
+        .map_err(|actual| format!("`zero_gates` must be an array of maps, got {actual}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, el) in arr.into_iter().enumerate() {
+        let ty = el.type_name();
+        let m = el
+            .try_cast::<Map>()
+            .ok_or_else(|| format!("`zero_gates`[{i}] must be a map, got {ty}"))?;
+        let condition = map_str(&m, "condition")
+            .ok_or_else(|| format!("`zero_gates`[{i}] requires a string `condition`"))?;
+        out.push(RawZeroGate {
+            condition,
+            threshold: map_f32(&m, "threshold"),
+        });
+    }
+    Ok(Some(out))
+}
+
+/// Convert a `spawn_entity` `overrides` subtree (`#{ … }`) into the `toml::Value`
+/// the declarative `overrides` field carries.
+///
+/// Every BARE numeric leaf renders as a toml FLOAT, NOT an integer: the whole
+/// script API is `no_float`, so an author writes `range: 200` (an INT), but
+/// `EntityConfig`'s numeric fields are overwhelmingly floats and a declarative
+/// `overrides` authors them as floats — so `200` must become `200.0` to
+/// deserialize into the same config `overrides = { range = 200.0 }` produces.
+/// Recurses through arrays and nested maps (the `behaviour.doctrine`
+/// array-of-maps, the radar string arrays). Pinned by the `range: 200 ≡
+/// range = 200.0` structural-parity assertion.
+///
+/// A leaf that targets a genuine INTEGER `EntityConfig` field
+/// (`repair.repair_team_count`, `volley_count`, …) is the one case the bare-int
+/// default gets wrong: rendered as a float it would become `field = 3.0`, fail
+/// to deserialize into an integer field, and `dispatch_spawn_entity` would drop
+/// the WHOLE override (keeping the template) — see its `override_failures`
+/// doc. Issue #1048 closed this with an explicit marker, [`IntLit`] /
+/// `int(3)`, checked below: the same opt-in escape hatch [`RealLit`] /
+/// `flt("…")` already is for the opposite rare case (a fractional VALUE a bare
+/// int cannot express at all). A hand-maintained field-name → type table was
+/// considered and rejected (see [`IntLit`]'s doc) — it would let this function
+/// guess the right rendering for an UNMARKED leaf, but the table rots silently
+/// the moment `EntityConfig` grows an integer field nobody remembers to add to
+/// it, whereas a missing `int(…)` marker fails LOUDLY (a deserialize error,
+/// now reported through `override_failures` rather than a bare warning).
+fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
+    // Bool before int: the two are distinct `Dynamic` types, so the order is for
+    // total coverage, not disambiguation.
+    if let Ok(b) = value.as_bool() {
+        return Ok(toml::Value::Boolean(b));
+    }
+    if let Some(int_lit) = value.clone().try_cast::<IntLit>() {
+        // An `int(3)` marker (issue #1048): the `no_float`-safe INTEGER-target
+        // leaf. Overrides the ambient bare-int-as-float default below, so it must
+        // be checked first — a `value.as_int()` on a boxed custom type like this
+        // one always fails anyway, but checking here keeps the two markers
+        // textually adjacent to the bare-int branch they both modify.
+        return Ok(toml::Value::Integer(int_lit.0));
+    }
+    if let Ok(i) = value.as_int() {
+        return Ok(toml::Value::Float(i as f64));
+    }
+    if let Some(real) = value.clone().try_cast::<RealLit>() {
+        // A `flt("0.9")` marker: the `no_float`-safe fractional leaf. Renders as the
+        // SAME toml FLOAT the declarative `0.9` parses to (`f64::from_str` and toml's
+        // float parse agree on canonical decimals), so a converted override's
+        // `toml::Value` is byte-identical to its declarative twin's.
+        return Ok(toml::Value::Float(real.0));
+    }
+    if let Some(s) = value.clone().try_cast::<ImmutableString>() {
+        return Ok(toml::Value::String(s.to_string()));
+    }
+    if let Some(arr) = value.clone().try_cast::<Array>() {
+        let mut out = Vec::with_capacity(arr.len());
+        for el in &arr {
+            out.push(dynamic_to_toml(el)?);
+        }
+        return Ok(toml::Value::Array(out));
+    }
+    if let Some(map) = value.clone().try_cast::<Map>() {
+        let mut table = toml::map::Map::new();
+        for (k, v) in map.iter() {
+            table.insert(k.to_string(), dynamic_to_toml(v)?);
+        }
+        return Ok(toml::Value::Table(table));
+    }
+    Err(format!(
+        "unsupported override value of type '{}'",
+        value.type_name()
+    ))
+}
+
+/// Build a `TriggerAction::AddObjective` from a script `#{ … }` map, reusing the
+/// declarative `parse_action_entry` for directive / utility validation.
+///
+/// The full utility config is read here: `base_priority` (a `flt`-or-int `f32`),
+/// plus the `modifiers` and `zero_gates` arrays via [`map_modifiers`] /
+/// [`map_zero_gates`]. They are set on the `RawActionEntry` so the SHARED
+/// `parse_utility_config` (run inside `parse_action_entry`) builds the byte-identical
+/// `UtilityConfig` the declarative twin does — the scripted and TOML `add_objective`
+/// are two front-ends over one parser, not two implementations kept in sync.
+fn presentation_action(
+    ship: &str,
+    cue: crate::gm_presentation::PresentationCue,
+) -> Result<TriggerAction, String> {
+    parse_action_entry(&RawActionEntry {
+        kind: "presentation".into(),
+        entity: Some(ship.into()),
+        presentation: Some(cue),
+        ..Default::default()
+    })
+}
+
+fn addressed_action(spec: &Map) -> Result<TriggerAction, String> {
+    let recipients = crate::recipients::RecipientSelection::from_rhai_map(spec)?
+        .ok_or("addressed requires an explicit recipient selection")?;
+    // Preserve integer values for typed tick counts and integer modifiers;
+    // the spawn-override converter intentionally converts numbers to floats.
+    fn json(value: &Dynamic) -> Result<serde_json::Value, String> {
+        if let Some(value) = value.clone().try_cast::<RealLit>() {
+            return serde_json::Number::from_f64(value.0)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| "addressed action fractional values must be finite".to_string());
+        }
+        if let Some(value) = value.clone().try_cast::<ImmutableString>() {
+            return Ok(serde_json::Value::String(value.to_string()));
+        }
+        if let Some(value) = value.clone().try_cast::<bool>() {
+            return Ok(value.into());
+        }
+        if let Some(value) = value.clone().try_cast::<i64>() {
+            return Ok(value.into());
+        }
+        if let Some(values) = value.clone().try_cast::<rhai::Array>() {
+            return values
+                .iter()
+                .map(json)
+                .collect::<Result<Vec<_>, _>>()
+                .map(serde_json::Value::Array);
+        }
+        if let Some(values) = value.clone().try_cast::<Map>() {
+            return values
+                .iter()
+                .map(|(key, value)| Ok((key.to_string(), json(value)?)))
+                .collect::<Result<serde_json::Map<_, _>, String>>()
+                .map(serde_json::Value::Object);
+        }
+        Err(
+            "addressed action fields must contain strings, integers, flt literals, booleans, arrays, or maps"
+                .into(),
+        )
+    }
+    let mut fields = serde_json::Map::new();
+    for (key, value) in spec {
+        match key.as_str() {
+            "recipient_ship_slots"
+            | "recipient_factions"
+            | "all_player_ships"
+            | "recipient_objective_instances" => continue,
+            "type"
+            | "id"
+            | "state"
+            | "target"
+            | "tag"
+            | "slot"
+            | "bonus"
+            | "int_bonus"
+            | "kind"
+            | "presentation"
+            | "contact_information" => {
+                fields.insert(key.to_string(), json(value)?);
+            }
+            _ => return Err(format!("unsupported addressed action field `{key}`")),
+        }
+    }
+    // An internal alias is replaced before dispatch. Authors cannot provide an
+    // entity beside selectors and thereby accidentally choose two destinations.
+    fields.insert("entity".into(), "addressed_recipient".into());
+    let raw = serde_json::from_value::<RawActionEntry>(fields.into())
+        .map_err(|error| format!("invalid addressed action: {error}"))?;
+    if raw.bonus.is_some_and(|value| !value.is_finite()) {
+        return Err("addressed modifier bonus must be finite".into());
+    }
+    let action = parse_action_entry(&raw)?;
+    crate::recipients::retarget_action(&action, "addressed_recipient")?;
+    Ok(TriggerAction::Addressed {
+        recipients,
+        action: Box::new(action),
+    })
+}
+
+fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
+    const KNOWN_FIELDS: &[&str] = &[
+        "id",
+        "instance_id",
+        "recipient_ship_slots",
+        "recipient_factions",
+        "all_player_ships",
+        "text",
+        "text_params",
+        "mandatory",
+        "targets",
+        "target",
+        "route",
+        "directive_kind",
+        "directive_anchors",
+        "directive_loop",
+        "directive_anchor",
+        "base_priority",
+        "source",
+        "modifiers",
+        "zero_gates",
+        "command_stance",
+    ];
+    let raw = RawActionEntry {
+        kind: "add_objective".to_string(),
+        id: map_str(spec, "id"),
+        instance_id: map_str(spec, "instance_id"),
+        recipient_ship_slots: map_string_array(spec, "recipient_ship_slots")?,
+        recipient_factions: map_string_array(spec, "recipient_factions")?,
+        all_player_ships: map_bool(spec, "all_player_ships"),
+        text: map_str(spec, "text"),
+        text_params: map_text_params(spec, "text_params")?,
+        mandatory: map_bool(spec, "mandatory"),
+        targets: map_string_array(spec, "targets")?,
+        target: map_str(spec, "target"),
+        route: map_str(spec, "route"),
+        directive_kind: map_str(spec, "directive_kind"),
+        directive_anchors: map_string_array(spec, "directive_anchors")?,
+        directive_loop: map_bool(spec, "directive_loop"),
+        directive_anchor: map_str(spec, "directive_anchor"),
+        base_priority: map_f32(spec, "base_priority"),
+        source: map_str(spec, "source"),
+        modifiers: map_modifiers(spec)?,
+        zero_gates: map_zero_gates(spec)?,
+        command_stance: map_command_stance(spec)?,
+        // Only the spelling matters: an unrecognised key has no typed value
+        // slot and is rejected before conversion by the shared contract.
+        unrecognised_fields: spec
+            .keys()
+            .filter(|key| !KNOWN_FIELDS.contains(&key.as_str()))
+            .map(|key| (key.to_string(), toml::Value::Boolean(true)))
+            .collect(),
+        ..Default::default()
+    };
+    parse_action_entry(&raw)
+}
+
+/// Read an optional `command_stance` `#{ … }` map (issue #1110) into a
+/// [`RawCommandStance`], so a scripted `add_objective` contributes an
+/// objective-specific stance through the SAME `parse_command_stance` seam the
+/// declarative TOML twin uses — one validator, not two.
+///
+/// `station`, `id` and `kind` are required (a stance with no id cannot be
+/// selected, no kind cannot be resolved, and no station has nothing to lend to);
+/// the remaining posture flags default exactly as `#[serde(default)]` does on the
+/// declarative side. `Ok(None)` when absent; `Err` — discarding the whole call
+/// (settled decision 10) — when present but malformed.
+fn map_command_stance(spec: &Map) -> Result<Option<RawCommandStance>, String> {
+    let Some(d) = spec.get("command_stance") else {
+        return Ok(None);
+    };
+    let map = d
+        .clone()
+        .try_cast::<Map>()
+        .ok_or_else(|| "`command_stance` must be a #{ … } map".to_string())?;
+    let station = map_str(&map, "station")
+        .ok_or_else(|| "`command_stance` requires a string `station`".to_string())?;
+    let id =
+        map_str(&map, "id").ok_or_else(|| "`command_stance` requires a string `id`".to_string())?;
+    let kind_str = map_str(&map, "kind")
+        .ok_or_else(|| "`command_stance` requires a string `kind`".to_string())?;
+    let kind = parse_stance_kind(&kind_str)?;
+    let stance = crate::ship::config::StationStanceConfig {
+        id,
+        label: map_str(&map, "label").unwrap_or_default(),
+        kind,
+        high_alert: map_bool(&map, "high_alert").unwrap_or(false),
+        persist_behind_human: map_bool(&map, "persist_behind_human").unwrap_or(false),
+        ai_engaged: map_bool(&map, "ai_engaged").unwrap_or(false),
+    };
+    Ok(Some(RawCommandStance { station, stance }))
+}
+
+/// Map a `command_stance` `kind` string to the [`StanceKind`] the declarative
+/// serde path resolves the same token to. The three snake_case spellings match
+/// `#[serde(rename_all = "snake_case")]` on the enum; an unknown one raises.
+fn parse_stance_kind(s: &str) -> Result<crate::ship::config::StanceKind, String> {
+    use crate::ship::config::StanceKind;
+    match s {
+        "standard" => Ok(StanceKind::Standard),
+        "normal_alert_neutral" => Ok(StanceKind::NormalAlertNeutral),
+        "high_alert_neutral" => Ok(StanceKind::HighAlertNeutral),
+        other => Err(format!(
+            "`command_stance.kind` must be one of standard, normal_alert_neutral, \
+             high_alert_neutral; got '{other}'"
+        )),
+    }
+}
+
+/// Build a `TriggerAction::SpawnEntity` from a script `#{ … }` map, reusing the
+/// declarative `parse_action_entry` for the required-field and anchor/position
+/// XOR checks.
+fn spawn_entity_action(spec: &Map) -> Result<TriggerAction, String> {
+    let raw = RawActionEntry {
+        kind: "spawn_entity".to_string(),
+        template_path: map_str(spec, "template_path"),
+        name: map_str(spec, "name"),
+        anchor: map_str(spec, "anchor"),
+        position: map_f32_array3(spec, "position")?,
+        rotation: map_f32_array3(spec, "rotation")?,
+        scale: map_f32_array3(spec, "scale")?,
+        groups: map_string_array(spec, "groups")?,
+        overrides: match spec.get("overrides") {
+            Some(d) => Some(dynamic_to_toml(d)?),
+            None => None,
+        },
+        ..Default::default()
+    };
+    parse_action_entry(&raw)
+}
+
+/// Build a `TriggerAction::DestroyEntity` from a script entity name, reusing the
+/// declarative `parse_action_entry` for the required-field check (issue #1033).
+///
+/// A bare string rather than a `#{ … }` map, matching `add_faction_enemy`: the
+/// action carries exactly one field, and a map would invent an authoring shape the
+/// declarative twin does not have. It still routes through `parse_action_entry`,
+/// so "which field is required, and what does its absence say" has one owner —
+/// unreachable from Rhai (the arity is the check) but true by construction rather
+/// than by a comment claiming so.
+///
+/// `pub(super)` because the deferred twin — `ctx.schedule.in_seconds(n)
+/// .destroy_entity(…)` — must buffer the byte-identical `TriggerAction`, and two
+/// spellings of "build the destroy action" would be two chances to diverge.
+pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, String> {
+    let raw = RawActionEntry {
+        kind: "destroy_entity".to_string(),
+        entity: Some(entity.to_string()),
+        ..Default::default()
+    };
+    parse_action_entry(&raw)
+}
+
+/// Build a [`ReportRow`](crate::core::report::ReportRow) from a `report_row`
+/// script map (issue #1344).
+///
+/// ```rhai
+/// ctx.effects.report_row(#{
+///     id: "lyra",                                            // required: stable row id
+///     heading: "world.x.report.lyra.heading",                // required: String Id
+///     outcome: "world.x.report.lyra.saved",                  // required: String Id
+///     state: "saved",                                        // required: saved|lost|partial|neutral
+///     score: 6,                                              // optional, default 0
+/// });
+/// ```
+///
+/// All four text keys are REQUIRED, and `id` / `heading` / `outcome` must each
+/// be NON-BLANK — missing and present-but-empty raise the same way, unlike
+/// `open_comms`'s optional metadata. That is the point of the check and not
+/// belt-and-braces: `heading: ""` is a string, so a presence-only test admits
+/// it, and the row it builds then disagrees with itself across the two player
+/// surfaces. `gui/game-over-view.js`'s `reportRows` drops a row with an empty
+/// heading or outcome (a blank line says less than no line), so the phone and
+/// the Viewscreen never show it — while the headless report still carries it
+/// and still folds its score into `MissionReport::total`. The total would then
+/// count a row no player surface displays, which is precisely the invariant
+/// issue #1344 states as "a total equal to the visible report rows' hidden
+/// scores". Enforcing it HERE, at the authoring boundary, is what makes that a
+/// property of the report rather than a coincidence of the renderers.
+///
+/// `score` is optional and defaults to 0 — a row that is purely a statement of
+/// fact, with no diagnostic weight, should not have to spell out a zero.
+///
+/// `state` is validated through
+/// [`ReportRowState::parse`](crate::core::report::ReportRowState::parse), the
+/// same parser the vocabulary defines, exactly as `narrative_outcome`'s word
+/// and `game_over`'s outcome are.
+fn report_row(spec: &Map) -> Result<crate::core::report::ReportRow, String> {
+    /// Read a required, non-blank text key. Absent and blank raise the SAME
+    /// error, so an author who typed `heading: ""` is told the same thing as
+    /// one who forgot the key — which is the same mistake wearing two faces.
+    fn required_text(spec: &Map, key: &str, what: &str) -> Result<String, String> {
+        match map_str(spec, key) {
+            Some(value) if !value.trim().is_empty() => Ok(value),
+            _ => Err(format!(
+                "report_row requires a non-empty string `{key}` ({what})"
+            )),
+        }
+    }
+    let id = required_text(spec, "id", "the stable row id")?;
+    let heading_id = required_text(spec, "heading", "the row's heading String Id")?;
+    let outcome_id = required_text(spec, "outcome", "the row's outcome String Id")?;
+    let state = map_str(spec, "state")
+        .ok_or_else(|| "report_row requires a string `state`".to_string())
+        .and_then(|s| {
+            crate::core::report::ReportRowState::parse(&s).map_err(|e| format!("report_row: {e}"))
+        })?;
+    // `no_float`: a score is whole by construction, so this is an INT and there
+    // is no `flt("…")` route — a fractional diagnostic score would be a number
+    // nobody could total in their head, which is the only thing it is for.
+    let score = match spec.get("score") {
+        Some(d) => {
+            let raw = d
+                .as_int()
+                .map_err(|_| "report_row `score` must be a whole number".to_string())?;
+            i32::try_from(raw)
+                .map_err(|_| format!("report_row `score` is out of range for an i32: {raw}"))?
+        }
+        None => 0,
+    };
+    Ok(crate::core::report::ReportRow {
+        id,
+        heading_id,
+        outcome_id,
+        state,
+        score,
+    })
+}
+
+/// Build an [`OpenCommsRequest`] from an `open_comms` script map.
+///
+/// ```rhai
+/// ctx.effects.open_comms(#{
+///     from: "axiom",                 // required: sender ref id -> name_to_uuid
+///     node_fn: "hail_axiom",         // required: the root dialogue node fn
+///     display_name: "Axiom Control", // optional
+///     thread_id: "aphelion",         // optional: joins an existing thread
+///     priority: "critical",          // optional: routine|urgent|critical
+///     urgent: true,                  // legacy optional fallback
+/// });
+/// ```
+///
+/// `node_fn`, not `fn`: `fn` is a Rhai KEYWORD, and the map-literal parser
+/// accepts only an identifier or a string as a property name — so `#{ fn: … }`
+/// is a parse error rather than a key this could read (pinned by
+/// `fn_is_not_usable_as_a_map_key`). One spelling, so there is nothing to keep in
+/// step.
+///
+/// A missing required key raises, discarding the whole call (settled decision
+/// 10), exactly as a malformed `add_objective` / `spawn_entity` map does. Unknown
+/// keys are ignored, matching `spawn_entity`; `add_objective` deliberately
+/// forwards them to the strict shared Directive contract.
+fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
+    let from = map_str(spec, "from")
+        .ok_or_else(|| "open_comms requires a string `from` (the sender ref id)".to_string())?;
+    let root_fn = map_str(spec, "node_fn").ok_or_else(|| {
+        "open_comms requires a string `node_fn` (the root dialogue node fn)".to_string()
+    })?;
+    let legacy_urgent = map_bool(spec, "urgent").unwrap_or(false);
+    let priority = match map_str(spec, "priority") {
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "routine" => crate::core::messages::CommsPriority::Routine,
+            "urgent" => crate::core::messages::CommsPriority::Urgent,
+            "critical" => crate::core::messages::CommsPriority::Critical,
+            _ => {
+                return Err(format!(
+                    "open_comms `priority` must be routine, urgent, or critical (got `{value}`)"
+                ));
+            }
+        },
+        None if legacy_urgent => crate::core::messages::CommsPriority::Urgent,
+        None => crate::core::messages::CommsPriority::Routine,
+    };
+    Ok(OpenCommsRequest {
+        sender_uuid: None,
+        recipient_ship: None,
+        recipients: crate::recipients::RecipientSelection::from_rhai_map(spec)?,
+        from,
+        root_fn,
+        display_name: map_str(spec, "display_name"),
+        thread_id: map_str(spec, "thread_id"),
+        priority,
+        urgent: priority.is_urgent(),
+        // Stamped by `EffectSink::take_opens` at the host boundary.
+        script_path: String::new(),
+        origin_layer: None,
+    })
+}
+
+#[cfg(test)]
+#[path = "effects_tests.rs"]
+mod tests;

@@ -35,7 +35,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/balance.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs]
+      paths: [crates/phoenix-sim-gameplay/src/core/balance.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-contracts/src/outcome.rs]
       symbols: [BalanceEvent, VictimKind, Outcome]
       tests: [cargo test, crates/phoenix-simulation/src/core/balance_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-simulation/src/ship/damage_sync_tests.rs]
 
@@ -52,7 +52,7 @@ entities:
       readers: [headless-telemetry-collector, shared-collision-history-collector]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/balance.rs]
+      paths: [crates/phoenix-sim-gameplay/src/core/balance.rs]
       symbols: [BalanceEvent]
       tests: [cargo test, crates/phoenix-simulation/src/core/balance_tests.rs]
 
@@ -113,7 +113,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/headless/report.rs, src/headless/app.rs]
+      paths: [src/headless/report.rs, src/headless/app.rs, crates/phoenix-sim-gameplay/src/core/balance.rs]
       symbols: [RunTelemetry, StampedBalanceEvent, collect_balance_events]
       tests: [cargo test, tests/headless_runner.rs, src/headless/report_tests.rs]
 
@@ -150,7 +150,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/balance.rs, src/headless/report.rs]
+      paths: [crates/phoenix-sim-gameplay/src/core/balance.rs, src/headless/report.rs]
       symbols: [aggregate_ledgers, aggregate_damage, DamageLedger, ledgers_to_json]
       tests: [cargo test, crates/phoenix-simulation/src/core/balance_tests.rs, src/headless/report_tests.rs]
 
@@ -171,9 +171,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/sim_rng.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/headless/app.rs, src/headless/args.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-sim-contracts/src/sim_rng.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/headless/app.rs, src/headless/args.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [SimRng, SimStream, SeedSource, assign_uuid_with]
-      tests: [cargo test, tests/rng_determinism.rs, crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, src/headless/args_tests.rs, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs]
+      tests: [cargo test, tests/rng_determinism.rs, crates/phoenix-sim-contracts/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, src/headless/args_tests.rs, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs]
 
   - state: sim-rng-state
     core:
@@ -194,9 +194,9 @@ entities:
       writers: [sim-rng]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/sim_rng.rs]
+      paths: [crates/phoenix-sim-contracts/src/sim_rng.rs]
       symbols: [SimRng, SimRngState, StreamRng]
-      tests: [cargo test, tests/rng_determinism.rs, crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
+      tests: [cargo test, tests/rng_determinism.rs, crates/phoenix-sim-contracts/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
 
   - component: run-outcome-classifier
     core:
@@ -215,7 +215,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/balance.rs, src/headless/report.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/server_app/components.rs]
+      paths: [crates/phoenix-sim-gameplay/src/core/balance.rs, src/headless/report.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-sim-contracts/src/lifecycle.rs]
       symbols: [classify, closing_damage_rates, RunOutcome, OutcomeReport, SideMargins, GameOverReason]
       tests: [cargo test, tests/headless_runner.rs, crates/phoenix-simulation/src/core/balance_tests.rs, src/headless/report_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 

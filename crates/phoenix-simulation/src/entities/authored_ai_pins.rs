@@ -1830,7 +1830,7 @@ fn only_the_committed_legs_decline_a_channel_three_arc_bearing_request() {
 /// AI-bearing hull (`ai_hulls`, i.e. every hull that authors `[behaviour]`),
 /// walk every axis of its COMPOSED `[helm_console]` — the same six `*_ai`
 /// blocks `harrow_warhawk_authors_the_artillery_machine_on_both_travel_axes`
-/// (`crates/phoenix-simulation/src/entities/config.rs`) iterates by hand for one hull — and for every
+/// (`crates/phoenix-sim-gameplay/src/entities/config.rs`) iterates by hand for one hull — and for every
 /// state any of whose rules emits `HoldCombatOrbit`, `HoldRecoveryOrbit` or
 /// `HoldCommittedHeading`, assert the state itself declares
 /// `yields_to_arc_requests = false`.

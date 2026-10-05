@@ -81,7 +81,7 @@ pub(crate) fn comms_test_app() -> App {
         // frozen roster spawns, so a fixture hull without one is invisible to
         // that host.
         crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
         crate::ship_plugin::CoordinationQueue::default(),

@@ -58,7 +58,7 @@ Two things worth a reviewer's attention before booking a human:
   the minute, and a fresh Urgent occurrence that must never be hidden by an
   unrelated snooze) rather than claiming an unverified live re-banding path.
 - **Widget action buttons carry no new authority.** `GM_WIDGET_ACTION_IDS`
-  (`crates/phoenix-simulation/src/world/config.rs:935`) is exactly `["gm-session-pause",
+  (`crates/phoenix-sim-world/src/world/config.rs:935`) is exactly `["gm-session-pause",
   "gm-session-resume"]` today. A widget button ACTIVATES the shipped DOM
   control by id — same confirmation category, same admission check, same
   `ActionFeedbackLifecycle` — so §5.9's "truthful outcomes" exercise is about
@@ -531,7 +531,7 @@ Defect dispositions and required human reruns:
 - [Attention queue projection](../../crates/phoenix-simulation/src/gm_attention.rs) and [panel](../../gui/gm-attention-panel.js); [private filter/snooze controller](../../gui/gm-attention-filters.js)
 - [Public health projection](../../crates/phoenix-simulation/src/gm_health.rs), [panel](../../gui/gm-health-panel.js) and [banner seam](../../gui/gm-health-banner.js)
 - [Station workload](../../crates/phoenix-simulation/src/gm_workload.rs) and [panel](../../gui/gm-workload-panel.js)
-- [Typed widget authoring](../../crates/phoenix-simulation/src/world/config.rs) (`GmRolePresetWidget`, `GM_WIDGET_TYPES`, `GM_WIDGET_ACTION_IDS`) and [desk panel](../../gui/gm-widgets-panel.js)
+- [Typed widget authoring](../../crates/phoenix-sim-world/src/world/config.rs) (`GmRolePresetWidget`, `GM_WIDGET_TYPES`, `GM_WIDGET_ACTION_IDS`) and [desk panel](../../gui/gm-widgets-panel.js)
 - [Confirmation policy registry](../../gui/gm-confirmation.js) and [refusal-reason labels](../../gui/gm-action-reasons.js)
 - [Read-only action journal panel](../../gui/gm-journal-panel.js) (#1441) — used in §5.9 for the Applied/No-op/Refused cross-check
 - Purpose-built probes reused unchanged by §5.4–§5.7: [`probe_gm_attention.toml`](../../assets/worlds/probe_gm_attention.toml), [`probe_gm_beats.toml`](../../assets/worlds/probe_gm_beats.toml), [`probe_gm_idle_npc_authored.toml`](../../assets/worlds/probe_gm_idle_npc_authored.toml), [`probe_gm_quiet.toml`](../../assets/worlds/probe_gm_quiet.toml), [`probe_gm_workload_authored.toml`](../../assets/worlds/probe_gm_workload_authored.toml), [`probe_gm_widgets.toml`](../../assets/worlds/probe_gm_widgets.toml)

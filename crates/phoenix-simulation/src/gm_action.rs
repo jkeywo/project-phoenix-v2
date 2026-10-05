@@ -757,13 +757,7 @@ impl GmAction {
                 objective,
                 recipients,
                 ..
-            } if bounded(objective)
-                && recipients.len() <= crate::gm_objective::MAX_OBJECTIVE_RECIPIENTS
-                && recipients.iter().all(|id| bounded(id))
-                && recipients.windows(2).all(|pair| pair[0] < pair[1]) =>
-            {
-                Ok(())
-            }
+            } if crate::gm_objective::valid_request_vocabulary(objective, recipients) => Ok(()),
             Self::SetContactInformation { ship, change }
                 if bounded(&ship.0)
                     && change.bounded()

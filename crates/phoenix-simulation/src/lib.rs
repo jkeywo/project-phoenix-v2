@@ -15,6 +15,7 @@
 // Declared early: the `plog!` family is `#[macro_export]`ed, and the helper
 // macros they expand to must be defined before any module that uses them.
 pub mod logging;
+pub use phoenix_sim_contracts::{__plog_gated, pdebug, perror, pinfo, ptrace, pwarn};
 
 // Headless runner. Native only: it drives the app with a manual fixed-timestep
 // loop, which has no meaning under requestAnimationFrame.

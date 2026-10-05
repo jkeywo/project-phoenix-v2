@@ -16,7 +16,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs]
       tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
 
   - component: torpedo-magazine-round-claim
@@ -37,7 +37,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-model/src/messages.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/console/weapons/torpedo.rs]
       symbols: [handle_torpedo_magazine_inter_system, TorpedoMagazineAiPolicy, seed_torpedo_magazine_facts, torpedo_magazine_grant_policy_fires, seed_torpedo_conservation_facts, torpedo_conservation_declared, torpedo_conservation_policy_fires, targeted_objective_count]
       tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
@@ -62,7 +62,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs]
       symbols: [ai_target_selection, TacticalTargetSelector]
       tests: [cargo test]
 
@@ -94,7 +94,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/console/weapons/torpedo.rs]
       symbols: [ai_torpedo_auto_fire, ai_torpedo_load, auto_fire_torpedo, TorpedoAiInput, torpedo_load_orders, TorpedoTubeAiPolicies, seed_torpedo_tube_load_facts, seed_torpedo_tube_launch_facts, torpedo_tube_load_policy_fires, torpedo_tube_launch_policy_fires]
       tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
@@ -118,7 +118,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs]
       symbols: [ai_phaser_auto_fire, PhaserBankAiPolicies, seed_phaser_bank_facts]
       tests: [cargo test]
 
@@ -139,7 +139,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-sim-gameplay/src/console/weapons/blaster.rs]
       symbols: [tick_blaster_auto_fire, handle_fire_blaster, BlasterBankAiPolicies, seed_blaster_bank_facts]
       tests: [cargo test]
 
@@ -160,7 +160,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [tick_npc_auto_match_frequency, NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchStatesState]
       tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
@@ -176,7 +176,7 @@ entities:
       writers: [npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchState, NpcFrequencyMatchStatesState]
 
       tests: [crates/phoenix-simulation/src/console_ai/core_tests.rs]
@@ -224,7 +224,7 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs]
       symbols: [TacticalRadarSelection]
       tests: [cargo test]
 
@@ -240,10 +240,10 @@ entities:
       writers: [tactical-weapons-controls, npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [ShipPhaserFrequency, ShipPhaserFrequencyState]
 
-      tests: [crates/phoenix-simulation/src/ship/state_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/state_tests.rs]
   - state: tactical-frequency-hint-inbox-state
     core:
       status: implemented
@@ -256,7 +256,7 @@ entities:
       writers: [tactical-weapons-controls]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PendingTacticalFrequencyHint, TacticalFrequencyHintInboxState, receive_tactical_coordination, apply_tactical_frequency_hint]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs]
@@ -275,7 +275,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/config/weapons.rs]
       symbols: [handle_fire_phaser, tick_beams, PhaserBankConfig]
       tests: [cargo test]
 
@@ -291,7 +291,7 @@ entities:
       writers: [phaser-beam-system]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs]
       symbols: [ActiveBeam, PhaserCooldown, CurrentPhaserMode]
       tests: [cargo test]
 
@@ -309,7 +309,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/entities/config.rs]
+      paths: [crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs]
       symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig, LaunchEvent]
       tests: [cargo test]
 
@@ -325,7 +325,7 @@ entities:
       writers: [blaster-projectile-system]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/weapons/blaster.rs]
+      paths: [crates/phoenix-sim-gameplay/src/weapons/blaster.rs]
       symbols: [BlasterVolleyState]
       tests: [cargo test]
 
@@ -347,7 +347,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/entities/config.rs]
+      paths: [crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/config/weapons.rs]
       symbols: [TorpedoSystem, TorpedoTube, build_torpedo_target_snapshot, tick_torpedo_lifecycle, handle_fire_torpedo, launch_with_barrels, TorpedoesConfig, publish_torpedo_magazine_blackboard]
       tests: [cargo test, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
 
@@ -363,7 +363,7 @@ entities:
       writers: [torpedo-system]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/weapons/torpedo.rs]
+      paths: [crates/phoenix-sim-gameplay/src/weapons/torpedo.rs]
       symbols: [TorpedoSystem, TorpedoTube, TubeBurstState, Torpedo, TorpedoDetonation]
       tests: [cargo test]
 
@@ -406,7 +406,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs]
       symbols: [handle_fire_phaser, ai_phaser_auto_fire, tick_beams_prepare, ActiveBeam, ActiveBeamSlot, is_bank_firing, live_banks]
       tests: [cargo test]
 
@@ -417,12 +417,12 @@ entities:
       title: Patterned Barrel Attacks
       summary: Blaster and torpedo banks declare multiple barrel marker points and a timed attack pattern of offsets and barrel-index arrays, allowing alternating or simultaneous shots.
       rationale:
-        - "Shared, reusable schema (issue #765). `BarrelPatternStep { barrels: Vec<u32>, offset_secs: f32 }` and the `BarrelPattern` alias live in the weapon-family-agnostic `crates/phoenix-simulation/src/weapons/pattern.rs` so torpedoes (issue #766) reuse the exact types and validator. A step fires its listed barrel indices SIMULTANEOUSLY at `offset_secs`; successive steps at increasing offsets ALTERNATE. Blasters wire it now; the blaster half of the evidence is covered here."
+        - "Shared, reusable schema (issue #765). `BarrelPatternStep { barrels: Vec<u32>, offset_secs: f32 }` and the `BarrelPattern` alias live in the weapon-family-agnostic `crates/phoenix-sim-gameplay/src/weapons/pattern.rs` so torpedoes (issue #766) reuse the exact types and validator. A step fires its listed barrel indices SIMULTANEOUSLY at `offset_secs`; successive steps at increasing offsets ALTERNATE. Blasters wire it now; the blaster half of the evidence is covered here."
         - "Backward compatible. A bank with no `barrels` and no `pattern` is one implicit barrel (= the existing `marker`) firing the uniform `volley_count` volley — `BlasterBankConfig::firing_schedule` returns the legacy schedule and `tick` fires at most one step per tick, preserving the pre-#765 one-bolt-per-tick cadence exactly. The four shipped blaster hulls are unchanged; `alliance_battleship` authors a real twin-barrel alternating-then-simultaneous pattern."
         - "Authoring validation, both twins (AC1/AC3). `validate_barrel_pattern` (rejects empty step, barrel index >= barrel count, negative/non-finite offset, multi-barrel-with-no-pattern) is called by `validate_blaster_banks` (Rust) and mirrored by `editor/blaster-validate.js` wired into `validateFile`, so an invalid pattern blocks save via the #757 admission gate. Per-barrel marker references are emitted by `collect_marker_refs` / `collectMarkerRefs`, so a missing barrel marker is rejected by the shipped-asset conformance test and the editor."
         - "Firing carries barrel identity (AC2). `BlasterSystem::tick` takes one world origin per barrel (`barrel_origins`), resolved by `tick_blaster_system` from each barrel's rig marker, and emits one `LaunchEvent { barrel, x, z, heading }` per firing barrel, so simultaneous steps launch multiple bolts from distinct authored points on one tick and alternating steps launch from the right origin each step."
         - "Blackboard + Tactical (AC4). `BlasterBankState` gains `active_barrels`, `pattern_step`, `pattern_len`; `ph-blasters-controls.js` renders a step/barrel indicator (string ids `component.blasters.pattern_step`/`.barrels`). Round-tripped in `codec.rs`."
-        - "Torpedo half preserves the ammunition economy (issue #766, AC3). Torpedoes reuse the SAME `crates/phoenix-simulation/src/weapons/pattern.rs` schema and `validate_barrel_pattern` (called by `validate_torpedo_tubes`, mirrored by `editor/torpedo-validate.js`). The pattern maps onto the EXISTING `launch`/`TubeBurstState` burst machinery: `TorpedoTube::barrel_sequence` flattens the offset-ordered steps into a `(barrel, step)` list and each volley round — the immediate `launch_with_barrels` shot plus every burst shot in `tick_torpedo_lifecycle` — draws its origin from the next barrel, cycling. The pattern governs ONLY which barrel a round leaves from and the barrel order; `loaded_count`, the shared `torpedoes_remaining` magazine, and `burst_interval_secs` stay the sole authority over the count. Magazine spend still happens at LOAD time (`start_load`/`claim_magazine_round`), never at launch. Timing rule: `burst_interval_secs` remains the sole cadence between rounds; the pattern's `offset_secs` only orders the barrel sequence. A 2-barrel simultaneous step with 1 round loaded fires exactly 1 torpedo and leaves the magazine untouched (`launch_does_not_change_torpedo_count` still holds). `handle_fire_torpedo` resolves per-barrel world origins from the tube's rig markers (falling back to ship centre for legacy single-marker tubes); `TorpedoTubeState`/`ph-torpedo-controls.js` surface `active_barrels`/`pattern_step`/`pattern_len`. `alliance_battleship`'s fore-centre tube authors a real twin-barrel pattern."
+        - "Torpedo half preserves the ammunition economy (issue #766, AC3). Torpedoes reuse the SAME `crates/phoenix-sim-gameplay/src/weapons/pattern.rs` schema and `validate_barrel_pattern` (called by `validate_torpedo_tubes`, mirrored by `editor/torpedo-validate.js`). The pattern maps onto the EXISTING `launch`/`TubeBurstState` burst machinery: `TorpedoTube::barrel_sequence` flattens the offset-ordered steps into a `(barrel, step)` list and each volley round — the immediate `launch_with_barrels` shot plus every burst shot in `tick_torpedo_lifecycle` — draws its origin from the next barrel, cycling. The pattern governs ONLY which barrel a round leaves from and the barrel order; `loaded_count`, the shared `torpedoes_remaining` magazine, and `burst_interval_secs` stay the sole authority over the count. Magazine spend still happens at LOAD time (`start_load`/`claim_magazine_round`), never at launch. Timing rule: `burst_interval_secs` remains the sole cadence between rounds; the pattern's `offset_secs` only orders the barrel sequence. A 2-barrel simultaneous step with 1 round loaded fires exactly 1 torpedo and leaves the magazine untouched (`launch_does_not_change_torpedo_count` still holds). `handle_fire_torpedo` resolves per-barrel world origins from the tube's rig markers (falling back to ship centre for legacy single-marker tubes); `TorpedoTubeState`/`ph-torpedo-controls.js` surface `active_barrels`/`pattern_step`/`pattern_len`. `alliance_battleship`'s fore-centre tube authors a real twin-barrel pattern."
     architecture:
       kind: configuration-schema
       authority: authoritative
@@ -430,21 +430,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/weapons/pattern.rs
-        - crates/phoenix-simulation/src/weapons/blaster.rs
-        - crates/phoenix-simulation/src/weapons/torpedo.rs
-        - crates/phoenix-simulation/src/entities/config.rs
-        - crates/phoenix-simulation/src/entities/marker_validate.rs
-        - crates/phoenix-simulation/src/console/weapons/blaster.rs
-        - crates/phoenix-simulation/src/console/weapons/torpedo.rs
-        - crates/phoenix-model/src/messages.rs
-        - editor/barrel-pattern-validate.js
-        - scripts/build-workshop.mjs
-        - editor/blaster-validate.js
-        - editor/torpedo-validate.js
-        - editor/marker-validate.js
-        - gui/components/ph-blasters-controls.js
-        - gui/components/ph-torpedo-controls.js
+        [crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-model/src/messages.rs, editor/barrel-pattern-validate.js, scripts/build-workshop.mjs, editor/blaster-validate.js, editor/torpedo-validate.js, editor/marker-validate.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/entities/config/weapons.rs]
       symbols:
         - BarrelPatternStep
         - BarrelPattern
@@ -456,7 +442,7 @@ entities:
         - validateTorpedoTubes
         - launch_with_barrels
         - barrel_sequence
-      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/weapons/pattern_tests.rs, crates/phoenix-simulation/src/entities/marker_validate_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-sim-gameplay/src/weapons/pattern_tests.rs, crates/phoenix-sim-gameplay/src/entities/marker_validate_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: weapon-readiness-feedback-policy
     core:
@@ -479,8 +465,8 @@ entities:
       status: declared
       paths:
         - crates/phoenix-model/src/messages.rs
-        - crates/phoenix-simulation/src/weapons/phaser.rs
-        - crates/phoenix-simulation/src/weapons/blaster.rs
+        - crates/phoenix-sim-gameplay/src/weapons/phaser.rs
+        - crates/phoenix-sim-gameplay/src/weapons/blaster.rs
         - crates/phoenix-simulation/src/console/weapons/blackboard.rs
         - gui/weapon-readiness.js
         - gui/components/ph-phasers-controls.js
@@ -495,7 +481,7 @@ entities:
         - build_tube_states
         - tube_readiness
         - bank_state
-      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/weapons/phaser_tests.rs, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-sim-gameplay/src/weapons/phaser_tests.rs, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
 
   - component: three-dimensional-torpedoes
     core:
@@ -516,9 +502,9 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/weapons/torpedo.rs
+        - crates/phoenix-sim-gameplay/src/weapons/torpedo.rs
         - crates/phoenix-simulation/src/console/weapons/torpedo.rs
-        - crates/phoenix-simulation/src/console/weapons/shared.rs
+        - crates/phoenix-sim-gameplay/src/console/weapons/shared.rs
         - crates/phoenix-model/src/messages.rs
         - crates/phoenix-simulation/src/core/codec.rs
         - crates/phoenix-presentation/src/server/pfx.rs
@@ -556,14 +542,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/console/weapons/mod.rs
-        - crates/phoenix-simulation/src/console/weapons/server.rs
-        - crates/phoenix-model/src/messages.rs
-        - crates/phoenix-simulation/src/core/codec.rs
-        - crates/phoenix-simulation/src/ship/components.rs
-        - crates/phoenix-simulation/src/console/helm/server.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
-        - gui/coordination-popup.js
+        [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, gui/coordination-popup.js, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - tick_weapons_arc_request
         - evaluate_family_arc_request

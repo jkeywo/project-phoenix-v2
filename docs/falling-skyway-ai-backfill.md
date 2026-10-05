@@ -118,7 +118,7 @@ hail (hail-independent, band-scored).
 **Historical decisive negative:** there was **no `operations_console`, no operations AI
 policy, and no way for AI to emit `StartOperation`**. `StartOperation` has exactly
 two producers in the repo — a *human* captain console (`gui/action-map.js:204`)
-and *world script* (`crates/phoenix-simulation/src/world/script/effects.rs:410`). The destroyer owns all four
+and *world script* (`crates/phoenix-sim-world/src/world/script/effects.rs:410`). The destroyer owns all four
 capability verbs (`alliance_destroyer.toml:1520-1640`) but nothing in any fragment
 can order them. `tow`, `stabilise`, `field_repair` and `transfer` are therefore
 strictly crew-only in that historical build.
@@ -277,7 +277,7 @@ gates actually sit ([ai] exploration; every ref verified against the file).
   condition_step 0.01) and `coarse` (max_range 260, condition_step 0.25,
   no capacities).
 - **A scan is a first-class world event.** `scanned_flag(subject_id)` composes
-  `scan.<id>.taken` (`crates/phoenix-simulation/src/science/scan.rs:465-467`); the latch in
+  `scan.<id>.taken` (`crates/phoenix-sim-gameplay/src/science/scan.rs:465-467`); the latch in
   `crates/phoenix-simulation/src/science/server.rs:360-373` raises it in the base-world flag store and
   queues `WorldEvent::FlagSet`. Scenario `on_flag_set("scan.<id>.taken", …)`
   handlers therefore fire off a real sensor action. The scan reads only

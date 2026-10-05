@@ -13,9 +13,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/damage.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/ship_plugin.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/damage.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/ship_plugin.rs]
       symbols: [DamageTier, SystemHull]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/damage_tests.rs]
 
   - component: damage-source-router
     core:
@@ -31,8 +31,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/ship/damage.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
+      paths: [crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/damage_tests.rs]
 
   - component: repair-team-cycle-policy
     core:
@@ -52,7 +52,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/modifiers/repair_teams.rs, crates/phoenix-simulation/src/console/repair/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-simulation/src/console/repair/server.rs]
       symbols: [RepairTeams, tick_repair_teams]
       tests: [cargo test]
 
@@ -70,8 +70,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/damage.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/server_app/collision.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/damage.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/server_app/collision.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/damage_tests.rs]
 
   - runtime: host-browser-runtime
     core:
@@ -241,7 +241,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/ship/damage.rs
+        - crates/phoenix-sim-gameplay/src/ship/damage.rs
         - crates/phoenix-simulation/src/entities/spawner.rs
         - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
@@ -249,7 +249,7 @@ entities:
         - DamageTier
         - sync_console_damage_tiers
       tests:
-        - crates/phoenix-simulation/src/ship/damage_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/damage_tests.rs
         - cargo test
 
   - state: authoritative-damage-state
@@ -271,14 +271,14 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/ship/damage.rs
+        - crates/phoenix-sim-gameplay/src/ship/damage.rs
         - crates/phoenix-simulation/src/console/repair/server.rs
         - crates/phoenix-model/src/messages.rs
       symbols:
         - SystemHull
         - RepairBlackboard
 
-      tests: [crates/phoenix-simulation/src/ship/damage_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/damage_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: system-damage-tier-memory-state
     core:
       status: implemented
@@ -292,7 +292,7 @@ entities:
       derived_from: [authoritative-damage-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [LastSystemTiers, LastSystemTiersState, detect_damage_tier_crossings]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/ship/damage_sync_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
@@ -327,9 +327,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/command_admission/mod.rs
-        - crates/phoenix-simulation/src/command_admission/ai_emit.rs
-        - crates/phoenix-simulation/src/command_admission/log.rs
+        [crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/command_admission/ai_emit.rs, crates/phoenix-sim-session/src/command_admission/log.rs, crates/phoenix-sim-gameplay/src/command_admission/ai_emit.rs]
       symbols:
         - AdmissionPlugin
         - AdmissionSet
@@ -350,7 +348,7 @@ entities:
       tests:
         - crates/phoenix-simulation/src/command_admission/tests.rs
         - crates/phoenix-simulation/src/command_admission/ai_emit_tests.rs
-        - crates/phoenix-simulation/src/command_admission/log_tests.rs
+        - crates/phoenix-sim-session/src/command_admission/log_tests.rs
         - cargo test
     evidence:
       - kind: test
@@ -422,8 +420,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/console/repair/dispatch.rs
-        - crates/phoenix-simulation/src/console/repair/server.rs
+        [crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-sim-gameplay/src/ship/components.rs]
       symbols:
         - handle_dispatch_repair_team
         - handle_recall_repair_team
@@ -669,7 +666,7 @@ entities:
       status: declared
       paths:
         - crates/phoenix-simulation/src/console/repair/server.rs
-        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
       symbols:
         - ShipRepairTeams
         - RepairTeams
@@ -695,7 +692,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
         - crates/phoenix-simulation/src/console/repair/server.rs
         - crates/phoenix-model/src/messages.rs
       symbols:
@@ -916,7 +913,7 @@ entities:
     implementation:
       status: suspected
       paths:
-        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
         - gui/console-state.js
       symbols:
         - on_site_systems

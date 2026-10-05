@@ -17,9 +17,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/modifiers/power_system.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PowerState, capture_continuation, restore_continuation, ControlState, PolicyState, RecoveryHistory, capture_from, restore_into]
-      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", crates/phoenix-simulation/src/modifiers/power_system_tests.rs, crates/phoenix-simulation/src/ship/continuation_tests.rs]
+      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs, crates/phoenix-simulation/src/ship/continuation_tests.rs]
 
   - component: startup-save-restore-driver
     core:
@@ -81,7 +81,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/server_app/components.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-sim-contracts/src/identity.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       symbols: [EntityUuid, AsteroidUuid]
 
       tests: [crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
@@ -102,10 +102,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/world_id.rs]
+      paths: [crates/phoenix-sim-contracts/src/world_id.rs]
       symbols: [WorldIdMint, WorldId, IdNamespace]
 
-      tests: [crates/phoenix-simulation/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs]
+      tests: [crates/phoenix-sim-contracts/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs]
   - state: npc-ai-fidelity-state
     core:
       status: implemented
@@ -119,7 +119,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-sim-gameplay/src/ai/server.rs]
       symbols: [AiHighFidelity, LodTransitionTimer, AiHighFidelityComponents, AiFidelityState, ai_high_fidelity_components, has_ai_high_fidelity_components]
 
   - state: runtime-entity-projection-state
@@ -165,13 +165,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/world_id.rs
+        - crates/phoenix-sim-contracts/src/world_id.rs
         - crates/phoenix-simulation/src/sim_tick.rs
-        - crates/phoenix-simulation/src/sim_rng.rs
+        - crates/phoenix-sim-contracts/src/sim_rng.rs
         - crates/phoenix-simulation/src/sim_digest.rs
         - clippy.toml
       symbols: [WorldId, WorldIdMint, IdNamespace, mint_id_with, sync_world_id_mint]
-      tests: [cargo test, crates/phoenix-simulation/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs, crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-contracts/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs, crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-sim-contracts/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
 
   - component: digest-float-canonicalisation-policy
     core:
@@ -190,9 +190,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/physics.rs, Cargo.toml]
+      paths: [crates/phoenix-sim-gameplay/src/ship/physics.rs, Cargo.toml]
 
-      tests: [crates/phoenix-simulation/src/ship/physics_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/physics_tests.rs]
   - component: libm-shared-math-policy
     core:
       status: proposed
@@ -223,10 +223,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/sim_rng.rs]
+      paths: [crates/phoenix-sim-contracts/src/sim_rng.rs]
       symbols: [SimRng, SimStream]
 
-      tests: [crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
+      tests: [crates/phoenix-sim-contracts/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
   - component: digest-render-interp-fold-point
     core:
       status: proposed
@@ -243,7 +243,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/sim_sets.rs, crates/phoenix-presentation/src/server/renderer.rs]
+      paths: [crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/sim_sets.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-sim-contracts/src/sim_sets.rs, crates/phoenix-sim-contracts/src/sim_tick.rs]
       symbols: [SimTick, SimSet, RenderInterp]
 
       tests: [crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
@@ -270,24 +270,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/ai/cadence.rs
-        - crates/phoenix-model/src/messages.rs
-        - crates/phoenix-simulation/src/sim_tick.rs
-        - crates/phoenix-simulation/src/server_app/broadcast.rs
-        - crates/phoenix-simulation/src/server_app/registration.rs
-        - crates/phoenix-simulation/src/debug_overlay.rs
-      # crates/phoenix-simulation/src/command_admission/mod.rs (clear_inter_system_queue's real home) is
-      # deliberately NOT a declared path here: it is also host-command-admission's
-      # (engineering-damage.yaml) primary implementation file, and PASM's
-      # dependency-drift scanner treats a file claimed by two entities as
-      # ambiguously owned, dropping every observed import edge through it —
-      # which silently broke host-command-admission's four declared
-      # dependency edges (admitted-command-router, system-command-admission-policy,
-      # and the two routers/operators that depend on host-command-admission
-      # in turn) the moment this issue's symbol backfill added it here.
-      # clear_inter_system_queue stays named in the CLEARED-AT-FOLD rationale
-      # above (prose, not a checked `symbols` entry) rather than reclaiming the
-      # file and re-breaking that scan.
+        [crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/debug_overlay.rs, crates/phoenix-sim-contracts/src/lifecycle.rs, crates/phoenix-sim-contracts/src/messages.rs]
       symbols:
         - InterSystemQueue
         - AiTickReady
@@ -312,7 +295,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: Digest Census — Traceability-Only Symbols
-      summary: "The `implementation.symbols` names that back the authoritative `state` entities for traceability but can never key the Rust declaration registry (`StateCensus`, crates/phoenix-simulation/src/authoritative.rs) — function/accessor names, a const, and value types that ride a larger folded resource rather than register as a component/resource of their own. Recorded here so that deleting the census guard's old `AUTHORITATIVE_SYMBOLS` const (issue #1222) loses nothing: these names stay documented in PASM, where they were always the source of truth."
+      summary: "The `implementation.symbols` names that back the authoritative `state` entities for traceability but can never key the Rust declaration registry (`StateCensus`, crates/phoenix-sim-contracts/src/authoritative.rs) — function/accessor names, a const, and value types that ride a larger folded resource rather than register as a component/resource of their own. Recorded here so that deleting the census guard's old `AUTHORITATIVE_SYMBOLS` const (issue #1222) loses nothing: these names stay documented in PASM, where they were always the source of truth."
       rationale:
         - "Why they are not declared. `App::declare_state::<T>(class, pasm)` keys the census on a real Rust TYPE's `std::any::type_name::<T>()`. A free function, an accessor, or a `thread_local!`/const is not a type, and a value type carried on a larger folded resource never registers with Bevy in its own right — so none of these can appear in the registry the enumeration guard (`tests/authoritative_state_enumeration.rs`) scans, and forcing them into `declare_state` would assert a component/resource that does not exist. The registered authoritative type each one rides beside IS declared (issue #1222): e.g. `ShipScanRecord` for the scan value types, `WorldIdMint` for `WorldId`/`IdNamespace`, `SimRng` for `SimRngState`, `EntitySpawnOrigin` for `SpawnOrigin`, `InfrastructureCondition` for `InfrastructureState`."
         - "FUNCTION / ACCESSOR / CONST names (traceability only). apply_arc_bearing_request, apply_world_layer_changes, assess_hazards, assign_named_entity_uuids, build_catalog, build_helm_ai_surfaces_frame, clear_mod_pack_overlay, encode_local_facing, encode_local_velocity, is_instagib, mod_pack_overlay_get, on_site_systems, seed_helm_actuator_facts, push_mod_pack, remove_mod_pack, reorder_mod_packs, active_packs, spawn_immediate_entities_internal, sync_ship_position, tick_boost, tick_impulse, visible_entities, wasm_load_world, wasm_select_ship, and the const INTENT_NARRATION_SPAWN_SITES. Named in prose rather than a checked `symbols` entry for the same reason `clear_inter_system_queue` is on the exclusion-classes entity above: this is a record, not a claim of file ownership. Each already lives on its owning `state` entity's `implementation.symbols` across `pasm/spec/architecture/*.yaml`."
@@ -349,10 +332,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/sim_rng.rs, crates/phoenix-model/src/messages.rs, src/headless/fingerprint.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      paths: [crates/phoenix-sim-contracts/src/sim_rng.rs, crates/phoenix-model/src/messages.rs, src/headless/fingerprint.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-contracts/src/lifecycle.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       symbols: [SimRng, GamePhase, GameOverReason, WorldResource, CaptainPriorityBoost, EntitySnapshot]
 
-      tests: [crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
+      tests: [crates/phoenix-sim-contracts/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
   - component: vellum-digest-primitive-reference
     core:
       status: proposed
@@ -473,35 +456,6 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/sim_sets.rs
-        - crates/phoenix-simulation/src/sim_sets/order.rs
-        - crates/phoenix-simulation/src/sim_sets/order/pass.rs
-        - crates/phoenix-simulation/src/server_app/registration.rs
-        - crates/phoenix-simulation/src/console/captain/server.rs
-        - crates/phoenix-simulation/src/console/command/server.rs
-        - src/headless/determinism_audit/graph.rs
-        - tests/fixed_update_ambiguities.rs
-        - tests/fixed_executor_policy.rs
-        - tests/pool_equivalence.rs
-        - tests/schedule_order_determinism.rs
-        - tests/archetype_order_determinism.rs
-        - tests/registration_order_determinism.rs
-        - tests/snapshot_resume.rs
-        - tests/fixtures/worlds/scripted_order_resume.toml
-        - tests/common/default_pool.rs
-        - tests/common/declared_order.rs
-        - tests/fixtures/determinism/declared-owner-order.json
-        - tests/tactical_target_ordering.rs
-        - tests/publisher_ordering.rs
-        - tests/admitted_producer_ordering.rs
-        - tests/admitted_foreign_consumers.rs
-        - tests/captain_sensors_ordering.rs
-        - docs/declared-fixed-order.md
-        - docs/script-callback-order-proof.md
-        - docs/default-pool-perturbations.md
-        - docs/publisher-order-proof.md
-        - docs/admitted-producer-six-proof.md
-        - docs/admitted-foreign-consumer-proof.md
-        - docs/captain-sensors-order-proof.md
+        [crates/phoenix-simulation/src/sim_sets.rs, crates/phoenix-simulation/src/sim_sets/order.rs, crates/phoenix-simulation/src/sim_sets/order/pass.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/command/server.rs, src/headless/determinism_audit/graph.rs, tests/fixed_update_ambiguities.rs, tests/fixed_executor_policy.rs, tests/pool_equivalence.rs, tests/schedule_order_determinism.rs, tests/archetype_order_determinism.rs, tests/registration_order_determinism.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, tests/common/default_pool.rs, tests/common/declared_order.rs, tests/fixtures/determinism/declared-owner-order.json, tests/tactical_target_ordering.rs, tests/publisher_ordering.rs, tests/admitted_producer_ordering.rs, tests/admitted_foreign_consumers.rs, tests/captain_sensors_ordering.rs, docs/declared-fixed-order.md, docs/script-callback-order-proof.md, docs/default-pool-perturbations.md, docs/publisher-order-proof.md, docs/admitted-producer-six-proof.md, docs/admitted-foreign-consumer-proof.md, docs/captain-sensors-order-proof.md, crates/phoenix-sim-contracts/src/sim_sets.rs]
       symbols: [FixedStep, DeclaredOrder, configure_fixed_order, RedAlertApplied, handle_set_red_alert, operate_command_ai, apply_alert_change_to_stances]
       tests: [cargo test, crates/phoenix-simulation/src/sim_sets/order/pass_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

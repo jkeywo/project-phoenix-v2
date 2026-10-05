@@ -2,7 +2,7 @@
 title: CaptainPlugin
 type: concept
 tags: [captain, red-alert, viewscreen, objectives, authority, ai]
-sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, gui/stations/captain-actions.js, gui/action-map.js]
+sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/ship/viewscreen.rs, gui/stations/captain-actions.js, gui/action-map.js]
 updated: 2026-08-31
 ---
 

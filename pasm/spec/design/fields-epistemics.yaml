@@ -73,7 +73,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Band-D Network Vocabulary at Band-B Scope
-      summary: "Borrowed Sun's mirror network (#858) is authored in the producer/conduit/buffer/consumer node vocabulary with generic capacity, dependency, and priority resolution, extending crates/phoenix-simulation/src/infrastructure/condition.rs — scoped strictly to external scenario infrastructure with static topology and no flow simulation beyond capacity resolution. Band D widens this same graph to ship systems; it never renames a mission-shaped one."
+      summary: "Borrowed Sun's mirror network (#858) is authored in the producer/conduit/buffer/consumer node vocabulary with generic capacity, dependency, and priority resolution, extending crates/phoenix-sim-gameplay/src/infrastructure/condition.rs — scoped strictly to external scenario infrastructure with static topology and no flow simulation beyond capacity resolution. Band D widens this same graph to ship systems; it never renames a mission-shaped one."
       rationale:
         - "The mirror network already fits the shape — mirrors produce, relays conduct, habitats consume — so adopting the vocabulary now costs nothing and saves a rename."
         - "The over-build guard: band B implements only what the habitat-allocation decision needs."

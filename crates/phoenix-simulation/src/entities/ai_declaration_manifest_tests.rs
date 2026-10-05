@@ -72,7 +72,7 @@ fn every_kind_is_attached_at_every_one_of_its_spawn_sites() {
 /// a spawn path.
 #[test]
 fn no_synthesiser_is_defined_or_called_anywhere() {
-    let src = read_non_test_source("crates/phoenix-simulation/src/entities/config.rs");
+    let src = read_non_test_source("crates/phoenix-sim-gameplay/src/entities/config.rs");
     let defined: Vec<String> = src
         .lines()
         .filter_map(|line| {
@@ -91,7 +91,7 @@ fn no_synthesiser_is_defined_or_called_anywhere() {
         .collect();
     assert!(
             defined.is_empty(),
-            "crates/phoenix-simulation/src/entities/config.rs defines AI synthesiser(s) again: {defined:?}.              Stage 5d deleted all nineteen; a hull that wants a baseline authors it              in TOML, and strict AI-declaration mode is what makes omitting it an              error rather than a silent Rust default."
+            "crates/phoenix-sim-gameplay/src/entities/config.rs defines AI synthesiser(s) again: {defined:?}.              Stage 5d deleted all nineteen; a hull that wants a baseline authors it              in TOML, and strict AI-declaration mode is what makes omitting it an              error rather than a silent Rust default."
         );
 
     let sites: BTreeSet<(&str, &str)> = FINE_SYSTEM_KINDS

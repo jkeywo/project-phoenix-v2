@@ -2,7 +2,7 @@
 title: System Addressing
 type: concept
 tags: [stations, systems, system-registry, command-admission, coordination]
-sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/rating_systems.rs]
+sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/rating_systems.rs]
 updated: 2026-08-27
 ---
 

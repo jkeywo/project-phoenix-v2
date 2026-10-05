@@ -1,5 +1,6 @@
 use super::*;
 use crate::entities::config::*;
+use crate::regions::shape::RegionShape;
 
 /// Helper: build a minimal Bevy app for spawning tests.
 fn test_app() -> App {

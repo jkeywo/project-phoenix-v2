@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::messages::ObjectiveSnapshot;
 use crate::core::messages::ObjectiveSource;
 use bevy::ecs::system::RunSystemOnce;
 

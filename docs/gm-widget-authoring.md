@@ -76,7 +76,7 @@ Repeats existing permitted GM action buttons where this role can reach them.
 actions = ["gm-session-pause", "gm-session-resume"]
 ```
 
-The registry is `GM_WIDGET_ACTION_IDS` in `crates/phoenix-simulation/src/world/config.rs`. Anything else
+The registry is `GM_WIDGET_ACTION_IDS` in `crates/phoenix-sim-world/src/world/config.rs`. Anything else
 fails the world load, naming the id and listing what is permitted.
 
 A widget button **activates the shipped control**; it does not issue an action

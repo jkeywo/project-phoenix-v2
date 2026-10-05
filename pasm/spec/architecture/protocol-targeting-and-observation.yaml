@@ -16,7 +16,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/components.rs, server.html, gui/action-map.js]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/components.rs, server.html, gui/action-map.js, crates/phoenix-sim-contracts/src/authority.rs]
       symbols: [LOCAL_CONSOLE_TOKEN, wasm_receive_message, dispatchConsoleAction]
       tests: [cargo test, npx vitest run, src/server/bridge_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
@@ -32,7 +32,7 @@ entities:
       writers: [host-local-console-bridge]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-sim-contracts/src/authority.rs]
       symbols: [LOCAL_CONSOLE_TOKEN]
 
       tests: [src/server/bridge_tests.rs]
@@ -123,7 +123,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/tags.rs, crates/phoenix-simulation/src/entities/target.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
+      paths: [crates/phoenix-sim-gameplay/src/entities/tags.rs, crates/phoenix-sim-gameplay/src/entities/target.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
       symbols: [EntityTag, TargetSection, parse_tags, matches_any]
       tests: [cargo test, src/entities/tags_tests.rs]
 
@@ -139,7 +139,7 @@ entities:
       derived_from: [entity-template-state, radar-contact-projection-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/target.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-model/src/messages.rs]
+      paths: [crates/phoenix-sim-gameplay/src/entities/target.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-model/src/messages.rs]
       tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   # The authored-toml-observer component and its authored-content-observation-state
@@ -173,6 +173,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs]
+      paths: [crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, tick_frequency_hint_high_fidelity]
       tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

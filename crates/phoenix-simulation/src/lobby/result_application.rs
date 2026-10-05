@@ -143,17 +143,11 @@ impl LobbyResultApplier<'_, '_> {
         preload_complete: bool,
     ) {
         let projected = self.afk_ratings();
-        let result = if let Ok((_, _, config, sources, _)) = self.ship.single_mut() {
-            // The pure disconnect helper also writes its resolver. Apply its
-            // returned intent below, so a fleet never mutates the live source
-            // ahead of the agreed command tick.
-            let mut departure_sources = sources.0.clone();
-            handler::process_disconnect_with_stations(
+        let result = if self.ship.single().is_ok() {
+            phoenix_sim_session::lobby::handler::process_disconnect_with_stations(
                 token,
                 sessions,
                 stations,
-                &config.0,
-                &mut departure_sources,
                 &projected,
                 phase,
                 preload_complete,

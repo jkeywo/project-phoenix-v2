@@ -46,6 +46,6 @@ entities:
       outputs: [advisory target designation, shield frequency hint]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-sim-gameplay/src/ai/core.rs]
       symbols: [operate_sensors_ai, find_nearest_hostile, effective_sensor_range]
       tests: [cargo test]

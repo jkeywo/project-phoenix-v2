@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
 updated: 2026-10-04
 ---
 
@@ -25,7 +25,7 @@ legacy weapon configurations retain their existing construction rules.
 | `crates/phoenix-simulation/src/console/weapons/torpedo.rs` | Tube load/fire commands, target snapshots, torpedo lifecycle, and detonation. |
 | `crates/phoenix-simulation/src/console/weapons/blaster.rs` | NPC blaster charge/fire and hit application. |
 | `crates/phoenix-simulation/src/console/weapons/blackboard.rs` | Weapons/Tactical radar blackboards, `WeaponsUpdate`, and its broadcaster. |
-| `crates/phoenix-simulation/src/console/weapons/shared.rs` | Cross-family helpers and one-tick handoff resources. |
+| `crates/phoenix-sim-gameplay/src/console/weapons/shared.rs` | Cross-family helpers and one-tick handoff resources. |
 | `crates/phoenix-simulation/src/console/weapons/server_tests.rs` | The large plugin integration suite included from `crates/phoenix-simulation/src/console/weapons/server.rs`. |
 
 Pure weapon state machines and geometry used by these adapters live under `crates/phoenix-simulation/src/weapons/`.

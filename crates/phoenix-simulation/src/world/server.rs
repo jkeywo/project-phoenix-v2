@@ -349,21 +349,6 @@ pub struct WorldRuntime {
 #[derive(Resource, Default)]
 pub struct WorldLayerMap(pub HashMap<String, WorldRuntime>);
 
-/// Marker component recording which loaded world layer spawned this entity
-/// (perf fix, issue #891 review finding 1). Stamped exactly once, at the two
-/// sites that add an entity to a `WorldRuntime::spawned_entities` list — the
-/// `SpawnEntity` trigger action and the bulk layer-load spawn in
-/// `apply_world_layer_changes` — so [`entity_flag_chain`] can read a ship's
-/// origin layer in O(1) (a `Query::get`) instead of the O(layers) scan
-/// `entity_origin_layer` used to run on every call, including per-claim
-/// inside `handle_torpedo_magazine_inter_system`.
-///
-/// Absent on a base-world (or otherwise unrecorded) entity — exactly the
-/// entities the old scan resolved to `None` — so a missing component keeps
-/// meaning "anchored at the base world", not "not spawned yet".
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct EntityOriginLayer(pub String);
-
 /// The flag-store-only half of the layered walk (PRD #397 fix 1, split out by
 /// the issue #891 review finding 2): `chain[0]` is the origin layer's own
 /// store, each `loader_path` hop appends the next-outer layer, and the base
@@ -3199,7 +3184,8 @@ fn apply_script_commands(
             // was pushed onto the sink DIRECTLY by `ctx.flags.*`, bypassing
             // `dispatch_action`'s transition step), so a scripted flag write chains
             // a downstream `on_flag_set` exactly as a declarative `set_flag` does.
-            BufferedEffect::Cmd(mut cmd) => {
+            BufferedEffect::Cmd(cmd) => {
+                let mut cmd: ActionCmd = cmd.into_resolved();
                 let mut new_events: Vec<WorldEvent> = Vec::new();
                 // Immediate `ctx.effects.load_world` is emitted before the host
                 // knows which retained layer unit is running, so its command
@@ -5761,3 +5747,5 @@ fn apply_addressed_action(
     }
     runtime.pending_world_events.extend(events);
 }
+
+pub use phoenix_sim_contracts::identity::EntityOriginLayer;

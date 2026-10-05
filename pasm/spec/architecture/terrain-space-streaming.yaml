@@ -13,7 +13,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/world/server.rs, assets/entities]
+      paths: [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/world/server.rs, assets/entities]
       tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs]
 
   - component: celestial-renderer
@@ -101,5 +101,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/regions/shape.rs, crates/phoenix-simulation/src/regions/server.rs, assets/entities/region_radiation_zone.toml, assets/entities/region_nebula.toml, assets/entities/region_asteroid_belt.toml]
-      tests: [crates/phoenix-simulation/src/regions/shape_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/regions/shape.rs, crates/phoenix-simulation/src/regions/server.rs, assets/entities/region_radiation_zone.toml, assets/entities/region_nebula.toml, assets/entities/region_asteroid_belt.toml]
+      tests: [crates/phoenix-sim-gameplay/src/regions/shape_tests.rs]

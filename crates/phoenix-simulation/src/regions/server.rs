@@ -11,39 +11,6 @@ use crate::server_app::{LocalShip, ShipImpulse};
 use crate::server_app::{Ship, SimOutbox};
 use crate::ship::state::ShipPhysics;
 
-/// Resource tracking which entities are inside which regions.
-#[derive(Resource, Default)]
-pub struct RegionMembership {
-    /// Maps ship entity → set of region entities the ship is currently inside.
-    /// A `BTreeSet` of regions, not a `HashSet` (issue #965). The set
-    /// differences in `update_region_membership` are what emit
-    /// `RegionEntered`/`RegionExited`, and a ship that crosses two boundaries
-    /// on one tick emits one event per region — so the set's iteration order
-    /// IS the event order. Those events queue `WorldEvent::EnteredRegion` for
-    /// the world-trigger pipeline and queue `ModifierEvent`s for broadcast,
-    /// neither of which may depend on a hash seed. Ordering by `Entity` costs
-    /// nothing at these sizes (a ship is inside a handful of regions at most)
-    /// and is stable across processes because ECS entity allocation in a
-    /// seeded run is.
-    pub inside: HashMap<Entity, std::collections::BTreeSet<Entity>>,
-    /// Cached UUIDs for region entities (persists after entity despawn).
-    pub region_uuids: HashMap<Entity, String>,
-}
-
-/// Fired when a subject entity enters a region.
-#[derive(Event, Clone, Debug)]
-pub struct RegionEntered {
-    pub subject: Entity,
-    pub region_entity: Entity,
-}
-
-/// Fired when a subject entity exits a region (or the region is despawned).
-#[derive(Event, Clone, Debug)]
-pub struct RegionExited {
-    pub subject: Entity,
-    pub region_entity: Entity,
-}
-
 pub struct RegionPlugin;
 
 impl Plugin for RegionPlugin {
@@ -525,7 +492,7 @@ fn handle_blocks_impulse_region_enter(
 /// can fire at any point and cannot be sequenced relative to the helm
 /// integrator inside a `SimSet` window. It deliberately does not opt into the
 /// debug `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
-/// (`crates/phoenix-simulation/src/ship/state.rs`).
+/// (`crates/phoenix-sim-gameplay/src/ship/state.rs`).
 pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
@@ -568,3 +535,5 @@ pub(crate) fn handle_slow_zone_speed_clamp(
 #[allow(clippy::disallowed_methods)]
 #[path = "server_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_gameplay::regions::server::*;

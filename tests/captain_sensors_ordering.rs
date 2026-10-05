@@ -132,11 +132,13 @@ fn doctrine(app: &mut App, ships: &[Entity], targets: &[Entity], scan: bool, sel
             if (kind == "Scan" && !scan) || (kind == "Destroy" && !select) {
                 continue;
             }
-            let mut d = DoctrineObjective::default();
-            d.id = format!("pair-{kind}-{uuid}");
-            d.text = "Prepared producer proof".into();
-            d.base_priority = 100.0;
-            d.directive_kind = Some(kind.into());
+            let mut d = DoctrineObjective {
+                id: format!("pair-{kind}-{uuid}"),
+                text: "Prepared producer proof".into(),
+                base_priority: 100.0,
+                directive_kind: Some(kind.into()),
+                ..Default::default()
+            };
             if kind == "Scan" {
                 d.directive_scan_target = Some(uuid.clone());
             } else {

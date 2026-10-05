@@ -118,7 +118,7 @@ entities:
       must_not_be: [a disclosure of enabled settings, a promise of solo complex-scenario completion, implemented as a second automation engine]
     implementation:
       status: declared
-      paths: [client.html, gui/accessibility-profile.js, gui/lobby-view.js, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/eligibility.rs]
+      paths: [client.html, gui/accessibility-profile.js, gui/lobby-view.js, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-sim-gameplay/src/ship/eligibility.rs]
       tests: [tests/client/accessibility-eligibility.test.js, cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/lobby/session_tests.rs, crates/phoenix-simulation/src/ship/eligibility_tests.rs]
 
   - decision: accessibility-incremental-delivery
@@ -144,5 +144,5 @@ entities:
       must_not_be: [deferred as one final polish project, treated as identical to difficulty, required to map one-to-one onto scenario fiction]
     implementation:
       status: declared
-      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/stations/sensors-actions.js, gui/stations/helm-actions.js, gui/tokens.css, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/ship/helm_admission.rs, crates/phoenix-simulation/src/ship/sensors.rs]
+      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/stations/sensors-actions.js, gui/stations/helm-actions.js, gui/tokens.css, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-simulation/src/ship/sensors.rs]
       tests: [tests/client/interaction-floors.test.js, tests/client/sensors-actions.test.js, tests/client/sensors-semantic-structure.test.js, tests/client/helm-actions.test.js, tests/client/helm-semantic-structure.test.js, tests/client/gamepad-input.test.js, tests/smoke/comms-ops-keyboard.spec.js, tests/smoke/semantic-action-helm.spec.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js, crates/phoenix-simulation/src/command_admission/tests.rs, crates/phoenix-simulation/src/dock/server_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-simulation/src/ship/helm_admission_tests.rs]

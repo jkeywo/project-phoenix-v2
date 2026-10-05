@@ -1,5 +1,5 @@
 //! The standing guard that the authoritative-state declaration registry
-//! (`crates/phoenix-simulation/src/authoritative.rs`, issue #1220) is INERT to the #901 digest.
+//! (`crates/phoenix-sim-contracts/src/authoritative.rs`, issue #1220) is INERT to the #901 digest.
 //!
 //! # What this proves
 //!

@@ -2,7 +2,7 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/tactical_target_ordering.rs, tests/tactical_target_ordering/order_proof.rs, crates/phoenix-simulation/src/console/weapons/server.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-simulation/src/command_admission/log.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
+sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/tactical_target_ordering.rs, tests/tactical_target_ordering/order_proof.rs, crates/phoenix-simulation/src/console/weapons/server.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-sim-session/src/command_admission/log.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
 updated: 2026-09-07
 ---
 
@@ -75,7 +75,7 @@ integration candidate remains the integrator's responsibility.
    `SessionManager`, drive the countdown on tick time.
 2. **Command admission** — clears and refills every ship's `AdmittedCommands`
    exactly once per tick, before `SimSet::Input`. The same pass stamps the
-   application tick (`crates/phoenix-simulation/src/command_admission/log.rs`): an accepted command is
+   application tick (`crates/phoenix-sim-session/src/command_admission/log.rs`): an accepted command is
    stamped for the tick it applies on (`SimTick` + `CommandDelay`) and queued
    for that tick in `PendingCommands`, ordered by `CommandOrder` — `(origin
    fleet slot, that slot's own sequence)`. When the tick comes round the queue

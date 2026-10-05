@@ -17,18 +17,6 @@ use std::collections::BTreeMap;
 pub struct SensorsObservationConfig(pub crate::radar_config::RadarConfig);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReportPolicy {
-    pub delay_ticks: u32,
-    pub position_step_mm: u32,
-    pub hide_identity: bool,
-}
-impl ReportPolicy {
-    pub fn changes_report(&self) -> bool {
-        self.delay_ticks != 0 || self.position_step_mm != 0 || self.hide_identity
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ReportSample {
     pub observed_tick: u64,
     pub position_mm: [i64; 3],
@@ -342,3 +330,5 @@ pub fn viewscreen(
 #[cfg(test)]
 #[path = "reports_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_world::gm_information::reports::*;

@@ -1,2 +1,1 @@
-//! Shared model vocabulary.
-pub use phoenix_model::tags::*;
+pub use phoenix_sim_gameplay::entities::tags::*;

@@ -76,13 +76,14 @@ station = "helm"
     )
     .expect("the selected hull supports the frozen Helm rating");
     world.insert_resource(crate::ship_plugin::PendingShipConfig(hull));
-    let mut roster = roster();
-    roster
-        .ships
+    let original = roster();
+    let mut ships = original.ships().to_vec();
+    ships
         .iter_mut()
         .find(|ship| ship.host == HostSlot(2))
         .unwrap()
         .ship_path = None;
+    let roster = FleetRoster::new(ships, original.local());
     assert!(crew::roster_crew_matches_hulls(world, &roster));
     roster
 }

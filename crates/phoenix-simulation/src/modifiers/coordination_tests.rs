@@ -1,4 +1,13 @@
 #![allow(clippy::field_reassign_with_default)]
+use crate::core::messages::{ModifierSlot, ModifierSource, PowerGroupId};
+use crate::modifiers::power_system::{
+    PowerSystem, HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
+};
+use crate::modifiers::ShipModifiers;
+use crate::server_app::ShipImpulse;
+use crate::ship_plugin::ImpulseConfigResource;
+use bevy::prelude::*;
+use std::collections::HashMap;
 
 use super::*;
 

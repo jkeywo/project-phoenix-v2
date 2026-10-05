@@ -20,7 +20,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/command/mod.rs, crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/console/command/mod.rs, crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-contracts/src/stance.rs]
       symbols: [CommandPlugin, ShipStationStances, CommandBlackboard, StationStanceConfig, command_target, is_command_authorized]
       messages: [SetStationStance]
       tests: [cargo test, tests/smoke/command-console.spec.js, crates/phoenix-simulation/src/command_admission/policy_tests.rs]
@@ -51,9 +51,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/command_stance.rs, crates/phoenix-simulation/src/ship/config.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/command_stance.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-contracts/src/stance.rs]
       symbols: [neutral_stance_for_alert, is_selectable, effective_high_alert, selection_after_alert_change, stance_by_id, StanceKind, StationStanceConfig]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/command_stance_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/command_stance_tests.rs]
 
   - state: command-stance-selection-state
     core:
@@ -72,10 +72,10 @@ entities:
       writers: [command-station-authority]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-simulation/src/ship/command_stance.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-sim-gameplay/src/ship/command_stance.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [ShipStationStances]
 
-      tests: [crates/phoenix-simulation/src/ship/command_stance_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/command_stance_tests.rs]
   - message: set-station-stance-command
     core:
       status: implemented

@@ -35,7 +35,7 @@ fn the_lowest_claim_seq_wins_regardless_of_arrival_order() {
     );
     assert!(a.wins(HostSlot(3), 5) && !a.wins(HostSlot(3), 9));
     // The winning claim's tick travels with it, so the boundary is shared.
-    assert_eq!(a.winners.get(&HostSlot(3)).map(|(_, t)| *t), Some(100));
+    assert_eq!(a.next_unopened().map(|(_, _, tick)| tick), Some(100));
 }
 
 /// The leader is the lowest roster slot that is not the one being recovered —

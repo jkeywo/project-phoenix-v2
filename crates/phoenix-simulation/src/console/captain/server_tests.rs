@@ -31,7 +31,7 @@ fn test_app() -> App {
     app.world_mut().spawn((
         Ship,
         LocalShip,
-        ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         ShipSystemControlSources::default(),
         crate::core::messages::AdmittedCommands::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -2034,7 +2034,7 @@ fn npc_captain_ai_sets_own_red_alert_via_admitted_commands() {
         .world_mut()
         .spawn((
             Ship,
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             npc_control_sources,
             crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -2109,7 +2109,7 @@ fn handle_set_red_alert_applies_admitted_commands_per_entity() {
         .world_mut()
         .spawn((
             Ship,
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             npc_control_sources,
             crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),

@@ -67,7 +67,6 @@
 
 use crate::core::messages::{
     DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot, DossierValue,
-    InfrastructureSnapshot,
 };
 use crate::dossier::evidence::EvidenceEntry;
 use crate::world::commitments::{Commitment, CommitmentState};
@@ -140,53 +139,6 @@ pub struct DossierSubject {
     /// produced by the crew's own act of finding out, so a caller that can see
     /// an entry is a caller who was there when it was gathered.
     pub evidence: Vec<EvidenceEntry>,
-}
-
-/// A subject's published condition track plus the crew-facing labels for it
-/// (issue #1030).
-///
-/// Built by the adapter from an [`InfrastructureSnapshot`] and the authored
-/// labels beside it; see [`SubjectCondition::from_published`].
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SubjectCondition {
-    /// Structural condition as a fraction of the authored ceiling.
-    pub condition_fraction: f32,
-    /// `(label id, held)` for each operational flag that authored a label, in
-    /// authored order.
-    pub flags: Vec<(String, bool)>,
-    /// `(label id, amount)` for each capacity that authored a label, in authored
-    /// order.
-    pub capacities: Vec<(String, i64)>,
-}
-
-impl SubjectCondition {
-    /// Pair a published snapshot with the authored labels for its flags and
-    /// capacities, dropping every entry that has none.
-    ///
-    /// `flag_labels` / `capacity_labels` resolve a machine id to its authored
-    /// `strings.csv` label. Taking them as lookups rather than reading the live
-    /// config keeps this side of the boundary honest: the *values* can only ever
-    /// be ones `crate::core::messages::infrastructure_snapshot_from_state` already published, and the
-    /// labels can only ever be ones an author wrote for the crew.
-    pub fn from_published(
-        published: &InfrastructureSnapshot,
-        flag_labels: impl Fn(&str) -> Option<String>,
-        capacity_labels: impl Fn(&str) -> Option<String>,
-    ) -> Self {
-        Self {
-            condition_fraction: published.condition_fraction,
-            flags: published
-                .flags
-                .iter()
-                .filter_map(|(id, held)| flag_labels(id).map(|label| (label, *held)))
-                .collect(),
-            capacities: published
-                .capacities
-                .iter()
-                .filter_map(|(id, amount)| capacity_labels(id).map(|label| (label, *amount)))
-                .collect(),
-        }
-    }
 }
 
 /// The `strings.csv` label for a promise in each of the ledger's three states.
@@ -282,3 +234,5 @@ pub fn project(subject: &DossierSubject) -> DossierSnapshot {
 #[cfg(test)]
 #[path = "projection_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_gameplay::dossier::SubjectCondition;

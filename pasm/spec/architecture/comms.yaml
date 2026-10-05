@@ -16,9 +16,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/recipients.rs, crates/phoenix-simulation/src/world/script/recipient_refs.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
+      paths: [crates/phoenix-simulation/src/recipients.rs, crates/phoenix-sim-world/src/world/script/recipient_refs.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/gm-recipient-diagnostics.js, crates/phoenix-sim-world/src/recipients.rs]
       symbols: [RecipientSelection, RecipientCatalog, RecipientSources, PreparedRecipients, prepare_in_world, RecipientDiagnostics, addressed_action, apply_addressed_action]
-      tests: [cargo test --lib addressed, cargo test --lib recipients, crates/phoenix-simulation/src/recipients_tests.rs, crates/phoenix-simulation/src/world/script/recipient_refs_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs]
+      tests: [cargo test --lib addressed, cargo test --lib recipients, crates/phoenix-simulation/src/recipients_tests.rs, crates/phoenix-sim-world/src/world/script/recipient_refs_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs]
 
   - component: comms-dialogue-controller
     core:
@@ -46,7 +46,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/server.rs]
       tests: [cargo test, crates/phoenix-simulation/src/console/comms/inbox_tests.rs]
 
   - state: comms-inbox-state
@@ -78,7 +78,7 @@ entities:
       writers: [comms-dialogue-controller]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      paths: [crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [CommsRuntime, ActiveDialogue, ScriptedDialogue]
 
   - component: comms-range-enforcer
@@ -144,7 +144,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs]
+      paths: [crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs]
       symbols: [EntityContact, merge_entity_contacts, entity_contact_label, CommsHailable, CommsConfig, update_comms_range_flags, init_comms_runtime]
       tests: [cargo test, crates/phoenix-simulation/src/comms/roster_tests.rs]
 
@@ -191,9 +191,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/ai/selector.rs, crates/phoenix-simulation/src/ai/policy.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-sim-gameplay/src/ai/selector.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs]
       symbols: [operate_comms_ai, operate_comms_response_ai, CommsTargetSelector, CommsResponseAiPolicy, comms_console_ai_components, seed_comms_hail_facts, seed_comms_self_facts, seed_comms_response_facts]
-      tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/ai/selector_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-sim-gameplay/src/ai/selector_tests.rs]
 
   - component: important-comms-decision-presentation
     core:
@@ -208,7 +208,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/comms/content.rs, gui/components/ph-comms-current-message.js]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-world/src/comms/content.rs, gui/components/ph-comms-current-message.js]
       symbols: [CommsResponseView, response_views]
       tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 

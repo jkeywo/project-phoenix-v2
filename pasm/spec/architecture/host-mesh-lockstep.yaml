@@ -32,7 +32,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/continuation.rs, crates/phoenix-simulation/src/lockstep/continuation_systems.rs, src/server/bridge.rs, gui/fleet-session.js, gui/fleet-continuation.js, gui/fleet-owner-continuation.js, gui/fleet-continuation-wire.js]
+      paths: [crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/continuation.rs, crates/phoenix-simulation/src/lockstep/continuation_systems.rs, src/server/bridge.rs, gui/fleet-session.js, gui/fleet-continuation.js, gui/fleet-owner-continuation.js, gui/fleet-continuation-wire.js, crates/phoenix-sim-session/src/lockstep/mod.rs]
       symbols:
         - LockstepSession
         - FleetLockstep
@@ -62,7 +62,7 @@ entities:
       writers: [fleet-lockstep-session]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/crew.rs, crates/phoenix-simulation/src/lobby/session.rs, gui/fleet-crew.js, gui/fleet-session.js]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/crew.rs, crates/phoenix-sim-session/src/lobby/session.rs, gui/fleet-crew.js, gui/fleet-session.js, crates/phoenix-sim-contracts/src/fleet.rs, crates/phoenix-sim-session/src/lockstep/crew.rs, crates/phoenix-sim-session/src/lockstep/mod.rs]
       symbols: [FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshInbox, MeshOutbox, canonical_station_ratings, lobby_station_ratings]
       tests: [cargo test, tests/authoritative_state_enumeration.rs, tests/lockstep_mesh.rs, tests/client/fleet-crew.test.js, tests/client/fleet-session.test.js, crates/phoenix-simulation/src/lockstep/tests.rs, src/lockstep/session_tests.rs, crates/phoenix-simulation/src/lockstep/crew_tests.rs, crates/phoenix-simulation/src/lobby/session_tests.rs]
 
@@ -91,7 +91,7 @@ entities:
       payload: MeshFrame
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js]
+      paths: [crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js, crates/phoenix-sim-session/src/lockstep/frame.rs]
       symbols:
         - MeshFrame
         - TickFrame
@@ -126,14 +126,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/command_admission/log.rs, crates/phoenix-simulation/src/command_admission/mod.rs]
+      paths: [crates/phoenix-sim-session/src/command_admission/log.rs, crates/phoenix-simulation/src/command_admission/mod.rs]
       symbols:
         - CommandOrder
         - HostSlot
         - PendingCommands
         - stamp_accepted_command
         - admit_system_commands
-      tests: [cargo test, tests/lockstep_mesh.rs, crates/phoenix-simulation/src/command_admission/log_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs]
+      tests: [cargo test, tests/lockstep_mesh.rs, crates/phoenix-sim-session/src/command_admission/log_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs]
 
   - component: local-ship-projection-boundary
     core:
@@ -159,14 +159,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/server_app/components.rs
-        - crates/phoenix-simulation/src/server_app/world_setup.rs
-        - crates/phoenix-simulation/src/server_app/registration.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
-        - crates/phoenix-simulation/src/ship/coordination_systems.rs
-        - crates/phoenix-simulation/src/server_app/broadcast_publish.rs
-        - crates/phoenix-simulation/src/console/weapons/beam.rs
-        - crates/phoenix-simulation/src/asteroids/lifecycle.rs
+        [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-sim-contracts/src/fleet.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       symbols: [LocalShip, FleetSlotOf, insert_player_core_bundle, update_asteroid_window, fleet_stream_centre]
       tests: [tests/local_ship_neutrality.rs, tests/lockstep_mesh.rs, tests/archetype_order_determinism.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-simulation/src/ship/physics_systems_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs]
 
@@ -192,7 +185,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-session/src/lockstep/mod.rs]
       symbols:
         - MeshAgreement
         - MeshDisagreement
@@ -215,7 +208,7 @@ entities:
       writers: [fleet-digest-exchange]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/mod.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-session/src/lockstep/mod.rs]
       symbols: [MeshAgreement, MeshDisagreement, MeshDiagnostics]
       tests: [cargo test, tests/authoritative_state_enumeration.rs, crates/phoenix-simulation/src/lockstep/tests.rs]
 
@@ -246,10 +239,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/lockstep/recovery.rs
-        - crates/phoenix-simulation/src/lockstep/recovery_plan.rs
-        - crates/phoenix-simulation/src/lockstep/snapshot_relay.rs
-        - crates/phoenix-simulation/src/lockstep/mod.rs
+        [crates/phoenix-simulation/src/lockstep/recovery.rs, crates/phoenix-simulation/src/lockstep/recovery_plan.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-gameplay/src/ai/host.rs]
       symbols:
         - drive_recovery
         - RecoveryPlan
@@ -311,13 +301,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/lockstep/slot_recovery.rs
-        - crates/phoenix-simulation/src/lockstep/mod.rs
-        - crates/phoenix-simulation/src/lockstep/frame.rs
-        - crates/phoenix-simulation/src/lockstep/session.rs
-        - src/server/bridge.rs
-        - gui/host-mesh.js
-        - gui/fleet-session.js
+        [crates/phoenix-simulation/src/lockstep/slot_recovery.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/lockstep/session.rs, src/server/bridge.rs, gui/host-mesh.js, gui/fleet-session.js, crates/phoenix-sim-session/src/lockstep/frame.rs, crates/phoenix-sim-session/src/lockstep/mod.rs, crates/phoenix-sim-session/src/lockstep/slot_recovery.rs]
       symbols:
         - drive_slot_recovery
         - PendingSlotClaims
@@ -346,6 +330,6 @@ entities:
       writers: [fleet-slot-recovery]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lockstep/slot_recovery.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/slot_recovery.rs, crates/phoenix-sim-session/src/lockstep/slot_recovery.rs]
       symbols: [PendingSlotClaims, SlotRecoveryState, SlotRecoveryHold, SlotRecoveryLog]
       tests: [cargo test, tests/authoritative_state_enumeration.rs, crates/phoenix-simulation/src/lockstep/slot_recovery_tests.rs]

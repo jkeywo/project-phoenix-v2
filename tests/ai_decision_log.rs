@@ -127,13 +127,13 @@ fn ai_logging_on_off_and_filtered_reach_the_identical_digest() {
         "enabling `ai=debug` decision logging moved the seeded digest — an `ai` \
          emitter is perturbing the simulation (drawing from SimRng, mutating \
          authoritative state, or reordering work). The traces must be a \
-         read-only projection; see crates/phoenix-simulation/src/ai/decision_trace.rs."
+         read-only projection; see crates/phoenix-sim-gameplay/src/ai/decision_trace.rs."
     );
     assert_eq!(
         off, on_filtered,
         "enabling `ai=debug --log-entity` moved the seeded digest — the \
          per-entity-filtered emit path is perturbing the simulation. See \
-         crates/phoenix-simulation/src/ai/decision_trace.rs and src/logging/."
+         crates/phoenix-sim-gameplay/src/ai/decision_trace.rs and src/logging/."
     );
 }
 

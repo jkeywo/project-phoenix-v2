@@ -44,7 +44,7 @@ worlds through `extra_worlds`, and triggers can load worlds during play through
 **Location:** `assets/worlds/*.toml` (e.g. `assets/worlds/default.toml`,
 `assets/worlds/patrol.toml`).
 
-**Parser:** `crates/phoenix-simulation/src/world/config.rs` owns the entire world schema. `parse_world`
+**Parser:** `crates/phoenix-sim-world/src/world/config.rs` owns the entire world schema. `parse_world`
 is a single-pass deserializer that produces a `WorldConfig` carrying the
 normalised anchor table and the `[[entity]]` list. Scenario logic is not part
 of that struct: the `[script]` block is lifted and compiled separately
@@ -1074,7 +1074,7 @@ same `[[entity]]` block.
 
 **Location:** `assets/entities/*.toml`.
 
-**Parser:** `crates/phoenix-simulation/src/entities/config.rs` → `EntityConfig::from_toml`.
+**Parser:** `crates/phoenix-sim-gameplay/src/entities/config.rs` → `EntityConfig::from_toml`.
 
 `EntityConfig` is a single universal struct. The *presence* of optional
 sub-tables (`[mesh]`, `[ship]`, `[shape]+[effects]`, `[asteroid_field]`,
@@ -1360,7 +1360,7 @@ emergency_threshold = 20
 **Read this before authoring or retuning any range on a hull.** The power model
 is not a side system: three of its groups multiply values you author elsewhere,
 through `ModifierSlot`s that `apply_power_modifiers_from_read_state`
-(`crates/phoenix-simulation/src/modifiers/coordination.rs`) writes every tick.
+(`crates/phoenix-sim-gameplay/src/modifiers/coordination.rs`) writes every tick.
 
 | Power group | Modifier slot | What it scales |
 |---|---|---|
@@ -1420,7 +1420,7 @@ Three consequences a doctrine author designs around:
   outside that envelope still needs the lock it is repositioning against. Pinned
   for the whole fleet by
   `every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`
-  (`crates/phoenix-simulation/src/modifiers/coordination.rs`), which fails naming the hull and the value to
+  (`crates/phoenix-sim-gameplay/src/modifiers/coordination.rs`), which fails naming the hull and the value to
   author. A hull that authors no `[weapons_console.radar]` at all is unbounded
   and exempt.
 * **A range derived from a TARGET's reach is the same number the target's file
@@ -1847,7 +1847,7 @@ outer_radius = 80.0
 ```
 
 Boxes and toruses live in the XZ plane; the Y dimension of `box` is full
-height. Region containment is computed by `crates/phoenix-simulation/src/regions/shape.rs`.
+height. Region containment is computed by `crates/phoenix-sim-gameplay/src/regions/shape.rs`.
 
 #### `[effects]`
 
@@ -1934,7 +1934,7 @@ radius = 150.0
 
 **Location:** `assets/factions/*.toml`.
 
-**Parser:** `crates/phoenix-simulation/src/ai/faction.rs` → `parse_faction_config`.
+**Parser:** `crates/phoenix-sim-gameplay/src/ai/faction.rs` → `parse_faction_config`.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
@@ -2020,7 +2020,7 @@ These appear inside multiple file types.
 Used by `[sensors_console.long_range_radar]` and
 `[navigation_console.system_chart]`.
 
-**Parser:** `crates/phoenix-simulation/src/radar_config.rs`.
+**Parser:** `crates/phoenix-sim-gameplay/src/radar_config.rs`.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
@@ -2037,8 +2037,8 @@ shows = ["region", "asteroid_field", "asteroid", "ship"]
 
 Used by NPC entity templates.
 
-**Parser:** `crates/phoenix-simulation/src/entities/config.rs::BehaviourConfig` +
-`crates/phoenix-simulation/src/ai/core.rs::TransitionConfig`.
+**Parser:** `crates/phoenix-sim-gameplay/src/entities/config.rs::BehaviourConfig` +
+`crates/phoenix-sim-gameplay/src/ai/core.rs::TransitionConfig`.
 
 #### `[behaviour]`
 
@@ -2223,14 +2223,14 @@ matching section in this document. The authoritative sources are:
 
 | Section | Source |
 |---|---|
-| Worlds (anchors, `[[entity]]`, `[ambient_light]`, scene shape) | `crates/phoenix-simulation/src/world/config.rs` |
-| Entity templates (`[mesh]`, `[hull]`, `[[light]]`, etc.) | `crates/phoenix-simulation/src/entities/config.rs` |
-| Region shape / effects | `crates/phoenix-simulation/src/regions/shape.rs`, `crates/phoenix-simulation/src/regions/effects.rs` |
-| RadarConfig | `crates/phoenix-simulation/src/radar_config.rs` |
-| Triggers / comms templates / objectives | `crates/phoenix-simulation/src/world/content.rs` |
-| Factions | `crates/phoenix-simulation/src/ai/faction.rs` |
+| Worlds (anchors, `[[entity]]`, `[ambient_light]`, scene shape) | `crates/phoenix-sim-world/src/world/config.rs` |
+| Entity templates (`[mesh]`, `[hull]`, `[[light]]`, etc.) | `crates/phoenix-sim-gameplay/src/entities/config.rs` |
+| Region shape / effects | `crates/phoenix-sim-gameplay/src/regions/shape.rs`, `crates/phoenix-sim-gameplay/src/regions/effects.rs` |
+| RadarConfig | `crates/phoenix-sim-gameplay/src/radar_config.rs` |
+| Triggers / comms templates / objectives | `crates/phoenix-sim-world/src/world/content.rs` |
+| Factions | `crates/phoenix-sim-gameplay/src/ai/faction.rs` |
 | Complexity presets | `src/console_ai/complexity.rs` |
-| Behaviour states / transitions | `crates/phoenix-simulation/src/ai/core.rs` |
+| Behaviour states / transitions | `crates/phoenix-sim-gameplay/src/ai/core.rs` |
 | Stations block | `crates/phoenix-simulation/src/lobby/stations_config.rs` |
 
 ## Dynasty role and attack-cycle tutorials

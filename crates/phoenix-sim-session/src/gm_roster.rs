@@ -1,0 +1,139 @@
+//! Crew-public Game Master roster (issue #1289).
+//!
+//! A GM is a host-class peer, not a [`crate::core::messages::Player`], a
+//! [`crate::lobby::Sessions`] row, or a [`crate::lockstep::FleetShip`].  This
+//! resource is therefore deliberately separate from all three.  It is the
+//! public projection only: reconnect credentials, rendezvous peer ids, mesh
+//! slots and any owner/leader concept never enter this type.
+
+use bevy::prelude::Resource;
+
+/// Resource ceiling for one rendezvous roster.
+///
+/// This is a protocol/memory bound, not a gameplay value.  It matches the
+/// host-mesh rendezvous record ceiling and prevents an untrusted host-page
+/// projection from growing an unbounded authoritative resource.
+pub const MAX_GM_OPERATORS: usize = 32;
+
+/// Stable public operator ids follow the existing session-token wire bound.
+pub const MAX_GM_OPERATOR_ID_CHARS: usize = 64;
+
+/// Host-mesh display names use the rendezvous `max_slot_name_length` default.
+/// Empty names are valid while an operator has not chosen a display name.
+pub const MAX_GM_OPERATOR_NAME_CHARS: usize = 48;
+
+/// One crew-visible GM identity.
+///
+/// `deny_unknown_fields` is intentional: the decoder must reject a host-page
+/// row that accidentally includes a peer id, reconnect credential, owner flag
+/// or any other private/authority-bearing field instead of silently stripping
+/// it only after it crossed the Rust boundary.
+pub use phoenix_model::wire::GmOperator;
+
+/// Why a host-page GM roster was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GmRosterError {
+    TooManyOperators,
+    EmptyId,
+    IdTooLong,
+    NameTooLong,
+    DuplicateId,
+}
+
+/// Full replacement roster of equal GM operators.
+///
+/// Rows are kept in public-id order, making equality and every projection a
+/// deterministic function of the same input set rather than of rendezvous
+/// arrival order.
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct GmRoster {
+    operators: Vec<GmOperator>,
+}
+
+impl GmRoster {
+    /// Validate and canonicalise one full host-page replacement.
+    pub fn try_new(mut operators: Vec<GmOperator>) -> Result<Self, GmRosterError> {
+        if operators.len() > MAX_GM_OPERATORS {
+            return Err(GmRosterError::TooManyOperators);
+        }
+
+        for operator in &mut operators {
+            let id_len = operator.id.chars().count();
+            if id_len == 0 {
+                return Err(GmRosterError::EmptyId);
+            }
+            if id_len > MAX_GM_OPERATOR_ID_CHARS {
+                return Err(GmRosterError::IdTooLong);
+            }
+            if operator.name.chars().count() > MAX_GM_OPERATOR_NAME_CHARS {
+                return Err(GmRosterError::NameTooLong);
+            }
+            // A disconnected operator cannot carry readiness into a later
+            // reconnect. Canonicalise at the Rust boundary even when a stale
+            // browser projection accidentally says otherwise.
+            if !operator.connected {
+                operator.ready = false;
+            }
+        }
+
+        operators.sort_by(|left, right| left.id.cmp(&right.id));
+        if operators.windows(2).any(|pair| pair[0].id == pair[1].id) {
+            return Err(GmRosterError::DuplicateId);
+        }
+
+        Ok(Self { operators })
+    }
+
+    /// Crew-public rows, in stable public-id order.
+    pub fn operators(&self) -> &[GmOperator] {
+        &self.operators
+    }
+
+    /// Clone the public projection for a wire snapshot.
+    pub fn projection(&self) -> Vec<GmOperator> {
+        self.operators.clone()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.operators.is_empty()
+    }
+
+    /// Reconcile a full replacement with the previous public presence. A
+    /// disconnected -> connected transition is a reconnect and always starts
+    /// unready, even if a stale page projection retained the old flag.
+    pub fn clear_reconnected_readiness(&mut self, previous: &Self) {
+        for operator in &mut self.operators {
+            if previous
+                .operators
+                .iter()
+                .any(|old| old.id == operator.id && !old.connected)
+            {
+                operator.ready = false;
+            }
+        }
+    }
+
+    pub fn readiness_tally(&self) -> crate::lobby::start_policy::ReadinessTally {
+        let connected = self
+            .operators
+            .iter()
+            .filter(|operator| operator.connected)
+            .count() as u32;
+        let ready = self
+            .operators
+            .iter()
+            .filter(|operator| operator.connected && operator.ready)
+            .count() as u32;
+        crate::lobby::start_policy::ReadinessTally { connected, ready }
+    }
+
+    pub fn is_connected(&self, id: &str) -> bool {
+        self.operators
+            .iter()
+            .any(|operator| operator.id == id && operator.connected)
+    }
+}
+
+#[cfg(test)]
+#[path = "gm_roster_tests.rs"]
+mod tests;

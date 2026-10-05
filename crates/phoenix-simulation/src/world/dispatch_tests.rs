@@ -1,6 +1,10 @@
 use super::*;
 use crate::ai::faction::FactionConfig;
+use crate::core::messages::{AiDirective, FlagKind, ModifierSlot, ObjectiveSource};
+use crate::modifiers::IntModifierSlot;
+use crate::objectives::UtilityConfig;
 use crate::world::load::MemoryTemplateLoader;
+use uuid::Uuid;
 
 /// Deterministic stand-in for `entity_loader::assign_uuid()`.
 const STUB_UUID: &str = "stub-uuid-0001";

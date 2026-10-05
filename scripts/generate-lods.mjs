@@ -18,7 +18,7 @@
 // ladders, so the script and the shipped sidecars could disagree forever and
 // nothing would say so. Here the model rig sidecar is the only author: a
 // `[[lod]]` level that was decimated out of another file declares how, in a
-// `[lod.generate]` sub-table (crates/phoenix-simulation/src/entities/config.rs, `LodGeneration`):
+// `[lod.generate]` sub-table (crates/phoenix-sim-gameplay/src/entities/config.rs, `LodGeneration`):
 //
 //   [[lod]]
 //   max_distance = 100.0

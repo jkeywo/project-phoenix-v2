@@ -36,7 +36,7 @@ fn helm_coordination_app() -> (App, Entity, CoordinationAddress) {
         crate::ship::test_support::TEST_TICK,
     );
 
-    let config = ShipConfigComponent::default();
+    let config = crate::ship::components::load_ship_config_from_disk();
     let address =
         crate::ship::coordination::address_for_system(&config.0, &helm_steering_system_id())
             .expect("shipped test hull assigns Helm steering to a Station");

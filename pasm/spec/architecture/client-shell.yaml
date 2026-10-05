@@ -327,8 +327,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/ship/config.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/manual.rs, crates/phoenix-sim-gameplay/src/ship/config.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/manual_tests.rs]
 
   - state: ship-authored-station-help-state
     core:
@@ -342,7 +342,7 @@ entities:
       writers: [ship-manual-content-builder]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
+      paths: [crates/phoenix-sim-gameplay/src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
       # `manual_overview` is a field on StationConfig, not a dedicated type —
       # the closest real symbol is the struct that carries it.
       symbols: [StationConfig]
@@ -361,8 +361,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/ship/rating.rs, crates/phoenix-simulation/src/lobby/server.rs]
-      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/ship/rating_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/manual.rs, crates/phoenix-sim-gameplay/src/ship/rating.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-sim-gameplay/src/ship/manual_tests.rs, crates/phoenix-simulation/src/ship/rating_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - state: system-manual-section-state
     core:
@@ -376,9 +376,9 @@ entities:
       writers: [system-manual-section-provider]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/manual.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/manual.rs]
 
-      tests: [crates/phoenix-simulation/src/ship/manual_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/manual_tests.rs]
   - component: station-manual-aggregator
     core:
       status: implemented
@@ -394,8 +394,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - state: ship-manual-state
     core:
@@ -410,8 +410,8 @@ entities:
       replicas: [ship-manual-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - state: ship-manual-replica
     core:

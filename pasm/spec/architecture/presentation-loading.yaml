@@ -14,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-presentation/src/server/asset_preload.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/entities/config.rs]
+      paths: [crates/phoenix-presentation/src/server/asset_preload.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-gameplay/src/entities/config.rs]
       tests: [cargo test, crates/phoenix-presentation/src/server/asset_preload_tests.rs]
 
   - state: asset-manifest-state

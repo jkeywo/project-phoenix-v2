@@ -3716,7 +3716,7 @@ fn a_world_naming_an_unresolvable_template_fails_the_build() {
 // `simulate_low_lod_ships` (`crates/phoenix-simulation/src/ai/server.rs`) writes `ShipPhysics.x/z/yaw`
 // directly instead of going through helm intent + `integrate_ship_physics`.
 // That is sanctioned — see the writer-policy table on `ShipPhysics`
-// (`crates/phoenix-simulation/src/ship/state.rs`) — but the whole justification rests on one property:
+// (`crates/phoenix-sim-gameplay/src/ship/state.rs`) — but the whole justification rests on one property:
 //
 //     No entity is ever moved by both the low-LOD substitute and the
 //     admitted/integrated helm path in the same tick.
@@ -3889,7 +3889,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
          integrating: the ship advances twice per tick and every distance, arrival and \
          intercept calculation downstream is silently wrong — nothing panics. Restore \
          the filter, or move the system onto helm intent components and delete its row \
-         from the writer-policy table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). \
+         from the writer-policy table on `ShipPhysics` (crates/phoenix-sim-gameplay/src/ship/state.rs). \
          ShipPhysics writers found:\n{inventory}"
     );
     assert_eq!(
@@ -3901,7 +3901,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
          `simulate_low_lod_ships` is dead-reckoning: both writers advance the same \
          ShipPhysics in one tick and the ship travels at roughly double speed along a \
          heading neither system chose. See the writer-policy table on `ShipPhysics` \
-         (crates/phoenix-simulation/src/ship/state.rs). ShipPhysics writers found:\n{inventory}"
+         (crates/phoenix-sim-gameplay/src/ship/state.rs). ShipPhysics writers found:\n{inventory}"
     );
 
     let low = &writers[only_low_lod[0]];
@@ -3920,7 +3920,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
 }
 
 /// Reconciles the scan against the writer-policy table on `ShipPhysics`
-/// (`crates/phoenix-simulation/src/ship/state.rs`). A new system that mutates `ShipPhysics` fails here
+/// (`crates/phoenix-sim-gameplay/src/ship/state.rs`). A new system that mutates `ShipPhysics` fails here
 /// until it is either given a disjoint filter or written into that table.
 #[test]
 fn ship_physics_writer_inventory_matches_the_policy_table() {
@@ -3942,7 +3942,7 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
-         table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). Two systems integrating the same \
+         table on `ShipPhysics` (crates/phoenix-sim-gameplay/src/ship/state.rs). Two systems integrating the same \
          ship is the bug class issue #699 exists for, and it is silent: nothing panics, \
          the ship simply moves further than everything downstream believes it did. If \
          you added a writer, prefer helm intent components; if it genuinely must write \
@@ -3968,7 +3968,7 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          response, blaster recoil, the tractor rig and the dock controller). \
          A change here means a correction grew an `AiHighFidelity` filter, or an integrator \
          lost one — either way the set of ships that get moved twice per tick has changed. \
-         Reconcile with the writer-policy table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). \
+         Reconcile with the writer-policy table on `ShipPhysics` (crates/phoenix-sim-gameplay/src/ship/state.rs). \
          ShipPhysics writers found:\n{inventory}"
     );
 }
@@ -17107,7 +17107,7 @@ const SKYWAY_BOOK_HANDLERS: [&str; 3] = ["on_book_committee", "on_book_havelock"
 fn window_increments(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> std::collections::BTreeMap<String, i64> {
-    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::dispatch::{FlagMutation, ScriptActionCmd as ActionCmd};
     use project_phoenix::world::script::effects::BufferedEffect;
     let mut out = std::collections::BTreeMap::new();
     for effect in &effects.commands {
@@ -17127,7 +17127,7 @@ fn window_increments(
 fn window_flag_values(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> std::collections::BTreeMap<String, i64> {
-    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::dispatch::{FlagMutation, ScriptActionCmd as ActionCmd};
     use project_phoenix::world::script::effects::BufferedEffect;
     let mut out = std::collections::BTreeMap::new();
     for effect in &effects.commands {
@@ -17155,7 +17155,7 @@ fn window_apply_flags(
     effects: &project_phoenix::world::script::schedule::CallEffects,
     flags: &mut project_phoenix::world::flags::FlagStore,
 ) {
-    use project_phoenix::world::dispatch::{ActionCmd, FlagMutation};
+    use project_phoenix::world::dispatch::{FlagMutation, ScriptActionCmd as ActionCmd};
     use project_phoenix::world::script::effects::BufferedEffect;
     for effect in &effects.commands {
         if let BufferedEffect::Cmd(ActionCmd::MutateFlag { name, mutation, .. }) = effect {
@@ -17188,7 +17188,7 @@ fn window_comms_opened(
 fn window_capacity_moves(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> std::collections::BTreeMap<String, i64> {
-    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::dispatch::ScriptActionCmd as ActionCmd;
     use project_phoenix::world::script::effects::BufferedEffect;
     let mut out = std::collections::BTreeMap::new();
     for effect in &effects.commands {
@@ -17208,7 +17208,7 @@ fn window_capacity_moves(
 fn window_objective_verdicts(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> (Vec<String>, Vec<String>) {
-    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::dispatch::ScriptActionCmd as ActionCmd;
     use project_phoenix::world::script::effects::BufferedEffect;
     let mut completed = Vec::new();
     let mut failed = Vec::new();
@@ -17988,7 +17988,7 @@ fn falling_skyway_a_convoy_lost_mid_window_leaves_no_claim_unanswered() {
 fn window_report_rows(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> Vec<project_phoenix::core::report::ReportRow> {
-    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::dispatch::ScriptActionCmd as ActionCmd;
     use project_phoenix::world::script::effects::BufferedEffect;
     effects
         .commands
@@ -18463,7 +18463,7 @@ fn alliance_convoy_fate_accounting() {
 fn convoy_instance_verdicts(
     effects: &project_phoenix::world::script::schedule::CallEffects,
 ) -> (Vec<String>, Vec<String>) {
-    use project_phoenix::world::dispatch::ActionCmd;
+    use project_phoenix::world::dispatch::ScriptActionCmd as ActionCmd;
     use project_phoenix::world::script::effects::BufferedEffect;
     let mut completed = Vec::new();
     let mut failed = Vec::new();
@@ -25511,7 +25511,7 @@ fn no_combat_test_hostile_parks_in_its_bow_hold() {
 
 // ── Falling Skyway, Act 3: the corridor sheds (issue #1347) ──────────────────
 //
-// The unit suites under `src/debris/`, `crates/phoenix-simulation/src/science/scan.rs`, `crates/phoenix-simulation/src/ship/sensors.rs`
+// The unit suites under `src/debris/`, `crates/phoenix-sim-gameplay/src/science/scan.rs`, `crates/phoenix-simulation/src/ship/sensors.rs`
 // and `crates/phoenix-simulation/src/console/weapons/server.rs` pin the ENGINE — the projection, the four
 // flags, the assessment gate on each Backfilled seat and the urgency ordering.
 // What none of them can pin is that the authored beat in `falling_skyway.toml`

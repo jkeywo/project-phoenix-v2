@@ -2,114 +2,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entities::config::EntityConfig;
-use crate::entities::config::{AsteroidFieldConfig, LightConfig, StarConfig};
-use crate::regions::effects::RegionEffectKind;
-use crate::regions::shape::RegionShape;
 
 // â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/// Every entity spawned by the generic spawner carries a UUID.
-#[derive(Component, Clone, Debug)]
-pub struct EntityUuid(pub String);
-
-/// Every entity spawned by the generic spawner carries its authored mass
-/// (issue #1154), in the game's own mass unit — [`EntityConfig::mass`]
-/// verbatim, already defaulted at parse time, so this is NEVER absent and
-/// NEVER zero. Unconditional like [`EntityUuid`] rather than optional like
-/// [`EntityName`]: every entity has a weight, whether an author chose one or
-/// not, so there is no "no mass" case for an `Option` to represent. Nothing
-/// mutates this after spawn — it is content identity, not simulation state,
-/// exactly as [`EntityUuid`] is.
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub struct EntityMass(pub f32);
-
-/// Optional human-readable identifier for the entity instance.
-#[derive(Component, Clone, Debug)]
-pub struct EntityId(pub String);
-
-/// Display name from the top-level `name = "..."` scalar in the entity TOML.
-/// Used by the renderer for HUD labels and by triggers/comms for named instances.
-#[derive(Component, Clone, Debug)]
-pub struct EntityName(pub String);
-
-/// Canonical entity-template path that produced this live entity.
-///
-/// Unlike [`EntitySpawnOrigin`], this identity is present for authored and
-/// runtime spawns alike. Live inspection must never recover provenance by
-/// comparing resolved configs: two templates may intentionally resolve to the
-/// same ship topology while remaining different authored sources.
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct EntityTemplatePath(pub String);
-
-impl EntityTemplatePath {
-    pub fn new(path: &str) -> Self {
-        Self(crate::entities::include_resolve::canonical_template_path(
-            path,
-        ))
-    }
-}
-
-/// Present when the EntityConfig had one or more `[[light]]` entries.
-/// The renderer reads this component to spawn `PointLight` / `DirectionalLight`
-/// components (either on the entity itself or as children for multi-light setups).
-#[derive(Component, Clone, Debug)]
-pub struct Lights(pub Vec<LightConfig>);
-
-/// Present when the EntityConfig had a [asteroid_field] section.
-#[derive(Component, Clone, Debug)]
-pub struct AsteroidFieldSection(pub AsteroidFieldConfig);
-
-/// Present when the EntityConfig had a [collider] section.
-#[derive(Component, Clone, Debug)]
-pub struct ColliderSection(pub crate::entities::config::ColliderConfig);
-
-/// Present when the EntityConfig had an [appearance] section.
-#[derive(Component, Clone, Debug)]
-pub struct AppearanceSection(pub crate::entities::config::AppearanceConfig);
-
-/// Present when the EntityConfig has a [mesh] section.
-/// Its primary model/variant and authored parent transform are simulation
-/// content used by the renderer-independent marker loader; the remaining shape
-/// and material fields drive 3-D viewscreen presentation.
-#[derive(Component, Clone, Debug)]
-pub struct MeshSection(pub crate::entities::config::MeshConfig);
-
-/// Present when the EntityConfig has a [star] section.
-#[derive(Component, Clone, Debug)]
-pub struct StarSection(pub StarConfig);
-
-/// Present when the EntityConfig has a [planet] section.
-#[derive(Component, Clone, Debug)]
-pub struct PlanetSection(pub crate::entities::config::PlanetConfig);
-
-/// Present when the EntityConfig had a [shape] section (region entity).
-#[derive(Component, Clone, Debug)]
-pub struct RegionShapeSection(pub RegionShape);
-
-/// Present when the EntityConfig had a [effects] section.
-#[derive(Component, Clone, Debug)]
-pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
-
-/// Present when the EntityConfig had a [behaviour] section.
-/// Carries the initial AI state name so `ai_plugin` can attach an `AiController`.
-#[derive(Component, Clone, Debug)]
-pub struct BehaviourSection(pub crate::entities::config::BehaviourConfig);
-
-/// Marks an ownerless, stationary weapons platform. It uses the shared ship
-/// combat substrate for its own target selection and beams. As of issue
-/// #1011, a factioned `StaticPointDefence` entity IS acquirable by the
-/// ordinary hostile scan (`ai_target_selection`'s `hostile_scan_q`, in
-/// `crates/phoenix-simulation/src/console/weapons/mod.rs`, matches `Or<(With<Ship>, With<StaticPointDefence>)>`) —
-/// an unfactioned one stays invisible only because the faction gate
-/// (`is_hostile` / `faction::is_enemy`) requires a `FactionComponent` on
-/// both sides.
-#[derive(Component, Clone, Debug)]
-pub struct StaticPointDefence;
-
-/// Present when the EntityConfig has a non-empty `tags` list.
-/// Mirrors the TOML tags onto the ECS entity so snapshot builders can include them.
-#[derive(Component, Clone, Debug)]
-pub struct EntityTagsSection(pub Vec<String>);
 
 /// Present on an entity a **script spawned mid-run**, carrying what the spawn
 /// was made from (issue #863) — see [`crate::world::spawn_origin`] for why the
@@ -126,77 +20,6 @@ pub struct EntityTagsSection(pub Vec<String>);
 /// `snapshot::capture` and `snapshot::restore`.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct EntitySpawnOrigin(pub crate::world::spawn_origin::SpawnOrigin);
-
-/// Present when the EntityConfig has a `faction` UUID.
-/// The AI tick reads this component to determine `self_faction` and enemy evaluation.
-#[derive(Component, Clone, Debug, PartialEq)]
-pub struct FactionComponent(pub uuid::Uuid);
-
-/// Present when the EntityConfig has a `[weapons_console]` section.
-/// The AI tick reads this component to determine weapons range and phaser readiness.
-#[derive(Component, Clone, Debug)]
-pub struct WeaponsConsoleSection(pub crate::entities::config::WeaponsConsoleConfig);
-
-/// Present when the EntityConfig has a `[helm_console]` section.
-/// The AI tick reads this to build a `ShipPhysicsConfig` instead of using hardcoded defaults.
-#[derive(Component, Clone, Debug)]
-pub struct HelmConsoleSection(pub crate::entities::config::HelmConsoleConfig);
-
-/// Present when the EntityConfig has a `[helm_capability]` section.
-/// Describes vertical movement mode and impulse steering policy.
-#[derive(Component, Clone, Debug)]
-pub struct HelmCapabilitySection(pub crate::entities::config::HelmCapabilityConfig);
-
-/// Present when the EntityConfig had a [radar_appearance] section.
-#[derive(Component, Clone, Debug)]
-pub struct RadarAppearanceSection(pub crate::entities::config::RadarAppearanceConfig);
-
-/// Present when the EntityConfig has an `[audio]` section.
-///
-/// Read off the `LocalShip` by `server::audio::push_audio_config` to build the
-/// host page's audio graph. It has to be a component rather than a resource
-/// because the lobby ship picker chooses the hull at game start — see
-/// `spawn_game_start_entities`, which overrides the world's placeholder config
-/// with the selected ship.
-#[derive(Component, Clone, Debug)]
-pub struct ShipAudioSection(pub crate::audio_config::ShipAudioConfig);
-
-/// Present when the EntityConfig has a `[target]` section.
-/// Carries targetability tags, threat level, and description.
-#[derive(Component, Clone, Debug)]
-pub struct EntityTarget(pub crate::entities::target::TargetSection);
-
-/// Present when the EntityConfig has a `[cinematic_camera]` section.
-/// The viewscreen reads this for cinematic camera positioning and tracking.
-#[derive(Component, Clone, Debug)]
-pub struct CinematicCameraSection(pub crate::entities::config::CinematicCameraConfig);
-
-/// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
-/// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
-/// single `CaptainChair` console slot; asteroids use the same single-slot
-/// convention. Damage systems query this component to deal damage and detect
-/// destruction.
-///
-/// This is a Bevy ECS component wrapping the pure `SystemHull` struct
-/// (parent issue #516 sub-issue #616). It is the sole per-ship hull store
-/// after PRD #597 PR 10 (the retired `ShipHullIntegrity` global resource
-/// that used to hold the player-ship copy was deleted along with its
-/// dual-write bridge).
-#[derive(Component, Clone, Debug)]
-pub struct EntitySystemHull(pub crate::ship::damage::SystemHull);
-
-/// Bevy ECS component wrapping the pure [`crate::ship::damage::ShipArcHull`]
-/// struct (issue #514). Attached to ship entities that declare
-/// `[[shield_arc]]` blocks with `hull_max_hp` fields. `ship/damage.rs` is
-/// Bevy-free per AGENTS.md rule 9, so the pure per-arc HP logic lives
-/// there and this component wraps it for ECS storage.
-///
-/// The rest of the codebase uses the type alias
-/// [`crate::ship::damage::ShipArcHull`] for readability at call sites — this
-/// wrapper is a thin newtype that lets the pure struct participate in
-/// Bevy queries.
-#[derive(Component, Clone, Debug, Default)]
-pub struct EntityShipArcHull(pub crate::ship::damage::ShipArcHull);
 
 // â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -301,7 +124,20 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &HullSpawn,
 ];
 
+#[cfg(test)]
+// Fixture ids only (issue #907): a test that needs "some distinct id" has no
+// run to reproduce. Production identity is minted by `crate::world_id`, and
+// clippy.toml bans `Uuid::new_v4` outside scopes like this one.
+#[allow(clippy::disallowed_methods)]
+#[path = "spawner_tests.rs"]
+mod tests;
+
+pub use phoenix_sim_contracts::identity::*;
+
+pub use phoenix_sim_gameplay::entities::spawner::*;
+
 struct ColliderSpawn;
+
 impl SpawnSection for ColliderSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Collider section â†’ Rapier collider + rigid body
@@ -364,6 +200,7 @@ impl SpawnSection for ColliderSpawn {
 }
 
 struct AppearanceSpawn;
+
 impl SpawnSection for AppearanceSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Appearance section
@@ -374,6 +211,7 @@ impl SpawnSection for AppearanceSpawn {
 }
 
 struct MeshSpawn;
+
 impl SpawnSection for MeshSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Mesh section
@@ -384,6 +222,7 @@ impl SpawnSection for MeshSpawn {
 }
 
 struct StarSpawn;
+
 impl SpawnSection for StarSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Star section
@@ -394,6 +233,7 @@ impl SpawnSection for StarSpawn {
 }
 
 struct PlanetSpawn;
+
 impl SpawnSection for PlanetSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Planet section
@@ -404,6 +244,7 @@ impl SpawnSection for PlanetSpawn {
 }
 
 struct NameSpawn;
+
 impl SpawnSection for NameSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Top-level name scalar
@@ -414,6 +255,7 @@ impl SpawnSection for NameSpawn {
 }
 
 struct LightsSpawn;
+
 impl SpawnSection for LightsSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Lights array â€” present when one or more [[light]] entries were declared.
@@ -424,6 +266,7 @@ impl SpawnSection for LightsSpawn {
 }
 
 struct AsteroidFieldSpawn;
+
 impl SpawnSection for AsteroidFieldSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Asteroid field section
@@ -434,6 +277,7 @@ impl SpawnSection for AsteroidFieldSpawn {
 }
 
 struct RegionShapeSpawn;
+
 impl SpawnSection for RegionShapeSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Region shape section
@@ -444,6 +288,7 @@ impl SpawnSection for RegionShapeSpawn {
 }
 
 struct RegionEffectsSpawn;
+
 impl SpawnSection for RegionEffectsSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Region effects section
@@ -456,6 +301,7 @@ impl SpawnSection for RegionEffectsSpawn {
 }
 
 struct CinematicCameraSpawn;
+
 impl SpawnSection for CinematicCameraSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Cinematic camera section
@@ -466,6 +312,7 @@ impl SpawnSection for CinematicCameraSpawn {
 }
 
 struct BehaviourSpawn;
+
 impl SpawnSection for BehaviourSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         if let Some(behaviour) = &config.behaviour {
@@ -481,6 +328,7 @@ impl SpawnSection for BehaviourSpawn {
 }
 
 struct AiProfileSpawn;
+
 impl SpawnSection for AiProfileSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // AiProfile section — injects AI personality component.
@@ -500,6 +348,7 @@ impl SpawnSection for AiProfileSpawn {
 }
 
 struct LodBubbleSpawn;
+
 impl SpawnSection for LodBubbleSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // LodBubble section — a high-fidelity zone this entity projects (issue: the
@@ -516,6 +365,7 @@ impl SpawnSection for LodBubbleSpawn {
 }
 
 struct TagsSpawn;
+
 impl SpawnSection for TagsSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Tags â€” mirror TOML tags onto the entity for snapshot builders.
@@ -526,6 +376,7 @@ impl SpawnSection for TagsSpawn {
 }
 
 struct RadarAppearanceSpawn;
+
 impl SpawnSection for RadarAppearanceSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Radar appearance section
@@ -536,6 +387,7 @@ impl SpawnSection for RadarAppearanceSpawn {
 }
 
 struct TargetSpawn;
+
 impl SpawnSection for TargetSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Target section
@@ -546,6 +398,7 @@ impl SpawnSection for TargetSpawn {
 }
 
 struct SensorsObservationSpawn;
+
 impl SpawnSection for SensorsObservationSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         if let Some(sensors) = &config.sensors_console {
@@ -555,7 +408,9 @@ impl SpawnSection for SensorsObservationSpawn {
         }
     }
 }
+
 struct AudioSpawn;
+
 impl SpawnSection for AudioSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Audio section — the local ship's copy drives the host page's sounds.
@@ -566,6 +421,7 @@ impl SpawnSection for AudioSpawn {
 }
 
 struct FactionSpawn;
+
 impl SpawnSection for FactionSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Faction â€” attach a FactionComponent so the AI can read faction from ECS.
@@ -576,6 +432,7 @@ impl SpawnSection for FactionSpawn {
 }
 
 struct HelmCapabilitySpawn;
+
 impl SpawnSection for HelmCapabilitySpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // HelmCapability — attach when [helm_capability] is present.
@@ -586,6 +443,7 @@ impl SpawnSection for HelmCapabilitySpawn {
 }
 
 struct CommsSpawn;
+
 impl SpawnSection for CommsSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Comms range - attach CommsRange component when [comms] is present, and
@@ -605,6 +463,7 @@ impl SpawnSection for CommsSpawn {
 }
 
 struct ShieldsDamageHistorySpawn;
+
 impl SpawnSection for ShieldsDamageHistorySpawn {
     fn apply(&self, _config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Shields damage history — per-ship Component tracking HP deltas for the
@@ -614,6 +473,7 @@ impl SpawnSection for ShieldsDamageHistorySpawn {
 }
 
 struct InfrastructureSpawn;
+
 impl SpawnSection for InfrastructureSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Infrastructure condition + capacity (issue #1025) — attach the track when
@@ -629,6 +489,7 @@ impl SpawnSection for InfrastructureSpawn {
 }
 
 struct TractorSpawn;
+
 impl SpawnSection for TractorSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The tractor beam (issue #1156) — attach the beam when `[tractor]` is
@@ -656,6 +517,7 @@ impl SpawnSection for TractorSpawn {
 }
 
 struct TransporterSpawn;
+
 impl SpawnSection for TransporterSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The rescue transporter (issue #1348) — attach when `[transporter]` is
@@ -680,6 +542,7 @@ impl SpawnSection for TransporterSpawn {
 }
 
 struct CivilianRescueSpawn;
+
 impl SpawnSection for CivilianRescueSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The civilians a contact carries (issue #1348) — attach when
@@ -694,6 +557,7 @@ impl SpawnSection for CivilianRescueSpawn {
 }
 
 struct ExternalRepairDispatchSpawn;
+
 impl SpawnSection for ExternalRepairDispatchSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // External repair-team dispatch (issue #1161) — attach the record when
@@ -720,6 +584,7 @@ impl SpawnSection for ExternalRepairDispatchSpawn {
 }
 
 struct HeldResponseSpawn;
+
 impl SpawnSection for HeldResponseSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The held-response (issue #1158) — attach when `[held_response]` is
@@ -733,6 +598,7 @@ impl SpawnSection for HeldResponseSpawn {
 }
 
 struct DockSpawn;
+
 impl SpawnSection for DockSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Docking (issue #1159) — a hull opts into docking with a `[dock]` table.
@@ -783,6 +649,7 @@ impl SpawnSection for DockSpawn {
 }
 
 struct UmbilicalSpawn;
+
 impl SpawnSection for UmbilicalSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The transfer umbilical (issue #1160) — attach the umbilical when
@@ -810,6 +677,7 @@ impl SpawnSection for UmbilicalSpawn {
 }
 
 struct SecuritySpawn;
+
 impl SpawnSection for SecuritySpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Security teams (issue #1346) — attach the muster when `[security]` is
@@ -831,6 +699,7 @@ impl SpawnSection for SecuritySpawn {
 }
 
 struct SecurityTargetSpawn;
+
 impl SpawnSection for SecurityTargetSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // What a Security team may be sent HERE to do (issue #1346). Independent
@@ -843,6 +712,7 @@ impl SpawnSection for SecurityTargetSpawn {
 }
 
 struct DemolitionTargetSpawn;
+
 impl SpawnSection for DemolitionTargetSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // What a controlled demolition may do HERE (issue #1350). Independent of
@@ -856,6 +726,7 @@ impl SpawnSection for DemolitionTargetSpawn {
 }
 
 struct ScanSpawn;
+
 impl SpawnSection for ScanSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The science scan (issue #1032) — attach the record when `[scan]` is
@@ -872,6 +743,7 @@ impl SpawnSection for ScanSpawn {
 }
 
 struct DebrisSpawn;
+
 impl SpawnSection for DebrisSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // The moving hazard (issue #1347) — attach the contact when `[debris]` is
@@ -886,6 +758,7 @@ impl SpawnSection for DebrisSpawn {
 }
 
 struct CivilianSpawn;
+
 impl SpawnSection for CivilianSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Civilian traffic (issue #1028) — attach the authored assignment and the
@@ -905,6 +778,7 @@ impl SpawnSection for CivilianSpawn {
 }
 
 struct HullSpawn;
+
 impl SpawnSection for HullSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Hull -- attach an EntitySystemHull component if the config has hull data.
@@ -954,11 +828,3 @@ impl SpawnSection for HullSpawn {
         }
     }
 }
-
-#[cfg(test)]
-// Fixture ids only (issue #907): a test that needs "some distinct id" has no
-// run to reproduce. Production identity is minted by `crate::world_id`, and
-// clippy.toml bans `Uuid::new_v4` outside scopes like this one.
-#[allow(clippy::disallowed_methods)]
-#[path = "spawner_tests.rs"]
-mod tests;

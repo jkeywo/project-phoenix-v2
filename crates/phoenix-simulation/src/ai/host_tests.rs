@@ -1,8 +1,13 @@
 use super::*;
+use crate::ai::policy::AiPolicy;
 use crate::ai::policy::AiPolicyRule;
+use crate::ai::policy::AiPolicyVerb;
 use crate::core::messages::SystemId;
 use crate::ship::control_source::ControlSource;
+use crate::ship::control_source::ControlSourceResolver;
 use crate::world::flags::parse_predicate;
+use crate::world::flags::AiFacts;
+use crate::world::flags::AiPolicyMemory;
 
 fn sid() -> SystemId {
     SystemId("red-alert".into())

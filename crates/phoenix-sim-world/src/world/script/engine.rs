@@ -1,0 +1,738 @@
+//! The two Rhai engines and the runtime call host (issue #979, milestone M1).
+//!
+//! Mirrors last-aeon's host structure (`aeon_data::host`): one sandbox profile
+//! (vellum's), two engines that differ only in surface.
+//!
+//! * [`loading_engine`] registers the *builder* host-fns (`on(event, handler)`)
+//!   and is used to run each unit's top level once (`Engine::run_ast`) so those
+//!   registrations are collected. Compiling a unit does not resolve types or
+//!   functions, and `run_ast` only runs top-level statements — never function
+//!   bodies — so the loading engine needs no effect vocabulary.
+//! * [`runtime_engine`] is built from `quiet_sandbox` (a script's `print` is
+//!   noise at runtime) and carries the runtime vocabulary — the `flags` type
+//!   and the effect functions. It only ever `call_fn`s retained functions with
+//!   `eval_ast(false)` (through `vellum_script::call_fn`), never re-running top
+//!   level.
+//!
+//! Both apply phoenix's tighter [`MAX_OPS_PER_CALL`] limit over the vellum
+//! sandbox's generous 5,000,000 default, and both call [`init_hashing_seed`]
+//! defensively before constructing the engine — cheap (a `Once`), and it means
+//! even a bare unit test that builds only one engine gets a seeded process.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use rhai::{Engine, Map, AST};
+
+use crate::dossier::evidence::EvidenceLog;
+use crate::world::commitments::CommitmentLedger;
+use crate::world::deadlines::DeadlineTable;
+use crate::world::flags::FlagStore;
+use crate::world::script::authoring::HostFn;
+use crate::world::script::commitments::{register_commitments, Commitments};
+use crate::world::script::deadlines::{register_deadlines, Deadlines};
+use crate::world::script::dossier::{register_dossier, Dossier};
+use crate::world::script::effects::{
+    register_effects, register_real_lit, BufferedEffect, EffectSink,
+};
+use crate::world::script::flags::{register_flags, Flags};
+use crate::world::script::registry::{host_fn, HostRegistry};
+use crate::world::script::schedule::{
+    register_scheduling, CallEffects, SchedClock, ScheduleSink, TickBudget,
+};
+use crate::world::script::{init_hashing_seed, MAX_OPS_PER_CALL};
+
+/// Unwrap a drained buffer to its `ActionCmd`s for [`RuntimeHost::call_immediate`]
+/// — the one effect-only entry point left.
+///
+/// A name-resolving [`BufferedEffect::Action`] (`spawn_entity` / `add_objective`
+/// / `add_faction_enemy`) needs the live pipeline's dispatch context
+/// (`world::server::apply_script_commands`), which this entry point does not
+/// carry. Every path that can produce one routes the full [`CallEffects`] through
+/// that context instead: the trigger handlers, the callback drain, and — since
+/// the dialogue entry point became full-effects (issue #984) — comms dialogue
+/// fns. So reaching here with an `Action` means a simple caller (a test, or the
+/// trigger-parity helper) used `call_immediate` on a handler that needs the
+/// applier. Rather than panic (a hard sim crash in dev AND release), drop it with
+/// a warning per the deny-by-default failure policy (decision 10); the immediate
+/// `Cmd` effects still apply in order.
+fn resolved_cmds(effects: Vec<BufferedEffect>) -> Vec<crate::world::dispatch::ActionCmd> {
+    effects
+        .into_iter()
+        .filter_map(|e| match e {
+            BufferedEffect::Cmd(cmd) => Some(cmd),
+            BufferedEffect::Action(action) => {
+                bevy::log::warn!(
+                    "a script effect-only entry point (dialogue/immediate) buffered a \
+                     name-resolving effect that needs the live dispatch pipeline; dropping \
+                     it — such effects are only supported inside trigger handlers so far: \
+                     {action:?}"
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+/// One handler registration collected at load time.
+///
+/// The M1 seam of "script registrations build the same Trigger structs the TOML
+/// front-end builds": for now a registration simply records that some `event`
+/// is handled by a named function, which [`validate`](super::validate) proves
+/// resolves. Later milestones grow this into full `Trigger` construction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Registration {
+    /// The event the handler is registered for (opaque string in M1).
+    pub event: String,
+    /// The name of the script function that handles it.
+    pub handler: String,
+    /// The content-relative path of the unit that made the registration —
+    /// carried so a finding names the right file and so a deferred-work key
+    /// `(tick, script_path, fn_name)` has its path (anon names are not unique
+    /// across files; M0 spike).
+    pub source_path: String,
+}
+
+/// One trigger authored through the Rhai front-end (issue #980, milestone M2).
+///
+/// A top-level call to a registration fn (`on_destroyed`, `on_flag_set`, … —
+/// one per [`TriggerCondition`](crate::world::config::TriggerCondition) variant,
+/// registered by [`crate::world::script::triggers`]) builds a real
+/// [`Trigger`](crate::world::config::Trigger) — the *same* struct the TOML
+/// `[[trigger]]` front-end builds, through the shared
+/// [`scripted_trigger`](crate::world::config::scripted_trigger) constructor — and
+/// records the named handler fn that supplies its effects at runtime. That is
+/// the "one evaluator, two front-ends" convergence: the built `trigger` feeds the
+/// existing pipeline exactly as a TOML-authored one does, and `handler` is what
+/// the cross-reference pass ([`validate`](super::validate)) proves resolves.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptTrigger {
+    /// The trigger this registration built — identical to its TOML equivalent.
+    pub trigger: crate::world::config::Trigger,
+    /// Name of the script fn that supplies the trigger's effects at runtime.
+    pub handler: String,
+    /// Content-relative path of the unit that registered it (for findings and
+    /// for a deferred-work key; anon names are not unique across files, M0 spike).
+    pub source_path: String,
+}
+
+/// Mutable state the loading engine accumulates as it runs each unit's top
+/// level. Held behind an `Arc<Mutex<_>>` because the builder host-fns are
+/// closures registered on the engine.
+#[derive(Debug, Default)]
+pub struct BuilderState {
+    /// Path of the unit currently being run — set by the loader before each
+    /// `run_ast` so a registration is attributed to the right file.
+    pub current_path: String,
+    /// Registrations collected from top-level `on(..)` calls.
+    pub registrations: Vec<Registration>,
+    /// Triggers built by the typed registration fns (`on_destroyed`, …), one per
+    /// `TriggerCondition` variant (issue #980, M2).
+    pub script_triggers: Vec<ScriptTrigger>,
+    /// `on_deadline("id", "handler")` declarations (issue #1024), pairing an
+    /// authored `[[deadline]]` id with the fn it runs and the unit that said so.
+    pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
+}
+
+/// Build the loading engine, registering the builder vocabulary against
+/// `state`.
+pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
+    init_hashing_seed();
+    let mut engine = HostRegistry::new(vellum_script::sandbox());
+    engine.set_max_operations(MAX_OPS_PER_CALL);
+    register_loading_vocabulary(&mut engine, state);
+    engine.into_engine()
+}
+
+/// Register the builder vocabulary against `state` on a loading registry.
+///
+/// Factored out of [`loading_engine`] so the descriptor harvest
+/// ([`collect_host_fn_descriptors`]) runs the *same* registration the real
+/// engine does — the editor's autocomplete list is derived from these
+/// [`host_fn!`] sites, not from a second hand-maintained copy (issue #1238).
+pub fn register_loading_vocabulary(engine: &mut HostRegistry, state: Arc<Mutex<BuilderState>>) {
+    // `on("event", "handler")` — records that `handler` handles `event`,
+    // attributed to the unit currently running.
+    let on_state = state.clone();
+    host_fn!(
+        engine,
+        "on",
+        receiver = "",
+        category = "register",
+        params = ["event", "handler"],
+        summary = "Register a named handler fn for a generic event string.",
+        move |event: rhai::ImmutableString, handler: rhai::ImmutableString| {
+            let mut s = on_state.lock().expect("builder state lock");
+            let source_path = s.current_path.clone();
+            s.registrations.push(Registration {
+                event: event.to_string(),
+                handler: handler.to_string(),
+                source_path,
+            });
+        },
+    );
+
+    // The fractional-leaf marker (issue #984). Needed HERE as well as on the
+    // runtime engine because `on_hull_below(entity, flt("0.75"), handler)` is a
+    // top-level registration, and a unit's top level only ever runs on this one.
+    // Not editor-exposed, so a bare registration with no descriptor.
+    register_real_lit(engine.engine_mut());
+
+    // The typed trigger-builder vocabulary (issue #980, M2): one registration fn
+    // per `TriggerCondition` variant, each building a `Trigger` into `state`.
+    super::triggers::register_trigger_builders(engine, state.clone());
+
+    // `on_deadline("id", "handler")` (issue #1024): names the fn a `[[deadline]]`
+    // block runs when it expires, attributed to the unit that declared it.
+    super::deadlines::register_deadline_builders(engine, state);
+}
+
+/// Build the runtime engine with the full runtime vocabulary.
+pub fn runtime_engine() -> Engine {
+    init_hashing_seed();
+    let mut engine = HostRegistry::new(vellum_script::quiet_sandbox());
+    engine.set_max_operations(MAX_OPS_PER_CALL);
+    register_runtime_vocabulary(&mut engine);
+    engine.into_engine()
+}
+
+/// Register the full runtime vocabulary on a runtime registry.
+///
+/// Factored out of [`runtime_engine`] for [`register_loading_vocabulary`]'s
+/// reason: the descriptor harvest reuses it, so the editor list stays in step
+/// with what the runtime engine actually resolves (issue #1238).
+pub fn register_runtime_vocabulary(engine: &mut HostRegistry) {
+    register_flags(engine);
+    register_effects(engine);
+    register_scheduling(engine);
+    // The `deadlines` read/write vocabulary (issue #1024).
+    register_deadlines(engine);
+    // The `commitments` read/write vocabulary (issue #1029).
+    register_commitments(engine);
+    // The `dossier` write vocabulary (issue #1031).
+    register_dossier(engine);
+}
+
+/// Collect the editor host-fn descriptors by running the SAME registration the
+/// two engine builders run and taking the descriptors it emitted (issue #1238).
+///
+/// This is what makes [`authoring::host_fns`](super::authoring::host_fns) a
+/// DERIVED list rather than a hand-maintained mirror: every descriptor comes
+/// from the `host_fn!` site that registers its verb, so a descriptor cannot name
+/// a verb the engine never registered (a phantom), and an exposed verb cannot be
+/// registered without being described. The throwaway engines are discarded; the
+/// loading vocabulary's descriptors come first, then the runtime vocabulary's,
+/// grouped as the two engines register them.
+pub fn collect_host_fn_descriptors() -> Vec<HostFn> {
+    let state = Arc::new(Mutex::new(BuilderState::default()));
+    let mut loading = HostRegistry::new(vellum_script::sandbox());
+    register_loading_vocabulary(&mut loading, state);
+
+    let mut runtime = HostRegistry::new(vellum_script::quiet_sandbox());
+    register_runtime_vocabulary(&mut runtime);
+
+    let mut descriptors = loading.into_descriptors();
+    descriptors.extend(runtime.into_descriptors());
+    descriptors
+}
+
+/// The runtime script host: owns the runtime engine and runs retained functions.
+///
+/// The engine carries an `on_progress` hook that records each call's operation
+/// high-water mark into [`ops_counter`](Self::ops_counter), so the host can
+/// charge it to a per-tick [`TickBudget`] — the operation-budget half of the M3
+/// safety limits.
+pub struct RuntimeHost {
+    engine: Engine,
+    /// High-water operation count of the most recent call, written every
+    /// operation by the engine's `on_progress` hook. Read once per call.
+    ops_counter: Arc<AtomicU64>,
+}
+
+impl Default for RuntimeHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuntimeHost {
+    /// Build a host on a fresh runtime engine, wiring the operation counter.
+    pub fn new() -> Self {
+        let ops_counter = Arc::new(AtomicU64::new(0));
+        let mut engine = runtime_engine();
+        let counter = ops_counter.clone();
+        // Count operations for the per-tick budget. Always returns `None` — it
+        // never aborts a call; the fixed per-call cap is enforced independently
+        // by `set_max_operations` (see `runtime_engine`). It only records the
+        // running op count so the caller can charge the call to a `TickBudget`.
+        engine.on_progress(move |ops| {
+            counter.store(ops, Ordering::Relaxed);
+            None
+        });
+        Self {
+            engine,
+            ops_counter,
+        }
+    }
+
+    /// The underlying engine (compile ASTs against a matching engine; ASTs are
+    /// engine-independent once compiled).
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// Root-world compatibility wrapper for [`Self::call_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn call(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> CallEffects {
+        self.call_scoped(
+            budget,
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::try_call_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_call(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Result<(CallEffects, u64), vellum_script::CallError> {
+        self.try_call_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::call_dialogue_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn call_dialogue(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Option<(CallEffects, rhai::Dynamic)> {
+        self.call_dialogue_scoped(
+            budget,
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::try_call_returning_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_call_returning(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
+        self.try_call_returning_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Run a retained function under a per-tick `budget`, returning its immediate
+    /// effects and the deferred work it scheduled, stamped against `clock`.
+    ///
+    /// The context map is `extra` with the `flags`, `effects` and `schedule`
+    /// handles inserted; a script reads it as its single parameter
+    /// (`fn on_x(ctx)`). `flag_chain` is the live store chain the flag overlay
+    /// snapshots — innermost layer first, terminating at the base world, the same
+    /// walk a `when` predicate evaluates against (issue #1045). A base-world
+    /// handler passes a one-entry chain.
+    ///
+    /// The `budget` is threaded across every call in a tick (the M0 aggregate
+    /// caps): a call refused by [`admit_call`](TickBudget::admit_call) — the tick
+    /// is already tripped, or the call cap is reached — is **dropped**, returning
+    /// empty effects and scheduling nothing, so the tick's remaining script work
+    /// is deterministically skipped. A completed call's operations are charged to
+    /// the budget, which may trip it for the *next* call.
+    ///
+    /// This is the failure boundary (settled decision 10). On a script error it
+    /// **panics in dev** (`debug_assertions`) and, in release, discards this
+    /// call's effects whole, logs, and returns empty effects so the game
+    /// continues. Callers that need to inspect the error use [`try_call`].
+    ///
+    /// [`try_call`]: RuntimeHost::try_call
+    pub fn call_scoped(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
+        extra: Map,
+    ) -> CallEffects {
+        if !budget.admit_call() {
+            // Dropped: the call cap is reached or the tick has already tripped.
+            return CallEffects::default();
+        }
+        match self.try_call_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            origin_layer,
+            extra,
+        ) {
+            Ok((effects, ops)) => {
+                budget.charge_ops(ops);
+                effects
+            }
+            Err(err) => {
+                // Charge the operations the failed call still consumed, so a
+                // runaway that trips the per-call cap also counts against the
+                // tick (and does so identically on every peer).
+                budget.charge_ops(self.ops_counter.load(Ordering::Relaxed));
+                if cfg!(debug_assertions) {
+                    panic!("{err}");
+                }
+                // Release: discard the call's effects whole (they were never
+                // drained), log, and continue. Plain helper with no log config
+                // in scope, so a bare `warn!` per AGENTS.md.
+                bevy::log::warn!(
+                    target: crate::logging::LogCat::World.target(),
+                    "{err}; discarding this call's effects"
+                );
+                CallEffects::default()
+            }
+        }
+    }
+
+    /// Like [`call`](RuntimeHost::call) but without the budget or the
+    /// panic/discard policy: returns the error, and — on success — the call's
+    /// effects plus the operation count it consumed (for the caller to charge to
+    /// a budget). On error the buffers are dropped whole (never returned).
+    ///
+    /// The call's `Dynamic` return value is discarded: effects are collected
+    /// imperatively via the buffers, not from a return value. A caller that needs
+    /// it (a comms dialogue fn communicates its node that way) takes
+    /// [`try_call_returning`](RuntimeHost::try_call_returning), of which this is
+    /// exactly the value-dropping form — one body, so the two entry points cannot
+    /// drift in what they drain.
+    pub fn try_call_scoped(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
+        extra: Map,
+    ) -> Result<(CallEffects, u64), vellum_script::CallError> {
+        self.try_call_returning_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            origin_layer,
+            extra,
+        )
+        .map(|(effects, _value, ops)| (effects, ops))
+    }
+
+    /// Run a scripted comms dialogue fn (issue #982, M4) under the tick's shared
+    /// `budget`, returning its full [`CallEffects`] AND the `Dynamic` it returned.
+    /// A dialogue-node fn returns a `#{message, responses}` map; a response
+    /// `on_pick` fn runs `ctx.effects.*`/`ctx.flags.*` and returns the follow-up
+    /// node map (or `()` for a terminal response). Both [`call`](RuntimeHost::call)
+    /// and [`try_call`](RuntimeHost::try_call) discard the return value (they
+    /// collect effects imperatively from the buffer), so a dialogue call needs its
+    /// own entry point to keep the returned node.
+    ///
+    /// Otherwise this is the [`call`](RuntimeHost::call) shape exactly (issue
+    /// #984): the same `budget.admit_call()` gate and `charge_ops` charge, so
+    /// dialogue calls count against the tick's aggregate caps like every other
+    /// script call; the same [`SchedClock`] stamping, so a dialogue fn's
+    /// `in_seconds`/`after` work is kept rather than silently dropped (a delayed
+    /// comms reply is authored as `ctx.schedule.after(n, …)`); and the same
+    /// settled-decision-10 failure policy — on a script error it **panics in dev**
+    /// (`debug_assertions`) and, in release, discards this call's effects whole,
+    /// logs, and returns `None` so the game continues.
+    ///
+    /// # `None` is not `()` (issue #984)
+    ///
+    /// A dialogue fn that returns `()` is a TERMINAL response — a real, authored
+    /// outcome. A call that never ran (refused by the budget, or discarded by the
+    /// failure policy) produced no outcome at all. Returning `(empty, ())` for
+    /// both made them indistinguishable, so a refused pick was recorded as though
+    /// the player had ended the thread. The `Option` is that distinction:
+    /// `Some((effects, value))` means the fn RAN and `value` is what it returned;
+    /// `None` means it did not, and the caller must tell the player its response
+    /// was dropped (issue #984 R5) rather than advance the thread.
+    ///
+    /// A caller that wants to refuse *before* spending the attempt pre-flights
+    /// with [`can_admit`](TickBudget::can_admit) — the same predicate
+    /// [`admit_call`](TickBudget::admit_call) is implemented over, so the two
+    /// cannot disagree. (`tripped()` is NOT that predicate: the call that reaches
+    /// the call cap is refused and trips the budget in one step, so a `tripped()`
+    /// pre-flight passes on a call that is about to be dropped.)
+    pub fn call_dialogue_scoped(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
+        extra: Map,
+    ) -> Option<(CallEffects, rhai::Dynamic)> {
+        if !budget.admit_call() {
+            // Dropped: the call cap is reached or the tick has already tripped.
+            return None;
+        }
+        match self.try_call_returning_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            origin_layer,
+            extra,
+        ) {
+            Ok((effects, value, ops)) => {
+                budget.charge_ops(ops);
+                Some((effects, value))
+            }
+            Err(err) => {
+                // Charge the operations the failed call still consumed, exactly as
+                // `call` does, so a runaway dialogue fn counts against the tick.
+                budget.charge_ops(self.ops_counter.load(Ordering::Relaxed));
+                if cfg!(debug_assertions) {
+                    panic!("{err}");
+                }
+                // Plain helper with no log config in scope, so a bare `warn!`
+                // per AGENTS.md.
+                bevy::log::warn!(
+                    target: crate::logging::LogCat::World.target(),
+                    "{err}; discarding this dialogue call's effects"
+                );
+                None
+            }
+        }
+    }
+
+    /// Like [`try_call`](RuntimeHost::try_call) but KEEPS the call's `Dynamic`
+    /// result alongside its effects and operation count — a scripted dialogue fn
+    /// communicates its node through the return value, not the effect buffer
+    /// (issue #982, M4).
+    ///
+    /// Identical in every other respect (issue #984): the buffered effects come
+    /// back whole as [`BufferedEffect`]s, so a dialogue `on_pick`'s name-resolving
+    /// verb survives for the live applier to dispatch instead of being warn-dropped;
+    /// the schedule sink is drained against `clock` like every other call, so a
+    /// dialogue fn's deferred work is kept; and on error both buffers are dropped
+    /// whole, never returned.
+    pub fn try_call_returning_scoped(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
+        extra: Map,
+    ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
+        let sink = EffectSink::new();
+        // Flags share the one ordered command buffer, so a flag write is emitted
+        // in authored order, interleaved with effects (issue #981 hazard 2).
+        let flags = Flags::with_chain(flag_chain, sink.clone());
+        let schedule = ScheduleSink::new();
+        // Measured against the SAME clock a deferred effect is stamped with, so
+        // `ctx.deadlines.remaining(…)` and `ctx.schedule.after(n, …)` agree about
+        // what "now" is (issue #1024).
+        let deadlines =
+            Deadlines::with_origin(base_deadlines, clock.tick, clock.tick_hz, origin_layer);
+        // Shares the SAME sink as `flags` (issue #1029): a resolution's campaign
+        // flag is an ordinary `MutateFlag`, emitted where the author put it
+        // rather than appended after the call's other work.
+        let commitments = Commitments::new(base_commitments, sink.clone(), clock.tick);
+        // Shares the SAME sink again (issue #1031), so an appended finding keeps
+        // its authored position among the call's flag writes and effects — and
+        // snapshots `base_evidence` (issue #1036), which is what lets a
+        // negotiation node offer an option the crew earned by going and looking.
+        // Read-only: see `Dossier`'s docs on why an append made in THIS call is
+        // deliberately not visible to a `holds` after it.
+        let dossier = Dossier::new(sink.clone(), clock.tick, base_evidence);
+
+        let mut ctx = extra;
+        ctx.insert("effects".into(), rhai::Dynamic::from(sink.clone()));
+        ctx.insert("flags".into(), rhai::Dynamic::from(flags));
+        ctx.insert("schedule".into(), rhai::Dynamic::from(schedule.clone()));
+        ctx.insert("deadlines".into(), rhai::Dynamic::from(deadlines.clone()));
+        ctx.insert(
+            "commitments".into(),
+            rhai::Dynamic::from(commitments.clone()),
+        );
+        ctx.insert("dossier".into(), rhai::Dynamic::from(dossier));
+
+        // Reset the op counter, then call. On error we return before draining
+        // anything, so the effect buffer and the schedule buffer are dropped
+        // whole.
+        self.ops_counter.store(0, Ordering::Relaxed);
+        let value = vellum_script::call_fn(&self.engine, ast, path, fn_name, ctx)?;
+        let ops = self.ops_counter.load(Ordering::Relaxed);
+
+        // `sink` already carries effects and flag writes in authored order; its
+        // second buffer carries the call's comms opens, stamped with `path` here
+        // at the host boundary just as the schedule drain stamps a callback's.
+        let commands = sink.take();
+        let comms_opens = sink.take_opens_scoped(path, origin_layer);
+        let (delayed, callbacks) = schedule.drain_scoped(clock, path, origin_layer);
+        Ok((
+            CallEffects {
+                completed: true,
+                commands,
+                delayed,
+                callbacks,
+                comms_opens,
+                // Dropped whole on the error path above with the other buffers,
+                // so a raising handler slips nothing (settled decision 10).
+                deadline_changes: deadlines.take_changes(),
+                // Dropped whole on the error path with the other buffers, so a
+                // raising handler neither settles a promise nor makes one.
+                commitment_changes: commitments.take_changes(),
+            },
+            value,
+            ops,
+        ))
+    }
+
+    /// Convenience for callers wanting only a call's immediate effects, unwrapped
+    /// to `ActionCmd`s: a fresh per-tick budget and a zero clock. Applies the
+    /// failure policy. Any deferred work the call scheduled is discarded, so this
+    /// is for effect-only (`Cmd`) handlers and simple tests — a name-resolving
+    /// effect needs the live pipeline, and using this on such a handler panics
+    /// (see [`resolved_cmds`]).
+    pub fn call_immediate(
+        &self,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        base_flags: &FlagStore,
+        extra: Map,
+    ) -> Vec<crate::world::dispatch::ActionCmd> {
+        let mut budget = TickBudget::new();
+        resolved_cmds(
+            self.call(
+                &mut budget,
+                &SchedClock::ZERO,
+                ast,
+                path,
+                fn_name,
+                std::slice::from_ref(base_flags),
+                // Inert, for `SchedClock::ZERO`'s reason: this entry point wants
+                // a call's immediate commands only, and a deadline mutation is
+                // never one of them (it drains to `deadline_changes`).
+                &DeadlineTable::default(),
+                // Inert for the same reason: this entry point wants a call's
+                // immediate commands only, and a commitment mutation is never
+                // one of them (it drains to `commitment_changes`).
+                &CommitmentLedger::default(),
+                // Inert for a third reason of its own: `ctx.dossier.holds` is a
+                // READ, so a handler that consults it here sees an empty file
+                // rather than a wrong one, and a handler that appends still
+                // emits its command onto the buffer this entry point drains.
+                &EvidenceLog::default(),
+                extra,
+            )
+            .commands,
+        )
+    }
+}
+
+#[cfg(test)]
+#[path = "engine_tests.rs"]
+mod tests;

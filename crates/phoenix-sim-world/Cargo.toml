@@ -1,0 +1,30 @@
+[package]
+name = "phoenix-sim-world"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+phoenix-math = { path = "../phoenix-math" }
+phoenix-model = { path = "../phoenix-model", features = ["ecs"] }
+phoenix-content = { path = "../phoenix-content" }
+phoenix-sim-contracts = { path = "../phoenix-sim-contracts" }
+bevy = { version = "0.18.1", default-features = false, features = ["std", "bevy_state", "bevy_log"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+toml = "1.0"
+rhai = { version = "1.25", features = ["sync", "no_float"] }
+vellum-script = { workspace = true }
+vellum-rng = { workspace = true }
+libm = "0.2"
+
+
+[features]
+default = []
+server = []
+test-support = []
+
+[dev-dependencies]
+ron = "0.12"
+bevy = { version = "0.18.1", default-features = false, features = ["debug"] }

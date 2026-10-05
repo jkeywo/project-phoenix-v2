@@ -608,7 +608,7 @@ fn test_app() -> App {
             crate::server_app::Ship,
             crate::server_app::LocalShip,
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
@@ -6240,7 +6240,7 @@ fn npc_weapons_blackboards_add_no_wire_traffic() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             ShipSystemBlackboards::default(),
             crate::console::weapons::TacticalRadarSelection(Some("npc-only-target".into())),

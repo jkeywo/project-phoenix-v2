@@ -255,7 +255,7 @@ The top-level `[[behaviour.doctrine]]` objective list remains live for NPC trave
 
 ## Canonical sources
 
-- `crates/phoenix-simulation/src/ship/config.rs` and `src/system_registry.rs` — stations, ratings, system instances, power groups, and system kinds.
-- `crates/phoenix-simulation/src/entities/config.rs` — hull capability sections and strict AI-policy validation.
+- `crates/phoenix-sim-gameplay/src/ship/config.rs` and `src/system_registry.rs` — stations, ratings, system instances, power groups, and system kinds.
+- `crates/phoenix-sim-gameplay/src/entities/config.rs` — hull capability sections and strict AI-policy validation.
 - `pasm/spec/architecture/station-system-authority.yaml`, `data-driven-fine-system-ai.yaml`, `weapons.yaml`, `shields.yaml`, `engineering-damage.yaml`, and `power-modifiers-regions.yaml`.
 - `assets/entities/alliance_*.toml` and `assets/entities/ship_harrow_*.toml` — shipped hull examples.

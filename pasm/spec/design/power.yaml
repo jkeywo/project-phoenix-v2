@@ -117,9 +117,9 @@ entities:
       outputs: [rule-derived group allocations]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ai/policy.rs, crates/phoenix-simulation/src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
       symbols: [ai_power_allocation, AiPolicy, resolve_channel, resolve_channel_ranked, seed_power_facts, POWER_SET_ALLOCATION_VERB, PowerAiPolicy, authored_power_group_seed, plan_allocation, AllocationBid, max_commanded_total]
-      tests: [cargo test, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs]
 
   # --- Band-D supply/demand redesign (2026-08-17 customisation grill). ---
   # These decisions REDESIGN the model above. The entities above describe the

@@ -2,7 +2,7 @@
 title: Ship
 type: entity
 tags: [ship, physics, collision, viewscreen]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/ship/physics.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/physics_systems.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-presentation/src/server/renderer.rs, assets/entities/dynasty_player_cruiser.toml]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-presentation/src/server/renderer.rs, assets/entities/dynasty_player_cruiser.toml]
 updated: 2026-10-04
 ---
 

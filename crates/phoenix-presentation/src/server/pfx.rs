@@ -1829,7 +1829,7 @@ fn sync_blaster_pfx(
 }
 
 /// The bolt's forward direction from its `heading` (radians, ship-forward
-/// convention `atan2(dx, -dz)` — see `crates/phoenix-simulation/src/weapons/blaster.rs`).
+/// convention `atan2(dx, -dz)` — see `crates/phoenix-sim-gameplay/src/weapons/blaster.rs`).
 fn blaster_bolt_forward(heading: f32) -> Vec3 {
     Vec3::new(heading.sin(), 0.0, -heading.cos())
 }

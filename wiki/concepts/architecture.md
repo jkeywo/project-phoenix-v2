@@ -2,7 +2,7 @@
 title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
-sources: [crates/phoenix-presentation/src/server/pfx.rs, AGENTS.md, crates/phoenix-simulation/src/lib.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
+sources: [crates/phoenix-presentation/src/server/pfx.rs, AGENTS.md, crates/phoenix-simulation/src/lib.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
 updated: 2026-10-05
 ---
 
@@ -34,7 +34,7 @@ phone clients
 
 Rust modules are grouped by domain: `lobby`, `ship`, `weapons`, `modifiers`, `asteroids`, `regions`, `entities`, `world`, `ai`, `comms`, and `console`. Pure state/decision code stays beside its Bevy adapter; a pure module never imports Bevy merely to serve an adapter.
 
-`crates/phoenix-simulation/src/entities/config.rs` owns `EntityConfig`, parsing and cross-subsystem validation. Its `config/` leaves hold the individual subsystem schemas; root re-exports preserve their public paths. Visual and LOD definitions live in `crates/phoenix-model/src/entity/visual.rs`, with hull, propulsion, weapons, consoles and other subsystem declarations in corresponding leaves.
+`crates/phoenix-sim-gameplay/src/entities/config.rs` owns `EntityConfig`, parsing and cross-subsystem validation. Its `config/` leaves hold the individual subsystem schemas; root re-exports preserve their public paths. Visual and LOD definitions live in `crates/phoenix-model/src/entity/visual.rs`, with hull, propulsion, weapons, consoles and other subsystem declarations in corresponding leaves.
 
 Cross-domain infrastructure has narrow homes:
 

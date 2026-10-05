@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/ai/host.rs]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/ai/host.rs]
 updated: 2026-10-04
 ---
 

@@ -11,10 +11,10 @@ use crate::world::script::{
 };
 
 #[derive(Debug)]
-pub(crate) struct MissingScriptUnit;
+pub struct MissingScriptUnit;
 
 #[derive(Debug)]
-pub(crate) enum DialogueInvocationError {
+pub enum DialogueInvocationError {
     /// Preflight declined without spending an attempt or tripping the budget.
     BudgetUnavailable,
     MissingUnit,

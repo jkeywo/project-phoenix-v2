@@ -534,7 +534,7 @@ describe('GM omniscient local projection', () => {
 describe('GM projection transport separation', () => {
   it('exists only in the Host Channel, never in peer or lockstep vocabularies', () => {
     for (const file of [
-      'crates/phoenix-simulation/src/core/messages.rs',
+      'crates/phoenix-sim-gameplay/src/core/messages.rs',
       'crates/phoenix-simulation/src/lockstep/frame.rs',
       'crates/phoenix-simulation/src/server_app/components.rs',
     ]) {

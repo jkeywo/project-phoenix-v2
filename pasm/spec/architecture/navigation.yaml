@@ -160,14 +160,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-simulation/src/ship/helm_planner.rs]
+      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_planner.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - receive_helm_coordination
         - cleared_nav_waypoint
         - build_helm_ai_surfaces_frame
         - helm_ai_decision
         - helm_motion_planner
-      tests: [cargo test, crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-simulation/src/ship/helm_planner_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs]
 
   - state: helm-waypoint-clearance-state
     core:
@@ -182,7 +182,7 @@ entities:
       derived_from: [coordination-delivery-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs]
       symbols: [HelmWaypointClearance, HelmWaypointClearanceState]
 
       tests: [crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs]
@@ -211,17 +211,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/civilian/traffic.rs
-        - crates/phoenix-simulation/src/civilian/server.rs
-        - crates/phoenix-model/src/messages.rs
-        - crates/phoenix-simulation/src/world/config.rs
-        - crates/phoenix-simulation/src/world/validate.rs
-        - crates/phoenix-simulation/src/world/dispatch.rs
-        - crates/phoenix-simulation/src/world/script/effects.rs
-        - crates/phoenix-simulation/src/console/navigation/mod.rs
-        - crates/phoenix-simulation/src/console/navigation/server.rs
-        - gui/components/ph-civilian-traffic.js
-        - gui/action-map.js
+        [crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, gui/components/ph-civilian-traffic.js, gui/action-map.js, crates/phoenix-sim-contracts/src/routes.rs]
       symbols:
         - RouteConfig
         - RouteLeg
@@ -239,7 +229,7 @@ entities:
         - PendingCivilianOrder
         - tick_civilian_traffic
         - CIVILIAN_ROUTE_OBJECTIVE_ID
-      tests: [cargo test, "cargo test a_correlated_console_order_is_applied_only_by_the_civilian_owner", "cargo test correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner", npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic", crates/phoenix-simulation/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs]
+      tests: [cargo test, "cargo test a_correlated_console_order_is_applied_only_by_the_civilian_owner", "cargo test correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner", npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic", crates/phoenix-sim-gameplay/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown"
@@ -264,14 +254,14 @@ entities:
       replicas: [civilian-traffic-published-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs]
       symbols:
         - CivilianState
         - CivilianTraffic
         - ComplianceState
         - ComplianceTransition
         - REASON_UNABLE
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume civilians", crates/phoenix-simulation/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume civilians", crates/phoenix-sim-gameplay/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs]
     evidence:
       - kind: test
         reference: "tests/snapshot_resume.rs::the_resumed_world_keeps_a_civilians_lane_order_and_place_in_the_negotiation"

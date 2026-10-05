@@ -116,7 +116,7 @@ fn recipient_comms_app() -> App {
             crate::ship_slots::AuthoredShipSlotId(slot.into()),
             crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(index)),
             crate::entities::spawner::FactionComponent(faction),
-            crate::ship::components::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             crate::server_app::ShipSystemBlackboards::default(),
         ));
     }
@@ -1422,7 +1422,7 @@ fn default_worlds_raider_attack_still_loads_the_reinforcements_layer_and_broadca
     assert_eq!(
         effects.commands,
         vec![BufferedEffect::Cmd(
-            crate::world::dispatch::ActionCmd::LoadWorld {
+            phoenix_sim_world::commands::ActionCmd::LoadWorld {
                 path: "assets/worlds/reinforcements.toml".into(),
                 loader_path: None,
             }

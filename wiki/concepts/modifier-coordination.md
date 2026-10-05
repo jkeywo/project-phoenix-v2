@@ -2,7 +2,7 @@
 title: Modifier Coordination
 type: concept
 tags: [modifiers, power, regions, impulse, collision, repair]
-sources: [crates/phoenix-simulation/src/modifiers/cache.rs, crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/snapshot.rs]
+sources: [crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/snapshot.rs]
 updated: 2026-09-09
 ---
 
@@ -12,7 +12,7 @@ updated: 2026-09-09
 
 ## Ownership
 
-`crates/phoenix-simulation/src/modifiers/cache.rs` owns storage, recomputation, and snapshot representation. `ModifierCoordinationPlugin` in `crates/phoenix-simulation/src/modifiers/coordination.rs` owns adapters for sources that otherwise would write the cache directly:
+`crates/phoenix-sim-gameplay/src/modifiers/cache.rs` owns storage, recomputation, and snapshot representation. `ModifierCoordinationPlugin` in `crates/phoenix-sim-gameplay/src/modifiers/coordination.rs` owns adapters for sources that otherwise would write the cache directly:
 
 - reactor allocation produces speed, yaw, phaser-damage, and shield-regeneration modifiers;
 - active impulse produces its authored speed multiplier;

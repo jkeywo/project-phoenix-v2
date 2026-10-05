@@ -29,9 +29,6 @@ use std::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use std::collections::HashSet;
 
-#[cfg(not(target_arch = "wasm32"))]
-use bevy::prelude::Resource;
-
 // ── Pure helpers (native + wasm) ─────────────────────────────────────────────
 
 /// Collect template paths nested inside an `EntityConfig` that the preload
@@ -1164,26 +1161,6 @@ impl From<HashMap<String, EntityConfig>> for ConfigCache {
 #[cfg(not(target_arch = "wasm32"))]
 pub type ConfigCache = std::collections::HashMap<String, crate::entities::config::EntityConfig>;
 
-/// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
-#[derive(Resource)]
-pub struct FactionRegistryResource(pub crate::ai::faction::FactionRegistry);
-
-#[cfg(target_arch = "wasm32")]
-impl std::ops::Deref for FactionRegistryResource {
-    type Target = crate::ai::faction::FactionRegistry;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl std::ops::Deref for FactionRegistryResource {
-    type Target = crate::ai::faction::FactionRegistry;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 /// Bevy plugin for setting up config resources from the preloaded state.
 /// This should be added to the app in wasm_init().
 #[cfg(target_arch = "wasm32")]
@@ -1459,3 +1436,5 @@ fn overlay_pack_factions(registry: &mut crate::ai::faction::FactionRegistry, pac
 mod tests;
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;
+
+pub use phoenix_sim_gameplay::entities::config_cache::*;

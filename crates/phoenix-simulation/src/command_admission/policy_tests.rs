@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::messages::StationId;
 use crate::core::messages::{RepairTarget, SystemId};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship_plugin::ShipSystemControlSources;

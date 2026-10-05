@@ -1,21 +1,7 @@
 //! Phoenix adapters over content's template composition engine.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::entities::config::EntityConfig;
-use crate::world::validate::WorldFinding;
 pub use phoenix_content::include_resolve::*;
-
-/// Parse composed content with Phoenix's full entity schema and validation.
-pub trait ParseEntityTemplate {
-    fn parse(&self) -> Result<EntityConfig, IncludeError>;
-}
-impl ParseEntityTemplate for ResolvedTemplate {
-    fn parse(&self) -> Result<EntityConfig, IncludeError> {
-        self.parse_with(EntityConfig::from_toml)
-    }
-}
-
-pub fn composition_finding(path: &str, source: &dyn FragmentSource) -> Option<WorldFinding> {
-    composition_finding_with(path, source, EntityConfig::from_toml)
-}
 
 /// Filesystem adapter for the pure resolver above.
 ///
@@ -110,3 +96,7 @@ impl FragmentSource for HostFragmentSource {
 #[cfg(test)]
 #[path = "include_resolve_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_gameplay::entities::include_resolve::{
+    composition_finding, ParseEntityTemplate,
+};

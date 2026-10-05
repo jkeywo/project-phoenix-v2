@@ -133,18 +133,18 @@ pub fn prepare_navigation_and_repair(
             .resource_mut::<WorldConfig>()
             .anchors
             .insert(anchor.clone(), [navigation_x, 0.0, navigation_z]);
-        // Use the real doctrine aggregator and selector. Default construction
-        // respects DoctrineObjective's private authoring-validation field.
-        let mut doctrine = DoctrineObjective::default();
-        doctrine.id = anchor.clone();
-        doctrine.text = format!("Prepared navigation destination {index}");
-        doctrine.directive_kind = Some("Reach".into());
-        doctrine.directive_anchor = Some(anchor.clone());
-        doctrine.base_priority = 100.0;
-        // The tracer proves waypoint application and clearance without asking
-        // the Helm to translate the hull during other producers' observations.
-        doctrine.target_speed = 0.0;
-        doctrine.use_impulse = Some(false);
+        // Use the real doctrine aggregator and selector.
+        let doctrine = DoctrineObjective {
+            id: anchor.clone(),
+            text: format!("Prepared navigation destination {index}"),
+            directive_kind: Some("Reach".into()),
+            directive_anchor: Some(anchor.clone()),
+            base_priority: 100.0,
+            // Prove waypoint application without translating the hull.
+            target_speed: 0.0,
+            use_impulse: Some(false),
+            ..Default::default()
+        };
         world.get_mut::<BehaviourSection>(ship).unwrap().0.doctrine = vec![doctrine];
         let generation_before = {
             let mut waypoint = world.get_mut::<NavigationWaypoint>(ship).unwrap();

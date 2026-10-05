@@ -14,45 +14,6 @@
 //! fallback config, and the validation call are all unchanged from the copies
 //! it replaces.
 
-/// The prefix every AI operator's token carries, and the one thing that tells a
-/// reader an admitted command came from an AI decision rather than from a seat.
-///
-/// Named here because it is already load-bearing in three places
-/// ([`super::policy::is_command_authorized`] routes on it,
-/// [`super::admit_system_commands`] resolves its route from it, and
-/// `lobby::handler` exempts it from lobby identity), and because issue #1436's
-/// crew-activity adapter is the first reader OUTSIDE admission to depend on it.
-pub const AI_TOKEN_PREFIX: &str = "ai:";
-
-/// Is this the token of an AI operator rather than a seat?
-///
-/// The complement is deliberately broad: a crew session token, the native local
-/// console token, and the absent token a peer-relayed or GM-puppeted command
-/// carries are all "not an AI decision". Advisory reads only — command authority
-/// is decided by [`super::policy::is_command_authorized`], never by this.
-pub fn is_ai_token(token: Option<&str>) -> bool {
-    token.is_some_and(|token| token.starts_with(AI_TOKEN_PREFIX))
-}
-
-/// The token an AI operator on a ship with no [`crate::entities::spawner::EntityUuid`]
-/// emits under.
-///
-/// Deliberately *not* registered in `crate::ai::server::AiTokenRegistry`: an
-/// unregistered `ai:` token falls through the routing branch in
-/// [`super::admit_system_commands`] to the `LocalShip`, which is exactly what
-/// the player ship's Backfill AI wants. Registered NPCs never reach this
-/// branch — they always carry an `EntityUuid`.
-pub const AI_BACKFILL_TOKEN: &str = "ai:backfill";
-
-/// Build the `ai:` token for one ship's AI operator: `ai:<uuid>` when the
-/// entity carries an [`crate::entities::spawner::EntityUuid`], else
-/// [`AI_BACKFILL_TOKEN`].
-pub fn ai_token_for(entity_uuid: Option<&crate::entities::spawner::EntityUuid>) -> String {
-    entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| AI_BACKFILL_TOKEN.to_string())
-}
-
 /// Validate-and-enqueue one AI decision into this ship's own
 /// `AdmittedCommands` through [`super::validate_and_admit`] — the same seam
 /// network `ControlSystem` messages pass through.
@@ -71,27 +32,24 @@ pub fn emit_ai_command(
     target: crate::core::messages::SystemId,
     payload: crate::core::messages::SystemControlPayload,
     sources: &crate::ship_plugin::ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
+    _sessions: &crate::lobby::Sessions,
     ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
     admitted: &mut crate::core::messages::AdmittedCommands,
 ) -> bool {
-    let token = ai_token_for(entity_uuid);
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    super::validate_and_admit(&token, target, payload, sources, sessions, config, admitted)
+    phoenix_sim_gameplay::command_admission::ai_emit::emit_ai_command(
+        entity_uuid,
+        target,
+        payload,
+        sources,
+        ship_config,
+        admitted,
+    )
 }
 
 #[cfg(test)]
 #[path = "ai_emit_tests.rs"]
 mod tests;
+
+pub use phoenix_sim_gameplay::command_admission::ai_emit::{
+    ai_token_for, is_ai_token, AI_BACKFILL_TOKEN, AI_TOKEN_PREFIX,
+};

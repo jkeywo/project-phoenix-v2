@@ -2,7 +2,7 @@
 title: NPC Doctrine Controls
 type: concept
 tags: [ai, npc, gm, doctrine, scenario, replay]
-sources: [crates/phoenix-simulation/src/gm_npc.rs, crates/phoenix-simulation/src/gm_npc/inspector.rs, crates/phoenix-simulation/src/inspector.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/gm-npc-panel.js, gui/inspector-field.js, pasm/spec/design/gm-console-t2.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
+sources: [crates/phoenix-simulation/src/gm_npc.rs, crates/phoenix-simulation/src/gm_npc/inspector.rs, crates/phoenix-simulation/src/inspector.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/gm-npc-panel.js, gui/inspector-field.js, pasm/spec/design/gm-console-t2.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
 updated: 2026-09-13
 ---
 

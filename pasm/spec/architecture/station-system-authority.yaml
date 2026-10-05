@@ -17,7 +17,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/config.rs, assets/entities]
+      paths: [crates/phoenix-sim-gameplay/src/ship/config.rs, assets/entities]
       symbols: [ShipConfig, StationConfig, SystemInstanceConfig]
       tests: [cargo test]
 
@@ -33,7 +33,7 @@ entities:
       writers: [ship-station-system-topology]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/config.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/config.rs]
       symbols: [ShipConfig]
 
   - component: visiting-station-resolver
@@ -57,7 +57,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs]
       symbols: [resolve_visiting_station, resolve_scenario_detail_floor, write_scenario_detail_floor, VisitingStationAssignment, VisitingStationHosts, ScenarioDetailFloor]
       tests: [cargo test, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/lobby/session_tests.rs]
 
@@ -73,7 +73,7 @@ entities:
       writers: [visiting-station-resolver]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js, gui/hero-bar.js]
+      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js, gui/hero-bar.js]
       symbols: [VisitingStationHosts, StationHostSnapshot]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
@@ -134,7 +134,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/router.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/router.rs]
       symbols: [SystemKindRegistry, SystemKindDescriptor, BlackboardKeyDescriptor, accepts_admitted_commands, ConsoleFamily, ShipClientConfig]
       tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs, crates/phoenix-simulation/src/dock/server_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/command_admission/router_tests.rs]
 
@@ -152,7 +152,7 @@ entities:
       replicas: [client-system-console-family-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs]
       symbols: [ConsoleFamily, ShipClientConfig]
       tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
@@ -169,7 +169,7 @@ entities:
       replicas: [client-system-console-family-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs]
       symbols: [BlackboardKeyDescriptor, ConsoleFamily, ShipClientConfig]
       tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
@@ -189,9 +189,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/ship/rating.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/rating.rs, crates/phoenix-sim-contracts/src/control.rs]
       symbols: [ControlSourceResolver, ControlSource]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/control_source_tests.rs, crates/phoenix-simulation/src/ship/rating_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/control_source_tests.rs, crates/phoenix-simulation/src/ship/rating_tests.rs]
 
   - state: system-control-source-state
     core:
@@ -205,10 +205,10 @@ entities:
       writers: [system-control-source-resolver]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js]
+      paths: [crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js]
       symbols: [ControlSourceResolver, ShipSystemControlSources, EntityState, SimSnapshot, build_control_source_snapshots]
 
-      tests: [crates/phoenix-simulation/src/ship/control_source_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/control_source_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: station-rating-controller
     core:
       status: implemented
@@ -228,7 +228,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/rating.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/rating.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-sim-contracts/src/authority.rs]
       symbols: [apply_rating, seed_boot_ratings, ai_only_systems, BACKFILL_RATING, LobbyResultApplier]
       messages: [SetStationRating, RatingChanged]
       tests: [cargo test, crates/phoenix-simulation/src/ship/rating_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]
@@ -246,7 +246,7 @@ entities:
       replicas: [station-rating-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/rating.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/ship/components.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/rating.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-sim-gameplay/src/ship/components.rs]
       # ActiveStationRatings is the in-round per-ship component; the pending
       # (pre-spawn, lobby-chosen) half of the summary lives on
       # SessionManager's pending_ratings map / Player.last_rating instead —
@@ -272,7 +272,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/lockstep/host_loss.rs, crates/phoenix-simulation/src/lockstep/mod.rs]
+      paths: [crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/lockstep/host_loss.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-sim-gameplay/src/ship/rating.rs, crates/phoenix-sim-session/src/lobby/handler.rs, crates/phoenix-sim-session/src/lockstep/host_loss.rs]
       symbols: [process_disconnect_with_stations, apply_rating, apply_host_loss_backfill, PendingHostLoss, agreed_loss_tick]
       tests: [cargo test, tests/smoke/reconnect.spec.js, tests/lockstep_backfill.rs, crates/phoenix-simulation/src/lobby/session_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-simulation/src/lockstep/host_loss_tests.rs, crates/phoenix-simulation/src/lockstep/tests.rs]
 
@@ -295,7 +295,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/command_admission/feedback.rs, crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-sim-gameplay/src/command_admission/feedback.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [AdmittedConsumerRegistry, ConsumerMatcher, ConsumerRegistration, FeedbackAddress, FeedbackSupport, action_feedback, admitted_action_feedback, RegisterAdmittedConsumer, warn_unrouted_admitted_commands, unrouted_command_targets, unrouted_commandable_systems]
       tests: [cargo test, crates/phoenix-simulation/src/command_admission/router_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs, crates/phoenix-simulation/src/gm_action_tests.rs, crates/phoenix-simulation/src/gm_puppet_tests.rs, crates/phoenix-simulation/src/gm_quiet_tests.rs, crates/phoenix-simulation/src/ship/system_registry_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
     evidence:
@@ -339,7 +339,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/command_admission/policy.rs]
+      paths: [crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-sim-gameplay/src/command_admission/policy.rs]
       symbols: [is_command_authorized, station_for_system]
       tests: [cargo test, crates/phoenix-simulation/src/command_admission/policy_tests.rs]
     evidence:

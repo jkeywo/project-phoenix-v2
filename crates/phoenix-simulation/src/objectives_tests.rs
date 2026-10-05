@@ -1,4 +1,13 @@
 use super::*;
+use crate::core::messages::AiDirective;
+use crate::core::messages::ObjectiveSnapshot;
+use crate::core::messages::ObjectiveSource;
+use crate::core::messages::ObjectiveStatus;
+use crate::core::messages::ScoredObjective;
+use crate::core::messages::StationId;
+use crate::core::messages::SystemAffinity;
+use crate::ship::config::StationStanceConfig;
+use std::collections::BTreeMap;
 
 // ── issue #1162: operate-directive relevance + selection ────────────────
 

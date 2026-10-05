@@ -1,114 +1,5 @@
-//! The **Boost** helm axis (issue #1208, #780, #882): the `boost` channel,
-//! resolving `EngageBoost` over the shared hazard/travel facts and emitting
-//! `SetBoost { active }` on change. Stateful — the #882 machine's minimal
-//! demonstrator, whose shipped default policy is idle.
-//!
-//! [`ai_helm_boost`] is the Bevy system; [`BoostAxis`] is its
-//! [`super::HelmAxisHost`] impl.
-//!
-//! Invariant: unlike the other five axes, Boost actuates on `Held` too — any
-//! non-boost verdict means release, so the drive never stays on by default.
-
 use super::*;
-
-use crate::ai::host::HostOutcome;
-use crate::ai::policy::AiPolicyVerb;
-use crate::core::messages::SystemControlPayload;
-
-/// Per-ship runtime state for a STATEFUL Boost policy (issue #882) — the
-/// minimal host that proves the optional stateful path end to end.
-///
-/// Boost was chosen as the demonstrator because it is the smallest credible
-/// stateful axis in the game: its shipped default policy is *idle*, so nothing
-/// that ships today changes behaviour, and its host already resolves exactly
-/// one channel from an already-seeded fact snapshot. (The destroyer doctrine
-/// this spine exists for is issue #883, deliberately not built here.)
-///
-/// ## Why this is a separate component
-///
-/// The authored Boost policy (this axis's entry in
-/// [`FineSystemAiPolicies`]) is immutable authored data; taking it `&mut` to tick
-/// a state machine would dirty Bevy change-detection on the policy every tick.
-/// So the runtime state is its own sibling component.
-///
-/// ## Why it is per-fine-system, not per-ship
-///
-/// This component belongs to the Boost fine system ALONE, and there is
-/// deliberately no `ShipAiState`. That is the structural answer to AC3: the
-/// `memory(...)` / `state_time` bag handed to an evaluation is seeded from
-/// THIS component, so no sibling fine system's policy can observe it and no
-/// ship-wide state machine can form by accretion.
-///
-/// Inserted/removed alongside `AiHighFidelity` by `lod_ai_ships`, so a demoted
-/// ship drops its policy state and a re-promoted one starts from `initial`
-/// (AC5).
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmBoostAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
-
-/// The **Boost** helm axis (issue #1208, issue #780): resolve the `boost`
-/// channel to the `engage_boost` mode verb over the shared hazard/travel facts
-/// and emit `SetBoost { active }` on change. A stateful axis — the #882 machine
-/// demonstrator.
-///
-/// Unlike the other axes, Boost actuates on `Held` too: a hold (or any non-boost
-/// verb) means *release*, so the axis emits `SetBoost { false }` when the drive
-/// is currently active. It emits only when the desired state differs from the
-/// current [`ShipBoost`], so it does not re-issue `SetBoost` every tick. The
-/// canonical default policy is idle, so a ship that authors no
-/// `[helm_console.boost_ai]` never AI-boosts.
-pub(crate) struct BoostAxis;
-
-impl HelmAxisHost for BoostAxis {
-    fn system_id() -> crate::core::messages::SystemId {
-        crate::ship::system_registry::helm_boost_system_id()
-    }
-    const CHANNEL: &'static str = crate::entities::config::HELM_BOOST_CHANNEL;
-    const STATEFUL: bool = true;
-
-    fn accepts(verb: &AiPolicyVerb) -> bool {
-        matches!(verb, AiPolicyVerb::EngageBoost)
-    }
-
-    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts {
-        // boost_available is literally `true` here — this IS the boost axis, and
-        // the body's availability guard has proven an enabled `BoostConfigResource`.
-        let mut facts = seed_helm_actuator_facts(
-            cx.plan.map(|sp| &sp.hazard),
-            cx.impulse_cfg.is_some(),
-            true,
-            cx.physics.map(|p| p.y).unwrap_or(0.0),
-            frame_red_alert(cx.frame),
-        );
-        // Issue #883 seeds the target-relative travel facts too, so an authored
-        // escape-leg boost rule can guard on the pass geometry, not just hazard.
-        if let Some(physics) = cx.physics {
-            seed_helm_travel_facts(&mut facts, cx.frame, physics, cx.max_speed);
-        }
-        facts
-    }
-
-    fn act(
-        outcome: HostOutcome,
-        cx: &HelmAxisCtx,
-        _io: &mut HelmAxisIo,
-    ) -> Option<SystemControlPayload> {
-        // Fires (`engage_boost`) ⇒ boost on; holds or any other verb ⇒ boost
-        // off. Undeclared/not-AI never touches the drive.
-        let desired = match outcome {
-            HostOutcome::Act(AiPolicyVerb::EngageBoost) => true,
-            HostOutcome::Act(_) | HostOutcome::Held => false,
-            HostOutcome::Undeclared | HostOutcome::NotAiOperated => return None,
-        };
-        // On-change only: re-issuing an unchanged state every tick is redundant.
-        let current = cx.boost.map(|b| b.0.is_active()).unwrap_or(false);
-        if desired == current {
-            None
-        } else {
-            Some(SystemControlPayload::SetBoost { active: desired })
-        }
-    }
-}
-
+pub use phoenix_sim_gameplay::ship::helm_ai::boost::{BoostAxis, HelmBoostAiPolicyState};
 /// Per-axis helm AI: boost drive (issue #780). Decides engage/release for ships
 /// whose `helm-boost` system is AI-operated and emits it as an admitted
 /// `SetBoost { active }` into the ship's own `AdmittedCommands` — the SAME seam
@@ -129,8 +20,8 @@ pub(crate) fn ai_helm_boost(
     ai_env: crate::ai::host::AiHostEnv,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
-    sessions: Res<crate::lobby::Sessions>,
-    mut ships: Query<
+    _sessions: Res<crate::lobby::Sessions>,
+    ships: Query<
         (
             Entity,
             &ShipSystemControlSources,
@@ -149,70 +40,5 @@ pub(crate) fn ai_helm_boost(
     >,
     clock: Res<AiPolicyTickClock>,
 ) {
-    for (
-        entity,
-        sources,
-        physics,
-        physics_cfg,
-        boost_comp,
-        boost_cfg,
-        impulse_cfg,
-        fine_policies,
-        boost_state,
-        entity_uuid,
-        ship_config,
-        mut admitted,
-    ) in ships.iter_mut()
-    {
-        // Availability (AC6): the feature must be present AND enabled. No
-        // BoostConfigResource, or one with the feature disabled, means no boost
-        // capability — emit nothing.
-        let (Some(boost), Some(cfg)) = (boost_comp, boost_cfg) else {
-            continue;
-        };
-        if !cfg.enabled {
-            continue;
-        }
-        let cx = HelmAxisCtx {
-            physics: Some(physics),
-            max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
-            plan: plan.ships.get(&entity),
-            frame: frame.ships.get(&entity),
-            anchors: &frame.anchors,
-            impulse: None,
-            impulse_cfg,
-            boost_cfg: Some(cfg),
-            boost: Some(boost),
-            behaviour: None,
-            capability: None,
-            cursors: None,
-        };
-        let mut io = HelmAxisIo {
-            policy: None,
-            state: None,
-            pending: None,
-        };
-        // The scenario flag chain, anchored at the layer that spawned this ship
-        // (issue #891 stage 2).
-        let flag_chain = ai_env.flag_chain(entity);
-        if let Some(payload) = run_helm_axis::<BoostAxis>(
-            sources,
-            fine_policies.and_then(|p| p.0.get(&BoostAxis::system_id())),
-            boost_state.map(|s| &s.0),
-            clock.0,
-            &flag_chain,
-            &cx,
-            &mut io,
-        ) {
-            emit_ai_command(
-                entity_uuid,
-                BoostAxis::system_id(),
-                payload,
-                sources,
-                &sessions,
-                ship_config,
-                &mut admitted,
-            );
-        }
-    }
+    phoenix_sim_gameplay::ship::helm_ai::boost::ai_helm_boost(&ai_env, frame, plan, ships, clock);
 }

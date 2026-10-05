@@ -1,0 +1,591 @@
+//! The simulation's one source of randomness.
+//!
+//! Before this existed every RNG consumer built its own generator inline
+//! (`SmallRng::from_os_rng()` / `rand::rng()`), so two runs of the same
+//! scenario diverged the moment anything took damage. [`SimRng`] replaces
+//! those call sites with a Bevy resource carrying a master seed and a fixed
+//! set of *derived streams* — one per call site.
+//!
+//! # Why per-site streams rather than one shared generator
+//!
+//! A single shared generator makes every consumer's sequence depend on how
+//! many draws every *other* consumer happened to make first, so adding one new
+//! RNG user silently reshuffles the whole simulation. Each [`SimStream`]
+//! instead seeds from the master seed combined with a per-site constant
+//! derived from the stream's own name, so streams are independent: adding a
+//! variant to the enum cannot perturb the sequence any existing site sees.
+//! (Deriving the constant from the *name* rather than the discriminant also
+//! makes the enum safe to reorder.)
+//!
+//! # Reproducibility contract
+//!
+//! Same binary, same machine, same seed. Seeded runs additionally need a fixed
+//! system execution order, which is why `--seed` implies `--deterministic` —
+//! with the multi-threaded executor two systems drawing from different streams
+//! is fine, but two *instances* of the same system are not.
+//!
+//! # Interior mutability
+//!
+//! Live ECS writers use `LiveStream<INDEX>`: mutable access to one actual
+//! generator cell and an immutable aggregate identity check. SimRng retains
+//! those same cells for coherent snapshots and standalone algorithms. Replacing
+//! a live seed/state must use `install` / `InstallSimRng`, which replaces every
+//! handle synchronously. Missing or stale handles in a seeded App are invariant
+//! failures, never an entropy fallback. Seed-only consumers remain reads.
+//! Distinct stream storage does not assert that the enclosing gameplay systems
+//! commute through their other resources, and same-stream writers still conflict.
+//!
+//! # The generator
+//!
+//! [`vellum_rng::Pcg32`] (issue #897), not `rand`'s `SmallRng`. Two reasons,
+//! neither of them "PCG is a better generator":
+//!
+//! 1. **It is `Serialize`.** `SmallRng` is not, so the stream positions
+//!    could not leave the process and a snapshot could only ever record the
+//!    master seed — which replays a run from the start, not from where it got
+//!    to. [`SimRngState`] is what a world snapshot carries (#862).
+//! 2. **A generator is part of a save format.** The fleet crate exists so the
+//!    byte sequence is pinned upstream and cannot move under a dependency bump
+//!    that "improved a distribution"; `vellum-rng` deliberately implements no
+//!    `rand` traits so nothing can substitute itself for it silently.
+//!
+//! `Pcg32` has no `next_u64` and no `fill_bytes` — the crate offers one
+//! 32-bit draw and bounded helpers over it. Where wider values are taken, this
+//! module composes them from `next_u32` explicitly and says how; that
+//! composition is a contract too.
+//!
+//! # What this module is no longer for (issue #907)
+//!
+//! It used to mint entity uuids, from a dedicated stream. It does not any
+//! more. Identity is not a random variable: an id drawn from a generator is a
+//! function of *draw order*, so it is reproducible within one seeded instance
+//! and meaningless across two. `crate::world_id` mints ids from
+//! `(namespace, tick, seq)` instead. [`SimStream::EntityUuid`] survives as a
+//! declared-but-unused stream — see its own docs for why retiring it would
+//! cost more than it saves.
+
+use bevy::prelude::{FromWorld, Resource, World};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex, MutexGuard};
+use vellum_rng::Pcg32;
+
+/// One independent RNG stream. One variant per call site that draws numbers.
+///
+/// Variants are free to be added or reordered: each stream's seed comes from
+/// its [`SimStream::name`], never from its position.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum SimStream {
+    /// `server_app::handle_collisions` — which console absorbs collision hull damage.
+    CollisionDamage,
+    /// `regions::server::apply_damage_zone_damage` — damage-zone hull distribution.
+    RegionDamage,
+    /// `console::weapons::beam` — phaser/beam hull distribution.
+    BeamDamage,
+    /// `console::weapons::torpedo` — torpedo impact hull distribution.
+    TorpedoDamage,
+    /// `console::weapons::blaster` — blaster impact hull distribution.
+    BlasterDamage,
+    /// `console::weapons::beam` — the per-cycle duration/cooldown jitter factor
+    /// a phaser bank draws when it lights (issue #929).
+    ///
+    /// Its own stream rather than a second consumer of [`Self::BeamDamage`], for
+    /// the reason every stream here is separate: a draw taken for one purpose
+    /// must not shift the sequence another purpose reads. Beam DAMAGE is drawn
+    /// per landing tick and jitter once per cycle, so sharing would make the
+    /// damage distribution a function of how often banks happened to relight.
+    BeamCycleJitter,
+    /// `console::comms::server::operate_comms_response_ai` — which live
+    /// response an unmanned Comms console picks when its authored wait expires
+    /// (issue #1343).
+    ///
+    /// Its own stream for the reason every stream here is separate, and with a
+    /// sharper edge than most: a comms decision is drawn at most once per open
+    /// dialogue per mission, while damage is drawn per landing tick, so sharing
+    /// would make the damage distribution of a whole battle a function of how
+    /// many conversations the crew happened to leave unanswered.
+    ///
+    /// A dialogue whose responses author no `ai_weight` TAKES NO DRAW AT ALL —
+    /// the same discipline `BeamCycleJitter` follows for an unjittered bank. The
+    /// stream's position does not move for any world but Falling Skyway, so no
+    /// existing world's *sequence* is perturbed by the mechanism merely existing.
+    ///
+    /// Its *digest* is, and that is not a contradiction — it is the cost of
+    /// declaring a stream, paid once. [`crate::sim_digest`] folds the whole
+    /// [`SimRngState`], whose `streams` vector is one entry per
+    /// [`SimStream::ALL`] entry, so adding a variant changes every world's
+    /// tick-0 digest including worlds that hold no conversation at all. That is
+    /// a widened fold and not a lost reproducibility: it re-blesses
+    /// `tests/fixtures/cross-target-ledger.json` (see the re-bless procedure in
+    /// `tests/cross_target_probe.rs`), exactly as #929 did when it added
+    /// [`Self::BeamCycleJitter`]. Anyone adding the ninth stream should expect
+    /// the same and not read it as a determinism regression.
+    CommsBackfillChoice,
+    /// **Retired, but deliberately still declared (issue #907).**
+    ///
+    /// This stream used to allocate entity UUIDs. Nothing draws from it any
+    /// more: ids are minted from the tick-scoped counter in `crate::world_id`,
+    /// because a uuid derived from a *draw* is a function of RNG draw order,
+    /// so two instances that interleave draws differently mint different ids
+    /// for the same spawn — which is exactly the cross-instance hazard #894's
+    /// stable-world-id-order fold could not survive.
+    ///
+    /// It stays in the enum rather than being deleted because retiring it is
+    /// not free and buys nothing. [`SimRngState`] serialises one generator per
+    /// [`SimStream::ALL`] entry, with
+    /// [`SimRng::from_state`] *rejecting* a snapshot whose length disagrees;
+    /// dropping the variant would invalidate every recorded snapshot and shift
+    /// the fingerprint's `rng_positions`, for the sake of one unused mutex. An
+    /// unused stream costs a lock nobody takes and a position that never
+    /// moves — and a position that never moves is itself a useful assertion:
+    /// the digest folds every stream position, so a draw appearing here again
+    /// would be caught the tick it happened.
+    EntityUuid,
+}
+
+impl SimStream {
+    /// Every stream, in declaration order. Used to build the resource.
+    pub const ALL: [SimStream; 8] = [
+        SimStream::CollisionDamage,
+        SimStream::RegionDamage,
+        SimStream::BeamDamage,
+        SimStream::TorpedoDamage,
+        SimStream::BlasterDamage,
+        SimStream::BeamCycleJitter,
+        SimStream::CommsBackfillChoice,
+        SimStream::EntityUuid,
+    ];
+
+    /// The stable per-site constant this stream derives its seed from.
+    ///
+    /// Renaming a variant here re-seeds that stream (and only that stream), so
+    /// treat these strings as part of the reproducibility contract.
+    pub const fn name(self) -> &'static str {
+        match self {
+            SimStream::CollisionDamage => "collision-damage",
+            SimStream::RegionDamage => "region-damage",
+            SimStream::BeamDamage => "beam-damage",
+            SimStream::TorpedoDamage => "torpedo-damage",
+            SimStream::BlasterDamage => "blaster-damage",
+            SimStream::BeamCycleJitter => "beam-cycle-jitter",
+            SimStream::CommsBackfillChoice => "comms-backfill-choice",
+            SimStream::EntityUuid => "entity-uuid",
+        }
+    }
+}
+
+/// Where the resolved master seed came from. Reported so a run is always
+/// replayable and the provenance is obvious.
+///
+/// Serialisable because it travels with [`SimRngState`]: a restored snapshot
+/// should report the provenance of the seed it was *recorded* under, not the
+/// provenance of the process that loaded it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum SeedSource {
+    /// `--seed <N>` on the command line.
+    Cli,
+    /// `[global] seed` in the world TOML.
+    World,
+    /// Drawn from the OS because neither of the above supplied one.
+    Random,
+}
+
+impl SeedSource {
+    /// Lowercase tag used in the exit report.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SeedSource::Cli => "cli",
+            SeedSource::World => "world",
+            SeedSource::Random => "random",
+        }
+    }
+}
+
+/// The sim-wide seeded RNG.
+#[derive(Resource, Debug)]
+pub struct SimRng {
+    seed: u64,
+    source: SeedSource,
+    /// Indexed by `SimStream as usize`, built from [`SimStream::ALL`].
+    streams: Vec<Arc<Mutex<Pcg32>>>,
+}
+
+/// Everything about a [`SimRng`] that can leave the process: the master seed,
+/// its provenance, and every stream's *exact position*.
+///
+/// This is the shape a world snapshot stores (#862). The seed alone would only
+/// let a run be replayed from tick zero; the stream states are what let one be
+/// resumed from where it got to, which is the whole point of capturing a live
+/// world. Ordering is [`SimStream::ALL`]'s, and the length is checked on the
+/// way back in — a snapshot written before a stream was added must be rejected
+/// rather than silently mapped onto the wrong call sites.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimRngState {
+    pub seed: u64,
+    pub source: SeedSource,
+    /// One generator per [`SimStream`], in [`SimStream::ALL`] order.
+    pub streams: Vec<Pcg32>,
+}
+
+impl Default for SimRng {
+    /// An OS-seeded instance, so an app that never configures a seed still
+    /// behaves the way it did before this resource existed.
+    fn default() -> Self {
+        Self::random()
+    }
+}
+
+impl SimRng {
+    /// Build from an explicit master seed.
+    pub fn new(seed: u64, source: SeedSource) -> Self {
+        Self {
+            seed,
+            source,
+            streams: SimStream::ALL
+                .iter()
+                .map(|s| Arc::new(Mutex::new(stream_generator(seed, s.name()))))
+                .collect(),
+        }
+    }
+
+    /// Draw a master seed from the OS.
+    ///
+    /// The one sanctioned OS-entropy call in the crate: everything downstream
+    /// derives from the seed this returns, and the seed is echoed in the exit
+    /// report so the run can be replayed with `--seed`. `rand` is the entropy
+    /// source because `vellum-rng` has none by design — it seeds from numbers
+    /// you hand it, and where those come from is the caller's business.
+    ///
+    /// Issue #903: `rand::random` is banned crate-wide in `clippy.toml` so a
+    /// new draw elsewhere in the sim fails the build; this is the one site
+    /// the ban is scoped away from, since it IS the sanctioned OS-entropy call
+    /// the module doc above claims.
+    #[allow(clippy::disallowed_methods)]
+    pub fn random() -> Self {
+        Self::new(rand::random::<u64>(), SeedSource::Random)
+    }
+
+    /// The master seed. Always reported, seeded or not.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    pub fn source(&self) -> SeedSource {
+        self.source
+    }
+
+    /// Borrow one stream's generator.
+    ///
+    /// Poisoning is recovered from rather than propagated: a panic elsewhere
+    /// in the frame has already failed the run, and turning that into a second
+    /// panic inside the damage path buries the original.
+    pub fn stream(&self, stream: SimStream) -> MutexGuard<'_, Pcg32> {
+        self.streams[stream as usize]
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    // `next_uuid()` composed a v4 uuid from four `next_u32` draws off
+    // `SimStream::EntityUuid`. It is gone (issue #907), and with it the whole
+    // idea of deriving identity from the RNG: a draw-derived id is stable
+    // within one seeded instance but is a function of *draw order*, so adding
+    // any unrelated draw upstream reshuffles every subsequent entity id, and
+    // two instances that interleave draws differently disagree about which
+    // ship is which. `crate::world_id` mints ids from `(namespace, tick, seq)`
+    // instead. The stream itself stays declared — see `SimStream::EntityUuid`.
+
+    /// Capture the seed, its provenance, and every stream's exact position.
+    ///
+    /// The snapshot half of the contract with #862. Taking this does not
+    /// disturb the generators — a captured world keeps running.
+    ///
+    /// Every guard is taken BEFORE any stream is cloned: the six locks are
+    /// collected into a `Vec` first, and only then is each one cloned. A
+    /// version that instead locked-and-cloned one stream at a time (as this
+    /// used to) would drop each guard before taking the next, so a draw
+    /// landing on another thread between two of those locks would make the
+    /// resulting `SimRngState` a torn snapshot — six positions that never
+    /// coexisted in any single instant of the live run. Holding all six at
+    /// once rules that out.
+    ///
+    /// That said, holding every guard makes a capture *coherent*, not
+    /// *meaningful* — it does not by itself make an arbitrary mid-run moment
+    /// a sensible thing to resume from. Callers should still capture at a
+    /// tick boundary (outside `SimSet`, between `FixedUpdate` steps), where
+    /// "all six streams right now" corresponds to a well-defined point every
+    /// system agrees on, rather than mid-tick where some systems for this
+    /// frame have drawn and others have not yet run.
+    pub fn state(&self) -> SimRngState {
+        let guards: Vec<MutexGuard<'_, Pcg32>> =
+            SimStream::ALL.iter().map(|s| self.stream(*s)).collect();
+        SimRngState {
+            seed: self.seed,
+            source: self.source,
+            streams: guards.iter().map(|g| (**g).clone()).collect(),
+        }
+    }
+
+    /// Rebuild from a captured [`SimRngState`], resuming every stream at the
+    /// position it was captured at.
+    ///
+    /// Returns `None` when the snapshot does not carry one generator per
+    /// [`SimStream`]. That is the case where a save predates a stream being
+    /// added, and the only safe answer is to refuse: mapping a short list onto
+    /// the enum by position would hand one call site another's sequence.
+    pub fn from_state(state: SimRngState) -> Option<Self> {
+        if state.streams.len() != SimStream::ALL.len() {
+            return None;
+        }
+        Some(Self {
+            seed: state.seed,
+            source: state.source,
+            streams: state
+                .streams
+                .into_iter()
+                .map(|stream| Arc::new(Mutex::new(stream)))
+                .collect(),
+        })
+    }
+}
+
+/// Run `f` against `stream`, falling back to a throwaway OS-seeded generator
+/// when the resource is absent.
+///
+/// This aggregate accessor remains for standalone callers. Ordinary ECS writers
+/// use `LiveStream` and `with_live_stream`; no aggregate draw fallback is exposed
+/// by that parameter. Full-state reads and fingerprint's intentional all-stream
+/// advancement remain outside schedule execution. The public standalone accessor
+/// cannot statically prohibit a future Res<SimRng> caller from misusing it;
+/// audited scheduled call sites must continue to use the restricted live API.
+///
+/// Issue #903: the `None` arm draws OS entropy, which is why the fn carries
+/// the `disallowed_methods` allow — a bare-`App` fixture that never inserted
+/// `SimRng` has no run to reproduce, so this is sanctioned, not a hole.
+#[allow(clippy::disallowed_methods)]
+pub fn with_stream<R>(
+    sim_rng: Option<&SimRng>,
+    stream: SimStream,
+    f: impl FnOnce(&mut Pcg32) -> R,
+) -> R {
+    match sim_rng {
+        Some(sim) => f(&mut sim.stream(stream)),
+        // Same shape as the real thing — the same stream selector, over a
+        // throwaway OS-drawn master. Deliberately *not* seeded: a fixture that
+        // never inserted the resource has no run to reproduce, and quietly
+        // giving it a fixed seed would make every such test agree by accident.
+        None => f(&mut stream_generator(rand::random::<u64>(), stream.name())),
+    }
+}
+
+/// The per-site constant the GM's direct damage/heal effects draw under
+/// (issue #1310).
+pub const GM_DIRECT_EFFECT_EVENT: &str = "gm-direct-effect";
+
+/// Borrow a generator for ONE discrete, canonically-ordered simulation event.
+///
+/// # Why this is not a ninth [`SimStream`]
+///
+/// A [`SimStream`] is a running position: its sequence is a function of how
+/// many times its own call site has drawn, which is the right model for a site
+/// that fires per landing tick. A GM direct effect is not that. It is a single
+/// authorised grant with a canonical total order of its own
+/// ([`crate::gm_action::GmActionOrder`]), applied exactly once on every peer,
+/// so keying its generator on that ordinal gives a STRONGER isolation than a
+/// stream does: two GM effects cannot reorder each other, and neither can move
+/// a weapon's sequence by existing.
+///
+/// It also costs nothing to declare. [`SimRngState`] serialises one generator
+/// per [`SimStream::ALL`] entry and [`crate::sim_digest`] folds the whole
+/// state, so a ninth stream would move EVERY world's tick-0 digest and reject
+/// every previously recorded snapshot — the re-bless [`SimStream`]'s own docs
+/// describe. An event generator adds no position to that state at all, so a
+/// world in which no GM ever presses a button is byte-identical to what it was
+/// before this issue.
+///
+/// The master seed still comes from [`SimRng`], so the numbers are a function
+/// of the run's seed exactly like every stream's are. `name` picks the PCG
+/// increment (the same `stream_selector` a stream's name picks, so this
+/// sequence is disjoint from all of them) and `ordinal` moves the seed, so
+/// each event gets its own start within that increment.
+///
+/// `Option<&SimRng>` and the OS fallback for [`with_stream`]'s exact reasons.
+#[allow(clippy::disallowed_methods)]
+pub fn with_event_generator<R>(
+    sim_rng: Option<&SimRng>,
+    name: &str,
+    ordinal: u64,
+    f: impl FnOnce(&mut Pcg32) -> R,
+) -> R {
+    let master = match sim_rng {
+        Some(sim) => sim.seed(),
+        None => rand::random::<u64>(),
+    };
+    f(&mut event_generator(master, name, ordinal))
+}
+
+/// The generator for one named event of `master` at `ordinal`.
+///
+/// `Pcg32::seeded` runs the seed through SplitMix64, so the golden-ratio
+/// multiply here only needs to make two adjacent ordinals differ in many bits
+/// before that happens rather than be a hash in its own right.
+fn event_generator(master: u64, name: &str, ordinal: u64) -> Pcg32 {
+    Pcg32::seeded(
+        master ^ ordinal.wrapping_mul(0x9e37_79b9_7f4a_7c15),
+        stream_selector(name),
+    )
+}
+
+/// A throwaway OS-seeded generator, for unit tests that need *a* generator and
+/// do not care which numbers come out of it.
+///
+/// The fixture twin of [`with_stream`]'s `None` arm, and deliberately
+/// `cfg(test)`: production code must reach a generator through a named
+/// [`SimStream`], and a `pub fn` handing out unseeded generators would be
+/// exactly the hole that closes. A fixture that *does* care about the sequence
+/// should build a `SimRng` with a literal seed instead of calling this.
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+pub fn unseeded_test_rng() -> Pcg32 {
+    Pcg32::seeded(rand::random::<u64>(), 0)
+}
+
+// `assign_uuid_with(Option<&SimRng>)` was the call sites' entry point to
+// `next_uuid`. Its replacement is `crate::world_id::mint_id_with`, which has
+// the same `Option<Res<_>>`-friendly shape for the same bare-`App` reason and
+// takes an `IdNamespace` instead of nothing — because namespace membership has
+// to come from the same value as the fold's sort key (issue #907).
+
+/// The generator for one named stream of `master`.
+///
+/// The master seed goes in as PCG's *seed* and the name-derived constant as
+/// its *stream selector*, which is a stronger form of the independence this
+/// module has always claimed than the old arrangement could offer. Seeding
+/// alone gives every stream the same increment, so the six were one sequence
+/// entered at six points and could in principle collide onto each other;
+/// selecting the stream gives each its own increment, so they are disjoint by
+/// construction. `Pcg32::seeded` runs the master through SplitMix64 before it
+/// becomes state, which is what stops a typed-in `--seed 1` starting from
+/// almost-zero state.
+fn stream_generator(master: u64, stream_name: &str) -> Pcg32 {
+    Pcg32::seeded(master, stream_selector(stream_name))
+}
+
+/// The stable per-site constant a stream's identity is derived from: FNV-1a
+/// over the stream name.
+///
+/// Derived from the *name* rather than the enum discriminant so declaration
+/// order is not part of the contract — adding or reordering a variant cannot
+/// move an existing stream. PCG shifts the selector left one bit to build an
+/// odd increment, so the identity is really the low 63 bits of this hash; two
+/// names would have to agree in all of those and differ only in the top bit to
+/// collide, which the six pinned names do not.
+fn stream_selector(stream_name: &str) -> u64 {
+    vellum_digest::fnv1a(stream_name.as_bytes())
+}
+
+#[cfg(test)]
+#[path = "sim_rng_tests.rs"]
+mod tests;
+
+/// A scheduler-visible owner of one actual stream cell. The aggregate SimRng
+/// retains read access for coherent boundary snapshots; it is not a second RNG.
+/// Runtime writers cannot choose another stream through this restricted handle.
+#[derive(Resource, Debug)]
+pub struct StreamRng<const INDEX: usize> {
+    generator: Arc<Mutex<Pcg32>>,
+}
+impl<const INDEX: usize> FromWorld for StreamRng<INDEX> {
+    fn from_world(world: &mut World) -> Self {
+        let rng = world.resource::<SimRng>();
+        Self {
+            generator: rng.streams[INDEX].clone(),
+        }
+    }
+}
+/// A live stream's actual mutable scheduler access plus an immutable aggregate
+/// identity check. An incomplete/stale seeded installation is an invariant error,
+/// never a reason to silently draw OS entropy in an otherwise seeded App.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LiveStream<'w, const INDEX: usize> {
+    stream: Option<bevy::prelude::ResMut<'w, StreamRng<INDEX>>>,
+    aggregate: Option<bevy::prelude::Res<'w, SimRng>>,
+}
+impl<const INDEX: usize> LiveStream<'_, INDEX> {
+    pub fn as_deref(&self) -> Option<&StreamRng<INDEX>> {
+        match (&self.aggregate, &self.stream) {
+            (None, None) => None,
+            (Some(aggregate), Some(stream)) => {
+                assert!(
+                    Arc::ptr_eq(&aggregate.streams[INDEX], &stream.generator),
+                    "stale RNG stream handle: replace seeded worlds with sim_rng::install"
+                );
+                Some(stream)
+            }
+            _ => panic!("incomplete RNG stream installation: use sim_rng::install"),
+        }
+    }
+}
+pub type CollisionRng = StreamRng<{ SimStream::CollisionDamage as usize }>;
+pub type RegionRng = StreamRng<{ SimStream::RegionDamage as usize }>;
+pub type BeamRng = StreamRng<{ SimStream::BeamDamage as usize }>;
+pub type TorpedoRng = StreamRng<{ SimStream::TorpedoDamage as usize }>;
+pub type BlasterRng = StreamRng<{ SimStream::BlasterDamage as usize }>;
+pub type BeamCycleRng = StreamRng<{ SimStream::BeamCycleJitter as usize }>;
+pub type CommsChoiceRng = StreamRng<{ SimStream::CommsBackfillChoice as usize }>;
+
+/// Replace the aggregate and every live stream handle together at an exclusive
+/// boot/fleet/restore boundary. Never retain handles from a replaced seed/state.
+pub fn install(world: &mut World, rng: SimRng) {
+    macro_rules! stream {
+        ($kind:ident, $stream:ident) => {
+            world.insert_resource($kind {
+                generator: rng.streams[SimStream::$stream as usize].clone(),
+            });
+        };
+    }
+    stream!(CollisionRng, CollisionDamage);
+    stream!(RegionRng, RegionDamage);
+    stream!(BeamRng, BeamDamage);
+    stream!(TorpedoRng, TorpedoDamage);
+    stream!(BlasterRng, BlasterDamage);
+    stream!(BeamCycleRng, BeamCycleJitter);
+    stream!(CommsChoiceRng, CommsBackfillChoice);
+    world.insert_resource(rng);
+}
+
+/// Same no-resource fallback and draw conditions as with_stream. A live handle
+/// contains the generator itself, not a lock token authorizing a hidden write.
+#[allow(clippy::disallowed_methods)]
+pub fn with_live_stream<R, const INDEX: usize>(
+    stream: Option<&StreamRng<INDEX>>,
+    f: impl FnOnce(&mut Pcg32) -> R,
+) -> R {
+    match stream {
+        Some(stream) => f(&mut stream.generator.lock().unwrap_or_else(|e| e.into_inner())),
+        None => f(&mut stream_generator(
+            rand::random::<u64>(),
+            SimStream::ALL[INDEX].name(),
+        )),
+    }
+}
+
+/// Seed/reseed an ECS App or World without leaving old live handles installed.
+/// Standalone SimRng values remain usable by pure algorithms and snapshots.
+pub trait InstallSimRng {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self;
+}
+impl InstallSimRng for World {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self {
+        install(self, rng);
+        self
+    }
+}
+impl InstallSimRng for bevy::prelude::App {
+    fn insert_sim_rng(&mut self, rng: SimRng) -> &mut Self {
+        install(self.world_mut(), rng);
+        self
+    }
+}
+
+#[cfg(test)]
+#[path = "sim_rng_live_stream_tests.rs"]
+mod live_stream_tests;

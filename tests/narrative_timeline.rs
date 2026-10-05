@@ -1,6 +1,6 @@
 //! The authored mission timeline, end to end (issue #1338, PRD #1337).
 //!
-//! `crates/phoenix-simulation/src/core/narrative.rs` and `crates/phoenix-simulation/src/narrative.rs` unit-test the vocabulary, the
+//! `crates/phoenix-sim-world/src/core/narrative.rs` and `crates/phoenix-simulation/src/narrative.rs` unit-test the vocabulary, the
 //! fold and each emitter in isolation. Three claims need a whole seeded run:
 //!
 //! 1. **Every authored category reaches the report.** `probe_narrative.toml`

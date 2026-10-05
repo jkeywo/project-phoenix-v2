@@ -2,7 +2,7 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect, readiness]
-sources: [crates/phoenix-simulation/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, gui/host-peer-routing.js, gui/host-mesh.js, gui/fleet-session.js, gui/native-fleet-peer.js, server.html, src/native_host/connections.rs, src/native_host/host_lobby/fleet.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/start_policy.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs, crates/phoenix-simulation/src/gm_roster.rs, crates/phoenix-simulation/src/lockstep/mod.rs, src/server/bridge.rs]
+sources: [crates/phoenix-sim-session/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, gui/host-peer-routing.js, gui/host-mesh.js, gui/fleet-session.js, gui/native-fleet-peer.js, server.html, src/native_host/connections.rs, src/native_host/host_lobby/fleet.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-sim-session/src/lobby/start_policy.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs, crates/phoenix-sim-session/src/gm_roster.rs, crates/phoenix-simulation/src/lockstep/mod.rs, src/server/bridge.rs]
 updated: 2026-09-20
 ---
 

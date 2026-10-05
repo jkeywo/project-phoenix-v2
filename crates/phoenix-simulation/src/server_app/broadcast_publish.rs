@@ -469,7 +469,7 @@ pub(crate) fn publish_viewscreen_blackboard(
 /// helm intent would let the ship integrate *into* geometry for a frame before
 /// responding. It deliberately does not opt into the debug
 /// `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
-/// (`crates/phoenix-simulation/src/ship/state.rs`).
+/// (`crates/phoenix-sim-gameplay/src/ship/state.rs`).
 /// Balance tracer: emit a [`BalanceEvent::PhaseChanged`] for every game-phase
 /// transition. Reads the global `StateTransitionEvent<GamePhase>` stream, so it
 /// fires exactly once per real transition without tapping each `next_state.set`

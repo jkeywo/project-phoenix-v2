@@ -341,7 +341,7 @@ describe('localiseTree', () => {
 describe('localiseTree parameterised ids', () => {
   // The wire shape this exists for: a text id joined by a `<field>_params`
   // sibling, so a figure the server computed lands inside the sentence rather
-  // than beside it on a panel. `TEXT_PARAMS_SUFFIX` in crates/phoenix-simulation/src/core/messages.rs is
+  // than beside it on a panel. `TEXT_PARAMS_SUFFIX` in crates/phoenix-sim-gameplay/src/core/messages.rs is
   // the Rust half of the same contract.
   beforeEach(() => {
     setTable(new Map([

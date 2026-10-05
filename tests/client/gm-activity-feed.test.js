@@ -969,7 +969,7 @@ describe('GM activity transport separation', () => {
   });
   it('uses only the page-local Host Channel and has a real server-page handler', () => {
     for (const file of [
-      'crates/phoenix-simulation/src/core/messages.rs',
+      'crates/phoenix-sim-gameplay/src/core/messages.rs',
       'crates/phoenix-simulation/src/lockstep/frame.rs',
       'crates/phoenix-simulation/src/server_app/components.rs',
     ]) {

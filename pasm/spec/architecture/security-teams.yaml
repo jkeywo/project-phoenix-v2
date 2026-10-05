@@ -25,7 +25,7 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/security/teams.rs
+        - crates/phoenix-sim-gameplay/src/security/teams.rs
         - crates/phoenix-simulation/src/security/server.rs
       symbols:
         - SecurityAction
@@ -46,7 +46,7 @@ entities:
         - tick_security_teams
         - publish_security_blackboard
       messages: [DispatchSecurityTeam, RecallSecurityTeam]
-      tests: [cargo test, crates/phoenix-simulation/src/security/teams_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/security/teams_tests.rs]
 
   - component: security-backfill-host
     core:
@@ -70,7 +70,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/security/server.rs]
+      paths: [crates/phoenix-simulation/src/security/server.rs, crates/phoenix-sim-gameplay/src/objectives.rs, crates/phoenix-sim-gameplay/src/security/teams.rs]
       symbols:
         - operate_security_ai
         - SecurityAiDispatched
@@ -122,12 +122,12 @@ entities:
       replicas: [security-published-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/security/teams.rs, crates/phoenix-simulation/src/security/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/security/teams.rs, crates/phoenix-simulation/src/security/server.rs]
       symbols:
         - SecurityTargetConfig
         - SecurityActionConfig
         - SecurityTargetActions
-      tests: [cargo test, crates/phoenix-simulation/src/security/teams_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/security/teams_tests.rs]
 
   - state: security-published-state
     core:

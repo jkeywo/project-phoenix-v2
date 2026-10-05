@@ -18,9 +18,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/physics.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/server_app/collision.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/server_app/collision.rs]
       symbols: [compute_physics]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/physics_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/physics_tests.rs]
 
   - component: helm-console-interface
     core:
@@ -154,11 +154,11 @@ entities:
       paths:
         - crates/phoenix-simulation/src/console/helm/dispatch.rs
         - crates/phoenix-simulation/src/ship_plugin.rs
-        - crates/phoenix-simulation/src/ship/helm_admission.rs
-        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
-        - crates/phoenix-simulation/src/ship/physics.rs
-        - crates/phoenix-simulation/src/ship/helm.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_admission.rs
+        - crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs
+        - crates/phoenix-sim-gameplay/src/ship/physics_systems.rs
+        - crates/phoenix-sim-gameplay/src/ship/physics.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm.rs
       symbols:
         - register_helm_dispatch
         - process_helm_inputs
@@ -183,7 +183,7 @@ entities:
         - crates/phoenix-simulation/src/ship/helm_admission_tests.rs
         - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
         - crates/phoenix-simulation/src/ship/physics_systems_tests.rs
-        - crates/phoenix-simulation/src/ship/physics_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/physics_tests.rs
         - cargo test
 
   - state: last-helm-input-state
@@ -208,7 +208,7 @@ entities:
       status: observed
       paths:
         - crates/phoenix-simulation/src/ship/continuation.rs
-        - crates/phoenix-simulation/src/ship/components.rs
+        - crates/phoenix-sim-gameplay/src/ship/components.rs
         - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - LastHelmInput
@@ -230,14 +230,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/state.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-sim-gameplay/src/ship/state.rs
+        - crates/phoenix-sim-gameplay/src/ship/physics_systems.rs
         - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - ShipPhysics
         - sync_ship_position
 
-      tests: [crates/phoenix-simulation/src/ship/state_tests.rs, crates/phoenix-simulation/src/ship/physics_systems_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/state_tests.rs, crates/phoenix-simulation/src/ship/physics_systems_tests.rs]
   - state: desired-motion-state
     core:
       status: implemented
@@ -263,14 +263,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
-        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner.rs
+        - crates/phoenix-sim-gameplay/src/ai/core.rs
       symbols:
         - DesiredMotion
         - encode_local_velocity
         - encode_local_facing
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: hazard-assessment-state
@@ -304,9 +304,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
-        - crates/phoenix-simulation/src/ai/core.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner.rs
+        - crates/phoenix-sim-gameplay/src/ai/core.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs
       symbols:
         - HazardAssessment
         - HazardAssessmentRaw
@@ -314,7 +314,7 @@ entities:
         - assess_hazards
         - seed_helm_actuator_facts
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: impulse-drive-state
@@ -337,10 +337,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/server_app/components.rs
-        - crates/phoenix-simulation/src/ship/impulse.rs
-        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
-        - crates/phoenix-simulation/src/ship_plugin.rs
+        [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       symbols:
         - ShipImpulse
         - ImpulseState
@@ -348,7 +345,7 @@ entities:
         - tick_impulse
       tests:
         - crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs
-        - crates/phoenix-simulation/src/ship/impulse_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/impulse_tests.rs
         - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
@@ -375,10 +372,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/entities/config.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/boost.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/boost.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs]
       symbols:
         # Issue #1209 collapsed the per-axis Helm*AiPolicy newtypes into the one
         # keyed FineSystemAiPolicies map (crates/phoenix-simulation/src/ship/helm_ai/mod.rs); the impulse and
@@ -406,17 +400,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/server_app/components.rs
-        - crates/phoenix-simulation/src/ship/boost.rs
-        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
-        - crates/phoenix-simulation/src/ship_plugin.rs
+        [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       symbols:
         - ShipBoost
         - BoostState
         - tick_boost
       tests:
         - crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs
-        - crates/phoenix-simulation/src/ship/boost_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/boost_tests.rs
         - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
@@ -496,12 +487,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner.rs
       symbols:
         - HelmMotionPlan
         - ShipMotionPlan
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-lateral-thrust-blackboard-state
@@ -583,13 +574,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner.rs
         - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - helm_motion_planner
         - HelmMotionPlan
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   # The `helm-shared-motion-planner-rollout` migration entity was REMOVED here
@@ -671,7 +662,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ai/server.rs
+        [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-sim-gameplay/src/ai/server.rs]
       symbols:
         - build_world_snapshot
         - WorldSnapshot
@@ -698,8 +689,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/entities/config.rs
-        - crates/phoenix-simulation/src/entities/spawner.rs
+        [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/entities/config/helm.rs, crates/phoenix-sim-gameplay/src/entities/spawner.rs]
       symbols:
         - VerticalMovementMode
         - HelmCapabilityConfig
@@ -728,8 +718,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/entities/config.rs
-        - crates/phoenix-simulation/src/entities/spawner.rs
+        [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/entities/config/helm.rs, crates/phoenix-sim-gameplay/src/entities/spawner.rs]
       symbols:
         - HelmCapabilityConfig
         - HelmCapabilitySection
@@ -748,8 +737,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ai/server.rs
-        - crates/phoenix-simulation/src/ai/core.rs
+        [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ai/server.rs]
       symbols:
         - WorldSnapshot
         - WorldView
@@ -776,10 +764,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/components.rs
-        - crates/phoenix-simulation/src/ship_plugin.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
-        - crates/phoenix-simulation/src/console/helm/server.rs
+        [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - PendingArcBearingRequest
         - receive_helm_coordination
@@ -807,12 +792,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/lateral.rs
-        - crates/phoenix-simulation/src/ai/core.rs
+        [crates/phoenix-sim-gameplay/src/ship/helm_planner.rs, crates/phoenix-simulation/src/ship/helm_ai/lateral.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/lateral.rs]
       symbols:
         # DockingMotionIntent (the component carrying the dock uuid) is defined
-        # in crates/phoenix-simulation/src/ship/components.rs and re-exported via ship_plugin; the scanner
+        # in crates/phoenix-sim-gameplay/src/ship/components.rs and re-exported via ship_plugin; the scanner
         # indexes it there. These three are the behaviour it drives: the pure
         # close-manoeuvre codec, the planner that folds it into desired-motion,
         # and the lateral-thrust operator that actuates the resulting translation.
@@ -820,7 +803,7 @@ entities:
         - helm_motion_planner
         - ai_helm_lateral_thrust
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-ai-surfaces-frame-state
@@ -842,7 +825,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - HelmAiSurfacesFrame
         - HelmAiShipFrame
@@ -889,12 +872,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/engines.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/steering.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ai/core.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/engines.rs, crates/phoenix-simulation/src/ship/helm_ai/steering.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/engines.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/impulse.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/steering.rs]
       symbols:
         - build_helm_ai_surfaces_frame
         - ai_helm_thrust
@@ -942,12 +920,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/lateral.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ai/core.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/lateral.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/lateral.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs]
       symbols:
         - ai_helm_lateral_thrust
         - LateralAxis
@@ -994,8 +967,8 @@ entities:
         - crates/phoenix-simulation/src/ship_plugin.rs
         - crates/phoenix-simulation/src/console_ai/server.rs
         - crates/phoenix-simulation/src/console/weapons/mod.rs
-        - crates/phoenix-simulation/src/entities/config.rs
-        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-sim-gameplay/src/entities/config.rs
+        - crates/phoenix-sim-world/src/world/config.rs
         - assets/worlds/default.toml
       symbols:
         - AiTickTimer
@@ -1035,9 +1008,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm.rs
-        - crates/phoenix-simulation/src/ship/helm_admission.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_admission.rs
+        - crates/phoenix-sim-gameplay/src/ship/physics_systems.rs
       symbols:
         - ThrustInput
         - SteeringInput
@@ -1081,14 +1054,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/engines.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
-        - crates/phoenix-simulation/src/ai/core.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/engines.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/engines.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - ai_helm_thrust
         - EnginesAxis
@@ -1124,7 +1090,7 @@ entities:
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
         - "Issue #883 (AC5) closed the same empty-facts gap here: ai_helm_steering seeds the hazard/availability snapshot plus the target-relative travel facts before resolving, so a yaw guard actually evaluates."
         - "Issue #883 seeds this host's availability facts (impulse_available / boost_available) from the ship's own config resources rather than the hardcoded false ai_helm_steering used to pass — see the same note on ai_helm_thrust."
-        - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in crates/phoenix-simulation/src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
+        - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in crates/phoenix-sim-gameplay/src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
         - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — at the time, the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS, then a pair). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
         - "Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
@@ -1141,14 +1107,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/steering.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/physics_systems.rs
-        - crates/phoenix-simulation/src/ai/core.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/steering.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/steering.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/surfaces.rs]
       symbols:
         - ai_helm_steering
         - SteeringAxis
@@ -1195,7 +1154,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_admission.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_admission.rs
       symbols:
         - process_helm_inputs
       tests:
@@ -1230,12 +1189,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/vertical.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ship/helm_planner.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/vertical.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-sim-gameplay/src/ship/helm_planner.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/vertical.rs]
       symbols:
         - ai_helm_vertical_thrust
         - VerticalAxis
@@ -1246,7 +1200,7 @@ entities:
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
         - seed_helm_actuator_facts
       tests:
-        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
         - cargo test
 
   - component: helm-impulse-ai-operator
@@ -1282,12 +1236,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ai/core.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/impulse.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs]
       symbols:
         - ai_helm_impulse
         - ImpulseAxis
@@ -1330,12 +1279,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - crates/phoenix-simulation/src/ship/helm_ai/boost.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
-        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
-        - crates/phoenix-simulation/src/ship/helm_admission.rs
-        - crates/phoenix-simulation/src/ai/policy.rs
-        - crates/phoenix-simulation/src/entities/config.rs
+        [crates/phoenix-simulation/src/ship/helm_ai/boost.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/entities/ai_policy_schema.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/boost.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/mod.rs]
       symbols:
         - ai_helm_boost
         - BoostAxis

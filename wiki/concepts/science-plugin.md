@@ -2,7 +2,7 @@
 title: Science / Sensors target
 type: concept
 tags: [science, sensors, scans, objectives, ai, blackboard]
-sources: [crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-simulation/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
+sources: [crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
 updated: 2026-08-27
 ---
 
@@ -62,7 +62,7 @@ carries `science_target_uuid` per ship (`crates/phoenix-simulation/src/ship/sens
 - `crates/phoenix-simulation/src/ship/sensors.rs` (`SensorRadarSelection`, `handle_sensors_messages`,
   `operate_sensors_ai`, publish systems)
 - `crates/phoenix-simulation/src/science/server.rs` (`tick_scans`, the sole scan applier)
-- `crates/phoenix-simulation/src/science/scan.rs` (pure scan range/fidelity derivation)
+- `crates/phoenix-sim-gameplay/src/science/scan.rs` (pure scan range/fidelity derivation)
 - `crates/phoenix-model/src/messages.rs` (`SensorRadarBlackboard`, `ViewscreenBlackboard.science_target`)
 - Issues #828 (per-entity Sensors migration), #829 (raw-blackboard split), and
   #1139 (Scan directive and Backfill emitter)

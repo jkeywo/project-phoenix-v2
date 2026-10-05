@@ -349,7 +349,7 @@ fn test_app_with_power_hull() -> App {
             LocalShip,
             Transform::default(),
             ShipPhysics::default(),
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
@@ -467,7 +467,7 @@ fn test_app_with_shield_arc_hull() -> App {
             LocalShip,
             Transform::default(),
             ShipPhysics::default(),
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
@@ -613,7 +613,7 @@ fn weapon_system_destruction_emits_tier_crossed_and_disarmed_for_a_non_local_shi
     // both a tier crossing and a full disarm. `ShipConfigComponent::default`
     // ships a full default weapons suite, so clear it to the single system
     // this fixture actually carries in its hull.
-    let mut config = ShipConfigComponent::default();
+    let mut config = crate::ship::components::load_ship_config_from_disk();
     config.0.systems.clear();
     config
         .0
@@ -707,7 +707,7 @@ fn destroying_the_tactical_radar_clears_the_lock_for_either_origin() {
                 crate::entities::spawner::EntityUuid("raider".into()),
                 crate::entities::spawner::EntitySystemHull(hull),
                 LastSystemTiers::default(),
-                ShipConfigComponent::default(),
+                crate::ship::components::load_ship_config_from_disk(),
                 sources,
                 TacticalRadarSelection(Some("the-enemy".to_string())),
             ))
@@ -761,7 +761,7 @@ fn a_merely_disabled_tactical_radar_does_not_clear_the_lock() {
             crate::entities::spawner::EntityUuid("raider".into()),
             crate::entities::spawner::EntitySystemHull(hull),
             LastSystemTiers::default(),
-            ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             ShipSystemControlSources::default(),
             TacticalRadarSelection(Some("the-enemy".to_string())),
         ))
@@ -815,7 +815,7 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
         .add_systems(Update, detect_damage_tier_crossings);
 
     let sid = SystemId("helm-drive".into());
-    let mut config = ShipConfigComponent::default();
+    let mut config = crate::ship::components::load_ship_config_from_disk();
     config.0.systems.clear();
     config
         .0

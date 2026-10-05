@@ -56,10 +56,10 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [editor/script-editor.js, editor/script-editor-view.js, editor/workshop-scripts.js, gui/workshop-scripts-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, crates/phoenix-simulation/src/world/script/authoring.rs, crates/phoenix-simulation/src/workshop/provider.rs]
+      paths: [editor/script-editor.js, editor/script-editor-view.js, editor/workshop-scripts.js, gui/workshop-scripts-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, crates/phoenix-sim-world/src/world/script/authoring.rs, crates/phoenix-simulation/src/workshop/provider.rs]
       symbols: [extractScriptUnits, mountScriptEditor, replaceInlineScript, applyWorkshopScript, mountWorkshopScripts, host_fns, script_diagnostics, ScriptHostFunctions, ScriptDiagnostics]
       tests:
-        - crates/phoenix-simulation/src/world/script/authoring_tests.rs
+        - crates/phoenix-sim-world/src/world/script/authoring_tests.rs
         - npx vitest run editor/tests/script-editor.test.js editor/tests/script-editor-view.test.js editor/tests/workshop-scripts.test.js tests/client/workshop-scripts-panel.test.js
         - cargo test --lib world::script::authoring workshop::provider native_host::panes::operator
 
@@ -234,14 +234,14 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/workshop/test_trace.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/script/load.rs, crates/phoenix-simulation/src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
+      paths: [crates/phoenix-simulation/src/workshop/test_trace.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/script/load.rs, crates/phoenix-sim-world/src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
       symbols: [TestTrace, TestTraceRecord, TestTraceKind, named_function_lines, apply_script_call, tick_script_callbacks, mountWorkshopTestPanel]
       tests:
         - crates/phoenix-simulation/src/workshop/test_trace_tests.rs
         - crates/phoenix-simulation/src/workshop/test_protocol_tests.rs
         - src/native_host/workshop/test_process_tests.rs
-        - crates/phoenix-simulation/src/world/script/load_tests.rs
-        - crates/phoenix-simulation/src/world/script/validate_tests.rs
+        - crates/phoenix-sim-world/src/world/script/load_tests.rs
+        - crates/phoenix-sim-world/src/world/script/validate_tests.rs
         - cargo test --lib workshop::test_trace world::server_tests::scripted_flag_write_chains_a_declarative_on_flag_set world::server_tests::scripted_callback_fires_after_the_delay_not_immediately
         - npx vitest run tests/client/workshop-test-panel.test.js tests/client/workshop-test-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/operator-profile.test.js
 

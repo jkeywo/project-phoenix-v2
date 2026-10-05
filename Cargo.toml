@@ -16,7 +16,7 @@ license = "AGPL-3.0-or-later"
 # delicate simba/parry3d/rapier3d determinism features (`enhanced-determinism`,
 # `libm_force`) — so pinning v2 keeps feature selection byte-identical.
 [workspace]
-members = ["examples/grid", "crates/phoenix-math", "crates/phoenix-runtime", "crates/phoenix-model", "crates/phoenix-content", "crates/phoenix-platform", "crates/phoenix-transport", "crates/phoenix-simulation", "crates/phoenix-presentation"]
+members = ["crates/phoenix-sim-world", "crates/phoenix-sim-gameplay", "crates/phoenix-sim-session", "crates/phoenix-sim-contracts", "examples/grid", "crates/phoenix-math", "crates/phoenix-runtime", "crates/phoenix-model", "crates/phoenix-content", "crates/phoenix-platform", "crates/phoenix-transport", "crates/phoenix-simulation", "crates/phoenix-presentation"]
 resolver = "2"
 
 # One vellum rev for the whole repo, pinned once (issue #1184) and referenced

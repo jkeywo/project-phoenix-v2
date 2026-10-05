@@ -227,7 +227,7 @@ fn comms_ai_app(comms_source: ControlSource) -> App {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         ShipSystemControlSources(resolver),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         AdmittedCommands::default(),
         // The AUTHORED `[comms_console.selector]` block every shipped hull
         // carries. Since #885b stage 5d `operate_comms_ai` has no
@@ -498,7 +498,7 @@ fn comms_ai_hail_is_isolated_to_the_local_ship() {
         .spawn((
             crate::server_app::Ship,
             ShipSystemControlSources(npc_resolver),
-            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship::components::load_ship_config_from_disk(),
             AdmittedCommands::default(),
         ))
         .id();
@@ -1579,7 +1579,7 @@ fn spawn_response_ai_hull(
         // a fixture hull without one is a hull the host cannot see at all.
         crate::lockstep::FleetSlotOf(slot),
         ShipSystemControlSources(resolver),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         AdmittedCommands::default(),
         // The AUTHORED `[comms_console.ai]` block every shipped hull
         // carries. Since #885b stage 5d `operate_comms_response_ai` has no

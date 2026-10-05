@@ -471,7 +471,7 @@ for (const file of codeFiles) {
 const WIRE_VISIBLE_RUST = [
   'crates/phoenix-simulation/src/ship/coordination_systems.rs',
   'crates/phoenix-simulation/src/ship/power.rs',
-  'crates/phoenix-simulation/src/weapons/shield.rs',
+  'crates/phoenix-sim-gameplay/src/weapons/shield.rs',
   'crates/phoenix-simulation/src/console/navigation/mod.rs',
   'crates/phoenix-presentation/src/server/viewscreen_border.rs',
 ];

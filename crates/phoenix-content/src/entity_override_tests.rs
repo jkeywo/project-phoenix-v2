@@ -729,7 +729,7 @@ fn an_instance_override_is_rejected_for_a_tombstone() {
 /// `Ok`, the doctrine came back
 /// as `["patrol-ironveil", "destroy-hostiles"]`, and the author who asked
 /// for `destroy-hostiles` to be GONE got a hull that still had it and no
-/// warning. `crates/phoenix-simulation/src/ship/config.rs` has no `deny_unknown_fields` either, so
+/// warning. `crates/phoenix-sim-gameplay/src/ship/config.rs` has no `deny_unknown_fields` either, so
 /// `[[system]]`, `[[station]]` and `[[station.rating]]` are no safer.
 ///
 /// That is exactly the silent-no-op failure mode #838 existed to end, so

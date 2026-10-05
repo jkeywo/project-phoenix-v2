@@ -19,9 +19,9 @@ entities:
       runs_in: [native-host-runtime, host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, crates/phoenix-simulation/src/core/codec.rs, gui/host-peer-routing.js, server.html, src/native_host/connections.rs, src/native_host/transport.rs, src/native_host/relay_transport.rs, src/native_host/panes/transport.rs, src/native_host/panes/registry.rs, src/native_host/bridge_display.rs]
+      paths: [crates/phoenix-sim-session/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, crates/phoenix-simulation/src/core/codec.rs, gui/host-peer-routing.js, server.html, src/native_host/connections.rs, src/native_host/transport.rs, src/native_host/relay_transport.rs, src/native_host/panes/transport.rs, src/native_host/panes/registry.rs, src/native_host/bridge_display.rs]
       symbols: [ConnectionRegistry, ConnectionId, BrowserConnections, createHostConnections, hostConnectionRegistryReady, SharedConnections, PairedTransport, RelayTransport, PaneTransport]
-      tests: [crates/phoenix-simulation/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, tests/fixtures/session-connections.json, tests/client/host-peer-routing.test.js, tests/smoke/session-connections.spec.js, tests/smoke/reconnect.spec.js, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs, crates/phoenix-simulation/src/session_connections_tests.rs, crates/phoenix-simulation/src/session_connections/browser_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, src/native_host/transport_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/registry_tests.rs, src/native_host/bridge_display_tests.rs]
+      tests: [crates/phoenix-sim-session/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, tests/fixtures/session-connections.json, tests/client/host-peer-routing.test.js, tests/smoke/session-connections.spec.js, tests/smoke/reconnect.spec.js, src/native_host/relay_transport_tests.rs, tests/native_host_panes/session_connections.rs, tests/native_host_panes.rs, crates/phoenix-simulation/src/session_connections_tests.rs, crates/phoenix-simulation/src/session_connections/browser_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, src/native_host/transport_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/registry_tests.rs, src/native_host/bridge_display_tests.rs]
 
   - component: session-identity-manager
     core:
@@ -42,7 +42,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs]
+      paths: [crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs]
       symbols: [SessionManager, handle_identify_system, LobbyResultApplier, identify_ratings, afk_ratings]
       tests: [cargo test, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js, "cargo test --features headless --lib lobby::server::result_application_tests", crates/phoenix-simulation/src/lobby/session_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
@@ -58,7 +58,7 @@ entities:
       writers: [session-identity-manager]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/session.rs]
+      paths: [crates/phoenix-sim-session/src/lobby/session.rs]
       symbols: [SessionManager]
 
       tests: [crates/phoenix-simulation/src/lobby/session_tests.rs]
@@ -75,7 +75,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-model/src/messages.rs]
+      paths: [crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-model/src/messages.rs]
       symbols: [SessionManager, Player]
       tests: [cargo test, tests/smoke/stations.spec.js, crates/phoenix-simulation/src/lobby/session_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
@@ -166,7 +166,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-session/src/lobby/handler.rs]
       messages: [SelectStation, ReleaseStation, StationAssigned]
       tests: [cargo test, tests/smoke/stations.spec.js, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
@@ -191,7 +191,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/broadcast, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/lobby/server.rs, src/server/bridge.rs]
+      paths: [crates/phoenix-simulation/src/core/broadcast, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/lobby/server.rs, src/server/bridge.rs, crates/phoenix-sim-contracts/src/lifecycle.rs]
       symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, register_reconnect_projection, ReconnectBoundary, reset_registered_replication]
       tests: [cargo test, tests/smoke/snapshot-channel.spec.js, crates/phoenix-simulation/src/core/broadcast/lifecycle_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, src/server/bridge_tests.rs]
 

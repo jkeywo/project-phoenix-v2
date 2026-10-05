@@ -1,0 +1,19 @@
+[package]
+name = "phoenix-sim-session"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+phoenix-sim-contracts = { path = "../phoenix-sim-contracts" }
+phoenix-model = { path = "../phoenix-model", features = ["ecs"] }
+phoenix-runtime = { path = "../phoenix-runtime" }
+phoenix-transport = { path = "../phoenix-transport" }
+bevy = { version = "0.18.1", default-features = false, features = ["std", "async_executor", "multi_threaded", "bevy_asset", "bevy_state", "bevy_log"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+vellum-replay = { workspace = true }
+
+[dev-dependencies]
+ron = "0.12"
+vellum-replay = { workspace = true, features = ["testkit"] }

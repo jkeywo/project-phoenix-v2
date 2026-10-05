@@ -244,7 +244,7 @@ a conversation — and those are counted by their own producers, once.
 | `security_team_<n>` | no | a committed team deploys, works and withdraws on the authored clock; a refused dispatch never opens an activation at all |
 | anything else | no | an activation whose meaning this inventory has never been told is unattributed source state, which PRD #1419 excludes rather than guesses at |
 
-A `crates/phoenix-simulation/src/gm_workload.rs` unit test reads `crates/phoenix-simulation/src/core/task_lifecycle.rs` and fails if
+A `crates/phoenix-simulation/src/gm_workload.rs` unit test reads `crates/phoenix-sim-world/src/core/task_lifecycle.rs` and fails if
 a `TASK_VERB_*` constant exists with no entry in the table, so a new continuous
 task cannot be added without a recorded decision.
 

@@ -52,8 +52,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: viewscreen-resolution-state
     core:
@@ -67,10 +67,10 @@ entities:
       writers: [viewscreen-arbiter]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-presentation/src/server/renderer.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-presentation/src/server/renderer.rs]
       symbols: [ViewscreenResolution, ViewscreenArbiter]
 
-      tests: [crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
   - component: viewscreen-source-registry
     core:
       status: implemented
@@ -84,8 +84,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/ship/system_registry.rs]
-      tests: [cargo test, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/viewscreen.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/viewscreen_tests.rs, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
 
   - component: viewscreen-latest-command-policy
     core:
@@ -102,8 +102,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/ship/viewscreen.rs
-        - crates/phoenix-simulation/src/ship/state.rs
+        - crates/phoenix-sim-gameplay/src/ship/viewscreen.rs
+        - crates/phoenix-sim-gameplay/src/ship/state.rs
         - crates/phoenix-simulation/src/console/captain/server.rs
         - crates/phoenix-simulation/src/console/comms/server.rs
         - crates/phoenix-simulation/src/comms/server.rs
@@ -114,8 +114,8 @@ entities:
         - handle_set_view
         - handle_show_on_screen
       tests:
-        - crates/phoenix-simulation/src/ship/viewscreen_tests.rs
-        - crates/phoenix-simulation/src/ship/state_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/viewscreen_tests.rs
+        - crates/phoenix-sim-gameplay/src/ship/state_tests.rs
         - cargo test
 
   - component: host-camera-renderer
@@ -170,7 +170,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-presentation/src/server/native_visuals/mod.rs, crates/phoenix-presentation/src/server/native_visuals/flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion.rs, assets/shaders/web_star_flare.wgsl, crates/phoenix-simulation/src/world/native_render_config.rs, assets/shaders/star_flare.wgsl, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/visual_fade.rs, crates/phoenix-presentation/src/entities/billboard.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/subject.rs]
+      paths: [crates/phoenix-presentation/src/server/native_visuals/mod.rs, crates/phoenix-presentation/src/server/native_visuals/flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion.rs, assets/shaders/web_star_flare.wgsl, crates/phoenix-sim-world/src/world/native_render_config.rs, assets/shaders/star_flare.wgsl, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/visual_fade.rs, crates/phoenix-presentation/src/entities/billboard.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/subject.rs]
       symbols: [NativeVisualPlugin, NativeRenderConfig, RenderConfig, BloomConfig, RenderTuning, apply_render_config, apply_target_hdr, BLOOM_RUNS_ON_THIS_TARGET, VisualFade, drive_visual_fades, retire_lod_visual, yaw_blend, billboard_quad_size, orient_lod_billboards]
       # The viewer half of this runs under `--features viewer`, and CI now
       # EXECUTES it: the `viewer-test` job in .github/workflows/ci.yml runs the
@@ -184,7 +184,7 @@ entities:
       # The billboard-preview test in crates/phoenix-presentation/src/viewer/lod.rs went
       # stale rather than red in exactly that gap: it asserted a far level was a
       # procedural sphere long after the imposter atlases replaced it.
-      tests: [cargo test, cargo test --features viewer, npx playwright test viewscreen.render.spec.js, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion_tests.rs, crates/phoenix-simulation/src/world/native_render_config_tests.rs, crates/phoenix-presentation/src/render_setup_tests.rs, crates/phoenix-presentation/src/entities/visual_fade_tests.rs, crates/phoenix-presentation/src/entities/billboard_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/viewer/lod_tests.rs]
+      tests: [cargo test, cargo test --features viewer, npx playwright test viewscreen.render.spec.js, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion_tests.rs, crates/phoenix-sim-world/src/world/native_render_config_tests.rs, crates/phoenix-presentation/src/render_setup_tests.rs, crates/phoenix-presentation/src/entities/visual_fade_tests.rs, crates/phoenix-presentation/src/entities/billboard_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/viewer/lod_tests.rs]
 
   - component: reference-grid
     core:
@@ -209,14 +209,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/reference_grid.rs, crates/phoenix-presentation/src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/server_app/registration.rs]
+      paths: [crates/phoenix-sim-gameplay/src/reference_grid.rs, crates/phoenix-presentation/src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [ReferenceGridConfig, ReferenceGridPlugin, ReferenceGridMaterial, ReferenceGridTuning, ReferenceGridPatch, decide_patch_action, material_from_config, distance_to_nearest_line, line_coverage, radial_fade]
       # The WGSL half is not executed by any gate - no shader in this repo is,
       # and `cargo test` cannot reach a fragment stage. What IS tested is the
       # reference implementation of the same three expressions in
-      # crates/phoenix-simulation/src/reference_grid.rs, which the shader mirrors deliberately. Change one,
+      # crates/phoenix-sim-gameplay/src/reference_grid.rs, which the shader mirrors deliberately. Change one,
       # change the other; the tests are what say what the answer should be.
-      tests: [cargo test, crates/phoenix-simulation/src/reference_grid_tests.rs, crates/phoenix-presentation/src/server/reference_grid_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/reference_grid_tests.rs, crates/phoenix-presentation/src/server/reference_grid_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
   - component: viewscreen-hud-effects
     core:
@@ -329,7 +329,7 @@ entities:
       writers: [host-debug-simulation-controls]
     implementation:
       status: declared
-      paths: [src/server/bridge.rs, crates/phoenix-simulation/src/debug_overlay.rs, crates/phoenix-simulation/src/server_app/components.rs]
+      paths: [src/server/bridge.rs, crates/phoenix-simulation/src/debug_overlay.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-sim-gameplay/src/server_app.rs]
       # Instagib's authoritative state is the typed `server_app::Instagib`
       # Resource. The wasm edge retains only a queued-toggle inbox and the
       # frame-lagged `INSTAGIB_MIRROR` read by `wasm_get_instagib`; its drain and
@@ -381,6 +381,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [server.html, src/server/bridge.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/ship/state.rs]
+      paths: [server.html, src/server/bridge.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-sim-gameplay/src/ship/state.rs]
       symbols: [wasm_teleport_to_waypoint, wasm_has_navigation_waypoint, drain_teleport_to_waypoint]
-      tests: [cargo test, src/server/bridge_tests.rs, crates/phoenix-simulation/src/ship/state_tests.rs]
+      tests: [cargo test, src/server/bridge_tests.rs, crates/phoenix-sim-gameplay/src/ship/state_tests.rs]

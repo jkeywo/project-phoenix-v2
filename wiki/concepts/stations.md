@@ -2,7 +2,7 @@
 title: Stations
 type: concept
 tags: [stations, lobby, ratings, authority, backfill, puppeting, human-seeking]
-sources: [crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/gm_puppet.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/gm_puppet.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-09-29
 ---
 

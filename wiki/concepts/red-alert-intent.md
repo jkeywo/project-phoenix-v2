@@ -2,7 +2,7 @@
 title: Red Alert Runtime
 type: concept
 tags: [red-alert, captain, sensors, ai, action-feedback, gm, activity]
-sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/core/balance.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm_activity.rs, gui/action-feedback.js, gui/stations/captain-actions.js]
+sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-sim-gameplay/src/core/balance.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm_activity.rs, gui/action-feedback.js, gui/stations/captain-actions.js]
 updated: 2026-09-01
 ---
 

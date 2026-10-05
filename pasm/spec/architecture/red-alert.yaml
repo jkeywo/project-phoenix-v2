@@ -39,10 +39,10 @@ entities:
         - selected-target-alert-state
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs]
       symbols: [ShipRedAlert]
 
-      tests: [crates/phoenix-simulation/src/ship/state_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/ship/state_tests.rs]
   - component: weapons-cold-fire-gate
     core:
       status: implemented
@@ -70,7 +70,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/console/weapons/server.rs]
       symbols:
         - system_power_group_is_cold
         - power_group_for
@@ -111,7 +111,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml]
+      paths: [crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml, crates/phoenix-sim-contracts/src/power.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols:
         - ActionCmd
         - ScriptedPowerLevel
@@ -120,7 +120,7 @@ entities:
         - mirror_weapons_cold_flags
         - OWN_SHIP_WEAPONS_COLD_FLAG
         - weapons_cold_flag
-      tests: [cargo test, "cargo test --features headless --test headless_runner restraint", crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test headless_runner restraint", crates/phoenix-sim-world/src/world/script/effects_tests.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs]
     evidence:
       - kind: test
         reference: "crates/phoenix-simulation/src/ship/power_tests.rs::a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default"
@@ -222,7 +222,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-sim-gameplay/src/ai/core.rs]
       tests: [cargo test]
 
   - state: selected-target-alert-state
@@ -284,7 +284,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/config.rs]
+      paths: [crates/phoenix-sim-gameplay/src/entities/config.rs]
       tests: [cargo test]
 
   - component: red-alert-presentation

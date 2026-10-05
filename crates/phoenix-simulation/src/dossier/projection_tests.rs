@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::messages::InfrastructureSnapshot;
 use crate::dossier::evidence::EvidenceProvenance;
 
 fn subject() -> DossierSubject {

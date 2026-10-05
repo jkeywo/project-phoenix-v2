@@ -24,9 +24,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/narrative.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/core/computer_message.rs]
+      paths: [crates/phoenix-sim-world/src/core/narrative.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-sim-world/src/core/computer_message.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [NarrativeEvent, NarrativeKind, NarrativeActor, NarrativeValue, NarrativeMark, NarrativeRequest, ObjectiveTransition, emit_scenario_narrative, emit_authored_and_marked_entity_narrative, tick_computer_message, ActiveComputerMessage, ComputerMessageRequest]
-      tests: [cargo test, tests/narrative_timeline.rs, crates/phoenix-simulation/src/core/narrative_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/core/computer_message_tests.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, crates/phoenix-sim-world/src/core/narrative_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-sim-world/src/core/computer_message_tests.rs]
 
   - state: narrative-event-stream
     core:
@@ -44,9 +44,9 @@ entities:
       readers: [narrative-telemetry-collector]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/narrative.rs]
+      paths: [crates/phoenix-sim-world/src/core/narrative.rs]
       symbols: [NarrativeEvent, NarrativeKind, NarrativeMark]
-      tests: [cargo test, crates/phoenix-simulation/src/core/narrative_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/core/narrative_tests.rs]
 
   - component: narrative-telemetry-collector
     core:
@@ -65,7 +65,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/headless/report.rs, src/headless/app.rs, crates/phoenix-simulation/src/core/telemetry.rs]
+      paths: [src/headless/report.rs, src/headless/app.rs, crates/phoenix-simulation/src/core/telemetry.rs, crates/phoenix-sim-world/src/core/narrative.rs]
       symbols: [collect_narrative_events, StampedNarrativeEvent, RunTelemetry]
       tests: [cargo test, tests/narrative_timeline.rs, src/headless/report_tests.rs]
 
@@ -87,9 +87,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/narrative.rs, src/headless/report.rs]
+      paths: [crates/phoenix-sim-world/src/core/narrative.rs, src/headless/report.rs]
       symbols: [fold_narrative, NarrativeTimeline, RunReport]
-      tests: [cargo test, tests/narrative_timeline.rs, crates/phoenix-simulation/src/core/narrative_tests.rs, src/headless/report_tests.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, crates/phoenix-sim-world/src/core/narrative_tests.rs, src/headless/report_tests.rs]
 
   - component: task-lifecycle-emitter
     core:
@@ -117,9 +117,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ai/standing_operation.rs, crates/phoenix-simulation/src/core/task_lifecycle.rs, crates/phoenix-simulation/src/core/task_lifecycle_tests.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/science/server.rs, src/headless/report.rs, crates/phoenix-simulation/src/server_app/registration.rs]
+      paths: [crates/phoenix-simulation/src/ai/standing_operation.rs, crates/phoenix-sim-world/src/core/task_lifecycle.rs, crates/phoenix-sim-world/src/core/task_lifecycle_tests.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/science/server.rs, src/headless/report.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [TaskKey, TaskSlot, TaskOutcome, TaskTerminalReason, TaskActivation, TaskLifecycleRequest, TaskLifecycles, start_event, terminal_event, repeats_event, emit_task_lifecycle_narrative, finalize_task_lifecycles]
-      tests: [cargo test, tests/task_lifecycle_narrative.rs, crates/phoenix-simulation/src/ai/standing_operation_tests.rs, crates/phoenix-simulation/src/core/task_lifecycle_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs, crates/phoenix-simulation/src/tractor/server_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs, src/headless/report_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, tests/task_lifecycle_narrative.rs, crates/phoenix-simulation/src/ai/standing_operation_tests.rs, crates/phoenix-sim-world/src/core/task_lifecycle_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs, crates/phoenix-simulation/src/tractor/server_tests.rs, crates/phoenix-simulation/src/science/server_tests.rs, src/headless/report_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
   - state: task-lifecycle-registry
     core:
@@ -140,9 +140,9 @@ entities:
       readers: [task-lifecycle-emitter, narrative-telemetry-collector]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/task_lifecycle.rs]
+      paths: [crates/phoenix-sim-world/src/core/task_lifecycle.rs]
       symbols: [TaskLifecycles, TaskActivation, TaskKey, TaskSlot]
-      tests: [cargo test, crates/phoenix-simulation/src/core/task_lifecycle_tests.rs]
+      tests: [cargo test, crates/phoenix-sim-world/src/core/task_lifecycle_tests.rs]
 
   - state: post-mission-report-state
     core:
@@ -164,9 +164,9 @@ entities:
       readers: [narrative-timeline-projector, host-state-broadcaster, viewscreen-hud-effects, run-outcome-classifier]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/report.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs]
+      paths: [crates/phoenix-sim-world/src/core/report.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow, reset_mission_report]
-      tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/core/report_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs, crates/phoenix-sim-world/src/core/report_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
   - component: post-mission-report-accumulator
     core:
@@ -190,6 +190,6 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/mission_report.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js, client.html, server.html]
+      paths: [crates/phoenix-simulation/src/mission_report.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-sim-gameplay/src/core/balance.rs, gui/game-over-view.js, gui/lobby-state.js, client.html, server.html]
       symbols: [apply_report_rows, reset_mission_report, finalized_event, SetReportRow, report_row, on_game_over_enter, RunOutcome, classify, gameOverView, reportRows]
-      tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js, crates/phoenix-simulation/src/mission_report_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-simulation/src/core/balance_tests.rs]
+      tests: [cargo test, tests/narrative_timeline.rs, tests/client/game-over-view.test.js, crates/phoenix-simulation/src/mission_report_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-simulation/src/core/balance_tests.rs]

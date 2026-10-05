@@ -91,7 +91,7 @@ fn test_app() -> App {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         crate::server_app::ShipSystemBlackboards::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::core::messages::AdmittedCommands::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -539,7 +539,7 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
     let mut app = test_app();
 
     // Use the fully composed hull surface that a real spawn receives. The
-    // `ShipConfigComponent::default()` fallback does not synthesize the
+    // `crate::ship::components::load_ship_config_from_disk()` fallback does not synthesize the
     // shield-arc System instances that typed Station addressing resolves.
     let ship_config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_battleship.toml",
@@ -830,7 +830,7 @@ fn sensors_ai_test_app() -> App {
         // Issue #828: the AI decision flows through this ship's own
         // AdmittedCommands, applied by handle_sensors_messages.
         crate::core::messages::AdmittedCommands::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         // The AUTHORED Sensors selector every shipped hull carries. Since
         // #885b stage 5d there is no synthesised stand-in inside
         // `operate_sensors_ai`, so a fixture that wants a ranking has to
@@ -1895,7 +1895,7 @@ fn ai_sensors_two_ships_select_their_own_hostiles() {
         },
         crate::modifiers::ShipModifiers::default(),
         crate::core::messages::AdmittedCommands::default(),
-        crate::ship_plugin::ShipConfigComponent::default(),
+        crate::ship::components::load_ship_config_from_disk(),
         crate::entities::spawner::FactionComponent(fed),
         // Ship B needs its own authored selector, same as ship A: the
         // declaration is per-entity and there is no synthesised fallback.

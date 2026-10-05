@@ -1,5 +1,7 @@
 use super::*;
+use crate::objective_instances::ObjectiveInstanceKey;
 use crate::objective_instances::ObjectiveInstanceSpec;
+use crate::objective_instances::RecipientSelector;
 
 fn fleet() -> Vec<PlayerShipMembership> {
     vec![

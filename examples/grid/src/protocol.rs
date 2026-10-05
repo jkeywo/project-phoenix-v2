@@ -82,17 +82,10 @@ pub struct BrowserReply {
 
 /// Browser physical handles use the same ownership policy as native relay.
 /// JavaScript only holds sockets; decoding, binding and recipient admission live here.
+#[derive(Default)]
 pub struct BrowserAdmission {
     connections: phoenix_transport::connections::ConnectionRegistry,
     handles: std::collections::BTreeMap<String, phoenix_transport::connections::ConnectionId>,
-}
-impl Default for BrowserAdmission {
-    fn default() -> Self {
-        Self {
-            connections: Default::default(),
-            handles: Default::default(),
-        }
-    }
 }
 impl BrowserAdmission {
     pub fn open(&mut self) -> String {

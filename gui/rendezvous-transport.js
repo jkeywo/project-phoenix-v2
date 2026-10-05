@@ -32,7 +32,10 @@ export function createRendezvousHost(opts) {
   return transport.createRendezvousHost({ getJoinCodeData, ...opts, factories: opts.factories === undefined ? defaultFactories() : opts.factories });
 }
 export function createRendezvousJoiner(opts) {
-  return transport.createRendezvousJoiner({ reasonStringId, localiseDeliveredMessage, ...opts, factories: opts.factories === undefined ? defaultFactories() : opts.factories });
+  return transport.createRendezvousJoiner({ reasonStringId, ...opts,
+    onAccepted: opts.onAccepted || (({ send }) => send(JSON.stringify({ type: 'Identify', data: (opts.getIdent || (() => ({})))() }))),
+    onData: message => (opts.onData || (() => {}))(opts.localise === false ? message : localiseDeliveredMessage(message)),
+    factories: opts.factories === undefined ? defaultFactories() : opts.factories });
 }
 if (typeof window !== 'undefined') {
   window.rendezvousTransport = {

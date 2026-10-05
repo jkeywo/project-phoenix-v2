@@ -68,9 +68,7 @@ export function createHostConnections(registry, {
     const out = [];
     for (const handle of handles) {
       const conn = connections.get(handle);
-      const snapshot = conn?.snapshotChannel;
-      if (deliveryClass === 'snapshot' && isOpen(snapshot)) out.push(snapshot);
-      else if (isOpen(conn)) out.push(conn);
+      if (isOpen(conn)) out.push({ send: raw => conn.send(raw, deliveryClass) });
     }
     return out;
   }

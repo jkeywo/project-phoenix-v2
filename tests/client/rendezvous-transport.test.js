@@ -1,3 +1,4 @@
+import { createRendezvousJoiner as createOpaqueJoiner } from '../../packages/transport/src/rendezvous-transport.js';
 // The join path end to end, in process (issue #1111).
 //
 // A fake WebSocket pair terminated by the REAL rendezvous registry, plus a fake
@@ -2175,4 +2176,36 @@ it('binds a verified continuation proof to only one adapter across peer replacem
   attach(null);
   expect(announced[2].continuation).toBeNull();
   host.close();
+});
+
+describe('reusable transport application boundary', () => {
+  it('accepts and reconnects opaque applications without implicit Identify or localisation', async () => {
+    const world = makeWorld(), accepted = [], received = [];
+    const { host, code, inbound, announced, factories } = await hostOn(world);
+    const joiner = createOpaqueJoiner({ base:'https://rendezvous.test', data:DATA, code:code.suffix, factories,
+      onAccepted: value => accepted.push(value), onData: value => received.push(value) });
+    await settle(); expect(accepted).toHaveLength(1); expect(inbound).toEqual([]);
+    const message = {type:'DifferentGame',data:{text:'client.reconnecting'}};
+    announced[0].send(JSON.stringify(message)); await settle(); expect(received).toEqual([message]);
+    announced[0].close(); await settle(); joiner.retryNow(); await settle();
+    expect(accepted.length).toBeGreaterThanOrEqual(2); expect(inbound).toEqual([]);
+    expect(accepted.at(-1).generation).not.toBe(accepted[0].generation);
+    joiner.close(); host.close();
+  });
+  it('host send owns snapshot choice, reliable fallback and failing-frame isolation', async () => {
+    const world = makeWorld();
+    const { host, code, announced, factories } = await hostOn(world);
+    const joiner = createRendezvousJoiner({ base:'https://rendezvous.test', data:DATA, code:code.suffix, factories });
+    await settle();
+    const peer = announced[0], snapshot = peer.snapshotChannel;
+    peer.send('snapshot', 'snapshot'); expect(snapshot.sent).toEqual(['snapshot']);
+    snapshot.readyState = 'closed'; peer.send('fallback', 'snapshot');
+    const reliable = channelsNamed(factories,'reliable','answer')[0];
+    expect(reliable.sent).toContain('fallback');
+    snapshot.readyState = 'open'; snapshot.send = () => {throw new Error('failed');};
+    expect(() => peer.send('shed', 'snapshot')).not.toThrow();
+    expect(reliable.sent).not.toContain('shed');
+    peer.send('command'); expect(reliable.sent).toContain('command');
+    joiner.close(); host.close();
+  });
 });

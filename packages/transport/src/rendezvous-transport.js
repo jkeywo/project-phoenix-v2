@@ -385,7 +385,12 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
      * ever does cross the ceiling, ONE client loses that frame, visibly,
      * instead of the whole bridge silently losing the flush.
      */
-    send(payload) {
+    send(payload, deliveryClass = 'reliable') {
+      if (deliveryClass === 'snapshot' && isChannelOpen(adapter.snapshotChannel)) {
+        try { adapter.snapshotChannel.send(payload); }
+        catch (e) { onLog(`[rendezvous] snapshot send to ${peerId} failed: ${e && e.message}`); }
+        return;
+      }
       if (channel.readyState !== 'open') return;
       try {
         channel.send(payload);
@@ -1153,7 +1158,6 @@ export function createRendezvousHost(opts) {
  */
 export function createRendezvousJoiner(opts) {
   const reasonStringId = opts.reasonStringId || ((reason) => reason);
-  const localiseDeliveredMessage = opts.localiseDeliveredMessage || ((message) => message);
   const {
     base,
     data,
@@ -1161,7 +1165,6 @@ export function createRendezvousJoiner(opts) {
     namespace = NAMESPACE_CLIENT,
     stamp = null,
     iceServers = [],
-    getIdent = () => ({}),
     onData = () => {},
     onStatus = () => {},
     onError = () => {},
@@ -1177,7 +1180,8 @@ export function createRendezvousJoiner(opts) {
     // localisable string ids and it encodes them itself. Three narrow hooks
     // rather than a second copy of the whole dance.
     /**
-     * Called instead of sending `Identify` once the host accepts this build.
+     * Called once the host accepts this build. The application may use `send`
+     * to announce its identity on this accepted connection.
      * `generation` identifies the concrete transport attempt, so consumers can
      * distinguish a real reconnect from a duplicate acceptance frame on the
      * still-live channel.
@@ -1185,8 +1189,6 @@ export function createRendezvousJoiner(opts) {
     onAccepted = null,
     onFleetControl = () => false,
     continuation: initialContinuation = null,
-    /** False for a peer whose frames are not ServerMessages. */
-    localise = true,
   } = opts;
 
   /**
@@ -1447,18 +1449,7 @@ export function createRendezvousJoiner(opts) {
         established = true;
         attemptIndex = 0;
         onStatus('ready');
-        if (onAccepted) {
-          // A ship host announces itself in its own vocabulary instead — and
-          // on every reconnect, for the same reason the crew path re-sends
-          // Identify: the far end restores this peer's slot from what it says
-          // here, not from a memory of a connection that has gone.
-          onAccepted({ generation: gen });
-          return;
-        }
-        // Re-sent on EVERY reconnect, not just the first: the host restores
-        // seat, rating and projection from the token on every Identify, which
-        // is what makes an automatic reconnect resume the same station.
-        channel.send(JSON.stringify({ type: 'Identify', data: getIdent() }));
+        onAccepted?.({ generation: gen, send: raw => channel.send(raw) });
         return;
       }
       if (msg.type === 'JoinRefused') {
@@ -1557,11 +1548,9 @@ export function createRendezvousJoiner(opts) {
     if (gen !== generation) return;
     const msg = decodeFrame(raw);
     if (!msg) return;
-    // localiseTree resolves string ids to display text once, here, so no
-    // console downstream has to know which of its fields are localisable.
-    // A host-mesh peer opts out: its frames carry no string ids, and walking
-    // them would be a resolver looking for ids in another protocol's data.
-    onData(localise ? localiseDeliveredMessage(msg) : msg);
+    // Accepted application payloads are opaque here. The application adapter
+    // owns identity announcements, catalogues and localisation.
+    onData(msg);
   }
 
   function handle(gen, msg) {

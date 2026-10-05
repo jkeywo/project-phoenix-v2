@@ -48,7 +48,8 @@ describe('physical host connection adapter', () => {
     expect(old.close).toHaveBeenCalledOnce();
     expect(registry.close).toHaveBeenCalledWith('first');
     expect(onDeparture).not.toHaveBeenCalled();
-    expect(host.targets('all', 'reliable')).toEqual([current]);
+    host.targets('all', 'reliable')[0].send('frame');
+    expect(current.send).toHaveBeenCalledWith('frame', 'reliable');
     old.emit('data', { type: 'ReleaseStation' });
     old.emit('close');
     expect(onMessage).toHaveBeenCalledExactlyOnceWith('A', JSON.stringify({ type: 'Identify', data: { token: 'A' } }), 'second');
@@ -88,24 +89,19 @@ describe('physical host connection adapter', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
-  it('uses only Rust recipients and falls back independently to each ready reliable link', () => {
+  it('uses only Rust recipients and delegates the delivery class to each connection', () => {
     const registry = registryStub(['a', 'b', 'closed']);
     const host = createHostConnections(registry, { onMessage: vi.fn() });
-    const snapshotA = { readyState: 'open' };
-    const a = connection({ snapshotChannel: snapshotA });
-    const b = connection({ snapshotChannel: { readyState: 'connecting' } });
-    const closed = connection({ open: false, snapshotChannel: { readyState: 'open' } });
+    const a = connection(), b = connection(), closed = connection({ open: false });
     host.attach(a); host.attach(b); host.attach(closed);
     registry.recipients.mockReturnValue('["a","b","closed"]');
-    expect(host.targets('except:some-token', 'snapshot')).toEqual([snapshotA, b, closed.snapshotChannel]);
+    const targets = host.targets('except:some-token', 'snapshot');
+    expect(targets).toHaveLength(2);
+    targets.forEach(target => target.send('snapshot frame'));
+    expect(a.send).toHaveBeenCalledWith('snapshot frame', 'snapshot');
+    expect(b.send).toHaveBeenCalledWith('snapshot frame', 'snapshot');
+    expect(closed.send).not.toHaveBeenCalled();
     expect(registry.recipients).toHaveBeenLastCalledWith('except:some-token');
-    expect(host.targets('all', 'reliable')).toEqual([a, b]);
-    registry.recipients.mockReturnValue('["b"]');
-    expect(host.targets('token:opaque', 'snapshot')).toEqual([b]);
-    b.snapshotChannel = { readyState: 'open' };
-    expect(host.targets('token:opaque', 'snapshot')).toEqual([b.snapshotChannel]);
-    b.snapshotChannel = null;
-    expect(host.targets('token:opaque', 'snapshot')).toEqual([b]);
     registry.recipients.mockReturnValue('[]');
     expect(host.targets('all', 'snapshot')).toEqual([]);
   });

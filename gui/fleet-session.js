@@ -70,7 +70,7 @@
  * has something to do about it.
  */
 
-import { sendContinuationWire, createContinuationWireReceiver } from './fleet-continuation-wire.js';
+import { createContinuationWire } from './fleet-continuation-wire.js';
 import { createOwnerContinuation, isContinuationEnvelope } from './fleet-owner-continuation.js';
 import { NAMESPACE_SERVER } from './join-code.js';
 import { createRendezvousHost, createRendezvousJoiner } from './rendezvous-transport.js';
@@ -314,6 +314,14 @@ export function createFleetOwner(opts) {
   });
   /** rendezvous peer id → the admitted connection adapter. */
   const links = new Map();
+  const wires = new WeakMap();
+  function wireFor(conn) {
+    if (!wires.has(conn)) {
+      const wire = createContinuationWire(raw => conn.send(raw));
+      wires.set(conn, wire); conn.on('close', () => wire.close());
+    }
+    return wires.get(conn);
+  }
   /** Candidate sockets reserved privately until Rust proves their digest. */
   const pendingLinks = new Map();
   /**
@@ -363,7 +371,7 @@ export function createFleetOwner(opts) {
         participants: simulationRoster.participants, request: onContinuation,
         deliver: onSimulationFrame, replayFrame: opts.onContinuationFrame, onError,
         send: (slot, raw) => {
-          for (const [peer, conn] of links) if (connSlots.get(peer) === slot) sendContinuationWire(value => conn.send(value), raw);
+          for (const [peer, conn] of links) if (connSlots.get(peer) === slot) wireFor(conn).send(raw);
         },
       });
     }
@@ -466,7 +474,7 @@ export function createFleetOwner(opts) {
 
   const broadcastSimulationFrame = (raw) => {
     const wire = continuation ? continuation.broadcast(raw) : raw;
-    if (wire) for (const conn of links.values()) sendContinuationWire(value => conn.send(value), wire);
+    if (wire) for (const conn of links.values()) wireFor(conn).send(wire);
     const frame = decodeHostFrame(raw);
     if (frame && (frame.t === HOST_FRAME_GM_JOIN
         || frame.t === HOST_FRAME_SNAPSHOT
@@ -808,7 +816,8 @@ export function createFleetOwner(opts) {
       }
     },
     onConnection: (conn) => {
-      const receiveContinuationWire = createContinuationWireReceiver();
+      const ownerWire = wireFor(conn);
+      const receiveContinuationWire = value => ownerWire.receive(value);
       conn.on('data', (raw) => {
         let envelope;
         try { envelope = receiveContinuationWire(JSON.parse(raw)); } catch (error) { onError('continuation-wire-refused', error.message); conn.close(); return; }
@@ -827,7 +836,7 @@ export function createFleetOwner(opts) {
           if (!authenticateFrame(envelope.body?.raw, authSlot)) return;
           const deliverAndRelay = fresh => {
             onSimulationFrame(fresh, authSlot);
-            for (const [peer, other] of links) if (peer !== conn.peer) sendContinuationWire(value => other.send(value), raw);
+            for (const [peer, other] of links) if (peer !== conn.peer) wireFor(other).send(raw);
           };
           const fresh = continuation.receive(envelope.body, authSlot, deliverAndRelay);
           if (fresh) deliverAndRelay(fresh);
@@ -966,7 +975,7 @@ export function createFleetOwner(opts) {
     get code() { return code; },
     get isOwner() { return true; },
     sendContinuation(slot, raw) {
-      for (const [peer, conn] of links) if (connSlots.get(peer) === slot) sendContinuationWire(value => conn.send(value), raw);
+      for (const [peer, conn] of links) if (connSlots.get(peer) === slot) wireFor(conn).send(raw);
     },
     get slot() { return fleet.owner; },
     get role() { return ownerRole; },
@@ -1236,7 +1245,8 @@ export function createFleetMember(opts) {
     factories,
   } = opts;
 
-  let receiveContinuationWire = createContinuationWireReceiver();
+  const memberWire = createContinuationWire(raw => joiner.sendFrame(raw));
+  const receiveContinuationWire = value => memberWire.receive(value);
   let mine = null;
   let continuation = null;
   let promoted = null;
@@ -1305,7 +1315,7 @@ export function createFleetMember(opts) {
         local: simulationRoster.local, owner: simulationRoster.owner,
         participants: simulationRoster.participants, request: onContinuation,
         deliver: onSimulationFrame, replayFrame: opts.onContinuationFrame, onError,
-        send: (slot, raw) => promoted ? promoted.sendContinuation(slot, raw) : sendContinuationWire(value => joiner.sendFrame(value), raw),
+        send: (slot, raw) => promoted ? promoted.sendContinuation(slot, raw) : memberWire.send(raw),
         onCommit: ({ owner, departed }) => {
           roster = { ...roster, owner: `slot-${owner}`,
             participants: roster.participants.filter(slot => hostSlotOrdinal(slot) !== departed),
@@ -1390,7 +1400,7 @@ export function createFleetMember(opts) {
       const realGeneration = Number.isInteger(generation) ? generation : null;
       if (realGeneration !== acceptedTransportGeneration) {
         // A fragment belongs to one authenticated connection, never its replacement.
-        receiveContinuationWire = createContinuationWireReceiver();
+        memberWire.accept(realGeneration);
       }
       const reconnected = realGeneration !== null
         && acceptedTransportGeneration !== null
@@ -1674,7 +1684,7 @@ export function createFleetMember(opts) {
     broadcast(raw) {
       if (promoted) return promoted.broadcast(raw);
       const wire = continuation ? continuation.broadcast(raw) : raw;
-      if (wire) sendContinuationWire(value => joiner.sendFrame(value), wire);
+      if (wire) memberWire.send(wire);
     },
 
     /** Announce this host's own ship or readiness to the fleet owner. */
@@ -1733,6 +1743,7 @@ export function createFleetMember(opts) {
     },
 
     close() {
+      memberWire.close();
       promoted?.close();
       closed = true;
       simulationRosterState = 'refused';

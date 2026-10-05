@@ -42,3 +42,20 @@ export function createContinuationWireReceiver() {
     return complete;
   };
 }
+
+/** A wire owns framing and assembly for one connection generation. Repeated
+ * acceptance preserves an assembly; replacement or disposal abandons it. */
+export function createContinuationWire(send) {
+  let generation = Symbol('initial');
+  let receive = createContinuationWireReceiver();
+  let closed = false;
+  return {
+    accept(next) {
+      if (closed) return;
+      if (next !== generation) { generation = next; receive = createContinuationWireReceiver(); }
+    },
+    receive(value) { if (closed) throw new Error('continuation-wire-closed'); return receive(value); },
+    send(raw) { if (closed) throw new Error('continuation-wire-closed'); return sendContinuationWire(send, raw); },
+    close() { closed = true; receive = createContinuationWireReceiver(); },
+  };
+}

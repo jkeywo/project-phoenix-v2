@@ -117,8 +117,11 @@ export function installSessionToken(win = globalThis.window, options = {}) {
     catch (_) { return {}; }
   };
 
-  const tabToken = sessionStore.getItem(tabKey);
-  const sharedToken = localStore.getItem(sharedKey);
+  const readToken = (store, key) => {
+    try { return store.getItem(key); } catch { return null; }
+  };
+  const tabToken = readToken(sessionStore, tabKey);
+  const sharedToken = readToken(localStore, sharedKey);
   const registry = readRegistry();
   const tabTokenClaimed = isClaimedByOtherTab(registry, tabToken, tabId, now);
   const sharedClaimed = isClaimedByOtherTab(registry, sharedToken, tabId, now);
@@ -148,9 +151,11 @@ export function installSessionToken(win = globalThis.window, options = {}) {
     } catch (_) {}
   };
   beat();
-  if (typeof win.setInterval === 'function') win.setInterval(beat, HEARTBEAT_MS);
+  let heartbeat;
+  if (typeof win.setInterval === 'function') heartbeat = win.setInterval(beat, HEARTBEAT_MS);
 
   const drop = () => {
+    win.clearInterval?.(heartbeat);
     try {
       const reg = readRegistry();
       delete reg[tabId];
@@ -158,6 +163,11 @@ export function installSessionToken(win = globalThis.window, options = {}) {
     } catch (_) {}
   };
   if (typeof win.addEventListener === 'function') win.addEventListener('pagehide', drop);
+  if (typeof win.addEventListener === 'function') win.addEventListener('pageshow', () => {
+    beat();
+    win.clearInterval?.(heartbeat);
+    if (typeof win.setInterval === 'function') heartbeat = win.setInterval(beat, HEARTBEAT_MS);
+  });
 
   return token;
 }

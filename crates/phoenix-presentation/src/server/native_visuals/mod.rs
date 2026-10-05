@@ -82,6 +82,20 @@ struct NativeMote(usize);
 struct MotePool {
     config: Option<PlatformRenderConfig>,
 }
+/// Asset-stack identity changes even when the authored mote configuration does
+/// not. Drop old handles and rebuild through the ordinary pool lifecycle.
+pub(crate) fn reset_pack_textures(world: &mut World) {
+    if let Some(mut pool) = world.get_resource_mut::<MotePool>() {
+        pool.config = None;
+    }
+    let entities: Vec<_> = world
+        .query_filtered::<Entity, With<NativeMote>>()
+        .iter(world)
+        .collect();
+    for entity in entities {
+        world.entity_mut(entity).despawn();
+    }
+}
 fn visible_view(mode: &ShipViewMode) -> bool {
     matches!(mode.view_mode, ViewMode::Camera(_) | ViewMode::Cinematic)
 }
@@ -132,7 +146,10 @@ fn update_motes(
                 materials.add(MoteMaterial {
                     tint_brightness: Vec3::from(cfg.mote_tint).extend(cfg.mote_brightness[i]),
                     opacity_masks: Vec4::new(cfg.mote_opacity, 0.12, 0.38, 0.15),
-                    texture: assets.load(cfg.mote_textures[i].clone()),
+                    texture: assets.load(crate::entities::pack_assets::asset_path(
+                        &assets,
+                        &cfg.mote_textures[i],
+                    )),
                 })
             })
             .collect();

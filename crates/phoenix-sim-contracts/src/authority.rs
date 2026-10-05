@@ -31,6 +31,7 @@ pub enum CommandClaimant {
 #[derive(Clone, Copy, Debug)]
 pub struct CommandTargetPolicy {
     pub control: crate::control::ControlTickPolicy,
+    /// Payload eligibility only; control permission is enforced here.
     pub summary: bool,
     pub debug_route: bool,
 }
@@ -49,11 +50,12 @@ pub fn authorize_command(
     target: CommandTargetPolicy,
 ) -> CommandAuthorization {
     use CommandAuthorization::{Allowed, Denied, UnknownSystem};
+    let summary = target.summary && target.control.accept_summary_input;
     let accept = |allowed| if allowed { Allowed } else { Denied };
     let (spectator, afk, registered, holds_station) = match claimant {
         CommandClaimant::Ai => return accept(target.control.operate_ai),
         CommandClaimant::LocalConsole => {
-            return accept(target.control.accept_human_input || target.summary)
+            return accept(target.control.accept_human_input || summary)
         }
         CommandClaimant::Crew {
             spectator,
@@ -62,10 +64,10 @@ pub fn authorize_command(
             holds_station,
         } => (spectator, afk, registered, holds_station),
     };
-    if spectator || (target.summary && afk) {
+    if spectator || (summary && afk) {
         return Denied;
     }
-    if !target.control.accept_human_input && !target.summary {
+    if !target.control.accept_human_input && !summary {
         return Denied;
     }
     if target.debug_route && registered {
@@ -76,3 +78,7 @@ pub fn authorize_command(
         None => UnknownSystem,
     }
 }
+
+#[cfg(test)]
+#[path = "authority_tests.rs"]
+mod tests;

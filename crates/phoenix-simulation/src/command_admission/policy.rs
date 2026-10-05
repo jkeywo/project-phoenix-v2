@@ -28,10 +28,9 @@ pub fn is_command_authorized(
     let policy = control_sources.0.policy_for(&effective_target);
     // Summary intent never shares an actuator with the AI. Repair priority
     // changes the ordinary sweep's policy input; dispatch/recall remain AI-only.
-    let summary = policy.accept_summary_input
-        && config
-            .system(&effective_target)
-            .is_some_and(|s| s.kind == crate::ship::system_registry::REPAIR_KIND)
+    let summary = config
+        .system(&effective_target)
+        .is_some_and(|s| s.kind == crate::ship::system_registry::REPAIR_KIND)
         && matches!(
             payload,
             SystemControlPayload::SetRepairPriority { .. }

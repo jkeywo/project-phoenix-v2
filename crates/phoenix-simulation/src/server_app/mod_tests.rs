@@ -7762,3 +7762,91 @@ fn an_anonymous_game_start_entity_still_mints_its_own_uuid() {
         "an anonymous row mints its own uuid: {uuids:?}"
     );
 }
+
+#[test]
+fn initial_and_incremental_entity_publication_share_the_complete_projection() {
+    use crate::entities::spawner::*;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut world = World::new();
+    world.init_resource::<TrackedEntities>();
+    world.init_resource::<WorldResource>();
+    world.init_resource::<SimOutbox>();
+    world.init_resource::<LastBroadcastEntityPositions>();
+    world.init_resource::<LastBroadcastEntityHealth>();
+    let mut objectives = ObjectiveManagerRes::default();
+    objectives
+        .0
+        .add("mission", "mission.text", true, vec!["station".into()]);
+    world.insert_resource(objectives);
+    let hull = crate::ship::damage::SystemHull::from_config(&[(SystemId("hull".into()), 100.0)]);
+    let bundle = (
+        EntityUuid("same-uuid".into()),
+        EntityId("station".into()),
+        EntityName("station.name".into()),
+        Transform::from_xyz(3.0, 4.0, 5.0),
+        RegionShapeSection(crate::regions::shape::RegionShape::Torus {
+            inner_radius: 10.0,
+            outer_radius: 20.0,
+        }),
+        EntityTagsSection(vec!["region".into()]),
+        RadarAppearanceSection(crate::entities::config::RadarAppearanceConfig {
+            icon: Some("Station".into()),
+            colour: Some(vec![0.1, 0.2]),
+            size: Some(9.0),
+            region_colour: Some(vec![0.3, 0.4, 0.5]),
+        }),
+        EntitySystemHull(hull),
+        EntityTarget(crate::entities::target::TargetSection {
+            tags: vec!["civilian".into()],
+            threat_level: Default::default(),
+            description: Some("target.description".into()),
+        }),
+    );
+    let infrastructure = crate::infrastructure::InfrastructureCondition(
+        crate::infrastructure::InfrastructureState::from_config(
+            &crate::infrastructure::InfrastructureConfig {
+                condition: Some(40.0),
+                publish: true,
+                ..Default::default()
+            },
+        ),
+    );
+    let entity = world
+        .spawn((
+            bundle.clone(),
+            infrastructure.clone(),
+            crate::ship::shields::ShipShields(ShieldSystem::default(), 0.0),
+        ))
+        .id();
+    world.run_system_once(reconcile_runtime_entities).unwrap();
+    assert!(
+        world.resource_mut::<SimOutbox>().drain().is_empty(),
+        "seed is Welcome data only"
+    );
+    let initial = world.resource::<WorldResource>().0.entities[0].clone();
+    world.despawn(entity);
+    world.resource_mut::<TrackedEntities>().reported.clear();
+    world.spawn((
+        bundle,
+        infrastructure,
+        crate::ship::shields::ShipShields(ShieldSystem::default(), 0.0),
+    ));
+    world.run_system_once(reconcile_runtime_entities).unwrap();
+    let emitted = world.resource_mut::<SimOutbox>().drain();
+    let later = emitted
+        .iter()
+        .find_map(|entry| match &entry.message {
+            ServerMessage::EntitySpawned { snapshot } => Some(snapshot),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(*later, initial);
+    assert_eq!(later.inner_radius, Some(10.0));
+    assert_eq!(
+        later.colour, None,
+        "short colour does not become a partial RGB value"
+    );
+    assert!(later.objective_target);
+    assert!(later.infrastructure.is_some());
+    assert!(later.shield_fraction.is_some());
+}

@@ -1,4 +1,4 @@
-use crate::core::messages::{AiDirective, ObjectiveSource, ScoredObjective, SystemAffinity};
+use crate::core::messages::{AiDirective, ScoredObjective, SystemAffinity};
 pub use phoenix_sim_contracts::directive;
 pub use phoenix_sim_contracts::objective_utility::*;
 /// When something last LANDED a hit on this ship: the more recent of hull
@@ -187,20 +187,4 @@ pub fn scan_directive_target(directive: &AiDirective) -> Option<&str> {
         AiDirective::Scan { target } => Some(target.as_str()),
         _ => None,
     }
-}
-
-/// Shared player-facing visibility filter (`objective-visibility-policy`, #752).
-///
-/// A scored objective is shown on a **player-facing** panel (Captain, Comms)
-/// when it is a mission objective — always visible regardless of score — or when
-/// it is a doctrine objective with a currently positive utility score. Doctrine
-/// objectives sitting at score 0 (e.g. an unmet zero-gate) are hidden until
-/// conditions or a Captain boost lift them above zero.
-///
-/// This is deliberately NOT used by the AI-facing pool: the AI keeps zero-score
-/// objectives in view and skips them at consumption time (`plan_helm_travel`
-/// filters `score > 0.0`), so a boost or a changed condition can re-activate a
-/// directive without re-publishing the pool.
-pub fn is_visible_objective(o: &ScoredObjective) -> bool {
-    o.source == ObjectiveSource::Mission || o.score > 0.0
 }

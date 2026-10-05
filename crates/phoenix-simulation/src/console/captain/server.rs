@@ -778,24 +778,12 @@ fn publish_captain_blackboard(
             objectives_snap = objectives
                 .as_ref()
                 .map(|obj| {
-                    let scored = obj.0.scored_pool_with_boost_for(
+                    obj.0.effective_visible_for_ship(
                         &conditions,
                         captain_boost,
                         uuid_opt.map_or("", |u| u.0.as_str()),
-                    );
-                    let snapshots: Vec<_> = scored
-                        .into_iter()
-                        .filter(crate::objectives::is_visible_objective)
-                        .map(|o| o.snapshot)
-                        .collect();
-                    objective_instances
-                        .as_ref()
-                        .map_or(snapshots.clone(), |instances| {
-                            instances.0.project_snapshots_for_ship(
-                                uuid_opt.map_or("", |u| u.0.as_str()),
-                                snapshots,
-                            )
-                        })
+                        objective_instances.as_ref().map(|i| &i.0),
+                    )
                 })
                 .unwrap_or_default();
             boosted_objective_id = boost.boosted_for(scope).map(str::to_string);

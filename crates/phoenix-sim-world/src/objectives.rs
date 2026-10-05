@@ -464,6 +464,42 @@ impl ObjectiveManager {
             .collect()
     }
 
+    /// Effective active directives for a ship, including named-instance rules.
+    pub fn effective_scored_for_ship(
+        &self,
+        conditions: &WorldConditions,
+        boost: Option<&str>,
+        ship: &str,
+        instances: Option<&crate::objective_instances::ObjectiveInstanceManager>,
+    ) -> Vec<ScoredObjective> {
+        let scored = self.scored_pool_with_boost_for(conditions, boost, ship);
+        match instances {
+            Some(instances) => instances.project_scored_for_ship(ship, scored),
+            None => scored,
+        }
+    }
+
+    /// Visible display rows retain instance history; this differs intentionally
+    /// from active directive projection and applies visibility before instances.
+    pub fn effective_visible_for_ship(
+        &self,
+        conditions: &WorldConditions,
+        boost: Option<&str>,
+        ship: &str,
+        instances: Option<&crate::objective_instances::ObjectiveInstanceManager>,
+    ) -> Vec<ObjectiveSnapshot> {
+        let snapshots = self
+            .scored_pool_with_boost_for(conditions, boost, ship)
+            .into_iter()
+            .filter(is_visible_objective)
+            .map(|objective| objective.snapshot)
+            .collect();
+        match instances {
+            Some(instances) => instances.project_snapshots_for_ship(ship, snapshots),
+            None => snapshots,
+        }
+    }
+
     /// Objective-contributed Command stances restricted to an intended ship.
     pub fn active_station_stances_for(&self, ship: &str) -> Vec<(StationId, StationStanceConfig)> {
         self.objectives
@@ -635,3 +671,7 @@ fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
         source: r.source.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "objective_projection_tests.rs"]
+mod projection_tests;

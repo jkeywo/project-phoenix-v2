@@ -710,20 +710,19 @@ fn ai_power_allocation(
         // An assignment to another ship must not bias this ship's power AI.
         let has_destroy_objective = objectives.as_ref().is_some_and(|om| {
             let ship_id = entity_uuid.map_or("", |u| u.0.as_str());
-            let scored =
-                om.0.scored_pool_for(&crate::objectives::WorldConditions::default(), ship_id);
-            objective_instances
-                .as_ref()
-                .map_or(scored.clone(), |instances| {
-                    instances.0.project_scored_for_ship(ship_id, scored)
-                })
-                .iter()
-                .any(|s| {
-                    matches!(
-                        s.directive,
-                        crate::core::messages::AiDirective::Destroy { .. }
-                    )
-                })
+            om.0.effective_scored_for_ship(
+                &crate::objectives::WorldConditions::default(),
+                None,
+                ship_id,
+                objective_instances.as_ref().map(|i| &i.0),
+            )
+            .iter()
+            .any(|s| {
+                matches!(
+                    s.directive,
+                    crate::core::messages::AiDirective::Destroy { .. }
+                )
+            })
         });
         // Control-Source gate through the shared AI host spine (issue #1208): not
         // (or no longer) AI-driven — a human Control Source — stands the reactor

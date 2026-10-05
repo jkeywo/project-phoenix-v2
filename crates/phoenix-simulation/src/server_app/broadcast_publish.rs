@@ -378,18 +378,14 @@ pub(crate) fn publish_viewscreen_blackboard(
         let mut scored_objectives = objectives
             .as_ref()
             .map(|o| {
-                o.0.scored_pool_with_boost_for(
+                o.0.effective_scored_for_ship(
                     &conditions,
                     captain_boost,
                     uuid.map_or("", |u| u.0.as_str()),
+                    objective_instances.as_ref().map(|i| &i.0),
                 )
             })
             .unwrap_or_default();
-        if let Some(instances) = objective_instances.as_ref() {
-            scored_objectives = instances
-                .0
-                .project_scored_for_ship(uuid.map_or("", |u| u.0.as_str()), scored_objectives);
-        }
 
         // Merge the hull's standing template doctrine into the scenario pool (see
         // the "why this MERGES" note above). Score the doctrine with the same
@@ -851,6 +847,111 @@ pub fn reconcile_runtime_entities(
         .to_string()
     }
 
+    // One live projection serves both Welcome seeding and later spawn messages.
+    let project =
+        |uuid: &String,
+         id: Option<&EntityId>,
+         name: Option<&EntityName>,
+         transform: &Transform,
+         region_shape: Option<&RegionShapeSection>,
+         entity_tags: Option<&EntityTagsSection>,
+         radar_appearance: Option<&RadarAppearanceSection>,
+         asteroid_field: Option<&AsteroidFieldSection>,
+         hull_comp: Option<&crate::entities::spawner::EntitySystemHull>,
+         entity_target: Option<&crate::entities::spawner::EntityTarget>,
+         shield_comp: Option<&crate::ship::shields::ShipShields>,
+         infrastructure: Option<&crate::infrastructure::InfrastructureCondition>| {
+            let hull_fraction = hull_comp.map(|h| {
+                let max = h.0.total_max();
+                if max > 0.0 {
+                    h.0.total_current() / max
+                } else {
+                    1.0
+                }
+            });
+            let shield_fraction = shield_comp.map(|s| {
+                let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
+                let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
+                if total_max > 0 {
+                    total_hp as f32 / total_max as f32
+                } else {
+                    0.0
+                }
+            });
+            let mut snapshot = EntitySnapshot {
+                uuid: uuid.clone(),
+                id: id.as_ref().map(|i| i.0.clone()),
+                name: name.as_ref().map(|n| n.0.clone()),
+                hull_fraction,
+                shield_fraction,
+                // Issue #1025: minted from the LIVE track, so a structure
+                // reported after it degraded is reported as it now is.
+                infrastructure: infrastructure
+                    .and_then(|i| crate::core::messages::infrastructure_snapshot_from_state(&i.0)),
+                position: Some([
+                    transform.translation.x,
+                    transform.translation.y,
+                    transform.translation.z,
+                ]),
+                tags: entity_tags.map(|t| t.0.clone()).unwrap_or_default(),
+                ..EntitySnapshot::default()
+            };
+            if let Some(shape) = region_shape {
+                snapshot.shape = Some(shape_to_wire(shape));
+                if snapshot.radius.is_none() {
+                    match &shape.0 {
+                        crate::regions::shape::RegionShape::Sphere { radius } => {
+                            snapshot.radius = Some(*radius);
+                        }
+                        crate::regions::shape::RegionShape::Box { half_extents, .. } => {
+                            let max_he = half_extents[0].max(half_extents[2]);
+                            snapshot.radius = Some(max_he);
+                            snapshot.half_extents = Some(*half_extents);
+                        }
+                        crate::regions::shape::RegionShape::Torus {
+                            inner_radius,
+                            outer_radius,
+                        } => {
+                            snapshot.radius = Some(*outer_radius);
+                            snapshot.inner_radius = Some(*inner_radius);
+                        }
+                    }
+                }
+            }
+            if snapshot.shape.is_none() {
+                if let Some(field) = asteroid_field {
+                    snapshot.shape = Some("torus".to_string());
+                    snapshot.radius = Some(field.0.outer_radius);
+                    snapshot.inner_radius = Some(field.0.inner_radius);
+                }
+            }
+            if let Some(ra) = radar_appearance {
+                if let Some(colour) = &ra.0.colour {
+                    if colour.len() >= 3 {
+                        snapshot.colour = Some([colour[0], colour[1], colour[2]]);
+                    }
+                }
+                if let Some(region_colour) = &ra.0.region_colour {
+                    if region_colour.len() >= 3 {
+                        snapshot.region_colour =
+                            Some([region_colour[0], region_colour[1], region_colour[2]]);
+                    }
+                }
+                snapshot.radar_size = ra.0.size;
+                snapshot.radar_icon = ra.0.icon.clone();
+            }
+            if let Some(ref id) = snapshot.id {
+                snapshot.objective_target = active_objective_names.contains(id);
+            }
+            // Target info
+            if let Some(t) = entity_target {
+                snapshot.target_tags = t.0.tags.clone();
+                snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
+                snapshot.target_description = t.0.description.clone();
+            }
+            snapshot
+        };
+
     // Seed reported set from ECS on first in-progress frame so that initial
     // world entities (stars, planets, ships, fields) are not re-reported.
     // Also populate WorldData.entities so the reconnect Welcome includes them.
@@ -873,95 +974,20 @@ pub fn reconcile_runtime_entities(
                 infrastructure,
             )) = query.get(*entity)
             {
-                let hull_fraction = hull_comp.map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        h.0.total_current() / max
-                    } else {
-                        1.0
-                    }
-                });
-                let shield_fraction = shield_comp.map(|s| {
-                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 {
-                        total_hp as f32 / total_max as f32
-                    } else {
-                        0.0
-                    }
-                });
-                let mut snapshot = EntitySnapshot {
-                    uuid: uuid.clone(),
-                    id: id.as_ref().map(|i| i.0.clone()),
-                    name: name.as_ref().map(|n| n.0.clone()),
-                    hull_fraction,
-                    shield_fraction,
-                    // Issue #1025: minted from the LIVE track, so a structure
-                    // reported after it degraded is reported as it now is.
-                    infrastructure: infrastructure.and_then(|i| {
-                        crate::core::messages::infrastructure_snapshot_from_state(&i.0)
-                    }),
-                    position: Some([
-                        transform.translation.x,
-                        transform.translation.y,
-                        transform.translation.z,
-                    ]),
-                    tags: entity_tags.map(|t| t.0.clone()).unwrap_or_default(),
-                    ..EntitySnapshot::default()
-                };
-                if let Some(shape) = region_shape {
-                    snapshot.shape = Some(shape_to_wire(shape));
-                    if snapshot.radius.is_none() {
-                        match &shape.0 {
-                            crate::regions::shape::RegionShape::Sphere { radius } => {
-                                snapshot.radius = Some(*radius);
-                            }
-                            crate::regions::shape::RegionShape::Box { half_extents, .. } => {
-                                let max_he = half_extents[0].max(half_extents[2]);
-                                snapshot.radius = Some(max_he);
-                                snapshot.half_extents = Some(*half_extents);
-                            }
-                            crate::regions::shape::RegionShape::Torus {
-                                inner_radius,
-                                outer_radius,
-                            } => {
-                                snapshot.radius = Some(*outer_radius);
-                                snapshot.inner_radius = Some(*inner_radius);
-                            }
-                        }
-                    }
-                }
-                if snapshot.shape.is_none() {
-                    if let Some(field) = asteroid_field {
-                        snapshot.shape = Some("torus".to_string());
-                        snapshot.radius = Some(field.0.outer_radius);
-                        snapshot.inner_radius = Some(field.0.inner_radius);
-                    }
-                }
-                if let Some(ra) = radar_appearance {
-                    if let Some(colour) = &ra.0.colour {
-                        if colour.len() >= 3 {
-                            snapshot.colour = Some([colour[0], colour[1], colour[2]]);
-                        }
-                    }
-                    if let Some(region_colour) = &ra.0.region_colour {
-                        if region_colour.len() >= 3 {
-                            snapshot.region_colour =
-                                Some([region_colour[0], region_colour[1], region_colour[2]]);
-                        }
-                    }
-                    snapshot.radar_size = ra.0.size;
-                    snapshot.radar_icon = ra.0.icon.clone();
-                }
-                if let Some(ref id) = snapshot.id {
-                    snapshot.objective_target = active_objective_names.contains(id);
-                }
-                // Target info
-                if let Some(t) = entity_target {
-                    snapshot.target_tags = t.0.tags.clone();
-                    snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
-                    snapshot.target_description = t.0.description.clone();
-                }
+                let snapshot = project(
+                    uuid,
+                    id,
+                    name,
+                    transform,
+                    region_shape,
+                    entity_tags,
+                    radar_appearance,
+                    asteroid_field,
+                    hull_comp,
+                    entity_target,
+                    shield_comp,
+                    infrastructure,
+                );
                 upsert_world_entity(&mut world, snapshot);
             }
         }
@@ -999,95 +1025,20 @@ pub fn reconcile_runtime_entities(
                 infrastructure,
             )) = query.get(*entity)
             {
-                let hull_fraction = hull_comp.map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        h.0.total_current() / max
-                    } else {
-                        1.0
-                    }
-                });
-                let shield_fraction = shield_comp.map(|s| {
-                    let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
-                    let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
-                    if total_max > 0 {
-                        total_hp as f32 / total_max as f32
-                    } else {
-                        0.0
-                    }
-                });
-                let mut snapshot = EntitySnapshot {
-                    uuid: uuid.clone(),
-                    id: id.as_ref().map(|i| i.0.clone()),
-                    name: name.as_ref().map(|n| n.0.clone()),
-                    hull_fraction,
-                    shield_fraction,
-                    // Issue #1025: minted from the LIVE track, so a structure
-                    // reported after it degraded is reported as it now is.
-                    infrastructure: infrastructure.and_then(|i| {
-                        crate::core::messages::infrastructure_snapshot_from_state(&i.0)
-                    }),
-                    position: Some([
-                        transform.translation.x,
-                        transform.translation.y,
-                        transform.translation.z,
-                    ]),
-                    tags: entity_tags.map(|t| t.0.clone()).unwrap_or_default(),
-                    ..EntitySnapshot::default()
-                };
-                if let Some(shape) = region_shape {
-                    snapshot.shape = Some(shape_to_wire(shape));
-                    if snapshot.radius.is_none() {
-                        match &shape.0 {
-                            crate::regions::shape::RegionShape::Sphere { radius } => {
-                                snapshot.radius = Some(*radius);
-                            }
-                            crate::regions::shape::RegionShape::Box { half_extents, .. } => {
-                                let max_he = half_extents[0].max(half_extents[2]);
-                                snapshot.radius = Some(max_he);
-                                snapshot.half_extents = Some(*half_extents);
-                            }
-                            crate::regions::shape::RegionShape::Torus {
-                                inner_radius,
-                                outer_radius,
-                            } => {
-                                snapshot.radius = Some(*outer_radius);
-                                snapshot.inner_radius = Some(*inner_radius);
-                            }
-                        }
-                    }
-                }
-                if snapshot.shape.is_none() {
-                    if let Some(field) = asteroid_field {
-                        snapshot.shape = Some("torus".to_string());
-                        snapshot.radius = Some(field.0.outer_radius);
-                        snapshot.inner_radius = Some(field.0.inner_radius);
-                    }
-                }
-                if let Some(ra) = radar_appearance {
-                    if let Some(colour) = &ra.0.colour {
-                        if colour.len() >= 3 {
-                            snapshot.colour = Some([colour[0], colour[1], colour[2]]);
-                        }
-                    }
-                    if let Some(region_colour) = &ra.0.region_colour {
-                        if region_colour.len() >= 3 {
-                            snapshot.region_colour =
-                                Some([region_colour[0], region_colour[1], region_colour[2]]);
-                        }
-                    }
-                    snapshot.radar_size = ra.0.size;
-                    snapshot.radar_icon = ra.0.icon.clone();
-                }
-                if let Some(ref id) = snapshot.id {
-                    snapshot.objective_target = active_objective_names.contains(id);
-                }
-                // Target info
-                if let Some(t) = entity_target {
-                    snapshot.target_tags = t.0.tags.clone();
-                    snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
-                    snapshot.target_description = t.0.description.clone();
-                }
+                let snapshot = project(
+                    uuid,
+                    id,
+                    name,
+                    transform,
+                    region_shape,
+                    entity_tags,
+                    radar_appearance,
+                    asteroid_field,
+                    hull_comp,
+                    entity_target,
+                    shield_comp,
+                    infrastructure,
+                );
                 upsert_world_entity(&mut world, snapshot.clone());
                 outbox.push_reliable((Target::All, ServerMessage::EntitySpawned { snapshot }));
             }

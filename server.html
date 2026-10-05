@@ -1558,6 +1558,8 @@
        reports. The attribute, the guards and the duplicated rotated-phone
        blocks in those four sheets are all gone with the rotation. */
   </style>
+  <script src="gui/page-startup.js"></script>
+  <script>PhoenixPageStartup.install(window, { host: true });</script>
 </head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
@@ -3270,17 +3272,6 @@
       isRoom: () => !window.__phoenixGmPage,
       onEquivalent: equivalents.update,
     });
-    window.__roomAudio = hostAudio;
-    window.__resetHostAudio = hostAudio.resetSession;
-    window.addEventListener('pagehide', () => hostAudio.setPageActive(false));
-    window.addEventListener('pageshow', () => hostAudio.setPageActive(true));
-    window.__audioConfig = hostAudio.audioConfig;
-    window.__audioCue = hostAudio.audioCue;
-    window.__audioLevel = hostAudio.audioLevel;
-    window.__audioLifecycle = hostAudio.audioLifecycle;
-    window.__audioDebug = hostAudio.debug;
-    window.__setMasterVolume = hostAudio.setMasterVolume;
-    window.__getMasterVolume = hostAudio.getMasterVolume;
     window.__hostAudioReady(hostAudio);
   </script>
   <!-- Host Channel dispatcher (issue #1225): the handler table and the
@@ -3385,12 +3376,7 @@
     // (issue #1225) can call window.__hostChannelReady(dispatch) once its own
     // module has loaded — however that races the WASM load — and whatever
     // queued in between flushes to it in order.
-    window.__hostChannelQueue = [];
-    window.__hostChannel = function(n, p) { window.__hostChannelQueue.push([n, p]); };
-    window.__hostChannelReady = function(dispatch) {
-      window.__hostChannel = dispatch;
-      window.__hostChannelQueue.splice(0).forEach(function(c) { dispatch(c[0], c[1]); });
-    };
+
 
     // ── Page chrome bridge (issue #1227) ────────────────────────────────────
     // setConnectionStatus/acquireWakeLock/releaseWakeLock, the fullscreen
@@ -3401,24 +3387,9 @@
     // calls window.__pageChromeReady(chrome) — same shape as the
     // window.__hostChannel queue just above, generalised from one channel
     // dispatcher to a handful of method names.
-    window.__pageChromeQueue = [];
-    let _pageChrome = null;
-    function setConnectionStatus(state) {
-      if (_pageChrome) _pageChrome.setConnectionStatus(state);
-      else window.__pageChromeQueue.push(['setConnectionStatus', state]);
-    }
-    function acquireWakeLock() {
-      if (_pageChrome) return _pageChrome.acquireWakeLock();
-      window.__pageChromeQueue.push(['acquireWakeLock', undefined]);
-    }
-    function releaseWakeLock() {
-      if (_pageChrome) _pageChrome.releaseWakeLock();
-      else window.__pageChromeQueue.push(['releaseWakeLock', undefined]);
-    }
-    window.__pageChromeReady = function(chrome) {
-      _pageChrome = chrome;
-      window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
-    };
+    function setConnectionStatus(state) { return window.pageStartup.callChrome('setConnectionStatus', state); }
+    function acquireWakeLock() { return window.pageStartup.callChrome('acquireWakeLock'); }
+    function releaseWakeLock() { return window.pageStartup.callChrome('releaseWakeLock'); }
 
     // ── Host audio bridge (issue #1228) ─────────────────────────────────────
     // startGameAudio/startMenuMusic/stopMenuMusic (called from __updateLobby's
@@ -3433,28 +3404,11 @@
     // host-audio island assigns those window globals directly as soon as it
     // mounts, and nothing calls them before WASM loads (see that island's own
     // comment for why).
-    window.__hostAudioQueue = [];
-    let _hostAudio = null;
-    function startGameAudio() {
-      if (_hostAudio) _hostAudio.startGameAudio();
-      else window.__hostAudioQueue.push(['startGameAudio', undefined]);
-    }
-    function startMenuMusic() {
-      if (_hostAudio) _hostAudio.startMenuMusic();
-      else window.__hostAudioQueue.push(['startMenuMusic', undefined]);
-    }
-    function stopMenuMusic() {
-      if (_hostAudio) _hostAudio.stopMenuMusic();
-      else window.__hostAudioQueue.push(['stopMenuMusic', undefined]);
-    }
-    function applyHudAudio(s) {
-      if (_hostAudio) _hostAudio.applyHudAudio(s);
-      else window.__hostAudioQueue.push(['applyHudAudio', s]);
-    }
-    window.__hostAudioReady = function(audio) {
-      _hostAudio = audio;
-      window.__hostAudioQueue.splice(0).forEach(function(c) { audio[c[0]](c[1]); });
-    };
+    function startGameAudio() { return window.pageStartup.callAudio('startGameAudio'); }
+    function startMenuMusic() { return window.pageStartup.callAudio('startMenuMusic'); }
+    function stopMenuMusic() { return window.pageStartup.callAudio('stopMenuMusic'); }
+    function applyHudAudio(state) { return window.pageStartup.callAudio('applyHudAudio', state); }
+
 
     // Resolve a string id via the module bridge; falls back to the raw id
     // before modules load. Render loops re-resolve on every state message.
@@ -6579,7 +6533,7 @@
       // above all guard the same race. mountConnDiag returns a value rather
       // than firing a queueable side effect, so a no-op fallback (not the
       // queue) is the guard here.
-      const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
+      const writeDiagLines = window.pageStartup.chrome ? window.pageStartup.chrome.mountConnDiag('conn-diag') : () => {};
       const clientIceStages = new Map(); // shortId → troubled or relayed state
       // The line-building itself is gui/connection-diagnostics.js since #1113 —
       // it grew a transport rung, a relay-shedding count and a second reader

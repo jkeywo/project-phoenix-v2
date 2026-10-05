@@ -278,3 +278,28 @@ describe('mountPageChrome', () => {
     });
   });
 });
+
+it('disposal removes controls and releases a wake-lock answer arriving after teardown', async () => {
+  const doc = scene();
+  let answer;
+  const sentinel = { release: vi.fn(), addEventListener:vi.fn() };
+  Object.defineProperty(navigator,'wakeLock',{ configurable:true, value:{ request:vi.fn(() => new Promise(resolve => {answer = resolve;})) } });
+  const chrome = mountPageChrome({doc,t:fakeT});
+  const pending = chrome.acquireWakeLock(); chrome.dispose(); chrome.dispose();
+  answer(sentinel); await pending;
+  expect(sentinel.release).toHaveBeenCalledOnce();
+  doc.dispatchEvent(new Event('visibilitychange'));
+  expect(navigator.wakeLock.request).toHaveBeenCalledOnce();
+});
+
+it('release and reacquire during an unresolved wake request preserves the new intent', async () => {
+  const doc = scene(), answers = [];
+  Object.defineProperty(navigator,'wakeLock',{ configurable:true, value:{ request:vi.fn(() => new Promise(resolve => answers.push(resolve))) } });
+  const chrome = mountPageChrome({doc,t:fakeT});
+  const pending = chrome.acquireWakeLock(); chrome.releaseWakeLock(); chrome.acquireWakeLock();
+  const old = {release:vi.fn(),addEventListener:vi.fn()}, current = {release:vi.fn(),addEventListener:vi.fn()};
+  answers[0](old); await pending;
+  expect(old.release).toHaveBeenCalledOnce(); expect(answers).toHaveLength(2);
+  answers[1](current); await Promise.resolve();
+  expect(current.release).not.toHaveBeenCalled(); chrome.dispose(); expect(current.release).toHaveBeenCalledOnce();
+});

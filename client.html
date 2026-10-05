@@ -2000,6 +2000,8 @@
       box-shadow: inset 0 0 18px rgba(var(--rgb-signal), 0.7);
     }
   </style>
+  <script src="gui/page-startup.js"></script>
+  <script>PhoenixPageStartup.install(window, { host: false });</script>
 </head>
 <body>
   <!-- UI click sound (played from JS). -->
@@ -2364,24 +2366,9 @@
     // deferred module â€” are queued and replayed in order once it calls
     // window.__pageChromeReady(chrome). Same shape as server.html's #1227
     // bridge (itself modelled on the #1224 host-channel queue).
-    window.__pageChromeQueue = [];
-    let _pageChrome = null;
-    function chromeSetConnectionStatus(state) {
-      if (_pageChrome) _pageChrome.setConnectionStatus(state);
-      else window.__pageChromeQueue.push(['setConnectionStatus', state]);
-    }
-    function acquireWakeLock() {
-      if (_pageChrome) return _pageChrome.acquireWakeLock();
-      window.__pageChromeQueue.push(['acquireWakeLock', undefined]);
-    }
-    function releaseWakeLock() {
-      if (_pageChrome) _pageChrome.releaseWakeLock();
-      else window.__pageChromeQueue.push(['releaseWakeLock', undefined]);
-    }
-    window.__pageChromeReady = function(chrome) {
-      _pageChrome = chrome;
-      window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
-    };
+    function chromeSetConnectionStatus(state) { return window.pageStartup.callChrome('setConnectionStatus', state); }
+    function acquireWakeLock() { return window.pageStartup.callChrome('acquireWakeLock'); }
+    function releaseWakeLock() { return window.pageStartup.callChrome('releaseWakeLock'); }
 
     // Station names in ShipStations are lookup identifiers; display them via
     // the derived station.<id>.name string when the table has one.
@@ -4287,22 +4274,12 @@
         return;
       }
 
-      // Resolve this tab's session token now that all deferred modules have
-      // run. Each tab gets its own token, which is what lets several clients
-      // on one desktop connect as distinct players. The inline branch is a
-      // last-ditch fallback for the rare case the module genuinely failed to
-      // load.
-      myToken = (typeof window.installSessionToken === 'function')
-        ? window.installSessionToken()
-        : (() => {
-            let t = sessionStorage.getItem('session-token');
-            if (!t) {
-              t = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-                .map(b => b.toString(16).padStart(2, '0')).join('');
-              sessionStorage.setItem('session-token', t);
-            }
-            return t;
-          })();
+      if (typeof window.installSessionToken !== 'function') {
+        console.error('[client] identity module failed to load — cannot join');
+        setStatus(t('client.status_transport_unavailable'));
+        return;
+      }
+      myToken = window.installSessionToken();
       console.log(`[client] session token ${myToken.slice(0, 8)}`);
 
       semanticActionRegistry = typeof window.createClientSemanticActionRegistry === 'function'
@@ -4596,7 +4573,7 @@
       // above all guard the same race. mountConnDiag returns a value
       // rather than firing a queueable side effect, so a no-op fallback
       // (not the queue) is the guard here.
-      const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
+      const writeDiagLines = window.pageStartup.chrome ? window.pageStartup.chrome.mountConnDiag('conn-diag') : () => {};
       // The line-building logic itself moved to gui/connection-diagnostics.js
       // in #1113: it grew enough to be worth testing (which rung of the
       // transport ladder, which relay actually carried the traffic, whether

@@ -82,6 +82,12 @@ export function mountPageChrome({
   statusLabels = {},
   releaseWakeLockOnUnload = false,
 } = {}) {
+  let disposed = false;
+  const listeners = [];
+  const listen = (target, event, handler) => {
+    target.addEventListener(event, handler);
+    listeners.push(() => target.removeEventListener(event, handler));
+  };
   const activeColor = statusColors.active ?? '#4c4';
   const troubleColor = statusColors.trouble ?? '#f44';
   const disconnectedLabel = statusLabels.disconnected ?? 'client.reconnecting';
@@ -113,25 +119,38 @@ export function mountPageChrome({
   // ── Screen Wake Lock (keep screen on while active) ──────────────────
 
   let wakeLockSentinel = null;
+  let pendingWakeLock = false;
+  let wakeGeneration = 0;
+  let wakeDesired = false;
 
   async function acquireWakeLock() {
+    wakeDesired = true;
+    if (disposed || wakeLockSentinel || pendingWakeLock) return;
+    const generation = wakeGeneration;
+    pendingWakeLock = true;
     try {
-      if (wakeLockSentinel) return;
-      wakeLockSentinel = await navigator.wakeLock.request('screen');
-      wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
-    } catch (_) {}
+      const sentinel = await navigator.wakeLock.request('screen');
+      if (disposed || generation !== wakeGeneration) { sentinel.release(); return; }
+      wakeLockSentinel = sentinel;
+      sentinel.addEventListener('release', () => { if (wakeLockSentinel === sentinel) wakeLockSentinel = null; });
+    } catch (_) {} finally {
+      pendingWakeLock = false;
+      if (!disposed && wakeDesired && generation !== wakeGeneration) acquireWakeLock();
+    }
   }
 
   function releaseWakeLock() {
+    wakeDesired = false;
+    wakeGeneration++;
     if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
   }
 
-  doc.addEventListener('visibilitychange', () => {
+  listen(doc, 'visibilitychange', () => {
     if (doc.visibilityState === 'visible') acquireWakeLock();
   });
 
   if (releaseWakeLockOnUnload) {
-    window.addEventListener('beforeunload', () => releaseWakeLock());
+    listen(window, 'beforeunload', () => releaseWakeLock());
   }
 
   // ── Fullscreen controller ────────────────────────────────────────────
@@ -140,13 +159,13 @@ export function mountPageChrome({
     const btn = doc.getElementById('fullscreen-btn');
     if (!btn) return;
     function syncIcon() { btn.textContent = doc.fullscreenElement ? '✕' : '⛶'; }
-    btn.addEventListener('click', () => {
+    listen(btn, 'click', () => {
       const p = doc.fullscreenElement
         ? doc.exitFullscreen()
         : doc.documentElement.requestFullscreen();
       p && p.catch(() => {});
     });
-    doc.addEventListener('fullscreenchange', syncIcon);
+    listen(doc, 'fullscreenchange', syncIcon);
   })();
 
   // ── Connection diagnostics (mechanical half only — see module doc) ──
@@ -159,5 +178,12 @@ export function mountPageChrome({
     };
   }
 
-  return { setConnectionStatus, acquireWakeLock, releaseWakeLock, mountConnDiag };
+  return { setConnectionStatus, acquireWakeLock, releaseWakeLock, mountConnDiag,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const remove of listeners.splice(0)) remove();
+      releaseWakeLock();
+    },
+  };
 }

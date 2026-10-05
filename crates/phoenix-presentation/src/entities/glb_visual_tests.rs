@@ -370,7 +370,7 @@ fn spawning_a_glb_visual_cannot_replace_authoritative_markers() {
         .world_mut()
         .spawn((
             crate::entities::model_rig::ModelMarkers::from_rig(&canonical_rig),
-            PendingSceneHandle(scene),
+            PendingSceneHandle::new(scene, "models/presentation-only.glb#Scene0".into(), None),
         ))
         .id();
 
@@ -384,4 +384,136 @@ fn spawning_a_glb_visual_cannot_replace_authoritative_markers() {
         Some([1.0, 2.0, 3.0]),
         "the visual tier's marker map must not overwrite the primary rig"
     );
+}
+
+#[test]
+fn identity_tier_preserves_primary_pose_without_double_scale_or_baked_transform() {
+    use crate::entities::model_rig::ModelRigTransform;
+    let primary = crate::entities::model_rig::parse_model_rig(
+        r#"
+        [base]
+        offset = [2.0, 3.0, 4.0]
+        rotation = [0.0, 3.14, 0.0]
+        scale = [2.0, 3.0, 4.0]
+    "#,
+    )
+    .unwrap();
+    let mut level = crate::entities::config::LodLevel {
+        tier_rig: Some(crate::entities::config::TierRig::Identity),
+        ..Default::default()
+    };
+    let effective = effective_tier_rig(&level, &primary)
+        .unwrap()
+        .base_bevy_transform();
+    let original = primary.base_bevy_transform();
+    assert_eq!(effective.translation, original.translation);
+    assert_eq!(effective.rotation, original.rotation);
+    assert_eq!(effective.scale, Vec3::ONE);
+    assert_eq!(
+        effective.scale * tier_parent_scale_at(1, Vec3::from_array(primary.base.scale)),
+        original.scale
+    );
+    level.tier_rig = Some(crate::entities::config::TierRig::Baked);
+    assert!(effective_tier_rig(&level, &primary).is_none());
+}
+#[test]
+fn pending_scene_identity_includes_variant_and_pack_revision() {
+    let pending = PendingSceneHandle::new(
+        Handle::default(),
+        "pack7://models/b.glb#Scene0".into(),
+        Some("red".into()),
+    );
+    assert!(pending.matches("pack7://models/b.glb#Scene0", Some("red")));
+    assert!(!pending.matches("pack7://models/a.glb#Scene0", Some("red")));
+    assert!(!pending.matches("pack7://models/b.glb#Scene0", Some("blue")));
+    assert!(!pending.matches("pack8://models/b.glb#Scene0", Some("red")));
+}
+
+#[test]
+fn superseded_loaded_scene_cannot_attach_then_matching_completion_attaches_its_own_scene() {
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<Scene>();
+    let old = app
+        .world_mut()
+        .resource_mut::<Assets<Scene>>()
+        .add(Scene::new(World::new()));
+    let new = app
+        .world_mut()
+        .resource_mut::<Assets<Scene>>()
+        .add(Scene::new(World::new()));
+    let parent = app
+        .world_mut()
+        .spawn(PendingSceneHandle::new(
+            old.clone(),
+            "models/b.glb#Scene0".into(),
+            None,
+        ))
+        .id();
+    app.world_mut()
+        .run_system_once(
+            |mut commands: Commands,
+             assets: Res<AssetServer>,
+             scenes: Res<Assets<Scene>>,
+             pending: Query<(Entity, &PendingSceneHandle)>| {
+                let (parent, pending) = pending.single().unwrap();
+                assert!(matches!(
+                    spawn_glb_visual(
+                        &mut commands,
+                        &assets,
+                        &scenes,
+                        parent,
+                        "assets/models/a.glb",
+                        None,
+                        Some(pending),
+                        Some(&crate::entities::model_rig::ModelRig::default())
+                    ),
+                    GlbSpawnOutcome::Pending
+                ));
+            },
+        )
+        .unwrap();
+    assert!(app.world().get::<Children>(parent).is_none());
+    assert!(app
+        .world()
+        .get::<PendingSceneHandle>(parent)
+        .unwrap()
+        .matches("models/a.glb#Scene0", None));
+    // The replacement completion carries its own identity; the old loaded scene
+    // remains alive but cannot satisfy this request.
+    app.world_mut()
+        .entity_mut(parent)
+        .insert(PendingSceneHandle::new(
+            new.clone(),
+            "models/a.glb#Scene0".into(),
+            None,
+        ));
+    app.world_mut()
+        .run_system_once(
+            |mut commands: Commands,
+             assets: Res<AssetServer>,
+             scenes: Res<Assets<Scene>>,
+             pending: Query<(Entity, &PendingSceneHandle)>| {
+                let (parent, pending) = pending.single().unwrap();
+                assert!(matches!(
+                    spawn_glb_visual(
+                        &mut commands,
+                        &assets,
+                        &scenes,
+                        parent,
+                        "assets/models/a.glb",
+                        None,
+                        Some(pending),
+                        Some(&crate::entities::model_rig::ModelRig::default())
+                    ),
+                    GlbSpawnOutcome::Spawned(_)
+                ));
+            },
+        )
+        .unwrap();
+    let child = app.world().get::<Children>(parent).unwrap()[0];
+    assert_eq!(app.world().get::<SceneRoot>(child).unwrap().0, new);
+    assert_ne!(app.world().get::<SceneRoot>(child).unwrap().0, old);
+    assert!(app.world().get::<PendingSceneHandle>(parent).is_none());
 }

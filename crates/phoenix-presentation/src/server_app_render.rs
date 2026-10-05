@@ -580,6 +580,7 @@ pub(crate) fn update_mesh_lod(
         }
 
         if lods.current == Some(target) {
+            crate::entities::glb_visual::retire_pending_visual(&mut commands, entity);
             continue;
         }
 
@@ -587,6 +588,10 @@ pub(crate) fn update_mesh_lod(
         let Some(level) = lods.levels.get(target).cloned() else {
             continue;
         };
+
+        if level.model.is_none() {
+            crate::entities::glb_visual::retire_pending_visual(&mut commands, entity);
+        }
 
         // Recompute the presentation root's scale from this tier's compensation
         // and optional `[x, y, z]`. Recomputed rather than multiplied in, so
@@ -639,18 +644,8 @@ pub(crate) fn update_mesh_lod(
             // a fetch, and its 404 is the console error this path used to print
             // for every hull model in the scene. Any other tier's sidecar hasn't
             // been resolved yet this frame; let spawn_glb_visual resolve it.
-            let declared = crate::entities::glb_visual::declared_tier_rig(&level);
-            // Generated tiers declare `tier_rig = "identity"` because no
-            // sidecar exists beside their GLB.  Identity must mean "do not
-            // fetch another sidecar", not "discard the primary hull's base
-            // orientation": the latter flips every 180°-corrected hull as it
-            // crosses an LOD boundary.  The parent already carries the base
-            // scale, so inherit only offset + rotation on the child.
-            let inherited_tier_rig = declared.as_ref().map(|_| {
-                let mut rig = lods.base_rig.clone();
-                rig.base.scale = [1.0, 1.0, 1.0];
-                rig
-            });
+            let inherited_tier_rig =
+                crate::entities::glb_visual::effective_tier_rig(&level, &lods.base_rig);
             match spawn_glb_visual(
                 &mut commands,
                 &asset_server,
@@ -659,7 +654,7 @@ pub(crate) fn update_mesh_lod(
                 model_path,
                 variant.as_deref(),
                 pending,
-                inherited_tier_rig.as_ref().or(declared.as_ref()),
+                inherited_tier_rig.as_ref(),
             ) {
                 // Keep the current visual until the new GLB resolves — avoids a
                 // visible gap. `current` is left unchanged so we retry next frame.

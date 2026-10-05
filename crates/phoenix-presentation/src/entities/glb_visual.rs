@@ -18,7 +18,20 @@ pub use crate::entities::model_markers::{
 /// Holds a pending GLB scene handle so the asset server keeps the asset alive
 /// across frames until it finishes loading.
 #[derive(Component)]
-pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
+pub struct PendingSceneHandle(pub Handle<Scene>, String, Option<String>);
+impl PendingSceneHandle {
+    /// Retain the scene with its exact pack-qualified request identity.
+    pub fn new(scene: Handle<Scene>, path: String, variant: Option<String>) -> Self {
+        Self(scene, path, variant)
+    }
+    fn matches(&self, path: &str, variant: Option<&str>) -> bool {
+        self.1 == path && self.2.as_deref() == variant
+    }
+}
+/// Retire a pending replacement when keeping the current or a non-GLB visual.
+pub fn retire_pending_visual(commands: &mut Commands, entity: Entity) {
+    commands.entity(entity).remove::<PendingSceneHandle>();
+}
 
 /// The extra scale a NON-near LOD tier's composition root must supply, given
 /// the primary sidecar's `[base].scale` and the scale the ladder's own
@@ -160,6 +173,19 @@ pub fn declared_tier_rig(
     }
 }
 
+/// Identity tiers inherit primary pose; the composition root supplies scale.
+/// Baked/undeclared tiers still resolve their own sidecar.
+pub fn effective_tier_rig(
+    level: &crate::entities::config::LodLevel,
+    primary: &crate::entities::model_rig::ModelRig,
+) -> Option<crate::entities::model_rig::ModelRig> {
+    declared_tier_rig(level).map(|mut rig| {
+        rig.base = primary.base.clone();
+        rig.base.scale = [1.0; 3];
+        rig
+    })
+}
+
 /// The extra composition scale for the tier at `index`.
 ///
 /// The near tier (index 0) IS the primary GLB, so its child already carries the
@@ -210,22 +236,24 @@ pub fn spawn_glb_visual(
     pending: Option<&PendingSceneHandle>,
     resolved_rig: Option<&crate::entities::model_rig::ModelRig>,
 ) -> GlbSpawnOutcome {
-    let scene: Handle<bevy::scene::Scene> = match pending {
+    let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
+    let path = super::pack_assets::asset_path(asset_server, &format!("{rel}#Scene0"));
+    let scene: Handle<bevy::scene::Scene> = match pending.filter(|p| p.matches(&path, variant)) {
         Some(p) => p.0.clone(),
         None => {
             // `asset_server` resolves paths relative to the `assets/` root, but
             // the TOML `model` field carries an `assets/` prefix. Strip it so
             // the GLB resolves instead of looking for `assets/assets/...`.
-            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-            let path = super::pack_assets::asset_path(asset_server, &format!("{rel}#Scene0"));
             let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
             bevy::log::info!(
                 "spawn_glb_visual: requesting scene {path} (load_state={:?})",
                 asset_server.load_state(h.id())
             );
-            commands
-                .entity(entity)
-                .insert(PendingSceneHandle(h.clone()));
+            commands.entity(entity).insert(PendingSceneHandle::new(
+                h.clone(),
+                path.to_string(),
+                variant.map(str::to_owned),
+            ));
             h
         }
     };

@@ -74,9 +74,22 @@ fn non_glb_lod_tiers_cannot_remove_authoritative_markers() {
         ))
         .id();
 
+    for entity in [shape, billboard] {
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(PendingSceneHandle::new(
+                Handle::default(),
+                "models/superseded.glb#Scene0".into(),
+                None,
+            ));
+    }
     app.update();
 
     for entity in [shape, billboard] {
+        assert!(
+            app.world().get::<PendingSceneHandle>(entity).is_none(),
+            "a procedural or billboard target retires the superseded GLB request"
+        );
         assert_eq!(
             app.world()
                 .get::<crate::entities::model_rig::ModelMarkers>(entity)
@@ -86,6 +99,21 @@ fn non_glb_lod_tiers_cannot_remove_authoritative_markers() {
             "changing visual tiers must leave canonical primary-rig markers intact"
         );
     }
+    // Reversing to the already displayed target must also abandon in-flight work.
+    app.world_mut()
+        .entity_mut(shape)
+        .insert(PendingSceneHandle::new(
+            Handle::default(),
+            "models/abandoned.glb#Scene0".into(),
+            None,
+        ));
+    let displayed = app.world().get::<MeshLods>(shape).unwrap().scene_child;
+    app.update();
+    assert!(app.world().get::<PendingSceneHandle>(shape).is_none());
+    assert_eq!(
+        app.world().get::<MeshLods>(shape).unwrap().scene_child,
+        displayed
+    );
 }
 
 /// The renderer may choose a non-unit tier scale, but that presentation

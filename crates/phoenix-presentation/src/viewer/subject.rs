@@ -276,7 +276,11 @@ pub fn poll_pending_model(
             .as_ref()
             .and(ladder.as_deref())
             .and_then(|l| l.current.and_then(|i| l.levels.get(i)))
-            .and_then(crate::entities::glb_visual::declared_tier_rig);
+            .and_then(|level| {
+                primary_rig.as_ref().and_then(|primary| {
+                    crate::entities::glb_visual::effective_tier_rig(level, primary)
+                })
+            });
         match spawn_glb_visual(
             &mut commands,
             &asset_server,

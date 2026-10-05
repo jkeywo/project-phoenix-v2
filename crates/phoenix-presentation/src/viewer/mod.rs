@@ -180,8 +180,6 @@ impl Plugin for ViewerPlugin {
             .init_resource::<lod::LadderState>()
             .init_resource::<lod::LodMode>()
             .init_resource::<stats::SubjectStats>()
-            .init_resource::<capture::CaptureRequest>()
-            .init_resource::<capture::CaptureState>()
             .init_resource::<crate::server_app_render::ProceduralMeshCache>()
             .add_systems(Startup, (setup_camera, subject::spawn_subject).chain())
             .add_systems(
@@ -194,13 +192,8 @@ impl Plugin for ViewerPlugin {
                     lod::refresh_ladder,
                     lod::apply_lod_mode,
                     subject::poll_pending_model,
-                    subject::respawn_on_asset_reload,
                     stats::measure_subject,
                     stats::publish_stats,
-                    // After `measure_subject` so the framing extents are known.
-                    capture::start_capture,
-                    capture::drive_capture,
-                    capture::publish_capture,
                 )
                     .chain(),
             )
@@ -218,6 +211,30 @@ impl Plugin for ViewerPlugin {
                     // #1023, module 5).
                     crate::entities::billboard::orient_lod_billboards::<ViewerCamera>,
                 ),
+            );
+    }
+}
+
+/// Explicit compatibility opt-in for the retained mutable ladder, asset reload
+/// and browser billboard baking API. Captured Workshop previews omit it.
+pub struct LegacyViewerWorkflowPlugin;
+#[derive(Resource)]
+struct LegacyViewerWorkflow;
+impl Plugin for LegacyViewerWorkflowPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(LegacyViewerWorkflow)
+            .init_resource::<capture::CaptureRequest>()
+            .init_resource::<capture::CaptureState>()
+            .add_systems(
+                Update,
+                (
+                    subject::respawn_on_asset_reload,
+                    capture::start_capture,
+                    capture::drive_capture,
+                    capture::publish_capture,
+                )
+                    .chain()
+                    .after(stats::measure_subject),
             );
     }
 }
@@ -262,7 +279,8 @@ fn apply_commands(
     asset_server: Res<AssetServer>,
     mut skyboxes: Query<&mut bevy::core_pipeline::Skybox>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut capture_request: ResMut<capture::CaptureRequest>,
+    mut capture_request: Option<ResMut<capture::CaptureRequest>>,
+    legacy: Option<Res<LegacyViewerWorkflow>>,
     mut commands: Commands,
 ) {
     for cmd in drain_commands() {
@@ -353,6 +371,9 @@ fn apply_commands(
                 }
             }
             ViewerCommand::SetLadder(levels) => {
+                if legacy.is_none() {
+                    continue;
+                }
                 // Only the levels change: `source` still names the model these
                 // belong to, so the sidecar is not re-read and this edit
                 // survives until the model itself changes.
@@ -360,6 +381,9 @@ fn apply_commands(
                 ladder.levels = levels;
             }
             ViewerCommand::ReloadAssets => {
+                if legacy.is_none() {
+                    continue;
+                }
                 // Every path this ladder can show, plus the base model — the
                 // whole set the panel might be looking at after a run.
                 let mut paths: Vec<String> = ladder
@@ -386,6 +410,9 @@ fn apply_commands(
             } => {
                 // Handed to `capture::start_capture`, which waits for the
                 // subject's extents before it begins.
+                let Some(ref mut capture_request) = capture_request else {
+                    continue;
+                };
                 capture_request.0 = Some(capture::CaptureParams {
                     views,
                     resolution,
@@ -393,7 +420,6 @@ fn apply_commands(
                 });
             }
         }
-        lighting.set_changed();
     }
 }
 

@@ -1,3 +1,4 @@
+import { createWorkshopOperations } from './workshop-edit-session.js';
 /** Standalone browser Authoring adapter. Only user-selected pack bytes enter;
  * no filesystem provider, GM connection, simulation or live-state capture.
  */
@@ -179,13 +180,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let draft = null;
   let selected = null;
   let pendingImport = null;
-  let pendingValidation = false;
   let inspected = null;
   let disposed = false;
   let pendingRecovery = true;
   let recoveredDraft = null;
   let persistenceGeneration = 0;
   let testPanel = null;
+  const operations = createWorkshopOperations({
+    blocked: () => Boolean(disposed || pendingImport || pendingRecovery || testPanel?.held()),
+    changed: () => refresh(),
+  });
   let soundAudition = null;
   let modelPanel = null;
   let definitionsPanel = null;
@@ -222,7 +226,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   const actions = createModActionRegistry({
     actionFeedback: lifecycle,
     openImport(activation) {
-      if (provider?.canImport === false || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return false;
+      if (provider?.canImport === false || operations.busy()) return false;
       if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return false;
       pendingImport = activation;
       fileInput.value = '';
@@ -248,41 +252,32 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     resolveAsset:path=>runtime.readAsset?.(path)??null,
     readAudio:()=>profile.audio,saveAudio:audio=>{profile={...profile,audio};return saveOperatorProfile(win.PhoenixOperatorStorage||win.localStorage,profile);}});
   modelPanel = mountWorkshopModels({ root, attach: false, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   definitionsPanel = mountWorkshopDefinitions({ root, attach: false, runtime, win, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   compositionPanel = mountWorkshopComposition({ root, attach: false, runtime, provider, win, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   entityPanel = mountWorkshopEntity({ root, attach: false, runtime, win, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); },
     preview: previewTemplate, test: testTemplate });
   presetsPanel = mountWorkshopPresets({ root, attach: false, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   shipAuthoringPanel = mountWorkshopShipAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   slotAuthoringPanel = mountWorkshopSlotAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   spatialPanel = mountWorkshopSpatial({ root, attach: false, provider, runtime, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held()),
-    setBusy(value) { pendingValidation = value; refresh(); },
+    ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   localisationPanel = mountWorkshopLocalisation({ root, attach: false, draft: () => draft,
     dependencies: () => catalogueDependencies, t: translate,
@@ -438,7 +433,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     if (reveal) layoutMount.reveal('findings', { focus: '.workshop-findings' });
   }
   function refresh({ selection = false } = {}) {
-    soundAudition?.refresh({held:!!(pendingImport || pendingValidation || pendingRecovery || testPanel?.held())});
+    soundAudition?.refresh({held:!!(operations.busy())});
     if (selection) {
       files.replaceChildren(...(draft?.paths() || []).map(path => {
         const option = el('option', null, { value: path }); option.textContent = path; return option;
@@ -447,7 +442,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       source.value = draft?.isBinary(selected) ? translate('workshop.binary_source', { bytes: draft.byteLength(selected) }) : draft?.read(selected) || '';
       sourceLabel.textContent = selected ? translate('workshop.source_path', { path: selected }) : translate('workshop.source');
     }
-    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
+    const busy = Boolean(operations.busy());
     toolbar.setAttribute('aria-busy', String(busy));
     const testing = testWorkspace;
     modelPanel?.refresh({ hidden: testing });
@@ -510,7 +505,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     return accepted;
   }
   function travel(redo) {
-    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
+    if (operations.busy()) return;
     const path = redo ? draft?.redo() : draft?.undo();
     if (!path) return;
     selected = draft.paths().includes(path) ? path : draft.paths()[0];
@@ -519,11 +514,12 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     persistDraft();
   }
   async function inspect() {
-    if (!draft || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
+    if (!draft || operations.busy()) return;
     const candidate = draft;
     const path = selected;
     const text = candidate.read(path);
-    pendingValidation = true;
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return;
     refresh();
     try {
       const fields = await runtime.inspect(text, path);
@@ -538,7 +534,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       renderField();
     } catch (error) {
       if (!disposed) show('workshop.inspector_refused', [errorText(error)], true);
-    } finally { pendingValidation = false; if (!disposed) refresh(); }
+    } finally { releaseOperation(); if (!disposed) refresh(); }
   }
   function renderField() {
     const field = inspected?.fields[Number(fieldSelect.value)];
@@ -551,11 +547,12 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   fieldSelect.addEventListener('change', renderField);
   async function patchField() {
-    if (!inspected || pendingValidation || pendingImport || testPanel?.held()) return;
+    if (!inspected || operations.busy()) return;
     const snapshot = inspected;
     const field = snapshot.fields[Number(fieldSelect.value)];
     if (!field) return;
-    pendingValidation = true;
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return;
     refresh();
     try {
       const patched = await runtime.patch(draft.read(snapshot.path), {
@@ -571,12 +568,13 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       }
     } catch (error) {
       if (!disposed) show('workshop.inspector_refused', [errorText(error)], true);
-    } finally { pendingValidation = false; if (!disposed) refresh(); }
+    } finally { releaseOperation(); if (!disposed) refresh(); }
   }
   function evaluate(exporting, activation) {
     if (exporting && provider?.save) return false;
-    if (!draft || pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return false;
-    pendingValidation = true;
+    if (!draft || operations.busy()) return false;
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return;
     const candidate = draft;
     show('workshop.runtime_checking');
     refresh();
@@ -614,7 +612,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
           activation.settleFeedback(ACTION_FEEDBACK_STATE.REFUSED);
         }
       } finally {
-        pendingValidation = false;
+        releaseOperation();
         if (!disposed) refresh();
       }
     })();
@@ -648,9 +646,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     }
   }
   async function createPack() {
-    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held() || provider?.canCreate === false) return;
+    if (operations.busy() || provider?.canCreate === false) return;
     if (draft?.isDirty() && !win.confirm(translate('workshop.replace_confirm'))) return;
-    pendingValidation = true; refresh();
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return; refresh();
     let created = false;
     try {
       const replacement = newWorkshopPack(await runtime.dependencies());
@@ -659,13 +658,14 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       show('workshop.created'); persistDraft();
     } catch (error) { if (!disposed) show('workshop.runtime_unavailable', [errorText(error)], true); }
     finally {
-      pendingValidation = false;
+      releaseOperation();
       if (!disposed) { refresh({ selection: true }); if (created) applyLaunch(); }
     }
   }
   async function saveNative() {
-    if (!provider?.save || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
-    pendingValidation = true; refresh();
+    if (!provider?.save || !draft || operations.busy()) return;
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return; refresh();
     try {
       await provider.save(draft);
       if (disposed) return;
@@ -674,10 +674,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       if (disposed) return;
       if (error.report) showRuntimeFindings('workshop.check_refused', error.report.findings, true);
       else show('workshop.native_save_refused', [errorText(error)], true);
-    } finally { pendingValidation = false; if (!disposed) refresh(); }
+    } finally { releaseOperation(); if (!disposed) refresh(); }
   }
   function addDocument(value = '') {
-    if (!draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    if (!draft || operations.busy()) return;
     const path = addPath.value.trim();
     if (!path.startsWith('assets/') || (!/\.(toml|rhai)$/.test(path) && !isWorkshopBinary(path))) {
       show('workshop.add_refused', [], true); return;
@@ -689,7 +689,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   }
   /** Move the selected member to the path box's value, bytes untouched. */
   function renameDocument() {
-    if (!draft || !selected || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    if (!draft || !selected || operations.busy()) return;
     const path = addPath.value.trim();
     if (!path.startsWith('assets/') || (!/\.(toml|rhai)$/.test(path) && !isWorkshopBinary(path))) {
       show('workshop.add_refused', [], true); return;
@@ -706,7 +706,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
    * away source whose only other copy may be the imported archive — and undone
    * by the ordinary history if it was not what the operator meant. */
   function deleteDocument() {
-    if (!draft || !selected || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    if (!draft || !selected || operations.busy()) return;
     const path = selected;
     if (!win.confirm(translate('workshop.delete_file_confirm', { path }))) return;
     if (!draft.remove(path)) return;
@@ -750,7 +750,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
    * the bytes reviewed are not the bytes that would be written, and writing
    * them anyway would be applying a review of something else. */
   function acceptMigration() {
-    if (!draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    if (!draft || operations.busy()) return;
     const proposed = currentMigration();
     if (!proposed || proposed.before !== migrationBefore.value || proposed.after !== migrationAfter.value) {
       show('workshop.migration.stale', [], true); refresh(); return;
@@ -763,7 +763,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
 
   function paintMigration() {
     const proposed = currentMigration();
-    const busy = Boolean(pendingImport || pendingValidation || pendingRecovery || testPanel?.held());
+    const busy = Boolean(operations.busy());
     migrationPanel.hidden = !proposed;
     migrationAccept.disabled = !proposed || busy;
     if (!proposed) { migrationBefore.value = ''; migrationAfter.value = ''; return; }
@@ -811,19 +811,20 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
 
   assetInput.addEventListener('change', async () => {
     const file = assetInput.files?.[0];
-    if (!file || !draft || pendingValidation || pendingRecovery || pendingImport || testPanel?.held()) return;
+    if (!file || !draft || operations.busy()) return;
     const target = draft;
     const path = addPath.value.trim();
-    pendingValidation = true; refresh();
+    const releaseOperation = operations.acquire();
+    if (!releaseOperation) return; refresh();
     try {
       const nativeAsset = isWorkshopBinary(path) && provider?.importAsset;
       const bytes = nativeAsset ? await provider.importAsset(file) : new Uint8Array(await file.arrayBuffer());
       if (disposed || draft !== target) return;
-      pendingValidation = false;
+      releaseOperation();
       addPath.value = path;
       addDocument(isWorkshopBinary(path) ? bytes : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes));
     } catch (error) { if (!disposed) show('workshop.add_refused', [errorText(error)], true); }
-    finally { pendingValidation = false; assetInput.value = ''; if (!disposed) refresh(); }
+    finally { releaseOperation(); assetInput.value = ''; if (!disposed) refresh(); }
   });
   async function loadDependencies() {
     if (!runtime.dependencies) return;
@@ -888,7 +889,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   });
   source.addEventListener('input', () => {
     if (testPanel?.held()) { refresh({ selection: true }); return; }
-    if (pendingImport || pendingValidation || pendingRecovery || testPanel?.held()) return;
+    if (operations.busy()) return;
     if (draft?.edit(selected, source.value)) {
       show('workshop.changed');
       refresh();
@@ -955,7 +956,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   doc.addEventListener('keydown', keydown);
   win.addEventListener('beforeunload', beforeUnload);
   testPanel = mountWorkshopTestPanel({ root, provider, draft: () => draft,
-    busy: () => Boolean(pendingImport || pendingValidation || pendingRecovery), changed(state) {
+    busy: () => Boolean(pendingImport || operations.held() || pendingRecovery || operations.held()), changed(state) {
       if (state?.run) testHadRun = true;
       else if (testHadRun) { testHadRun = false; testWorkspace = false; }
       refresh();
@@ -1089,7 +1090,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
       if (previousFocus && root.contains(previousFocus)) previousFocus.focus({ preventScroll: true });
     },
     dispose() {
-    disposed = true;
+    disposed = true; operations.dispose();
     testLayoutMount?.dispose();
     testPanel.dispose();
     soundAudition?.dispose();

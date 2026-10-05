@@ -191,11 +191,12 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
         if (provider.billboardCapture) {
           const run = async work => {
             if (busy()) return;
-            setBusy(true);
+            const releaseOperation = setBusy(true);
+    if (releaseOperation === false) return;
             try { await work(); }
             catch (error) { billboardResult = provider.billboardCapture.active;
               if (!disposed) show(error.message === 'workshop.billboard.stale' ? error.message : 'workshop.models.capture.failed', true); }
-            finally { if (!disposed) { setBusy(false); renderStructure(); refresh(); } }
+            finally { if (!disposed) { if (typeof releaseOperation === 'function') releaseOperation(); else setBusy(false); renderStructure(); refresh(); } }
           };
           const start = action(`workshop-model-capture-start-${index}`, 'workshop.models.capture.start', () => run(async () => {
             billboardResult = await provider.billboardCapture.start(current, selected, index); show('workshop.models.capture.running');
@@ -231,11 +232,12 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       progress.textContent = (lodGenerationResult?.progress || []).join('\n');
       const run = async work => {
         if (busy()) return;
-        setBusy(true);
+        const releaseOperation = setBusy(true);
+    if (releaseOperation === false) return;
         try { await work(); }
         catch (error) { lodGenerationResult = provider.lodGeneration.active;
           if (!disposed) show(error.message === 'workshop.lod_generation.stale' ? error.message : 'workshop.models.generation.failed', true); }
-        finally { if (!disposed) { setBusy(false); renderStructure(); refresh(); } }
+        finally { if (!disposed) { if (typeof releaseOperation === 'function') releaseOperation(); else setBusy(false); renderStructure(); refresh(); } }
       };
       const start = action('workshop-model-generation-start', 'workshop.models.generation.start', () => run(async () => {
         lodGenerationResult = await provider.lodGeneration.start(current, selected, { remesh: remesh.checked });
@@ -341,7 +343,8 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
     if (busy() || !variant.value) return;
     const candidate = draft(), path = variant.value, source = candidate.read(path);
     if (typeof source !== 'string') return;
-    setBusy(true);
+    const releaseOperation = setBusy(true);
+    if (releaseOperation === false) return;
     try {
       const fields = await runtime.inspect(source, path);
       if (disposed || draft() !== candidate || candidate.read(path) !== source || variant.value !== path) return;
@@ -349,13 +352,14 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       render(fields); show(fields.length ? 'workshop.models.inspected' : 'workshop.inspector_empty');
     } catch {
       if (!disposed) show('workshop.inspector_refused', true);
-    } finally { if (!disposed) { setBusy(false); refresh(); } }
+    } finally { if (!disposed) { if (typeof releaseOperation === 'function') releaseOperation(); else setBusy(false); refresh(); } }
   });
   apply.addEventListener('click', async () => {
     if (busy() || !snapshot || apply.disabled) return;
     const read = snapshot;
     const fields = rows.map(row => row.field), values = rows.map(row => row.input.value);
-    setBusy(true);
+    const releaseOperation = setBusy(true);
+    if (releaseOperation === false) return;
     try {
       const edited = await patchModelFields({ draft: read.draft, runtime, documentPath: read.path,
         source: read.source, fields, values,
@@ -364,7 +368,7 @@ export function mountWorkshopModels({ root, provider, runtime, draft, busy, setB
       show(edited ? 'workshop.changed' : 'workshop.models.unchanged');
     } catch (error) {
       if (!disposed) show(error.message === 'workshop.inspector_stale' ? error.message : 'workshop.inspector_refused', true);
-    } finally { if (!disposed) { setBusy(false); refresh(); } }
+    } finally { if (!disposed) { if (typeof releaseOperation === 'function') releaseOperation(); else setBusy(false); refresh(); } }
   });
   clone.addEventListener('click', async () => {
     if (busy() || clone.disabled) return;

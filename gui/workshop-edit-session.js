@@ -6,14 +6,22 @@ export function createWorkshopEditSession({
   draft, disposed, setBusy, changed, refresh, reload, showChanged, showError,
   restoreFocus = () => {},
 }) {
+  let operationCurrent = () => true;
+  let running = false;
   async function guarded(action, after = () => {}) {
-    setBusy(true);
+    if (running) return;
+    const release = setBusy(true);
+    if (release === false) return;
+    running = true;
+    operationCurrent = typeof release?.current === 'function' ? release.current : () => true;
     let focus = null;
     try { focus = await action(); }
     catch (error) { if (!disposed()) showError(error); }
     finally {
-      if (!disposed()) {
-        setBusy(false);
+      running = false;
+      const released = typeof release === 'function' ? release() : true;
+      if (!disposed() && released) {
+        if (typeof release !== 'function') setBusy(false);
         refresh();
         // Controls must be enabled before the panel chooses a landing spot.
         if (focus?.length) restoreFocus(...focus);
@@ -23,7 +31,7 @@ export function createWorkshopEditSession({
   }
 
   async function land(read, path, result, focus = []) {
-    if (disposed()) return null;
+    if (disposed() || !operationCurrent()) return null;
     if (!snapshotIsCurrent(read, draft())) throw new Error('workshop.inspector_stale');
     if (typeof result !== 'string') throw new Error('workshop.inspector_refused');
     if (draft().edit(path, result)) changed(path);
@@ -68,14 +76,48 @@ export async function refreshWorkshopReading({ draft, disposed, read, validate, 
 /** Own busy presentation without inventing freshness or cancellation policy. */
 export async function runWorkshopMutation({ setBusy, start = () => {}, invoke, success, error,
   current, successCurrent = current, release }) {
-  setBusy(true);
+  const end = setBusy(true);
+  if (end === false) return;
   start();
   try {
     const result = await invoke();
-    if (successCurrent()) success(result);
+    if (successCurrent() && (typeof end?.current !== 'function' || end.current())) success(result);
   } catch (reason) {
     if (current()) error(reason);
   } finally {
-    if (current()) { setBusy(false); release(); }
+    const released = typeof end === 'function' ? end() : true;
+    if (current() && released) {
+      if (typeof end !== 'function') setBusy(false);
+      release();
+    }
   }
+}
+
+/** Workspace admission is shared by all panels. Each acquisition returns its
+ * own release capability; a stale completion cannot unlock a later operation. */
+export function createWorkshopOperations({ blocked = () => false, changed = () => {} } = {}) {
+  let owner = null, disposed = false;
+  const operations = {
+    busy: () => disposed || owner !== null || blocked(),
+    held: () => owner !== null,
+    acquire() {
+      if (disposed || owner !== null || blocked()) return null;
+      const lease = {}; owner = lease; changed();
+      const release = () => {
+        if (disposed || owner !== lease) return false;
+        owner = null; changed(); return true;
+      };
+      release.current = () => !disposed && owner === lease;
+      return release;
+    },
+    invalidate() { owner = null; changed(); },
+    dispose() { disposed = true; owner = null; },
+    panel() {
+      return {
+        busy: () => disposed || owner !== null || blocked(),
+        setBusy(value) { if (value) return operations.acquire() || false; },
+      };
+    },
+  };
+  return operations;
 }

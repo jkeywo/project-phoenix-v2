@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { definitionsSnapshot } from '../../editor/workshop-definitions.js';
-import { createWorkshopEditSession, runWorkshopMutation, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms } from '../../gui/workshop-edit-session.js';
+import { createWorkshopEditSession, createWorkshopOperations, runWorkshopMutation, refreshWorkshopReading, retainUnappliedForms, restoreUnappliedForms } from '../../gui/workshop-edit-session.js';
 
 const path = 'assets/worlds/test.toml';
 const source = '# retained\n[global]\nseed = 1\n';
@@ -154,3 +154,30 @@ it('delegates synchronous invocation and success errors before normal release', 
     error: error => order.push(error), release: () => order.push('refresh') });
   expect(order).toEqual([true, failure, false, 'refresh']);
 });
+
+it('invalidated workspace operation cannot land unchanged source or release a newer owner', async () => {
+  const workspace = createWorkshopOperations();
+  const panel = workspace.panel();
+  const s = setup({setBusy:panel.setBusy, reload:async () => {}});
+  let answer; const pending = new Promise(resolve => {answer = resolve;});
+  const operation = s.guarded(async () => s.land(s.read, path, await pending));
+  workspace.invalidate(); const newer = workspace.acquire();
+  answer(replacement); await operation;
+  expect(s.draft.read(path)).toBe(source); expect(workspace.held()).toBe(true);
+  expect(s.events).toEqual([]); newer(); expect(workspace.held()).toBe(false);
+});
+
+it('Workshop rejects competing owners and stale release cannot unlock its replacement', () => {
+  let blocked = false;
+  const workspace = createWorkshopOperations({ blocked: () => blocked });
+  const first = workspace.panel(), second = workspace.panel();
+  const release = first.setBusy(true);
+  expect(second.setBusy(true)).toBe(false);
+  workspace.invalidate(); const replacement = second.setBusy(true);
+  expect(release()).toBe(false); expect(workspace.busy()).toBe(true);
+  expect(replacement()).toBe(true); expect(workspace.busy()).toBe(false);
+  blocked = true; expect(workspace.acquire()).toBeNull();
+  blocked = false; const late = workspace.acquire(); workspace.dispose();
+  expect(late()).toBe(false); expect(workspace.acquire()).toBeNull();
+});
+

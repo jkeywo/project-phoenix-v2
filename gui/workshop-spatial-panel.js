@@ -153,7 +153,8 @@ export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft,
     if (busy()) return;
     const draft = getDraft(), token = ++generation;
     if (!draft) return;
-    setBusy(true); controls(); show('workshop.spatial.checking');
+    const releaseOperation = setBusy(true);
+    if (releaseOperation === false) return; controls(); show('workshop.spatial.checking');
     try {
       const result = await applySpatialOperation({ draft, provider, runtime, operation, dependencies,
         current: () => !disposed && token === generation && getDraft() === draft });
@@ -162,7 +163,7 @@ export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft,
     } catch (error) {
       if (!disposed && token === generation) show('workshop.spatial.refused', true,
         error?.report?.findings?.map(row => `${row.file || operation.path}: ${row.message}`).join(' ') || String(error?.message || error));
-    } finally { if (!disposed && token === generation) { setBusy(false); controls(); } }
+    } finally { if (!disposed && token === generation) { if (typeof releaseOperation === 'function') releaseOperation(); else setBusy(false); controls(); } }
   }
 
   async function loadDependencies() {

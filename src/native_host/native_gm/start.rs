@@ -58,9 +58,7 @@ pub fn readiness_totals(crew: ReadinessTally, gms: &GmRoster) -> NativeGmReadine
     NativeGmReadinessTotals {
         crew,
         gms: gm_tally,
-        participants: ReadinessTally::try_new(crew.connected, crew.ready)
-            .and_then(|crew| crew.checked_add(gm_tally))
-            .ok(),
+        participants: crew.checked_add(gm_tally).ok(),
         connected_total: u64::from(crew.connected) + u64::from(gm_tally.connected),
         ready_total: u64::from(crew.ready) + u64::from(gm_tally.ready),
     }

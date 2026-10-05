@@ -59,9 +59,7 @@ pub fn evaluate_start_policy(
 ) -> StartPolicyDecision {
     let mut participants = ReadinessTally::default();
     for tally in crew {
-        let Ok(next) = ReadinessTally::try_new(tally.connected, tally.ready)
-            .and_then(|_| participants.checked_add(tally))
-        else {
+        let Ok(next) = participants.checked_add(tally) else {
             return StartPolicyDecision::Refused {
                 reason: StartPolicyReason::InvalidReadiness,
             };

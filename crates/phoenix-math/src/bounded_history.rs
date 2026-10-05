@@ -39,10 +39,43 @@ use std::collections::VecDeque;
 /// Serialisable because it is a field of `world::flags::AiHistory`, which is
 /// itself a field of `world::flags::AiPolicyMemory` — serde for the #862
 /// snapshot payload; the payload boundary is the #894 record.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct BoundedHistory {
     capacity: usize,
     samples: VecDeque<f64>,
+}
+
+// Invalid continuation state is rejected, never silently truncated.
+#[derive(Deserialize)]
+struct HistoryStorage<T> {
+    capacity: usize,
+    samples: VecDeque<T>,
+}
+
+impl<'de> Deserialize<'de> for BoundedHistory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let storage = HistoryStorage::<f64>::deserialize(deserializer)?;
+        if storage.samples.len() > storage.capacity {
+            return Err(serde::de::Error::custom("history exceeds capacity"));
+        }
+        Ok(Self {
+            capacity: storage.capacity,
+            samples: storage.samples,
+        })
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for BoundedRing<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let storage = HistoryStorage::<T>::deserialize(deserializer)?;
+        if storage.samples.len() > storage.capacity {
+            return Err(serde::de::Error::custom("history exceeds capacity"));
+        }
+        Ok(Self {
+            capacity: storage.capacity,
+            samples: storage.samples,
+        })
+    }
 }
 
 impl BoundedHistory {
@@ -202,7 +235,7 @@ impl BoundedHistory {
 /// the *bound*: the ring is `capacity` records per trigger for ever, so a
 /// session that runs for hours keeps the last `capacity` fires of each trigger
 /// and nothing older — a `Vec` that only grows is a leak in exactly that run.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BoundedRing<T> {
     capacity: usize,
     samples: VecDeque<T>,

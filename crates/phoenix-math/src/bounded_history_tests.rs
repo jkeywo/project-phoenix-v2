@@ -306,3 +306,32 @@ fn a_default_ring_retains_nothing_until_a_capacity_is_authored() {
     r.push(2);
     assert_eq!(r.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
 }
+
+#[test]
+fn deserialize_rejects_capacity_violations_for_both_histories() {
+    for malformed in [
+        r#"{"capacity":2,"samples":[10,20,30]}"#,
+        r#"{"capacity":0,"samples":[10]}"#,
+    ] {
+        assert!(serde_json::from_str::<BoundedHistory>(malformed).is_err());
+        assert!(serde_json::from_str::<BoundedRing<u32>>(malformed).is_err());
+    }
+    for valid in [
+        r#"{"capacity":0,"samples":[]}"#,
+        r#"{"capacity":2,"samples":[10]}"#,
+        r#"{"capacity":2,"samples":[10,20]}"#,
+    ] {
+        let numeric: BoundedHistory = serde_json::from_str(valid).unwrap();
+        assert_eq!(
+            serde_json::from_str::<BoundedHistory>(&serde_json::to_string(&numeric).unwrap())
+                .unwrap(),
+            numeric
+        );
+        let ring: BoundedRing<u32> = serde_json::from_str(valid).unwrap();
+        assert_eq!(
+            serde_json::from_str::<BoundedRing<u32>>(&serde_json::to_string(&ring).unwrap())
+                .unwrap(),
+            ring
+        );
+    }
+}

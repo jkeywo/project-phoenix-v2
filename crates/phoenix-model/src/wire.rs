@@ -250,7 +250,7 @@ pub struct DebrisAssessment {
     pub seconds_to_impact: Option<f32>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadinessTally {
     pub connected: u32,
@@ -261,6 +261,20 @@ pub struct ReadinessTally {
 pub enum ReadinessTallyError {
     ReadyExceedsConnected,
     TotalOverflow,
+}
+
+impl<'de> Deserialize<'de> for ReadinessTally {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Counts {
+            connected: u32,
+            ready: u32,
+        }
+        let counts = Counts::deserialize(deserializer)?;
+        Self::try_new(counts.connected, counts.ready)
+            .map_err(|_| serde::de::Error::custom("ready exceeds connected"))
+    }
 }
 
 impl CivilianOrder {
@@ -347,6 +361,8 @@ impl ReadinessTally {
     }
 
     pub fn checked_add(self, other: Self) -> Result<Self, ReadinessTallyError> {
+        Self::try_new(self.connected, self.ready)?;
+        Self::try_new(other.connected, other.ready)?;
         let connected = self
             .connected
             .checked_add(other.connected)
@@ -402,3 +418,7 @@ impl OrderKind {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "wire_tests.rs"]
+mod tests;

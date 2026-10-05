@@ -1161,11 +1161,7 @@ pub(crate) fn tick_beams_prepare(
                     // serves is the one THIS cycle bought (issue #929), not a
                     // fresh read of the authored number: a jittered cycle that
                     // is cut short still owes the cooldown it drew.
-                    let served = beam
-                        .bank_pending_cooldown(&active_bank)
-                        .unwrap_or(cooldown_secs);
-                    beam.end_bank(&active_bank);
-                    cooldown.start_bank(&active_bank, served);
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
                     commands.trigger(BeamEndedEvent {
                         bank: active_bank.clone(),
                         target_uuid,
@@ -1221,11 +1217,7 @@ pub(crate) fn tick_beams_prepare(
             if !bank_in_arc {
                 // Same as the vanished-target arm above: this cycle's own
                 // cooldown, not a fresh read (issue #929).
-                let served = beam
-                    .bank_pending_cooldown(&active_bank)
-                    .unwrap_or(cooldown_secs);
-                beam.end_bank(&active_bank);
-                cooldown.start_bank(&active_bank, served);
+                beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
                 commands.trigger(BeamEndedEvent {
                     bank: active_bank.clone(),
                     target_uuid,
@@ -2050,11 +2042,7 @@ pub(crate) fn tick_beams_tick_lifetimes(
         };
 
         if state.end_beam_early {
-            let served = beam
-                .bank_pending_cooldown(&state.active_bank)
-                .unwrap_or(state.cooldown_secs);
-            beam.end_bank(&state.active_bank);
-            cooldown.start_bank(&state.active_bank, served);
+            beam.complete_bank(&state.active_bank, &mut cooldown, state.cooldown_secs);
             if state.is_local_shooter {
                 if let Some(ref mut wt) = weapons_target_opt {
                     wt.0 = None;
@@ -2079,11 +2067,7 @@ pub(crate) fn tick_beams_tick_lifetimes(
             // The ORDINARY end of a cycle, and the one the jitter is for: the
             // burn ran its drawn length and the rest it paired with follows it
             // (issue #929).
-            let served = beam
-                .bank_pending_cooldown(&state.active_bank)
-                .unwrap_or(state.cooldown_secs);
-            beam.end_bank(&state.active_bank);
-            cooldown.start_bank(&state.active_bank, served);
+            beam.complete_bank(&state.active_bank, &mut cooldown, state.cooldown_secs);
             commands.trigger(BeamEndedEvent {
                 bank: state.active_bank.clone(),
                 target_uuid: state.target_uuid.clone(),

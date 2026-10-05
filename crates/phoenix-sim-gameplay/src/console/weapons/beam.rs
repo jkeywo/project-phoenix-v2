@@ -217,6 +217,25 @@ impl ActiveBeam {
         self.per_bank.remove(bank)
     }
 
+    /// Complete an ordinary cycle, serving its recorded cooldown. Zero in a
+    /// legacy snapshot falls back to the authored cooldown supplied by the host.
+    /// Relight cleanup deliberately continues to use `end_bank` directly.
+    pub fn complete_bank(
+        &mut self,
+        bank: &str,
+        cooldown: &mut PhaserCooldown,
+        fallback_secs: f32,
+    ) -> Option<ActiveBeamSlot> {
+        let slot = self.end_bank(bank)?;
+        let served = if slot.pending_cooldown_secs > 0.0 {
+            slot.pending_cooldown_secs
+        } else {
+            fallback_secs
+        };
+        cooldown.start_bank(bank, served);
+        Some(slot)
+    }
+
     /// Mutable access to one bank's live slot, for the per-tick damage and
     /// lifetime folds.
     pub fn bank_slot_mut(&mut self, bank: &str) -> Option<&mut ActiveBeamSlot> {
@@ -415,3 +434,7 @@ pub struct BeamEndedEvent {
     /// The ship entity that fired the beam.
     pub source_entity: Entity,
 }
+
+#[cfg(test)]
+#[path = "beam_tests.rs"]
+mod tests;

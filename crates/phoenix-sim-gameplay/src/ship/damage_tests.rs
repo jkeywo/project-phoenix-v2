@@ -775,3 +775,60 @@ fn arc_hull_apply_damage_favours_higher_hp_arc() {
         fraction * 100.0
     );
 }
+
+#[test]
+fn both_hulls_preserve_ordered_spill_and_following_rng_draw() {
+    // These outcomes follow the pre-extraction ordered walk, including the
+    // depleted second entry and one draw per selection, rather than only totals.
+    for (order, expected, next) in [
+        ([0, 1, 2, 3], [0.0, 0.0, 3.0, 0.0], 1_773_229_902),
+        ([3, 2, 1, 0], [3.0, 0.0, 0.0, 0.0], 168_391_573),
+    ] {
+        let hp = [3.0, 0.0, 11.0, 29.0];
+        let mut systems =
+            SystemHull::from_config(&order.map(|id| (SystemId(id.to_string()), hp[id])));
+        let mut arcs = ShipArcHull::from_entries(
+            order
+                .into_iter()
+                .map(|id| {
+                    (
+                        id.to_string(),
+                        ArcHullEntry {
+                            current: hp[id],
+                            max: hp[id],
+                            tier_config: ConsoleTierConfig::default(),
+                        },
+                    )
+                })
+                .collect(),
+        );
+        let mut system_rng = Pcg32::from_parts(123_456_789, 1);
+        let mut arc_rng = system_rng.clone();
+        systems.apply_damage(40.0, &mut system_rng);
+        arcs.apply_damage(40.0, &mut arc_rng);
+        for (id, expected) in expected.into_iter().enumerate() {
+            assert_eq!(
+                systems.get(&SystemId(id.to_string())).unwrap().current,
+                expected
+            );
+            assert_eq!(arcs.get(&id.to_string()).unwrap().current, expected);
+        }
+        assert_eq!(system_rng.next_u32(), next);
+        assert_eq!(arc_rng.next_u32(), next);
+    }
+    let mut systems = SystemHull::from_config(&[(SystemId("a".into()), 5.0)]);
+    let mut rng = Pcg32::from_parts(123_456_789, 1);
+    let mut untouched = rng.clone();
+    systems.apply_damage_within(Some(&[]), 99.0, &mut rng);
+    assert_eq!(rng.next_u32(), untouched.next_u32());
+    assert_eq!(systems.total_current(), 5.0);
+}
+#[test]
+fn tier_rules_keep_strict_thresholds_and_nonpositive_max() {
+    let config = ConsoleTierConfig::default();
+    assert_eq!(damage_tier(75.0, 100.0, config), DamageTier::Operational);
+    assert_eq!(damage_tier(25.0, 100.0, config), DamageTier::Damaged);
+    assert_eq!(damage_tier(1.0, 0.0, config), DamageTier::Disabled);
+    assert_eq!(damage_tier(1.0, -1.0, config), DamageTier::Disabled);
+    assert_eq!(damage_tier(0.0, 0.0, config), DamageTier::Destroyed);
+}

@@ -30,6 +30,118 @@ pub fn unit_f32(rng: &mut Pcg32) -> f32 {
 
 // ── DamageTier ────────────────────────────────────────────────────────────────
 
+fn damage_tier(current: f32, max: f32, config: ConsoleTierConfig) -> DamageTier {
+    if current == 0.0 {
+        return DamageTier::Destroyed;
+    }
+    let ratio = if max > 0.0 { current / max } else { 0.0 };
+    if ratio < config.disabled_threshold_pct {
+        DamageTier::Disabled
+    } else if ratio < config.damaged_threshold_pct {
+        DamageTier::Damaged
+    } else {
+        DamageTier::Operational
+    }
+}
+
+// The two hull owners keep their identities and metadata; this private walk
+// owns only the shared ordered weighted damage rule, including RNG draws.
+trait CurrentHp {
+    fn current(&self) -> f32;
+    fn current_mut(&mut self) -> &mut f32;
+}
+impl CurrentHp for SystemHullEntry {
+    fn current(&self) -> f32 {
+        self.current
+    }
+    fn current_mut(&mut self) -> &mut f32 {
+        &mut self.current
+    }
+}
+impl CurrentHp for ArcHullEntry {
+    fn current(&self) -> f32 {
+        self.current
+    }
+    fn current_mut(&mut self) -> &mut f32 {
+        &mut self.current
+    }
+}
+trait HpEntries<K> {
+    type Entry: CurrentHp;
+    fn get(&self, key: &K) -> Option<&Self::Entry>;
+    fn get_mut(&mut self, key: &K) -> Option<&mut Self::Entry>;
+}
+impl<K: Ord, E: CurrentHp> HpEntries<K> for std::collections::BTreeMap<K, E> {
+    type Entry = E;
+    fn get(&self, key: &K) -> Option<&E> {
+        self.get(key)
+    }
+    fn get_mut(&mut self, key: &K) -> Option<&mut E> {
+        self.get_mut(key)
+    }
+}
+impl<K: Eq + std::hash::Hash, E: CurrentHp> HpEntries<K> for HashMap<K, E> {
+    type Entry = E;
+    fn get(&self, key: &K) -> Option<&E> {
+        self.get(key)
+    }
+    fn get_mut(&mut self, key: &K) -> Option<&mut E> {
+        self.get_mut(key)
+    }
+}
+fn weighted_damage<K: Clone, M: HpEntries<K>>(
+    order: &[K],
+    entries: &mut M,
+    mut amount: f32,
+    rng: &mut Pcg32,
+    in_scope: impl Fn(&K) -> bool,
+) {
+    while amount > 0.0 {
+        let total: f32 = order
+            .iter()
+            .filter(|id| in_scope(id))
+            .filter_map(|id| entries.get(id))
+            .filter(|entry| entry.current() > 0.0)
+            .map(|entry| entry.current())
+            .sum();
+        if total == 0.0 {
+            break;
+        }
+        let mut r = unit_f32(rng) * total;
+        let mut chosen = None;
+        for id in order.iter().filter(|id| in_scope(id)) {
+            let hp = entries
+                .get(id)
+                .expect("hull order and entries agree")
+                .current();
+            if hp <= 0.0 {
+                continue;
+            }
+            r -= hp;
+            if r < 0.0 {
+                chosen = Some(id.clone());
+                break;
+            }
+        }
+        let id = chosen.unwrap_or_else(|| {
+            order
+                .iter()
+                .rev()
+                .filter(|id| in_scope(id))
+                .find(|id| entries.get(*id).is_some_and(|entry| entry.current() > 0.0))
+                .cloned()
+                .expect("positive total has a live entry in scope")
+        });
+        let hp = entries
+            .get_mut(&id)
+            .expect("hull order and entries agree")
+            .current_mut();
+        let absorbed = amount.min(*hp);
+        *hp -= absorbed;
+        amount -= absorbed;
+    }
+}
+
 /// HP-derived damage tier for a single console.
 ///
 /// Tiers are computed from `current_hp / max_hp` against configurable
@@ -279,21 +391,7 @@ impl SystemHull {
         let Some(entry) = self.entries.get(sid) else {
             return DamageTier::Operational;
         };
-        if entry.current == 0.0 {
-            return DamageTier::Destroyed;
-        }
-        let ratio = if entry.max > 0.0 {
-            entry.current / entry.max
-        } else {
-            0.0
-        };
-        if ratio < entry.tier_config.disabled_threshold_pct {
-            DamageTier::Disabled
-        } else if ratio < entry.tier_config.damaged_threshold_pct {
-            DamageTier::Damaged
-        } else {
-            DamageTier::Operational
-        }
+        damage_tier(entry.current, entry.max, entry.tier_config)
     }
 
     /// Apply `amount` of damage distributed across systems above 0 HP,
@@ -320,59 +418,12 @@ impl SystemHull {
     pub fn apply_damage_within(
         &mut self,
         allow: Option<&[SystemId]>,
-        mut amount: f32,
+        amount: f32,
         rng: &mut Pcg32,
     ) {
-        let in_scope = |id: &SystemId| allow.is_none_or(|allow| allow.contains(id));
-        while amount > 0.0 {
-            let total: f32 = self
-                .order
-                .iter()
-                .filter(|id| in_scope(id))
-                .filter_map(|id| self.entries.get(id))
-                .filter(|entry| entry.current > 0.0)
-                .map(|entry| entry.current)
-                .sum();
-            if total == 0.0 {
-                break;
-            }
-            // Weighted selection: generate r in [0, total), subtract each
-            // system's HP in order; choose the first one that drives r
-            // negative.
-            let mut r = unit_f32(rng) * total;
-            let mut chosen_id: Option<SystemId> = None;
-            for id in self.order.iter().filter(|id| in_scope(id)) {
-                let entry = self
-                    .entries
-                    .get(id)
-                    .expect("SystemHull invariant: order and entries agree");
-                if entry.current <= 0.0 {
-                    continue;
-                }
-                r -= entry.current;
-                if r < 0.0 {
-                    chosen_id = Some(id.clone());
-                    break;
-                }
-            }
-            // Float-precision safety: fall back to the last available system.
-            let idx = chosen_id.unwrap_or_else(|| {
-                self.order
-                    .iter()
-                    .rev()
-                    .filter(|id| in_scope(id))
-                    .find(|id| self.entries.get(*id).is_some_and(|e| e.current > 0.0))
-                    .cloned()
-                    .expect("total > 0.0 implies at least one live entry in scope")
-            });
-            let entry = self
-                .entries
-                .get_mut(&idx)
-                .expect("SystemHull invariant: order and entries agree");
-            let absorbed = amount.min(entry.current);
-            entry.current -= absorbed;
-            amount -= absorbed;
-        }
+        weighted_damage(&self.order, &mut self.entries, amount, rng, |id| {
+            allow.is_none_or(|allow| allow.contains(id))
+        });
     }
 
     /// Iterate `(SystemId, current, max)` triples in TOML declaration order.
@@ -689,74 +740,14 @@ impl ShipArcHull {
         let Some(entry) = self.entries.get(arc_id) else {
             return DamageTier::Operational;
         };
-        if entry.current == 0.0 {
-            return DamageTier::Destroyed;
-        }
-        let ratio = if entry.max > 0.0 {
-            entry.current / entry.max
-        } else {
-            0.0
-        };
-        if ratio < entry.tier_config.disabled_threshold_pct {
-            DamageTier::Disabled
-        } else if ratio < entry.tier_config.damaged_threshold_pct {
-            DamageTier::Damaged
-        } else {
-            DamageTier::Operational
-        }
+        damage_tier(entry.current, entry.max, entry.tier_config)
     }
 
     /// Apply `amount` of damage distributed across arcs above 0 HP, weighted
     /// by remaining HP — same policy as [`SystemHull::apply_damage`]. Damage
     /// spills to further weighted selections when an arc is exhausted.
-    pub fn apply_damage(&mut self, mut amount: f32, rng: &mut Pcg32) {
-        while amount > 0.0 {
-            let total: f32 = self
-                .order
-                .iter()
-                .filter_map(|id| self.entries.get(id))
-                .filter(|entry| entry.current > 0.0)
-                .map(|entry| entry.current)
-                .sum();
-            if total == 0.0 {
-                break;
-            }
-            let mut r = unit_f32(rng) * total;
-            let mut chosen_id: Option<String> = None;
-            for id in &self.order {
-                let entry = self
-                    .entries
-                    .get(id)
-                    .expect("ShipArcHull invariant: order and entries agree");
-                if entry.current <= 0.0 {
-                    continue;
-                }
-                r -= entry.current;
-                if r < 0.0 {
-                    chosen_id = Some(id.clone());
-                    break;
-                }
-            }
-            let idx = chosen_id.unwrap_or_else(|| {
-                self.order
-                    .iter()
-                    .rev()
-                    .find(|id| {
-                        self.entries
-                            .get(id.as_str())
-                            .is_some_and(|e| e.current > 0.0)
-                    })
-                    .cloned()
-                    .expect("total > 0.0 implies at least one live entry")
-            });
-            let entry = self
-                .entries
-                .get_mut(&idx)
-                .expect("ShipArcHull invariant: order and entries agree");
-            let absorbed = amount.min(entry.current);
-            entry.current -= absorbed;
-            amount -= absorbed;
-        }
+    pub fn apply_damage(&mut self, amount: f32, rng: &mut Pcg32) {
+        weighted_damage(&self.order, &mut self.entries, amount, rng, |_| true);
     }
 
     /// Restore `amount` HP to a specific arc, clamped to its max. Arcs not

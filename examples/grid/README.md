@@ -46,3 +46,12 @@ native and browser-host movement/reconnect/reload, checks console requests for
 WASM, and stops its services. Build the native binary and browser package first.
 Unit tests cover peer ordering with delayed/duplicate delivery, digest divergence,
 checkpoint restoration and rejection without partial state mutation.
+
+The browser smoke distinguishes three contracts: console checkpoint delivery
+(the console paints the checkpoint), native file persistence across process
+restart, and host continuation from the same checkpoint on native and WASM.
+`phoenix-grid --verify-continuation <checkpoint-file>` is the finite comparison
+mode used by the smoke: it restores the checkpoint, queues right/down moves,
+advances five ticks and prints the resulting checkpoint and State envelope.
+The direct Rust chunk-transfer tests separately prove in-memory runtime recovery;
+ordinary console connections do not implement networked host-to-host lockstep.

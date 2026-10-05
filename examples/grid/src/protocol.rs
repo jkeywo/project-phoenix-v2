@@ -60,3 +60,84 @@ impl RelayProtocol for GridProtocol {
         codec::encode(message)
     }
 }
+
+/// Shared application decision after physical identity admission.
+pub fn apply(grid: &mut Grid, input: Input) -> Result<Option<Output>, String> {
+    match input {
+        Input::Move(movement) => {
+            grid.submit(movement);
+            Ok(None)
+        }
+        Input::Identify { .. } | Input::Recover => Ok(Some(Output::Recovery {
+            checkpoint: grid.checkpoint()?,
+        })),
+    }
+}
+
+#[derive(Serialize)]
+pub struct BrowserReply {
+    pub previous: Option<String>,
+    pub output: Option<Output>,
+}
+
+/// Browser physical handles use the same ownership policy as native relay.
+/// JavaScript only holds sockets; decoding, binding and recipient admission live here.
+pub struct BrowserAdmission {
+    connections: phoenix_transport::connections::ConnectionRegistry,
+    handles: std::collections::BTreeMap<String, phoenix_transport::connections::ConnectionId>,
+}
+impl Default for BrowserAdmission {
+    fn default() -> Self {
+        Self {
+            connections: Default::default(),
+            handles: Default::default(),
+        }
+    }
+}
+impl BrowserAdmission {
+    pub fn open(&mut self) -> String {
+        let id = self.connections.open(0);
+        let handle = id.incarnation.to_string();
+        self.handles.insert(handle.clone(), id);
+        handle
+    }
+    pub fn close(&mut self, handle: &str) {
+        if let Some(id) = self.handles.remove(handle) {
+            self.connections.close(id);
+        }
+    }
+    pub fn receive(
+        &mut self,
+        grid: &mut Grid,
+        handle: &str,
+        raw: &str,
+    ) -> Result<BrowserReply, String> {
+        let input = GridProtocol::decode_client(raw)?;
+        let id = *self.handles.get(handle).ok_or("stale-connection")?;
+        let previous = if let Some(token) = GridProtocol::identity(&input) {
+            self.connections
+                .bind(id, token)
+                .map_err(|reason| format!("{reason:?}"))?
+                .map(|old| old.incarnation.to_string())
+        } else {
+            None
+        };
+        let output = if self.connections.sender(id).is_some() {
+            apply(grid, input)?
+        } else {
+            None
+        };
+        Ok(BrowserReply { previous, output })
+    }
+    pub fn recipients(&self) -> Vec<String> {
+        self.connections
+            .recipients(&phoenix_transport::Target::All)
+            .iter()
+            .map(|id| id.incarnation.to_string())
+            .collect()
+    }
+}
+
+#[cfg(test)]
+#[path = "protocol_tests.rs"]
+mod tests;

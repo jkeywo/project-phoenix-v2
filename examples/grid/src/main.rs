@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use phoenix_grid::{
-        protocol::{GridProtocol, Input, Output},
+        protocol::{apply, GridProtocol, Output},
         Grid,
     };
     use phoenix_runtime::HostSlot;
@@ -11,6 +11,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     use phoenix_transport::{DeliveryClass, Dispatch, Event, Target, Transport};
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--verify-continuation") {
+        let path = args.get(2).ok_or("checkpoint path required")?;
+        let mut grid = Grid::new(HostSlot(1), []);
+        grid.restore(&std::fs::read_to_string(path)?)
+            .map_err(std::io::Error::other)?;
+        grid.submit(phoenix_grid::Move { dx: 1, dy: 0 });
+        grid.submit(phoenix_grid::Move { dx: 0, dy: 1 });
+        for _ in 0..5 {
+            grid.advance();
+        }
+        println!(
+            "{}",
+            serde_json::json!({ "checkpoint": grid.checkpoint().map_err(std::io::Error::other)?, "state": Output::state(&grid) })
+        );
+        return Ok(());
+    }
     let base = args
         .get(1)
         .map(String::as_str)
@@ -37,20 +53,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         for event in transport.poll() {
             if let Event::Received { token, msg } = event {
-                match msg {
-                    Input::Move(movement) => {
-                        grid.submit(movement);
-                    }
-                    Input::Identify { .. } | Input::Recover => {
-                        let message = Output::Recovery {
-                            checkpoint: grid.checkpoint().map_err(std::io::Error::other)?,
-                        };
-                        transport.dispatch(Dispatch {
-                            target: &Target::Token(token),
-                            msg: &message,
-                            delivery: DeliveryClass::Reliable,
-                        });
-                    }
+                if let Some(message) = apply(&mut grid, msg).map_err(std::io::Error::other)? {
+                    transport.dispatch(Dispatch {
+                        target: &Target::Token(token),
+                        msg: &message,
+                        delivery: DeliveryClass::Reliable,
+                    });
                 }
             }
         }

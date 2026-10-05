@@ -1,11 +1,12 @@
+import { createGridLifecycle, createGridPeers } from './host-lifecycle.js';
 import { createRendezvousHost, createRendezvousJoiner } from '../../packages/transport/src/rendezvous-transport.js';
 import { installSessionToken } from '../../packages/session/src/session-token.js';
 const data = await (await fetch('./join-codes.json')).json();
 const token = installSessionToken(window, { tabKey: 'grid-tab', sharedKey: 'grid-session', registryKey: 'grid-tabs' });
 const $ = (id) => document.getElementById(id);
 const status = (text) => { $('status').textContent = text; };
-let transport, grid, timer;
-const peers = new Set();
+let transport, grid;
+const lifecycle = createGridLifecycle();
 const ctx = document.querySelector('canvas').getContext('2d');
 function paint(state, digest = '') {
   ctx.clearRect(0, 0, 400, 400);
@@ -22,42 +23,50 @@ function receive(message) {
     paint(saved.state); status(`Checkpoint received at tick ${saved.state.tick}`);
   }
 }
-function stop() { $('digest').textContent = ''; for (const button of document.querySelectorAll('[data-dx]')) button.disabled = true; transport?.close(); transport = null; clearInterval(timer); peers.clear(); grid?.free(); grid = null; }
+function stop() {
+  lifecycle.stop(); transport = null; grid = null;
+  $('digest').textContent = '';
+  for (const button of document.querySelectorAll('[data-dx]')) button.disabled = true;
+}
 $('disconnect').onclick = () => { stop(); status('Disconnected'); };
 $('join').onclick = () => {
   stop();
+  const operation = lifecycle.begin();
   transport = createRendezvousJoiner({ base: $('service').value, data, code: $('code').value, stamp: 'grid/1',
-    getIdent: () => ({ token, name: 'Grid player' }), localise: false, onData: receive,
-    onStatus: status, onError: status });
+    onAccepted: ({ send }) => send(JSON.stringify({ type: 'Identify', data: { token, name: 'Grid player' } })),
+    onData: message => { if (operation.current()) receive(message); },
+    onStatus: text => { if (operation.current()) status(text); }, onError: text => { if (operation.current()) status(text); } });
+  const ownedTransport = transport; operation.own(() => ownedTransport.close());
 };
 $('host').onclick = async () => {
   stop();
+  const operation = lifecycle.begin();
   try {
-    const module = await import('./pkg/phoenix_grid.js'); await module.default(); grid = new module.GridHost();
-    const saved = localStorage.getItem('grid-checkpoint'); if (saved) grid.restore(saved);
-    transport = createRendezvousHost({ base: $('service').value, data, checkStamp: (stamp) => stamp === 'grid/1' ? { ok: true } : { ok: false, code: 'version-mismatch', detail: 'This host runs Grid 1' },
-      onCode: (code) => { $('code').value = code.suffix; status(`Hosting ${code.suffix}`); }, onError: status,
-      onConnection: (peer) => {
-        peers.add(peer);
-        let identified = false;
-        peer.on('close', () => peers.delete(peer));
-        peer.on('data', (raw) => {
-          let message; try { message = JSON.parse(raw); } catch { return; }
-          if (message.type === 'Identify') identified = typeof message.data?.token === 'string' && message.data.token.length > 0;
-          if (!identified) return;
-          if (message.type === 'Move') grid.move_piece(message.data?.dx, message.data?.dy);
-          if (message.type === 'Identify' || message.type === 'Recover') peer.send(JSON.stringify({ type: 'Recovery', data: { checkpoint: grid.checkpoint() } }));
-        });
-      } });
-    timer = setInterval(() => {
-      grid.tick(); const raw = grid.state(); receive(JSON.parse(raw));
-      for (const peer of peers) {
-        if (peer.snapshotChannel?.readyState === 'open') { try { peer.snapshotChannel.send(raw); } catch {} }
-        else peer.send(raw);
-      }
-      localStorage.setItem('grid-checkpoint', grid.checkpoint());
+    const module = await import('./pkg/phoenix_grid.js');
+    if (!operation.current()) return;
+    await module.default();
+    if (!operation.current()) return;
+    const ownedGrid = new module.GridHost(); operation.own(() => ownedGrid.free());
+    const saved = localStorage.getItem('grid-checkpoint'); if (saved) ownedGrid.restore(saved);
+    const peers = createGridPeers(ownedGrid); operation.own(() => peers.close());
+    const ownedTransport = createRendezvousHost({ base: $('service').value, data,
+      checkStamp: stamp => JSON.parse(module.GridHost.check_stamp(stamp || '')),
+      onCode: code => { if (operation.current()) { $('code').value = code.suffix; status(`Hosting ${code.suffix}`); } },
+      onError: text => { if (operation.current()) status(text); },
+      onConnection: peer => { if (operation.current()) peers.attach(peer); else peer.close(); },
+    });
+    operation.own(() => ownedTransport.close());
+    grid = ownedGrid; transport = ownedTransport;
+    const ownedTimer = setInterval(() => {
+      if (!operation.current()) return;
+      ownedGrid.tick(); const raw = ownedGrid.state(); receive(JSON.parse(raw));
+      peers.publish(raw);
+      localStorage.setItem('grid-checkpoint', ownedGrid.checkpoint());
     }, 100);
-  } catch (error) { stop(); status(`Cannot host: ${error.message || error}. Build the grid WASM first.`); }
+    operation.own(() => clearInterval(ownedTimer));
+  } catch (error) {
+    if (operation.current()) { stop(); status(`Cannot host: ${error.message || error}. Build the grid WASM first.`); }
+  }
 };
 for (const button of document.querySelectorAll('[data-dx]')) button.onclick = () => {
   const move = { dx: Number(button.dataset.dx), dy: Number(button.dataset.dy) };

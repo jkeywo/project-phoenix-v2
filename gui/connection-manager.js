@@ -60,12 +60,22 @@ export function openRelayFallbackServers() {
  *                             the connection will almost certainly fail, so
  *                             callers must warn rather than retry silently.
  */
-export async function fetchIceServers() {
+export async function fetchIceServers({ timeoutMs = 7000 } = {}) {
+  const controller = new AbortController();
+  let timer;
   const base = defaultIceServers();
   try {
-    const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
+    const result = await Promise.race([
+      (async () => {
+        const response = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev', { signal: controller.signal });
+        return { response, extra: response.ok ? await response.json() : null };
+      })(),
+      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('TURN credential timeout')); }, timeoutMs); }),
+    ]);
+    const r = result.response;
     if (r.ok) {
-      const extra = await r.json();
+      const extra = result.extra;
+      if (!Array.isArray(extra)) throw new Error('Invalid TURN credential response');
       console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
       const servers = [...base, ...extra];
       const relayAvailable = hasRelayServer(servers);
@@ -74,7 +84,7 @@ export async function fetchIceServers() {
     console.warn('[ICE] Metered.ca fetch returned', r.status, '— falling back to shared OpenRelay TURN');
   } catch (e) {
     console.warn('[ICE] Metered.ca fetch failed — falling back to shared OpenRelay TURN:', e.message);
-  }
+  } finally { clearTimeout(timer); }
   return {
     servers: [...base, ...openRelayFallbackServers()],
     relayAvailable: true,

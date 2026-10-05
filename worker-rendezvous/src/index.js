@@ -104,39 +104,31 @@ export class RendezvousRegistry {
     this.sockets = new Map();
   }
 
+  drop(connId) {
+    if (!this.sockets.delete(connId)) return;
+    this.dispatch(this.registry.disconnect(connId));
+  }
+
   dispatch(frames) {
     for (const { to, frame, close } of frames) {
       const ws = this.sockets.get(to);
-      // A socket this object no longer holds, or one already closing, cannot
-      // take bytes. Say so, or a relay mailbox drains into nothing on every
-      // turn and the authored queue depths never apply to the one case they
-      // exist for. See src/relay.js: this is the ONLY backpressure signal a
-      // Durable Object has, because Cloudflare's WebSocket exposes no
-      // `bufferedAmount`.
-      //
-      // Deliberately one-way. Both triggers are terminal — `drop()` below
-      // deletes the socket, and a CLOSING socket never reopens — so there is
-      // no re-arming path and none is wanted; the peer's own close event
-      // detaches its mailbox a moment later.
       if (!ws || (ws.readyState !== undefined && ws.readyState !== 1)) {
         this.registry.setWritable(to, false);
+        this.drop(to);
         continue;
       }
-      try {
-        ws.send(JSON.stringify(frame));
-      } catch {
-        // A socket that has already gone away is not an error worth failing
-        // the sending peer's request over; the close event cleans it up.
+      try { ws.send(JSON.stringify(frame)); }
+      catch {
+        this.registry.setWritable(to, false);
+        this.drop(to);
+        try { ws.close(1011, 'delivery-failed'); } catch { /* terminal */ }
+        continue;
       }
-      // The registry cannot hold a socket, so a refusal that should also END
-      // the connection (a connection past its lookup cap) says so on the frame
-      // and this adapter carries it out — after the refusal has been sent, so
-      // the peer learns why rather than seeing an unexplained drop.
-      if (!close) continue;
-      try {
-        ws.close(1008, frame.reason || 'refused');
-      } catch {
-        // Already gone; the close handler will clean up.
+      if (close) {
+        // Send the refusal before retiring the registry entry. Socket events
+        // may arrive later, or never arrive after an adapter failure.
+        this.drop(to);
+        try { ws.close(1008, frame.reason || 'refused'); } catch { /* terminal */ }
       }
     }
   }
@@ -153,6 +145,7 @@ export class RendezvousRegistry {
     this.sockets.set(connId, serverSocket);
 
     serverSocket.addEventListener('message', (evt) => {
+      if (!this.sockets.has(connId)) return;
       let frame = null;
       try {
         frame = JSON.parse(typeof evt.data === 'string' ? evt.data : '');
@@ -162,11 +155,7 @@ export class RendezvousRegistry {
       this.dispatch(this.registry.receive(connId, frame));
     });
 
-    const drop = () => {
-      if (!this.sockets.has(connId)) return;
-      this.sockets.delete(connId);
-      this.dispatch(this.registry.disconnect(connId));
-    };
+    const drop = () => this.drop(connId);
     serverSocket.addEventListener('close', drop);
     serverSocket.addEventListener('error', drop);
 

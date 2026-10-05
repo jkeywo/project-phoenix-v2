@@ -23,21 +23,22 @@
 // fetch fresh ones on every page load, so a short TTL costs nothing.
 const CF_TURN_TTL_SECONDS = 6 * 60 * 60;
 
-async function meteredServers(env) {
+async function meteredServers(env, signal) {
   if (!env.METERED_APP || !env.METERED_KEY) return [];
   const r = await fetch(
-    `https://${env.METERED_APP}.metered.live/api/v1/turn/credentials?apiKey=${env.METERED_KEY}`
+    `https://${env.METERED_APP}.metered.live/api/v1/turn/credentials?apiKey=${env.METERED_KEY}`, { signal }
   );
   if (!r.ok) throw new Error(`Metered.ca returned ${r.status}`);
   const body = await r.json();
   return Array.isArray(body) ? body : [];
 }
 
-async function cloudflareServers(env) {
+async function cloudflareServers(env, signal) {
   if (!env.CF_TURN_KEY_ID || !env.CF_TURN_API_TOKEN) return [];
   const r = await fetch(
     `https://rtc.live.cloudflare.com/v1/turn/keys/${env.CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
     {
+      signal,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${env.CF_TURN_API_TOKEN}`,
@@ -54,6 +55,18 @@ async function cloudflareServers(env) {
   return Array.isArray(ice) ? ice : ice ? [ice] : [];
 }
 
+
+/** Deadline covers both fetch and body decoding, even if a provider ignores abort. */
+export async function acquireTurnSource(acquire, timeoutMs = 5000) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([acquire(controller.signal), new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('TURN provider timed out')); }, timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 export default {
   async fetch(request, env) {
     // CORS preflight
@@ -66,8 +79,8 @@ export default {
     }
 
     const results = await Promise.allSettled([
-      meteredServers(env),
-      cloudflareServers(env),
+      acquireTurnSource(signal => meteredServers(env, signal)),
+      acquireTurnSource(signal => cloudflareServers(env, signal)),
     ]);
     const servers = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
     const errors = results

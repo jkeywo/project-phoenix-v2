@@ -2,13 +2,13 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [src/entities/ship_spawn.rs, src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/console/weapons/blackboard.rs, src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, src/console/helm/server.rs, src/weapons/, src/server_app/registration.rs, src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml]
 updated: 2026-10-04
 ---
 
 # WeaponsPlugin
 
-The Tactical/weapons module follows the pure-root plus server-adapter convention. `src/console/weapons/mod.rs` declares and re-exports the module tree; `src/console/weapons/server.rs` owns `WeaponsPlugin`, shared resources, registration, and Tactical target selection.
+The Tactical/weapons module follows the pure-root plus server-adapter convention. `crates/phoenix-simulation/src/console/weapons/mod.rs` declares and re-exports the module tree; `crates/phoenix-simulation/src/console/weapons/server.rs` owns `WeaponsPlugin`, shared resources, registration, and Tactical target selection.
 
 Weapon consumers and projections read each ship's equipment components.
 Missing components produce no mounts or ammunition and never borrow the global
@@ -20,15 +20,15 @@ legacy weapon configurations retain their existing construction rules.
 
 | File | Responsibility |
 |---|---|
-| `src/console/weapons/server.rs` | Plugin assembly, shared state, admitted-consumer registration, Tactical AI target selection, and the Tactical-owned receiver for delivered frequency hints. |
-| `src/console/weapons/beam.rs` | Phaser banks, target-lock application, auto-fire, beam lifecycle, and damage. |
-| `src/console/weapons/torpedo.rs` | Tube load/fire commands, target snapshots, torpedo lifecycle, and detonation. |
-| `src/console/weapons/blaster.rs` | NPC blaster charge/fire and hit application. |
-| `src/console/weapons/blackboard.rs` | Weapons/Tactical radar blackboards, `WeaponsUpdate`, and its broadcaster. |
-| `src/console/weapons/shared.rs` | Cross-family helpers and one-tick handoff resources. |
-| `src/console/weapons/server_tests.rs` | The large plugin integration suite included from `src/console/weapons/server.rs`. |
+| `crates/phoenix-simulation/src/console/weapons/server.rs` | Plugin assembly, shared state, admitted-consumer registration, Tactical AI target selection, and the Tactical-owned receiver for delivered frequency hints. |
+| `crates/phoenix-simulation/src/console/weapons/beam.rs` | Phaser banks, target-lock application, auto-fire, beam lifecycle, and damage. |
+| `crates/phoenix-simulation/src/console/weapons/torpedo.rs` | Tube load/fire commands, target snapshots, torpedo lifecycle, and detonation. |
+| `crates/phoenix-simulation/src/console/weapons/blaster.rs` | NPC blaster charge/fire and hit application. |
+| `crates/phoenix-simulation/src/console/weapons/blackboard.rs` | Weapons/Tactical radar blackboards, `WeaponsUpdate`, and its broadcaster. |
+| `crates/phoenix-simulation/src/console/weapons/shared.rs` | Cross-family helpers and one-tick handoff resources. |
+| `crates/phoenix-simulation/src/console/weapons/server_tests.rs` | The large plugin integration suite included from `crates/phoenix-simulation/src/console/weapons/server.rs`. |
 
-Pure weapon state machines and geometry used by these adapters live under `src/weapons/`.
+Pure weapon state machines and geometry used by these adapters live under `crates/phoenix-simulation/src/weapons/`.
 
 ## Command symmetry
 
@@ -69,7 +69,7 @@ on the next tick. `tests/reconnect_snapshot_boundary.rs` checks that boundary
 and the shared 10 Hz Weapons cache while exercising an ordinary load/unload
 and reconnect; a reconnect does not reset that cache.
 
-Weapon reach, arcs, cooldowns, load times, payloads, colours, and AI policy parameters come from entity TOML. `src/server_app/world_setup.rs` projects the selected hull's authored configuration into runtime components/resources; renderer-only beam appearance stays separate from hit authority.
+Weapon reach, arcs, cooldowns, load times, payloads, colours, and AI policy parameters come from entity TOML. `crates/phoenix-simulation/src/server_app/world_setup.rs` projects the selected hull's authored configuration into runtime components/resources; renderer-only beam appearance stays separate from hit authority.
 
 ## Publication
 

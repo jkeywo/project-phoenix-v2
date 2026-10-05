@@ -14,7 +14,8 @@ use super::*;
 use crate::core::messages::{DeliveryClass, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::native_host::panes::identity::PaneIdentity;
-use crate::native_host::transport::{NativeTransport, TransportDispatch};
+use crate::native_host::transport::TransportDispatch;
+use phoenix_transport::transport::Transport;
 
 const CONSOLE: PaneId = PaneId(1);
 const LOBBY: PaneId = PaneId(900);
@@ -79,12 +80,14 @@ fn stats(out: &[PaneEvent]) -> PaneThreadSample {
 fn disabled_attribution_attaches_no_trace_or_phase_clock_samples() {
     let mut driver = one_pane(HUD, PaneKind::Hud);
     let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
-    sink.configure(HUD, PaneKind::Hud, (WIDTH * HEIGHT * 4) as usize);
+    sink.configure(
+        HUD,
+        PaneKind::Hud.pixel_mode(),
+        (WIDTH * HEIGHT * 4) as usize,
+    );
     let mut out = Vec::new();
     driver.iterate(&mut sink, &mut out);
-    let PaneEvent::Frame(frame) = &sink.frames[0] else {
-        panic!("a real frame")
-    };
+    let frame = &sink.frames[0];
     assert!(frame.bytes.trace().is_none());
     assert!(
         !out.iter()
@@ -410,7 +413,11 @@ fn observed_pool_preserves_old_frame_identity_across_resize_and_recycles_once() 
     let mut driver = one_pane(HUD, PaneKind::Hud);
     driver.set_observer(Some(observer.clone()));
     let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
-    sink.configure(HUD, PaneKind::Hud, (WIDTH * HEIGHT * 4) as usize);
+    sink.configure(
+        HUD,
+        PaneKind::Hud.pixel_mode(),
+        (WIDTH * HEIGHT * 4) as usize,
+    );
     let mut out = Vec::new();
     for _ in 0..PANE_STAGING_BUFFERS + 1 {
         driver.iterate(&mut sink, &mut out);
@@ -428,7 +435,11 @@ fn observed_pool_preserves_old_frame_identity_across_resize_and_recycles_once() 
         &mut sink,
         &mut out,
     );
-    sink.configure(HUD, PaneKind::Hud, (WIDTH * 2 * HEIGHT * 4) as usize);
+    sink.configure(
+        HUD,
+        PaneKind::Hud.pixel_mode(),
+        (WIDTH * 2 * HEIGHT * 4) as usize,
+    );
     driver.view_mut(HUD).unwrap().paint = Some(FrameRect::full(WIDTH * 2, HEIGHT));
     driver.iterate(&mut sink, &mut out);
     drop(old_frames);
@@ -447,7 +458,11 @@ fn observed_pool_preserves_old_frame_identity_across_resize_and_recycles_once() 
     // The old generation returns to its retired channel, never the new pool.
     assert!(sink.stage(HUD, (WIDTH * 2 * HEIGHT * 4) as usize).is_some());
     sink.return_staged();
-    assert_eq!(sink.pools[&HUD].free.len(), PANE_STAGING_BUFFERS);
+    for _ in 0..PANE_STAGING_BUFFERS {
+        assert!(sink.stage(HUD, (WIDTH * 2 * HEIGHT * 4) as usize).is_some());
+        sink.publish(HUD, 1, FrameRect::full(WIDTH * 2, HEIGHT), true);
+    }
+    assert!(sink.stage(HUD, (WIDTH * 2 * HEIGHT * 4) as usize).is_none());
     assert_eq!(
         observer.events().len(),
         events.len(),

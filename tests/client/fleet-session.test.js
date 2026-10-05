@@ -1382,7 +1382,7 @@ describe('typed-code refusal', () => {
     const stray = composeJoinCode({
       project: '00000000-0000-4000-8000-000000000000',
       version: versionGuid(DATA),
-      suffix: 'QUARKING',
+      suffix: 'QUARK',
     });
     const two = await memberOn(world, factories, stray);
     expect(two.refusals.map((r) => r.reason)).toContain('unknown-project');
@@ -2007,7 +2007,7 @@ describe('unbound-connection ingress (issue #1120 adversarial)', () => {
     // Forged HostLoss{from: victim, lost: victim, tick: 0} on an unbound
     // connection. Delivered to the owner's own sim it would arrive as slot 0
     // (MeshOrigin::Unauthenticated), whose tick-0 self-observation guard
-    // (src/lockstep/mod.rs) fires only for MeshOrigin::Peer(_) — so the owner
+    // (crates/phoenix-simulation/src/lockstep/mod.rs) fires only for MeshOrigin::Peer(_) — so the owner
     // would derive a loss for a LIVE slot while members (tagged Peer(lead)) drop
     // it, diverging. That divergence is reachable ONLY through this JS bridge
     // (Rust deliberately keeps Unauthenticated tick-0 for native fixtures), so it

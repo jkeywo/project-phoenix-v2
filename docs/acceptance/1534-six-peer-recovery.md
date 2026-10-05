@@ -357,7 +357,7 @@ all four ordinary tests, with two long-running/manual cases ignored. The
 boosted recovery test checks matching checkpoints 1500 and 1800, original ship
 UUIDs in fresh Helm commands, and one applied canonical damage result on every
 peer. Log: `target/1534-boost-restore-green.log`. These runs used the assigned
-worktree and shared native target cache, refreshing `src/lib.rs` before
+worktree and shared native target cache, refreshing `crates/phoenix-simulation/src/lib.rs` before
 switching source trees. They establish native in-process continuation after
 the correction; source-matched browser/native transport recovery is still
 required, and the outstanding matrix below remains authoritative.

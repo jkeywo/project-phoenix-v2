@@ -13,7 +13,7 @@ export const JOURNEYS = Object.freeze([
   { id: 'GM', lane: 'rust', target: 'gm_objective', expected: 6 },
   { id: 'J3-runtime', lane: 'rust', target: 'lockstep_recovery', filter: 'a_diverged_host_is_healed_and_the_whole_fleet_reconverges', expected: 1 },
   { id: 'J4-runtime', lane: 'rust', target: 'cruiser_elimination', filter: 'competitive_world_results_and_destroyed_crew_keep_their_identity', expected: 1 },
-  { id: 'J4-authority', lane: 'rust', library: true, filter: 'command_admission::tests::crew_spectator_dead_hull_refuses_controls_while_live_crew_still_controls_own_ship', expected: 1 },
+  { id: 'J4-authority', lane: 'rust', package: 'phoenix-simulation', library: true, filter: 'command_admission::tests::crew_spectator_dead_hull_refuses_controls_while_live_crew_still_controls_own_ship', expected: 1 },
   { id: 'J2-J5-client', lane: 'js', expected: 4 },
 ]);
 export function selectJourneys(lane) {
@@ -44,7 +44,7 @@ async function main() {
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   const paths = ['Cargo.toml', 'Cargo.lock', 'scripts/t5-journeys.mjs', 'tests/t5_journeys.rs',
     'tests/client/t5-journeys.test.js', 'tests/gm_objective.rs', 'tests/lockstep_recovery.rs',
-    'tests/cruiser_elimination.rs', 'src/command_admission/mod.rs', 'assets/worlds/alliance_convoy_escort.toml',
+    'tests/cruiser_elimination.rs', 'crates/phoenix-simulation/src/command_admission/mod.rs', 'assets/worlds/alliance_convoy_escort.toml',
     'assets/worlds/cruiser_elimination.toml', 'assets/entities/alliance_cruiser.toml',
     'assets/entities/alliance_destroyer.toml', 'assets/entities/dynasty_player_cruiser.toml',
     'assets/strings/strings.csv'];
@@ -60,14 +60,14 @@ async function main() {
   await save();
   // AGENTS.md's shared-target rule: a new test executable is not sufficient.
   if (lane === 'rust') {
-    const library = path.join(root, 'src/lib.rs'), metadata = await stat(library);
+    const library = path.join(root, 'crates/phoenix-simulation/src/lib.rs'), metadata = await stat(library);
     await utimes(library, metadata.atime, new Date());
   }
   for (const row of selected) {
     const jsonPath = path.join(output, `${row.id}.json`);
     const executable = row.lane === 'rust' ? 'cargo' : process.execPath;
     const args = row.lane === 'rust'
-      ? ['test', '--features', 'headless', ...(row.library ? ['--lib'] : ['--test', row.target]),
+      ? ['test', ...(row.package ? ['-p', row.package] : []), '--features', 'headless', ...(row.library ? ['--lib'] : ['--test', row.target]),
         ...(row.filter ? [row.filter, '--', '--exact', '--nocapture'] : ['--', '--nocapture'])]
       : [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', 'tests/client/t5-journeys.test.js',
         '--reporter=json', `--outputFile=${jsonPath}`];

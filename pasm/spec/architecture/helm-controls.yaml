@@ -18,9 +18,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: observed
-      paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app/collision.rs]
+      paths: [crates/phoenix-simulation/src/ship/physics.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/server_app/collision.rs]
       symbols: [compute_physics]
-      tests: [cargo test, src/ship/physics_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/physics_tests.rs]
 
   - component: helm-console-interface
     core:
@@ -119,7 +119,7 @@ entities:
         - "[ai] Issue #1449: impulse speed modifiers are derived for every ship from its own drive phase and authored configuration, independent of LocalShip. Reapply the keyed contribution each tick without duplicate modifier events, and rebuild it during snapshot restoration before physics can consume a stale bootstrap cap."
         - "Impulse and boost are separate host-owned drive states with their own declared systems since #801: impulse commands target helm-impulse and boost commands target the new helm-boost system. Since #824 the admitted StartImpulseCharge/CancelImpulse loop lives in process_helm_inputs for every ship (with the same BlocksImpulse region gate the human path always had); handle_impulse_messages then retained only the LocalShip hull-damage auto-cancel, ordered earlier in the tick so an admitted command can still override it."
         - "Issue #881 completed the same retirement for boost: handle_boost_messages was deleted and its admitted SetBoost/ToggleBoost loop folded into process_helm_inputs, so boost now applies for EVERY AI ship through this shared input arbiter rather than only the LocalShip. The old applier was filtered With<LocalShip> and read a single entity, so the admitted SetBoost that the helm-boost AI operator (#780) emits for a non-local AiHighFidelity NPC was admitted and then silently dropped. BoostCommand now has exactly one writer, the enabled BoostConfigResource guard is unchanged (a hull authoring no boost ignores the payload), and ToggleBoost's read-modify-write against the ship's own ShipBoost is identical for human and AI origins — nothing downstream of admission branches on origin (AGENTS.md #6). Same-tick ordering is preserved: ai_helm_boost is .before(process_helm_inputs) like its four siblings, and apply_helm_commands is .after(process_helm_inputs) and .before(tick_boost)."
-        - "Issue #695 split admission from physics integration: the router only writes ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_ship_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
+        - "Issue #695 split admission from physics integration: the router only writes ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_ship_physics and apply_helm_commands systems in crates/phoenix-simulation/src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
         - "The 30 Hz HelmInputTimer sampling gate was deleted by #824: AdmittedCommands is cleared every tick at admission, so a sampling gate would silently drop AI commands emitted on frames the timer skipped. Commands apply the tick they are admitted."
     architecture:
       kind: subsystem
@@ -152,13 +152,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/console/helm/dispatch.rs
-        - src/ship_plugin.rs
-        - src/ship/helm_admission.rs
-        - src/ship/impulse_boost_systems.rs
-        - src/ship/physics_systems.rs
-        - src/ship/physics.rs
-        - src/ship/helm.rs
+        - crates/phoenix-simulation/src/console/helm/dispatch.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/helm_admission.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ship/physics.rs
+        - crates/phoenix-simulation/src/ship/helm.rs
       symbols:
         - register_helm_dispatch
         - process_helm_inputs
@@ -180,10 +180,10 @@ entities:
         - ToggleBoost
         - SetBoost
       tests:
-        - src/ship/helm_admission_tests.rs
-        - src/ship/impulse_boost_systems_tests.rs
-        - src/ship/physics_systems_tests.rs
-        - src/ship/physics_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_admission_tests.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
+        - crates/phoenix-simulation/src/ship/physics_systems_tests.rs
+        - crates/phoenix-simulation/src/ship/physics_tests.rs
         - cargo test
 
   - state: last-helm-input-state
@@ -207,13 +207,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/continuation.rs
-        - src/ship/components.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/continuation.rs
+        - crates/phoenix-simulation/src/ship/components.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - LastHelmInput
 
-      tests: [src/ship/continuation_tests.rs, src/ship/components_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/continuation_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs]
   - state: authoritative-ship-motion-state
     core:
       status: implemented
@@ -230,14 +230,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/state.rs
-        - src/ship/physics_systems.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/state.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - ShipPhysics
         - sync_ship_position
 
-      tests: [src/ship/state_tests.rs, src/ship/physics_systems_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/state_tests.rs, crates/phoenix-simulation/src/ship/physics_systems_tests.rs]
   - state: desired-motion-state
     core:
       status: implemented
@@ -263,14 +263,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_planner.rs
-        - src/ai/core.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ai/core.rs
       symbols:
         - DesiredMotion
         - encode_local_velocity
         - encode_local_facing
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: hazard-assessment-state
@@ -304,9 +304,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_planner.rs
-        - src/ai/core.rs
-        - src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
       symbols:
         - HazardAssessment
         - HazardAssessmentRaw
@@ -314,7 +314,7 @@ entities:
         - assess_hazards
         - seed_helm_actuator_facts
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: impulse-drive-state
@@ -337,19 +337,19 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/server_app/components.rs
-        - src/ship/impulse.rs
-        - src/ship/impulse_boost_systems.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/server_app/components.rs
+        - crates/phoenix-simulation/src/ship/impulse.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - ShipImpulse
         - ImpulseState
         - ImpulsePhase
         - tick_impulse
       tests:
-        - src/server_app/components_interior_write_access_tests.rs
-        - src/ship/impulse_tests.rs
-        - src/ship/impulse_boost_systems_tests.rs
+        - crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs
+        - crates/phoenix-simulation/src/ship/impulse_tests.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
   - state: impulse-manoeuvre-policy-state
@@ -375,13 +375,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/entities/config.rs
-        - src/ship/helm_ai/impulse.rs
-        - src/ship/helm_ai/boost.rs
-        - src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/boost.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
       symbols:
         # Issue #1209 collapsed the per-axis Helm*AiPolicy newtypes into the one
-        # keyed FineSystemAiPolicies map (src/ship/helm_ai/mod.rs); the impulse and
+        # keyed FineSystemAiPolicies map (crates/phoenix-simulation/src/ship/helm_ai/mod.rs); the impulse and
         # boost policies are now entries in it, keyed by fine-system id.
         - FineSystemAiPolicies
       tests:
@@ -406,18 +406,18 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/server_app/components.rs
-        - src/ship/boost.rs
-        - src/ship/impulse_boost_systems.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/server_app/components.rs
+        - crates/phoenix-simulation/src/ship/boost.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - ShipBoost
         - BoostState
         - tick_boost
       tests:
-        - src/server_app/components_interior_write_access_tests.rs
-        - src/ship/boost_tests.rs
-        - src/ship/impulse_boost_systems_tests.rs
+        - crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs
+        - crates/phoenix-simulation/src/ship/boost_tests.rs
+        - crates/phoenix-simulation/src/ship/impulse_boost_systems_tests.rs
         - cargo test
 
   - component: helm-blackboard-publisher
@@ -446,11 +446,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/console/helm/server.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
       symbols:
         - publish_helm_blackboard
       tests:
-        - src/console/helm/server_tests.rs
+        - crates/phoenix-simulation/src/console/helm/server_tests.rs
         - cargo test
 
   - state: helm-status-blackboard-state
@@ -469,14 +469,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/console/helm/server.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
         - gui/console-state.js
       symbols:
         - HelmBlackboard
         - buildHelmConsoleState
 
-      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
   - state: helm-motion-blackboard-state
     core:
       status: implemented
@@ -496,12 +496,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
       symbols:
         - HelmMotionPlan
         - ShipMotionPlan
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-lateral-thrust-blackboard-state
@@ -518,14 +518,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/console/helm/server.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
         - gui/console-state.js
       symbols:
         - HelmLateralThrustBlackboard
         - buildHelmConsoleState
 
-      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
   - state: helm-engine-blackboard-state
     core:
       status: implemented
@@ -544,14 +544,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/console/helm/server.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
         - gui/console-state.js
       symbols:
         - HelmEngineBlackboard
         - buildHelmConsoleState
 
-      tests: [src/core/messages_view_mode_tests.rs, src/console/helm/server_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
   - component: helm-motion-planner
     core:
       status: implemented
@@ -583,13 +583,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_planner.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - helm_motion_planner
         - HelmMotionPlan
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   # The `helm-shared-motion-planner-rollout` migration entity was REMOVED here
@@ -627,7 +627,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ai/server.rs
+        - crates/phoenix-simulation/src/ai/server.rs
       symbols:
         - aggregate_doctrine_blackboards
       tests:
@@ -645,14 +645,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ai/server.rs
-        - src/core/messages.rs
+        - crates/phoenix-simulation/src/ai/server.rs
+        - crates/phoenix-model/src/messages.rs
       symbols:
         - aggregate_doctrine_blackboards
         - ScoredObjective
         - SystemAffinity
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: ai-world-snapshot-builder
     core:
       status: implemented
@@ -671,7 +671,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ai/server.rs
+        - crates/phoenix-simulation/src/ai/server.rs
       symbols:
         - build_world_snapshot
         - WorldSnapshot
@@ -698,8 +698,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/entities/config.rs
-        - src/entities/spawner.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-simulation/src/entities/spawner.rs
       symbols:
         - VerticalMovementMode
         - HelmCapabilityConfig
@@ -728,8 +728,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/entities/config.rs
-        - src/entities/spawner.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-simulation/src/entities/spawner.rs
       symbols:
         - HelmCapabilityConfig
         - HelmCapabilitySection
@@ -748,8 +748,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ai/server.rs
-        - src/ai/core.rs
+        - crates/phoenix-simulation/src/ai/server.rs
+        - crates/phoenix-simulation/src/ai/core.rs
       symbols:
         - WorldSnapshot
         - WorldView
@@ -776,16 +776,16 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/components.rs
-        - src/ship_plugin.rs
-        - src/ship/helm_ai/surfaces.rs
-        - src/console/helm/server.rs
+        - crates/phoenix-simulation/src/ship/components.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
       symbols:
         - PendingArcBearingRequest
         - receive_helm_coordination
         - apply_arc_bearing_request
 
-      tests: [src/ship/components_tests.rs, src/console/helm/server_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
   - state: docking-motion-intent-state
     core:
       status: implemented
@@ -807,12 +807,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_planner.rs
-        - src/ship/helm_ai/lateral.rs
-        - src/ai/core.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/lateral.rs
+        - crates/phoenix-simulation/src/ai/core.rs
       symbols:
         # DockingMotionIntent (the component carrying the dock uuid) is defined
-        # in src/ship/components.rs and re-exported via ship_plugin; the scanner
+        # in crates/phoenix-simulation/src/ship/components.rs and re-exported via ship_plugin; the scanner
         # indexes it there. These three are the behaviour it drives: the pure
         # close-manoeuvre codec, the planner that folds it into desired-motion,
         # and the lateral-thrust operator that actuates the resulting translation.
@@ -820,7 +820,7 @@ entities:
         - helm_motion_planner
         - ai_helm_lateral_thrust
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   - state: helm-ai-surfaces-frame-state
@@ -842,7 +842,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
       symbols:
         - HelmAiSurfacesFrame
         - HelmAiShipFrame
@@ -861,7 +861,7 @@ entities:
         - "Issue #779 began that transition for the travel axes: ai_helm_thrust / ai_helm_steering now resolve a data-authored #775 policy verb catalogue (helm-engines-ai-operator / helm-steering-ai-operator) to decide WHETHER to actuate, with the continuous magnitude still sourced from the shared DesiredMotion planner fact. The plan_helm_travel geometry is unchanged here; retiring the hardcoded planner branch entirely is the coordinated tail #794."
         - "Issue #801 completed the per-axis split: each system gates on its own declared helm-thrust / helm-steering / helm-impulse system's operate_ai policy. The dead coarse helm fallbacks and helm_control_policy are deleted; a whole-helm judgement (e.g. arc-bearing) derives from the per-axis declarations via helm_axes_operate_ai, never from a coarse system."
         - "Issue #803 decoupled the decision cadence from the host frame rate: all per-axis AI helm systems run only on the shared AI-helm sim tick (see ai-helm-tick-cadence), a determinism prerequisite for P2P lockstep (PRD #620)."
-        - "Issue #1211 deleted the emit_helm_ai_command pass-through shim (helm_ai_emit.rs). ai_helm_thrust/ai_helm_steering/ai_helm_impulse now emit through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. This operator was ALREADY a missing-observed-dependency warning before #1211 because helm_ai_emit.rs was co-owned by three helm entities (never an unambiguous per-entity edge); the swap retargets that same warning to the spine, where the admission edge is now carried unambiguously by the single-owner src/ai/host.rs."
+        - "Issue #1211 deleted the emit_helm_ai_command pass-through shim (helm_ai_emit.rs). ai_helm_thrust/ai_helm_steering/ai_helm_impulse now emit through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. This operator was ALREADY a missing-observed-dependency warning before #1211 because helm_ai_emit.rs was co-owned by three helm entities (never an unambiguous per-entity edge); the swap retargets that same warning to the spine, where the admission edge is now carried unambiguously by the single-owner crates/phoenix-simulation/src/ai/host.rs."
     architecture:
       kind: service
       authority: authoritative
@@ -882,19 +882,19 @@ entities:
         # Issue #1211 deleted the per-axis emit_helm_ai_command shim; the travel
         # axes now emit through the AI host spine's AiHostEnv::emitter(), so this
         # operator depends on ai-policy-host-spine, which carries the single-owner
-        # observed command_admission::ai_emit edge in src/ai/host.rs.
+        # observed command_admission::ai_emit edge in crates/phoenix-simulation/src/ai/host.rs.
         - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/engines.rs
-        - src/ship/helm_ai/steering.rs
-        - src/ship/helm_ai/impulse.rs
-        - src/ship/helm_ai/surfaces.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ai/core.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/engines.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/steering.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ai/core.rs
       symbols:
         - build_helm_ai_surfaces_frame
         - ai_helm_thrust
@@ -920,7 +920,7 @@ entities:
         - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
         - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmLateralAiPolicy (attached at spawn from [helm_console.lateral_ai]) resolves the lateral channel to the actuate_lateral_thrust mode verb over a fact snapshot seeded from the shared hazard surface (seed_helm_actuator_facts). A hold resolution emits nothing; the docking translation remains an UNCONDITIONAL sanctioned override applied before the gate. The dodge magnitude still comes from HazardAssessment.hazard_forces weighted by lateral_hazard_sensitivity — avoidance BENDS travel without swapping the doctrine (AC3)."
         - "Issue #885 (8555e336) deleted the default_lateral_ai_config synthesiser that used to stand in for an unauthored block with an unconditional actuate. Strict AI-declaration mode is now the default, so an undeclared [helm_console.lateral_ai] fails the entity load instead of being invented; every shipped hull authors the block."
-        - "Issue #1211 deleted the single-owner emit_helm_lateral_command shim (helm_lateral_emit.rs). ai_helm_lateral_thrust now emits through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: helm_lateral_emit.rs was this operator's only single-owner file, so PASM had attributed a per-entity admission edge to it; its other files (lateral.rs, mod.rs, facts.rs, …) are co-owned, so the swapped dependency now reports as missing-observed — the admission edge is instead carried unambiguously by the spine's single-owner src/ai/host.rs, matching how helm-ai-operator/impulse/boost were already modelled."
+        - "Issue #1211 deleted the single-owner emit_helm_lateral_command shim (helm_lateral_emit.rs). ai_helm_lateral_thrust now emits through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: helm_lateral_emit.rs was this operator's only single-owner file, so PASM had attributed a per-entity admission edge to it; its other files (lateral.rs, mod.rs, facts.rs, …) are co-owned, so the swapped dependency now reports as missing-observed — the admission edge is instead carried unambiguously by the spine's single-owner crates/phoenix-simulation/src/ai/host.rs, matching how helm-ai-operator/impulse/boost were already modelled."
     architecture:
       kind: service
       authority: authoritative
@@ -935,19 +935,19 @@ entities:
         # Issue #1211 deleted the single-owner emit_helm_lateral_command shim;
         # this operator now emits through the AI host spine's AiHostEnv::emitter()
         # and so depends on ai-policy-host-spine, which carries the single-owner
-        # observed command_admission::ai_emit edge in src/ai/host.rs.
+        # observed command_admission::ai_emit edge in crates/phoenix-simulation/src/ai/host.rs.
         - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/lateral.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ai/core.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/lateral.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_lateral_thrust
         - LateralAxis
@@ -968,7 +968,7 @@ entities:
       summary: The single fixed-rate AI decision cadence (one AiTickTimer plus the AiTickReady latch, with AiSnapshotReady derived from it as an integer multiple) that gates every AI decider — the helm decision-surface assembly, the six per-axis helm systems and the policy state tick on the base latch, together with shield focus, power allocation, torpedo load and launch, frequency hint, phaser and blaster auto-fire and Tactical target selection; Captain, Sensors and the world-snapshot / doctrine-aggregation rebuild ride the derived slower latch. AI decisions therefore run at a TOML-authored rate instead of once per rendered frame.
       rationale:
         - "Issue #803 introduced the first shared latch, for the helm axes only: AI helm decisions were coupled to host frame rate — a 144 Hz host steered on ~4x fresher data than a 60 Hz one — a determinism blocker for P2P lockstep (PRD #620). One shared timer replaced per-frame execution and the private AiLateralThrustTimer."
-        - "Issue #889 (3d21957d) made it the ONE cadence for all AI, and moved the machinery into the new src/ai/cadence.rs. Before it the cadence was fragmented three ways: the six helm axes on the authored latch; Captain and Sensors on a HARDCODED 10 Hz AiSnapshotTimer gated inside the system body by an Option<Res<_>> that fell back to evaluating every tick when the resource was absent (which every bare-App fixture in the crate hit, so the shipped cadence was exercised by no test at all); and eight further deciders on no gate whatsoever. Because SimSet is configured in Bevy's Update, no gate means once per rendered frame — see AGENTS.md rule #7, which now states this."
+        - "Issue #889 (3d21957d) made it the ONE cadence for all AI, and moved the machinery into the new crates/phoenix-simulation/src/ai/cadence.rs. Before it the cadence was fragmented three ways: the six helm axes on the authored latch; Captain and Sensors on a HARDCODED 10 Hz AiSnapshotTimer gated inside the system body by an Option<Res<_>> that fell back to evaluating every tick when the resource was absent (which every bare-App fixture in the crate hit, so the shipped cadence was exercised by no test at all); and eight further deciders on no gate whatsoever. Because SimSet is configured in Bevy's Update, no gate means once per rendered frame — see AGENTS.md rule #7, which now states this."
         - "The base rate is authored as [global] ai_tick_hz (serde default 30 Hz). The pre-#889 key ai_helm_tick_hz survives as a serde ALIAS and every shipped world deliberately keeps authoring it, so the alias is exercised on every load rather than only by a test. The timer resource is built at plugin registration, before any WorldConfig exists, so tick_ai_cadence reconciles its period against the loaded config each frame."
         - "[ai] The slower cadence is DERIVED, not a second clock. GlobalConfig::checked_snapshot_every_ticks resolves ai_tick_hz / ai_snapshot_hz to a whole number of base ticks, and AiSnapshotPhase counts them; a non-integer relationship (e.g. 25 Hz against 10 Hz) is rejected in world::config::parse_world at load rather than silently rounded, so the two AI clocks can never be commensurate only by luck."
         - "[ai] register_ai_cadence is a plain idempotent function rather than a Plugin because several plugins each register gated systems and duplicate registration of tick_ai_cadence would advance the timer more than once per frame. tick_ai_cadence itself is registered in Bevy's Last schedule: every gated system lives in Update, so the latch is guaranteed consumed before it is re-armed without an .after() edge against each gated system — an edge that would silently degrade to an empty constraint in any fixture that does not register them all."
@@ -988,14 +988,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ai/cadence.rs
-        - src/ai/server.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship_plugin.rs
-        - src/console_ai/server.rs
-        - src/console/weapons/mod.rs
-        - src/entities/config.rs
-        - src/world/config.rs
+        - crates/phoenix-simulation/src/ai/cadence.rs
+        - crates/phoenix-simulation/src/ai/server.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
+        - crates/phoenix-simulation/src/console_ai/server.rs
+        - crates/phoenix-simulation/src/console/weapons/mod.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-simulation/src/world/config.rs
         - assets/worlds/default.toml
       symbols:
         - AiTickTimer
@@ -1009,7 +1009,7 @@ entities:
         - checked_snapshot_every_ticks
         - snapshot_every_ticks
       tests:
-        - src/ai/cadence_tests.rs
+        - crates/phoenix-simulation/src/ai/cadence_tests.rs
         - cargo test
 
   - state: helm-actuator-input-state
@@ -1035,9 +1035,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm.rs
-        - src/ship/helm_admission.rs
-        - src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ship/helm.rs
+        - crates/phoenix-simulation/src/ship/helm_admission.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
       symbols:
         - ThrustInput
         - SteeringInput
@@ -1045,8 +1045,8 @@ entities:
         - ImpulseCommand
         - BoostCommand
       tests:
-        - src/ship/helm_admission_tests.rs
-        - src/ship/physics_systems_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_admission_tests.rs
+        - crates/phoenix-simulation/src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-engines-ai-operator
@@ -1081,14 +1081,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/engines.rs
-        - src/ship/helm_ai/surfaces.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/physics_systems.rs
-        - src/ai/core.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/engines.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_thrust
         - EnginesAxis
@@ -1108,7 +1108,7 @@ entities:
         - decode_thrust_from_velocity
         - integrate_ship_physics
       tests:
-        - src/ship/physics_systems_tests.rs
+        - crates/phoenix-simulation/src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-steering-ai-operator
@@ -1124,7 +1124,7 @@ entities:
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
         - "Issue #883 (AC5) closed the same empty-facts gap here: ai_helm_steering seeds the hazard/availability snapshot plus the target-relative travel facts before resolving, so a yaw guard actually evaluates."
         - "Issue #883 seeds this host's availability facts (impulse_available / boost_available) from the ship's own config resources rather than the hardcoded false ai_helm_steering used to pass — see the same note on ai_helm_thrust."
-        - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
+        - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in crates/phoenix-simulation/src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
         - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — at the time, the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS, then a pair). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
         - "Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
@@ -1141,14 +1141,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/steering.rs
-        - src/ship/helm_ai/surfaces.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/physics_systems.rs
-        - src/ai/core.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/steering.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_steering
         - SteeringAxis
@@ -1171,7 +1171,7 @@ entities:
         - decode_steering_from_facing
         - integrate_ship_physics
       tests:
-        - src/ship/physics_systems_tests.rs
+        - crates/phoenix-simulation/src/ship/physics_systems_tests.rs
         - cargo test
 
   - component: helm-input-arbiter
@@ -1195,11 +1195,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_admission.rs
+        - crates/phoenix-simulation/src/ship/helm_admission.rs
       symbols:
         - process_helm_inputs
       tests:
-        - src/ship/helm_admission_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_admission_tests.rs
         - cargo test
 
   - component: helm-vertical-thrust-ai-operator
@@ -1230,12 +1230,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/vertical.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ship/helm_planner.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/vertical.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_vertical_thrust
         - VerticalAxis
@@ -1246,7 +1246,7 @@ entities:
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
         - seed_helm_actuator_facts
       tests:
-        - src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_planner_tests.rs
         - cargo test
 
   - component: helm-impulse-ai-operator
@@ -1275,19 +1275,19 @@ entities:
         # Issue #1211 deleted the emit_helm_ai_command shim; this axis now emits
         # through the AI host spine's AiHostEnv::emitter(), so it depends on
         # ai-policy-host-spine, which carries the single-owner observed
-        # command_admission::ai_emit edge in src/ai/host.rs.
+        # command_admission::ai_emit edge in crates/phoenix-simulation/src/ai/host.rs.
         - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/impulse.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ai/core.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/impulse.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ai/core.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_impulse
         - ImpulseAxis
@@ -1330,12 +1330,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai/boost.rs
-        - src/ship/helm_ai/facts.rs
-        - src/ship/helm_ai/mod.rs
-        - src/ship/helm_admission.rs
-        - src/ai/policy.rs
-        - src/entities/config.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/boost.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/facts.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/mod.rs
+        - crates/phoenix-simulation/src/ship/helm_admission.rs
+        - crates/phoenix-simulation/src/ai/policy.rs
+        - crates/phoenix-simulation/src/entities/config.rs
       symbols:
         - ai_helm_boost
         - BoostAxis
@@ -1350,7 +1350,7 @@ entities:
         - process_helm_inputs
         - seed_helm_actuator_facts
       tests:
-        - src/ship/helm_admission_tests.rs
+        - crates/phoenix-simulation/src/ship/helm_admission_tests.rs
         - cargo test
 
   - component: torpedo-flight-operator
@@ -1392,15 +1392,15 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - SetThrust
         - SetSteering
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1424,14 +1424,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - LateralThrustInput
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1455,14 +1455,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - StartImpulseCharge
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1486,14 +1486,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - CancelImpulse
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1517,14 +1517,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - ToggleBoost
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test
 
@@ -1548,13 +1548,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - SetBoost
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - cargo test

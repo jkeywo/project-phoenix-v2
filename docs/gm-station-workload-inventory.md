@@ -1,7 +1,7 @@
 # GM Station-workload producer inventory
 
 Issue #1438, PRD #1419 M4 (stories 11, 12, 14), presentation contract PRD #1418.
-Implementation: `src/gm_workload.rs`. Design contract:
+Implementation: `crates/phoenix-simulation/src/gm_workload.rs`. Design contract:
 `pasm/spec/design/gm-console-t3.yaml`, component `gm-t3-station-workload`.
 
 The Station-workload advisory tells a Game Master how much is being asked of the
@@ -173,7 +173,7 @@ is reviewable and revisable there. The ratified cruiser balance matchups were
 re-run against this change; see the commit body for the measured table.
 
 Because that dispatch is authoritative, #1438 bumps `SIMULATION_RULES` to
-`"0.7"` in `src/snapshot.rs`. Two rules moved: the human-routed write itself,
+`"0.7"` in `crates/phoenix-simulation/src/snapshot.rs`. Two rules moved: the human-routed write itself,
 and the stale-entry prune becoming seat-independent and running every fixed step
 (below). The queue is in no digest and its snapshot field is serde-defaulted, so
 a pre-#1438 save *parses* — it restores intact with an empty queue and then
@@ -183,7 +183,7 @@ refuse. `SNAPSHOT_FORMAT` is unchanged; nothing about the payload's shape did.
 
 One more visible consequence of the same write, on hulls with no AI repair at
 all: a **fully human** Repair seat now has a non-empty `queue_depth` on its own
-console readout (`src/console/repair/visibility.rs`), where that number was
+console readout (`crates/phoenix-simulation/src/console/repair/visibility.rs`), where that number was
 always zero before. That is the intended semantics — the entry is the record of
 what is still owed — and it is the same single change as the dispatch above, not
 a second one.
@@ -244,7 +244,7 @@ a conversation — and those are counted by their own producers, once.
 | `security_team_<n>` | no | a committed team deploys, works and withdraws on the authored clock; a refused dispatch never opens an activation at all |
 | anything else | no | an activation whose meaning this inventory has never been told is unattributed source state, which PRD #1419 excludes rather than guesses at |
 
-A `src/gm_workload.rs` unit test reads `src/core/task_lifecycle.rs` and fails if
+A `crates/phoenix-simulation/src/gm_workload.rs` unit test reads `crates/phoenix-simulation/src/core/task_lifecycle.rs` and fails if
 a `TASK_VERB_*` constant exists with no entry in the table, so a new continuous
 task cannot be added without a recorded decision.
 

@@ -2,7 +2,7 @@
 title: Session
 type: entity
 tags: [session, server, identity, reconnect, readiness]
-sources: [src/session_connections.rs, src/session_connections/browser.rs, gui/host-peer-routing.js, gui/host-mesh.js, gui/fleet-session.js, gui/native-fleet-peer.js, server.html, src/native_host/connections.rs, src/native_host/host_lobby/fleet.rs, src/lobby/session.rs, src/lobby/start_policy.rs, src/lobby/handler.rs, src/lobby/server.rs, src/lobby/result_application.rs, src/lobby/result_application_tests.rs, src/gm_roster.rs, src/lockstep/mod.rs, src/server/bridge.rs]
+sources: [crates/phoenix-simulation/src/session_connections.rs, crates/phoenix-simulation/src/session_connections/browser.rs, gui/host-peer-routing.js, gui/host-mesh.js, gui/fleet-session.js, gui/native-fleet-peer.js, server.html, src/native_host/connections.rs, src/native_host/host_lobby/fleet.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/start_policy.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/result_application_tests.rs, crates/phoenix-simulation/src/gm_roster.rs, crates/phoenix-simulation/src/lockstep/mod.rs, src/server/bridge.rs]
 updated: 2026-09-20
 ---
 
@@ -76,12 +76,12 @@ On reconnect with the same token:
 The lobby handler and its server adapter own these transitions and broadcasts;
 `SessionManager` supplies the pure identity and occupancy operations.
 
-`LobbyResultApplier` in `src/lobby/result_application.rs` applies the complete
+`LobbyResultApplier` in `crates/phoenix-simulation/src/lobby/result_application.rs` applies the complete
 handler result to the countdown, next phase, loaded Ship ratings/control sources
 and outbound queue. Each message variant retains its own registered system.
 The adapter also resolves the rating snapshot used by Identify or AFK before
 versus after Ship spawn. Registered-App coverage is in
-`src/lobby/result_application_tests.rs`.
+`crates/phoenix-simulation/src/lobby/result_application_tests.rs`.
 
 ## Related
 

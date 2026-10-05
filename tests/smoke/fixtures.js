@@ -38,12 +38,12 @@
 //           specs green while testing exactly the content #941 decoupled them
 //           from.
 //        b. **Author tags under `overrides`, not on the block.** `WorldEntity`
-//           (src/world/config.rs) has no `tags` field, and serde ignores
+//           (crates/phoenix-simulation/src/world/config.rs) has no `tags` field, and serde ignores
 //           unknown keys, so a bare `tags = [...]` on an `[[entity]]` block is
 //           silently dropped and the entity keeps whatever its production
 //           template authored. `overrides = { tags = [...] }` is the form the
 //           shipped worlds use; the instance layer *replaces* the array rather
-//           than unioning it (src/entities/entity_override.rs), so it can take
+//           than unioning it (crates/phoenix-simulation/src/entities/entity_override.rs), so it can take
 //           a tag away as well as add one.
 //
 //   2. **Derive the expectation from the TOML the test itself serves** — for
@@ -621,7 +621,7 @@ export function tomlNumber(toml, section, key) {
  *  issue #941 exists to decouple them from.
  *
  *  `WorldData.scenario_title` is `[global].title` verbatim (declared in
- *  src/core/messages.rs, populated in src/world/server.rs), so it identifies
+ *  crates/phoenix-simulation/src/core/messages.rs, populated in crates/phoenix-simulation/src/world/server.rs), so it identifies
  *  the world that was actually parsed. The expected value is read back out of
  *  the fixture text rather than written down a second time — same
  *  derive-don't-pin rule as the rest of this file — which also makes a fixture

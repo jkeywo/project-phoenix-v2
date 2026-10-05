@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot, coordination, gm]
-sources: [src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, gui/gm-mission-panel.js, gui/gm-spawn-panel.js, src/core/debug_surface.rs, src/debug/catalogue.rs, src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/gm_action.rs, src/gm_join.rs, src/gm_activity.rs, src/lockstep/frame.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
+sources: [crates/phoenix-simulation/src/gm_objective.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/gm_event.rs, crates/phoenix-simulation/src/gm_effect.rs, crates/phoenix-simulation/src/gm_spawn.rs, gui/gm-mission-panel.js, gui/gm-spawn-panel.js, crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, src/server/bridge.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/broadcast/, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/command_admission/, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/gm_join.rs, crates/phoenix-simulation/src/gm_activity.rs, crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/host-channel.js, gui/gm-activity-feed.js, gui/host-mesh.js, gui/fleet-session.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js, scripts/generate-debug-surfaces.mjs, scripts/build-client.mjs, AGENTS.md]
 updated: 2026-10-04
 ---
 
@@ -34,9 +34,9 @@ The host simulation is authoritative. Clients submit intent and render projected
 
 ## Inbound paths
 
-Lobby/session variants are handled by dedicated systems in `src/lobby/server.rs`, with pure state transitions in `src/lobby/handler.rs`. Identification and station selection remain available where reconnect/seat changes require them.
+Lobby/session variants are handled by dedicated systems in `crates/phoenix-simulation/src/lobby/server.rs`, with pure state transitions in `crates/phoenix-simulation/src/lobby/handler.rs`. Identification and station selection remain available where reconnect/seat changes require them.
 
-In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically. Correlated discrete actions first consult the installed `ConsumerRegistration` metadata in `src/command_admission/router.rs`; missing or ambiguous terminal owners are refused before queue/log insertion. Gameplay owners complete through the shared `src/command_admission/feedback.rs` envelope builder, using existing reliable message/outbox adapters. The GM journal derives Pending and puppet delivery checks ownership from the same registry; uncorrelated continuous actions require installed owners. The quiet-activity observer uses registry spelling compatibility for legacy traffic and observes actual correlations only from terminal outcomes.
+In-game actions use `ClientMessage::ControlSystem { target: SystemId, payload }`. `command_admission` resolves token tenure, station ownership, system damage/availability, control source, and special host-only routes once per logical tick. Accepted commands enter the owning ship's `AdmittedCommands`; the domain applier then treats human and AI emissions identically. Correlated discrete actions first consult the installed `ConsumerRegistration` metadata in `crates/phoenix-simulation/src/command_admission/router.rs`; missing or ambiguous terminal owners are refused before queue/log insertion. Gameplay owners complete through the shared `crates/phoenix-simulation/src/command_admission/feedback.rs` envelope builder, using existing reliable message/outbox adapters. The GM journal derives Pending and puppet delivery checks ownership from the same registry; uncorrelated continuous actions require installed owners. The quiet-activity observer uses registry spelling compatibility for legacy traffic and observes actual correlations only from terminal outcomes.
 
 Host-class GM actions use a separate typed control-plane lane. The GM page
 queues `GmActionRequest`; Rust authenticates its operator against the frozen
@@ -179,14 +179,14 @@ generic Station or Ship popups while making that decision.
 
 ## Codec resilience
 
-All JSON encoding/decoding is centralised in `src/core/codec.rs`. `decode_bridge_client_messages` partitions valid messages from decode errors so one malformed frame does not discard the rest of the inbound batch. The bridge logs rejected payloads and continues processing.
+All JSON encoding/decoding is centralised in `crates/phoenix-simulation/src/core/codec.rs`. `decode_bridge_client_messages` partitions valid messages from decode errors so one malformed frame does not discard the rest of the inbound batch. The bridge logs rejected payloads and continues processing.
 
 ## Debug Surface catalogue (#1267)
 
-`src/core/debug_surface.rs` declares every diagnostic identity once. Its macro
+`crates/phoenix-model/src/debug_surface.rs` declares every diagnostic identity once. Its macro
 invocation generates `DebugSurface`, `DEBUG_SURFACE_CATALOGUE`, stable `ALL`
 iteration, serde names, and bridge name parsing from the same rows. There is no
-parallel `DebugToggleKind`. `src/debug/catalogue.rs` assembles exactly one
+parallel `DebugToggleKind`. `crates/phoenix-simulation/src/debug/catalogue.rs` assembles exactly one
 `DebugSurfaceAdapter` constant from each owning diagnostic Module; each adapter
 reads and writes that Module's enabled Resource. The completeness test requires
 one adapter per canonical row in the same order.

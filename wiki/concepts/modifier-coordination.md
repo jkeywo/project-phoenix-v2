@@ -2,7 +2,7 @@
 title: Modifier Coordination
 type: concept
 tags: [modifiers, power, regions, impulse, collision, repair]
-sources: [src/modifiers/cache.rs, src/modifiers/coordination.rs, src/server_app/registration.rs, src/server_app/collision.rs, src/regions/server.rs, src/core/messages.rs, src/snapshot.rs]
+sources: [crates/phoenix-simulation/src/modifiers/cache.rs, crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/snapshot.rs]
 updated: 2026-09-09
 ---
 
@@ -12,7 +12,7 @@ updated: 2026-09-09
 
 ## Ownership
 
-`src/modifiers/cache.rs` owns storage, recomputation, and snapshot representation. `ModifierCoordinationPlugin` in `src/modifiers/coordination.rs` owns adapters for sources that otherwise would write the cache directly:
+`crates/phoenix-simulation/src/modifiers/cache.rs` owns storage, recomputation, and snapshot representation. `ModifierCoordinationPlugin` in `crates/phoenix-simulation/src/modifiers/coordination.rs` owns adapters for sources that otherwise would write the cache directly:
 
 - reactor allocation produces speed, yaw, phaser-damage, and shield-regeneration modifiers;
 - active impulse produces its authored speed multiplier;
@@ -30,9 +30,9 @@ The main consumers are:
 - Tactical target acquisition (`RadarRange`), Helm radar (`HelmRadarRange`), and Sensors (`SensorRadarRange`);
 - beam damage (`PhaserDamage`);
 - shield recovery (`ShieldRegen`);
-- collision damage (`HullDamageTaken`) in `src/server_app/collision.rs`;
+- collision damage (`HullDamageTaken`) in `crates/phoenix-simulation/src/server_app/collision.rs`;
 - internal repair progress (`RepairRate`);
-- region entry clamping (`MaxSpeed`) in `src/regions/server.rs`.
+- region entry clamping (`MaxSpeed`) in `crates/phoenix-simulation/src/regions/server.rs`.
 
 Weapon firing range is authored on the weapon. `RadarRange` limits acquisition, not a beam's reach.
 

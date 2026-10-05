@@ -2,11 +2,11 @@
 //
 // The live-restore control (issues #1446 and #1447), mounted on the
 // REAL `server.html` markup with the REAL String Table, driven by the exact
-// `gm_health` payload `src/gm_health.rs` publishes and the exact catalogue-row
+// `gm_health` payload `crates/phoenix-simulation/src/gm_health.rs` publishes and the exact catalogue-row
 // shape `bridge::save_slot_js` publishes.
 //
 // The DECISIONS under test live in Rust and are pinned there
-// (`src/gm_restore.rs`, `tests/gm_restore.rs`). What is tested here is the
+// (`crates/phoenix-simulation/src/gm_restore.rs`, `tests/gm_restore.rs`). What is tested here is the
 // contract PRD #1418 puts on the surface: that every phase is a SENTENCE, that
 // a control a GM cannot press says why, that the confirmation preview names the
 // consequences, and that a refusal reaches the operator instead of vanishing.
@@ -167,7 +167,7 @@ it('offers Restore only for a selected, eligible candidate, and says why otherwi
 
 it('names an engine-named candidate by its authored sentence, in summary and preview', async () => {
   // A restore leaves its own recovery checkpoint in the catalogue, and
-  // `src/gm_restore.rs` names that row with the String Table id
+  // `crates/phoenix-simulation/src/gm_restore.rs` names that row with the String Table id
   // `RECOVERY_CHECKPOINT_NAME`. It is an ordinary candidate for the NEXT
   // restore, so neither the summary nor the confirmation preview — the two
   // places a GM reads which session they are about to load — may show the id.

@@ -27,8 +27,8 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/native-gm-workspace.js, gui/native-workshop.js, gui/viewscreen-hud.html, src/native_host/viewscreen_locale.rs, src/native_host/panes/operator_storage.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-session-controls.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-spawn-panel.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, server.html, src/server/bridge.rs, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, editor/mod-pack-export.js, editor/mod-pack-workspace.js, scripts/extract-strings.mjs, scripts/generate-german.py, scripts/german-domain-draft.json, scripts/german-dynasty-draft.json, docs/strings-authoring-guide.md]
-      tests: [npx vitest run tests/client/string-catalogue.test.js tests/client/locale-preference.test.js tests/client/extract-strings.test.js tests/client/host-journey-localisation.test.js tests/client/snapshot-status.test.js tests/client/german-catalogue.test.js editor/tests/workshop-localisation.test.js editor/tests/mod-pack-export.test.js, npx vitest run tests/client/gm-action-feedback.test.js tests/client/gm-session-controls.test.js tests/client/gm-mission-panel.test.js tests/client/gm-direct-effect-panel.test.js tests/client/gm-spawn-panel.test.js, src/native_host/viewscreen_locale_tests.rs, src/server/bridge_tests.rs, src/core/messages_view_mode_tests.rs]
+      paths: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/native-gm-workspace.js, gui/native-workshop.js, gui/viewscreen-hud.html, src/native_host/viewscreen_locale.rs, src/native_host/panes/operator_storage.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-action-feedback.js, gui/gm-feedback-presentation.js, gui/gm-session-controls.js, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-spawn-panel.js, gui/workshop-authoring.js, gui/workshop-boot.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, server.html, src/server/bridge.rs, editor/workshop-localisation.js, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/world/mod_pack.rs, editor/mod-pack-export.js, editor/mod-pack-workspace.js, scripts/extract-strings.mjs, scripts/generate-german.py, scripts/german-domain-draft.json, scripts/german-dynasty-draft.json, docs/strings-authoring-guide.md]
+      tests: [npx vitest run tests/client/string-catalogue.test.js tests/client/locale-preference.test.js tests/client/extract-strings.test.js tests/client/host-journey-localisation.test.js tests/client/snapshot-status.test.js tests/client/german-catalogue.test.js editor/tests/workshop-localisation.test.js editor/tests/mod-pack-export.test.js, npx vitest run tests/client/gm-action-feedback.test.js tests/client/gm-session-controls.test.js tests/client/gm-mission-panel.test.js tests/client/gm-direct-effect-panel.test.js tests/client/gm-spawn-panel.test.js, src/native_host/viewscreen_locale_tests.rs, src/server/bridge_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: client-console-registry
     core:
@@ -83,8 +83,8 @@ entities:
       derived_from: [system-console-family-projection-state, blackboard-console-family-projection-state]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/lobby/server.rs, gui/sim-state.js]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/lobby/server_tests.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/server.rs, gui/sim-state.js]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - component: client-console-family-router
     core:
@@ -327,8 +327,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs, src/ship/config.rs]
-      tests: [cargo test, src/ship/manual_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/ship/config.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs]
 
   - state: ship-authored-station-help-state
     core:
@@ -342,7 +342,7 @@ entities:
       writers: [ship-manual-content-builder]
     implementation:
       status: declared
-      paths: [src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
+      paths: [crates/phoenix-simulation/src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
       # `manual_overview` is a field on StationConfig, not a dedicated type —
       # the closest real symbol is the struct that carries it.
       symbols: [StationConfig]
@@ -361,8 +361,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs, src/ship/rating.rs, src/lobby/server.rs]
-      tests: [cargo test, npx vitest run, src/ship/manual_tests.rs, src/ship/rating_tests.rs, src/lobby/server_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/ship/rating.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/ship/rating_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - state: system-manual-section-state
     core:
@@ -376,9 +376,9 @@ entities:
       writers: [system-manual-section-provider]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs]
+      paths: [crates/phoenix-simulation/src/ship/manual.rs]
 
-      tests: [src/ship/manual_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/manual_tests.rs]
   - component: station-manual-aggregator
     core:
       status: implemented
@@ -394,8 +394,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs, src/lobby/server.rs]
-      tests: [cargo test, src/ship/manual_tests.rs, src/lobby/server_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - state: ship-manual-state
     core:
@@ -410,8 +410,8 @@ entities:
       replicas: [ship-manual-replica]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs, src/lobby/server.rs, src/core/messages.rs, src/core/codec.rs]
-      tests: [cargo test, src/ship/manual_tests.rs, src/lobby/server_tests.rs, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/manual.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/manual_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - state: ship-manual-replica
     core:

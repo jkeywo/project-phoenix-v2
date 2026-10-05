@@ -2,7 +2,7 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [src/core/broadcast/reconnect.rs, src/ship/impulse_boost_systems.rs, src/ship/physics_systems.rs, src/modifiers/coordination.rs, src/modifiers/cache.rs, src/ship/control_source.rs, src/gm_action.rs, src/gm_projection.rs, src/snapshot.rs, src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+sources: [crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-simulation/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/ship/physics_systems.rs, crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/modifiers/cache.rs, crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
 updated: 2026-09-08
 ---
 

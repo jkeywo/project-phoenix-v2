@@ -62,7 +62,7 @@ entities:
       produces: [editor-validation-state]
     implementation:
       status: declared
-      paths: [editor/workshop-runtime.js, src/workshop/mod.rs, editor/validation.js, editor/workshop-acceptance.js]
+      paths: [editor/workshop-runtime.js, crates/phoenix-simulation/src/workshop/mod.rs, editor/validation.js, editor/workshop-acceptance.js]
       tests: [cargo test, npm run test:editor, npx vitest run editor/tests/workshop-form-acceptance.test.js]
 
   - component: editor-objective-instance-authoring
@@ -176,7 +176,7 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/entities/config_cache.rs
+        - crates/phoenix-simulation/src/entities/config_cache.rs
       # Issue #987 replaced the single-slot UPLOADED_PACK_TOML / MOD_MANIFEST_TOML
       # thread-locals (and their set_mod_pack_overlay installer) with `ActivePack`
       # records held in one `thread_local!` `Vec<ActivePack>` (`ACTIVE_PACKS`).
@@ -185,7 +185,7 @@ entities:
       # `overlay_conflicts` are the pure resolution + provenance walks; and
       # `clear_mod_pack_overlay` discards the whole stack for the same-page seam.
       symbols: [ActivePack, PathConflict, push_mod_pack, remove_mod_pack, reorder_mod_packs, active_packs, mod_pack_overlay_get, overlay_source, overlay_lookup, overlay_conflicts, clear_mod_pack_overlay]
-      tests: [cargo test, src/entities/config_cache_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/config_cache_tests.rs]
 
   - component: mod-content-overlay-resolver
     core:
@@ -203,10 +203,10 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/world/mod_pack.rs
-        - src/entities/config_cache.rs
+        - crates/phoenix-simulation/src/world/mod_pack.rs
+        - crates/phoenix-simulation/src/entities/config_cache.rs
       symbols: [validate_mod_pack, validate_pack_scripts]
-      tests: [cargo test, src/entities/config_cache_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/config_cache_tests.rs]
     evidence:
       - kind: test
         reference: valid_pack_is_accepted / corrupt_archive_rejects_whole_pack
@@ -215,7 +215,7 @@ entities:
         reference: store_zip_round_trips / store_zip_rejects_non_store_method / store_zip_rejects_crc_mismatch
         summary: The hand-rolled store-only ZIP reader mirrors editor/mod-pack-export.js — it round-trips real archive bytes and rejects non-store method and CRC mismatch.
       - kind: test
-        reference: "later_pack_wins_a_shared_path_and_reorder_flips_it / a_path_only_one_pack_carries_resolves_to_that_pack / pushing_pack_b_after_a_does_not_evict_a (src/entities/config_cache.rs)"
+        reference: "later_pack_wins_a_shared_path_and_reorder_flips_it / a_path_only_one_pack_carries_resolves_to_that_pack / pushing_pack_b_after_a_does_not_evict_a (crates/phoenix-simulation/src/entities/config_cache.rs)"
         summary: "Both content channels consult the ordered overlay stack first — the latest-loaded pack carrying a path wins, a path only one pack carries resolves to that pack, installing B after A does not evict A, and reorder flips the winner — falling through to the normal fetch for non-overridden paths (AC2, issue #987)."
 
   - state: composed-world-content-pack-state
@@ -231,13 +231,13 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/entities/config_cache.rs
+        - crates/phoenix-simulation/src/entities/config_cache.rs
       # Also no dedicated storage type: the composed view is produced on every
       # read by mod_pack_overlay_get walking the ordered pack stack (later-loaded
       # wins, via the pure overlay_lookup) over the normal fetch path, never
       # materialised as its own struct.
       symbols: [mod_pack_overlay_get, overlay_lookup]
-      tests: [cargo test, src/entities/config_cache_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/config_cache_tests.rs]
 
   - component: mod-aware-scenario-catalog
     core:
@@ -254,9 +254,9 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/world/manifest.rs
+        - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
         reference: merged_catalog_contains_only_manifest_listed_scenarios
@@ -347,9 +347,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/manifest.rs
+        - crates/phoenix-simulation/src/world/manifest.rs
       symbols: [parse_pack_manifest, PackManifest, PackMeta, PackRequires, parse_content_identity, ContentIdentity, SUPPORTED_PACK_FORMAT]
-      tests: [cargo test, src/world/manifest_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs]
 
   - component: mod-pack-script-trust-boundary
     core:
@@ -366,14 +366,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/mod_pack.rs
-        - src/entities/config_cache.rs
-        - src/content_ledger.rs
+        - crates/phoenix-simulation/src/world/mod_pack.rs
+        - crates/phoenix-simulation/src/entities/config_cache.rs
+        - crates/phoenix-simulation/src/content_ledger.rs
       symbols: [validate_pack_scripts, PackScriptFiles, OverlayScriptResolver]
-      tests: [cargo test, src/entities/config_cache_tests.rs, src/content_ledger_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/config_cache_tests.rs, crates/phoenix-simulation/src/content_ledger_tests.rs]
     evidence:
       - kind: test
-        reference: "a_pack_script_resolves_from_the_overlay_not_the_fallback / a_script_carrying_pack_moves_the_content_digest (src/entities/config_cache.rs)"
+        reference: "a_pack_script_resolves_from_the_overlay_not_the_fallback / a_script_carrying_pack_moves_the_content_digest (crates/phoenix-simulation/src/entities/config_cache.rs)"
         summary: "A pack's sibling script resolves from the overlay stack rather than the HTTP fallback, and a script-carrying pack moves the folded content digest — the determinism guarantee that keeps pack scripts from drifting under replay."
 
   - component: mod-pack-scenario-provenance
@@ -390,14 +390,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/manifest.rs
+        - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
         - server.html
       symbols: [build_merged_catalog, MergedCatalog, ScenarioCatalogEntry]
-      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
-        reference: "merged_catalog_base_scenarios_report_no_origin (src/world/manifest.rs)"
+        reference: "merged_catalog_base_scenarios_report_no_origin (crates/phoenix-simulation/src/world/manifest.rs)"
         summary: "A base-manifest scenario carries no origin (None → wire source \"base\"); a mod scenario, including one replacing a base id, reports its pack id, so a player is never mis-badged."
 
   - component: editor-mod-workspace

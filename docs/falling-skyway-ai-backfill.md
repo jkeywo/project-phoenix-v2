@@ -118,7 +118,7 @@ hail (hail-independent, band-scored).
 **Historical decisive negative:** there was **no `operations_console`, no operations AI
 policy, and no way for AI to emit `StartOperation`**. `StartOperation` has exactly
 two producers in the repo — a *human* captain console (`gui/action-map.js:204`)
-and *world script* (`src/world/script/effects.rs:410`). The destroyer owns all four
+and *world script* (`crates/phoenix-simulation/src/world/script/effects.rs:410`). The destroyer owns all four
 capability verbs (`alliance_destroyer.toml:1520-1640`) but nothing in any fragment
 can order them. `tow`, `stabilise`, `field_repair` and `transfer` are therefore
 strictly crew-only in that historical build.
@@ -277,8 +277,8 @@ gates actually sit ([ai] exploration; every ref verified against the file).
   condition_step 0.01) and `coarse` (max_range 260, condition_step 0.25,
   no capacities).
 - **A scan is a first-class world event.** `scanned_flag(subject_id)` composes
-  `scan.<id>.taken` (`src/science/scan.rs:465-467`); the latch in
-  `src/science/server.rs:360-373` raises it in the base-world flag store and
+  `scan.<id>.taken` (`crates/phoenix-simulation/src/science/scan.rs:465-467`); the latch in
+  `crates/phoenix-simulation/src/science/server.rs:360-373` raises it in the base-world flag store and
   queues `WorldEvent::FlagSet`. Scenario `on_flag_set("scan.<id>.taken", …)`
   handlers therefore fire off a real sensor action. The scan reads only
   *published* infrastructure (`InfrastructureSnapshot::from_state` is #1025's
@@ -509,4 +509,4 @@ outcome/phase/ship/damage but no per-objective set).
 - `assets/entities/fragments/ai/movement_attack_pass.toml`
 - `assets/entities/alliance_destroyer.toml` (current tractor, dock, umbilical and repair-dispatch tables; historical audit used the retired `[operations]` block)
 - `assets/entities/region_radiation_band.toml`
-- `src/tractor/`, `src/dock/`, `src/umbilical/`, and `src/console/repair/external_server.rs` (current crew-owned systems)
+- `src/tractor/`, `src/dock/`, `src/umbilical/`, and `crates/phoenix-simulation/src/console/repair/external_server.rs` (current crew-owned systems)

@@ -1,7 +1,9 @@
 //! The immutable first census bounds the allowance when the trusted Git base
 //! predates its introduction. The live allowance may already have shrunk within
 //! that same batch. Later trusted Git ledgers retain the ordinary subset ratchet.
-use project_phoenix::headless::determinism_audit::{parse_census, uncovered, Ambiguity};
+use project_phoenix::headless::determinism_audit::{
+    migrate_census, parse_census_original, uncovered, Ambiguity,
+};
 use std::{
     io::Write,
     path::Path,
@@ -18,7 +20,7 @@ const INITIAL_CAPTURE: &str =
     include_str!("../fixtures/determinism/fixed-update-ambiguities.initial.json");
 
 pub(super) fn enforce_first_allowance(root: &Path, rows: &[Ambiguity]) -> Result<(), String> {
-    let initial = parse_census(INITIAL_CAPTURE)?;
+    let initial = parse_census_original(INITIAL_CAPTURE)?;
     require_pinned_allowance(root, rows, &initial, INITIAL_ROWS, INITIAL_BLOB)
 }
 
@@ -32,7 +34,7 @@ fn require_pinned_allowance(
     // Validate the independent capture first. Replacing both JSON files cannot
     // silently authorize new access or an extra instance of an existing pair.
     require_fingerprint(root, initial, expected_rows, expected_blob)?;
-    let growth = uncovered(allowed, initial);
+    let growth = uncovered(allowed, &migrate_census(initial.to_vec()));
     if !growth.is_empty() {
         return Err(format!(
             "first allowance grew beyond the reviewed capture:\n{growth:#?}"

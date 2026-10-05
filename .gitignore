@@ -94,3 +94,7 @@ worker/.dev.vars
 /default/
 /pane-*/
 ultralight.log
+
+# Source modules named debug are not compiler output.
+!crates/**/src/debug/
+!crates/**/src/debug/**

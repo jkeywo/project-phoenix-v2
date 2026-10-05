@@ -34,7 +34,11 @@ pub fn before(a: &str, b: &str) -> bool {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|v| v["name"] == name)
+            .filter(|v| {
+                project_phoenix::headless::determinism_audit::migrated_symbol(
+                    v["name"].as_str().unwrap(),
+                ) == name
+            })
             .collect();
         assert_eq!(matches.len(), 1, "unique frozen owner {name}");
         matches[0]["index"].as_u64().unwrap()

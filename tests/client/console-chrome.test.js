@@ -209,7 +209,7 @@ describe('the shell owns the damage popup the footers used to', () => {
   });
 
   it('still reports the visit on that tap, so the unread cue can clear', () => {
-    // `unread` is edge-triggered host-side (src/station_importance.rs) on
+    // `unread` is edge-triggered host-side (crates/phoenix-simulation/src/station_importance.rs) on
     // whichever Station an objective ends on — including the one this seat is
     // already sitting at — and gui/hero-bar.js draws the cue on every tab.
     // Tapping your own tab is the only gesture that reports a visit for it, so

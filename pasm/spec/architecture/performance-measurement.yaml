@@ -22,9 +22,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/perf/mod.rs, src/perf/native_frames.rs, src/bin/phoenix_perf.rs, scripts/profile-native.ps1, scripts/profile-headless.ps1, scripts/profile-analysis.mjs, examples/profile_systems.rs, scripts/profile-systems.ps1, scripts/profile-systems-analysis.mjs, docs/profiling.md, .github/workflows/ci.yml]
+      paths: [crates/phoenix-simulation/src/perf/mod.rs, crates/phoenix-presentation/src/perf/native_frames.rs, src/bin/phoenix_perf.rs, scripts/profile-native.ps1, scripts/profile-headless.ps1, scripts/profile-analysis.mjs, examples/profile_systems.rs, scripts/profile-systems.ps1, scripts/profile-systems-analysis.mjs, docs/profiling.md, .github/workflows/ci.yml]
       symbols: [profile, baseline_path, load_baseline, report, gates, BaselineError, BASELINE_DIR]
-      tests: [cargo test, src/perf/tests.rs, src/perf/native_frames_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/tests.rs, crates/phoenix-presentation/src/perf/native_frames_tests.rs]
 
   - component: perf-mesh-interior
     core:
@@ -49,9 +49,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/perf/mesh.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
+      paths: [crates/phoenix-presentation/src/perf/mesh.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
       symbols: [Interior, ModelInterior, measure, capture, triangles_in, pixels_in, TRIANGLES_METRIC, TRIANGLES_TOTAL_METRIC, TEXTURE_COUNT_METRIC, TEXTURE_PIXELS_METRIC]
-      tests: [cargo test, src/perf/mesh_tests.rs]
+      tests: [cargo test, crates/phoenix-presentation/src/perf/mesh_tests.rs]
 
   - component: perf-baseline-adoption
     core:
@@ -73,9 +73,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/perf/baseline.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
+      paths: [crates/phoenix-simulation/src/perf/baseline.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
       symbols: [adopt, unmeasured, render, PROVENANCE_MARKER]
-      tests: [cargo test, src/perf/baseline_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/baseline_tests.rs]
 
   - component: perf-tick-collector
     core:
@@ -93,9 +93,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/perf/tick.rs, src/headless/app.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
+      paths: [crates/phoenix-simulation/src/perf/tick.rs, src/headless/app.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
       symbols: [TickSampler, run_sampled]
-      tests: [cargo test, src/perf/tick_tests.rs, src/headless/args_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/tick_tests.rs, src/headless/args_tests.rs]
 
   - component: perf-console-latency-collector
     core:
@@ -117,9 +117,9 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/perf/console.rs, src/debug/console_latency.rs, src/perf/tick.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
+      paths: [crates/phoenix-simulation/src/perf/console.rs, crates/phoenix-simulation/src/debug/console_latency.rs, crates/phoenix-simulation/src/perf/tick.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
       symbols: [sample_console_latency, CONSOLE_ACK_METRIC, ConsoleLatencyTracker, stamp_admission_instant, record_admit_to_broadcast, publish_console_latency, clear_console_latency_on_enable, recorder_mut]
-      tests: [cargo test, src/perf/console_tests.rs, src/debug/console_latency_tests.rs, src/perf/tick_tests.rs, src/headless/args_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/console_tests.rs, crates/phoenix-simulation/src/debug/console_latency_tests.rs, crates/phoenix-simulation/src/perf/tick_tests.rs, src/headless/args_tests.rs]
 
   - component: perf-asset-inventory
     core:
@@ -142,9 +142,9 @@ entities:
       runs_in: [node-tooling-runtime]
     implementation:
       status: declared
-      paths: [src/perf/assets.rs, src/bin/phoenix_perf.rs]
+      paths: [crates/phoenix-simulation/src/perf/assets.rs, src/bin/phoenix_perf.rs]
       symbols: [Inventory, inventory, capture, GLB_BYTES_METRIC, GLB_TOTAL_METRIC, LOD_LEVELS_METRIC, WITHOUT_LOD_METRIC]
-      tests: [cargo test, src/perf/assets_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/assets_tests.rs]
 
   - component: perf-browser-collector
     core:
@@ -164,7 +164,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/perf/browser.rs, src/server/bridge.rs, server.html, tests/smoke/perf-browser.spec.js]
+      paths: [crates/phoenix-simulation/src/perf/browser.rs, src/server/bridge.rs, server.html, tests/smoke/perf-browser.spec.js]
       symbols: [wasm_perf_capture, boot_begin, boot_end, frame_begin, frame_end]
       tests: [npx playwright test, src/server/bridge_tests.rs]
 
@@ -180,9 +180,9 @@ entities:
       readers: [perf-measurement-contract]
     implementation:
       status: declared
-      paths: [src/perf/tick.rs, src/perf/browser.rs, src/perf/console.rs, src/perf/mod.rs, src/bin/phoenix_headless.rs, src/bin/phoenix_perf.rs]
+      paths: [crates/phoenix-simulation/src/perf/tick.rs, crates/phoenix-simulation/src/perf/browser.rs, crates/phoenix-simulation/src/perf/console.rs, crates/phoenix-simulation/src/perf/mod.rs, src/bin/phoenix_headless.rs, src/bin/phoenix_perf.rs]
       symbols: [RUN_METRIC, TICK_METRIC, BOOT_METRIC, FRAME_METRIC, CONSOLE_ACK_METRIC]
-      tests: [cargo test, src/perf/tick_tests.rs, src/perf/console_tests.rs, src/perf/tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/tick_tests.rs, crates/phoenix-simulation/src/perf/console_tests.rs, crates/phoenix-simulation/src/perf/tests.rs]
 
   - state: perf-baseline-file
     core:
@@ -201,9 +201,9 @@ entities:
       writers: [perf-baseline-adoption]
     implementation:
       status: declared
-      paths: [perf/baselines/headless-default.ron, perf/baselines/assets.ron, perf/baselines/assets-mesh.ron, perf/baselines/browser-automation.ron, src/perf/mod.rs, src/perf/baseline.rs]
+      paths: [perf/baselines/headless-default.ron, perf/baselines/assets.ron, perf/baselines/assets-mesh.ron, perf/baselines/browser-automation.ron, crates/phoenix-simulation/src/perf/mod.rs, crates/phoenix-simulation/src/perf/baseline.rs]
       symbols: [BASELINE_DIR]
-      tests: [cargo test, src/perf/tests.rs, src/perf/baseline_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/perf/tests.rs, crates/phoenix-simulation/src/perf/baseline_tests.rs]
 
   - component: native-surface-attribution
     core:
@@ -228,6 +228,6 @@ entities:
       runs_in: [native-host-runtime]
     implementation:
       status: declared
-      paths: [src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/upload.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/app.rs, src/core/codec.rs, scripts/profile-surfaces.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, scripts/profile-matrix.mjs, scripts/profile-analysis.mjs, tests/client/profile-surfaces.test.js, tests/client/profile-analysis.test.js, docs/acceptance/1405-surface-attribution.md]
+      paths: [src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/upload.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/app.rs, crates/phoenix-simulation/src/core/codec.rs, scripts/profile-surfaces.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, scripts/profile-matrix.mjs, scripts/profile-analysis.mjs, tests/client/profile-surfaces.test.js, tests/client/profile-analysis.test.js, docs/acceptance/1405-surface-attribution.md]
       symbols: [SurfaceCapture, SurfaceObserver, SurfaceIdentity, FrameTrace, FullCopyReasons, CopyObservation, PaneRenderScale, RasterGeometry, DiscardReason, Operation, PaneFrameBuffer, MAX_CAPTURE_EVENTS, to_json, analyzeSurfaceCapture]
-      tests: ["cargo test --features headless --lib native_host::panes::", "npx vitest run tests/client/profile-surfaces.test.js", src/native_host/panes/surface_stats_tests.rs, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/panes/upload_tests.rs, src/native_host/panes/frame_stats_tests.rs, src/native_host/panes/render_geometry_tests.rs, src/native_host/app_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: ["cargo test --features headless --lib native_host::panes::", "npx vitest run tests/client/profile-surfaces.test.js", src/native_host/panes/surface_stats_tests.rs, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/panes/upload_tests.rs, src/native_host/panes/frame_stats_tests.rs, src/native_host/panes/render_geometry_tests.rs, src/native_host/app_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]

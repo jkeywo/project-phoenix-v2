@@ -20,9 +20,9 @@ use std::{
 };
 
 const SYSTEMS: [&str; 3] = [
-    "project_phoenix::ship::power::publish_power_blackboard",
-    "project_phoenix::ship::shields::publish_shields_blackboard",
-    "project_phoenix::console::repair::server::publish_repair_blackboard",
+    "phoenix_simulation::ship::power::publish_power_blackboard",
+    "phoenix_simulation::ship::shields::publish_shields_blackboard",
+    "phoenix_simulation::console::repair::server::publish_repair_blackboard",
 ];
 const PAIRS: [(usize, usize); 3] = [(0, 1), (0, 2), (1, 2)];
 

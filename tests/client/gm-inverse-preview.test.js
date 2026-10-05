@@ -28,7 +28,7 @@ const realStrings = buildTable(read('assets/strings/strings.csv'));
 
 /** Every `GmActionKind`, read off the Rust enum rather than restated here. */
 function rustActionKinds() {
-  const source = read('src/gm_action.rs');
+  const source = read('crates/phoenix-simulation/src/gm_action.rs');
   const body = source.slice(source.indexOf('pub enum GmActionKind {'));
   const variants = body.slice(0, body.indexOf('\n}')).match(/^\s{4}([A-Z]\w+),$/gm) || [];
   return variants

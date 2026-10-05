@@ -18,7 +18,7 @@
 //
 // ── Design notes (the merge is a PURE fold; keep it that way) ────────────────
 //
-// The report contract this consumes (src/headless/report.rs, src/core/balance.rs):
+// The report contract this consumes (src/headless/report.rs, crates/phoenix-simulation/src/core/balance.rs):
 //   report.outcome                         "victory" | "defeat" | "draw" | "timeout" | "reported"
 //   report.report.rows[]                   {id, heading, outcome, state, score}
 //   report.report.total                    hidden diagnostic sum of the rows
@@ -38,7 +38,7 @@
 // phone and the Viewscreen render, and it has no `score` field whatsoever. So
 // design's number reaches design through this artifact and reaches no player
 // surface anywhere, as a shape guarantee rather than a filter somebody has to
-// remember to apply — see the module docs on src/core/report.rs.
+// remember to apply — see the module docs on crates/phoenix-simulation/src/core/report.rs.
 //
 // Merge conventions (documented so the numbers are unambiguous):
 //   - win = victory, loss = defeat. `draw` and `timeout` are tallied in their

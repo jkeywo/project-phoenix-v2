@@ -1,0 +1,19 @@
+entities:
+  - component: reusable-game-layers
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Reusable Game Layers
+      summary: Cargo and JavaScript package boundaries separate reusable runtime, transport and platform mechanisms from Phoenix data, content, simulation and presentation. Existing host entry points compose those packages through compatibility facades.
+      rationale:
+        - Runtime orders admitted commands and coordinates readiness, digests and recovery without choosing game rules. Transport owns connection identity and delivery without interpreting Phoenix commands. Platform owns files and surfaces without choosing Station or lobby roles.
+        - Model carries shared game vocabulary. Content prepares authored bytes through manifests, includes, overlays, archives and asset validation. Entity and world semantic validation remains beside the simulation registries it validates, consuming the content mechanisms in one direction.
+        - Simulation retains Bevy ECS and scheduling but independently builds without rendering, windows or Ultralight. Presentation consumes simulation through explicit readiness and input contracts. Optional platform rendering features are selected only by hosts.
+        - A separate grid game consumes only reusable packages, proving native and browser hosts, pure JavaScript consoles, command ordering, digest divergence and recovery without Phoenix game dependencies.
+    architecture:
+      kind: package-boundary
+      authority: local
+    implementation:
+      status: declared
+      paths: [Cargo.toml, scripts/check-layers.mjs, src/lib.rs, src/presentation_adapters.rs, crates/phoenix-runtime/src/lib.rs, crates/phoenix-transport/src/lib.rs, crates/phoenix-platform/src/lib.rs, crates/phoenix-model/src/lib.rs, crates/phoenix-content/src/lib.rs, crates/phoenix-simulation/src/lib.rs, crates/phoenix-presentation/src/lib.rs, packages/transport/package.json, packages/session/package.json, examples/grid/Cargo.toml]
+      tests: [tests/layers/grid-smoke.mjs, examples/grid/src/grid_tests.rs, src/layer_tests/mod.rs, src/headless/determinism_audit/layer_names_tests.rs]

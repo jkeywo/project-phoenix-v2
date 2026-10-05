@@ -48,7 +48,7 @@
 //!
 //! # Why headless and not the browser
 //!
-//! `src/cross_target_probe.rs` already pins native↔wasm equivalence for the
+//! `crates/phoenix-simulation/src/cross_target_probe.rs` already pins native↔wasm equivalence for the
 //! simulation crate, tick by tick, against a committed ledger, and it does so
 //! from Rust literals with no filesystem precisely so the two targets are
 //! comparable. Adding a boot profile does not change what that probe tests, and

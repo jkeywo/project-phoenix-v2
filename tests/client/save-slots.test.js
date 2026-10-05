@@ -183,7 +183,7 @@ describe('the mounted catalogue', () => {
   });
 
   // The recovery checkpoint a GM live restore (#1446) takes before it replaces
-  // the world is an ordinary manual row in this list, and `src/gm_restore.rs`
+  // the world is an ordinary manual row in this list, and `crates/phoenix-simulation/src/gm_restore.rs`
   // names it with the String Table id `RECOVERY_CHECKPOINT_NAME` because that
   // crate has no locale. Every place this catalogue prints a name resolves it,
   // or a player opening Load reads `server.gm.restore.recovery_name` verbatim.

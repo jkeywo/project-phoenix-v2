@@ -3,7 +3,7 @@
 // MINIMAL_TEST_WORLD), locks the raider and fires the port blaster bank via
 // `ControlSystem { target: "blaster-port", payload: FireBlaster }`, and
 // screenshots the viewscreen so the textured blaster-bolt PFX
-// (src/server/pfx.rs sync_blaster_pfx) can be eyeballed in flight and on
+// (crates/phoenix-presentation/src/server/pfx.rs sync_blaster_pfx) can be eyeballed in flight and on
 // impact.
 //
 // Not part of the smoke suite (AGENTS.md: renderer visual output is not
@@ -151,7 +151,7 @@ test('capture blaster bolts firing on a stationary target', async ({ context }) 
   await shot('00-pre-fire');
 
   // Human blaster fire requires a locked WeaponsTarget (arc check in
-  // handle_fire_blaster, src/console/weapons/server.rs:2667) — same
+  // handle_fire_blaster, crates/phoenix-simulation/src/console/weapons/server.rs:2667) — same
   // requirement as phasers/torpedoes. Lock the raider first.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000);
   const entities = worldSetup?.data?.world?.entities ?? [];

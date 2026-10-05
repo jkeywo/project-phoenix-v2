@@ -989,7 +989,7 @@ describe("the cruiser's Command tab (issue #1387)", () => {
         navigation: { station: 'navigation', host: null, rating: 'Backfill' },
       },
       // Command has something to direct: Tactical (its `command_target`) is
-      // AI-controlled, per `src/console/command/server.rs::station_is_ai_controlled`.
+      // AI-controlled, per `crates/phoenix-simulation/src/console/command/server.rs::station_is_ai_controlled`.
       blackboards: { command: { directed_station_ai: true } },
       stationRatings: { captain: 'Std' },
       activeStation: 'captain',

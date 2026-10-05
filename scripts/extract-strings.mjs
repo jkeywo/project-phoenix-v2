@@ -24,7 +24,7 @@
  * In assets/worlds/*.toml, `[[entity]] name` is dual-purpose: it is display text
  * AND the cross-reference key that `entity = "..."` and `targets = [...]` point
  * at, which Rust resolves through `DispatchContext::name_to_uuid`
- * (src/world/dispatch.rs:112). Rust treats it as an opaque string, so swapping
+ * (crates/phoenix-simulation/src/world/dispatch.rs:112). Rust treats it as an opaque string, so swapping
  * the name for an id is safe *provided every reference is swapped to the same
  * id*. We therefore run in two passes: collect all entity names first, then
  * rewrite definitions and references together. A reference is only rewritten

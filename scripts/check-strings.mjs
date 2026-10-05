@@ -314,7 +314,7 @@ for (const file of worldFiles) {
 }
 
 // `class` is INHERITABLE: a hull that declares none takes its included
-// fragment's (src/entities/include_resolve.rs), and that resolved value is what
+// fragment's (crates/phoenix-simulation/src/entities/include_resolve.rs), and that resolved value is what
 // reaches the badge — the catalog entry reads `cfg.class` off the fully
 // resolved EntityConfig (src/server/bridge.rs:1581). Reading only a hull's own
 // top-level `class` would leave a composed hull at zero errors while the picker
@@ -469,11 +469,11 @@ for (const file of codeFiles) {
 // panic text — is now an error, which is the point: these modules are fully
 // migrated and any new prose is a regression.
 const WIRE_VISIBLE_RUST = [
-  'src/ship/coordination_systems.rs',
-  'src/ship/power.rs',
-  'src/weapons/shield.rs',
-  'src/console/navigation/mod.rs',
-  'src/server/viewscreen_border.rs',
+  'crates/phoenix-simulation/src/ship/coordination_systems.rs',
+  'crates/phoenix-simulation/src/ship/power.rs',
+  'crates/phoenix-simulation/src/weapons/shield.rs',
+  'crates/phoenix-simulation/src/console/navigation/mod.rs',
+  'crates/phoenix-presentation/src/server/viewscreen_border.rs',
 ];
 
 for (const relPath of WIRE_VISIBLE_RUST) {

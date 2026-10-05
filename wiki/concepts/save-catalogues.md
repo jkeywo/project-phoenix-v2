@@ -2,7 +2,7 @@
 title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
-sources: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/snapshot.rs, src/core/collision_history.rs, tests/collision_history.rs, tests/same_target_damage_ordering.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, src/server_app/world_setup.rs, src/lockstep/mod.rs, src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, src/entities/config.rs, src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
+sources: [crates/phoenix-simulation/src/save_slots.rs, crates/phoenix-simulation/src/save_slots_lifecycle.rs, crates/phoenix-simulation/src/startup_restore.rs, crates/phoenix-simulation/src/save_slots_store.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/core/collision_history.rs, tests/collision_history.rs, tests/same_target_damage_ordering.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, crates/phoenix-simulation/src/delivery/args.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
 updated: 2026-09-22
 ---
 
@@ -28,7 +28,7 @@ first in-progress tick, every authored interval, and the first observed
 seconds and world loading accepts it only when it converts to a positive whole
 number of `sim_tick_hz` ticks.
 
-`src/core/collision_history.rs` owns collision attribution on every simulation
+`crates/phoenix-simulation/src/core/collision_history.rs` owns collision attribution on every simulation
 host. It collects in `FixedLast` before peer digest sampling and tick advance,
 so capture includes the collision events from the step just completed. The
 snapshot preserves all collision rows; restore replaces history and advances

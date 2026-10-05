@@ -91,12 +91,12 @@ describe('code issue', () => {
     // never repeats leaves that branch uncovered while the assertion below
     // still passes, which is what this test used to do.
     let i = 0;
-    const script = [...letters('QUARKING'), ...letters('QUARKING'), ...letters('MOISTURE')];
+    const script = [...letters('QUARK'), ...letters('QUARK'), ...letters('MOIST')];
     const h = harness({ randomInt: () => script[i++] });
     const first = openHost(h, 'host-1');
     const second = openHost(h, 'host-2');
-    expect(first.suffix).toBe('QUARKING');
-    expect(second.suffix).toBe('MOISTURE');
+    expect(first.suffix).toBe('QUARK');
+    expect(second.suffix).toBe('MOIST');
     expect(i, 'the collision was never drawn, so the retry never ran').toBe(script.length);
     expect(h.reg.snapshot()).toHaveLength(2);
   });
@@ -138,12 +138,12 @@ describe('code issue', () => {
     // must skip it (the deny rule is containment — see gui/join-code.js).
     const a = DATA.suffix.alphabet;
     const script = [
-      ...[...'ADMINXYZ'].map((c) => a.indexOf(c)),
-      ...[...'QUARKING'].map((c) => a.indexOf(c)),
+      ...[...'ADMIN'].map((c) => a.indexOf(c)),
+      ...[...'QUARK'].map((c) => a.indexOf(c)),
     ];
     let i = 0;
     const h = harness({ randomInt: () => script[i++ % script.length] });
-    expect(openHost(h).suffix).toBe('QUARKING');
+    expect(openHost(h).suffix).toBe('QUARK');
   });
 });
 
@@ -171,7 +171,7 @@ describe('typed lookup', () => {
     const h = harness();
     openHost(h);
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
     expect(h.last('phone', 'error')).toMatchObject({ request: 'resolve', reason: 'unknown' });
   });
 
@@ -207,7 +207,7 @@ describe('typed lookup', () => {
     const server = openHost(h, 'fleet-host', NAMESPACE_SERVER);
     const old = openHost(h, 'old-host', NAMESPACE_CLIENT, { version: OTHER_RELEASE });
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
     h.send('phone', { type: 'resolve', code: server.suffix });
     h.send('phone', {
       type: 'resolve',
@@ -220,14 +220,14 @@ describe('typed lookup', () => {
   it('refuses a denied suffix at lookup as well as at mint', () => {
     const h = harness();
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ADMINXYZ' });
+    h.send('phone', { type: 'resolve', code: 'ADMIN' });
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'denied' });
   });
 
   it('refuses a frame from another protocol revision rather than guessing', () => {
     const h = harness();
     h.connect('phone', ROLE_CLIENT);
-    h.raw('phone', { v: RENDEZVOUS_PROTOCOL + 1, type: 'resolve', code: 'ZZZZZZZZ' });
+    h.raw('phone', { v: RENDEZVOUS_PROTOCOL + 1, type: 'resolve', code: 'ZZZZZ' });
     expect(h.last('phone', 'error')).toMatchObject({ reason: 'unsupported-protocol' });
   });
 });
@@ -327,19 +327,19 @@ describe('fleet joining (issue #1114)', () => {
     // The sharpest case for the typed fallback: one suffix, two records, two
     // fields. Without a per-request namespace the fleet field would compose
     // the crew project and attach a ship host to a phone's ship.
-    const script = [...letters('QUARKING'), ...letters('QUARKING')];
+    const script = [...letters('QUARK'), ...letters('QUARK')];
     let i = 0;
     const h = harness({ randomInt: () => script[i++] });
     const crew = openHost(h, 'crew-host', NAMESPACE_CLIENT);
     const fleet = openHost(h, 'fleet-lead', NAMESPACE_SERVER);
     expect(crew.suffix).toBe(fleet.suffix);
 
-    fleetJoin(h, 'ship-2', 'quarking');
+    fleetJoin(h, 'ship-2', 'quark');
     expect(h.last('fleet-lead', 'peer-joined')).toMatchObject({ peer: 'ship-2' });
     expect(h.last('crew-host', 'peer-joined')).toBeNull();
 
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'join', code: 'quarking' });
+    h.send('phone', { type: 'join', code: 'quark' });
     expect(h.last('crew-host', 'peer-joined')).toMatchObject({ peer: 'phone' });
   });
 
@@ -417,12 +417,12 @@ describe('registry bounds', () => {
     const h = harness();
     openHost(h);
     h.connect('scanner', ROLE_CLIENT);
-    for (let i = 0; i < cap; i += 1) h.send('scanner', { type: 'resolve', code: 'ZZZZZZZZ' });
+    for (let i = 0; i < cap; i += 1) h.send('scanner', { type: 'resolve', code: 'ZZZZZ' });
     expect(h.last('scanner', 'error')).toMatchObject({ reason: 'unknown' });
 
     // Past the cap the answer changes, and the frame tells the adapter to end
     // the socket rather than keep answering an enumeration.
-    const [refusal] = h.reg.receive('scanner', { v: RENDEZVOUS_PROTOCOL, type: 'resolve', code: 'ZZZZZZZZ' });
+    const [refusal] = h.reg.receive('scanner', { v: RENDEZVOUS_PROTOCOL, type: 'resolve', code: 'ZZZZZ' });
     expect(refusal.frame).toMatchObject({ type: 'error', reason: 'too-many-attempts' });
     expect(refusal.close).toBe(true);
   });
@@ -494,7 +494,7 @@ describe('registry bounds', () => {
 
     clock += DATA.limits.record_ttl_seconds * 1000 + 1;
     h.connect('phone', ROLE_CLIENT);
-    h.send('phone', { type: 'resolve', code: 'ZZZZZZZZ' });
+    h.send('phone', { type: 'resolve', code: 'ZZZZZ' });
 
     expect(h.reg.snapshot()).toHaveLength(0);
     // 'unreachable' is what createRendezvousHost's own socket.onerror/onclose
@@ -833,7 +833,7 @@ describe('code reclaim (issue #1115)', () => {
     h.send('host-1', {
       type: 'host-open',
       namespace: NAMESPACE_CLIENT,
-      resume: { suffix: 'ZZZZZZZZ', secret: 'whatever-was-guessed-here-000000' },
+      resume: { suffix: 'ZZZZZ', secret: 'whatever-was-guessed-here-000000' },
     });
     const minted = h.last('host-1', 'hosted');
     expect(minted.code.suffix)

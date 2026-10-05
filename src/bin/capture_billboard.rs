@@ -34,7 +34,6 @@ use bevy::{
     winit::WinitPlugin,
 };
 
-use project_phoenix::entities::model_rig::ModelRig;
 use project_phoenix::render_capture::{
     create_render_target, frame_distance, measure_world_bounds, orbit_transform, unpad_rows,
     ImageCopyPlugin, MainWorldReceiver,
@@ -100,7 +99,7 @@ fn load_config(args: CaptureArgs) -> CaptureConfig {
     let sidecar = model.replace(".glb", ".model.toml");
     let base = std::fs::read_to_string(&sidecar)
         .ok()
-        .and_then(|t| ModelRig::from_toml(&t).ok())
+        .and_then(|t| parse_model_rig(&t).ok())
         .map(|rig| rig.base_bevy_transform())
         .unwrap_or_default();
 
@@ -394,3 +393,7 @@ fn save_atlas(config: &CaptureConfig, tiles: &[Vec<u8>]) {
 #[cfg(test)]
 #[path = "tests/capture_billboard_cli_tests.rs"]
 mod cli_tests;
+
+use project_phoenix::entities::model_rig::parse_model_rig;
+
+use project_phoenix::entities::model_rig::ModelRigTransform as _;

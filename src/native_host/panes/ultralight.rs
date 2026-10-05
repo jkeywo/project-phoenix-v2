@@ -91,8 +91,8 @@ use bevy::window::{
 };
 
 use vellum_ultralight::runtime::{
-    KeyEventType, Modifiers, MouseButton as UlMouseButton, PaneSession, PaneSpec, RuntimeOptions,
-    UltralightPane, UltralightRuntime, VirtualKeyCode,
+    KeyEventType, Modifiers, MouseButton as UlMouseButton, RuntimeOptions, UltralightPane,
+    UltralightRuntime, VirtualKeyCode,
 };
 use vellum_ultralight::staging;
 
@@ -264,210 +264,108 @@ pub fn stage_sdk() -> Result<String, String> {
     ))
 }
 
-/// One embedded view, behind the trait the frame loop drives.
+/// Phoenix input adapter over the shared native document surface.
 pub struct UltralightPaneSurface {
-    view: UltralightPane,
-    /// Set once the document has reported a completed load. Sticky: `is_loading`
-    /// goes false between navigations too, and a pane navigates once.
-    loaded: bool,
-    /// Whether this page composites over what is behind it (issue #1404).
-    ///
-    /// Set at construction from the surface's [`PaneKind`], the same predicate
-    /// the texture format and the fill are minted from, and read by exactly one
-    /// thing: which copy [`PaneView::copy_frame`] makes. Before this the copy
-    /// loop asked the *pane window* whether it was the HUD, so the one fact that
-    /// has to agree with the texture — straight alpha or verbatim BGRA — was
-    /// decided a level above the thing that knows it. A surface now carries its
-    /// own answer, which is what lets a copy happen anywhere the surface is.
-    transparent: bool,
-    /// The script that collects what this document has queued.
-    ///
-    /// Held per surface because the two documents this type drives install
-    /// **different** queues: a pane's is `phoenixPaneOut` (a participant's
-    /// `ClientMessage`s, admitted as such) and the host lobby's is
-    /// `phoenixHostLobbyOut` (the host operator's own picks and this machine's
-    /// own screen arrangement, judged by the arbiter and the layout law and
-    /// never admitted at all). Two namespaces make a record that arrived on the
-    /// wrong one unrepresentable rather than merely wrong — see
-    /// `host_lobby::document::HOST_LOBBY_OUT_NAMESPACE` — and a surface that
-    /// drained the wrong one would simply find no function and report nothing,
-    /// forever, with a clean log. That cost nothing until issue #1328 gave the
-    /// lobby surface something to say and #1330 gave it more; this field is what
-    /// makes the mistake unrepresentable.
-    drain_script: String,
-    render_visible: bool,
-    applied_visibility: Option<bool>,
+    inner: phoenix_platform::ultralight::UltralightSurface,
 }
-
 impl UltralightPaneSurface {
-    /// Wrap a freshly created **pane** view.
-    ///
-    /// Public so an integration test can drive one pane without a Bevy `App`:
-    /// the automated proof that a real console page loads and answers
-    /// (`tests/native_host_pane_ultralight.rs`) needs a runtime, a view and this
-    /// wrapper, and nothing else this module builds.
     pub fn new(view: UltralightPane) -> Self {
         Self::with_transparency(view, false)
     }
-
-    /// Wrap a freshly created pane view whose page is **transparent** — the
-    /// viewscreen HUD overlay (issue #422, native port), and nothing else today.
-    ///
-    /// A separate constructor rather than a parameter on [`new`](Self::new)
-    /// because `new` is what the ignored SDK integration tests call, and every
-    /// caller that is not the HUD wants the opaque answer. See
-    /// [`transparent`](Self::transparent) for what the flag decides.
     pub fn with_transparency(view: UltralightPane, transparent: bool) -> Self {
         Self {
-            view,
-            loaded: false,
-            transparent,
-            drain_script: pane_drain_script(),
-            render_visible: true,
-            applied_visibility: None,
+            inner: phoenix_platform::ultralight::UltralightSurface::new(
+                view,
+                pixel_mode(transparent),
+                pane_drain_script(),
+            ),
         }
     }
-
-    /// Wrap a freshly created **host-lobby** view (issues #1325/#1328/#1330).
-    ///
-    /// Everything below the queue is identical to a pane's — the same runtime,
-    /// the same texture, the same push primitive — so this is a constructor
-    /// rather than a second type. What differs is the one thing that must:
-    /// which page→host queue it drains. See [`Self::drain_script`].
     pub fn for_host_lobby(view: UltralightPane) -> Self {
         Self {
-            view,
-            loaded: false,
-            // Opaque chrome, like a console: `PaneKind::Lobby.transparent()` is
-            // false, and this is the same answer said in the adapter.
-            transparent: false,
-            drain_script: host_lobby_drain_script(),
-            render_visible: true,
-            applied_visibility: None,
+            inner: phoenix_platform::ultralight::UltralightSurface::new(
+                view,
+                pixel_mode(false),
+                host_lobby_drain_script(),
+            ),
         }
     }
-
-    /// The underlying view, for input forwarding and the pixel copy.
     pub fn view_mut(&mut self) -> &mut UltralightPane {
-        &mut self.view
+        self.inner.view_mut()
     }
-
-    /// Ask the view whether its document has finished loading, and remember the
-    /// answer.
-    ///
-    /// Sticky, deliberately: `is_loading` also goes false *between* navigations,
-    /// and a pane navigates exactly once.
     pub fn refresh_loaded(&mut self) -> bool {
-        if !self.loaded && !self.view.is_loading() {
-            self.loaded = true;
-        }
-        self.apply_visibility();
-        self.loaded
-    }
-
-    fn apply_visibility(&mut self) {
-        if !self.loaded || self.applied_visibility == Some(self.render_visible) {
-            return;
-        }
-        // The SDK renders every dirty view, including ones Bevy does not
-        // composite. Hide its document at the paint source, not merely the
-        // copied texture. The DOM, subscriptions and reliable queues survive.
-        let script = format!(
-            "(()=>{{const root=document.documentElement;if(!root)throw Error('document loading');let style=document.getElementById('phoenix-native-visibility');if(!style){{style=document.createElement('style');style.id='phoenix-native-visibility';style.textContent='html[data-phoenix-native-hidden]{{display:none!important}}';document.head.appendChild(style);}}root.toggleAttribute('data-phoenix-native-hidden',{});}})()",
-            !self.render_visible
-        );
-        if self.view.evaluate(&script).is_ok() {
-            self.applied_visibility = Some(self.render_visible);
-        }
+        self.inner.refresh_loaded()
     }
 }
-
 impl PaneSurface for UltralightPaneSurface {
     fn load(&mut self, url: &str) -> Result<(), PaneSurfaceError> {
-        self.loaded = false;
-        self.applied_visibility = None;
-        self.view
-            .load_url(url)
-            .map_err(|e| PaneSurfaceError::Load(e.to_string()))
+        self.inner.load(url)
     }
-
     fn is_ready(&self) -> bool {
-        self.loaded
+        self.inner.is_ready()
     }
-
     fn push(&mut self, script: &str) -> Result<(), PaneSurfaceError> {
-        self.view
-            .evaluate(script)
-            .map(|_| ())
-            .map_err(|e| PaneSurfaceError::Script(e.to_string()))
+        self.inner.push(script)
     }
-
     fn drain(&mut self) -> Vec<String> {
-        match self.view.evaluate(&self.drain_script) {
-            Ok(drained) => vellum_ultralight::bridge::split_records(&drained)
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-            // A throw here is the same ordinary case a failed push is: the
-            // page's own scripts have not run yet, so the drain function does
-            // not exist. Next frame.
-            Err(_) => Vec::new(),
-        }
+        self.inner.drain()
     }
 }
-
-/// The frame half of the seam (issue #1404, slice 2).
-///
-/// Every call here is one the frame loop used to make by reaching into
-/// `surface.view`. Going through the trait instead is what lets the loop be
-/// written — and tested, against
-/// [`pane_thread::doubles`](super::pane_thread) — without an SDK, and what will
-/// let it run on a thread of its own. The calls, and their order, are exactly
-/// the calls and the order they were.
 impl PaneView for UltralightPaneSurface {
     fn set_visible(&mut self, visible: bool) {
-        self.render_visible = visible;
-        self.apply_visibility();
+        self.inner.set_visible(visible);
     }
     fn refresh_loaded(&mut self) -> bool {
-        UltralightPaneSurface::refresh_loaded(self)
+        self.inner.refresh_loaded()
     }
-
     fn resize(&mut self, width: u32, height: u32) {
-        self.view.resize(width, height);
+        self.inner.resize(width, height);
     }
-
+    fn copy_frame(
+        &mut self,
+        dst: &mut [u8],
+        force: bool,
+    ) -> Result<Option<FrameRect>, PaneSurfaceError> {
+        self.inner.copy_frame(dst, force)
+    }
     fn input(&mut self, input: &PaneInput) {
         match input {
-            PaneInput::MouseMove { x, y } => self.view.mouse_move(*x, *y),
-            PaneInput::MouseDown { x, y } => self.view.mouse_down(*x, *y, UlMouseButton::Left),
-            PaneInput::MouseUp { x, y } => self.view.mouse_up(*x, *y, UlMouseButton::Left),
-            PaneInput::Scroll { dx, dy } => self.view.scroll(*dx, *dy),
+            PaneInput::MouseMove { x, y } => self.inner.view_mut().mouse_move(*x, *y),
+            PaneInput::MouseDown { x, y } => {
+                self.inner
+                    .view_mut()
+                    .mouse_down(*x, *y, UlMouseButton::Left)
+            }
+            PaneInput::MouseUp { x, y } => {
+                self.inner.view_mut().mouse_up(*x, *y, UlMouseButton::Left)
+            }
+            PaneInput::Scroll { dx, dy } => self.inner.view_mut().scroll(*dx, *dy),
             // Editing/dismissal keys are raw key-downs with native code 0 and
             // no modifiers, as `forward_keyboard_text` has always sent them
             // — the modifiers gap noted there is unchanged by this seam.
-            PaneInput::Key(code) => self.view.key(
+            PaneInput::Key(code) => self.inner.view_mut().key(
                 KeyEventType::RawKeyDown,
                 pane_virtual_key(*code),
                 0,
                 Modifiers::default(),
             ),
-            PaneInput::KeyChar(text) => self.view.key_char(text),
+            PaneInput::KeyChar(text) => self.inner.view_mut().key_char(text),
             PaneInput::WorkshopKey(key) => {
                 let json = crate::core::codec::encode_workshop_key(key);
                 let handled = self
-                    .view
+                    .inner
+                    .view_mut()
                     .evaluate(&format!("window.__phoenixNativeWorkshopKey({json})"))
                     .ok()
                     .as_deref()
                     == Some("true");
                 if !handled {
                     if let Some(text) = &key.text {
-                        self.view.key_char(text);
+                        self.inner.view_mut().key_char(text);
                     } else if let Some(code) =
                         crate::native_host::workshop::keyboard::virtual_key(&key.code)
                     {
-                        self.view.key(
+                        self.inner.view_mut().key(
                             if key.pressed {
                                 KeyEventType::RawKeyDown
                             } else {
@@ -485,27 +383,9 @@ impl PaneView for UltralightPaneSurface {
                     }
                 }
             }
-            PaneInput::Focus => self.view.focus(),
-            PaneInput::Unfocus => self.view.unfocus(),
+            PaneInput::Focus => self.inner.view_mut().focus(),
+            PaneInput::Unfocus => self.inner.view_mut().unfocus(),
         }
-    }
-
-    fn copy_frame(
-        &mut self,
-        dst: &mut [u8],
-        force: bool,
-    ) -> Result<Option<FrameRect>, PaneSurfaceError> {
-        // The transparent HUD takes the straight-alpha copy; every opaque
-        // surface is moved verbatim into its BGRA texture — see
-        // [`pane_texture_format`], which is minted from the same predicate.
-        let copied = if self.transparent {
-            self.view.copy_frame(dst, force)
-        } else {
-            self.view.copy_frame_bgra(dst, force)
-        };
-        copied
-            .map(|rect| rect.map(FrameRect::from))
-            .map_err(|e| PaneSurfaceError::Frame(e.to_string()))
     }
 }
 
@@ -534,13 +414,15 @@ fn pane_virtual_key(code: PaneKeyCode) -> VirtualKeyCode {
 /// this host's policy and not vellum's. `!Send`, like the runtime it holds: what
 /// crosses onto the pane thread is the closure that builds one.
 pub struct UltralightHost {
-    runtime: UltralightRuntime,
+    runtime: phoenix_platform::ultralight::UltralightDriver,
 }
 
 impl UltralightHost {
     /// Take ownership of a started runtime.
     pub fn new(runtime: UltralightRuntime) -> Self {
-        Self { runtime }
+        Self {
+            runtime: phoenix_platform::ultralight::UltralightDriver::new(runtime),
+        }
     }
 }
 
@@ -562,40 +444,21 @@ impl PaneRuntime for UltralightHost {
         spec: &PaneSpecOwned,
         url: &str,
     ) -> Result<Self::View, PaneSurfaceError> {
-        let spec = PaneSpec {
-            width: spec.width,
-            height: spec.height,
-            device_scale: spec.device_scale,
-            transparent: kind.transparent(),
-            // One storage session per pane, named after the pane and never
-            // written to disk — see the twin of this spec in `init_pane_host`
-            // for what a shared session would cost.
-            session: Some(PaneSession::ephemeral(id.to_string())),
+        let drain = match kind {
+            PaneKind::Workshop => crate::native_host::workshop::document::drain_script(),
+            PaneKind::GameMaster => crate::native_host::native_gm::document::drain_script(),
+            PaneKind::Lobby => host_lobby_drain_script(),
+            PaneKind::Console | PaneKind::Hud => pane_drain_script(),
         };
-        let view = self
-            .runtime
-            .create_pane(&spec)
-            .map_err(|e| PaneSurfaceError::Load(e.to_string()))?;
-        // The lobby drains its OWN queue — the one place the two surfaces differ
-        // below the URL.
-        let mut surface = match kind {
-            PaneKind::Workshop => {
-                let mut surface = UltralightPaneSurface::with_transparency(view, false);
-                surface.drain_script = crate::native_host::workshop::document::drain_script();
-                surface
-            }
-            PaneKind::GameMaster => {
-                let mut surface = UltralightPaneSurface::with_transparency(view, false);
-                surface.drain_script = crate::native_host::native_gm::document::drain_script();
-                surface
-            }
-            PaneKind::Lobby => UltralightPaneSurface::for_host_lobby(view),
-            PaneKind::Console | PaneKind::Hud => {
-                UltralightPaneSurface::with_transparency(view, kind.transparent())
-            }
-        };
-        surface.load(url)?;
-        Ok(surface)
+        self.runtime
+            .create(
+                (spec.width, spec.height, spec.device_scale),
+                kind.pixel_mode(),
+                id.to_string(),
+                drain,
+                url,
+            )
+            .map(|inner| UltralightPaneSurface { inner })
     }
 }
 
@@ -609,12 +472,15 @@ impl PaneRuntime for UltralightHost {
 /// straight alpha, and pays for it with `copy_frame` into `Rgba8UnormSrgb`.
 /// Both `Image::new_fill` sites and the copy loop decide through this one
 /// predicate, so the format and the copy cannot come apart.
-const fn pane_texture_format(transparent: bool) -> TextureFormat {
+const fn pixel_mode(transparent: bool) -> phoenix_platform::frames::PixelMode {
     if transparent {
-        TextureFormat::Rgba8UnormSrgb
+        phoenix_platform::frames::PixelMode::StraightRgba
     } else {
-        TextureFormat::Bgra8UnormSrgb
+        phoenix_platform::frames::PixelMode::OpaqueBgra
     }
+}
+const fn pane_texture_format(transparent: bool) -> TextureFormat {
+    pixel_mode(transparent).texture_format()
 }
 
 /// The colour a pane's texture is minted in, by the same predicate
@@ -627,11 +493,7 @@ const fn pane_texture_format(transparent: bool) -> TextureFormat {
 /// shows anywhere a frame has not yet reached — including the whole surface for
 /// the frame or two after a resize mints a new one.
 const fn pane_fill(transparent: bool) -> [u8; 4] {
-    if transparent {
-        [0, 0, 0, 0]
-    } else {
-        [0, 0, 0, 255]
-    }
+    pixel_mode(transparent).fill()
 }
 
 /// The main world's part of a pane. SDK objects and staging pools live on the
@@ -1408,7 +1270,7 @@ fn init_pane_host(world: &mut World) {
     // host-lobby surface, which carries no typeable control and so would be
     // framed by a reticle promising a keyboard target that accepts nothing. A
     // host with no `--pane` seeds no focus at all, which is the honest state.
-    let focus = FocusRing::focused_on_first_pane(router.focus_order());
+    let focus = crate::native_host::input_routing::focused_on_first_pane(router.focus_order());
     if let Some(first) = focus.focused() {
         let _ = thread.send(PaneCommand::Input {
             id: first,
@@ -1505,7 +1367,7 @@ fn sync_host_lobby_presence(
     // carrying it onto whatever now occupies that position.
     //
     // A reveal does NOT seed focus onto the surface. Same rule as
-    // `FocusRing::focused_on_first_pane`: keyboard focus is a promise that the
+    // `crate::native_host::input_routing::focused_on_first_pane`: keyboard focus is a promise that the
     // next keystroke lands somewhere, and this surface has no control to land it
     // in, so seeding it would route input at chrome that accepts nothing. It
     // stays in the focus order, so a deliberate Ctrl+Tab still reaches it.

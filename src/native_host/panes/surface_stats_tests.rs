@@ -94,7 +94,7 @@ fn bounded_recording_keeps_exact_totals_and_discloses_missing_raw_events() {
     let observer = SurfaceObserver::new(Instant::now(), 1);
     let frame = observer.produced(surface(), 1, false, FullCopyReasons::default(), None);
     drop(frame);
-    let recording = observer.0.recording.lock().unwrap();
+    let recording = observer.snapshot().unwrap();
     assert_eq!(recording.events.len(), 1);
     assert_eq!(recording.omitted_events, 1);
     assert_eq!(recording.totals["produced"], 1);
@@ -117,7 +117,7 @@ fn closure_discloses_in_flight_frames_and_refuses_late_worker_events() {
     assert_eq!(artifact.omitted_events, 0);
     drop(frame);
     observer.record(None, Operation::MainFrame);
-    let recording = observer.0.recording.lock().unwrap();
+    let recording = observer.snapshot().unwrap();
     assert!(recording.closed);
     assert!(recording.events.is_empty());
     assert!(

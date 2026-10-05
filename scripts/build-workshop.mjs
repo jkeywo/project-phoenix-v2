@@ -45,6 +45,7 @@ await writeFile(path.join(out, 'workshop-native-test.html'), composedTestPage
   .replace('<canvas id="canvas"></canvas>', '<img id="canvas" style="object-fit:contain" alt="">')
   .replace('gui/workshop-test-boot.js', 'gui/workshop-native-test-boot.js'), 'utf8');
 await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
+await cp(path.join(root, 'packages'), path.join(out, 'packages'), { recursive: true });
 await copyFile(path.join(root, 'assets/strings/strings.csv'), path.join(out, 'assets/strings/strings.csv'));
 for (const name of editorModules) {
   await copyFile(path.join(root, `editor/${name}.js`), path.join(out, `editor/${name}.js`));

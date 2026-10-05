@@ -5,7 +5,7 @@
 //!
 //! # What this proves that the unit tests cannot
 //!
-//! `src/sim_digest_tests.rs` builds each folded surface by hand in a bare
+//! `crates/phoenix-simulation/src/sim_digest_tests.rs` builds each folded surface by hand in a bare
 //! `World` and asserts the fold moves. That is the right shape for "this field
 //! is in the fold", and the wrong shape for the two claims this issue is
 //! actually about:

@@ -8,5 +8,5 @@
   "linkedPdbIncludesObjectiveReducer": true,
   "executableSha256": "eca89f684275b51344ee5fc81d49dda054f50b42352e60b5ee8724b6324307ca",
   "executableMtimeUtc": "2026-09-27T03:50:07.9465877Z",
-  "verification": "Runner refreshed src/lib.rs mtime before first Cargo; compile log names this worktree; dependency record and linked PDB were checked before releasing shared target."
+  "verification": "Runner refreshed crates/phoenix-simulation/src/lib.rs mtime before first Cargo; compile log names this worktree; dependency record and linked PDB were checked before releasing shared target."
 }

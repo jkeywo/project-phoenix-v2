@@ -107,7 +107,7 @@ describe('hostLobbyViewModel — phase transitions', () => {
 
   it('keeps the join panel off the landing, on a host whose phase already reads Lobby', () => {
     // The bug this input exists for. `GamePhase::Lobby` is the DEFAULT
-    // (src/core/messages.rs), so a world-less native host boots straight into
+    // (crates/phoenix-simulation/src/core/messages.rs), so a world-less native host boots straight into
     // it and the phase law answered 'show' while the operator was still at the
     // landing's front door with no World chosen — the join code drawn over the
     // menu, above it in the stacking order. The landing is not a phase, so the

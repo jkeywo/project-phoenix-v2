@@ -61,7 +61,7 @@ describe('host channel localisation boundary', () => {
   });
 
   it('resolves the lobby scenario title and body — the reported symptom', () => {
-    // Exactly what src/world/server.rs puts on the wire for combat_test.toml.
+    // Exactly what crates/phoenix-simulation/src/world/server.rs puts on the wire for combat_test.toml.
     d.dispatch('lobby', JSON.stringify({
       phase: 'Lobby',
       scenario_title: 'world.combat_test.global.title',

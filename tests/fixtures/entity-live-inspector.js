@@ -1,6 +1,6 @@
 /** Shared fixture for the entities/AI Live Inspector domain (issue #1489).
  *
- * Mirrors the wire shape `src/gm_entity_inspector.rs` publishes: a descriptor
+ * Mirrors the wire shape `crates/phoenix-simulation/src/gm_entity_inspector.rs` publishes: a descriptor
  * table for the whole domain plus one reading per live entity.
  */
 export function entityDescriptor(id, {

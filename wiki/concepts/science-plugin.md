@@ -2,7 +2,7 @@
 title: Science / Sensors target
 type: concept
 tags: [science, sensors, scans, objectives, ai, blackboard]
-sources: [src/science/mod.rs, src/science/server.rs, src/science/scan.rs, src/ship/sensors.rs, src/world/server.rs, src/core/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
+sources: [crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-simulation/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
 updated: 2026-08-27
 ---
 
@@ -11,20 +11,20 @@ updated: 2026-08-27
 ## Ownership
 
 `science::SciencePlugin` is the authoritative scan plugin, implemented in
-`src/science/server.rs` and registered by `WorldPlugin` in
-`src/world/server.rs`. It applies admitted scan requests in `tick_scans` and
+`crates/phoenix-simulation/src/science/server.rs` and registered by `WorldPlugin` in
+`crates/phoenix-simulation/src/world/server.rs`. It applies admitted scan requests in `tick_scans` and
 publishes each ship's scan blackboard. The independently selected
 Science/Sensors **target** is first-class per-ship state owned by the Sensors
-system in `src/ship/sensors.rs`:
+system in `crates/phoenix-simulation/src/ship/sensors.rs`:
 
 - The selection lives in the per-entity **`SensorRadarSelection`** component
-  (`src/ship/sensors.rs:20`; also reachable via the
+  (`crates/phoenix-simulation/src/ship/sensors.rs`; also reachable via the
   `crate::sensors_plugin::SensorRadarSelection` alias). Every ship — player and
   NPC — carries its own.
-- `handle_sensors_messages` (`src/ship/sensors.rs:171`) consumes admitted
+- `handle_sensors_messages` (`crates/phoenix-simulation/src/ship/sensors.rs`) consumes admitted
   `SetScienceTarget` / `ClearScienceTarget` command payloads and writes the
   ship's own `SensorRadarSelection`.
-- `operate_sensors_ai` (`src/ship/sensors.rs:1167`) is the AI decide-and-emit
+- `operate_sensors_ai` (`crates/phoenix-simulation/src/ship/sensors.rs`) is the AI decide-and-emit
   system (issue #828): rather than writing `SensorRadarSelection` directly, it
   emits an admitted `SetScienceTarget` / `ClearScienceTarget` through the same
   command-admission seam the human path uses, so AI and human converge on one
@@ -40,7 +40,7 @@ fallback), and emits the same admitted `ScanTarget` command as the console.
 
 The emitter does not decide whether the scan is legal and does not write or
 latch scan state. `science::server::tick_scans`
-(`src/science/server.rs:210`) remains the sole applier: it evaluates the
+(`crates/phoenix-simulation/src/science/server.rs`) remains the sole applier: it evaluates the
 hull-authored suite, power, interference, and range, then writes the reading and
 the scenario's `scan.<entity-id>.taken` flag only on success. A refusal leaves
 the objective active, so Backfill retries on the next deterministic Sensors
@@ -52,18 +52,18 @@ tick.
 The Sensors system publishes its raw truth into the ship's `sensor-radar`
 blackboard: `SensorRadarBlackboard.selected_target` mirrors this ship's
 `SensorRadarSelection`. The viewscreen aggregator lifts that value into
-`ViewscreenBlackboard::science_target` (`src/core/messages.rs`), and every
+`ViewscreenBlackboard::science_target` (`crates/phoenix-model/src/messages.rs`), and every
 cross-system consumer reads the frozen `science_target` viewscreen fact rather
 than the live per-ship selection. The Sensors-panel target-info snapshot also
-carries `science_target_uuid` per ship (`src/ship/sensors.rs`).
+carries `science_target_uuid` per ship (`crates/phoenix-simulation/src/ship/sensors.rs`).
 
 ## Sources
 
-- `src/ship/sensors.rs` (`SensorRadarSelection`, `handle_sensors_messages`,
+- `crates/phoenix-simulation/src/ship/sensors.rs` (`SensorRadarSelection`, `handle_sensors_messages`,
   `operate_sensors_ai`, publish systems)
-- `src/science/server.rs` (`tick_scans`, the sole scan applier)
-- `src/science/scan.rs` (pure scan range/fidelity derivation)
-- `src/core/messages.rs` (`SensorRadarBlackboard`, `ViewscreenBlackboard.science_target`)
+- `crates/phoenix-simulation/src/science/server.rs` (`tick_scans`, the sole scan applier)
+- `crates/phoenix-simulation/src/science/scan.rs` (pure scan range/fidelity derivation)
+- `crates/phoenix-model/src/messages.rs` (`SensorRadarBlackboard`, `ViewscreenBlackboard.science_target`)
 - Issues #828 (per-entity Sensors migration), #829 (raw-blackboard split), and
   #1139 (Scan directive and Backfill emitter)
 - [Radar Projection](./radar-projection.md)

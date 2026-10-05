@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/server_app/registration.rs, src/world/server.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/coordination.rs, src/ship/damage_sync.rs, src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -29,7 +29,7 @@ power_group = "helm"
 to be registered, every station reference to resolve, and every system named by
 a station rating to exist and belong to that station.
 
-`SystemKindDescriptor` in `src/ship/system_registry.rs` is the authoritative
+`SystemKindDescriptor` in `crates/phoenix-simulation/src/ship/system_registry.rs` is the authoritative
 metadata record for an authored kind. A kind chooses the server behaviour and
 presentation classification; the instance id remains the identity carried by
 topology, control-source and command state. It also declares whether the kind
@@ -54,7 +54,7 @@ System ids are lowercase kebab strings. A fine system normally combines its
 capability and instance (`phaser-fore`, `torpedo-tube-aft`); a single coarse
 capability can use the bare id (`captain`, `navigation`, `comms`). Kind strings
 are registry keys and may use snake case. Use the helpers in
-`src/ship/system_registry.rs` instead of duplicating stable ids in Rust.
+`crates/phoenix-simulation/src/ship/system_registry.rs` instead of duplicating stable ids in Rust.
 
 Station ids and system ids are separate namespaces. `helm` and `tactical` are
 Station identities used for console-level blackboards; Helm axes and Tactical

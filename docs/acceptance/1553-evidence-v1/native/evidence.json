@@ -14,7 +14,7 @@
     "tests/gm_objective.rs": "ab50e931cea465a6883e151cd374e234dafcbe4247c65eb9783c9c19391e86e3",
     "tests/lockstep_recovery.rs": "531fad99638263e7ce3c204d796f0c8e5962323e6dc14c98ae0e25a2189b3712",
     "tests/cruiser_elimination.rs": "0dbe01c5d75f19527db127670ba371ccc297fd12830010af1d89e5809bbb09c6",
-    "src/command_admission/mod.rs": "63ed762850ff40d4a5d1bfabd2e0cc9c361da2f0dd5581a384b5f775d813d1bc",
+    "crates/phoenix-simulation/src/command_admission/mod.rs": "63ed762850ff40d4a5d1bfabd2e0cc9c361da2f0dd5581a384b5f775d813d1bc",
     "assets/worlds/alliance_convoy_escort.toml": "7d0e370519efc643a1a33af16aa131d270cc363171b1f32796bff0d49a802924",
     "assets/worlds/cruiser_elimination.toml": "6912245f19b6b4bcf10d8003aa31d22d67c302b5855828c8340e841e057400a7",
     "assets/entities/alliance_cruiser.toml": "968b8812b2c3da042650dbcd47bc483d147d369099e39a673b9220fc4ed4d043",

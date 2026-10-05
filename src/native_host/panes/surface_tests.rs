@@ -3,7 +3,8 @@ use crate::core::codec::JsonCodec;
 use crate::core::messages::{DeliveryClass, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::native_host::panes::identity::PaneIdentity;
-use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use crate::native_host::transport::{TransportDispatch, TransportEvent};
+use phoenix_transport::transport::Transport;
 
 fn bus_with_pane() -> (PaneBus, PaneId) {
     let bus = PaneBus::default();

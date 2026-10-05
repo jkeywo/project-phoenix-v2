@@ -1,8 +1,8 @@
 # Observed phase timing (#1400 slice 5)
 
 The existing non-recording `phoenix-headless --perf-capture <PATH>` path now
-owns a live span collector outside the App. `src/perf/phase_trace.rs` observes
-Bevy's actual FixedUpdate/system spans; `src/perf/phase.rs` reduces their paired
+owns a live span collector outside the App. `crates/phoenix-simulation/src/perf/phase_trace.rs` observes
+Bevy's actual FixedUpdate/system spans; `crates/phoenix-simulation/src/perf/phase.rs` reduces their paired
 intervals and feeds the same Recorder used by the harness tick sampler.
 Native compilation, real coverage, CLI capture and measured/unmeasured state and
 census parity passed on the preserved declaration-stage source. The phase

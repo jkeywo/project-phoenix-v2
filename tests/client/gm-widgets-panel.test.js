@@ -165,7 +165,7 @@ describe('the four typed widgets an author may compose', () => {
 
   it('drops an unknown widget type and a widget with no label rather than drawing an empty card', () => {
     // Rust refuses both at world load naming the section and index
-    // (src/world/config_tests.rs). This is the same refusal one level on, for
+    // (crates/phoenix-simulation/src/world/config_tests.rs). This is the same refusal one level on, for
     // a payload that never came from a world file.
     const poked = parseGmRolePresets([{
       id: 'tactical',

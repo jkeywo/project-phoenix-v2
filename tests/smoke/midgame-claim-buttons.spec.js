@@ -27,7 +27,7 @@ test('mid-game station claim: Leave and Ready both register via real DOM clicks'
   await p1.click('#ready-btn');
 
   // Ready starts a server-authoritative 5 s countdown before the game
-  // actually transitions to InProgress (src/lobby/handler.rs). Wait for
+  // actually transitions to InProgress (crates/phoenix-simulation/src/lobby/handler.rs). Wait for
   // that transition on p1's page before bringing p2 in, or p2's mid-game
   // claim flow below races a server that's still in Lobby.
   await p1.waitForSelector('#lobby-ui.active', { state: 'detached', timeout: 10_000 });

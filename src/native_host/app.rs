@@ -1169,3 +1169,5 @@ pub fn run(mut app: App) {
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
+
+use crate::entities::include_resolve::ParseEntityTemplate as _;

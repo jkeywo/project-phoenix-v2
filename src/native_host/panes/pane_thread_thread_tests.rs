@@ -392,7 +392,7 @@ fn retained_empty_gamepad_slot_reaches_js_even_when_main_frames_outrun_iteration
 #[test]
 fn pooled_frames_are_bounded_recycled_and_isolated_across_resize_and_close() {
     let mut sink = PooledFrames::new(PANE_STAGING_BUFFERS);
-    sink.configure(PANE, PaneKind::Console, 16);
+    sink.configure(PANE, PaneKind::Console.pixel_mode(), 16);
     for _ in 0..3 {
         assert_eq!(sink.stage(PANE, 16).unwrap()[3], 255);
         sink.publish(PANE, 0, FrameRect::full(2, 2), true);
@@ -406,7 +406,7 @@ fn pooled_frames_are_bounded_recycled_and_isolated_across_resize_and_close() {
     );
     sink.publish(PANE, 0, FrameRect::full(2, 2), true);
     let old_frames = std::mem::take(&mut sink.frames);
-    sink.configure(PANE, PaneKind::Hud, 16); // Equal length, different generation.
+    sink.configure(PANE, PaneKind::Hud.pixel_mode(), 16); // Equal length, different generation.
     drop(old_frames);
     for _ in 0..3 {
         assert_eq!(sink.stage(PANE, 16).unwrap()[3], 0);

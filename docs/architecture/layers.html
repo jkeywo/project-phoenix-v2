@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phoenix · Layer dependencies</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f7fa;--fg:#182234;--muted:#58657a;--line:#b2bdcc;--surface:#fff;--shared:#e4f2ec;--game:#e8edfb;--host:#f9edda;--accent:#176754;--focus:#af5f15}
+@media(prefers-color-scheme:dark){:root{--bg:#121a23;--fg:#ecf1f7;--muted:#b1bece;--line:#65758a;--surface:#202c3a;--shared:#203d37;--game:#283753;--host:#473722;--accent:#80d9ba;--focus:#ffbe7e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:1220px;margin:auto;padding:30px 24px 50px}h1{font-size:30px;line-height:1.15;margin:8px 0 12px;letter-spacing:-.6px}h2{font-size:19px;margin:0 0 6px}h3{font-size:16px;margin:18px 0 7px}p{margin:8px 0 16px}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:var(--muted)}.intro{max-width:840px;color:var(--muted)}a{color:var(--accent);overflow-wrap:anywhere}button,select{font:inherit;color:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid var(--focus);outline-offset:4px}.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:20px 0}.tabs{display:flex;gap:6px}.tabs button{border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:5px}.tabs button[aria-selected=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}select{max-width:100%;padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:5px}.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-bottom:18px}.key{display:inline-block;width:12px;height:12px;margin-right:6px;border:1px solid var(--line);vertical-align:-1px}.host{background:var(--host)}.game{background:var(--game)}.shared{background:var(--shared)}.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:start}.layout>div{min-width:0}.canvas-wrap{max-width:100%;overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}.canvas{position:relative;min-width:640px;height:750px}svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.edge{fill:none;stroke:var(--line);stroke-width:1.2;opacity:.55}.edge.dev{stroke-dasharray:5 4}.edge.active{stroke:var(--accent);stroke-width:2;opacity:1}.edge.incoming{stroke:var(--focus);stroke-width:2;opacity:1}.edge.dim{opacity:.1}.node{position:absolute;width:146px;min-height:55px;transform:translate(-50%,-50%);border:1px solid var(--line);border-radius:5px;padding:8px;text-align:center;transition:opacity .12s}.node strong{font-size:14px;display:block;font-weight:600}.node small{font-size:11px;display:block;color:var(--muted)}.node.selected{outline:3px solid var(--accent);outline-offset:3px}.node.dim{opacity:.38}.rank-label{position:absolute;left:16px;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}.details{min-width:0}.details p{color:var(--muted)}.details ul{padding-left:19px;margin:8px 0}.details li{margin-bottom:6px}.details code,footer code{font-size:12px;overflow-wrap:anywhere}.hint{font-size:13px;color:var(--muted);margin-top:12px}.edge-link{border:0;background:none;padding:0;text-decoration:underline;text-underline-offset:3px;color:var(--accent);text-align:left}.evidence{margin-top:22px;font-size:12px}.evidence li{overflow-wrap:anywhere}footer{border-top:1px solid var(--line);margin-top:28px;padding-top:16px;font-size:13px;color:var(--muted)}footer p{margin-bottom:6px}.matrix{margin-top:16px}.matrix summary{cursor:pointer}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}td button{font-size:13px}noscript{display:block;padding:20px}
+@media(max-width:1000px){.layout{grid-template-columns:1fr}.details{border-top:1px solid var(--line);padding-top:18px}.canvas{height:750px}.details ul{columns:2}.evidence ul{columns:1}}
+@media(max-width:520px){main{padding:20px 14px}h1{font-size:25px}.toolbar{align-items:stretch;flex-direction:column}.details ul{columns:1}.legend{gap:10px}.hint{font-size:12px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body><main>
+<div class="eyebrow">Project Phoenix / Architecture</div>
+<h1>Layer dependencies</h1>
+<p class="intro">Arrows point from the layer doing the importing to the layer it depends on. Select a layer to trace its direct dependencies and callers. These are actual declared edges, including conditional and test dependencies.</p>
+<div class="toolbar">
+<div class="tabs" role="tablist" aria-label="Language">
+<button id="rust-tab" role="tab" aria-selected="true" aria-controls="graph-panel">Rust</button>
+<button id="javascript-tab" role="tab" aria-selected="false" aria-controls="graph-panel">JavaScript</button>
+</div>
+<label for="focus-layer">Focus</label><select id="focus-layer" aria-label="Focus layer"></select>
+</div>
+<div class="legend"><span><i class="key host"></i>Host / application</span><span><i class="key game"></i>Phoenix game</span><span><i class="key shared"></i>Reusable foundation</span><span>Solid: runtime import</span><span>Dashed: test/build only</span></div>
+<div id="graph-panel" role="tabpanel" aria-labelledby="rust-tab">
+<div class="layout">
+<div><div class="canvas-wrap"><div class="canvas" id="canvas"><svg id="edges" aria-hidden="true"></svg></div></div><p class="hint">Green arrows: selected layer depends on · Amber arrows: imports selected layer. At narrow widths, scroll the graph horizontally or use the dependency list below.</p></div>
+<aside class="details" id="details" aria-live="polite"></aside>
+</div>
+<details class="matrix"><summary>Complete dependency list</summary><table><thead><tr><th>Imports from</th><th>Depends on</th><th>Scope</th></tr></thead><tbody id="edge-table"></tbody></table></details>
+</div>
+<footer>
+<p><strong>Scope:</strong> workspace crates and JavaScript layer imports. External libraries are omitted. A Rust edge may be target- or feature-specific; selecting its layer reveals declaration details. This is a dependency graph, not network traffic or runtime message flow.</p>
+<p>Authored <code>assets/</code> are consumed as data, not an importing code layer. Simulation owns game-specific validation; content owns preparation and loading. The independent simulation build has no renderer or window stack.</p>
+<p>Source: workspace <a href="../../Cargo.toml">Cargo manifests</a> and JavaScript imports · <a href="../../wiki/concepts/reusable-layers.md">Layer guide</a> · Refresh: <code>npm run layers:graph</code> · Verify: <code>node scripts/generate-layers-graph.mjs --check</code></p>
+</footer>
+<noscript>This graph needs JavaScript. The layer guide linked above provides the package ownership table.</noscript>
+<script id="graph-data" type="application/json">
+{
+  "rust": {
+    "nodes": [
+      {
+        "id": "project-phoenix",
+        "label": "project-phoenix",
+        "path": ".",
+        "source": "./Cargo.toml",
+        "description": "Host composition, native and browser adapters, headless runner and Workshop host.",
+        "group": "host"
+      },
+      {
+        "id": "phoenix-grid",
+        "label": "grid",
+        "path": "examples/grid",
+        "source": "examples/grid/Cargo.toml",
+        "description": "Separate native and WASM game proving reuse without Phoenix game packages.",
+        "group": "host"
+      },
+      {
+        "id": "phoenix-math",
+        "label": "math",
+        "path": "crates/phoenix-math",
+        "source": "crates/phoenix-math/Cargo.toml",
+        "description": "Deterministic numerical foundation.",
+        "group": "shared"
+      },
+      {
+        "id": "phoenix-runtime",
+        "label": "runtime",
+        "path": "crates/phoenix-runtime",
+        "source": "crates/phoenix-runtime/Cargo.toml",
+        "description": "Generic command ordering, continuation, digests and recovery.",
+        "group": "shared"
+      },
+      {
+        "id": "phoenix-model",
+        "label": "model",
+        "path": "crates/phoenix-model",
+        "source": "crates/phoenix-model/Cargo.toml",
+        "description": "Shared Phoenix types, identities, messages and visual declarations.",
+        "group": "game"
+      },
+      {
+        "id": "phoenix-content",
+        "label": "content",
+        "path": "crates/phoenix-content",
+        "source": "crates/phoenix-content/Cargo.toml",
+        "description": "Asset preparation, archives, includes, manifests, strings and content ledger.",
+        "group": "game"
+      },
+      {
+        "id": "phoenix-platform",
+        "label": "platform",
+        "path": "crates/phoenix-platform",
+        "source": "crates/phoenix-platform/Cargo.toml",
+        "description": "Files, monitors, pane surfaces, input routing and frame lifetimes.",
+        "group": "shared"
+      },
+      {
+        "id": "phoenix-transport",
+        "label": "transport",
+        "path": "crates/phoenix-transport",
+        "source": "crates/phoenix-transport/Cargo.toml",
+        "description": "Generic connections, delivery classes, relay protocol and sockets.",
+        "group": "shared"
+      },
+      {
+        "id": "phoenix-simulation",
+        "label": "simulation",
+        "path": "crates/phoenix-simulation",
+        "source": "crates/phoenix-simulation/Cargo.toml",
+        "description": "Game rules, ECS schedules, AI, scripts, command admission and snapshots.",
+        "group": "game"
+      },
+      {
+        "id": "phoenix-presentation",
+        "label": "presentation",
+        "path": "crates/phoenix-presentation",
+        "source": "crates/phoenix-presentation/Cargo.toml",
+        "description": "Shared 3D view: renderer, effects, cameras, HUD and Workshop preview.",
+        "group": "game"
+      }
+    ],
+    "edges": [
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-simulation",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets",
+          "./Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-presentation",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-math",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-model",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-content",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets",
+          "./Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-platform",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-runtime",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "project-phoenix",
+        "to": "phoenix-transport",
+        "evidence": [
+          "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-grid",
+        "to": "phoenix-runtime",
+        "evidence": [
+          "examples/grid/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-grid",
+        "to": "phoenix-transport",
+        "evidence": [
+          "examples/grid/Cargo.toml: dependencies, all targets",
+          "examples/grid/Cargo.toml: dependencies, cfg(not(target_arch = \"wasm32\"))"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-grid",
+        "to": "phoenix-platform",
+        "evidence": [
+          "examples/grid/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-model",
+        "to": "phoenix-transport",
+        "evidence": [
+          "crates/phoenix-model/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content",
+        "to": "phoenix-model",
+        "evidence": [
+          "crates/phoenix-content/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content",
+        "to": "phoenix-math",
+        "evidence": [
+          "crates/phoenix-content/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content",
+        "to": "phoenix-platform",
+        "evidence": [
+          "crates/phoenix-content/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-math",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-model",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-content",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets",
+          "crates/phoenix-simulation/Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-platform",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-runtime",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-transport",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets",
+          "crates/phoenix-simulation/Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-presentation",
+        "to": "phoenix-simulation",
+        "evidence": [
+          "crates/phoenix-presentation/Cargo.toml: dependencies, all targets",
+          "crates/phoenix-presentation/Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-presentation",
+        "to": "phoenix-math",
+        "evidence": [
+          "crates/phoenix-presentation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-presentation",
+        "to": "phoenix-model",
+        "evidence": [
+          "crates/phoenix-presentation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-presentation",
+        "to": "phoenix-content",
+        "evidence": [
+          "crates/phoenix-presentation/Cargo.toml: dev-dependencies, all targets"
+        ],
+        "normal": false
+      }
+    ]
+  },
+  "javascript": {
+    "nodes": [
+      {
+        "id": "browser-ui",
+        "label": "Phoenix browser UI",
+        "path": "gui",
+        "source": "server.html",
+        "description": "Phone consoles, shared screen controls and Workshop. Includes root HTML entry points.",
+        "group": "host"
+      },
+      {
+        "id": "worker",
+        "label": "Rendezvous Worker",
+        "path": "worker-rendezvous/src",
+        "source": "worker-rendezvous/src/index.js",
+        "description": "Cloud service composition around the reusable transport registry and relay.",
+        "group": "host"
+      },
+      {
+        "id": "grid-js",
+        "label": "Grid console",
+        "path": "examples/grid",
+        "source": "examples/grid/app.js",
+        "description": "Pure JavaScript console and WASM host adapter for the separate grid game.",
+        "group": "host"
+      },
+      {
+        "id": "session-js",
+        "label": "Session · JS",
+        "path": "packages/session",
+        "source": "packages/session/package.json",
+        "description": "Injected browser session identity and continuation mechanisms.",
+        "group": "shared"
+      },
+      {
+        "id": "transport-js",
+        "label": "Transport · JS",
+        "path": "packages/transport",
+        "source": "packages/transport/package.json",
+        "description": "Rendezvous, ICE, reconnect, join-code parsing, relay and service registry.",
+        "group": "shared"
+      }
+    ],
+    "edges": [
+      {
+        "from": "browser-ui",
+        "to": "transport-js",
+        "normal": true,
+        "evidence": [
+          "gui/connection-manager.js: ../packages/transport/src/connection-manager.js",
+          "gui/connection-manager.js: ../packages/transport/src/connection-manager.js",
+          "gui/connection-manager.js: ../packages/transport/src/connection-manager.js",
+          "gui/join-code.js: ../packages/transport/src/join-code.js",
+          "gui/join-code.js: ../packages/transport/src/join-code.js",
+          "gui/rendezvous-protocol.js: ../packages/transport/src/rendezvous-protocol.js",
+          "gui/rendezvous-relay.js: ../packages/transport/src/rendezvous-relay.js",
+          "gui/rendezvous-transport.js: ../packages/transport/src/rendezvous-transport.js",
+          "gui/rendezvous-transport.js: ../packages/transport/src/rendezvous-transport.js",
+          "gui/transport-levers.js: ../packages/transport/src/transport-levers.js",
+          "gui/transport-levers.js: ../packages/transport/src/transport-levers.js"
+        ]
+      },
+      {
+        "from": "browser-ui",
+        "to": "session-js",
+        "normal": true,
+        "evidence": [
+          "gui/fleet-continuation-wire.js: ../packages/session/src/fleet-continuation-wire.js",
+          "gui/fleet-continuation.js: ../packages/session/src/fleet-continuation.js",
+          "gui/fleet-owner-continuation.js: ../packages/session/src/fleet-owner-continuation.js",
+          "gui/session-token.js: ../packages/session/src/session-token.js",
+          "gui/session-token.js: ../packages/session/src/session-token.js"
+        ]
+      },
+      {
+        "from": "worker",
+        "to": "transport-js",
+        "normal": true,
+        "evidence": [
+          "worker-rendezvous/src/registry.js: ../../packages/transport/src/service-registry.js",
+          "worker-rendezvous/src/relay.js: ../../packages/transport/src/service-relay.js"
+        ]
+      },
+      {
+        "from": "grid-js",
+        "to": "transport-js",
+        "normal": true,
+        "evidence": [
+          "examples/grid/app.js: ../../packages/transport/src/rendezvous-transport.js"
+        ]
+      },
+      {
+        "from": "grid-js",
+        "to": "session-js",
+        "normal": true,
+        "evidence": [
+          "examples/grid/app.js: ../../packages/session/src/session-token.js"
+        ]
+      }
+    ]
+  }
+}
+</script>
+<script>
+const data=JSON.parse(document.getElementById('graph-data').textContent);
+const canvas=document.getElementById('canvas'),svg=document.getElementById('edges'),details=document.getElementById('details'),select=document.getElementById('focus-layer');
+let language='rust',selected='phoenix-simulation';
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const href=p=>'../../'+p.replace(/^\.\//,'');
+const graph=()=>data[language];
+const name=id=>graph().nodes.find(n=>n.id===id)?.label||id;
+function choose(id){selected=id;select.value=id;render();}
+function switchLanguage(next){language=next;selected=next==='rust'?'phoenix-simulation':'browser-ui';for(const id of ['rust','javascript'])document.getElementById(id+'-tab').setAttribute('aria-selected',String(id===next));document.getElementById('graph-panel').setAttribute('aria-labelledby',next+'-tab');select.innerHTML='<option value="">All layers</option>'+graph().nodes.map(n=>`<option value="${n.id}">${esc(n.label)}</option>`).join('');select.value=selected;render();}
+function coordinates(width){
+ if(language==='javascript')return {'browser-ui':[width*.2,100],worker:[width*.5,100],'grid-js':[width*.8,100],'session-js':[width*.32,300],'transport-js':[width*.68,480]};
+ return {'project-phoenix':[width*.44,66],'phoenix-presentation':[width*.44,182],'phoenix-simulation':[width*.44,298],'phoenix-content':[width*.44,414],'phoenix-model':[width*.44,530],'phoenix-grid':[width*.8,66],'phoenix-math':[width*.125,685],'phoenix-platform':[width*.375,685],'phoenix-transport':[width*.625,685],'phoenix-runtime':[width*.875,685]};
+}
+function render(){
+ const {nodes,edges}=graph(),width=canvas.clientWidth,pos=coordinates(width),height=language==='rust'?750:560;
+ canvas.style.height=height+'px';svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+ const related=new Set([selected]);edges.filter(e=>e.from===selected||e.to===selected).forEach(e=>{related.add(e.from);related.add(e.to);});
+ const markers=['normal','active','incoming'].map(k=>`<marker id="arrow-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--${k==='active'?'accent':k==='incoming'?'focus':'line'})"/></marker>`).join('');
+ svg.innerHTML='<defs>'+markers+'</defs>';
+ // Draw neutral edges first, highlighted edges last. Skip-level routes travel beside the central chain.
+ const ordered=[...edges].sort((a,b)=>Number(a.from===selected||a.to===selected)-Number(b.from===selected||b.to===selected));
+ ordered.forEach((e,i)=>{
+  const [x1,y1]=pos[e.from],[x2,y2]=pos[e.to],style=e.from===selected?'active':e.to===selected?'incoming':selected?'dim':'normal';
+  let d;
+  if(language==='rust'&&y2-y1>170){
+   const side=e.to==='phoenix-math'||e.to==='phoenix-platform'?-1:1;
+   const rail=side<0?22+(i%7)*12:width-22-(i%7)*12;
+   const sx=x1+side*74,sy=y1+((i%5)-2)*5,ex=x2,ey=y2-29;
+   d=`M ${sx} ${sy} C ${rail} ${sy}, ${rail} ${ey-45}, ${ex} ${ey}`;
+  }else{const mid=(y1+y2)/2;d=`M ${x1} ${y1+29} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2-29}`;}
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);path.setAttribute('class',`edge ${e.normal?'':'dev'} ${style}`);path.setAttribute('marker-end',`url(#arrow-${['active','incoming'].includes(style)?style:'normal'})`);svg.append(path);
+ });
+ canvas.querySelectorAll('.node,.rank-label').forEach(n=>n.remove());
+ const groups=language==='rust'?[[13,'Host composition'],[125,'Phoenix game packages'],[626,'Reusable foundation']]:[[38,'Applications'],[235,'Reusable JavaScript packages']];
+ for(const [y,label]of groups){const el=document.createElement('span');el.className='rank-label';el.style.top=y+'px';el.textContent=label;canvas.append(el);}
+ for(const n of nodes){const b=document.createElement('button');b.type='button';b.className=`node ${n.group}${selected===n.id?' selected':''}${selected&&!related.has(n.id)?' dim':''}`;b.style.left=pos[n.id][0]+'px';b.style.top=pos[n.id][1]+'px';b.setAttribute('aria-pressed',String(selected===n.id));b.innerHTML=`<strong>${esc(n.label)}</strong><small>${esc(n.id=== 'project-phoenix'?'root host':n.id==='phoenix-grid'?'reuse example':n.group==='shared'?'reusable':n.group==='game'?'Phoenix game':'application')}</small>`;b.onclick=()=>choose(selected===n.id?'':n.id);canvas.append(b);}
+ const node=nodes.find(n=>n.id===selected),out=edges.filter(e=>e.from===selected),inc=edges.filter(e=>e.to===selected);
+ const links=list=>list.length?'<ul>'+list.map(id=>`<li><button class="edge-link" data-select="${id}">${esc(name(id))}</button></li>`).join('')+'</ul>':'<p>None within the shown layers.</p>';
+ details.innerHTML=node?`<h2>${esc(node.label)}</h2><code>${esc(node.id)}</code><p>${esc(node.description)}</p><a href="${href(node.source)}">Source declaration / entry point</a> · <a href="${href(node.path)}/">Directory</a><h3>Depends on (${out.length})</h3>${links(out.map(e=>e.to))}<h3>Used by (${inc.length})</h3>${links(inc.map(e=>e.from))}<details class="evidence"><summary>Direct dependency evidence</summary><ul>${out.flatMap(e=>e.evidence).map(v=>`<li>${esc(v)}</li>`).join('')||'<li>No internal dependency declarations.</li>'}</ul></details>`:`<h2>${nodes.length} layers · ${edges.length} edges</h2><p>Select a layer to inspect its responsibilities, direct dependencies and callers.</p><p>Reusable foundations have no Phoenix game imports. Presentation can depend on simulation; simulation cannot depend on presentation.</p>`;
+ const rows=[...edges].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to));
+ document.getElementById('edge-table').innerHTML=rows.map(e=>`<tr><td><button class="edge-link" data-select="${e.from}">${esc(name(e.from))}</button></td><td><button class="edge-link" data-select="${e.to}">${esc(name(e.to))}</button></td><td>${e.normal?'Runtime':'Test/build only'}</td></tr>`).join('');
+ document.querySelectorAll('[data-select]').forEach(b=>b.onclick=()=>choose(b.dataset.select));
+}
+select.onchange=()=>choose(select.value);
+for(const id of ['rust','javascript'])document.getElementById(id+'-tab').onclick=()=>switchLanguage(id);
+new ResizeObserver(()=>render()).observe(canvas);
+switchLanguage('rust');
+</script>
+</main></body></html>

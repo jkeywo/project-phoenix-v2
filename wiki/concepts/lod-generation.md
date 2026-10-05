@@ -2,7 +2,7 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [src/bin/capture_billboard.rs, src/bin/tune_lods.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+sources: [src/bin/capture_billboard.rs, src/bin/tune_lods.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/model_rig.rs, src/native_host/workshop/billboard_capture.rs, src/native_host/workshop/lod_generation.rs, editor/workshop-billboard-capture.js, editor/workshop-lod-generation.js, crates/phoenix-simulation/src/perf/assets.rs, crates/phoenix-presentation/src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
 updated: 2026-10-04
 ---
 
@@ -45,7 +45,7 @@ error = 0.01                                     # meshoptimizer error limit
 texture_size = 512                               # max texture dimension (px)
 ```
 
-`LodGeneration` (`src/entities/config.rs`) parses these under the sidecar's
+`LodGeneration` (`crates/phoenix-simulation/src/entities/config.rs`) parses these under the sidecar's
 strict schema and the renderer then ignores them entirely — by load time the
 decimation has already happened. A level with no `[lod.generate]` is authored
 by hand and the generator never touches it.
@@ -97,7 +97,7 @@ any mismatch — a replaced source, a retuned ratio, or a hand-edited binary.
 CI does **not** re-run gltf-transform: meshoptimizer output is not guaranteed
 byte-identical across CLI versions, so a regenerate-and-diff gate would go red
 for reasons that are not drift. The recorded `output_bytes` is asserted against
-`src/perf/assets.rs`'s own inventory (issue #868) by a Rust test, so file size
+`crates/phoenix-simulation/src/perf/assets.rs`'s own inventory (issue #868) by a Rust test, so file size
 has one measurement and two readers. Triangle and texture budgets belong to
 issue #905. Both performance inventories exclude checked-in `.remesh.glb`
 intermediates: they are generator inputs, not files the runtime can select.

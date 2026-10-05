@@ -71,17 +71,7 @@ use snapshot::{merge_delta, PendingSnapshot};
 
 use super::identity::PaneIdentity;
 
-/// A pane's handle within one host. Stable for the pane's lifetime; not reused
-/// after a close, so a stale reference names a gone pane rather than a
-/// different one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PaneId(pub u32);
-
-impl std::fmt::Display for PaneId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "pane-{}", self.0)
-    }
-}
+pub use phoenix_platform::input_routing::PaneId;
 
 /// Where a pane is in its life.
 ///

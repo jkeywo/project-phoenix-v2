@@ -2,7 +2,7 @@
 title: Asteroid
 type: entity
 tags: [asteroid, world, obstacle, collision]
-sources: [src/asteroids/spawner.rs, src/asteroids/mod.rs, src/entities/spawner.rs]
+sources: [crates/phoenix-simulation/src/asteroids/spawner.rs, crates/phoenix-simulation/src/asteroids/mod.rs, crates/phoenix-simulation/src/entities/spawner.rs]
 updated: 2026-07-14
 ---
 

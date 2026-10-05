@@ -8,7 +8,7 @@ name: Check Deploy Headers
 # branch to go red for reasons the push did not cause. The header contract that
 # CAN be checked without a network is checked on every push already:
 # `tests/client/deploy-headers.test.js` (the rules, over canned fixtures) in the
-# editor-test job, and `src/delivery/http.rs`'s unit tests (the same contract as
+# editor-test job, and `crates/phoenix-simulation/src/delivery/http.rs`'s unit tests (the same contract as
 # the native host serves it) in the test job. This workflow is the third leg —
 # what a CDN actually did with them — and it is run by a human after a deploy.
 on:

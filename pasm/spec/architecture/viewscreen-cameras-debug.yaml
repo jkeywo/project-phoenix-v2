@@ -18,8 +18,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/crew_spectator.rs, src/server/renderer.rs, src/command_admission/mod.rs, src/console/repair/server.rs, src/console/weapons/server.rs, gui/crew-spectator-view.js, gui/sim-state.js, client.html]
-      tests: [cargo test --lib --features headless crew_spectator, cargo test --lib --features headless crew_wreck, npx vitest run tests/client/crew-spectator.test.js, src/crew_spectator_tests.rs, src/server/renderer_tests.rs, src/command_admission/tests.rs]
+      paths: [crates/phoenix-simulation/src/crew_spectator.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, gui/crew-spectator-view.js, gui/sim-state.js, client.html]
+      tests: [cargo test --lib --features headless crew_spectator, cargo test --lib --features headless crew_wreck, npx vitest run tests/client/crew-spectator.test.js, crates/phoenix-simulation/src/crew_spectator_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs]
 
   - state: crew-spectator-camera-state
     core:
@@ -33,10 +33,10 @@ entities:
       writers: [destroyed-crew-spectator]
     implementation:
       status: declared
-      paths: [src/crew_spectator.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/crew_spectator.rs, crates/phoenix-model/src/messages.rs]
       symbols: [CrewSpectator, CrewSpectatorPayload]
 
-      tests: [src/crew_spectator_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/crew_spectator_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: viewscreen-arbiter
     core:
       status: implemented
@@ -52,8 +52,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/viewscreen.rs, src/core/messages.rs]
-      tests: [cargo test, src/ship/viewscreen_tests.rs, src/core/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: viewscreen-resolution-state
     core:
@@ -67,10 +67,10 @@ entities:
       writers: [viewscreen-arbiter]
     implementation:
       status: declared
-      paths: [src/ship/viewscreen.rs, src/core/messages.rs, src/server/renderer.rs]
+      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-presentation/src/server/renderer.rs]
       symbols: [ViewscreenResolution, ViewscreenArbiter]
 
-      tests: [src/ship/viewscreen_tests.rs, src/core/messages_view_mode_tests.rs, src/server/renderer_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
   - component: viewscreen-source-registry
     core:
       status: implemented
@@ -84,8 +84,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/viewscreen.rs, src/ship/system_registry.rs]
-      tests: [cargo test, src/ship/viewscreen_tests.rs, src/ship/system_registry_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/ship/system_registry.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
 
   - component: viewscreen-latest-command-policy
     core:
@@ -102,11 +102,11 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/ship/viewscreen.rs
-        - src/ship/state.rs
-        - src/console/captain/server.rs
-        - src/console/comms/server.rs
-        - src/comms/server.rs
+        - crates/phoenix-simulation/src/ship/viewscreen.rs
+        - crates/phoenix-simulation/src/ship/state.rs
+        - crates/phoenix-simulation/src/console/captain/server.rs
+        - crates/phoenix-simulation/src/console/comms/server.rs
+        - crates/phoenix-simulation/src/comms/server.rs
       symbols:
         - apply_channel_2
         - request_view_mode_from
@@ -114,8 +114,8 @@ entities:
         - handle_set_view
         - handle_show_on_screen
       tests:
-        - src/ship/viewscreen_tests.rs
-        - src/ship/state_tests.rs
+        - crates/phoenix-simulation/src/ship/viewscreen_tests.rs
+        - crates/phoenix-simulation/src/ship/state_tests.rs
         - cargo test
 
   - component: host-camera-renderer
@@ -132,8 +132,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs]
-      tests: [cargo test, src/server/renderer_tests.rs, src/server/radar_tests.rs, src/server/radar_contact_override_tests.rs, src/server/viewscreen_border_tests.rs]
+      paths: [crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/radar.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs]
+      tests: [cargo test, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/server/radar_tests.rs, crates/phoenix-presentation/src/server/radar_contact_override_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]
 
   - component: model-presentation
     core:
@@ -142,13 +142,13 @@ entities:
       title: Model Presentation — HDR, LOD Cross-Fade, Billboard Blending, Arrival
       summary: "How a model reaches the viewscreen and how it leaves it: the camera's high-dynamic-range intermediate target and display transform, the cross-fade window that replaces an LOD tier's same-frame swap, the two-pose blend that replaces a billboard's yaw quantisation, and the arrival effect that covers a mid-mission spawn's asynchronous GLB resolve. Authored in a world's [render] block; registered only under SimPluginOptions::render, so it is digest-neutral by construction."
       rationale:
-        - "PRD #1023 module 5. Weapon fire and engine glow are authored at emissive multipliers between 2.5 and 9.0 (src/server/pfx.rs), every one of them above screen white. The viewscreen camera rendered to a low-dynamic-range target, which clips at exactly 1.0, so a torpedo core authored nine times brighter than white was drawn the same flat white as a value of one. HDR is what stops the clamp, and it is the half of the calibration that ships on."
+        - "PRD #1023 module 5. Weapon fire and engine glow are authored at emissive multipliers between 2.5 and 9.0 (crates/phoenix-presentation/src/server/pfx.rs), every one of them above screen white. The viewscreen camera rendered to a low-dynamic-range target, which clips at exactly 1.0, so a torpedo core authored nine times brighter than white was drawn the same flat white as a value of one. HDR is what stops the clamp, and it is the half of the calibration that ships on."
         - "[ai] The display transform is named rather than inherited: tony_mc_mapface, which is both Bevy's own default and the transform its bloom documentation recommends pairing bloom with. It desaturates brights across the spectrum, so an over-white core reads as hot with its colour intact at the edges rather than as a white disc. Pending designer ratification. Naming it changed nothing on its own, which is worth recording: TonyMcMapface is already Bevy's `#[default]` for Tonemapping and Camera3d has always carried the component, so the entire behavioural delta of adopting this calibration was the `Hdr` marker."
         - "EVERY CAMERA DRAWING TO THE SHARED CANVAS TAKES THE SAME HDR ANSWER, and that is a correctness invariant rather than a tidiness one. `Hdr` does not only say what a camera draws; it selects which intermediate texture the camera draws INTO, because bevy_render's prepare_view_targets keys its main-texture cache on `(target, texture_usages, hdr, msaa)`. The host page puts TWO cameras on the one canvas and composites them — the game camera at order -1, then the 2D UI camera drawing the viewscreen border and HUD over it at order 0 with ClearColorConfig::None, precisely so it does not wipe the scene. Both graphs end in an Upscaling node that blits their OWN main texture to the surface. Give only the game camera Hdr and the pair stops sharing a texture, so the UI camera's blit — second, being the higher order — replaces the finished 3D image with one that never had a scene drawn into it. The viewscreen goes black with a COMPLETELY CLEAN CONSOLE, because nothing about it is invalid. That shipped: it is what `[render] hdr = true` did to every world from 597779a4 until `apply_target_hdr`, which syncs the marker onto the UI camera at Startup and again when the world's block lands. The retreat direction needs it just as much — an authored `hdr = false` reaching only the game camera splits the pair exactly as badly."
         - "[ai] Only the MARKER is synced onto the UI camera, never the display transform. Core2dPlugin requires Tonemapping::None onto every Camera2d and that is correct here: by the time the HUD is drawn, the game camera's tonemapping node has already resolved the shared texture to display-referred values, so a second transform would tonemap the HUD and re-tonemap the scene beneath it."
         - "The black viewscreen is also why this component now has a test that DRAWS. tests/smoke/viewscreen.render.spec.js runs in its own Playwright project with a SwiftShader WebGL2 context and `navigator.webdriver` hidden, so src/server/bridge.rs takes the real render path instead of the automation one; it reads canvas pixels back through a screenshot and asserts the scene area is not one flat colour. Uniformity rather than brightness, so tuning the art cannot fail it and a compositing break cannot pass it. Before it, nothing in CI drew a frame — which is precisely how a render-graph break reached a human's browser."
         - "[ai] BLOOM IS GATED ON THE PLATFORM, not on the authored flag, and the reason is a platform fact rather than a taste judgement. Bevy 0.18.1's bloom cannot run on WebGL2, which is what the browser host is (Key Constraint 9). Its downsample chain binds individual mip LEVELS of one texture for sampling, which WebGL2 does not support; bevy_post_process carries a separate-texture-per-mip fallback behind its own `webgl` feature, but bevy_internal's `webgl` feature forwards to eight sub-crates and bevy_post_process is not among them — and enabling that feature directly does not compile, because prepare_bloom_bind_groups reads `bloom_texture.texture.texture.id()` for its bind-group cache key with no cfg while the fallback makes `texture` a Vec. Both facts were read out of the vendored 0.18.1 sources, not inferred. NOTHING HAS BEEN FILED UPSTREAM from this repo; the filable bug is the missing cfg on that cache-key read, which makes bevy_post_process's own `webgl` feature uncompilable."
-        - "[ai] REVISED from 'BLOOM IS AUTHORED AND SHIPS OFF'. That phrasing made ONE flag do two jobs — whether a world wants bloom, and whether the platform can draw it — and left the second enforced only by a doc comment, so a world writing `[render.bloom] enabled = true` reached the browser host's camera and failed its render graph with nothing in the code to stop it. `BLOOM_RUNS_ON_THIS_TARGET` (src/render_setup.rs) now gates the component insertion, so the authored default says what the calibration was authored to say (`enabled: true`; the emissives were authored FOR it) and the platform answers drawability separately. The authored block therefore parses identically on every target — a world file cannot mean two things — and the platform enters at exactly one place."
+        - "[ai] REVISED from 'BLOOM IS AUTHORED AND SHIPS OFF'. That phrasing made ONE flag do two jobs — whether a world wants bloom, and whether the platform can draw it — and left the second enforced only by a doc comment, so a world writing `[render.bloom] enabled = true` reached the browser host's camera and failed its render graph with nothing in the code to stop it. `BLOOM_RUNS_ON_THIS_TARGET` (crates/phoenix-presentation/src/render_setup.rs) now gates the component insertion, so the authored default says what the calibration was authored to say (`enabled: true`; the emissives were authored FOR it) and the platform answers drawability separately. The authored block therefore parses identically on every target — a world file cannot mean two things — and the platform enters at exactly one place."
         - "[ai] The gate is `cfg!(not(target_arch = \"wasm32\"))` rather than a runtime wgpu adapter query, because the backend is a BUILD-time choice here: Cargo.toml pins bevy with the `webgl2` feature, so a wasm32 build selects WebGL2 and a native build gets full wgpu. Querying the adapter would answer a question the build already settled, and would have to answer it before the camera is spawned. It is `cfg!` and not `#[cfg]` so both arms compile on both targets: no new conditional compilation, the wasm dependency graph stays byte-identical (bevy_post_process is already linked there — `Bloom` is imported unconditionally in render_setup.rs today), and the constant stays readable by a test on either platform."
         - "[ai] Native hosts now draw bloom through the shared render configuration; browser targets remain WebGL2 and keep the platform gate."
         - "[ai] The bloom prefilter thresholds at exactly 1.0 — screen white, the same number the old target clamped at — with a softness of 0.4 and additive compositing. That is the calibration in one value: what would glow is precisely what the low-dynamic-range pipeline used to throw away, so adopting bloom cannot quietly restyle the hulls, the skybox or the dust. Bevy's own guidance is that a non-zero prefilter wants additive rather than energy-conserving compositing, and the intensity of 0.15 is three times its additive preset's because that preset thresholds well below white and passes far more of the image."
@@ -170,7 +170,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/server/native_visuals/mod.rs, src/server/native_visuals/flare.rs, src/server/native_visuals/web_flare.rs, src/server/native_visuals/web_occlusion.rs, assets/shaders/web_star_flare.wgsl, src/world/native_render_config.rs, assets/shaders/star_flare.wgsl, src/render_setup.rs, src/entities/visual_fade.rs, src/entities/billboard.rs, src/server_app/registration.rs, src/server/renderer.rs, src/world/config.rs, src/viewer/lod.rs, src/viewer/subject.rs]
+      paths: [crates/phoenix-presentation/src/server/native_visuals/mod.rs, crates/phoenix-presentation/src/server/native_visuals/flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion.rs, assets/shaders/web_star_flare.wgsl, crates/phoenix-simulation/src/world/native_render_config.rs, assets/shaders/star_flare.wgsl, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/visual_fade.rs, crates/phoenix-presentation/src/entities/billboard.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/subject.rs]
       symbols: [NativeVisualPlugin, NativeRenderConfig, RenderConfig, BloomConfig, RenderTuning, apply_render_config, apply_target_hdr, BLOOM_RUNS_ON_THIS_TARGET, VisualFade, drive_visual_fades, retire_lod_visual, yaw_blend, billboard_quad_size, orient_lod_billboards]
       # The viewer half of this runs under `--features viewer`, and CI now
       # EXECUTES it: the `viewer-test` job in .github/workflows/ci.yml runs the
@@ -181,10 +181,10 @@ entities:
       # tests — that step type-checks them because its explicit feature list
       # includes `viewer` (it stopped being `--all-features` in issue #1122,
       # which would otherwise pull in the Ultralight SDK download).
-      # The billboard-preview test in src/viewer/lod.rs went
+      # The billboard-preview test in crates/phoenix-presentation/src/viewer/lod.rs went
       # stale rather than red in exactly that gap: it asserted a far level was a
       # procedural sphere long after the imposter atlases replaced it.
-      tests: [cargo test, cargo test --features viewer, npx playwright test viewscreen.render.spec.js, src/server/native_visuals/tests.rs, src/server/native_visuals/web_occlusion_tests.rs, src/world/native_render_config_tests.rs, src/render_setup_tests.rs, src/entities/visual_fade_tests.rs, src/entities/billboard_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/server/renderer_tests.rs, src/viewer/lod_tests.rs]
+      tests: [cargo test, cargo test --features viewer, npx playwright test viewscreen.render.spec.js, crates/phoenix-presentation/src/server/native_visuals/tests.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion_tests.rs, crates/phoenix-simulation/src/world/native_render_config_tests.rs, crates/phoenix-presentation/src/render_setup_tests.rs, crates/phoenix-presentation/src/entities/visual_fade_tests.rs, crates/phoenix-presentation/src/entities/billboard_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs, crates/phoenix-presentation/src/viewer/lod_tests.rs]
 
   - component: reference-grid
     core:
@@ -209,14 +209,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/reference_grid.rs, src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, src/entities/config.rs, src/server_app/registration.rs]
+      paths: [crates/phoenix-simulation/src/reference_grid.rs, crates/phoenix-presentation/src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [ReferenceGridConfig, ReferenceGridPlugin, ReferenceGridMaterial, ReferenceGridTuning, ReferenceGridPatch, decide_patch_action, material_from_config, distance_to_nearest_line, line_coverage, radial_fade]
       # The WGSL half is not executed by any gate - no shader in this repo is,
       # and `cargo test` cannot reach a fragment stage. What IS tested is the
       # reference implementation of the same three expressions in
-      # src/reference_grid.rs, which the shader mirrors deliberately. Change one,
+      # crates/phoenix-simulation/src/reference_grid.rs, which the shader mirrors deliberately. Change one,
       # change the other; the tests are what say what the answer should be.
-      tests: [cargo test, src/reference_grid_tests.rs, src/server/reference_grid_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/reference_grid_tests.rs, crates/phoenix-presentation/src/server/reference_grid_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
   - component: viewscreen-hud-effects
     core:
@@ -234,9 +234,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server/viewscreen_border.rs, src/core/messages.rs]
+      paths: [crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-model/src/messages.rs]
 
-      tests: [src/server/viewscreen_border_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: viewscreen-motion-state
     core:
       status: implemented
@@ -249,10 +249,10 @@ entities:
       writers: [viewscreen-hud-effects]
     implementation:
       status: declared
-      paths: [src/server/viewscreen_border.rs, src/server/bridge.rs]
+      paths: [crates/phoenix-presentation/src/server/viewscreen_border.rs, src/server/bridge.rs]
       symbols: [ViewscreenMotion]
 
-      tests: [src/server/viewscreen_border_tests.rs, src/server/bridge_tests.rs]
+      tests: [crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, src/server/bridge_tests.rs]
   - component: debug-overlay-controller
     core:
       status: implemented
@@ -272,9 +272,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug/mod.rs, src/debug_overlay.rs, src/server/bridge.rs, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, scripts/generate-debug-surfaces.mjs]
+      paths: [crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, crates/phoenix-simulation/src/debug/mod.rs, crates/phoenix-simulation/src/debug_overlay.rs, src/server/bridge.rs, gui/debug-surfaces.generated.js, gui/debug-surface-adapters.js, gui/server-settings.js, gui/settings-panel.js, scripts/generate-debug-surfaces.mjs]
       symbols: [DebugSurface, DEBUG_SURFACE_CATALOGUE, DEBUG_SURFACE_ADAPTERS, DebugSurfaceReadback, DEBUG_SURFACE, DEBUG_SURFACE_ORDER, projectDebugSurfaceAdapters, apply_pending_states, apply_pending_toggles, refresh_readback, wasm_set_debug_surface]
-      tests: [cargo test --lib debug_surface, cargo test --lib debug::catalogue, cargo test --lib server::bridge::tests, npm run debug-surfaces:check, npx vitest run tests/client/debug-surfaces-generation.test.js tests/client/server-settings.test.js tests/client/settings-panel.test.js, src/core/debug_surface_tests.rs, src/debug/catalogue_tests.rs, src/debug_overlay_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test --lib debug_surface, cargo test --lib debug::catalogue, cargo test --lib server::bridge::tests, npm run debug-surfaces:check, npx vitest run tests/client/debug-surfaces-generation.test.js tests/client/server-settings.test.js tests/client/settings-panel.test.js, crates/phoenix-model/src/debug_surface_tests.rs, crates/phoenix-simulation/src/debug/catalogue_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs, src/server/bridge_tests.rs]
 
   - state: debug-overlay-state
     core:
@@ -288,10 +288,10 @@ entities:
       writers: [debug-overlay-controller]
     implementation:
       status: declared
-      paths: [src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug/mod.rs, src/debug_overlay.rs]
+      paths: [crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, crates/phoenix-simulation/src/debug/mod.rs, crates/phoenix-simulation/src/debug_overlay.rs]
       symbols: [DebugSurfaceReadback]
 
-      tests: [src/core/debug_surface_tests.rs, src/debug/catalogue_tests.rs, src/debug_overlay_tests.rs]
+      tests: [crates/phoenix-model/src/debug_surface_tests.rs, crates/phoenix-simulation/src/debug/catalogue_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs]
   - component: host-debug-simulation-controls
     core:
       status: implemented
@@ -309,13 +309,13 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [server.html, gui/server-settings.js, src/server/bridge.rs, src/server_app/components.rs]
+      paths: [server.html, gui/server-settings.js, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/components.rs]
       # Since issue #939 these are driven from the host settings cog's
       # Debug/Cheat tab, not a loose toolbar in the debug dock. Pause is the
       # odd one out: it moved to the cog's Gameplay tab, which is NOT gated on
       # PHOENIX_DEMO_BUILD, hence the un-prefixed `wasm_toggle_pause`.
       symbols: [wasm_toggle_pause, wasm_toggle_god_mode, wasm_toggle_instagib]
-      tests: [cargo test, npx vitest run tests/client/server-settings.test.js, src/server/bridge_tests.rs, src/server_app/components_interior_write_access_tests.rs]
+      tests: [cargo test, npx vitest run tests/client/server-settings.test.js, src/server/bridge_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
   - state: host-debug-simulation-override-state
     core:
@@ -329,7 +329,7 @@ entities:
       writers: [host-debug-simulation-controls]
     implementation:
       status: declared
-      paths: [src/server/bridge.rs, src/debug_overlay.rs, src/server_app/components.rs]
+      paths: [src/server/bridge.rs, crates/phoenix-simulation/src/debug_overlay.rs, crates/phoenix-simulation/src/server_app/components.rs]
       # Instagib's authoritative state is the typed `server_app::Instagib`
       # Resource. The wasm edge retains only a queued-toggle inbox and the
       # frame-lagged `INSTAGIB_MIRROR` read by `wasm_get_instagib`; its drain and
@@ -341,7 +341,7 @@ entities:
       # a debug-only concept.
       symbols: [SimulationPaused, GodMode, Instagib, PENDING_INSTAGIB_TOGGLES, INSTAGIB_MIRROR, drain_instagib_toggle, publish_instagib]
 
-      tests: [src/server/bridge_tests.rs, src/debug_overlay_tests.rs, src/server_app/components_interior_write_access_tests.rs]
+      tests: [src/server/bridge_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
   - component: client-debug-control-route
     core:
       status: implemented
@@ -363,9 +363,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/debug_route.rs, src/command_admission/policy.rs, src/core/debug_surface.rs, src/debug/catalogue.rs, src/debug_overlay.rs, src/server/bridge.rs, src/build_flags.rs, src/demo_build_value.rs, build.rs, gui/settings-panel.js]
+      paths: [crates/phoenix-simulation/src/command_admission/debug_route.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-model/src/debug_surface.rs, crates/phoenix-simulation/src/debug/catalogue.rs, crates/phoenix-simulation/src/debug_overlay.rs, src/server/bridge.rs, crates/phoenix-simulation/src/build_flags.rs, crates/phoenix-simulation/src/demo_build_value.rs, build.rs, gui/settings-panel.js]
       symbols: [DebugSurface, admits_debug_command, is_demo_build, admitted_flag_toggles, admitted_pause_toggles, drain_client_debug_flags, drain_client_pause]
-      tests: [cargo test, npx vitest run tests/client/settings-panel.test.js, src/command_admission/debug_route_tests.rs, src/command_admission/policy_tests.rs, src/core/debug_surface_tests.rs, src/debug/catalogue_tests.rs, src/debug_overlay_tests.rs, src/server/bridge_tests.rs, src/build_flags_tests.rs]
+      tests: [cargo test, npx vitest run tests/client/settings-panel.test.js, crates/phoenix-simulation/src/command_admission/debug_route_tests.rs, crates/phoenix-simulation/src/command_admission/policy_tests.rs, crates/phoenix-model/src/debug_surface_tests.rs, crates/phoenix-simulation/src/debug/catalogue_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs, src/server/bridge_tests.rs, crates/phoenix-simulation/src/build_flags_tests.rs]
 
   - component: host-debug-waypoint-teleport
     core:
@@ -381,6 +381,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [server.html, src/server/bridge.rs, src/console/navigation/mod.rs, src/ship/state.rs]
+      paths: [server.html, src/server/bridge.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/ship/state.rs]
       symbols: [wasm_teleport_to_waypoint, wasm_has_navigation_waypoint, drain_teleport_to_waypoint]
-      tests: [cargo test, src/server/bridge_tests.rs, src/ship/state_tests.rs]
+      tests: [cargo test, src/server/bridge_tests.rs, crates/phoenix-simulation/src/ship/state_tests.rs]

@@ -798,10 +798,16 @@ fn a_host_with_no_join_service_says_so_rather_than_showing_a_dead_qr() {
 
 #[test]
 fn publishing_serves_the_lobby_at_that_path_and_withdrawing_stops() {
+    // Publishing also seeds the process-global renderer effect latch.
+    let _serialised = crate::server::bridge::NATIVE_EFFECT_LATCH_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let documents = HostedDocuments::default();
     let lobby = LocalHostLobby::open("127.0.0.1:8080");
     let page = std::fs::read_to_string("server.html").unwrap();
-    lobby.publish(&page, &documents).unwrap();
+    lobby
+        .publish_with_presentation(&page, &documents, Default::default(), None)
+        .unwrap();
 
     let body = documents
         .get(&lobby.path())
@@ -817,10 +823,19 @@ fn publishing_serves_the_lobby_at_that_path_and_withdrawing_stops() {
 
 #[test]
 fn a_bundle_with_no_lobby_refuses_by_name_instead_of_publishing_a_blank_page() {
+    // Publishing also seeds the process-global renderer effect latch.
+    let _serialised = crate::server::bridge::NATIVE_EFFECT_LATCH_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let documents = HostedDocuments::default();
     let lobby = LocalHostLobby::open("127.0.0.1:8080");
     assert_eq!(
-        lobby.publish("<html><body></body></html>", &documents),
+        lobby.publish_with_presentation(
+            "<html><body></body></html>",
+            &documents,
+            Default::default(),
+            None,
+        ),
         Err(HostLobbyDocumentError::NoLobbyPanel)
     );
     assert!(documents.is_empty());

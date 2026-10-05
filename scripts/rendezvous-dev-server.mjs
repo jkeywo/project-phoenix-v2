@@ -63,10 +63,13 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 
 import { createRegistry, ROLE_HOST, ROLE_CLIENT } from '../worker-rendezvous/src/registry.js';
-import { setJoinCodeData } from '../gui/join-code.js';
+import { setJoinCodeData } from '../packages/transport/src/join-code.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DATA = JSON.parse(readFileSync(path.join(root, 'assets/join/join-codes.json'), 'utf8'));
+const codesArg = process.argv.indexOf('--codes');
+const codesPath = codesArg >= 0 ? process.argv[codesArg + 1] : path.join(root, 'assets/join/join-codes.json');
+if (!codesPath) throw new Error('--codes requires a table path');
+const DATA = JSON.parse(readFileSync(codesPath, 'utf8'));
 setJoinCodeData(DATA);
 
 /** The GUID RFC 6455 mixes into the accept key. Not a secret; it is the spec. */
@@ -93,7 +96,7 @@ const profile = Object.freeze({
   seed: numberFlag(argv, '--seed', 1, 0xffffffff),
   block_rtc_offers: argv.includes('--block-rtc-offers'),
 });
-const knownFlags = new Set(['--port', '--delay-ms', '--loss-percent', '--seed', '--block-rtc-offers']);
+const knownFlags = new Set(['--codes', '--port', '--delay-ms', '--loss-percent', '--seed', '--block-rtc-offers']);
 for (let i = 0; i < argv.length; i += 1) {
   if (!knownFlags.has(argv[i])) throw new Error(`unknown argument: ${argv[i]}`);
   if (argv[i] !== '--block-rtc-offers') i += 1;

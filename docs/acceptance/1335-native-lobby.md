@@ -52,7 +52,7 @@ conditions are met, and do not read their unticked boxes as a failed run.
       `[ERROR] dist\index.html not found` before taking the port.
 
       **Rebuild it for this run even if `dist/` is already there.** The join code
-      is **eight** letters now (issue #1353) and every reader refuses a code it
+      is **five** letters and every reader refuses a code it
       cannot parse, so a stale `dist/` — carrying the five-letter
       `gui/join-code.js` and the five-letter `assets/join/join-codes.json` beside
       it — answers a *correct* code with `malformed`. That reads like a broken
@@ -153,13 +153,10 @@ version of this test.
 - [ ] **The terminal prints the code**: `phoenix-host: crew join code XXXXX —
       phones join this host directly, no service needed (full: …)`, and beside it
       `the join QR is on the viewscreen, pointing phones at http://<address>`.
-- [ ] **The same code is on the viewscreen**, as a framed QR with the eight
-      letters under it ("or type this code"). Not a terminal-only code: this is
-      the whole of #1329. Eight, not five: the code is the only secret in front
-      of the game, so `assets/join/join-codes.toml` authors enough letters that
-      guessing it is out of reach (25^8 ≈ 1.5 × 10^11) — check the QR still
-      frames cleanly and the letters under it are readable across the room,
-      which is the only thing the extra length can cost.
+- [ ] **The same code is on the viewscreen**, as a framed QR with five
+      letters under it ("or type this code"). Check the QR frames cleanly,
+      the letters are readable across the room, and typing those five letters
+      joins the same host as scanning the QR.
 - [ ] **The QR draws with no CDN.** The encoder is vendored
       (`gui/vendor/qrcode.js`) and served by this process, so there is no external
       request to fail — a bridge machine is not assumed to have internet. If you
@@ -186,7 +183,7 @@ version of this test.
       usable. Then type it right — it joins. There is a per-address budget behind
       that (wrong guesses are rate-limited so the code cannot be walked from a
       reconnecting socket), and it is deliberately sized so a room of people
-      fumbling eight letters never notices it; only a **correct** code costs
+      fumbling five letters never notices it; only a **correct** code costs
       nothing, so this is a typo allowance rather than a join allowance. If you
       ever see "Too many attempts" on an honest crew, that is a defect worth
       reporting — wait a few seconds and it clears on its own, which is the other

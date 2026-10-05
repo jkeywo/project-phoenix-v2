@@ -45,7 +45,7 @@ fn args(manifest: &str) -> HostArgs {
         // modes. `tests/native_host_sim.rs` owns the simulation half.
         sim: None,
         // Issue #1123's bridge-display flags. Neither claim in this file is
-        // about them; `src/delivery/args.rs`'s own tests and
+        // about them; `crates/phoenix-simulation/src/delivery/args.rs`'s own tests and
         // `src/native_host/bridge_profile.rs`'s cover `--setup`/`--profile`.
         setup: false,
         test_output: None,

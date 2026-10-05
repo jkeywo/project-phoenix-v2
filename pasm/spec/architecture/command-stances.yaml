@@ -20,10 +20,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/command/mod.rs, src/console/command/server.rs, src/command_admission/policy.rs, src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/console/command/mod.rs, crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/ship/config.rs]
       symbols: [CommandPlugin, ShipStationStances, CommandBlackboard, StationStanceConfig, command_target, is_command_authorized]
       messages: [SetStationStance]
-      tests: [cargo test, tests/smoke/command-console.spec.js, src/command_admission/policy_tests.rs]
+      tests: [cargo test, tests/smoke/command-console.spec.js, crates/phoenix-simulation/src/command_admission/policy_tests.rs]
     evidence:
       - kind: test
         reference: command-console.spec.js
@@ -51,9 +51,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/command_stance.rs, src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/ship/command_stance.rs, crates/phoenix-simulation/src/ship/config.rs]
       symbols: [neutral_stance_for_alert, is_selectable, effective_high_alert, selection_after_alert_change, stance_by_id, StanceKind, StationStanceConfig]
-      tests: [cargo test, src/ship/command_stance_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/command_stance_tests.rs]
 
   - state: command-stance-selection-state
     core:
@@ -63,7 +63,7 @@ entities:
       title: Command Stance Selection State
       summary: Authoritative per-target selected stance for each AI-controlled Station a Command station directs, defaulting to the alert-neutral stance for the current alert level.
       rationale:
-        - "FOLDED. A stored stance is a human Command operator's standing order: it persists tick to tick and it changes the VALUE of the posture fact the directed Station's weapons AI reads, so two hosts that disagreed about which stance a hull is under would disagree about whether its guns open up. It is folded in its own `fold_station_stances_namespace` (src/sim_digest.rs) so a divergent selection is caught on the tick it happens, the identical argument the weapons-hold namespace made before issue #1398 retired that lever."
+        - "FOLDED. A stored stance is a human Command operator's standing order: it persists tick to tick and it changes the VALUE of the posture fact the directed Station's weapons AI reads, so two hosts that disagreed about which stance a hull is under would disagree about whether its guns open up. It is folded in its own `fold_station_stances_namespace` (crates/phoenix-simulation/src/sim_digest.rs) so a divergent selection is caught on the tick it happens, the identical argument the weapons-hold namespace made before issue #1398 retired that lever."
         - "NOT derived, which is why it is folded rather than excluded. `HumanSeekingHosts` and `VisitingStationHosts` recompute every tick as pure functions of ShipConfig, sessions and control sources — all digest-free — and are classified `derived`; a stance selection is not: it lands only when a `SetStationStance` command is admitted and stays until a later order or the AI operator clears it, so no fold of already-folded state recovers it."
         - "The namespace folds NOTHING while every hull's map is empty. Every ship is spawn-inserted with an empty `ShipStationStances` (empty is the load-bearing default of a hull nobody commands), so a run in which no stance is ever selected and a run recorded before #1107 existed are the same authoritative state and fold to the same number — the byte-identical property the whole slice is built to. Each selecting ship folds its per-station selections in `StationId` order, never `HashMap` iteration order, so the fold is independent of insertion order across instances."
     architecture:
@@ -72,10 +72,10 @@ entities:
       writers: [command-station-authority]
     implementation:
       status: declared
-      paths: [src/console/command/server.rs, src/ship/command_stance.rs, src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/console/command/server.rs, crates/phoenix-simulation/src/ship/command_stance.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [ShipStationStances]
 
-      tests: [src/ship/command_stance_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/command_stance_tests.rs]
   - message: set-station-stance-command
     core:
       status: implemented
@@ -92,6 +92,6 @@ entities:
       payload: SetStationStance
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, gui/console-state.js]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, gui/action-map.js, gui/console-state.js]
       symbols: [SetStationStance]
-      tests: [cargo test, tests/client/action-map.test.js, tests/client/console-state.test.js, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, tests/client/action-map.test.js, tests/client/console-state.test.js, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]

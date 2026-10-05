@@ -4957,6 +4957,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-content"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bevy_image",
+ "gltf",
+ "ktx2",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-platform",
+ "serde",
+ "serde_json",
+ "toml",
+ "vellum-digest",
+]
+
+[[package]]
+name = "phoenix-grid"
+version = "0.1.0"
+dependencies = [
+ "phoenix-platform",
+ "phoenix-runtime",
+ "phoenix-transport",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "phoenix-math"
 version = "0.1.0"
 dependencies = [
@@ -4964,6 +4993,125 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "phoenix-model"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "bevy_state",
+ "phoenix-transport",
+ "serde",
+ "strum",
+ "uuid",
+]
+
+[[package]]
+name = "phoenix-platform"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "uuid",
+ "vellum-ultralight",
+]
+
+[[package]]
+name = "phoenix-presentation"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bevy",
+ "bevy_rapier3d",
+ "console_error_panic_hook",
+ "crossbeam-channel",
+ "glam 0.30.10",
+ "gltf",
+ "js-sys",
+ "ktx2",
+ "libm",
+ "noise",
+ "phoenix-content",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-simulation",
+ "rand 0.9.4",
+ "ron",
+ "serde",
+ "serde_json",
+ "toml",
+ "uuid",
+ "vellum-perf",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "phoenix-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "vellum-digest",
+]
+
+[[package]]
+name = "phoenix-simulation"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bevy",
+ "bevy_ecs",
+ "bevy_rapier3d",
+ "clap",
+ "console_error_panic_hook",
+ "getrandom 0.3.4",
+ "glam 0.30.10",
+ "httparse",
+ "indexmap",
+ "js-sys",
+ "libm",
+ "nalgebra",
+ "noise",
+ "parry3d",
+ "phoenix-content",
+ "phoenix-math",
+ "phoenix-model",
+ "phoenix-platform",
+ "phoenix-runtime",
+ "phoenix-transport",
+ "rand 0.9.4",
+ "rapier3d",
+ "rhai",
+ "ron",
+ "serde",
+ "serde_json",
+ "strum",
+ "toml",
+ "toml_edit 0.25.11+spec-1.1.0",
+ "tungstenite",
+ "uuid",
+ "vellum-digest",
+ "vellum-perf",
+ "vellum-replay",
+ "vellum-rng",
+ "vellum-save",
+ "vellum-script",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "phoenix-transport"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tungstenite",
 ]
 
 [[package]]
@@ -5181,7 +5329,14 @@ dependencies = [
  "nalgebra",
  "noise",
  "parry3d",
+ "phoenix-content",
  "phoenix-math",
+ "phoenix-model",
+ "phoenix-platform",
+ "phoenix-presentation",
+ "phoenix-runtime",
+ "phoenix-simulation",
+ "phoenix-transport",
  "rand 0.9.4",
  "rapier3d",
  "rhai",

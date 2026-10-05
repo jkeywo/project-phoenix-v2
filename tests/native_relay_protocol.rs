@@ -2,7 +2,7 @@
 //! (issue #1113).
 //!
 //! Three implementations now speak this protocol: the service
-//! (`worker-rendezvous/src/`), the browser (`gui/rendezvous-transport.js`), and
+//! (`worker-rendezvous/src/`), the browser (`packages/transport/src/rendezvous-transport.js`), and
 //! a native host (`src/native_host/relay_transport.rs`). The first two share
 //! modules and cannot drift. The third is a different language with no build
 //! step between them, so the only thing that can catch a divergence is a test
@@ -12,7 +12,7 @@
 //! to run the JS modules from `cargo test` without adding a JS runtime to the
 //! Rust test harness, and the failures worth catching are all textual anyway: a
 //! bumped protocol revision, a renamed verb, a renamed field. Each assertion
-//! below therefore reads the shipped `gui/` or `worker-rendezvous/` source and
+//! below therefore reads the shipped `packages/transport/` source and
 //! asserts the Rust constant appears in it.
 //!
 //! What it cannot catch: a semantic change that keeps every name. That is what
@@ -41,12 +41,12 @@ fn the_protocol_revision_matches_the_one_module_that_declares_it() {
     // JS side has a single-source module precisely because two copies of the
     // literal held together by a comment were one careless edit away from that.
     // Rust is the third copy, and this is its comment made executable.
-    let js = read("gui/rendezvous-protocol.js");
+    let js = read("packages/transport/src/rendezvous-protocol.js");
     let expected = format!("export const RENDEZVOUS_PROTOCOL = {RENDEZVOUS_PROTOCOL};");
     assert!(
         js.contains(&expected),
-        "gui/rendezvous-protocol.js does not declare revision {RENDEZVOUS_PROTOCOL}; \
-         src/core/rendezvous.rs must be bumped with it"
+        "packages/transport/src/rendezvous-protocol.js does not declare revision {RENDEZVOUS_PROTOCOL}; \
+         crates/phoenix-transport/src/rendezvous.rs must be bumped with it"
     );
 }
 
@@ -55,7 +55,7 @@ fn every_verb_a_native_host_sends_is_one_the_service_handles() {
     // The registry's `switch` is the service's whole surface: a verb it has no
     // `case` for is answered `malformed`, which from a native host reads as an
     // unexplained refusal to register.
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     for verb in [
         "host-open",
         "relay",
@@ -65,14 +65,14 @@ fn every_verb_a_native_host_sends_is_one_the_service_handles() {
     ] {
         assert!(
             registry.contains(&format!("case '{verb}':")),
-            "worker-rendezvous/src/registry.js has no case for {verb:?}"
+            "packages/transport/src/service-registry.js has no case for {verb:?}"
         );
     }
 }
 
 #[test]
 fn every_frame_a_native_host_acts_on_is_one_the_service_sends() {
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     for kind in [
         "ready",
         "hosted",
@@ -83,7 +83,7 @@ fn every_frame_a_native_host_acts_on_is_one_the_service_sends() {
     ] {
         assert!(
             registry.contains(&format!("type: '{kind}'")),
-            "worker-rendezvous/src/registry.js never sends a {kind:?} frame, but \
+            "packages/transport/src/service-registry.js never sends a {kind:?} frame, but \
              src/native_host/relay_transport.rs handles one"
         );
     }
@@ -98,11 +98,11 @@ fn the_terminal_relay_reasons_are_ones_the_service_actually_sends() {
     // notice about one frame. A reason renamed on the service without a
     // matching rename here would silently reclassify a whole-crew outage as
     // one dropped frame, or the reverse.
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     for reason in ["unreachable", "not-connected", "unsupported-protocol"] {
         assert!(
             registry.contains(&format!("'{reason}'")),
-            "worker-rendezvous/src/registry.js no longer sends reason {reason:?}, but \
+            "packages/transport/src/service-registry.js no longer sends reason {reason:?}, but \
              src/native_host/relay_transport.rs still treats it as terminal"
         );
     }
@@ -115,11 +115,11 @@ fn the_error_frames_request_field_is_named_the_same_in_both_languages() {
     // it is `reason`, not `request`, that decides link-versus-per-request (see
     // the pin above), but a renamed `request` field would still silently blank
     // half of every native fault message.
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     assert!(
         registry.contains("type: 'error', request, reason"),
-        "worker-rendezvous/src/registry.js's fail() no longer names a request field \
-         the same way src/core/rendezvous.rs's RendezvousFrame does"
+        "packages/transport/src/service-registry.js's fail() no longer names a request field \
+         the same way crates/phoenix-transport/src/rendezvous.rs's RendezvousFrame does"
     );
 }
 
@@ -128,7 +128,7 @@ fn the_transport_names_are_the_ones_the_service_will_relay() {
     // A host's claim is sanitised against this list; a name the service does
     // not know is DROPPED rather than relayed, so a native host claiming an
     // unrecognised one would silently be advertised as capable of everything.
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     assert!(registry.contains(&format!(
         "const TRANSPORTS = ['{TRANSPORT_WEBRTC}', '{TRANSPORT_WS_RELAY}'];"
     )));
@@ -138,7 +138,7 @@ fn the_transport_names_are_the_ones_the_service_will_relay() {
 fn the_delivery_classes_are_spelled_the_same_in_both_languages() {
     // The service refuses a class it cannot read rather than guessing one, so a
     // spelling difference here is every snapshot frame refused.
-    let relay = read("worker-rendezvous/src/relay.js");
+    let relay = read("packages/transport/src/service-relay.js");
     assert!(relay.contains(&format!(
         "export const RELAY_RELIABLE = '{CLASS_RELIABLE}';"
     )));
@@ -152,7 +152,7 @@ fn the_in_band_handshake_frames_are_spelled_the_same_in_both_languages() {
     // These three are transport-plane and never reach the crew protocol, which
     // is exactly why nothing else pins them: they are not `ClientMessage`
     // variants and no codec round-trip covers them.
-    let joiner = read("gui/rendezvous-transport.js");
+    let joiner = read("packages/transport/src/rendezvous-transport.js");
     assert!(joiner.contains(&format!("type: '{JOIN_HANDSHAKE}'")));
     assert!(joiner.contains(&format!("msg.type === '{JOIN_ACCEPTED}'")));
     assert!(joiner.contains(&format!("msg.type === '{JOIN_REFUSED}'")));
@@ -163,7 +163,7 @@ fn the_relay_limit_fields_are_named_the_same_in_both_languages() {
     // A native host takes the service's authored numbers rather than carrying
     // its own copy, so a renamed field means it silently falls back to defaults
     // that may be stricter or laxer than the deployment's.
-    let registry = read("worker-rendezvous/src/registry.js");
+    let registry = read("packages/transport/src/service-registry.js");
     for field in ["max_frame_bytes", "max_send_buffer_bytes"] {
         assert!(
             registry.contains(&format!("{field}:")),

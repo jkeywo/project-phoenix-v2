@@ -1,11 +1,11 @@
 //! The standing guard that the authoritative-state declaration registry
-//! (`src/authoritative.rs`, issue #1220) is INERT to the #901 digest.
+//! (`crates/phoenix-simulation/src/authoritative.rs`, issue #1220) is INERT to the #901 digest.
 //!
 //! # What this proves
 //!
 //! `App::declare_state::<T>(class, pasm)` records a type in the [`StateCensus`]
 //! resource, keyed by its full path. That census is a coverage/diagnostic
-//! surface: nothing in `src/sim_digest.rs`'s `world_digest` or `src/snapshot.rs`
+//! surface: nothing in `crates/phoenix-simulation/src/sim_digest.rs`'s `world_digest` or `crates/phoenix-simulation/src/snapshot.rs`
 //! reads it. This guard turns that claim into a test — the order plugins declare
 //! their state in (and whether they declare it at all) must not move a single
 //! byte of the authoritative-state digest.

@@ -534,9 +534,9 @@ describe('GM omniscient local projection', () => {
 describe('GM projection transport separation', () => {
   it('exists only in the Host Channel, never in peer or lockstep vocabularies', () => {
     for (const file of [
-      'src/core/messages.rs',
-      'src/lockstep/frame.rs',
-      'src/server_app/components.rs',
+      'crates/phoenix-simulation/src/core/messages.rs',
+      'crates/phoenix-simulation/src/lockstep/frame.rs',
+      'crates/phoenix-simulation/src/server_app/components.rs',
     ]) {
       const source = read(file);
       expect(source).not.toContain('GmEntityProjection');

@@ -126,7 +126,7 @@ $env:CARGO_TARGET_DIR = 'C:\Coding\project-phoenix-v2\target'
 $env:PHOENIX_T5_ARTIFACT_DIR = '<fresh evidence directory>'
 $env:PHOENIX_T5_MEASURE_SECONDS = '10'
 $env:PHOENIX_T5_MEASURE_REPETITIONS = '3'
-# Refresh src/lib.rs mtime when switching a shared target between worktrees.
+# Refresh crates/phoenix-simulation/src/lib.rs mtime when switching a shared target between worktrees.
 cargo test --features headless --test lockstep_six_peer six_peer_local_measurement -- --ignored --exact --nocapture
 $env:PHOENIX_RELAY_PROBE_ROUNDS = '200'
 $env:PHOENIX_RELAY_PROBE_WARMUP_ROUNDS = '20'

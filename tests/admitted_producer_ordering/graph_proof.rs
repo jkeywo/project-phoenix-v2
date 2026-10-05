@@ -22,16 +22,16 @@ use std::{
 };
 
 pub const PRODUCERS: [&str; 4] = [
-    "project_phoenix::console_ai::server::ai_power_allocation",
-    "project_phoenix::console_ai::server::ai_shield_focus",
-    "project_phoenix::console::navigation::server::operate_navigation_ai",
-    "project_phoenix::console::repair::server::operate_repair_ai",
+    "phoenix_simulation::console_ai::server::ai_power_allocation",
+    "phoenix_simulation::console_ai::server::ai_shield_focus",
+    "phoenix_simulation::console::navigation::server::operate_navigation_ai",
+    "phoenix_simulation::console::repair::server::operate_repair_ai",
 ];
 pub const CONSUMERS: [&str; 4] = [
-    "project_phoenix::ship::power::handle_power_messages",
-    "project_phoenix::ship::shields::handle_shields_messages",
-    "project_phoenix::console::navigation::server::handle_navigation_waypoint",
-    "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team",
+    "phoenix_simulation::ship::power::handle_power_messages",
+    "phoenix_simulation::ship::shields::handle_shields_messages",
+    "phoenix_simulation::console::navigation::server::handle_navigation_waypoint",
+    "phoenix_simulation::console::repair::dispatch::handle_dispatch_repair_team",
 ];
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Candidate {
@@ -65,6 +65,19 @@ pub fn candidates() -> Vec<Candidate> {
     }
     expected.sort();
     let mut actual = inventory.pairs;
+    for pair in &mut actual {
+        pair.systems = pair
+            .systems
+            .each_ref()
+            .map(|name| project_phoenix::headless::determinism_audit::migrated_symbol(name));
+        pair.systems.sort();
+        pair.access = pair
+            .access
+            .iter()
+            .map(|name| project_phoenix::headless::determinism_audit::migrated_symbol(name))
+            .collect();
+        pair.access.sort();
+    }
     actual.sort();
     assert_eq!(
         actual, expected,
@@ -215,11 +228,11 @@ impl ScheduleBuildPass for Observe {
         let admission = [
             key(
                 graph,
-                "project_phoenix::command_admission::admit_system_commands",
+                "phoenix_simulation::command_admission::admit_system_commands",
             ),
             key(
                 graph,
-                "project_phoenix::command_admission::clear_inter_system_queue",
+                "phoenix_simulation::command_admission::clear_inter_system_queue",
             ),
         ];
         let mut probe_keys = HashSet::new();

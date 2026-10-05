@@ -16,10 +16,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/sim_sets.rs, src/ship/viewscreen.rs, src/core/messages.rs, src/server_app/broadcast_publish.rs, src/core/broadcast/lifecycle.rs]
+      paths: [crates/phoenix-simulation/src/sim_sets.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs]
       symbols: [SimSet, broadcast_blackboard_updates, LastBroadcastBlackboards, ReplicationLifecycleAdapter]
       messages: [BlackboardUpdate]
-      tests: [cargo test, src/ship/viewscreen_tests.rs, src/core/messages_view_mode_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/core/broadcast/lifecycle_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle_tests.rs]
 
   - state: ship-system-blackboards-state
     core:
@@ -36,10 +36,10 @@ entities:
       replicas: [simulation-state-replica]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship/viewscreen.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/viewscreen.rs]
       symbols: [SystemBlackboard]
 
-      tests: [src/core/messages_view_mode_tests.rs, src/ship/viewscreen_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/ship/viewscreen_tests.rs]
   - state: frozen-system-blackboards-state
     core:
       status: implemented
@@ -52,9 +52,9 @@ entities:
       derived_from: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/ship/viewscreen.rs, src/sim_sets.rs]
+      paths: [crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/sim_sets.rs]
 
-      tests: [src/ship/viewscreen_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/viewscreen_tests.rs]
   - state: viewscreen-target-facts-state
     core:
       status: implemented
@@ -70,10 +70,10 @@ entities:
       derived_from: [tactical-radar-blackboard-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ai/server.rs, src/server_app/broadcast.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/server_app/broadcast.rs]
       symbols: [ViewscreenBlackboard]
 
-      tests: [src/core/messages_view_mode_tests.rs, src/server_app/broadcast_replication_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs]
   - component: inter-system-message-router
     core:
       status: implemented
@@ -87,10 +87,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship_plugin.rs, src/console/weapons/mod.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
       symbols: [InterSystemMsg]
       messages: [InterSystemPayload]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: inter-system-message-state
     core:
@@ -104,10 +104,10 @@ entities:
       writers: [inter-system-message-router]
     implementation:
       status: declared
-      paths: [src/core/messages.rs]
+      paths: [crates/phoenix-model/src/messages.rs]
       symbols: [InterSystemMsg, InterSystemPayload]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: coordination-lag-router
     core:
       status: implemented
@@ -136,10 +136,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship/shields.rs, src/ship_plugin.rs, src/snapshot.rs, src/core/messages.rs, src/core/codec.rs, src/console_bridge.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, gui/client-router.js, gui/sim-state.js, gui/coordination-popup.js, client.html, server.html, scripts/check-strings.mjs, scripts/strings-rust.mjs]
+      paths: [crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-simulation/src/console_bridge.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, gui/client-router.js, gui/sim-state.js, gui/coordination-popup.js, client.html, server.html, scripts/check-strings.mjs, scripts/strings-rust.mjs]
       symbols: [CoordinationAddress, CoordinationPresentation, CoordinationParam, CoordinationDelivery, address_for_system, address_for_system_kind, CoordinationLagQueue, CoordinationPayload, CoordinationEnqueueCursor, CoordinationEnqueueState, DeliveredCoordination, OrderedCoordinationPopup, PendingArcBearingRequest, HelmWaypointClearance, receive_helm_coordination, PendingTacticalFrequencyHint, receive_tactical_coordination, receive_repair_coordination, PendingShieldsThreatBearing, receive_shields_coordination, flush_coordination_popups, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat, normalizeCoordinationPresentation, renderCoordinationPopup, buildCoordinationChatterBubble, coordinationPresentationIds]
       messages: [SendCoordination, CoordinationPopup, DeliveredCoordination, OrderedCoordinationPopup, AiChatterEvent]
-      tests: [cargo test, tests/client/client-router.test.js, tests/client/sim-state.test.js, tests/client/coordination-popup.test.js, src/ship/components_tests.rs, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs, src/console/helm/server_tests.rs]
+      tests: [cargo test, tests/client/client-router.test.js, tests/client/sim-state.test.js, tests/client/coordination-popup.test.js, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
 
   - state: coordination-lag-queue-state
     core:
@@ -153,7 +153,7 @@ entities:
       writers: [coordination-lag-router]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship_plugin.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [CoordinationLagQueue, CoordinationQueue, CoordinationQueueState, QueuedCoordinationState]
 
   - state: coordination-enqueue-staging-state
@@ -168,10 +168,10 @@ entities:
       writers: [coordination-lag-router]
     implementation:
       status: declared
-      paths: [src/ship/components.rs, src/ship/coordination_systems.rs, src/ship_plugin.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [CoordinationEnqueue, CoordinationEnqueueCursor, CoordinationEnqueueState, capture_coordination_staging, restore_coordination_staging]
 
-      tests: [src/ship/components_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/components_tests.rs]
   - state: coordination-delivery-state
     core:
       status: implemented
@@ -184,11 +184,11 @@ entities:
       derived_from: [coordination-lag-queue-state]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship/components.rs, src/ship/coordination_systems.rs, src/ship/shields.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, gui/coordination-popup.js, client.html, server.html, src/ship_plugin.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console_bridge.rs, gui/coordination-popup.js, client.html, server.html, crates/phoenix-simulation/src/ship_plugin.rs]
       symbols: [CoordinationPresentation, CoordinationDelivery, DeliveredCoordination, OrderedCoordinationPopup, AiChatterEvent, receive_helm_coordination, receive_tactical_coordination, receive_repair_coordination, receive_shields_coordination, flush_coordination_popups, normalizeCoordinationPresentation]
       messages: [CoordinationPopup, DeliveredCoordination, OrderedCoordinationPopup, AiChatterEvent]
 
-      tests: [src/core/messages_view_mode_tests.rs, src/ship/components_tests.rs, src/console/helm/server_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]
   - component: intent-narration-coalescer
     core:
       status: implemented
@@ -211,10 +211,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/intent_narration.rs, src/ship/intent_narration_systems.rs, src/core/messages.rs, src/ship_plugin.rs, gui/coordination-popup.js]
+      paths: [crates/phoenix-simulation/src/ship/intent_narration.rs, crates/phoenix-simulation/src/ship/intent_narration_systems.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship_plugin.rs, gui/coordination-popup.js]
       symbols: [coalesce_intent, IntentSnapshot, IntentChange, IntentNarrationConfig, IntentKind, tick_intent_narration, ShipIntentNarration]
       messages: [CoordinationPopup]
-      tests: [cargo test, tests/client/coordination-popup.test.js, src/ship/intent_narration_tests.rs, src/ship/intent_narration_systems_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, tests/client/coordination-popup.test.js, crates/phoenix-simulation/src/ship/intent_narration_tests.rs, crates/phoenix-simulation/src/ship/intent_narration_systems_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: intent-narration-state
     core:
@@ -232,6 +232,6 @@ entities:
       writers: [intent-narration-coalescer]
     implementation:
       status: declared
-      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/intent_narration_systems.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [ShipIntentNarration, INTENT_NARRATION_SPAWN_SITES, IntentNarrationState, IntentSnapshotState]
-      tests: [src/ship/intent_narration_systems_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/intent_narration_systems_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

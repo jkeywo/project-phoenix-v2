@@ -8,7 +8,7 @@
 //
 // Since issue #737 the message is a per-recipient projection rather than a
 // Target::All broadcast, so what a client receives depends on which station it
-// holds — see src/console/repair/visibility.rs.
+// holds — see crates/phoenix-simulation/src/console/repair/visibility.rs.
 
 import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 
@@ -79,7 +79,7 @@ test('Engineering player receives SystemHullUpdate after game start', { tag: '@c
 // #639-641, then the c1af00c0 / f94c356e balance passes) and every rewrite was
 // a false failure: the projection code was fine, a designer had retuned a
 // hull. The exact-row-set arithmetic is covered where it belongs — against a
-// self-contained ship config, in `src/console/repair/visibility.rs::tests`
+// self-contained ship config, in `crates/phoenix-simulation/src/console/repair/visibility.rs::tests`
 // (`live_broadcast_gives_engineering_core_only_with_no_team_on_site`,
 // `live_broadcast_gives_a_station_owner_only_its_own_systems`,
 // `every_recipient_receives_the_same_ship_wide_aggregate`).

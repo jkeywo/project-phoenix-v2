@@ -12,9 +12,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, src/entities/config_cache.rs]
+      paths: [crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/config_cache.rs]
       symbols: [EntityConfig, ConfigCachePlugin]
-      tests: [cargo test, src/entities/config_cache_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/config_cache_tests.rs]
 
   - state: entity-template-state
     core:
@@ -28,7 +28,7 @@ entities:
       writers: [entity-template-cache]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, assets/entities]
+      paths: [crates/phoenix-simulation/src/entities/config.rs, assets/entities]
       symbols: [EntityConfig]
 
   - component: entity-template-composition-resolver
@@ -45,7 +45,7 @@ entities:
         - "Issue #869 merge semantics, SUPERSEDED by #911 and kept only as the starting point that issue moved from. #869 reconciled exactly two arrays by key — behaviour.state by `name` and behaviour.doctrine by `id` — and EVERY OTHER ARRAY REPLACED WHOLESALE, including tags, [[station]], [[system]], [[shield_arc]] and [[weapons_console.phaser_banks]]. A hull that included a systems fragment and then declared its own [[system]] blocks replaced the fragment whole suite rather than adding to it. Widening that rule would have changed instance-override semantics too, because both layers called the same two-argument merge, so #869 put it out of scope. The empty-array-clears lever and the omitted-key-leaves-it-alone rule both survive #911 unchanged."
         - "Issue #911 generalised the key-based reconciliation and SCOPED it, which is the whole design. The merge grew a MergePolicy parameter: ComposeFragments for include resolution, InstanceOverride for a world [[entity]].overrides. merge_entity_config_toml keeps its two-argument shape and defaults to InstanceOverride, so its three callers — entity_loader::apply_overrides, the direct call in world::dispatch step 2b, and world::validate::doctrine_anchor_refs through apply_overrides — all keep the pre-#911 semantics, and only include_resolve opts into the other policy. That is the smallest blast radius available. Those callers did each need one edit after all: the merge is now FALLIBLE (see the tombstone bullet), so each threads a Result. Under ComposeFragments an array whose dotted, index-free path is in COMPOSE_KEYED_ARRAYS reconciles element-wise: system / station / shield_arc / weapons_console.phaser_banks / weapons_console.blaster_banks / torpedoes.tubes / behaviour.doctrine by `id`, and station.rating by `name`. Every key is an identity the loader already enforces as unique (DuplicateSystemId and its siblings); `kind` is deliberately NOT an identity because it repeats in 8 of the 11 shipped files that declare systems. A matched entry deep-merges AT ITS ORIGINAL POSITION and only genuinely new entries append — that is a stated guarantee, not an accident, because [[shield_arc]] order is load-bearing (ShieldSystem::from_arcs maps arcs positionally, focused_facing is a positional index, and the first arc frequency seeds the ship-wide shield frequency)."
         - "Issue #911 authoring vocabulary, the AC3 record of what a fragment author writes to get each behaviour. EXTEND: declare an entry with a new id (or, for station.rating, a new name) and it is appended — no marker, no new syntax, which is the point, since a marker-per-array would make the common case (the library systems plus two of my own) require new syntax. REPLACE ONE ENTRY: declare an entry whose key matches an inherited one; it deep-merges in place and fields it does not mention survive. REMOVE ONE ENTRY: declare an entry carrying _remove = true beside its id; the inherited entry is dropped and the tombstone never reaches the resolved document, stripped exactly where `includes` is stripped, because EntityConfig is deny_unknown_fields. A tombstone matching nothing is a no-op, since fragments compose in any order; a later fragment re-adding the id wins whole rather than inheriting the marker. CLEAR THE WHOLE LIST: author an empty array, unchanged and still beating the element-wise rules. LEAVE IT ALONE: omit the key. Tombstones are a COMPOSE-layer marker only, and a world override that writes one is REJECTED BY THE MERGE ITSELF — merge_entity_config_toml_with returns Result and reject_unhonoured_removals fails on any _remove key anywhere in an InstanceOverride document. A world subtractive levers stay the empty array and restating the list."
-        - "Issue #911 made the merge FALLIBLE so the tombstone guarantee is true where it matters. The first cut asserted that a _remove reaching a world override would be caught by EntityConfig deny_unknown_fields. Measured against the real ship_harrow_patrol hull, it was not: behaviour.doctrine is the one array that reconciles at the InstanceOverride layer, so a tombstone written there deep-merges INTO the matching template entry, and DoctrineObjective is not deny_unknown_fields — apply_overrides returned Ok, the doctrine came back unchanged as patrol-ironveil plus destroy-hostiles, and no warning was raised. src/ship/config.rs carries no deny_unknown_fields either, so [[system]], [[station]] and [[station.rating]] are no safer; only ShieldArcConfig, PhaserBankConfig and TorpedoTubeConfig actually reject an unknown key. That is precisely the silent-no-op failure mode #838 existed to end, behind a marker whose docs promised the opposite. merge_entity_config_toml_with now returns Result and reject_unhonoured_removals rejects any _remove key — true or false, at any depth — under InstanceOverride. Pinned END TO END by a_tombstone_in_a_world_override_fails_against_the_real_hull, which loads the shipped hull, asserts apply_overrides is Err, and asserts the doctrine = [] lever still works on the same hull."
+        - "Issue #911 made the merge FALLIBLE so the tombstone guarantee is true where it matters. The first cut asserted that a _remove reaching a world override would be caught by EntityConfig deny_unknown_fields. Measured against the real ship_harrow_patrol hull, it was not: behaviour.doctrine is the one array that reconciles at the InstanceOverride layer, so a tombstone written there deep-merges INTO the matching template entry, and DoctrineObjective is not deny_unknown_fields — apply_overrides returned Ok, the doctrine came back unchanged as patrol-ironveil plus destroy-hostiles, and no warning was raised. crates/phoenix-simulation/src/ship/config.rs carries no deny_unknown_fields either, so [[system]], [[station]] and [[station.rating]] are no safer; only ShieldArcConfig, PhaserBankConfig and TorpedoTubeConfig actually reject an unknown key. That is precisely the silent-no-op failure mode #838 existed to end, behind a marker whose docs promised the opposite. merge_entity_config_toml_with now returns Result and reject_unhonoured_removals rejects any _remove key — true or false, at any depth — under InstanceOverride. Pinned END TO END by a_tombstone_in_a_world_override_fails_against_the_real_hull, which loads the shipped hull, asserts apply_overrides is Err, and asserts the doctrine = [] lever still works on the same hull."
         - "Issue #911 kept several arrays REPLACING deliberately, and this is a granularity decision rather than a gap. *.ai.rule and *_ai.state[].transition have only the composite (channel, priority) as a candidate key, so an author bumping a priority would silently rename the entry and get an append instead of an edit; equal-priority collisions are already rejected at load, so no stable key exists. *.selector.score entries carry no identity at all. hull.system_hull is positional. mesh.lod was too until issue #914 moved the LOD ladder into the model rig sidecar, so entity TOML no longer carries the array at all and the merge table no longer names it. A FRAGMENT CONTRIBUTING AN AI POLICY CONTRIBUTES IT WHOLE. Nested arrays inside a reconciled entry are judged by their own path, so behaviour.doctrine.directive_anchors — the empty-array idiom world::dispatch documents as the way through a directive-kind flip — keeps replacing wholesale at BOTH layers."
         - "Issue #911 handled `tags` as the one array with no possible key, and it is the reason the policy seam exists at all rather than a flag on the merge. tags is an array of bare strings, so set-union and replace are the only two options. It UNIONS at the compose layer, because a fragment library adding tags is what composition is for, and it REPLACES at the instance layer, because replacing is the only way a world can take a tag AWAY — assets/worlds/default.toml, patrol.toml and reinforcements.toml all override ship_harrow_patrol tags precisely to drop comms_contact, and tags are behaviourally live (entities/tags.rs, gui/radar.rs). One rule could not serve both layers; the test pinning the instance-layer half was written FIRST, because nothing asserted it before."
         - "Issue #911 RETIRED the behaviour.state special case rather than generalising it. BehaviourConfig is deny_unknown_fields and has had no `state` field since #572 dissolved the FSM, so a resolved document carrying [[behaviour.state]] does not parse and no shipped hull or fragment has one; its path and the by-name merger were exercised only by unit tests on raw toml::Value. The by-`name` MECHANISM is not retired — station.rating uses it — so the pre-existing tests were re-pointed at it rather than deleted. The old public helpers collapsed into one merge_keyed_array_at(path, template, overrides, key, policy); merge_named_array survives only as a test-only wrapper and merge_id_array, which had no caller left at all, went with the FSM."
@@ -68,9 +68,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/include_resolve.rs, src/entities/entity_override.rs, src/entities/config_cache.rs, src/entities/loader.rs]
+      paths: [crates/phoenix-simulation/src/entities/include_resolve.rs, crates/phoenix-simulation/src/entities/entity_override.rs, crates/phoenix-simulation/src/entities/config_cache.rs, crates/phoenix-simulation/src/entities/loader.rs]
       symbols: [resolve_template, resolve_from_disk, load_entity_config, preload_step, PreloadStep, ResolvedTemplate, Provenance, FieldOrigin, MergeStep, IncludeError, IncludeErrorDetail, FsFragmentSource, INCLUDES_KEY, MergePolicy, ArrayRule, merge_entity_config_toml_with, reject_unhonoured_removals, find_removal_marker, strip_removals, REMOVE_KEY]
-      tests: [cargo test, src/entities/entity_override_tests.rs, src/entities/config_cache_tests.rs, src/entities/loader_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/entity_override_tests.rs, crates/phoenix-simulation/src/entities/config_cache_tests.rs, crates/phoenix-simulation/src/entities/loader_tests.rs]
 
   - state: resolved-entity-template-state
     core:
@@ -88,7 +88,7 @@ entities:
       readers: [ship-config-loader, entity-spawn-orchestrator, entity-template-schema-validator]
     implementation:
       status: declared
-      paths: [src/entities/include_resolve.rs]
+      paths: [crates/phoenix-simulation/src/entities/include_resolve.rs]
       symbols: [ResolvedTemplate, Provenance, FieldOrigin, MergeStep]
       tests: [cargo test]
 
@@ -107,9 +107,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/config.rs, src/entities/config.rs, src/ship/system_registry.rs]
+      paths: [crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/ship/system_registry.rs]
       symbols: [parse_and_validate, ShipConfig]
-      tests: [cargo test, src/ship/system_registry_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
 
   - component: entity-spawn-orchestrator
     core:
@@ -126,7 +126,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/entities/ship_spawn.rs, src/server_app/world_setup.rs, src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [spawn_entity, spawn_entity_with_ship_seed, ShipSpawnSeed]
       tests: [cargo test]
 
@@ -142,7 +142,7 @@ entities:
       writers: [entity-spawn-orchestrator]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs]
       symbols: [EntityMass]
 
   - state: spawned-entity-state
@@ -158,7 +158,7 @@ entities:
       replicas: [simulation-state-replica]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-model/src/messages.rs]
       # The stable world/runtime identity components; the live ECS Entity
       # handle itself is deliberately NOT a symbol here — it is exactly the
       # unstable-across-instances handle #894 and this slice name as the
@@ -166,7 +166,7 @@ entities:
       symbols: [EntityUuid, EntityId, EntityName, StaticPointDefence]
       messages: [EntitySpawned, EntityDespawned]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: model-marker-contract
     core:
       status: implemented
@@ -181,13 +181,13 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/entities/model_rig.rs
-        - src/entities/marker_validate.rs
-        - src/entities/config.rs
-        - src/server/pfx.rs
+        - crates/phoenix-simulation/src/entities/model_rig.rs
+        - crates/phoenix-simulation/src/entities/marker_validate.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-presentation/src/server/pfx.rs
         - src/headless/app.rs
       symbols: [ModelRig, MarkerFinding, MarkerRole, validate_entity_markers, duplicate_marker_findings]
-      tests: [cargo test, src/entities/model_rig_tests.rs, src/entities/marker_validate_tests.rs, src/server/pfx_dust_tests.rs, src/server/pfx_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/model_rig_tests.rs, crates/phoenix-simulation/src/entities/marker_validate_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
     exceptions:
       - rule: every-marker-reference-is-validated-before-attachment
         scope:
@@ -234,9 +234,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/entity_override.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
+      paths: [crates/phoenix-simulation/src/entities/entity_override.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs]
       symbols: [player_hull_config]
-      tests: [cargo test, src/entities/entity_override_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/entity_override_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]
     evidence:
       - kind: test
         reference: a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull
@@ -260,9 +260,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/world/manifest.rs, src/world/config.rs, src/delivery/payload.rs, src/core/messages.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
+      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/delivery/payload.rs, crates/phoenix-model/src/messages.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
       symbols: [AvailableShipEntry, ScenarioCatalog, build_catalog, build_merged_catalog, CatalogShipWire, ScenarioCatalogWire, ScenarioCatalogPayload, catalogue_snapshot]
-      tests: [cargo test, src/world/manifest_tests.rs, src/delivery/payload_tests.rs, src/core/messages_view_mode_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-simulation/src/delivery/payload_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: entity-template-schema-validator
     core:
@@ -282,7 +282,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/ship/config.rs]
       tests: [cargo test]
 
   - component: entity-component-composition
@@ -302,8 +302,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/entities/ship_spawn.rs, src/entities/loader.rs, src/ship/config.rs]
-      tests: [cargo test, src/entities/loader_tests.rs, src/entities/spawner_tests.rs, src/server_app/world_setup_ship_spawn_tests.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/ship/config.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs, crates/phoenix-simulation/src/entities/spawner_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_ship_spawn_tests.rs]
 
   - component: entity-template-capability-contract
     core:
@@ -323,5 +323,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, src/ship/config.rs, src/entities/ship_spawn.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs]
-      tests: [cargo test, src/server_app/world_setup_ship_spawn_tests.rs, src/console/weapons/equipment_presence_tests.rs]
+      paths: [crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_ship_spawn_tests.rs, crates/phoenix-simulation/src/console/weapons/equipment_presence_tests.rs]

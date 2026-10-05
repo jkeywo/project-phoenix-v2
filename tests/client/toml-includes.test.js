@@ -5,7 +5,7 @@
 // hull a world offers. `class` is inheritable, so reading only a hull's OWN
 // top-level key left a composed hull at zero errors while ph-ship-picker.js
 // badged it with the raw token. These cases mirror the merge-order asserts in
-// src/entities/include_resolve.rs — if Rust's precedence ever changes, both
+// crates/phoenix-simulation/src/entities/include_resolve.rs — if Rust's precedence ever changes, both
 // sides should fail together rather than the checker drifting silently.
 
 import { describe, it, expect } from 'vitest';

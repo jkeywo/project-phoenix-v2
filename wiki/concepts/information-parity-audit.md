@@ -2,7 +2,7 @@
 title: Information-Parity Audit
 type: concept
 tags: [ai, backfill, parity, consoles, blackboards, coordination]
-sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, src/entities/ai_flag_hosts.rs, src/ai/host.rs, src/ship/helm_ai/, src/ai/server.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/console/captain/server.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/sensors.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/core/messages.rs, gui/console-state.js, gui/console-payload.js, gui/mount-plan.js]
+sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, crates/phoenix-simulation/src/entities/ai_flag_hosts.rs, crates/phoenix-simulation/src/ai/host.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-model/src/messages.rs, gui/console-state.js, gui/console-payload.js, gui/mount-plan.js]
 updated: 2026-09-07
 ---
 
@@ -17,13 +17,13 @@ GM contact overrides (#1309) live in `WorldContentRuntime` by observing player s
 | Domain | Shared facts | Human surface | Backfill consumer |
 |---|---|---|---|
 | Captain | objectives, selected priority, combat activity, red alert, current view | Captain blackboard and controls | `operate_captain_ai` |
-| Helm | own motion, authored limits, combat lock, waypoint/clearance, scored objectives, visible contacts, weapon/shield geometry | Helm blackboard/radar and controls | hosts under `src/ship/helm_ai/` |
+| Helm | own motion, authored limits, combat lock, waypoint/clearance, scored objectives, visible contacts, weapon/shield geometry | Helm blackboard/radar and controls | hosts under `crates/phoenix-simulation/src/ship/helm_ai/` |
 | Tactical | combat lock, visible/acquirable contacts, weapon readiness/arcs/range, scored operate/destroy directives | Tactical radar and weapons controls | `ai_target_selection` plus weapon-family hosts |
 | Shields | own arc health/focus, damage history, threat bearing | Shields blackboard and arc controls | `ai_shield_focus` |
 | Power | group allocations, battery charge, authored limits, brownout state | Power state/blackboard | `ai_power_allocation` |
 | Sensors | sensor contacts, selected target, scan progress/results | Sensors radar and scan panel | `operate_sensors_ai` |
 | Repair | visible system damage, team state, queue severity, external targets | Repair blackboard and team controls | `operate_repair_ai` and external-repair host |
-| Comms | inbox, contacts, range flags, scripted replies, urgency | Comms blackboard/panels | Comms hosts in `src/console/comms/server.rs` |
+| Comms | inbox, contacts, range flags, scripted replies, urgency | Comms blackboard/panels | Comms hosts in `crates/phoenix-simulation/src/console/comms/server.rs` |
 | Navigation | chart contacts, waypoint, route cursors, civilian traffic/order state | Navigation map and traffic controls | `operate_navigation_ai` and civilian-order host |
 
 Static selection inputs such as a hull's authored power rating may be shown at ship choice rather than repeated on every console. Derived timers, deltas, and bounded-window verdicts do not need a separate display when they are computed only from already-visible facts.

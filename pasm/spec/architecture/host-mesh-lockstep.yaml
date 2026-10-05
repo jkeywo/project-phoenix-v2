@@ -32,7 +32,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lockstep/session.rs, src/lockstep/mod.rs, src/lockstep/continuation.rs, src/lockstep/continuation_systems.rs, src/server/bridge.rs, gui/fleet-session.js, gui/fleet-continuation.js, gui/fleet-owner-continuation.js, gui/fleet-continuation-wire.js]
+      paths: [crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/continuation.rs, crates/phoenix-simulation/src/lockstep/continuation_systems.rs, src/server/bridge.rs, gui/fleet-session.js, gui/fleet-continuation.js, gui/fleet-owner-continuation.js, gui/fleet-continuation-wire.js]
       symbols:
         - LockstepSession
         - FleetLockstep
@@ -41,7 +41,7 @@ entities:
         - join_fleet
         - wasm_join_fleet
         - wasm_mesh_status
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/fleet-owner-handoff.test.js, tests/client/fleet-owner-continuation.test.js, tests/client/fleet-continuation.test.js, tests/client/fleet-continuation-wire.test.js, tests/smoke/fleet-lockstep.spec.js, src/lockstep/session_tests.rs, src/lockstep/tests.rs, src/lockstep/continuation_systems_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/fleet-owner-handoff.test.js, tests/client/fleet-owner-continuation.test.js, tests/client/fleet-continuation.test.js, tests/client/fleet-continuation-wire.test.js, tests/smoke/fleet-lockstep.spec.js, src/lockstep/session_tests.rs, crates/phoenix-simulation/src/lockstep/tests.rs, crates/phoenix-simulation/src/lockstep/continuation_systems_tests.rs, src/server/bridge_tests.rs]
 
   - state: fleet-lockstep-state
     core:
@@ -62,9 +62,9 @@ entities:
       writers: [fleet-lockstep-session]
     implementation:
       status: declared
-      paths: [src/lockstep/mod.rs, src/lockstep/session.rs, src/lockstep/crew.rs, src/lobby/session.rs, gui/fleet-crew.js, gui/fleet-session.js]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/lockstep/crew.rs, crates/phoenix-simulation/src/lobby/session.rs, gui/fleet-crew.js, gui/fleet-session.js]
       symbols: [FleetLockstep, FleetRoster, FleetShip, FleetSlotOf, MeshInbox, MeshOutbox, canonical_station_ratings, lobby_station_ratings]
-      tests: [cargo test, tests/authoritative_state_enumeration.rs, tests/lockstep_mesh.rs, tests/client/fleet-crew.test.js, tests/client/fleet-session.test.js, src/lockstep/tests.rs, src/lockstep/session_tests.rs, src/lockstep/crew_tests.rs, src/lobby/session_tests.rs]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs, tests/lockstep_mesh.rs, tests/client/fleet-crew.test.js, tests/client/fleet-session.test.js, crates/phoenix-simulation/src/lockstep/tests.rs, src/lockstep/session_tests.rs, crates/phoenix-simulation/src/lockstep/crew_tests.rs, crates/phoenix-simulation/src/lobby/session_tests.rs]
 
   - message: lockstep-tick-frame
     core:
@@ -91,7 +91,7 @@ entities:
       payload: MeshFrame
     implementation:
       status: declared
-      paths: [src/lockstep/frame.rs, src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js]
+      paths: [crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/core/codec.rs, gui/host-mesh.js, gui/fleet-session.js]
       symbols:
         - MeshFrame
         - TickFrame
@@ -103,7 +103,7 @@ entities:
         - wasm_receive_mesh_frame
         - wasm_take_mesh_frames
         - apply_mesh_inbox
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js, src/lockstep/frame_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/client/host-mesh.test.js, tests/smoke/fleet-lockstep.spec.js, crates/phoenix-simulation/src/lockstep/frame_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - component: peer-independent-command-order
     core:
@@ -126,14 +126,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/log.rs, src/command_admission/mod.rs]
+      paths: [crates/phoenix-simulation/src/command_admission/log.rs, crates/phoenix-simulation/src/command_admission/mod.rs]
       symbols:
         - CommandOrder
         - HostSlot
         - PendingCommands
         - stamp_accepted_command
         - admit_system_commands
-      tests: [cargo test, tests/lockstep_mesh.rs, src/command_admission/log_tests.rs, src/command_admission/tests.rs]
+      tests: [cargo test, tests/lockstep_mesh.rs, crates/phoenix-simulation/src/command_admission/log_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs]
 
   - component: local-ship-projection-boundary
     core:
@@ -159,16 +159,16 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/server_app/components.rs
-        - src/server_app/world_setup.rs
-        - src/server_app/registration.rs
-        - src/ship/physics_systems.rs
-        - src/ship/coordination_systems.rs
-        - src/server_app/broadcast_publish.rs
-        - src/console/weapons/beam.rs
-        - src/asteroids/lifecycle.rs
+        - crates/phoenix-simulation/src/server_app/components.rs
+        - crates/phoenix-simulation/src/server_app/world_setup.rs
+        - crates/phoenix-simulation/src/server_app/registration.rs
+        - crates/phoenix-simulation/src/ship/physics_systems.rs
+        - crates/phoenix-simulation/src/ship/coordination_systems.rs
+        - crates/phoenix-simulation/src/server_app/broadcast_publish.rs
+        - crates/phoenix-simulation/src/console/weapons/beam.rs
+        - crates/phoenix-simulation/src/asteroids/lifecycle.rs
       symbols: [LocalShip, FleetSlotOf, insert_player_core_bundle, update_asteroid_window, fleet_stream_centre]
-      tests: [tests/local_ship_neutrality.rs, tests/lockstep_mesh.rs, tests/archetype_order_determinism.rs, src/server_app/components_interior_write_access_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/ship/physics_systems_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/asteroids/lifecycle_tests.rs]
+      tests: [tests/local_ship_neutrality.rs, tests/lockstep_mesh.rs, tests/archetype_order_determinism.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-simulation/src/ship/physics_systems_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs]
 
   - component: fleet-digest-exchange
     core:
@@ -192,14 +192,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lockstep/mod.rs, src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols:
         - MeshAgreement
         - MeshDisagreement
         - sample_and_publish_digest
         - digest_stages
         - first_divergent_scope
-      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/smoke/fleet-lockstep.spec.js, src/lockstep/tests.rs]
+      tests: [cargo test, tests/lockstep_mesh.rs, tests/lockstep_six_peer.rs, tests/smoke/fleet-lockstep.spec.js, crates/phoenix-simulation/src/lockstep/tests.rs]
 
   - state: fleet-agreement-state
     core:
@@ -215,9 +215,9 @@ entities:
       writers: [fleet-digest-exchange]
     implementation:
       status: declared
-      paths: [src/lockstep/mod.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/mod.rs]
       symbols: [MeshAgreement, MeshDisagreement, MeshDiagnostics]
-      tests: [cargo test, tests/authoritative_state_enumeration.rs, src/lockstep/tests.rs]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs, crates/phoenix-simulation/src/lockstep/tests.rs]
 
   - component: fleet-divergence-recovery
     core:
@@ -246,10 +246,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/lockstep/recovery.rs
-        - src/lockstep/recovery_plan.rs
-        - src/lockstep/snapshot_relay.rs
-        - src/lockstep/mod.rs
+        - crates/phoenix-simulation/src/lockstep/recovery.rs
+        - crates/phoenix-simulation/src/lockstep/recovery_plan.rs
+        - crates/phoenix-simulation/src/lockstep/snapshot_relay.rs
+        - crates/phoenix-simulation/src/lockstep/mod.rs
       symbols:
         - drive_recovery
         - RecoveryPlan
@@ -262,7 +262,7 @@ entities:
         - MeshRestoreArm
         - gate_and_restore_against
         - drain_mesh_restore
-      tests: [cargo test, tests/lockstep_recovery.rs, tests/lockstep_snapshot_transfer.rs, src/lockstep/recovery_tests.rs, src/lockstep/recovery_plan_tests.rs, src/lockstep/snapshot_relay_tests.rs, src/lockstep/tests.rs]
+      tests: [cargo test, tests/lockstep_recovery.rs, tests/lockstep_snapshot_transfer.rs, crates/phoenix-simulation/src/lockstep/recovery_tests.rs, src/lockstep/recovery_plan_tests.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay_tests.rs, crates/phoenix-simulation/src/lockstep/tests.rs]
 
   - state: fleet-recovery-state
     core:
@@ -281,9 +281,9 @@ entities:
       writers: [fleet-divergence-recovery]
     implementation:
       status: declared
-      paths: [src/lockstep/recovery.rs, src/lockstep/snapshot_relay.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/recovery.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay.rs]
       symbols: [RecoveryState, RecoveryHold, RecoveryLog, MeshRestoreArm]
-      tests: [cargo test, tests/authoritative_state_enumeration.rs, src/lockstep/recovery_tests.rs, src/lockstep/snapshot_relay_tests.rs]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs, crates/phoenix-simulation/src/lockstep/recovery_tests.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay_tests.rs]
 
   - component: fleet-slot-recovery
     core:
@@ -311,10 +311,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/lockstep/slot_recovery.rs
-        - src/lockstep/mod.rs
-        - src/lockstep/frame.rs
-        - src/lockstep/session.rs
+        - crates/phoenix-simulation/src/lockstep/slot_recovery.rs
+        - crates/phoenix-simulation/src/lockstep/mod.rs
+        - crates/phoenix-simulation/src/lockstep/frame.rs
+        - crates/phoenix-simulation/src/lockstep/session.rs
         - src/server/bridge.rs
         - gui/host-mesh.js
         - gui/fleet-session.js
@@ -327,7 +327,7 @@ entities:
         - claimSlot
         - wasm_mesh_frame_from
         - wasm_claim_slot
-      tests: [cargo test, tests/lockstep_slot_recovery.rs, tests/client/fleet-session.test.js, tests/client/host-mesh.test.js, src/lockstep/slot_recovery_tests.rs, src/lockstep/tests.rs, src/lockstep/frame_tests.rs, src/lockstep/session_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, tests/lockstep_slot_recovery.rs, tests/client/fleet-session.test.js, tests/client/host-mesh.test.js, crates/phoenix-simulation/src/lockstep/slot_recovery_tests.rs, crates/phoenix-simulation/src/lockstep/tests.rs, crates/phoenix-simulation/src/lockstep/frame_tests.rs, src/lockstep/session_tests.rs, src/server/bridge_tests.rs]
 
   - state: fleet-slot-recovery-state
     core:
@@ -346,6 +346,6 @@ entities:
       writers: [fleet-slot-recovery]
     implementation:
       status: declared
-      paths: [src/lockstep/slot_recovery.rs]
+      paths: [crates/phoenix-simulation/src/lockstep/slot_recovery.rs]
       symbols: [PendingSlotClaims, SlotRecoveryState, SlotRecoveryHold, SlotRecoveryLog]
-      tests: [cargo test, tests/authoritative_state_enumeration.rs, src/lockstep/slot_recovery_tests.rs]
+      tests: [cargo test, tests/authoritative_state_enumeration.rs, crates/phoenix-simulation/src/lockstep/slot_recovery_tests.rs]

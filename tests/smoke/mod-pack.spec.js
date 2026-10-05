@@ -8,7 +8,7 @@
 // active-pack list, and that an upload after world load is ignored.
 //
 // Every committed fixture under tests/fixtures/mod-packs/ is exercised here AND
-// by a Rust `validate_mod_pack` test over the SAME bytes (src/world/mod_pack.rs),
+// by a Rust `validate_mod_pack` test over the SAME bytes (crates/phoenix-simulation/src/world/mod_pack.rs),
 // so the two consumers cannot drift (issue #991 AC). Expectations are read out
 // of each pack's own manifest (readModPackManifest + tomlString/tableArrayValues)
 // rather than pinned — the derive-don't-pin rule from fixtures.js.

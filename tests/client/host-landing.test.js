@@ -34,7 +34,7 @@ import {
  * owns its own entry TABLE: what is under test is the decision, and a suite
  * that read the shipped format would start failing the day a designer renamed
  * a denied word. The two namespace GUIDs are this fixture's own and the
- * suffix rules are the shipped shape — eight letters, `0`→`O`, `1`→`I`.
+ * suffix rules are the shipped shape — five letters, `0`→`O`, `1`→`I`.
  */
 const JOIN_DATA = {
   format_version: 1,
@@ -44,12 +44,12 @@ const JOIN_DATA = {
   },
   version: { guid: '33333333-3333-4333-8333-333333333333' },
   suffix: {
-    length: 8,
+    length: 5,
     alphabet: 'ABCDEFGHIJKMNOPQRSTUVWXYZ',
     strip: ' -_',
     normalise: { 0: 'O', 1: 'I', L: 'I' },
   },
-  deny: ['BADWORD'],
+  deny: ['BAD'],
 };
 
 /** The shipped Join as Peer / Connect to Host descriptors. */
@@ -904,7 +904,7 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
   const client = () => joinOf('connect_host');
 
   it('accepts a bare suffix, composing it into the ROW’s namespace', () => {
-    const attempt = landingJoinAttempt(peer(), 'quarking', JOIN_DATA);
+    const attempt = landingJoinAttempt(peer(), 'quark', JOIN_DATA);
     expect(attempt.ok).toBe(true);
     expect(attempt.namespace).toBe('server');
     expect(attempt.action).toBe('boot-game-master');
@@ -912,14 +912,14 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
     // identifier, and composing it once here is what stops each of them doing
     // it differently.
     expect(attempt.code).toBe(
-      '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333_QUARKING',
+      '22222222-2222-4222-8222-222222222222_33333333-3333-4333-8333-333333333333_QUARK',
     );
   });
 
   it('composes the SAME letters into the client namespace on the other route', () => {
     // One field, two meanings, and the meaning is the row's. This is the whole
     // reason the namespace is data rather than a constant in the page.
-    const attempt = landingJoinAttempt(client(), 'quarking', JOIN_DATA);
+    const attempt = landingJoinAttempt(client(), 'quark', JOIN_DATA);
     expect(attempt.ok).toBe(true);
     expect(attempt.namespace).toBe('client');
     expect(attempt.action).toBe('open-client-page');
@@ -930,22 +930,22 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
     // Lower case, the spacing somebody adds reading a code aloud, and the
     // confusable digits. Not re-implemented here — this is gui/join-code.js
     // answering, which is the point of importing it rather than parsing again.
-    const attempt = landingJoinAttempt(peer(), ' quark-1ng ', JOIN_DATA);
+    const attempt = landingJoinAttempt(peer(), ' m0-1st ', JOIN_DATA);
     expect(attempt.ok).toBe(true);
-    expect(attempt.code.endsWith('_QUARKING')).toBe(true);
+    expect(attempt.code.endsWith('_MOIST')).toBe(true);
   });
 
   it('reports an empty field, a wrong length, a bad character and a denied word', () => {
     expect(landingJoinAttempt(peer(), '', JOIN_DATA).errorId).toBe('client.join.error_empty');
-    expect(landingJoinAttempt(peer(), 'QUARK', JOIN_DATA).errorId).toBe('client.join.error_length');
-    expect(landingJoinAttempt(peer(), 'QUARKIN$', JOIN_DATA).errorId)
+    expect(landingJoinAttempt(peer(), 'QUAR', JOIN_DATA).errorId).toBe('client.join.error_length');
+    expect(landingJoinAttempt(peer(), 'QUAR$', JOIN_DATA).errorId)
       .toBe('client.join.error_charset');
-    expect(landingJoinAttempt(peer(), 'BADWORDS', JOIN_DATA).errorId)
+    expect(landingJoinAttempt(peer(), 'BADXX', JOIN_DATA).errorId)
       .toBe('client.join.error_denied');
   });
 
   it('reports a paste that lost a part as malformed rather than as letters', () => {
-    const half = '22222222-2222-4222-8222-222222222222_QUARKING';
+    const half = '22222222-2222-4222-8222-222222222222_QUARK';
     expect(landingJoinAttempt(peer(), half, JOIN_DATA).errorId)
       .toBe('client.join.error_malformed');
   });
@@ -955,21 +955,21 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
     // a viewscreen, the phone's sentence for this is the exact inverse of what
     // happened. The row carries `surface: 'server'` so it is not.
     const crew = '11111111-1111-4111-8111-111111111111'
-      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+      + '_33333333-3333-4333-8333-333333333333_QUARK';
     expect(landingJoinAttempt(peer(), crew, JOIN_DATA).errorId)
       .toBe('server.fleet.error_wrong_type');
   });
 
   it('refuses a FLEET code pasted into Connect to Host, in the phone’s wording', () => {
     const fleet = '22222222-2222-4222-8222-222222222222'
-      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+      + '_33333333-3333-4333-8333-333333333333_QUARK';
     expect(landingJoinAttempt(client(), fleet, JOIN_DATA).errorId)
       .toBe('client.join.error_wrong_type');
   });
 
   it('refuses a GUID belonging to no Phoenix namespace as not-Phoenix', () => {
     const alien = '44444444-4444-4444-8444-444444444444'
-      + '_33333333-3333-4333-8333-333333333333_QUARKING';
+      + '_33333333-3333-4333-8333-333333333333_QUARK';
     expect(landingJoinAttempt(peer(), alien, JOIN_DATA).errorId)
       .toBe('client.join.error_not_phoenix');
   });
@@ -978,9 +978,9 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
     // Not a refusal of the code — it was never judged. Sending an operator back
     // to retype letters that were already right is the one failure the reason
     // map exists to prevent.
-    expect(landingJoinAttempt(peer(), 'QUARKING', null).errorId)
+    expect(landingJoinAttempt(peer(), 'QUARK', null).errorId)
       .toBe('client.join.error_unreachable');
-    expect(landingJoinAttempt(null, 'QUARKING', JOIN_DATA).errorId)
+    expect(landingJoinAttempt(null, 'QUARK', JOIN_DATA).errorId)
       .toBe('client.join.error_unreachable');
   });
 
@@ -990,7 +990,7 @@ describe('landingJoinAttempt — judging a typed code (issue #1364)', () => {
     // sentence an unreachable service gets, because the operator's remedy is
     // identical — and because a throw here would abandon a click handler
     // mid-way and leave the panel saying nothing at all.
-    expect(landingJoinAttempt(peer(), 'QUARKING', { format_version: 1 }).errorId)
+    expect(landingJoinAttempt(peer(), 'QUARK', { format_version: 1 }).errorId)
       .toBe('client.join.error_unreachable');
   });
 });
@@ -1017,7 +1017,7 @@ describe('landingViewModel — the join stage (issue #1364)', () => {
   });
 
   it('fills in what the FIELD says, which is the same on every join route', () => {
-    // "Join code", "eight letters", "or paste the whole code" are facts about
+    // "Join code", "five letters", "or paste the whole code" are facts about
     // the authored format and not about the route, so both rows get them and
     // neither repeats them.
     for (const id of ['join_peer', 'connect_host']) {
@@ -1035,7 +1035,7 @@ describe('landingViewModel — the join stage (issue #1364)', () => {
 
   it('lets a row override a field default rather than being overwritten by it', () => {
     // The merge order, pinned: the shared defaults go UNDER the row. A route
-    // whose code is not eight letters has to be able to say so.
+    // whose code is not five letters has to be able to say so.
     const own = [{
       id: 'own',
       labelId: 'x',

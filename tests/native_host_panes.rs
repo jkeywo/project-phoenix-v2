@@ -41,6 +41,7 @@
 
 use bevy::prelude::*;
 
+use phoenix_transport::Transport;
 use project_phoenix::boot::NativeRenderSurface;
 use project_phoenix::core::messages::{ClientMessage, GamePhase, ServerMessage, SystemId};
 use project_phoenix::delivery::args::ClientSource;
@@ -51,7 +52,7 @@ use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::panes::identity::PaneIdentity;
 use project_phoenix::native_host::panes::{service_faults, LocalPanes, PaneBus, PaneFault, PaneId};
 use project_phoenix::native_host::transport::{
-    LoopbackHandle, NativeTransport, NativeTransportLink, PairedTransport, TransportDispatch,
+    LoopbackHandle, NativeTransportLink, PairedTransport, TransportDispatch,
 };
 use project_phoenix::native_host::{
     build_native_host_app, preload_content_templates, NativeHostConfig,

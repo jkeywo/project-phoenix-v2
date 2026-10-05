@@ -158,7 +158,8 @@ fn access_is_subset(current: &[String], allowed: &[String]) -> bool {
     })
 }
 
-pub fn parse_census(raw: &str) -> Result<Vec<Ambiguity>, String> {
+/// Parse and validate the historical names without rewriting fingerprint input.
+pub fn parse_census_original(raw: &str) -> Result<Vec<Ambiguity>, String> {
     let rows: Vec<Ambiguity> = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     if rows.windows(2).any(|p| p[0] > p[1])
         || rows.iter().any(|row| {
@@ -173,6 +174,68 @@ pub fn parse_census(raw: &str) -> Result<Vec<Ambiguity>, String> {
     }
     Ok(rows)
 }
+
+pub fn parse_census(raw: &str) -> Result<Vec<Ambiguity>, String> {
+    Ok(migrate_census(parse_census_original(raw)?))
+}
+
+/// Translate reviewed historical names only after validating any pinned bytes.
+pub fn migrate_census(rows: Vec<Ambiguity>) -> Vec<Ambiguity> {
+    let mut rows: Vec<_> = rows
+        .into_iter()
+        .map(|mut row| {
+            row.systems = row.systems.map(|name| migrated_symbol(&name));
+            row.systems.sort();
+            row.access = row
+                .access
+                .iter()
+                .map(|name| migrated_symbol(name))
+                .collect();
+            row.access.sort();
+            row
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// Historical ledger names only. This explicit table changes no pair, access or
+/// multiplicity, and leaves unknown names intact so newly introduced debt fails.
+pub fn migrated_symbol(name: &str) -> String {
+    use std::sync::OnceLock;
+    static RENAMES: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    let renames = RENAMES.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../tests/fixtures/determinism/layer-symbol-renames.json"
+        ))
+        .expect("reviewed layer symbol renames")
+    });
+    let mut output = String::new();
+    let mut token = String::new();
+    let flush = |token: &mut String, output: &mut String| {
+        output.push_str(
+            renames
+                .get(token.as_str())
+                .map(String::as_str)
+                .unwrap_or(token),
+        );
+        token.clear();
+    };
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
+            token.push(ch);
+        } else {
+            flush(&mut token, &mut output);
+            output.push(ch);
+        }
+    }
+    flush(&mut token, &mut output);
+    output
+}
+
+#[cfg(test)]
+#[path = "determinism_audit/layer_names_tests.rs"]
+mod layer_names_tests;
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 struct StrictAuditRebuild;

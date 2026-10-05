@@ -2942,6 +2942,7 @@
   <link data-trunk rel="copy-dir" href="assets/shaders" />
   <!-- HTML console pages (issue #422): copied to dist/gui/ -->
   <link data-trunk rel="copy-dir" href="gui" />
+  <link data-trunk rel="copy-dir" href="packages" />
   <script type="module">
     // Localisation bridge (same pattern as client.html): the page logic below
     // is classic-script, so publish the strings API on window and substitute
@@ -7126,7 +7127,7 @@
           }
           // The landing is still on the join stage — nothing moved it — so the
           // sentence lands under the field the code was typed into, with the
-          // eight letters still in it.
+          // five letters still in it.
           _landingJoinError = window.joinCode.reasonStringId(reason, 'server');
           window.__hostRenderLanding();
         };

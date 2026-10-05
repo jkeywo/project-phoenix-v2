@@ -2,7 +2,7 @@
 title: Comms Range
 type: concept
 tags: [comms, range, hail, authority, contacts]
-sources: [src/comms/mod.rs, src/comms/range.rs, src/comms/component.rs, src/comms/roster.rs, src/comms/server.rs, src/console/comms/server.rs, src/core/messages.rs, src/entities/config.rs, src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -10,7 +10,7 @@ updated: 2026-08-27
 
 Comms endpoints opt in with an authored `[comms]` block. A contact is reachable when both endpoints support range and their distance is within the effective link range. Hailability and physical range are separate authored facts.
 
-`src/comms/range.rs` contains the pure distance/range calculation. `src/comms/server.rs` maintains each ship's authoritative contact roster and range flags from live transforms. `src/console/comms/server.rs` enforces the same flags when a hail or reply command is applied, so stale or malicious client state cannot bypass range.
+`crates/phoenix-simulation/src/comms/range.rs` contains the pure distance/range calculation. `crates/phoenix-simulation/src/comms/server.rs` maintains each ship's authoritative contact roster and range flags from live transforms. `crates/phoenix-simulation/src/console/comms/server.rs` enforces the same flags when a hail or reply command is applied, so stale or malicious client state cannot bypass range.
 
 `CommsContact.in_range` describes the current roster entry. Each `CommsMessage.sender_in_range` snapshots the sender's status when the message enters the inbox, allowing the UI and Backfill policy to explain why a thread can or cannot continue.
 

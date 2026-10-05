@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [tests/native_cli_smoke.rs, src/bin/tests/phoenix_perf_cli_tests.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/fleet-browser-matrix.mjs, scripts/fleet-mixed-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, src/perf/phase.rs, src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, src/server_app/components.rs, src/sim_sets/order.rs, src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
+sources: [tests/native_cli_smoke.rs, src/bin/tests/phoenix_perf_cli_tests.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/fleet-browser-matrix.mjs, scripts/fleet-mixed-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, crates/phoenix-simulation/src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, crates/phoenix-simulation/src/perf/phase.rs, crates/phoenix-simulation/src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/sim_sets/order.rs, crates/phoenix-simulation/src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
 updated: 2026-10-04
 ---
 
@@ -184,8 +184,8 @@ there is no separate logging duel or claim that it captures emitted log text.
 
 ## Observed phase timing
 
-The headless perf-capture path uses `src/perf/phase_trace.rs` to observe actual
-FixedUpdate/system spans outside App and `src/perf/phase.rs` for pure reduction.
+The headless perf-capture path uses `crates/phoenix-simulation/src/perf/phase_trace.rs` to observe actual
+FixedUpdate/system spans outside App and `crates/phoenix-simulation/src/perf/phase.rs` for pure reduction.
 Per-phase execution intervals and an adjacent coverage report keep unattributed
 work visible. `tests/phase_profiling.rs` covers real span attribution, the binary
 capture path and measured/unmeasured state and census equivalence.
@@ -221,7 +221,7 @@ are described in [Typed reconnect projection](../../docs/reconnect-projection-pr
 
 ## Declared FixedUpdate order
 
-`src/sim_sets/order.rs` records typed owner sequences within the existing fixed
+`crates/phoenix-simulation/src/sim_sets/order.rs` records typed owner sequences within the existing fixed
 phases and at named early and late boundaries. Each `FixedStep` marker stays on
 the original system registration beside its existing conditions and phase.
 `order::pass::DeclaredOrder` adds execution edges after Bevy's automatic deferred

@@ -2,7 +2,7 @@
 title: View Modes
 type: concept
 tags: [view, camera, captain, viewscreen, radar]
-sources: [src/core/messages.rs, src/ship/viewscreen.rs, src/ship/state.rs, src/console/captain/server.rs, src/server/renderer.rs, src/server/radar.rs, src/server/viewscreen_border.rs, gui/console-state.js, src/crew_spectator.rs, gui/crew-spectator-view.js]
+sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-presentation/src/server/radar.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, gui/console-state.js, crates/phoenix-simulation/src/crew_spectator.rs, gui/crew-spectator-view.js]
 updated: 2026-09-27
 ---
 
@@ -16,7 +16,7 @@ derive their controls from the same state.
 ## Modes
 
 In a multi-ship mission, a destroyed crew's Viewscreen enters cinematic
-spectating. `src/crew_spectator.rs` retains the original `LocalShip` and Station
+spectating. `crates/phoenix-simulation/src/crew_spectator.rs` retains the original `LocalShip` and Station
 assignments; only its host-local camera target changes. Original crew members
 (including those reconnecting after destruction) can select any surviving ship.
 The latest valid choice wins, target loss selects another survivor, and an empty
@@ -27,7 +27,7 @@ Backfill gameplay controls. Authored multi-ship scenarios decide mission endings
 from ordinary destruction facts; single-ship missions keep their existing defeat.
 Ordinary repair ticks leave retained crew wrecks at zero hull, and Tactical's
 automatic target selector drops their persistent UUIDs in favour of surviving
-combatants (`src/console/repair/server.rs`, `src/console/weapons/server.rs`).
+combatants (`crates/phoenix-simulation/src/console/repair/server.rs`, `crates/phoenix-simulation/src/console/weapons/server.rs`).
 
 - `Camera(CameraView)` selects a named `camera_*` marker from the ship's model
   rig. `camera_fore` is the default. The renderer resolves the marker's world

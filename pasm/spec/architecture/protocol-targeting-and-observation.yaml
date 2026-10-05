@@ -16,9 +16,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app/components.rs, server.html, gui/action-map.js]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/components.rs, server.html, gui/action-map.js]
       symbols: [LOCAL_CONSOLE_TOKEN, wasm_receive_message, dispatchConsoleAction]
-      tests: [cargo test, npx vitest run, src/server/bridge_tests.rs, src/server_app/components_interior_write_access_tests.rs]
+      tests: [cargo test, npx vitest run, src/server/bridge_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
   - state: host-local-console-identity-state
     core:
@@ -32,7 +32,7 @@ entities:
       writers: [host-local-console-bridge]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs]
       symbols: [LOCAL_CONSOLE_TOKEN]
 
       tests: [src/server/bridge_tests.rs]
@@ -51,9 +51,9 @@ entities:
       payload: ClientMessage
     implementation:
       status: declared
-      paths: [server.html, gui/action-map.js, src/core/codec.rs]
+      paths: [server.html, gui/action-map.js, crates/phoenix-simulation/src/core/codec.rs]
       symbols: [decode_bridge_client_message]
-      tests: [cargo test, npx vitest run, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - component: wire-codec-protocol
     core:
@@ -71,9 +71,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/codec.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-model/src/messages.rs]
       symbols: [JsonCodec, to_json, from_json, from_json_bytes, decode_bridge_client_message, encode_mesh_frame, decode_mesh_frame, decode_gm_action_request]
-      tests: [cargo test, src/core/codec_mesh_frame_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: host-page-push-bridge
     core:
@@ -89,9 +89,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server/audio.rs, src/gm_projection.rs, gui/gm-local-projection.js]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-presentation/src/server/audio.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/gm-local-projection.js]
       symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged]
-      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js, src/server/bridge_tests.rs, src/server/viewscreen_border_tests.rs, src/server/audio_tests.rs, src/gm_projection_tests.rs]
+      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js, src/server/bridge_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-presentation/src/server/audio_tests.rs, crates/phoenix-simulation/src/gm_projection_tests.rs]
 
   - state: browser-gm-profile-marker-state
     core:
@@ -105,9 +105,9 @@ entities:
       writers: [host-page-push-bridge]
     implementation:
       status: declared
-      paths: [src/gm_projection.rs, src/server/bridge.rs, server.html]
+      paths: [crates/phoenix-simulation/src/gm_projection.rs, src/server/bridge.rs, server.html]
       symbols: [BrowserGameMaster, GmProjectionPlugin]
-      tests: [cargo test, tests/smoke/gm-page.spec.js, src/gm_projection_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, tests/smoke/gm-page.spec.js, crates/phoenix-simulation/src/gm_projection_tests.rs, src/server/bridge_tests.rs]
 
   - component: entity-targetability-contract
     core:
@@ -123,7 +123,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/tags.rs, src/entities/target.rs, src/entities/config.rs, src/entities/spawner.rs, src/console/weapons/mod.rs]
+      paths: [crates/phoenix-simulation/src/entities/tags.rs, crates/phoenix-simulation/src/entities/target.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
       symbols: [EntityTag, TargetSection, parse_tags, matches_any]
       tests: [cargo test, src/entities/tags_tests.rs]
 
@@ -139,8 +139,8 @@ entities:
       derived_from: [entity-template-state, radar-contact-projection-state]
     implementation:
       status: declared
-      paths: [src/entities/target.rs, src/console/weapons/mod.rs, src/core/messages.rs]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-simulation/src/entities/target.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-model/src/messages.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   # The authored-toml-observer component and its authored-content-observation-state
   # were removed when phoenix de-vendored PASM. They modelled the TOML scanner
@@ -173,6 +173,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app/registration.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, tick_frequency_hint_high_fidelity]
-      tests: [cargo test, src/console_ai/core_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

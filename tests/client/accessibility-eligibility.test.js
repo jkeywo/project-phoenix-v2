@@ -10,7 +10,7 @@
  *     no setting), versus the PRIVATE functional explanation kept locally,
  *   - private-setting non-disclosure: nothing derived carries the raw profile.
  *
- * The client mirrors the RUST rule (src/ship/eligibility.rs) from the projected
+ * The client mirrors the RUST rule (crates/phoenix-simulation/src/ship/eligibility.rs) from the projected
  * `station_assist_gaps` table; these tests pin that mirror.
  */
 import { describe, it, expect } from 'vitest';

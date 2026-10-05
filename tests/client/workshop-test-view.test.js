@@ -138,12 +138,12 @@ describe('the disposable Test view', () => {
   });
 
   it('refuses a ship the run does not have, in the runtime', () => {
-    const browser = readFileSync('src/workshop/test_browser.rs', 'utf8');
+    const browser = readFileSync('src/workshop_host/test_browser.rs', 'utf8');
     expect(browser.replace(/\s+/g, ' ')).toContain('status.ships.iter().any(');
   });
 
   it('switches with presentation-only state, so the run cannot notice', () => {
-    const view = readFileSync('src/workshop/test_view.rs', 'utf8');
+    const view = readFileSync('crates/phoenix-simulation/src/workshop/test_view.rs', 'utf8');
     // Both levers are already excluded from the authoritative fold.
     expect(view).toContain('StateClass::Presentation');
     expect(view).toContain('NativeGmPresentation');

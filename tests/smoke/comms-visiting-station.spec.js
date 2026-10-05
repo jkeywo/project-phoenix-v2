@@ -12,7 +12,7 @@
 // remaining host outcomes the acceptance criteria name — visiting and
 // AI-hosted — plus the hosted-tab resolution onto a non-owning seat, via
 // `SimState.snapshot.station_hosts` (the wire projection of
-// `resolve_visiting_station`, `src/ship/coordination.rs`) plus a live
+// `resolve_visiting_station`, `crates/phoenix-simulation/src/ship/coordination.rs`) plus a live
 // `CommsState`/`Hail` round trip to prove a visiting host can actually act,
 // not just get named as host. The prior "direct: a player seated on Comms is
 // its own host" case is gone: Comms is no longer a claimable seat, so its
@@ -350,7 +350,7 @@ test('comms — AI-hosted: falls back to AI once every host_order seat is unheld
   // "engineering", "captain", "helm"] is every crewable seat other than Comms,
   // so with Tactical released and nobody else ever having claimed a seat,
   // every candidate in the chain is unheld and resolve_visiting_station
-  // (src/ship/coordination.rs) falls all the way through to `host: None`,
+  // (crates/phoenix-simulation/src/ship/coordination.rs) falls all the way through to `host: None`,
   // `rating: BACKFILL_RATING` ("Backfill") — the pure AI-operated verdict.
   await tactical.page.evaluate(() => {
     window.__messages = window.__messages.filter((m) => m.type !== 'SimState');

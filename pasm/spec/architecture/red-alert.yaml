@@ -39,10 +39,10 @@ entities:
         - selected-target-alert-state
     implementation:
       status: declared
-      paths: [src/ship/state.rs, src/console/captain/server.rs]
+      paths: [crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/captain/server.rs]
       symbols: [ShipRedAlert]
 
-      tests: [src/ship/state_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/state_tests.rs]
   - component: weapons-cold-fire-gate
     core:
       status: implemented
@@ -70,7 +70,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/console_ai/server.rs, src/ship/config.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/ship/config.rs]
       symbols:
         - system_power_group_is_cold
         - power_group_for
@@ -80,7 +80,7 @@ entities:
       tests: [cargo test, tests/smoke/weapons-cold-fire-gate.spec.js]
     evidence:
       - kind: test
-        reference: "src/console/weapons/server_tests.rs::a_cold_weapons_group_holds_fire_and_power_gives_it_back"
+        reference: "crates/phoenix-simulation/src/console/weapons/server_tests.rs::a_cold_weapons_group_holds_fire_and_power_gives_it_back"
         summary: "A backfilled bank with every readiness reading favourable and the alert RAISED holds while its authored group is at level 0, and opens fire on the next AI tick after the group is powered back — one run, one thing changed."
       - kind: test
         reference: "tests/headless_runner.rs::powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_gives_the_fire_back"
@@ -111,7 +111,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/world/script/effects.rs, src/world/dispatch.rs, src/world/server.rs, src/ship/power.rs, src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml]
+      paths: [crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml]
       symbols:
         - ActionCmd
         - ScriptedPowerLevel
@@ -120,13 +120,13 @@ entities:
         - mirror_weapons_cold_flags
         - OWN_SHIP_WEAPONS_COLD_FLAG
         - weapons_cold_flag
-      tests: [cargo test, "cargo test --features headless --test headless_runner restraint", src/world/script/effects_tests.rs, src/modifiers/power_system_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test headless_runner restraint", crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
     evidence:
       - kind: test
-        reference: "src/ship/power_tests.rs::a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default"
+        reference: "crates/phoenix-simulation/src/ship/power_tests.rs::a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default"
         summary: "A hull booting its weapons group at 3 rather than the fleet's usual 2 goes to 0 on hold_fire's order and back to 3 on release_fire's — so an applier restoring a hardcoded 2 would fail here and pass everywhere else."
       - kind: test
-        reference: "src/ship/power_tests.rs::a_scripted_hold_is_clamped_by_the_hulls_own_authored_floor"
+        reference: "crates/phoenix-simulation/src/ship/power_tests.rs::a_scripted_hold_is_clamped_by_the_hulls_own_authored_floor"
         summary: "A hull authoring min_level = 1 stays at 1 under the same order, and the mirror flag says so — the script gets no privilege the crew do not have."
       - kind: test
         reference: "tests/headless_runner.rs::the_crews_own_restraint_is_visible_to_the_scenario_and_something_answers_it"
@@ -145,7 +145,7 @@ entities:
       owner: red-alert-console-interface
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, gui/console-state.js]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, gui/console-state.js]
 
   - message: set-red-alert-command
     core:
@@ -170,8 +170,8 @@ entities:
       payload: set-red-alert-active
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, gui/sim-state.js]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, gui/action-map.js, gui/sim-state.js]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - component: host-red-alert-control-router
     core:
@@ -195,8 +195,8 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/core/messages.rs]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-model/src/messages.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: red-alert-ai-operator
     core:
@@ -222,7 +222,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/ai/core.rs]
       tests: [cargo test]
 
   - state: selected-target-alert-state
@@ -241,8 +241,8 @@ entities:
       owner: sensor-target-alert-publisher
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship/sensors.rs]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/sensors.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: sensor-target-alert-publisher
     core:
@@ -261,7 +261,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, gui/console-state.js, gui/components/ph-sensor-panel.js]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, gui/console-state.js, gui/components/ph-sensor-panel.js]
       tests: [cargo test, npx vitest run]
 
   - component: npc-red-alert-capability-provisioner
@@ -284,7 +284,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/entities/config.rs]
       tests: [cargo test]
 
   - component: red-alert-presentation
@@ -302,5 +302,5 @@ entities:
       runs_in: [host-browser-runtime, phone-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/server/viewscreen_border.rs, gui/components/ph-red-alert.js, assets/sounds/red_alert_siren.ogg]
-      tests: [src/server/viewscreen_border_tests.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, gui/components/ph-red-alert.js, assets/sounds/red_alert_siren.ogg]
+      tests: [crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]

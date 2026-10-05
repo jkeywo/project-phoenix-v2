@@ -31,12 +31,12 @@ so a failure found during this run can be filed against the right owner.
 
 | Issue | Commit | What it added | Its own automated coverage |
 | --- | --- | --- | --- |
-| #1433 | `63b0abd8` | `src/gm_attention.rs` foundation: `GmAttentionBand` (Urgent/Attention/Background), the peer-local `gm_attention` Host Channel projection; `gui/gm-attention-panel.js` (band groups, held/live reading, Open/Snooze) and `gui/gm-attention-filters.js` (private band/category/ship filters, the 60-second snooze); pending-Comms producer with `[[gm_comms_route]].attention_band` authored override | `tests/gm_attention.rs`, `tests/client/gm-attention-panel.test.js` |
+| #1433 | `63b0abd8` | `crates/phoenix-simulation/src/gm_attention.rs` foundation: `GmAttentionBand` (Urgent/Attention/Background), the peer-local `gm_attention` Host Channel projection; `gui/gm-attention-panel.js` (band groups, held/live reading, Open/Snooze) and `gui/gm-attention-filters.js` (private band/category/ship filters, the 60-second snooze); pending-Comms producer with `[[gm_comms_route]].attention_band` authored override | `tests/gm_attention.rs`, `tests/client/gm-attention-panel.test.js` |
 | #1434 | `17da8135` | Eligible-authored-beats producer sharing `manual_fire_would_land` with the real Fire evaluator (no condition read twice, no Rhai side effect); `.attention_band("…")` Rhai sibling of `.pauseable()`/`.skip()` | `tests/gm_attention_beats.rs` |
 | #1435 | `28a131b1` | Idle-NPC producer: `[gm_attention]` table (`idle_npc_grace_secs`, `idle_npc_band`, `idle_npc_disabled`), 30 simulation-second default grace read from the ship's own `top_directive` over its live scored objectives — the same pool Helm/Weapons act on | `tests/gm_idle_npc.rs` |
 | #1436 | `f8be4f9e` | Quiet-time producer: one non-escalating Background row after 120 simulation seconds with no `ActionFeedback::Applied`, no sustained `AdmittedCommands`, no `ObjectiveChanged` — shares `[gm_attention]` with #1435 | `tests/gm_attention_quiet.rs` |
-| #1437 | `a3fc3e7b` | `src/gm_health.rs`: public `gm_health` projection (Live/Paused/Stale/Recovering/Disconnected), no `HostSlot`/token on the wire; `GmAttentionCategory::StationHealth` fixed at Urgent, reachable by no authored key; `gui/gm-health-banner.js` unfilterable technical-banner seam that no snooze, filter or hold can touch | `tests/gm_health.rs` |
-| #1438 | `8f51e5a1` | `src/gm_workload.rs`: `GmWorkloadLevel` (Backfill/Offline/Underused/Engaged/Overloaded) from distinct outstanding human demands (pending Comms, unflown Navigation clearance, queued Repair dispatch, task activations) — never input frequency; `gui/gm-workload-panel.js` evidence expander | `tests/gm_workload.rs`, `tests/client/gm-workload-panel.test.js` |
+| #1437 | `a3fc3e7b` | `crates/phoenix-simulation/src/gm_health.rs`: public `gm_health` projection (Live/Paused/Stale/Recovering/Disconnected), no `HostSlot`/token on the wire; `GmAttentionCategory::StationHealth` fixed at Urgent, reachable by no authored key; `gui/gm-health-banner.js` unfilterable technical-banner seam that no snooze, filter or hold can touch | `tests/gm_health.rs` |
+| #1438 | `8f51e5a1` | `crates/phoenix-simulation/src/gm_workload.rs`: `GmWorkloadLevel` (Backfill/Offline/Underused/Engaged/Overloaded) from distinct outstanding human demands (pending Comms, unflown Navigation clearance, queued Repair dispatch, task activations) — never input frequency; `gui/gm-workload-panel.js` evidence expander | `tests/gm_workload.rs`, `tests/client/gm-workload-panel.test.js` |
 | #1439 | `7e550501` | `[[gm_role_preset.widget]]` typed world authoring (attention/workload/actions/note, closed `GM_WIDGET_TYPES`); `gui/gm-widgets-panel.js` composing the *existing* attention/workload controllers and the *existing* action buttons — never a second queue, never a new permission; reconnect keeps live filters/snoozes, a fresh session and a live preset switch both reset to authored defaults | `tests/gm_widgets.rs`, `tests/client/gm-widgets-panel.test.js` (26), `tests/smoke/gm-layout.spec.js` (200%-scale) |
 | #1430 | `b0f104ee` | GM directing/performing desk (T2, PRD #930 M1–M3) carried into 200%/forced-colours/dense-list coverage, plus the GM Station-puppet mirroring the GM's own resolved presentation onto the puppeted document | `docs/acceptance/1432-platform-comfort.md` Task 4, `tests/client/gm-directing-performing-dense-content.test.js` |
 
@@ -45,7 +45,7 @@ Two things worth a reviewer's attention before booking a human:
 - **No producer re-bands a live occurrence.** Every authored band
   (`[[gm_comms_route]].attention_band`, `.attention_band()` on a beat,
   `idle_npc_band`) is fixed at authoring time; `GmAttentionCategory::StationHealth`
-  is a system-fixed `Urgent` literal (`src/gm_attention.rs:1082`), and quiet
+  is a system-fixed `Urgent` literal (`crates/phoenix-simulation/src/gm_attention.rs:1082`), and quiet
   time is a system-fixed `Background` literal (`:1209`). The "newly Urgent
   escalation breaks snooze, an already-Urgent snoozed item waits the minute"
   reconciliation rule (PRD #1419 Implementation Decisions) is real and
@@ -58,7 +58,7 @@ Two things worth a reviewer's attention before booking a human:
   the minute, and a fresh Urgent occurrence that must never be hidden by an
   unrelated snooze) rather than claiming an unverified live re-banding path.
 - **Widget action buttons carry no new authority.** `GM_WIDGET_ACTION_IDS`
-  (`src/world/config.rs:935`) is exactly `["gm-session-pause",
+  (`crates/phoenix-simulation/src/world/config.rs:935`) is exactly `["gm-session-pause",
   "gm-session-resume"]` today. A widget button ACTIVATES the shipped DOM
   control by id — same confirmation category, same admission check, same
   `ActionFeedbackLifecycle` — so §5.9's "truthful outcomes" exercise is about
@@ -528,10 +528,10 @@ Defect dispositions and required human reruns:
 
 ## 7. Source pointers for the coordinator
 
-- [Attention queue projection](../../src/gm_attention.rs) and [panel](../../gui/gm-attention-panel.js); [private filter/snooze controller](../../gui/gm-attention-filters.js)
-- [Public health projection](../../src/gm_health.rs), [panel](../../gui/gm-health-panel.js) and [banner seam](../../gui/gm-health-banner.js)
-- [Station workload](../../src/gm_workload.rs) and [panel](../../gui/gm-workload-panel.js)
-- [Typed widget authoring](../../src/world/config.rs) (`GmRolePresetWidget`, `GM_WIDGET_TYPES`, `GM_WIDGET_ACTION_IDS`) and [desk panel](../../gui/gm-widgets-panel.js)
+- [Attention queue projection](../../crates/phoenix-simulation/src/gm_attention.rs) and [panel](../../gui/gm-attention-panel.js); [private filter/snooze controller](../../gui/gm-attention-filters.js)
+- [Public health projection](../../crates/phoenix-simulation/src/gm_health.rs), [panel](../../gui/gm-health-panel.js) and [banner seam](../../gui/gm-health-banner.js)
+- [Station workload](../../crates/phoenix-simulation/src/gm_workload.rs) and [panel](../../gui/gm-workload-panel.js)
+- [Typed widget authoring](../../crates/phoenix-simulation/src/world/config.rs) (`GmRolePresetWidget`, `GM_WIDGET_TYPES`, `GM_WIDGET_ACTION_IDS`) and [desk panel](../../gui/gm-widgets-panel.js)
 - [Confirmation policy registry](../../gui/gm-confirmation.js) and [refusal-reason labels](../../gui/gm-action-reasons.js)
 - [Read-only action journal panel](../../gui/gm-journal-panel.js) (#1441) — used in §5.9 for the Applied/No-op/Refused cross-check
 - Purpose-built probes reused unchanged by §5.4–§5.7: [`probe_gm_attention.toml`](../../assets/worlds/probe_gm_attention.toml), [`probe_gm_beats.toml`](../../assets/worlds/probe_gm_beats.toml), [`probe_gm_idle_npc_authored.toml`](../../assets/worlds/probe_gm_idle_npc_authored.toml), [`probe_gm_quiet.toml`](../../assets/worlds/probe_gm_quiet.toml), [`probe_gm_workload_authored.toml`](../../assets/worlds/probe_gm_workload_authored.toml), [`probe_gm_widgets.toml`](../../assets/worlds/probe_gm_widgets.toml)

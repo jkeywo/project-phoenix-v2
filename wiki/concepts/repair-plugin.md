@@ -2,17 +2,17 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [src/console/repair/server.rs, src/console/repair/dispatch.rs, src/console/repair/external_server.rs, src/console/repair/visibility.rs, src/ship/coordination_systems.rs, src/ship/damage_sync.rs, src/ship/components.rs, src/modifiers/repair_teams.rs, src/core/messages.rs, src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-08-31
 ---
 
 # Repair Runtime
 
-`RepairPlugin` owns the server adapter for internal repair teams, Repair Backfill, blackboard publication, and external-repair registration. The deterministic team state machine lives in the Bevy-free `src/modifiers/repair_teams.rs`.
+`RepairPlugin` owns the server adapter for internal repair teams, Repair Backfill, blackboard publication, and external-repair registration. The deterministic team state machine lives in the Bevy-free `crates/phoenix-simulation/src/modifiers/repair_teams.rs`.
 
 ## Internal repairs
 
-The Repair console and `operate_repair_ai` emit the same admitted payloads. The dispatch adapters in `src/console/repair/dispatch.rs` apply team dispatch and priority changes. `tick_repair_teams` advances each ship's own teams and repairs its own `EntitySystemHull`.
+The Repair console and `operate_repair_ai` emit the same admitted payloads. The dispatch adapters in `crates/phoenix-simulation/src/console/repair/dispatch.rs` apply team dispatch and priority changes. `tick_repair_teams` advances each ship's own teams and repairs its own `EntitySystemHull`.
 
 An on-site team sweeps repairable systems at its station worst-first. `SetRepairTargetPriority` can pin one system as the next job without changing the standing deterministic order. Team slots carry `SystemId` and display text so the client never reconstructs target identity from an obsolete console enum.
 
@@ -35,7 +35,7 @@ latch and is cleared when the reported damage group returns to Operational.
 
 ## External repairs
 
-`src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies progress to the target's authoritative condition track. Backfill uses the same command seam.
+`crates/phoenix-simulation/src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies progress to the target's authoritative condition track. Backfill uses the same command seam.
 
 `repair.external-dispatch` is the shared dispatch/recall semantic action on
 Repair and Engineering variants. Dispatch feedback completes after the live
@@ -47,7 +47,7 @@ than entering a queue with no owner.
 
 ## Publication and visibility
 
-`publish_repair_blackboard` writes the per-ship Repair blackboard. `src/console/repair/visibility.rs` projects recipient-visible damage before the state reaches a player. `repair_state_broadcaster` sends LocalShip state at 10 Hz to the holder of the authored `repair` system.
+`publish_repair_blackboard` writes the per-ship Repair blackboard. `crates/phoenix-simulation/src/console/repair/visibility.rs` projects recipient-visible damage before the state reaches a player. `repair_state_broadcaster` sends LocalShip state at 10 Hz to the holder of the authored `repair` system.
 
 ## Coordination receive path
 

@@ -117,9 +117,9 @@ describe('proseLiterals — the failing case #975 was filed about', () => {
 });
 
 describe('proseLiterals — the guarded module is actually clean', () => {
-  it('src/ship/coordination_systems.rs composes no player-visible English', () => {
+  it('crates/phoenix-simulation/src/ship/coordination_systems.rs composes no player-visible English', () => {
     const src = fs.readFileSync(
-      path.join(root, 'src', 'ship', 'coordination_systems.rs'),
+      path.join(root, 'crates', 'phoenix-simulation', 'src', 'ship', 'coordination_systems.rs'),
       'utf8',
     );
     expect(proseLiterals(src)).toEqual([]);

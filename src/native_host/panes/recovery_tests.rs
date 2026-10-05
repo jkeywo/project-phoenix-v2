@@ -2,7 +2,8 @@ use super::*;
 use crate::core::messages::{ClientMessage, DeliveryClass, ServerMessage};
 use crate::lobby::handler::Target;
 use crate::native_host::panes::identity::PaneIdentity;
-use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use crate::native_host::transport::{TransportDispatch, TransportEvent};
+use phoenix_transport::transport::Transport;
 
 fn identity(n: u8) -> PaneIdentity {
     PaneIdentity::adopt(

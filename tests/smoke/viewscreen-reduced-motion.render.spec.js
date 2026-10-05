@@ -5,7 +5,7 @@
 // Under a reduced-motion preference the shake must produce NO page transform
 // and the vignette pulse must be capped/disabled; without it, both behave as
 // before. The intensity/zeroing MATH is unit-tested without a GPU in
-// `src/server/viewscreen_border.rs` (`shake_magnitude` / `capped_flash_intensity`);
+// `crates/phoenix-presentation/src/server/viewscreen_border.rs` (`shake_magnitude` / `capped_flash_intensity`);
 // what only a real browser can prove is the WIRING those unit tests cannot
 // reach: that the host's `prefers-reduced-motion` preference actually crosses
 // into the WASM render path, that the live shake host-channel emits only zeros

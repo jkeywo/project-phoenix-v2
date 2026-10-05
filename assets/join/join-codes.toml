@@ -20,26 +20,16 @@
 format_version = 1
 
 [suffix]
-# Eight typed letters. The alphabet deliberately EXCLUDES L, because L
+# Five typed letters. The alphabet deliberately EXCLUDES L, because L
 # normalises to I — a letter that can never survive canonicalisation must never
 # be minted, or the printed code would not round-trip through the very
 # normalisation that makes it typeable. O and I stay in: they are the canonical
 # forms of 0 and 1. J stays distinct and is minted normally.
 #
-# WHY EIGHT AND NOT FIVE. The code is the ONLY secret in front of a game: the
-# join stamp is public (every host serves it), so anyone holding the code can
-# join, open a relay and act as a crew member. Five letters over this alphabet
-# is 25^5 ≈ 9.77e6 codes — 23.2 bits — and a native host accepting LAN joins
-# directly (issue #1353) was measured answering ~2,340 wrong guesses a second
-# to a single machine that reconnected between batches, which walks that
-# keyspace in about 35 MINUTES of expected search. Eight letters is 25^8 ≈
-# 1.526e11 — 37.15 bits — which is ~377 days of expected search at that same
-# unthrottled rate, before the per-source and global attempt limits in
-# src/native_host/direct_join.rs take the achievable rate down by another three
-# orders of magnitude. The cost is three more letters to read off a viewscreen;
-# the QR carries the whole code either way, and both worker and native legs
-# inherit the stronger scheme because all three readers read THIS file.
-length = 8
+# Five letters are the operator-facing code length. The QR still carries the
+# full structured identifier. Admission keeps its per-source guess budgets,
+# reconnect-resistant limits and global delay in src/native_host/direct_join.rs.
+length = 5
 alphabet = "ABCDEFGHIJKMNOPQRSTUVWXYZ"
 # Punctuation a player adds while reading a code aloud, dropped before the
 # comparison. `_` is here as well as being the separator inside a full code:

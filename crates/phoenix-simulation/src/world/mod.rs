@@ -1,0 +1,43 @@
+/// The promises a captain makes, and whether they end up kept (issue #1029) —
+/// a pure record whose resolution writes campaign flags, carrying no queue and
+/// no evaluator of its own.
+pub mod commitments;
+pub mod config;
+pub mod content;
+/// Named, inspectable, mutable mission deadlines (issue #1024) — a *record*
+/// layered over the existing `pending_callbacks` deferred-work queue, never a
+/// second scheduler.
+pub mod deadlines;
+pub mod delayed;
+pub mod dispatch;
+pub mod flags;
+pub mod layers;
+/// The world-loading sequence owned in one place (issue #1213): a
+/// [`WorldReader`](load::WorldReader) seam, a [`LoadPolicy`](load::LoadPolicy)
+/// over [`load`](load::load), and the content-ledger writes returned as a
+/// [`LedgerPlan`](load::LedgerPlan) for the caller to apply. A thin wrapper over
+/// `parse_world` / `validate_composition` / `load_world_scripts`.
+pub mod load;
+pub mod manifest;
+pub mod materialization;
+pub mod mod_pack;
+pub mod native_render_config;
+pub mod pack_asset_validation;
+pub mod script;
+pub mod server;
+/// What a runtime-spawned entity was made from (issue #863) — the template,
+/// overrides and placement a script's spawn consumed, kept on the entity it
+/// produced so a resume can rebuild what no fresh boot re-derives.
+pub mod spawn_origin;
+pub mod trigger_registry;
+pub mod validate;
+/// Who staffs a structure, and whether they are working (issue #1035) — the
+/// authored `[[workforce]]` sides of a labour dispute, their live strike status
+/// and their disposition toward the crew. A record, never a decider: what a
+/// stoppage *does* to a piece of work is authored on the hull's capability.
+pub mod workforce;
+pub use server::WorldPlugin;
+
+/// Host content ingestion requests a ledger freeze after world installation.
+#[derive(bevy::prelude::Resource)]
+pub struct PendingHostContentFreeze;

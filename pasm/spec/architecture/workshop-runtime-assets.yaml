@@ -15,23 +15,23 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/world/pack_asset_validation.rs
-        - src/world/pack_asset_validation/metadata.rs
-        - src/world/pack_asset_validation/semantics.rs
-        - src/audio_decode.rs
-        - src/sound_cues.rs
-        - src/world/mod_pack.rs
-        - src/workshop/mod.rs
+        - crates/phoenix-simulation/src/world/pack_asset_validation.rs
+        - crates/phoenix-content/src/pack_asset_validation/metadata.rs
+        - crates/phoenix-content/src/pack_asset_validation/semantics.rs
+        - crates/phoenix-simulation/src/audio_decode.rs
+        - crates/phoenix-simulation/src/sound_cues.rs
+        - crates/phoenix-simulation/src/world/mod_pack.rs
+        - crates/phoenix-simulation/src/workshop/mod.rs
         - editor/asset-dependencies.js
         - editor/workshop-assets.js
         - tests/smoke/workshop-assets.spec.js
       tests:
-        - src/world/pack_asset_validation_sound_catalog_tests.rs
-        - src/world/pack_asset_validation_tests.rs
-        - src/world/pack_asset_validation/metadata_tests.rs
-        - src/world/pack_asset_validation/semantics_tests.rs
-        - src/audio_decode_tests.rs
-        - src/sound_cues_tests.rs
+        - crates/phoenix-simulation/src/world/pack_asset_validation_sound_catalog_tests.rs
+        - crates/phoenix-simulation/src/world/pack_asset_validation_tests.rs
+        - crates/phoenix-content/src/pack_asset_validation/metadata_tests.rs
+        - crates/phoenix-content/src/pack_asset_validation/semantics_tests.rs
+        - crates/phoenix-simulation/src/audio_decode_tests.rs
+        - crates/phoenix-simulation/src/sound_cues_tests.rs
         - cargo test --lib world::pack_asset_validation
         - cargo test --lib world::mod_pack
         - npx vitest run tests/client/workshop-assets.test.js
@@ -52,10 +52,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/entities/pack_assets.rs
-        - src/entities/pack_assets/versioned.rs
-        - src/entities/pack_assets/runtime_tests.rs
+        - crates/phoenix-presentation/src/entities/pack_assets.rs
+        - crates/phoenix-presentation/src/entities/pack_assets/versioned.rs
+        - crates/phoenix-presentation/src/entities/pack_assets/runtime_tests.rs
         - gui/content-assets.js
       tests:
-        - src/entities/pack_assets_tests.rs
+        - crates/phoenix-presentation/src/entities/pack_assets_tests.rs
         - cargo test --lib entities::pack_assets

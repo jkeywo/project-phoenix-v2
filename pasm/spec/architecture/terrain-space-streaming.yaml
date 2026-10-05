@@ -13,8 +13,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/config.rs, src/entities/loader.rs, src/world/server.rs, assets/entities]
-      tests: [cargo test, src/entities/loader_tests.rs]
+      paths: [crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/world/server.rs, assets/entities]
+      tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs]
 
   - component: celestial-renderer
     core:
@@ -30,8 +30,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/star.rs, src/server/renderer.rs, assets/entities/star_sun.toml]
-      tests: [cargo test, src/server/renderer_tests.rs]
+      paths: [crates/phoenix-presentation/src/entities/star.rs, crates/phoenix-presentation/src/server/renderer.rs, assets/entities/star_sun.toml]
+      tests: [cargo test, crates/phoenix-presentation/src/server/renderer_tests.rs]
 
   - component: asteroid-field-lifecycle
     core:
@@ -51,8 +51,8 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/asteroids/window.rs, src/asteroids/spawner.rs, src/asteroids/lifecycle.rs, src/entities/config_cache.rs, tests/asteroid_streaming.rs]
-      tests: [cargo test, src/asteroids/window_tests.rs, src/asteroids/lifecycle_tests.rs, src/entities/config_cache_tests.rs]
+      paths: [crates/phoenix-simulation/src/asteroids/window.rs, crates/phoenix-simulation/src/asteroids/spawner.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/entities/config_cache.rs, tests/asteroid_streaming.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/asteroids/window_tests.rs, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs, crates/phoenix-simulation/src/entities/config_cache_tests.rs]
 
   - state: asteroid-window-state
     core:
@@ -66,10 +66,10 @@ entities:
       writers: [asteroid-field-lifecycle]
     implementation:
       status: declared
-      paths: [src/asteroids/lifecycle.rs, src/asteroids/window.rs]
+      paths: [crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/asteroids/window.rs]
       symbols: [AsteroidWindow, AsteroidData, AsteroidEntityMap]
 
-      tests: [src/asteroids/lifecycle_tests.rs, src/asteroids/window_tests.rs]
+      tests: [crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs, crates/phoenix-simulation/src/asteroids/window_tests.rs]
   - component: asteroid-destruction-respawn-policy
     core:
       status: implemented
@@ -84,8 +84,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/asteroids/lifecycle.rs, src/asteroids/spawner.rs, src/server/renderer.rs]
-      tests: [cargo test, src/asteroids/lifecycle_tests.rs, src/server/renderer_tests.rs]
+      paths: [crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/asteroids/spawner.rs, crates/phoenix-presentation/src/server/renderer.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
 
   - component: terrain-region-integration
     core:
@@ -101,5 +101,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/regions/shape.rs, src/regions/server.rs, assets/entities/region_radiation_zone.toml, assets/entities/region_nebula.toml, assets/entities/region_asteroid_belt.toml]
-      tests: [src/regions/shape_tests.rs]
+      paths: [crates/phoenix-simulation/src/regions/shape.rs, crates/phoenix-simulation/src/regions/server.rs, assets/entities/region_radiation_zone.toml, assets/entities/region_nebula.toml, assets/entities/region_asteroid_belt.toml]
+      tests: [crates/phoenix-simulation/src/regions/shape_tests.rs]

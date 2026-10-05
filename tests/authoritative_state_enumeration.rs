@@ -21,7 +21,7 @@
 //!    [`census_authoritative_short_names`]) — authoritative simulation state,
 //!    each type declared at its OWNING `build()` site via
 //!    `App::declare_state::<T>(class, pasm)` as one of the two authoritative fold
-//!    shapes: `Folded` (state `src/sim_digest.rs` walks every tick) or
+//!    shapes: `Folded` (state `crates/phoenix-simulation/src/sim_digest.rs` walks every tick) or
 //!    `DeferredFold` (authoritative state the record classifies as in-the-fold
 //!    but that `world_digest` does not walk yet). Before issue #1222 this was a
 //!    hand-maintained `AUTHORITATIVE_SYMBOLS` const in this file transcribed from
@@ -98,10 +98,10 @@ const SEED: u64 = 20260894;
 /// Since issue #1222 (Track 3 step C10) every authoritative type that used to
 /// live in the local `AUTHORITATIVE_SYMBOLS` const is declared at its owning
 /// `build()` site via `App::declare_state::<T>(class, pasm)` (see
-/// `src/authoritative.rs` and the block in `server_app::add_simulation_plugins_with`),
+/// `crates/phoenix-simulation/src/authoritative.rs` and the block in `server_app::add_simulation_plugins_with`),
 /// and this guard reads the set back out of the census — the mirror image of
 /// [`census_excluded_short_names`] below. The two authoritative fold shapes count
-/// here: `Folded` (state `src/sim_digest.rs`'s `world_digest` walks every tick)
+/// here: `Folded` (state `crates/phoenix-simulation/src/sim_digest.rs`'s `world_digest` walks every tick)
 /// and `DeferredFold` (authoritative state the record classifies as in-the-fold
 /// but that `world_digest` does not walk yet). Every declared EXCLUSION class
 /// (`Presentation`/`Cache`/`Timer`/`Derived`/`ClearedAtFold`/`TestInfra`) is
@@ -147,7 +147,7 @@ fn census_authoritative_short_names(app: &App) -> std::collections::BTreeSet<Str
 /// Since issue #1221 (Track 3 step C9) every non-authoritative type that used to
 /// live in a local `EXCLUSIONS` const is declared at its OWNING plugin's
 /// `build()` via `App::declare_state::<T>(class, pasm)` (see
-/// `src/authoritative.rs`), and this guard reads the set back out of the census
+/// `crates/phoenix-simulation/src/authoritative.rs`), and this guard reads the set back out of the census
 /// instead. The reason classes are unchanged — presentation / cache / timer /
 /// derived / cleared-at-fold, exactly the `deterministic-simulation.yaml`
 /// `digest-exclusion-classes` vocabulary — they now live as a [`StateClass`] at
@@ -172,7 +172,7 @@ fn census_authoritative_short_names(app: &App) -> std::collections::BTreeSet<Str
 /// C9 nothing declares those, so the filter is belt-and-suspenders — but it keeps
 /// the set honest the day a folded declaration lands beside these.
 ///
-/// `EntitySnapshot` (`src/core/messages.rs`) is deliberately covered by NEITHER
+/// `EntitySnapshot` (`crates/phoenix-simulation/src/core/messages.rs`) is deliberately covered by NEITHER
 /// this set nor the census-derived authoritative set
 /// ([`census_authoritative_short_names`]): it carries no
 /// `#[derive(Component)]`/`#[derive(Resource)]` at all (a plain wire-message
@@ -231,11 +231,11 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // exhaustive remainder is keyed on the full path. Regenerate mechanically
     // from a real run — see `every_registered_type_maps_to_the_digest_record`'s
     // failure message — never hand-edit.
-    "project_phoenix::ai::server::AiProfile",
-    "project_phoenix::ai::server::AiTokenRegistry",
-    "project_phoenix::ai::server::ObjectiveCursors",
+    "phoenix_simulation::ai::server::AiProfile",
+    "phoenix_simulation::ai::server::AiTokenRegistry",
+    "phoenix_simulation::ai::server::ObjectiveCursors",
     // The authoritative-state declaration registry itself (issue #1220's
-    // `StateCensus`, `src/authoritative.rs`). It first ENTERS the registry as of
+    // `StateCensus`, `crates/phoenix-simulation/src/authoritative.rs`). It first ENTERS the registry as of
     // issue #1221: `declare_state` `init_resource`s it on first use, and #1221 is
     // when production plugins begin declaring, so a real run now inserts it. It is
     // a build-time coverage/diagnostic surface — populated once as plugins build,
@@ -245,7 +245,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // nor cleared-at-fold), so rather than misclassify it, it sits on the honest
     // baseline beside `AdmittedConsumerRegistry` below — the other build-time
     // registry populated by plugin `build()` calls.
-    "project_phoenix::authoritative::StateCensus",
+    "phoenix_simulation::authoritative::StateCensus",
     // The boot render-surrogate seam marker (issue #1218). A zero-sized
     // `#[derive(Resource)]` that `boot::render_surrogate` inserts so boot's
     // three-profile parity test can assert which renderer path a profile took;
@@ -255,83 +255,83 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // honest baseline beside `StateCensus` above rather than being misclassified
     // into a digest-exclusion class it does not fit.
     "project_phoenix::boot::RenderSurrogateApplied",
-    "project_phoenix::command_admission::log::CommandDelay",
-    "project_phoenix::command_admission::log::CommandLog",
-    "project_phoenix::command_admission::log::PendingCommands",
-    "project_phoenix::command_admission::router::AdmittedConsumerRegistry",
-    "project_phoenix::comms::server::OnScreenMessage",
-    "project_phoenix::console::captain::server::CaptainAiPolicy",
-    "project_phoenix::console::comms::server::CommsResponseAiCadence",
-    "project_phoenix::console::comms::server::CommsResponseAiPolicy",
-    "project_phoenix::console::comms::server::CommsTargetSelector",
-    "project_phoenix::console::navigation::server::NavigationTargetSelector",
-    "project_phoenix::console::repair::server::RepairRequestQueue",
-    "project_phoenix::console::repair::server::RepairTargetSelector",
-    "project_phoenix::console::repair::server::ShipRepairTeams",
-    "project_phoenix::console::weapons::server::PhaserRenderConfig",
-    "project_phoenix::console::weapons::server::WeaponsArcRequestState",
-    "project_phoenix::console::weapons::beam::LastShipAttacker",
-    "project_phoenix::console::weapons::beam::PhaserBankAiPolicies",
-    "project_phoenix::console::weapons::beam::PhaserCombatConfigResource",
-    "project_phoenix::console::weapons::beam::TacticalTargetSelector",
-    "project_phoenix::console::weapons::blaster::BlasterBankAiPolicies",
-    "project_phoenix::console::weapons::blaster::BlasterSystemResource",
-    "project_phoenix::console::weapons::shared::BeamContext",
-    "project_phoenix::console::weapons::shared::TorpedoTargetSnapshot",
-    "project_phoenix::console::weapons::torpedo::TorpedoMagazineAiPolicy",
-    "project_phoenix::console::weapons::torpedo::TorpedoSystemResource",
-    "project_phoenix::console::weapons::torpedo::TorpedoTubeAiPolicies",
-    "project_phoenix::core::messages::AdmittedCommands",
-    "project_phoenix::core::telemetry::RunTelemetry",
-    "project_phoenix::entities::config_cache::FactionRegistryResource",
-    "project_phoenix::entities::spawner::AsteroidFieldSection",
-    "project_phoenix::entities::spawner::BehaviourSection",
-    "project_phoenix::entities::spawner::CinematicCameraSection",
-    "project_phoenix::entities::spawner::ColliderSection",
-    "project_phoenix::entities::spawner::EntityShipArcHull",
-    "project_phoenix::entities::spawner::EntitySystemHull",
-    "project_phoenix::entities::spawner::EntityTagsSection",
-    "project_phoenix::entities::spawner::EntityTarget",
-    "project_phoenix::entities::spawner::FactionComponent",
-    "project_phoenix::entities::spawner::HelmConsoleSection",
-    "project_phoenix::entities::spawner::MeshSection",
-    "project_phoenix::entities::spawner::RadarAppearanceSection",
-    "project_phoenix::entities::spawner::RegionEffectsSection",
-    "project_phoenix::entities::spawner::RegionShapeSection",
-    "project_phoenix::entities::spawner::ShipAudioSection",
-    "project_phoenix::entities::spawner::WeaponsConsoleSection",
-    "project_phoenix::lobby::server::CountdownTimer",
-    "project_phoenix::lobby::server::GameStateCache",
-    "project_phoenix::lobby::server::LobbyOutbox",
-    "project_phoenix::lobby::server::SelectedShipResource",
-    "project_phoenix::lobby::server::Sessions",
-    "project_phoenix::lobby::server::ShipClientConfigResource",
-    "project_phoenix::lobby::server::ShipManualResource",
-    "project_phoenix::lobby::stations_config::ShipStations",
-    "project_phoenix::logging::filter::LogFilterConfig",
-    "project_phoenix::regions::server::RegionMembership",
-    "project_phoenix::server::viewscreen_border::ShakeState",
-    "project_phoenix::server_app::broadcast_publish::WorldSetupBroadcast",
-    "project_phoenix::server_app::components::Asteroid",
-    "project_phoenix::server_app::components::AsteroidShieldPierce",
-    "project_phoenix::server_app::components::CollisionCooldown",
-    "project_phoenix::server_app::components::LocalShip",
-    "project_phoenix::server_app::components::Ship",
-    "project_phoenix::server_app::components::ShipAttackedThisTick",
-    "project_phoenix::server_app::components::ShipSystemBlackboards",
-    "project_phoenix::server_app::components::WeaponFiredThisTick",
-    "project_phoenix::ship::components::BankConfigResource",
-    "project_phoenix::ship::components::BoostConfigResource",
-    "project_phoenix::ship::components::DockingMotionIntent",
-    "project_phoenix::ship::components::ImpulseConfigResource",
-    "project_phoenix::ship::components::PendingShipConfig",
-    "project_phoenix::ship::components::RepairHumanAlerted",
-    "project_phoenix::ship::components::ShipConfigComponent",
-    "project_phoenix::ship::components::ShipPhysicsConfigResource",
-    "project_phoenix::ship::helm::HelmPhysicsFrame",
-    "project_phoenix::ship::helm::HelmPhysicsWriteGuard",
-    "project_phoenix::ship::helm::VerticalThrustInput",
-    "project_phoenix::ship::helm_ai::AiPolicyTickClock",
+    "phoenix_simulation::command_admission::log::CommandDelay",
+    "phoenix_simulation::command_admission::log::CommandLog",
+    "phoenix_simulation::command_admission::log::PendingCommands",
+    "phoenix_simulation::command_admission::router::AdmittedConsumerRegistry",
+    "phoenix_simulation::comms::server::OnScreenMessage",
+    "phoenix_simulation::console::captain::server::CaptainAiPolicy",
+    "phoenix_simulation::console::comms::server::CommsResponseAiCadence",
+    "phoenix_simulation::console::comms::server::CommsResponseAiPolicy",
+    "phoenix_simulation::console::comms::server::CommsTargetSelector",
+    "phoenix_simulation::console::navigation::server::NavigationTargetSelector",
+    "phoenix_simulation::console::repair::server::RepairRequestQueue",
+    "phoenix_simulation::console::repair::server::RepairTargetSelector",
+    "phoenix_simulation::console::repair::server::ShipRepairTeams",
+    "phoenix_simulation::console::weapons::server::PhaserRenderConfig",
+    "phoenix_simulation::console::weapons::server::WeaponsArcRequestState",
+    "phoenix_simulation::console::weapons::beam::LastShipAttacker",
+    "phoenix_simulation::console::weapons::beam::PhaserBankAiPolicies",
+    "phoenix_simulation::console::weapons::beam::PhaserCombatConfigResource",
+    "phoenix_simulation::console::weapons::beam::TacticalTargetSelector",
+    "phoenix_simulation::console::weapons::blaster::BlasterBankAiPolicies",
+    "phoenix_simulation::console::weapons::blaster::BlasterSystemResource",
+    "phoenix_simulation::console::weapons::shared::BeamContext",
+    "phoenix_simulation::console::weapons::shared::TorpedoTargetSnapshot",
+    "phoenix_simulation::console::weapons::torpedo::TorpedoMagazineAiPolicy",
+    "phoenix_simulation::console::weapons::torpedo::TorpedoSystemResource",
+    "phoenix_simulation::console::weapons::torpedo::TorpedoTubeAiPolicies",
+    "phoenix_simulation::core::messages::AdmittedCommands",
+    "phoenix_simulation::core::telemetry::RunTelemetry",
+    "phoenix_simulation::entities::config_cache::FactionRegistryResource",
+    "phoenix_simulation::entities::spawner::AsteroidFieldSection",
+    "phoenix_simulation::entities::spawner::BehaviourSection",
+    "phoenix_simulation::entities::spawner::CinematicCameraSection",
+    "phoenix_simulation::entities::spawner::ColliderSection",
+    "phoenix_simulation::entities::spawner::EntityShipArcHull",
+    "phoenix_simulation::entities::spawner::EntitySystemHull",
+    "phoenix_simulation::entities::spawner::EntityTagsSection",
+    "phoenix_simulation::entities::spawner::EntityTarget",
+    "phoenix_simulation::entities::spawner::FactionComponent",
+    "phoenix_simulation::entities::spawner::HelmConsoleSection",
+    "phoenix_simulation::entities::spawner::MeshSection",
+    "phoenix_simulation::entities::spawner::RadarAppearanceSection",
+    "phoenix_simulation::entities::spawner::RegionEffectsSection",
+    "phoenix_simulation::entities::spawner::RegionShapeSection",
+    "phoenix_simulation::entities::spawner::ShipAudioSection",
+    "phoenix_simulation::entities::spawner::WeaponsConsoleSection",
+    "phoenix_simulation::lobby::server::CountdownTimer",
+    "phoenix_simulation::lobby::server::GameStateCache",
+    "phoenix_simulation::lobby::server::LobbyOutbox",
+    "phoenix_simulation::lobby::server::SelectedShipResource",
+    "phoenix_simulation::lobby::server::Sessions",
+    "phoenix_simulation::lobby::server::ShipClientConfigResource",
+    "phoenix_simulation::lobby::server::ShipManualResource",
+    "phoenix_model::wire::ShipStations",
+    "phoenix_simulation::logging::filter::LogFilterConfig",
+    "phoenix_simulation::regions::server::RegionMembership",
+    "phoenix_simulation::presentation_contracts::ShakeState",
+    "phoenix_simulation::server_app::broadcast_publish::WorldSetupBroadcast",
+    "phoenix_simulation::server_app::components::Asteroid",
+    "phoenix_simulation::server_app::components::AsteroidShieldPierce",
+    "phoenix_simulation::server_app::components::CollisionCooldown",
+    "phoenix_simulation::server_app::components::LocalShip",
+    "phoenix_simulation::server_app::components::Ship",
+    "phoenix_simulation::server_app::components::ShipAttackedThisTick",
+    "phoenix_simulation::server_app::components::ShipSystemBlackboards",
+    "phoenix_simulation::server_app::components::WeaponFiredThisTick",
+    "phoenix_simulation::ship::components::BankConfigResource",
+    "phoenix_simulation::ship::components::BoostConfigResource",
+    "phoenix_simulation::ship::components::DockingMotionIntent",
+    "phoenix_simulation::ship::components::ImpulseConfigResource",
+    "phoenix_simulation::ship::components::PendingShipConfig",
+    "phoenix_simulation::ship::components::RepairHumanAlerted",
+    "phoenix_simulation::ship::components::ShipConfigComponent",
+    "phoenix_simulation::ship::components::ShipPhysicsConfigResource",
+    "phoenix_simulation::ship::helm::HelmPhysicsFrame",
+    "phoenix_simulation::ship::helm::HelmPhysicsWriteGuard",
+    "phoenix_simulation::ship::helm::VerticalThrustInput",
+    "phoenix_simulation::ship::helm_ai::AiPolicyTickClock",
     // Issue #1209 collapsed the six per-axis `Helm*AiPolicy` newtypes
     // (Engines/Steering/Lateral/Vertical/Impulse/Boost) into this ONE keyed
     // component. It is authored-immutable and not snapshotted, so it sits on the
@@ -339,27 +339,27 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // and not a declared exclusion. The two axes previously declared
     // `DeferredFold` (Boost/Impulse policies) lost their `declare_state` with the
     // newtypes; the STATE twins below are unchanged (LOD-carried + snapshotted).
-    "project_phoenix::ship::helm_ai::FineSystemAiPolicies",
-    "project_phoenix::ship::helm_ai::boost::HelmBoostAiPolicyState",
-    "project_phoenix::ship::helm_ai::engines::HelmEnginesAiPolicyState",
-    "project_phoenix::ship::helm_ai::surfaces::HelmPassSurface",
-    "project_phoenix::ship::helm_ai::surfaces::HelmRecoveryHistory",
-    "project_phoenix::ship::helm_ai::steering::HelmSteeringAiPolicyState",
-    "project_phoenix::ship::helm_planner::HelmMotionPlan",
-    "project_phoenix::ship::power::PowerAiCadence",
-    "project_phoenix::ship::power::PowerAiPolicy",
-    "project_phoenix::ship::power::PowerConfigResource",
-    "project_phoenix::ship::power::PowerMultiplierResource",
-    "project_phoenix::ship::power::ShipPowerSystem",
-    "project_phoenix::ship::sensors::SensorsAiConfigResource",
-    "project_phoenix::ship::sensors::SensorsFrequencyState",
-    "project_phoenix::ship::sensors::SensorsTargetSelector",
-    "project_phoenix::ship::shields::ShieldsAiConfigResource",
-    "project_phoenix::ship::shields::ShieldsFocusAiPolicy",
-    "project_phoenix::ship::shields::ShipShields",
-    "project_phoenix::ship::state::ShipViewMode",
-    "project_phoenix::world::server::PendingScenarioLoad",
-    "project_phoenix::world::server::WorldContentRuntime",
+    "phoenix_simulation::ship::helm_ai::FineSystemAiPolicies",
+    "phoenix_simulation::ship::helm_ai::boost::HelmBoostAiPolicyState",
+    "phoenix_simulation::ship::helm_ai::engines::HelmEnginesAiPolicyState",
+    "phoenix_simulation::ship::helm_ai::surfaces::HelmPassSurface",
+    "phoenix_simulation::ship::helm_ai::surfaces::HelmRecoveryHistory",
+    "phoenix_simulation::ship::helm_ai::steering::HelmSteeringAiPolicyState",
+    "phoenix_simulation::ship::helm_planner::HelmMotionPlan",
+    "phoenix_simulation::ship::power::PowerAiCadence",
+    "phoenix_simulation::ship::power::PowerAiPolicy",
+    "phoenix_simulation::ship::power::PowerConfigResource",
+    "phoenix_simulation::ship::power::PowerMultiplierResource",
+    "phoenix_simulation::ship::power::ShipPowerSystem",
+    "phoenix_simulation::ship::sensors::SensorsAiConfigResource",
+    "phoenix_simulation::ship::sensors::SensorsFrequencyState",
+    "phoenix_simulation::ship::sensors::SensorsTargetSelector",
+    "phoenix_simulation::ship::shields::ShieldsAiConfigResource",
+    "phoenix_simulation::ship::shields::ShieldsFocusAiPolicy",
+    "phoenix_simulation::ship::shields::ShipShields",
+    "phoenix_simulation::ship::state::ShipViewMode",
+    "phoenix_simulation::world::server::PendingScenarioLoad",
+    "phoenix_simulation::world::server::WorldContentRuntime",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
     // authoritative and PARTLY folded since issue #1086 — see the paragraph at
     // the end of this block for exactly which fields moved into the fold and why
@@ -392,7 +392,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `#[derive(Resource)]` and no `#[derive(Component)]`, nothing new appears in
     // the registry this guard scans, and both baseline entries keep covering
     // exactly what they did before — with more state behind them. See
-    // `src/world/deadlines.rs` for why a deadline is a record over the existing
+    // `crates/phoenix-simulation/src/world/deadlines.rs` for why a deadline is a record over the existing
     // queue rather than a scheduler (and a resource) of its own, and
     // pasm/spec/architecture/scenario-scripting.yaml's `mission-deadline-state`
     // entity for the `implementation.symbols` naming those Rust types.
@@ -407,7 +407,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // `WorldScriptRuntime` either: there is no `[[commitment]]` block and so no
     // load-time declaration table to hold — a promise exists because of what a
     // player said, not because of what an author wrote down. See
-    // `src/world/commitments.rs`, and
+    // `crates/phoenix-simulation/src/world/commitments.rs`, and
     // pasm/spec/architecture/scenario-scripting.yaml's `commitment-ledger-state`
     // entity for the `implementation.symbols` naming those Rust types.
     //
@@ -426,7 +426,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // The one place it DOES touch a scanned type is `InfrastructureState`,
     // which gained an authored, immutable `workforce` naming the side that
     // staffs a structure — a field on state `InfrastructureCondition` already
-    // covers, not a registration. See `src/world/workforce.rs`, and
+    // covers, not a registration. See `crates/phoenix-simulation/src/world/workforce.rs`, and
     // pasm/spec/architecture/scenario-scripting.yaml's `workforce-register-state`
     // entity for the `implementation.symbols` naming those Rust types.
     //
@@ -441,7 +441,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // no resource; the subject roster is DERIVED from `CommsHailable` and
     // `InfrastructureCondition` rather than authored into a component of its own,
     // which was a deliberate rejection — see the module docs in
-    // `src/dossier/server.rs` — and is what leaves this list untouched. The wire
+    // `crates/phoenix-simulation/src/dossier/server.rs` — and is what leaves this list untouched. The wire
     // types (`DossierBlackboard` and friends) are plain message structs with no
     // `#[derive(Component)]`/`#[derive(Resource)]`, so like `EntitySnapshot` they
     // can never appear in the registry this guard scans. See
@@ -461,7 +461,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // that writes it (`ctx.dossier.append`) buffers an ordinary `ActionCmd` on
     // the existing effect sink and adds no `WorldScriptRuntime` field either:
     // there is no `[[evidence]]` block, so there is no load-time declaration
-    // table to hold. See `src/dossier/evidence.rs`, and
+    // table to hold. See `crates/phoenix-simulation/src/dossier/evidence.rs`, and
     // pasm/spec/architecture/world-files.yaml's `dossier-evidence-state` entity
     // for the `implementation.symbols` naming those Rust types.
     //
@@ -482,7 +482,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // have been a second authoritative record of something the flag store can
     // already hold, needing its own classification, its own snapshot field and
     // its own fold decision, to answer a question a counter answers. See
-    // `src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
+    // `crates/phoenix-simulation/src/science/scan.rs`'s `scanned_flag` docs for the mirror argument, and
     // #1035's `FlagMirror` two paragraphs up for the precedent.
     //
     // Issue #1043's CAMPAIGN FLAG HANDOFF registers nothing either, and it is the
@@ -554,7 +554,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     //
     // The empty `WorldScriptRuntime` a scripted layer inserts when the base world
     // authored none is that same registered type, instantiated where a script-free
-    // world previously had nothing. See `src/world/layers.rs`; #1412 now keeps
+    // world previously had nothing. See `crates/phoenix-simulation/src/world/layers.rs`; #1412 now keeps
     // trigger state/handler pairing structurally in `WorldTriggerRegistry`.
     //
     // Issue #1086 CASHED IN most of the "belongs in the same digest fold"
@@ -631,10 +631,10 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // mostly compiled ASTs, the per-tick budget and the content hash, none of
     // which the AUTHORITATIVE fold has any business touching — `content_digest`
     // answers for them.
-    "project_phoenix::world::server::BridgeWorldSource",
-    "project_phoenix::world::server::PreCompiledScripts",
-    "project_phoenix::world::server::RawWorldSource",
-    "project_phoenix::world::server::WorldScriptRuntime",
+    "phoenix_simulation::world::server::BridgeWorldSource",
+    "phoenix_simulation::world::server::PreCompiledScripts",
+    "phoenix_simulation::world::server::RawWorldSource",
+    "phoenix_simulation::world::server::WorldScriptRuntime",
 ];
 
 fn build_and_run() -> App {
@@ -655,7 +655,16 @@ fn build_and_run() -> App {
 /// `Transform`, `RapierContext`, and friends — none of which this issue's
 /// boundary is about; only what THIS crate defines and the sim app actually
 /// registers is in scope.
-const CRATE_PREFIX: &str = "project_phoenix::";
+const CRATE_PREFIXES: &[&str] = &[
+    "project_phoenix::",
+    "phoenix_simulation::",
+    "phoenix_presentation::",
+    "phoenix_model::",
+    "phoenix_content::",
+    "phoenix_runtime::",
+    "phoenix_platform::",
+    "phoenix_transport::",
+];
 
 /// The short type name Bevy's `type_name::<T>()`-derived `DebugName` reports
 /// (e.g. `project_phoenix::ship::state::ShipRedAlert`), stripped to its last
@@ -709,7 +718,7 @@ fn registered_crate_local_type_names(app: &App) -> Vec<String> {
         .components()
         .iter_registered()
         .map(|info| info.name().to_string())
-        .filter(|full| full.starts_with(CRATE_PREFIX))
+        .filter(|full| CRATE_PREFIXES.iter().any(|prefix| full.starts_with(prefix)))
         .collect();
     names.sort();
     names.dedup();
@@ -769,7 +778,7 @@ fn every_registered_type_maps_to_the_digest_record() {
          `app.declare_state::<T>(class, pasm)` (issue #1220's registry):\n\
          \x20 - if it is authoritative simulation state, pick the class by the \
          rule at `authoritative::StateClass`'s own doc comment: \
-         `StateClass::Folded` ONLY when `src/sim_digest.rs` walks EVERY field of \
+         `StateClass::Folded` ONLY when `crates/phoenix-simulation/src/sim_digest.rs` walks EVERY field of \
          the type, `StateClass::DeferredFold` for anything less — a type \
          `sim_digest.rs` folds PART of is `DeferredFold`, never `Folded`, with \
          an adjacent comment naming the folded/unfolded split — the census feeds \
@@ -878,7 +887,7 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
     // digest boundary.
     assert!(
         !authoritative.contains("EntitySnapshot"),
-        "EntitySnapshot (src/core/messages.rs) is the #894 HITL thread's \
+        "EntitySnapshot (crates/phoenix-simulation/src/core/messages.rs) is the #894 HITL thread's \
          rejected shortcut — it carries authored presentation fields \
          (radar_icon, region_colour, colour, radar_size) and must never stand \
          in for the digest boundary. See digest-boundary-reviewer-answers in \

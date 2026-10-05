@@ -24,7 +24,7 @@
 //!
 //! The projector's *content* — that a given authored world state produces the
 //! expected flags/objectives/triggers/queues/commitments/dossiers — is asserted
-//! by the pure unit tests in `src/debug/scenario.rs`, which build the authoritative
+//! by the pure unit tests in `crates/phoenix-simulation/src/debug/scenario.rs`, which build the authoritative
 //! state directly rather than through a whole app.
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]

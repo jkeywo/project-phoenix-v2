@@ -2,7 +2,7 @@
 title: Shields Runtime
 type: concept
 tags: [shields, ai, damage, focus, coordination, pasm]
-sources: [src/ship/shields.rs, src/ship/config.rs, src/core/broadcast/audience.rs, src/core/broadcast/lifecycle.rs, src/console_ai/server.rs, src/console_ai/core.rs, src/ship/coordination_systems.rs, pasm/spec/architecture/coordination-blackboards.yaml]
+sources: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/core/broadcast/audience.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, pasm/spec/architecture/coordination-blackboards.yaml]
 updated: 2026-08-28
 ---
 
@@ -38,7 +38,7 @@ disproportionately weak arc, otherwise focus is cleared. Single-arc ships have
 nothing to focus. Human Shields retains exclusive focus control whenever the
 hull's authored Shields focus capability is human-operated.
 
-The policy thresholds and windows come from the hull's AI policy parameters. The pure decision kernel is `tick_shield_focus_ai` in `src/console_ai/core.rs`; the Bevy host in `src/console_ai/server.rs` supplies current per-ship state and emits the admitted command. High-fidelity gating and the shared AI cadence keep the decision deterministic.
+The policy thresholds and windows come from the hull's AI policy parameters. The pure decision kernel is `tick_shield_focus_ai` in `crates/phoenix-simulation/src/console_ai/core.rs`; the Bevy host in `crates/phoenix-simulation/src/console_ai/server.rs` supplies current per-ship state and emits the admitted command. High-fidelity gating and the shared AI cadence keep the decision deterministic.
 
 ## Related
 

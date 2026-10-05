@@ -317,7 +317,7 @@ fn native_publication_holds_ready_crew_in_lobby_before_page_load_and_freeze() {
             .insert_resource(HostLobbyBridgeResource(super::super::HostLobbyBridge::new()))
             .insert_resource(crate::world::config::WorldConfig::default());
         crate::sim_tick::register_sim_tick(&mut app);
-        crate::ship::test_support::drive_one_fixed_step_per_update(
+        crate::ship::test_clock::drive_one_fixed_step_per_update(
             &mut app,
             std::time::Duration::from_secs(1),
         );

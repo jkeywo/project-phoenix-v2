@@ -14,8 +14,19 @@
 //! implementation of the thing under test.
 
 use super::*;
-use crate::core::messages::ServerMessage;
+use crate::core::codec::{
+    decode_handshake_frame, decode_rendezvous_frame, encode_handshake_frame,
+    encode_rendezvous_frame,
+};
+use crate::core::messages::DeliveryClass;
 use crate::core::rendezvous::JOIN_REFUSED;
+use crate::core::rendezvous::{
+    HandshakeFrame, JoinCode, RelayLimits, RendezvousFrame, CLASS_RELIABLE, CLASS_SNAPSHOT,
+    JOIN_HANDSHAKE, RENDEZVOUS_PROTOCOL,
+};
+use crate::lobby::handler::Target;
+use crate::native_host::transport::{TransportDispatch, TransportEvent};
+use phoenix_transport::Transport;
 use std::sync::{Arc, Mutex};
 
 /// A [`RelaySocket`] with two queues and a settable backlog.
@@ -983,7 +994,17 @@ fn identify_is_immutable_and_invalid_tokens_never_enter_routing() {
     {
         assert!(admit(&mut host, &socket, &format!("invalid-{index}"), token).is_empty());
     }
-    assert!(host.audience(&Target::All).is_empty());
+    let sent = socket.sent().len();
+    host.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert_eq!(
+        socket.sent().len(),
+        sent,
+        "refused identities receive no game traffic"
+    );
     let token = "é".repeat(64);
     assert_eq!(admit(&mut host, &socket, "valid", &token).len(), 1);
     let identify = |token: String| {
@@ -1002,7 +1023,17 @@ fn identify_is_immutable_and_invalid_tokens_never_enter_routing() {
     );
     socket.arrive(&relayed("valid", &identify("someone-else".into())));
     assert!(host.poll().is_empty());
-    assert!(host.audience(&Target::All).is_empty());
+    let sent = socket.sent().len();
+    host.dispatch(TransportDispatch {
+        target: &Target::All,
+        msg: &ServerMessage::GameStarted,
+        delivery: DeliveryClass::Reliable,
+    });
+    assert_eq!(
+        socket.sent().len(),
+        sent,
+        "refused identities receive no game traffic"
+    );
     assert_eq!(host.poll(), vec![TransportEvent::Disconnected { token }]);
     assert!(host.poll().is_empty());
 }
@@ -1192,3 +1223,5 @@ fn native_adapters_follow_the_shared_browser_ownership_transcript() {
         }
     }
 }
+
+use crate::native_host::transport::NativeTransport;

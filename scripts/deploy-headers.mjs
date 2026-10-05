@@ -6,7 +6,7 @@
  * whether a header is right is here, so the contract is unit-testable against
  * canned fixtures instead of against a live site.
  *
- * This is the SAME contract `src/delivery/http.rs` serves from the native host:
+ * This is the SAME contract `crates/phoenix-simulation/src/delivery/http.rs` serves from the native host:
  * hashed bundles are cached for 4 hours (matching the deliberate Cloudflare
  * dashboard Cache Rule, rather than the year-long ceiling the content-addressed
  * filename would otherwise licence), entry points and authored manifests always

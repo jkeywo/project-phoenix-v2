@@ -159,7 +159,7 @@ fn read_dependencies(
         return Err("Read-only Workshop dependencies cannot contain linked paths".into());
     }
     let mut total = 0;
-    crate::native_capture::walk(&assets, &mut |entry| {
+    phoenix_platform::native_capture::walk(&assets, &mut |entry| {
         let kind = entry.file_type().map_err(|e| e.to_string())?;
         if kind.is_symlink() {
             return Err("Read-only Workshop dependencies cannot contain linked paths".into());
@@ -168,7 +168,7 @@ fn read_dependencies(
         if kind.is_dir() {
             return Ok(Some(path));
         } else if kind.is_file() {
-            let name = crate::native_capture::relative_name(&path, root)?;
+            let name = phoenix_platform::native_capture::relative_name(&path, root)?;
             let text_source = name.ends_with(".toml") || name.ends_with(".rhai");
             if !text_source
                 && !crate::workshop::provider::assets::binary_path(&name)
@@ -177,9 +177,9 @@ fn read_dependencies(
                 return Ok(None);
             }
             let remaining = (512 * 1024 * 1024usize).saturating_sub(total);
-            let bytes = crate::native_capture::read_bounded(&path, remaining as u64)?;
+            let bytes = phoenix_platform::native_capture::read_bounded(&path, remaining as u64)?;
             total = total.saturating_add(bytes.len());
-            crate::native_capture::check_size(
+            phoenix_platform::native_capture::check_size(
                 dependencies.base_files.len() + dependencies.base_assets.len(),
                 total,
                 16383,

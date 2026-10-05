@@ -16,8 +16,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/ship/system_registry.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs]
-      tests: [cargo test, src/ship/system_registry_tests.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/ship/system_registry.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/system_registry_tests.rs]
 
   - component: torpedo-magazine-round-claim
     core:
@@ -37,9 +37,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-model/src/messages.rs]
       symbols: [handle_torpedo_magazine_inter_system, TorpedoMagazineAiPolicy, seed_torpedo_magazine_facts, torpedo_magazine_grant_policy_fires, seed_torpedo_conservation_facts, torpedo_conservation_declared, torpedo_conservation_policy_fires, targeted_objective_count]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: tactical-ai-weapon-operator
     core:
@@ -48,7 +48,7 @@ entities:
       title: Tactical AI Weapon Operator
       summary: Uses scored Destroy objectives and fine-system availability to select and track targets, and issue arc-bearing coordination when a usable family lacks arc; firing decisions for individual weapon families live in separate decide/apply AI systems that read the resulting target.
       rationale:
-        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. Issue #700 deleted operate_tactical_ai: with every other responsibility rehomed, the remaining glue was folded back into ai_target_selection, which now gates on any_tactical_system_operates_ai (any tactical fine system's own operate_ai policy — the dead coarse tactical fallback was deleted by #801), publishes its choice to WeaponsBlackboard.locked_target as observable intent, and applies the same choice to WeaponsTarget in one system. Selection could not be separated from application by a sim set the way the other AI decide/apply pairs are — every WeaponsTarget reader runs in SimSet::Input — so keeping them in one system is what makes the AI's read-modify-write atomic against handle_set_target, the other Input writer of WeaponsTarget."
+        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in crates/phoenix-simulation/src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. Issue #700 deleted operate_tactical_ai: with every other responsibility rehomed, the remaining glue was folded back into ai_target_selection, which now gates on any_tactical_system_operates_ai (any tactical fine system's own operate_ai policy — the dead coarse tactical fallback was deleted by #801), publishes its choice to WeaponsBlackboard.locked_target as observable intent, and applies the same choice to WeaponsTarget in one system. Selection could not be separated from application by a sim set the way the other AI decide/apply pairs are — every WeaponsTarget reader runs in SimSet::Input — so keeping them in one system is what makes the AI's read-modify-write atomic against handle_set_target, the other Input writer of WeaponsTarget."
         - "Issue #781 (AC6) gave the tactical radar an EXPLICIT AI-or-idle declaration. Previously ai_target_selection ran its selector whenever any_tactical_system_operates_ai held and otherwise cleared the lock, but there was no way to say 'the radar deliberately makes no AI selection' versus 'no selector authored → default selector'. An authored [weapons_console] selector_idle = true is carried on the TacticalTargetSelector component (field idle, seeded at spawn) and honoured at the same gate: when the radar is idle ai_target_selection clears any stale intent and skips the ship even under AI control. Default false preserves the prior behaviour."
         - "Issue #887 (b208d9aa) changed BOTH halves of the sentence above. (1) The GATE is no longer any_tactical_system_operates_ai. That predicate was strictly wider than the one admission applies to the human — any bank, any tube or the magazine being automated licensed the AI to take the lock — so it now gates on the tactical RADAR's own operate_ai. Because accept_human_input and operate_ai cannot both hold on one SystemId, the two origins are now mutually exclusive by construction. (2) The APPLICATION is no longer a direct write. This host emits an admitted SetTarget on tactical-radar through emit_ai_command, and handle_set_target applies it later in the same SimSet::Input. The atomicity argument recorded above for keeping decide and apply in one system is therefore superseded: what makes the read-modify-write safe now is that the human writer and the AI writer meet at ONE applier behind ONE gate, not that they share a system. Both halves stay in Input, which is what keeps the lock landing pre-physics on the tick it was decided, exactly as the direct write used to."
         - "Issue #887 removed the selector's Rust-side fallback as well. TacticalTargetSelector is attached at spawn on every ship; since #885 there is no synthesised default behind it, so a ship without the component ranks nothing and ai_target_selection simply skips it. The [weapons_console] selector_idle declaration recorded above is unchanged and remains the explicit opt-out."
@@ -62,7 +62,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/ai/core.rs]
       symbols: [ai_target_selection, TacticalTargetSelector]
       tests: [cargo test]
 
@@ -94,9 +94,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs]
       symbols: [ai_torpedo_auto_fire, ai_torpedo_load, auto_fire_torpedo, TorpedoAiInput, torpedo_load_orders, TorpedoTubeAiPolicies, seed_torpedo_tube_load_facts, seed_torpedo_tube_launch_facts, torpedo_tube_load_policy_fires, torpedo_tube_launch_policy_fires]
-      tests: [cargo test, src/console_ai/core_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
   - component: phaser-auto-fire-ai
     core:
@@ -118,7 +118,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs]
       symbols: [ai_phaser_auto_fire, PhaserBankAiPolicies, seed_phaser_bank_facts]
       tests: [cargo test]
 
@@ -139,7 +139,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/blaster.rs, src/console/weapons/mod.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs]
       symbols: [tick_blaster_auto_fire, handle_fire_blaster, BlasterBankAiPolicies, seed_blaster_bank_facts]
       tests: [cargo test]
 
@@ -160,9 +160,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/console_ai/core.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [tick_npc_auto_match_frequency, NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchStatesState]
-      tests: [cargo test, src/console_ai/core_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
   - state: npc-frequency-match-state
     core:
@@ -176,10 +176,10 @@ entities:
       writers: [npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/console_ai/core.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchState, NpcFrequencyMatchStatesState]
 
-      tests: [src/console_ai/core_tests.rs]
+      tests: [crates/phoenix-simulation/src/console_ai/core_tests.rs]
   - component: tactical-weapons-controls
     core:
       status: implemented
@@ -188,7 +188,7 @@ entities:
       summary: Tactical player and Backfill controls select a target, fire configured phaser, blaster, and torpedo banks, and manage phaser mode and torpedo tubes through admitted ControlSystem commands.
       rationale:
         - "Every wire target names a declared system since #801: SetTarget targets the tactical-radar system, and SetPhaserMode / SetPhaserFrequency target the new declared phaser-control system (a single system owning the ship-wide firing mode and emitter frequency; the data model is unchanged). The coarse tactical system is deleted — \"tactical\" survives only as a station id keying the Weapons console blackboard and coordination routing."
-        - "Issue #887 (b208d9aa) made handle_set_target (src/console/weapons/beam.rs) the ship's ONE TacticalRadarSelection applier for EVERY origin, player ship and NPC alike. Two origins reach it and neither is distinguishable there: a human's console message, admitted by admit_system_commands before SimSet::Input, and the Tactical AI's own choice, emitted by ai_target_selection earlier in the same set. Admission has stripped the source; there is no human-vs-AI branch below that line (AGENTS.md #6). An unresolvable UUID clears the lock, which is how the AI drops a target (SetTarget { uuid: \"\" }) and equally what a human gets for naming something that has since been destroyed — so no origin-specific clear verb exists."
+        - "Issue #887 (b208d9aa) made handle_set_target (crates/phoenix-simulation/src/console/weapons/beam.rs) the ship's ONE TacticalRadarSelection applier for EVERY origin, player ship and NPC alike. Two origins reach it and neither is distinguishable there: a human's console message, admitted by admit_system_commands before SimSet::Input, and the Tactical AI's own choice, emitted by ai_target_selection earlier in the same set. Admission has stripped the source; there is no human-vs-AI branch below that line (AGENTS.md #6). An unresolvable UUID clears the lock, which is how the AI drops a target (SetTarget { uuid: \"\" }) and equally what a human gets for naming something that has since been destroyed — so no origin-specific clear verb exists."
         - "Issue #887 REMOVED a second gate that was both wrong and, once the AI shares the applier, unrepresentable. The pre-#887 body also required any_bank_accepts_human_input — 'some phaser bank on this ship is human-operable' — on top of admission's own check on tactical-radar. On alliance_cruiser's shipped Simplified Tactical rating both phaser banks are automated, so that predicate read false and a CREWED Tactical officer could not lock anything at all while the AI took the lock instead. Admission on tactical-radar is the authorisation; a bank's rating is not a radar concern."
         - "Issue #887 also corrected the applier's RANGE horizon to this ship's own [weapons_console.radar] range scaled by its live RadarRange modifier, rather than the LocalShip-only ShipClientConfigResource (which is the player's radar and meaningless on an NPC). A non-positive or non-finite range means UNBOUNDED — the hull declares no radar, so range never culls a lock — which is the same rule ai_target_selection applies to its candidates and matters because no NPC hull authors [weapons_console.radar] at all."
         - "Issue #955 draws the line between ACQUISITION and REACH, and only the first is power-scaled. handle_set_target's horizon above is acquisition - it culls a LOCK, off the hull's authored [weapons_console.radar] range, and keeps its RadarRange scaling; ai_target_selection's candidate filter and the tactical radar blips are the same concept and keep theirs. REACH is not: handle_fire_phaser, ai_phaser_auto_fire and tick_beams used to multiply each bank's authored beam_range by the same slot, so a hull resting its sensors group fired at two thirds of the range its own file authored while blasters and torpedoes (never scaled) did not. That multiplication is removed - a gun reaches what it authors - and the consequence is deliberate: a ship with its sensors down still shoots as far, it just has less warning about what to shoot at. The reach fact (entity_direct_fire_range, #788) and the arc sectors (#874) lost the scaling with it, so entity_direct_fire_banks no longer reads ShipModifiers at all."
@@ -200,7 +200,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, gui/action-map.js]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, gui/action-map.js]
       symbols: [handle_set_target, handle_fire_phaser, handle_fire_torpedo]
       tests: [cargo test, npx vitest run]
 
@@ -216,7 +216,7 @@ entities:
         - "Issue #887 (b208d9aa) is the ONE-LOCK-PER-SHIP statement, and it is a symmetry rule rather than a nicety: a human gunner holds exactly one radar selection, so a player ship engages one target, and AI weapon groups picking independently could engage more — a capability no player can have. The audit found the invariant already held WHERE THE GUNS ARE: every weapon host has aimed at the ship's single combat lock since #829. The asymmetry was in who was allowed to SET that lock. The human's SetTarget was admitted against the tactical radar; the AI decider gated on ANY tactical system being automated — any bank, any tube, the magazine — which is strictly wider. It now gates on the radar itself and routes through admission, so both origins meet at one applier behind one gate, and the two can no longer collide STRUCTURALLY (a system is either accepting human input or operating on AI, never both) rather than by ordering."
         - "Issue #887 fixed a second shipped, player-facing bug through the same change. The old AI gate omitted BLASTER banks, and the alliance courier, the Harrow destroyer and the Requiem courier declare no phaser bank, tube or magazine — so those three hulls never ran target selection at all and drifted through every engagement disarmed. The resulting balance swing is large and is that bug being fixed rather than a tuning change: couriers go from unable to shoot to killing a cruiser, and timeouts fall by two thirds. Every matchup that moved is attributable to a hull that could not previously fight; the other nine matchups are byte-identical."
         - "[ai] Spec-compliance follow-up: the Weapons publishers (publish_weapons_core_blackboard, publish_phaser_bank_blackboards) and compute_current_weapons_update were the last live readers and now read combat_lock too. WeaponsBlackboard.target_uuid is therefore the frozen Combat Lock, liveness-filtered. It is deliberately NOT merged with locked_target: target_uuid is applied truth, locked_target is Tactical-AI intent and stays None on a human-operated Tactical, which is how the wire distinguishes an AI lock from a human's."
-        - "**Decided (issue #893, 2026-08-02): a destroyed tactical radar clears this lock.** Surfaced by #887's own seed-1 balance A/B, where both battleships reached tactical-radar Destroyed with time-to-kill still to run and kept firing at the lock they already held — a wrecked radar refused new locks but left the standing one intact. Symmetric with #887's own reasoning: `detect_damage_tier_crossings` (src/ship/damage_sync.rs) clears TacticalRadarSelection to None the tick the tactical-radar system's damage tier crosses into Destroyed, keyed on the SYSTEM crossing tiers and never on who set the lock, so a human-held lock and an AI-held lock clear identically with no origin branch (AGENTS.md #6) — the second writer of this state, alongside tactical-weapons-controls, and the only one permitted to clear it outside a SetTarget. The existing #887 admission gate (tactical-radar offline on Disabled OR Destroyed refuses a NEW lock from either origin) is unchanged; this is the companion half for the lock the ship already held, which that gate never revisited. A merely Disabled (not yet Destroyed) radar still does not clear the lock — only Destroyed does. Re-acquire is gated by the same admission check, unmodified. **Data rule (decided, enforcement DEFERRED):** no shipped hull should author hit points on `tactical-radar` or its Sensors sibling `sensor-radar` (the #887 A/B's battleship did) — the intended pin is `authored_ai_pins::no_shipped_hull_authors_hit_points_on_a_radar_that_gates_the_tactical_lock`, written and `#[ignore]`d rather than enforced today: a separate, in-progress no-radar-damage rebalance (a different worktree) owns actually stripping the HP lines from the shipped Alliance/Harrow/Requiem hulls, and every shipped hull still authors real radar HP until that lands. Un-ignore the pin alongside that rebalance. The drop-lock mechanic stays engine-level regardless of when the data rule lands: test-only content that deliberately wants a blindable radar (`assets/worlds/probe_radar_kill.toml`) authors its own `[[hull.system_hull]]` override the same way any other test fixture does — this is how the mechanism is exercised today, ahead of the data rule. Headless evidence: `tests/headless_runner.rs::destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_memory` runs against that probe world (not a shipped hull) and asserts the disarmed hostile stops landing hits (past the in-flight-torpedo tail) rather than keeps shooting its remembered target. Balance A/B: not yet meaningful on shipped hulls — every shipped hull still authors the radar HP the #887 A/B observed, so the seed-1 battleship duel is unchanged by this issue until the rebalance lands; re-measure once shipped HP is actually removed. **Checked against #918's arc-bearing bookkeeping and deliberately left unspecial-cased:** `tick_weapons_arc_request` (src/console/weapons/mod.rs) reads the FROZEN viewscreen `combat_lock`, not this state directly, and on `None` stops emitting — `state.last = None; continue` — so no NEW `ArcBearingRequest` is raised once the lock clears (a one-tick lag behind the clear here, the same lag every other combat_lock reader accepts). A REQUEST ALREADY STANDING on `PendingArcBearingRequest` is untouched by the clear and is not walked here to withdraw it; `apply_arc_bearing_request` (src/ship/helm_ai.rs) already clears it on pure geometry — the named target entity not found, out of every carried arc's range, or already bearing — regardless of who holds or last held the lock. That geometry-only clear is what #918 documents as the request's whole lifecycle; a disarmed ship raises nothing further, and the one request already in flight expires the same way it always would have. Adding a lock-cleared branch there would be exactly the origin/cause branching AGENTS.md #6 and this decision both avoid, for a case the existing geometry check already resolves."
+        - "**Decided (issue #893, 2026-08-02): a destroyed tactical radar clears this lock.** Surfaced by #887's own seed-1 balance A/B, where both battleships reached tactical-radar Destroyed with time-to-kill still to run and kept firing at the lock they already held — a wrecked radar refused new locks but left the standing one intact. Symmetric with #887's own reasoning: `detect_damage_tier_crossings` (crates/phoenix-simulation/src/ship/damage_sync.rs) clears TacticalRadarSelection to None the tick the tactical-radar system's damage tier crosses into Destroyed, keyed on the SYSTEM crossing tiers and never on who set the lock, so a human-held lock and an AI-held lock clear identically with no origin branch (AGENTS.md #6) — the second writer of this state, alongside tactical-weapons-controls, and the only one permitted to clear it outside a SetTarget. The existing #887 admission gate (tactical-radar offline on Disabled OR Destroyed refuses a NEW lock from either origin) is unchanged; this is the companion half for the lock the ship already held, which that gate never revisited. A merely Disabled (not yet Destroyed) radar still does not clear the lock — only Destroyed does. Re-acquire is gated by the same admission check, unmodified. **Data rule (decided, enforcement DEFERRED):** no shipped hull should author hit points on `tactical-radar` or its Sensors sibling `sensor-radar` (the #887 A/B's battleship did) — the intended pin is `authored_ai_pins::no_shipped_hull_authors_hit_points_on_a_radar_that_gates_the_tactical_lock`, written and `#[ignore]`d rather than enforced today: a separate, in-progress no-radar-damage rebalance (a different worktree) owns actually stripping the HP lines from the shipped Alliance/Harrow/Requiem hulls, and every shipped hull still authors real radar HP until that lands. Un-ignore the pin alongside that rebalance. The drop-lock mechanic stays engine-level regardless of when the data rule lands: test-only content that deliberately wants a blindable radar (`assets/worlds/probe_radar_kill.toml`) authors its own `[[hull.system_hull]]` override the same way any other test fixture does — this is how the mechanism is exercised today, ahead of the data rule. Headless evidence: `tests/headless_runner.rs::destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_memory` runs against that probe world (not a shipped hull) and asserts the disarmed hostile stops landing hits (past the in-flight-torpedo tail) rather than keeps shooting its remembered target. Balance A/B: not yet meaningful on shipped hulls — every shipped hull still authors the radar HP the #887 A/B observed, so the seed-1 battleship duel is unchanged by this issue until the rebalance lands; re-measure once shipped HP is actually removed. **Checked against #918's arc-bearing bookkeeping and deliberately left unspecial-cased:** `tick_weapons_arc_request` (crates/phoenix-simulation/src/console/weapons/mod.rs) reads the FROZEN viewscreen `combat_lock`, not this state directly, and on `None` stops emitting — `state.last = None; continue` — so no NEW `ArcBearingRequest` is raised once the lock clears (a one-tick lag behind the clear here, the same lag every other combat_lock reader accepts). A REQUEST ALREADY STANDING on `PendingArcBearingRequest` is untouched by the clear and is not walked here to withdraw it; `apply_arc_bearing_request` (src/ship/helm_ai.rs) already clears it on pure geometry — the named target entity not found, out of every carried arc's range, or already bearing — regardless of who holds or last held the lock. That geometry-only clear is what #918 documents as the request's whole lifecycle; a disarmed ship raises nothing further, and the one request already in flight expires the same way it always would have. Adding a lock-cleared branch there would be exactly the origin/cause branching AGENTS.md #6 and this decision both avoid, for a case the existing geometry check already resolves."
     architecture:
       classification: authoritative
       owner: tactical-weapons-controls
@@ -224,7 +224,7 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs]
       symbols: [TacticalRadarSelection]
       tests: [cargo test]
 
@@ -240,10 +240,10 @@ entities:
       writers: [tactical-weapons-controls, npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [src/ship/state.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/state.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [ShipPhaserFrequency, ShipPhaserFrequencyState]
 
-      tests: [src/ship/state_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/state_tests.rs]
   - state: tactical-frequency-hint-inbox-state
     core:
       status: implemented
@@ -256,10 +256,10 @@ entities:
       writers: [tactical-weapons-controls]
     implementation:
       status: declared
-      paths: [src/ship/components.rs, src/console/weapons/server.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PendingTacticalFrequencyHint, TacticalFrequencyHintInboxState, receive_tactical_coordination, apply_tactical_frequency_hint]
 
-      tests: [src/ship/components_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/components_tests.rs]
   - component: phaser-beam-system
     core:
       status: implemented
@@ -275,7 +275,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/entities/config.rs]
       symbols: [handle_fire_phaser, tick_beams, PhaserBankConfig]
       tests: [cargo test]
 
@@ -291,7 +291,7 @@ entities:
       writers: [phaser-beam-system]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs]
       symbols: [ActiveBeam, PhaserCooldown, CurrentPhaserMode]
       tests: [cargo test]
 
@@ -309,7 +309,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/blaster.rs, src/console/weapons/mod.rs, src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/entities/config.rs]
       symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig, LaunchEvent]
       tests: [cargo test]
 
@@ -325,7 +325,7 @@ entities:
       writers: [blaster-projectile-system]
     implementation:
       status: declared
-      paths: [src/weapons/blaster.rs]
+      paths: [crates/phoenix-simulation/src/weapons/blaster.rs]
       symbols: [BlasterVolleyState]
       tests: [cargo test]
 
@@ -347,9 +347,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/entities/config.rs]
       symbols: [TorpedoSystem, TorpedoTube, build_torpedo_target_snapshot, tick_torpedo_lifecycle, handle_fire_torpedo, launch_with_barrels, TorpedoesConfig, publish_torpedo_magazine_blackboard]
-      tests: [cargo test, src/console/weapons/blackboard_lifecycle_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
 
   - state: torpedo-state
     core:
@@ -363,7 +363,7 @@ entities:
       writers: [torpedo-system]
     implementation:
       status: declared
-      paths: [src/weapons/torpedo.rs]
+      paths: [crates/phoenix-simulation/src/weapons/torpedo.rs]
       symbols: [TorpedoSystem, TorpedoTube, TubeBurstState, Torpedo, TorpedoDetonation]
       tests: [cargo test]
 
@@ -383,10 +383,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/console/weapons/server.rs, src/console/weapons/blackboard.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, gui/weapon-readiness.js, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+      paths: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, gui/weapon-readiness.js, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
       symbols: [weapons_update_broadcaster, compute_current_weapons_update, publish_weapons_core_blackboard, LastWeaponsUpdate, WeaponsUpdateFirstTick, register_weapons_replication_lifecycle, buildWeaponsConsoleState, withWeaponCooldowns, cooldownRemainingPercent]
       messages: [WeaponsUpdate]
-      tests: [cargo test, npx vitest run, tests/client/weapon-cooldown.test.js, src/console/weapons/blackboard_lifecycle_tests.rs]
+      tests: [cargo test, npx vitest run, tests/client/weapon-cooldown.test.js, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
 
   - component: phaser-attack-target-lock
     core:
@@ -406,7 +406,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/beam.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/beam.rs]
       symbols: [handle_fire_phaser, ai_phaser_auto_fire, tick_beams_prepare, ActiveBeam, ActiveBeamSlot, is_bank_firing, live_banks]
       tests: [cargo test]
 
@@ -417,12 +417,12 @@ entities:
       title: Patterned Barrel Attacks
       summary: Blaster and torpedo banks declare multiple barrel marker points and a timed attack pattern of offsets and barrel-index arrays, allowing alternating or simultaneous shots.
       rationale:
-        - "Shared, reusable schema (issue #765). `BarrelPatternStep { barrels: Vec<u32>, offset_secs: f32 }` and the `BarrelPattern` alias live in the weapon-family-agnostic `src/weapons/pattern.rs` so torpedoes (issue #766) reuse the exact types and validator. A step fires its listed barrel indices SIMULTANEOUSLY at `offset_secs`; successive steps at increasing offsets ALTERNATE. Blasters wire it now; the blaster half of the evidence is covered here."
+        - "Shared, reusable schema (issue #765). `BarrelPatternStep { barrels: Vec<u32>, offset_secs: f32 }` and the `BarrelPattern` alias live in the weapon-family-agnostic `crates/phoenix-simulation/src/weapons/pattern.rs` so torpedoes (issue #766) reuse the exact types and validator. A step fires its listed barrel indices SIMULTANEOUSLY at `offset_secs`; successive steps at increasing offsets ALTERNATE. Blasters wire it now; the blaster half of the evidence is covered here."
         - "Backward compatible. A bank with no `barrels` and no `pattern` is one implicit barrel (= the existing `marker`) firing the uniform `volley_count` volley — `BlasterBankConfig::firing_schedule` returns the legacy schedule and `tick` fires at most one step per tick, preserving the pre-#765 one-bolt-per-tick cadence exactly. The four shipped blaster hulls are unchanged; `alliance_battleship` authors a real twin-barrel alternating-then-simultaneous pattern."
         - "Authoring validation, both twins (AC1/AC3). `validate_barrel_pattern` (rejects empty step, barrel index >= barrel count, negative/non-finite offset, multi-barrel-with-no-pattern) is called by `validate_blaster_banks` (Rust) and mirrored by `editor/blaster-validate.js` wired into `validateFile`, so an invalid pattern blocks save via the #757 admission gate. Per-barrel marker references are emitted by `collect_marker_refs` / `collectMarkerRefs`, so a missing barrel marker is rejected by the shipped-asset conformance test and the editor."
         - "Firing carries barrel identity (AC2). `BlasterSystem::tick` takes one world origin per barrel (`barrel_origins`), resolved by `tick_blaster_system` from each barrel's rig marker, and emits one `LaunchEvent { barrel, x, z, heading }` per firing barrel, so simultaneous steps launch multiple bolts from distinct authored points on one tick and alternating steps launch from the right origin each step."
         - "Blackboard + Tactical (AC4). `BlasterBankState` gains `active_barrels`, `pattern_step`, `pattern_len`; `ph-blasters-controls.js` renders a step/barrel indicator (string ids `component.blasters.pattern_step`/`.barrels`). Round-tripped in `codec.rs`."
-        - "Torpedo half preserves the ammunition economy (issue #766, AC3). Torpedoes reuse the SAME `src/weapons/pattern.rs` schema and `validate_barrel_pattern` (called by `validate_torpedo_tubes`, mirrored by `editor/torpedo-validate.js`). The pattern maps onto the EXISTING `launch`/`TubeBurstState` burst machinery: `TorpedoTube::barrel_sequence` flattens the offset-ordered steps into a `(barrel, step)` list and each volley round — the immediate `launch_with_barrels` shot plus every burst shot in `tick_torpedo_lifecycle` — draws its origin from the next barrel, cycling. The pattern governs ONLY which barrel a round leaves from and the barrel order; `loaded_count`, the shared `torpedoes_remaining` magazine, and `burst_interval_secs` stay the sole authority over the count. Magazine spend still happens at LOAD time (`start_load`/`claim_magazine_round`), never at launch. Timing rule: `burst_interval_secs` remains the sole cadence between rounds; the pattern's `offset_secs` only orders the barrel sequence. A 2-barrel simultaneous step with 1 round loaded fires exactly 1 torpedo and leaves the magazine untouched (`launch_does_not_change_torpedo_count` still holds). `handle_fire_torpedo` resolves per-barrel world origins from the tube's rig markers (falling back to ship centre for legacy single-marker tubes); `TorpedoTubeState`/`ph-torpedo-controls.js` surface `active_barrels`/`pattern_step`/`pattern_len`. `alliance_battleship`'s fore-centre tube authors a real twin-barrel pattern."
+        - "Torpedo half preserves the ammunition economy (issue #766, AC3). Torpedoes reuse the SAME `crates/phoenix-simulation/src/weapons/pattern.rs` schema and `validate_barrel_pattern` (called by `validate_torpedo_tubes`, mirrored by `editor/torpedo-validate.js`). The pattern maps onto the EXISTING `launch`/`TubeBurstState` burst machinery: `TorpedoTube::barrel_sequence` flattens the offset-ordered steps into a `(barrel, step)` list and each volley round — the immediate `launch_with_barrels` shot plus every burst shot in `tick_torpedo_lifecycle` — draws its origin from the next barrel, cycling. The pattern governs ONLY which barrel a round leaves from and the barrel order; `loaded_count`, the shared `torpedoes_remaining` magazine, and `burst_interval_secs` stay the sole authority over the count. Magazine spend still happens at LOAD time (`start_load`/`claim_magazine_round`), never at launch. Timing rule: `burst_interval_secs` remains the sole cadence between rounds; the pattern's `offset_secs` only orders the barrel sequence. A 2-barrel simultaneous step with 1 round loaded fires exactly 1 torpedo and leaves the magazine untouched (`launch_does_not_change_torpedo_count` still holds). `handle_fire_torpedo` resolves per-barrel world origins from the tube's rig markers (falling back to ship centre for legacy single-marker tubes); `TorpedoTubeState`/`ph-torpedo-controls.js` surface `active_barrels`/`pattern_step`/`pattern_len`. `alliance_battleship`'s fore-centre tube authors a real twin-barrel pattern."
     architecture:
       kind: configuration-schema
       authority: authoritative
@@ -430,14 +430,14 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/weapons/pattern.rs
-        - src/weapons/blaster.rs
-        - src/weapons/torpedo.rs
-        - src/entities/config.rs
-        - src/entities/marker_validate.rs
-        - src/console/weapons/blaster.rs
-        - src/console/weapons/torpedo.rs
-        - src/core/messages.rs
+        - crates/phoenix-simulation/src/weapons/pattern.rs
+        - crates/phoenix-simulation/src/weapons/blaster.rs
+        - crates/phoenix-simulation/src/weapons/torpedo.rs
+        - crates/phoenix-simulation/src/entities/config.rs
+        - crates/phoenix-simulation/src/entities/marker_validate.rs
+        - crates/phoenix-simulation/src/console/weapons/blaster.rs
+        - crates/phoenix-simulation/src/console/weapons/torpedo.rs
+        - crates/phoenix-model/src/messages.rs
         - editor/barrel-pattern-validate.js
         - scripts/build-workshop.mjs
         - editor/blaster-validate.js
@@ -456,7 +456,7 @@ entities:
         - validateTorpedoTubes
         - launch_with_barrels
         - barrel_sequence
-      tests: [cargo test, npx vitest run, src/weapons/pattern_tests.rs, src/entities/marker_validate_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/weapons/pattern_tests.rs, crates/phoenix-simulation/src/entities/marker_validate_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: weapon-readiness-feedback-policy
     core:
@@ -478,10 +478,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/core/messages.rs
-        - src/weapons/phaser.rs
-        - src/weapons/blaster.rs
-        - src/console/weapons/blackboard.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/weapons/phaser.rs
+        - crates/phoenix-simulation/src/weapons/blaster.rs
+        - crates/phoenix-simulation/src/console/weapons/blackboard.rs
         - gui/weapon-readiness.js
         - gui/components/ph-phasers-controls.js
         - gui/components/ph-blasters-controls.js
@@ -495,7 +495,7 @@ entities:
         - build_tube_states
         - tube_readiness
         - bank_state
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/weapons/phaser_tests.rs, src/console/weapons/blackboard_lifecycle_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/weapons/phaser_tests.rs, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs]
 
   - component: three-dimensional-torpedoes
     core:
@@ -516,12 +516,12 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/weapons/torpedo.rs
-        - src/console/weapons/torpedo.rs
-        - src/console/weapons/shared.rs
-        - src/core/messages.rs
-        - src/core/codec.rs
-        - src/server/pfx.rs
+        - crates/phoenix-simulation/src/weapons/torpedo.rs
+        - crates/phoenix-simulation/src/console/weapons/torpedo.rs
+        - crates/phoenix-simulation/src/console/weapons/shared.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
+        - crates/phoenix-presentation/src/server/pfx.rs
         - gui/sim-state.js
       symbols:
         - Torpedo
@@ -532,7 +532,7 @@ entities:
         - tick_torpedo_lifecycle
         - handle_fire_torpedo
         - sync_torpedo_pfx
-      tests: [cargo test, npx vitest run, src/console/weapons/shared_tests.rs, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/pfx_dust_tests.rs, src/server/pfx_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/console/weapons/shared_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-presentation/src/server/pfx_dust_tests.rs, crates/phoenix-presentation/src/server/pfx_tests.rs]
 
   - component: weapon-family-arc-bearing-coordination
     core:
@@ -556,13 +556,13 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/console/weapons/mod.rs
-        - src/console/weapons/server.rs
-        - src/core/messages.rs
-        - src/core/codec.rs
-        - src/ship/components.rs
-        - src/console/helm/server.rs
-        - src/ship/helm_ai/surfaces.rs
+        - crates/phoenix-simulation/src/console/weapons/mod.rs
+        - crates/phoenix-simulation/src/console/weapons/server.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
+        - crates/phoenix-simulation/src/ship/components.rs
+        - crates/phoenix-simulation/src/console/helm/server.rs
+        - crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs
         - gui/coordination-popup.js
       symbols:
         - tick_weapons_arc_request
@@ -578,4 +578,4 @@ entities:
         - apply_arc_bearing_request
         - CoordinationPresentation
         - coordination_weapon_family_param
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs, src/ship/components_tests.rs, src/console/helm/server_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/console/helm/server_tests.rs]

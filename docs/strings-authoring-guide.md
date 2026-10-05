@@ -214,7 +214,7 @@ A wire field holding a text id may be joined by a sibling field named
 `<field>_params`, a string→string map. `localiseTree` finds it by name and
 resolves `t(id, params)` instead of `t(id)`. The fields that carry one today are
 `ObjectiveSnapshot::text_params` and `CommsMessage::body_params`;
-`TEXT_PARAMS_SUFFIX` in `src/core/messages.rs` states the contract, and
+`TEXT_PARAMS_SUFFIX` in `crates/phoenix-simulation/src/core/messages.rs` states the contract, and
 `localiseTree`'s own doc comment states the client half.
 
 Authoring it from a scenario script:

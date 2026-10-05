@@ -2,8 +2,8 @@
 title: Architecture
 type: concept
 tags: [architecture, server, client, wasm, authority, domains]
-sources: [src/server/pfx.rs, AGENTS.md, src/lib.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, src/lockstep/mod.rs, src/entities/config.rs, src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
-updated: 2026-10-02
+sources: [crates/phoenix-presentation/src/server/pfx.rs, AGENTS.md, crates/phoenix-simulation/src/lib.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, src/server/bridge.rs, src/server/browser_edge.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/config/, server.html, client.html, wiki/concepts/client-architecture.md]
+updated: 2026-10-05
 ---
 
 # Architecture
@@ -23,22 +23,26 @@ phone clients
 
 - `server.html` loads the Rust/WASM host, registers with the rendezvous service, owns the per-token connections, and displays the shared viewscreen.
 - `client.html` and `gui/` are pure JavaScript; there is no client-side Rust or WASM.
-- `src/server/bridge.rs` exports the JavaScript/WASM boundary and drains browser inputs into Bevy. Its private `browser_edge.rs` adapter owns pre-app storage, bounded queues, callbacks and readback mirrors behind typed operations. Callbacks are cloned before invocation so synchronous JavaScript replacement cannot retain a storage borrow. Fleet slot-claim sequencing is a `SlotClaimSequence` Resource in `src/lockstep/mod.rs`. Browser sockets remain in JavaScript.
-- `src/server_app/registration.rs` composes the fixed-tick simulation; `src/server_app/mod.rs` is its stable facade.
+- `src/server/bridge.rs` exports the JavaScript/WASM boundary and drains browser inputs into Bevy. Its private `browser_edge.rs` adapter owns pre-app storage, bounded queues, callbacks and readback mirrors behind typed operations. Callbacks are cloned before invocation so synchronous JavaScript replacement cannot retain a storage borrow. Fleet slot-claim sequencing is a `SlotClaimSequence` Resource in `crates/phoenix-simulation/src/lockstep/mod.rs`. Browser sockets remain in JavaScript.
+- `crates/phoenix-simulation/src/server_app/registration.rs` composes the fixed-tick simulation; `crates/phoenix-simulation/src/server_app/mod.rs` is its stable facade.
+
+## Packages
+
+[Reusable Layers](./reusable-layers.md) maps each package to its owner and focused checks. Reusable runtime, transport and platform packages contain no Phoenix game dependencies. The root crate composes hosts; simulation and presentation have separate Cargo boundaries.
 
 ## Domain layout
 
 Rust modules are grouped by domain: `lobby`, `ship`, `weapons`, `modifiers`, `asteroids`, `regions`, `entities`, `world`, `ai`, `comms`, and `console`. Pure state/decision code stays beside its Bevy adapter; a pure module never imports Bevy merely to serve an adapter.
 
-`src/entities/config.rs` owns `EntityConfig`, parsing and cross-subsystem validation. Its `config/` leaves hold the individual subsystem schemas; root re-exports preserve their public paths. Visual and LOD definitions live in `config/visual.rs`, with hull, propulsion, weapons, consoles and other subsystem declarations in corresponding leaves.
+`crates/phoenix-simulation/src/entities/config.rs` owns `EntityConfig`, parsing and cross-subsystem validation. Its `config/` leaves hold the individual subsystem schemas; root re-exports preserve their public paths. Visual and LOD definitions live in `crates/phoenix-model/src/entity/visual.rs`, with hull, propulsion, weapons, consoles and other subsystem declarations in corresponding leaves.
 
 Cross-domain infrastructure has narrow homes:
 
-- `src/core/messages.rs` and `src/core/codec.rs` own the wire vocabulary and JSON seam;
-- `src/core/broadcast/` owns outbound audience/cadence dispatch;
-- `src/command_admission/` owns token/system authority before commands reach a domain;
+- `crates/phoenix-model/src/messages.rs` owns the wire vocabulary; `crates/phoenix-simulation/src/core/codec.rs` owns the game JSON seam;
+- `crates/phoenix-simulation/src/core/broadcast/` owns outbound audience/cadence dispatch;
+- `crates/phoenix-simulation/src/command_admission/` owns token/system authority before commands reach a domain;
 - `src/server_app/` owns composition, cross-domain publication, world setup, and collision;
-- `src/sim_sets.rs` owns the logical order `Input → Physics → Damage → Modifiers → Publish → PublishAggregate → Broadcast`.
+- `crates/phoenix-simulation/src/sim_sets.rs` owns the logical order `Input → Physics → Damage → Modifiers → Publish → PublishAggregate → Broadcast`.
 
 ## State and authority
 
@@ -48,7 +52,7 @@ Human and AI actors submit the same `ControlSystem` commands. Admission records 
 
 ## Host presentation effects
 
-`src/server/pfx.rs` builds transient flashes, rings, plasma and sparks through
+`crates/phoenix-presentation/src/server/pfx.rs` builds transient flashes, rings, plasma and sparks through
 a shared billboard-sprite constructor. Each effect retains its texture,
 lifetime, scale, particle count and random-offset recipe. The constructor
 assembles render and lifetime state; the existing lifetime and burst systems

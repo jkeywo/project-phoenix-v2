@@ -8,7 +8,7 @@ entities:
       rationale:
         - "The four questions were chosen because each one, answered wrong late, would cost a rewrite rather than a patch. Anonymous-function naming decides whether deferred work can be serialized at all; wasm decides whether the browser is a target; map ordering decides whether iterating authored data is a divergence source; operation budgets decide whether a bad script is a bug report or a hung game. The roadmap entity already commits to `(tick, fn_name)` pairs, integer-only arithmetic, and fixed budgets, so the spike's job was to find out what those commitments actually cost."
         - "Everything below was measured on rhai `=1.25.1` reached through `vellum-script`'s own `sandbox()`/`quiet_sandbox()`/`call_fn` seam, not through a bare `Engine::new()`, because the sandbox profile is what phoenix will ship: `Engine::new_raw()` plus eleven explicitly registered packages, a dummy module resolver, `eval` disabled, and the crate's own limits. A number measured against a different engine would not describe the game."
-        - "SCOPE, stated so it is not over-read: no scenario content was written, no host functions were designed, no effect buffer exists, and the spike deliberately did not touch `src/`. The one repository change is this file. The wasm bundle measurement DID temporarily add the dependency to `Cargo.toml` and a `#[wasm_bindgen]` probe to `src/lib.rs`; both were reverted, and the baseline was rebuilt afterwards to the byte-identical size it had before (53,123,733 bytes twice), which is the check that the revert was clean."
+        - "SCOPE, stated so it is not over-read: no scenario content was written, no host functions were designed, no effect buffer exists, and the spike deliberately did not touch `src/`. The one repository change is this file. The wasm bundle measurement DID temporarily add the dependency to `Cargo.toml` and a `#[wasm_bindgen]` probe to `crates/phoenix-simulation/src/lib.rs`; both were reverted, and the baseline was rebuilt afterwards to the byte-identical size it had before (53,123,733 bytes twice), which is the check that the revert was clean."
         - "[ai] Verdict and constants below are the spike's recommendation, not a ratified decision. They are marked so `pasm review` surfaces them: a human adopting them should delete the markers, and a human disagreeing has four reproducible experiments to argue with rather than an opinion."
     architecture:
       kind: design-policy
@@ -105,7 +105,7 @@ entities:
       title: Map Iteration Order Is Deterministic
       summary: "`rhai::Map` is a `BTreeMap<SmartString, Dynamic>`, so iteration is byte-sorted by key on both the Rust and the script side, on every platform, with no dependence on insertion order or on any hash seed. Confirmed by test, and by confirming no feature in vellum's dependency chain swaps the container."
       rationale:
-        - "MEASURED. Seven keys inserted in deliberately scrambled order iterate as `0nine, Alpha, _under, alpha, bravo, mike, zulu` — exactly ASCII byte order, which is worth writing down because it puts uppercase before underscore before lowercase, and an author who expects case-insensitive alphabetical ordering will be surprised by it. Script-side is the same container: `#{ zulu: 1, alpha: 2, mike: 3, bravo: 4 }.keys()` yields `alpha, bravo, mike, zulu`, and a returned `#{ responses, message, id, actor }` reads back to the host as `actor, id, message, responses`. The runtime type name printed by the test is `BTreeMap<SmartString<LazyCompact>, Dynamic>`, matching the alias at `rhai-1.25.1/src/lib.rs`."
+        - "MEASURED. Seven keys inserted in deliberately scrambled order iterate as `0nine, Alpha, _under, alpha, bravo, mike, zulu` — exactly ASCII byte order, which is worth writing down because it puts uppercase before underscore before lowercase, and an author who expects case-insensitive alphabetical ordering will be surprised by it. Script-side is the same container: `#{ zulu: 1, alpha: 2, mike: 3, bravo: 4 }.keys()` yields `alpha, bravo, mike, zulu`, and a returned `#{ responses, message, id, actor }` reads back to the host as `actor, id, message, responses`. The runtime type name printed by the test is `BTreeMap<SmartString<LazyCompact>, Dynamic>`, matching the alias at `rhai-1.25.1/crates/phoenix-simulation/src/lib.rs`."
         - "The feature question was checked rather than assumed: vellum's workspace pins `rhai = { version = \"1.25\", features = [\"sync\", \"no_float\"] }` with default features left on and no `no_object` anywhere in the chain — and `no_object` would remove object maps entirely rather than reorder them, so there is no configuration in reach that turns this into a hash map. The `BasicMapPackage` the sandbox registers operates on the same alias."
         - "CONSEQUENCE for the design: iterating an authored map is safe as a source of ordered effects, and does NOT need a defensive sort at the host boundary. It also means authors get one free ordering guarantee they may come to rely on — key order in a returned effect map is stable and sorted — which is fine to rely on and should be documented as intentional rather than left as an accident of the container."
     architecture:
@@ -144,17 +144,17 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/mod.rs
-        - src/world/script/engine.rs
-        - src/world/script/effects.rs
-        - src/world/script/flags.rs
-        - src/world/script/registry.rs
+        - crates/phoenix-simulation/src/world/script/mod.rs
+        - crates/phoenix-simulation/src/world/script/engine.rs
+        - crates/phoenix-simulation/src/world/script/effects.rs
+        - crates/phoenix-simulation/src/world/script/flags.rs
+        - crates/phoenix-simulation/src/world/script/registry.rs
         - src/bin/phoenix_headless.rs
       symbols: [init_hashing_seed, HASHING_SEED, MAX_OPS_PER_CALL, MAX_OPS_PER_TICK, MAX_CALLS_PER_TICK, loading_engine, runtime_engine, RuntimeHost, BuilderState, EffectSink, register_effects, Flags, register_flags, HostRegistry, collect_host_fn_descriptors]
-      tests: [cargo test, src/world/script/tests.rs, src/world/script/engine_tests.rs, src/world/script/effects_tests.rs, src/world/script/flags_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/script/tests.rs, crates/phoenix-simulation/src/world/script/engine_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/world/script/flags_tests.rs]
     evidence:
       - kind: test
-        reference: "world::script::tests::init_hashing_seed_is_idempotent, budgets_are_ordered_safety_limits (src/world/script/mod.rs)"
+        reference: "world::script::tests::init_hashing_seed_is_idempotent, budgets_are_ordered_safety_limits (crates/phoenix-simulation/src/world/script/mod.rs)"
         summary: "The seed initialiser is idempotent under the `Once` guard, and the fixed budgets are ordered safety limits (per-tick aggregate > per-call, positive call cap)."
 
   - component: scenario-script-trigger-frontend
@@ -170,11 +170,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/triggers.rs
-        - src/world/script/engine.rs
-        - src/world/trigger_registry.rs
+        - crates/phoenix-simulation/src/world/script/triggers.rs
+        - crates/phoenix-simulation/src/world/script/engine.rs
+        - crates/phoenix-simulation/src/world/trigger_registry.rs
       symbols: [WorldTriggerRegistry, ScriptHandlerRef, register_trigger_builders, BuilderState, ScriptTrigger, Registration, TriggerHandle, register_real_lit]
-      tests: [cargo test, src/world/script/triggers_tests.rs, src/world/script/engine_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/script/triggers_tests.rs, crates/phoenix-simulation/src/world/script/engine_tests.rs]
 
   - component: scenario-script-scheduling
     core:
@@ -194,11 +194,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/schedule.rs
-        - src/world/server.rs
-        - src/world/script_invocation.rs
+        - crates/phoenix-simulation/src/world/script/schedule.rs
+        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/script_invocation.rs
       symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks, apply_script_call, ScriptCallContext, ScriptEventTarget, invoke_effects, invoke_dialogue, prepare_invocation_tick, reset_invocation_budget]
-      tests: [cargo test, src/world/script/schedule_tests.rs, src/world/script_invocation_tests.rs, src/comms/scripted_tests.rs, src/console/comms/server_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/world/script_invocation_tests.rs, crates/phoenix-simulation/src/comms/scripted_tests.rs, crates/phoenix-simulation/src/console/comms/server_tests.rs]
     evidence:
       - kind: test
         reference: complete_script_call_applies_all_six_collections_with_clock_and_owner_context
@@ -207,7 +207,7 @@ entities:
         reference: failed_script_call_discards_all_six_effect_buffers
         summary: "A raising call exposes no effects and leaks no buffered work into the next call."
       - kind: test
-        reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (src/world/server.rs)"
+        reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (crates/phoenix-simulation/src/world/server.rs)"
         summary: "A scripted `in_seconds` effect routes through the existing tick `DelayedAction` queue rather than a parallel timer — proving the schedule seam reuses the declarative delay path."
 
   - component: scripted-entity-removal
@@ -229,10 +229,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/effects.rs
-        - src/world/script/schedule.rs
-        - src/world/dispatch.rs
-        - src/world/server.rs
+        - crates/phoenix-simulation/src/world/script/effects.rs
+        - crates/phoenix-simulation/src/world/script/schedule.rs
+        - crates/phoenix-simulation/src/world/dispatch.rs
+        - crates/phoenix-simulation/src/world/server.rs
         - assets/worlds/probe_destroy_chain.toml
         - docs/toml-authoring-guide.md
       symbols:
@@ -240,15 +240,15 @@ entities:
         - dispatch_destroy_entity
         - DestroyEntity
       tests:
-        - src/world/script/effects_tests.rs
-        - src/world/script/schedule_tests.rs
+        - crates/phoenix-simulation/src/world/script/effects_tests.rs
+        - crates/phoenix-simulation/src/world/script/schedule_tests.rs
         - cargo test
         - "cargo test --features headless --test headless_runner a_scripted_destroy"
         - "cargo test --features headless --test entity_id_minting two_instances_destroy"
         - "cargo test --features headless --test snapshot_resume an_entity_destroyed_before_the_save"
     evidence:
       - kind: test
-        reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (src/world/server.rs)"
+        reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (crates/phoenix-simulation/src/world/server.rs)"
         summary: "A script destroys group members one at a time through the LIVE trigger pipeline: the group's `OnAllDestroyed` stays silent with one of two down and fires when the LAST one goes. The negative half is what makes the positive half mean anything — a trigger that fired on the first kill would satisfy a fires-at-the-end assertion just as well."
       - kind: test
         reference: "tests/headless_runner.rs::a_scripted_destroy_chains_its_triggers_off_the_removal"
@@ -270,9 +270,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/comms.rs
+        - crates/phoenix-simulation/src/world/script/comms.rs
       symbols: [ScriptDialogueNode, ScriptDialogueResponse, read_dialogue_node, enter_node]
-      tests: [cargo test, src/world/script/comms_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/script/comms_tests.rs]
 
   - component: scenario-text-parameters
     core:
@@ -305,14 +305,14 @@ entities:
       # `symbols` for the same reason: a symbol that lives outside every declared
       # path is exactly what `missing-observed-symbol` exists to flag.
       paths:
-        - src/core/messages.rs
-        - src/objectives.rs
-        - src/world/script/comms.rs
-        - src/world/script/effects.rs
-        - src/world/config.rs
-        - src/world/dispatch.rs
-        - src/comms/content.rs
-        - src/comms/scripted.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/objectives.rs
+        - crates/phoenix-simulation/src/world/script/comms.rs
+        - crates/phoenix-simulation/src/world/script/effects.rs
+        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-simulation/src/world/dispatch.rs
+        - crates/phoenix-simulation/src/comms/content.rs
+        - crates/phoenix-simulation/src/comms/scripted.rs
         - assets/worlds/falling_skyway.toml
       symbols:
         - TEXT_PARAMS_SUFFIX
@@ -322,13 +322,13 @@ entities:
         - CommsMessage
         - CommsDialogueNode
         - ScriptDialogueNode
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/objectives_tests.rs, src/world/script/comms_tests.rs, src/world/script/effects_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/world/script/comms_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs]
     evidence:
       - kind: test
-        reference: "src/core/codec.rs::an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire"
+        reference: "crates/phoenix-simulation/src/core/codec.rs::an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire"
         summary: "The empty case pinned as a LITERAL encoded string, not as a key-absence assertion: a reader that never heard of the field sees the same bytes, in the same order. Siblings pin sorted key order for a non-empty table, the decode of a payload written before the field existed, and the absence of `body_params` from a comms message that carries none."
       - kind: test
-        reference: "src/world/script/comms.rs::a_node_fn_can_attach_params_to_its_message"
+        reference: "crates/phoenix-simulation/src/world/script/comms.rs::a_node_fn_can_attach_params_to_its_message"
         summary: "The authoring seam end to end: a node fn reads two flags into a `params` map, integers render to strings, and `project_node` carries them onto `CommsDialogueNode::body_params` unchanged. Siblings assert a paramless node materialises an empty table and that a non-scalar value raises naming the offending key."
       - kind: test
         reference: "tests/client/strings.test.js::localiseTree parameterised ids"
@@ -352,25 +352,25 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/content_ledger.rs
-        - src/world/materialization.rs
-        - src/world/server.rs
-        - src/server_app/world_setup.rs
-        - src/world/config.rs
-        - src/world/dispatch.rs
-        - src/world/script/load.rs
-        - src/world/script/validate.rs
-        - src/world/validate.rs
+        - crates/phoenix-simulation/src/content_ledger.rs
+        - crates/phoenix-simulation/src/world/materialization.rs
+        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/server_app/world_setup.rs
+        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-simulation/src/world/dispatch.rs
+        - crates/phoenix-simulation/src/world/script/load.rs
+        - crates/phoenix-simulation/src/world/script/validate.rs
+        - crates/phoenix-simulation/src/world/validate.rs
         - tests/snapshot_resume.rs
       symbols: [ScriptActivationGate, ScriptResolver, CompiledScripts, ResolvedScriptSpawnRef, resolved_script_spawn_refs, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, eager_record_world_entities_with_scripts, note_uncovered_spawn, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
-      tests: [cargo test, "cargo test --lib world::server::tests::script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload", "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content", src/content_ledger_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/world/script/load_tests.rs, src/world/script/validate_tests.rs]
+      tests: [cargo test, "cargo test --lib world::server::tests::script_activation_is_local_to_each_app_and_resets_on_a_script_free_reload", "cargo test --lib world::load::tests::activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance", "cargo test --features headless --test snapshot_resume a_save_whose_script_only_hull_template_changed_is_refused_on_content", crates/phoenix-simulation/src/content_ledger_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/world/script/load_tests.rs, crates/phoenix-simulation/src/world/script/validate_tests.rs]
 
   - component: scenario-script-editor-host
     core:
       status: implemented
       confidence: confirmed
       title: Scenario-Script Editor Authoring Host (M5)
-      summary: "Issue #983, with the registry DERIVED as of issue #1238. `authoring.rs` exposes the author-callable vocabulary as `host_fns()` — a list of `HostFn` records with signatures — and `script_diagnostics`, which compiles a `.rhai` source under the SAME loading-engine compile + top-level run the activation gate uses, so a source clean in the editor is clean at load. `host_fns()` is no longer a hand-maintained `HOST_FNS` mirror: each editor-exposed verb is declared with the `host_fn!` macro (src/world/script/registry.rs), which emits both the engine registration and its `HostFn` descriptor from one site, and `host_fns()` runs the same registration the two engines run (`collect_host_fn_descriptors`) and returns the descriptors it collected — so a descriptor cannot name a verb the engine never registered, and an exposed verb cannot be registered without being described. `bridge.rs` exports `wasm_get_script_host_fns` and `wasm_script_diagnostics` to the editor; issue #995 serves the wasm-bindgen module to the editor (the editor-side consumer is recorded in design/editor-authoring.yaml and architecture/editor-authoring.yaml)."
+      summary: "Issue #983, with the registry DERIVED as of issue #1238. `authoring.rs` exposes the author-callable vocabulary as `host_fns()` — a list of `HostFn` records with signatures — and `script_diagnostics`, which compiles a `.rhai` source under the SAME loading-engine compile + top-level run the activation gate uses, so a source clean in the editor is clean at load. `host_fns()` is no longer a hand-maintained `HOST_FNS` mirror: each editor-exposed verb is declared with the `host_fn!` macro (crates/phoenix-simulation/src/world/script/registry.rs), which emits both the engine registration and its `HostFn` descriptor from one site, and `host_fns()` runs the same registration the two engines run (`collect_host_fn_descriptors`) and returns the descriptors it collected — so a descriptor cannot name a verb the engine never registered, and an exposed verb cannot be registered without being described. `bridge.rs` exports `wasm_get_script_host_fns` and `wasm_script_diagnostics` to the editor; issue #995 serves the wasm-bindgen module to the editor (the editor-side consumer is recorded in design/editor-authoring.yaml and architecture/editor-authoring.yaml)."
     architecture:
       kind: authoring-support
       authority: authoritative
@@ -378,10 +378,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/script/authoring.rs
+        - crates/phoenix-simulation/src/world/script/authoring.rs
         - src/server/bridge.rs
       symbols: [HostFn, host_fns, ScriptDiagnostic, script_diagnostics, wasm_get_script_host_fns, wasm_script_diagnostics]
-      tests: [cargo test, src/world/script/authoring_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/script/authoring_tests.rs, src/server/bridge_tests.rs]
 
   - component: scenario-script-activation-obligations
     core:
@@ -400,12 +400,12 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/world/script/load.rs
-        - src/entities/config_cache.rs
-        - src/content_ledger.rs
+        - crates/phoenix-simulation/src/world/script/load.rs
+        - crates/phoenix-simulation/src/entities/config_cache.rs
+        - crates/phoenix-simulation/src/content_ledger.rs
       symbols: [load_world_scripts, OverlayScriptResolver]
 
-      tests: [src/world/script/load_tests.rs, src/entities/config_cache_tests.rs, src/content_ledger_tests.rs]
+      tests: [crates/phoenix-simulation/src/world/script/load_tests.rs, crates/phoenix-simulation/src/entities/config_cache_tests.rs, crates/phoenix-simulation/src/content_ledger_tests.rs]
   - component: mission-deadline-vocabulary
     core:
       status: implemented
@@ -429,13 +429,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/deadlines.rs
-        - src/world/script/deadlines.rs
-        - src/world/config.rs
-        - src/world/script/validate.rs
-        - src/world/server.rs
-        - src/console/captain/server.rs
-        - src/core/messages.rs
+        - crates/phoenix-simulation/src/world/deadlines.rs
+        - crates/phoenix-simulation/src/world/script/deadlines.rs
+        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-simulation/src/world/script/validate.rs
+        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/console/captain/server.rs
+        - crates/phoenix-model/src/messages.rs
         - gui/components/ph-deadline-list.js
         - gui/destroyer/captain.html
         - assets/worlds/probe_deadlines.toml
@@ -450,7 +450,7 @@ entities:
         - validate_deadline_handlers
         - DEADLINE_NOT_PAIRED
         - DeadlineSnapshot
-      tests: [cargo test, "cargo test --features headless --test headless_runner a_slipped_deadline", src/world/deadlines_tests.rs, src/world/script/deadlines_tests.rs, src/world/script/validate_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_slipped_deadline", crates/phoenix-simulation/src/world/deadlines_tests.rs, crates/phoenix-simulation/src/world/script/deadlines_tests.rs, crates/phoenix-simulation/src/world/script/validate_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires"
@@ -477,15 +477,15 @@ entities:
       writers: [mission-deadline-vocabulary]
     implementation:
       status: observed
-      # `src/snapshot.rs` is deliberately NOT listed. It carries this state's
+      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed. It carries this state's
       # persistence (`ScenarioState::deadlines`, and the 12 → 13 `SNAPSHOT_FORMAT`
       # bump the evidence below records), but it is a whole-payload module whose
       # own imports the scanner would attribute wholesale to this entity — see
       # the `dependencies` note. The persistence is traced through the evidence
       # and the test reference instead.
       paths:
-        - src/world/deadlines.rs
-        - src/world/server.rs
+        - crates/phoenix-simulation/src/world/deadlines.rs
+        - crates/phoenix-simulation/src/world/server.rs
       symbols:
         - DeadlineTable
         - DeadlineRecord
@@ -496,16 +496,16 @@ entities:
         - NO_DEADLINE
         - WorldContentRuntime
         - WorldScriptRuntime
-        # Named for traceability, defined in src/world/script/schedule.rs rather
+        # Named for traceability, defined in crates/phoenix-simulation/src/world/script/schedule.rs rather
         # than here: they are what this state is BUILT OVER, and a reader who
         # follows `mission-deadline-state` must land on the queue it reuses
         # rather than have to discover it.
         - PendingCallbacks
         - ScheduledCall
-      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly", "cargo test --features headless --test snapshot_resume a_dynamically_unloaded_startup_layer_stays_absent_after_resume", src/world/deadlines_tests.rs]
+      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly", "cargo test --features headless --test snapshot_resume a_dynamically_unloaded_startup_layer_stays_absent_after_resume", crates/phoenix-simulation/src/world/deadlines_tests.rs]
     evidence:
       - kind: test
-        reference: "src/world/deadlines.rs tests; tests/snapshot_resume.rs"
+        reference: "crates/phoenix-simulation/src/world/deadlines.rs tests; tests/snapshot_resume.rs"
         summary: "The pure table's scoped arm/slip/cancel/note_fired behaviour, including root and two layers reusing one local id, plus activation-relative load/unload/reload and the save round-trip. `SNAPSHOT_FORMAT` moved 12 → 13 because callback/deadline/comms origin and the ordered active-layer topology are authoritative: resume unloads bootstrap-only layers, loads missing dynamic layers in captured activation order, preserves loader ownership and declared-entity identity, then replaces captured queues without bootstrap duplicate arming."
 
   - component: commitment-vocabulary
@@ -530,14 +530,14 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/commitments.rs
-        - src/world/script/commitments.rs
-        - src/world/script/engine.rs
-        - src/world/script/schedule.rs
-        - src/world/script/comms.rs
-        - src/world/server.rs
-        - src/comms/scripted.rs
-        - src/console/comms/server.rs
+        - crates/phoenix-simulation/src/world/commitments.rs
+        - crates/phoenix-simulation/src/world/script/commitments.rs
+        - crates/phoenix-simulation/src/world/script/engine.rs
+        - crates/phoenix-simulation/src/world/script/schedule.rs
+        - crates/phoenix-simulation/src/world/script/comms.rs
+        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/comms/scripted.rs
+        - crates/phoenix-simulation/src/console/comms/server.rs
         - assets/worlds/probe_commitments.toml
       symbols:
         - Commitments
@@ -548,13 +548,13 @@ entities:
         - CommitmentOutcome
         - kept_flag
         - broken_flag
-      tests: [cargo test, "cargo test --features headless --test headless_runner a_promise_gates", src/world/commitments_tests.rs, src/world/script/commitments_tests.rs, src/world/script/engine_tests.rs, src/world/script/schedule_tests.rs, src/world/script/comms_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test headless_runner a_promise_gates", crates/phoenix-simulation/src/world/commitments_tests.rs, crates/phoenix-simulation/src/world/script/commitments_tests.rs, crates/phoenix-simulation/src/world/script/engine_tests.rs, crates/phoenix-simulation/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/world/script/comms_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag"
         summary: "`probe_commitments.toml` driven for fifteen mission seconds. ONE authored dialogue node fn is opened TWICE through the real `open_comms` pipeline: while `safe_passage` is owed it offers the response that exists only because the captain gave their word, and once it is kept that response is gone — asserted against `CommsRuntime::active_dialogues`, the node the comms pipeline actually built, rather than against anything the script says about itself. Keeping the promise writes `commitment.safe_passage.kept` and an `on_flag_set` trigger fires off it a tick later; the promise nobody kept is broken by a `[[deadline]]` handler."
       - kind: test
-        reference: "src/comms/scripted.rs::a_player_pick_records_a_promise_that_unlocks_a_later_dialogue_option"
+        reference: "crates/phoenix-simulation/src/comms/scripted.rs::a_player_pick_records_a_promise_that_unlocks_a_later_dialogue_option"
         summary: "The player-driven half the probe cannot reach: four real `RespondToMessage` picks through the live Input chain, where the promise is recorded by a player's choice and the option it unlocks is offered by a node fn running on a LATER tick against the LIVE ledger — not against the snapshot the recording handler mutated."
 
   - state: commitment-ledger-state
@@ -578,24 +578,24 @@ entities:
       writers: [commitment-vocabulary]
     implementation:
       status: observed
-      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` omits it: it is a whole-payload module whose own
       # imports the scanner would attribute wholesale to this entity. The
       # persistence (`ScenarioState::commitments`, and the 5 → 6 `SNAPSHOT_FORMAT`
       # bump the evidence below records) is traced through the evidence instead.
       paths:
-        - src/world/commitments.rs
-        - src/world/server.rs
+        - crates/phoenix-simulation/src/world/commitments.rs
+        - crates/phoenix-simulation/src/world/server.rs
       symbols:
         - CommitmentLedger
         - Commitment
         - CommitmentState
         - DuplicateCommitment
         - WorldContentRuntime
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_kept_promise", src/world/commitments_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_kept_promise", crates/phoenix-simulation/src/world/commitments_tests.rs]
     evidence:
       - kind: test
-        reference: "src/world/commitments.rs tests; tests/snapshot_resume.rs"
+        reference: "crates/phoenix-simulation/src/world/commitments.rs tests; tests/snapshot_resume.rs"
         summary: "The pure ledger's record/query/resolve-kept/resolve-broken behaviour without Bevy, including the duplicate refusal, the re-resolution no-op, and open/kept/broken/unknown never collapsing into each other; plus the save round-trip. `SNAPSHOT_FORMAT` moved 5 → 6, and here the content digest could NOT stand in for it: a promise is a runtime artifact, so an older save of the SAME world file carries the same content digest and nothing else would refuse it. Restoring it resumes a captain who has promised nothing — a plausible state rather than an obviously missing one, which is what would let a resumed scenario re-offer a word already given."
 
   - component: workforce-vocabulary
@@ -620,12 +620,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world/workforce.rs
-        - src/world/config.rs
-        - src/world/dispatch.rs
-        - src/world/server.rs
-        - src/world/script/effects.rs
-        - src/infrastructure/condition.rs
+        - crates/phoenix-simulation/src/world/workforce.rs
+        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-simulation/src/world/dispatch.rs
+        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/script/effects.rs
+        - crates/phoenix-simulation/src/infrastructure/condition.rs
         - assets/worlds/probe_strike_min.toml
         - assets/worlds/falling_skyway.toml
         - assets/entities/alliance_destroyer.toml
@@ -637,7 +637,7 @@ entities:
         - disposition_flag
         - arm_mission_workforces
         - InfrastructureConfig
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled", src/world/workforce_tests.rs, src/world/script/effects_tests.rs, src/infrastructure/condition_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled", crates/phoenix-simulation/src/world/workforce_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/infrastructure/condition_tests.rs]
     evidence:
       - kind: test
         reference: "tests/snapshot_resume.rs::a_settled_strike_stays_settled_across_a_resume"
@@ -666,15 +666,15 @@ entities:
       writers: [workforce-vocabulary]
     implementation:
       status: observed
-      # `src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` and `commitment-ledger-state` omit it: it is a
       # whole-payload module whose own imports the scanner would attribute
       # wholesale to this entity. The persistence (`ScenarioState::workforce`,
       # and the 6 → 7 `SNAPSHOT_FORMAT` bump the evidence below records) is
       # traced through the evidence instead.
       paths:
-        - src/world/workforce.rs
-        - src/world/server.rs
+        - crates/phoenix-simulation/src/world/workforce.rs
+        - crates/phoenix-simulation/src/world/server.rs
       symbols:
         - WorkforceRegister
         - WorkforceRecord
@@ -682,8 +682,8 @@ entities:
         - DISPOSITION_MIN
         - DISPOSITION_MAX
         - WorldContentRuntime
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike", src/world/workforce_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike", crates/phoenix-simulation/src/world/workforce_tests.rs]
     evidence:
       - kind: test
-        reference: "src/world/workforce.rs tests; tests/snapshot_resume.rs"
+        reference: "crates/phoenix-simulation/src/world/workforce.rs tests; tests/snapshot_resume.rs"
         summary: "The pure register's arm/read/settle/re-strike/disposition behaviour without Bevy, including the arm-twice no-op that stops a resumed mission re-arming, the unknown-side-is-at-work default, and the two facts moving independently. Plus the save round-trip: `SNAPSHOT_FORMAT` moved 6 → 7 because the content digest could NOT stand in even though a strike IS authored — `RawWorld` sets no `deny_unknown_fields`, so an older build loads a `[[workforce]]`-authoring world, drops the table, and writes a save of the same files with the same content digest and no dispute in it. Restoring that arms an empty register and every structure the strike was gating reads as worked."

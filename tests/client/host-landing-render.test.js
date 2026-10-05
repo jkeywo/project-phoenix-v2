@@ -1244,20 +1244,20 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     const doc = landingDoc();
     const [h, calls] = hooks();
     renderHostLanding(doc, peerVm(), t, h);
-    doc.getElementById('landing-join-code').value = 'quarking';
+    doc.getElementById('landing-join-code').value = 'quark';
     doc.getElementById('landing-join-submit').click();
-    expect(calls.join).toEqual([['boot-game-master', 'quarking']]);
+    expect(calls.join).toEqual([['boot-game-master', 'quark']]);
 
     // The other route, same field, same button: what differs is the descriptor
     // the hook is handed, which is what the caller dispatches on.
     renderHostLanding(doc, clientVm(), t, h);
     doc.getElementById('landing-join-submit').click();
-    expect(calls.join[1]).toEqual(['open-client-page', 'quarking']);
+    expect(calls.join[1]).toEqual(['open-client-page', 'quark']);
   });
 
   it('reports nonsense too, because judging a code is not this module`s job', () => {
     // The exact sibling of "reports every click, including the inert entries":
-    // whether eight letters are a code is `landingJoinAttempt`'s answer, and a
+    // whether five letters are a code is `landingJoinAttempt`'s answer, and a
     // second judgement here would be a place for the two to disagree.
     const doc = landingDoc();
     const [h, calls] = hooks();
@@ -1272,9 +1272,9 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
     const [h, calls] = hooks();
     renderHostLanding(doc, peerVm(), t, h);
     const field = doc.getElementById('landing-join-code');
-    field.value = 'QUARKING';
+    field.value = 'QUARK';
     field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(calls.join).toEqual([['boot-game-master', 'QUARKING']]);
+    expect(calls.join).toEqual([['boot-game-master', 'QUARK']]);
     // ...and only on Return: every other key is somebody typing.
     field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'A', bubbles: true }));
     expect(calls.join).toHaveLength(1);
@@ -1309,16 +1309,16 @@ describe('renderHostLanding — the join-code stage (issue #1364)', () => {
 
   it('never writes the field`s value, so a refusal does not delete what was typed', () => {
     // The one thing this renderer deliberately does not own. A render that
-    // cleared the value would take away the eight letters at the exact moment
+    // cleared the value would take away the five letters at the exact moment
     // the operator needs to see what is wrong with them.
     const doc = landingDoc();
     const field = doc.getElementById('landing-join-code');
     renderHostLanding(doc, peerVm(), t);
-    field.value = 'QUARKING';
+    field.value = 'QUARK';
     renderHostLanding(doc, peerVm('client.join.error_denied'), t);
-    expect(field.value).toBe('QUARKING');
+    expect(field.value).toBe('QUARK');
     renderHostLanding(doc, clientVm(), t);
-    expect(field.value).toBe('QUARKING');
+    expect(field.value).toBe('QUARK');
   });
 
   it('empties every join sentence when the stage closes', () => {

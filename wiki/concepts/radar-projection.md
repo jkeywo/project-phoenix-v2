@@ -2,7 +2,7 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
-sources: [src/ship/continuation.rs, src/snapshot.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, src/gm_projection.rs, src/gui/radar.rs, src/radar.rs, src/radar_config.rs, src/entities/tags.rs, src/console/weapons/blackboard.rs, CONTEXT.md]
+sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/radar.rs, crates/phoenix-simulation/src/radar_config.rs, crates/phoenix-simulation/src/entities/tags.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, CONTEXT.md]
 updated: 2026-09-07
 ---
 
@@ -13,24 +13,24 @@ implementation:
 
 - phone consoles use the pure-JS `buildBlips()` family in
   `gui/console-state.js` over authoritative entity and blackboard snapshots;
-- the Bevy viewscreen uses `project_radar_entity` in `src/gui/radar.rs`;
+- the Bevy viewscreen uses `project_radar_entity` in `crates/phoenix-presentation/src/gui/radar.rs`;
 - the rendererless GM page projects deterministic semantic contacts and
   geometry Regions through the local Host Channel and adapts them to
   `ph-navigation-map` inspect mode;
-- `src/radar.rs` now owns only the pure ship-local phaser range/forward-arc
+- `crates/phoenix-simulation/src/radar.rs` now owns only the pure ship-local phaser range/forward-arc
   readiness check used by the weapons server.
 
 The client remains pure JavaScript and does not call the Rust projection.
 
 Saved target memory is separate from those published projections. The Ship-owned
-`ControlState` conversion in `src/ship/continuation.rs` preserves Combat Lock,
-Science Target and last attacker, including cleared targets; `src/snapshot.rs`
+`ControlState` conversion in `crates/phoenix-simulation/src/ship/continuation.rs` preserves Combat Lock,
+Science Target and last attacker, including cleared targets; `crates/phoenix-simulation/src/snapshot.rs`
 retains entity matching and the compatibility re-export. Live AI consumers still
 read the published viewscreen facts.
 
 ## GM inspect mode
 
-`src/gm_projection.rs` builds one absolute, UUID-sorted and deduplicated view
+`crates/phoenix-simulation/src/gm_projection.rs` builds one absolute, UUID-sorted and deduplicated view
 from the GM peer's local deterministic ECS. It classifies player/NPC ships,
 structures (including the canonical `structure` tag, Stations,
 infrastructure, and `StaticPointDefence`), hazards, inert Regions, asteroid
@@ -110,7 +110,7 @@ Entity TOML `[radar_appearance].icon` flows into `EntitySnapshot.radar_icon` whe
 
 This means an empty `navChartShows` is **not** a no-op for Navigation — it makes the outer filter drop every non-objective entity, leaving the chart blank. Tactical and Sensors only have the inner filter, where an empty `shows` falls through and shows everything.
 
-`navChartShows` / `navChartSelects` / `navChartRange` live on `ShipClientConfig` in `src/core/messages.rs`, sourced from `[navigation_console.system_chart]` in the per-hull ship TOML (e.g. `assets/entities/alliance_battleship.toml`). The client has one store: `gui/sim-state.js` (`window.simState`), applied from `Welcome` and each `SimSnapshot`. The per-console builders read straight from that store. `gui/dirty-consoles.js` tracks which consoles changed each tick and `gui/client-router.js` drives the fan-out, calling `window.buildConsoleState(consoleName, simState)` per dirty console.
+`navChartShows` / `navChartSelects` / `navChartRange` live on `ShipClientConfig` in `crates/phoenix-model/src/messages.rs`, sourced from `[navigation_console.system_chart]` in the per-hull ship TOML (e.g. `assets/entities/alliance_battleship.toml`). The client has one store: `gui/sim-state.js` (`window.simState`), applied from `Welcome` and each `SimSnapshot`. The per-console builders read straight from that store. `gui/dirty-consoles.js` tracks which consoles changed each tick and `gui/client-router.js` drives the fan-out, calling `window.buildConsoleState(consoleName, simState)` per dirty console.
 
 Tactical radar blips follow the same single-store path: the server publishes them into the ship's `tactical-radar` blackboard, `simState` carries the blackboards, and `buildWeaponsConsoleState` in `gui/console-state.js` reads `state.blackboards['tactical-radar'].blips` as the authoritative source (falling back to a local `buildBlips()` projection only when the blackboard carries none). It **copies** that array rather than aliasing it: the science marker and waypoint are appended to the result, and the store's array is replaced only when a `BlackboardUpdate` arrives.
 

@@ -2,7 +2,7 @@
 title: Player
 type: entity
 tags: [player, session, identity, station, reconnect]
-sources: [src/core/messages.rs, src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/gm_roster.rs]
+sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/gm_roster.rs]
 updated: 2026-08-31
 ---
 

@@ -170,7 +170,7 @@ All current event logic is Rhai. The former declarative `[[trigger]]` and `[[com
 
 At load time the script registers event-to-handler relationships such as world loaded, timer, deadline, flag set/cleared, entity destroyed or attacked, hull threshold, waypoint reached, and group destroyed. At runtime the host calls named handlers with a bounded context. Handlers inspect supported flags, counters, evidence, deadlines, commitments, and dialogue state, then buffer supported effects. Scripts cannot mutate arbitrary Bevy state.
 
-Common effect families include objectives; comms and dialogue; flags and counters; spawn/despawn and group membership; faction relations; infrastructure and civilian orders; deadlines and delayed calls; evidence, dossiers, and commitments; world-layer load/unload; and explicit victory or defeat. Crew-owned tractor, dock, umbilical and repair systems are driven through admitted controls and objective directives rather than script-started external-operation effects. The exact callable signatures live in `src/world/script/authoring.rs` and must be checked rather than inferred from an old example.
+Common effect families include objectives; comms and dialogue; flags and counters; spawn/despawn and group membership; faction relations; infrastructure and civilian orders; deadlines and delayed calls; evidence, dossiers, and commitments; world-layer load/unload; and explicit victory or defeat. Crew-owned tractor, dock, umbilical and repair systems are driven through admitted controls and objective directives rather than script-started external-operation effects. The exact callable signatures live in `crates/phoenix-simulation/src/world/script/authoring.rs` and must be checked rather than inferred from an old example.
 
 ## Scenario structure
 
@@ -232,7 +232,7 @@ Each scenario records a possible range of `0–Max Players per selected ship` an
 
 ## Canonical sources
 
-- `src/world/config.rs`, `src/world/validate.rs`, and `src/world/script/` — live world and Rhai contracts.
+- `crates/phoenix-simulation/src/world/config.rs`, `crates/phoenix-simulation/src/world/validate.rs`, and `src/world/script/` — live world and Rhai contracts.
 - `assets/worlds/combat_test.toml` and `assets/worlds/falling_skyway.toml` — shipped examples.
 - `assets/scenarios.toml` and `assets/scenarios.demo.toml` — catalogues.
 - `pasm/spec/architecture/world-files.yaml` and `pasm/spec/architecture/scenario-scripting.yaml` — intended architecture and decisions.

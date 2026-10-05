@@ -8,6 +8,26 @@ For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/c
 
 ---
 
+## Workspace layers
+
+Read [wiki/concepts/reusable-layers.md](wiki/concepts/reusable-layers.md) before
+choosing a package to edit. `phoenix-runtime`, `phoenix-transport` and
+`phoenix-platform` are reusable and must not depend on Phoenix game packages.
+`phoenix-model`, `phoenix-content`, `phoenix-simulation` and
+`phoenix-presentation` own the game; root `src/` composes hosts and keeps
+compatibility paths. Browser mechanisms live in `packages/transport` and
+`packages/session`, with Phoenix adapters in `gui/`.
+
+Use `cargo test -p <owner>` while iterating. Prove simulation independence with
+`cargo test -p phoenix-simulation --lib --no-default-features` and
+`node scripts/check-layers.mjs --dependency-tree`; a workspace build can unify
+features and hide an accidental renderer dependency. Run `npm run layers:check`
+when changing manifests or JavaScript imports. The independent native/WASM grid
+example is documented in [examples/grid/README.md](examples/grid/README.md).
+Existing final integration gates below still apply.
+
+---
+
 ## Wiki — Read It and Maintain It
 
 This repo carries a **small LLM-maintained wiki** under `wiki/`. It indexes current code-oriented concepts and entities. Treat it as the orientation index, not as an archive of historical PRDs or design drafts.
@@ -60,7 +80,7 @@ a build-lock wait is not a reason to launch another copy of the same check.
 When reusing a `CARGO_TARGET_DIR` across worktrees, force this project's library
 to rebuild after switching source trees. Its shared `rlib`/`cdylib` output can
 otherwise be reused when the incoming files have older timestamps. Refresh
-`src/lib.rs`'s modification time without changing its bytes, then verify the
+`crates/phoenix-simulation/src/lib.rs`'s modification time without changing its bytes, then verify the
 library build and dependency record match the intended source. A newly compiled
 test executable alone does not establish that its linked library is current.
 
@@ -114,15 +134,15 @@ uv run pasm traceability                       # CI: pasm job, report (still exi
 # CI runs these independently and requires them for deployment. Locally, run
 # the relevant configuration when changing viewer/demo/build setup, or each
 # once when verifying the full matrix. Keep local Cargo commands sequential.
-cargo test --lib --features viewer viewer::     # CI: viewer-test; must run >0 tests
+cargo test -p phoenix-presentation --lib --features viewer viewer::     # CI: viewer-test; must run >0 tests
 # PowerShell demo invocation (restore any pre-existing value afterward):
 # $savedDemoBuild = $env:PHOENIX_DEMO_BUILD
 # try {
 #   $env:PHOENIX_DEMO_BUILD = 'true'
-#   cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+#   cargo test -p phoenix-simulation --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 # } finally { $env:PHOENIX_DEMO_BUILD = $savedDemoBuild }
 # Bash equivalent (CI: demo-test):
-PHOENIX_DEMO_BUILD=true cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+PHOENIX_DEMO_BUILD=true cargo test -p phoenix-simulation --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 cargo build --features host --bin phoenix-host # CI: tooling-build
 cargo build --features capture --bins          # CI: tooling-build
 
@@ -183,7 +203,7 @@ cargo build --release --features host --bin phoenix-host
 # the viewscreen on an empty GamePhase::Lobby holding the merged scenario
 # catalogue and ingests a world only once a SelectScenario + SelectPlayerShip
 # pair has been arbitrated — the same first-valid-wins rule server.html runs in
-# gui/scenario-arbiter.js, transcribed into the pure src/lobby/scenario_arbiter.rs.
+# gui/scenario-arbiter.js, transcribed into the pure crates/phoenix-simulation/src/lobby/scenario_arbiter.rs.
 # --world is that same decision made at the prompt, and the two are refused
 # together. A BARE invocation (neither flag) is still PRD #855's delivery-only
 # host, unchanged.
@@ -444,7 +464,7 @@ cargo build --release --features host --bin phoenix-host
 #   asset_preload}, server_app::world_setup, world::server) has NO filesystem
 #   fallback and answers Default on a miss, so a configless boot would run a
 #   plausible mission with the wrong numbers.
-#   src/entities/template_preload.rs is the one strict populate every native
+#   crates/phoenix-simulation/src/entities/template_preload.rs is the one strict populate every native
 #   process shares.
 #   THE CREW PATH IS TWO LEGS, and a host may run either or both.
 #   DIRECT LAN ACCEPT (issue #1353) is ON by default whenever the host serves a
@@ -473,9 +493,9 @@ cargo build --release --features host --bin phoenix-host
 #     reconnection, a per-source cap on sockets that never join, and a global
 #     circuit-breaker that ramps a delay onto every lookup answer. All of it is
 #     SOFT — the bucket refills, refusals carry Retry-After — because a whole
-#     crew can share one address. The authored suffix is EIGHT letters for the
-#     same reason (25^8 ≈ 1.5e11; five was walkable in ~35 min), and all three
-#     readers of assets/join/join-codes.toml inherit that. Every STATE a joiner
+#     crew can share one address. The authored suffix is FIVE letters
+#     (25^5 = 9,765,625 combinations), and all three readers of
+#     assets/join/join-codes.toml inherit that. Every STATE a joiner
 #     socket can be in also has a clock, which is what stops a dropped phone
 #     holding a seat for the whole mission: un-joined on JOIN_DEADLINE, joined
 #     but never attached on attach_deadline, attached on WebSocket ping/pong.
@@ -508,7 +528,7 @@ cargo build --release --features host --bin phoenix-host
 #   --client-dir is version-pinned at STARTUP against the manifest being served:
 #     a bundle built for other content refuses to start, before the port is
 #     taken. /host/manifest.json pins a running client's protocol per request.
-#   The catalogue it publishes is the browser host's own — src/delivery/payload.rs
+#   The catalogue it publishes is the browser host's own — crates/phoenix-simulation/src/delivery/payload.rs
 #     holds the single field list that wasm_get_scenario_catalog and the JSON
 #     encoder both walk, so the two surfaces cannot drift.
 
@@ -562,7 +582,7 @@ cargo test --features host --test native_relay_live -- --ignored --nocapture
 # public deploy, from a laptop (Node 20, no npm install) or by dispatching the
 # `Check Deploy Headers` workflow. Never a push gate — the offline half of the
 # contract is already covered by tests/client/deploy-headers.test.js and
-# src/delivery/http.rs's unit tests.
+# crates/phoenix-simulation/src/delivery/http.rs's unit tests.
 node scripts/check-deploy-headers.mjs https://pp-demo.kiwigamedesign.co.uk/
 #   The rules ship as deploy/cloudflare/_headers, installed into dist/ by
 #   deploy-demo.yml. NO TWO PATTERNS IN THAT FILE MAY SET THE SAME HEADER —
@@ -610,13 +630,13 @@ TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 
 # Public demo build: same command plus PHOENIX_DEMO_BUILD=true, which is a
-# SEPARATE flag (src/build_flags.rs, option_env!) that hides the host settings
+# SEPARATE flag (crates/phoenix-simulation/src/build_flags.rs, option_env!) that hides the host settings
 # cog's Debug/Cheat tab. Only .github/workflows/deploy-demo.yml sets it —
 # ci.yml's GitHub Pages deploy is the dev host and keeps its debug tooling.
 # Since #940 the same variable ALSO reaches the compiler as a cfg: build.rs
 # turns it into `phoenix_demo_build`, which DELETES five things from a demo
 # binary rather than merely refusing them —
-#   - the god-mode cheat route (src/command_admission/debug_route.rs),
+#   - the god-mode cheat route (crates/phoenix-simulation/src/command_admission/debug_route.rs),
 #   - ClientMessage::ToggleDebugFlag and its drain,
 #   - ClientMessage::TogglePause and its drain, and
 #   - the host mod-pack upload export, `wasm_add_mod_pack` (PRD #855), and
@@ -643,12 +663,12 @@ node scripts/build-client.mjs
 # The client page has no WASM to bake anything into, so it learns the
 # flag from the `phoenix-build-demo` meta tag the deploy workflow stamps.
 # The literal both halves compare against lives in ONE place —
-# src/demo_build_value.rs, `include!`d by build.rs and src/build_flags.rs —
+# crates/phoenix-simulation/src/demo_build_value.rs, `include!`d by build.rs and crates/phoenix-simulation/src/build_flags.rs —
 # because a build script cannot `use` the crate it builds and two copies
 # could only diverge in a build nothing but deploy-demo.yml produces.
 
 # The demo cfg compiled and tested (ci.yml's "demo-build gate tests" step):
-PHOENIX_DEMO_BUILD=true cargo test --lib -- \
+PHOENIX_DEMO_BUILD=true cargo test -p phoenix-simulation --lib -- \
   build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 # deploy-demo.yml runs no tests, so without this step nothing in the repo ever
 # compiles a `#[cfg(phoenix_demo_build)]` body. Run it after touching the gate.
@@ -680,7 +700,7 @@ npx playwright test comms-visiting-station     # ONE feature's deep specs
 # Captures are compared against committed baselines in perf/baselines/*.ron.
 # ONE of the four scenarios gates: `assets`, because bytes on disk and counts
 # in authored TOML are a function of the checkout rather than of the machine.
-# The rule for the others is in src/perf/mod.rs; the short version is that
+# The rule for the others is in crates/phoenix-simulation/src/perf/mod.rs; the short version is that
 # wall-clock on a shared runner stays non-gating until post-demo.
 cargo run --release --features perf --bin phoenix-perf -- assets --capture target/perf/assets.json
 cargo run --release --features perf --bin phoenix-perf -- mesh   --capture target/perf/mesh.json
@@ -700,7 +720,7 @@ cargo run --release --features perf --bin phoenix-perf -- adopt --artifact targe
 git diff perf/baselines
 #   Adoption moves the numbers and keeps the judgement: statistics, tolerances
 #   and header prose survive. Write commentary in the HEADER — the RON value
-#   below it is regenerated. See src/perf/baseline.rs.
+#   below it is regenerated. See crates/phoenix-simulation/src/perf/baseline.rs.
 
 # CI topology: .github/workflows/ci.yml is authoritative for commands and
 # dependencies; the local gate commands are listed once at the top of this
@@ -874,13 +894,13 @@ docs/           — Draft design notes (numbered).
 
 ## Key Constraints & Rules
 
-1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: PRD #116's own save path, which does not exist yet. The module issue #862 actually created is **`src/snapshot.rs`**, and it is deliberately *not* that exception: a world snapshot is written as RON inside `vellum-save`'s envelope, so it imports no `serde_json` at all. If #116 ever lands a JSON save, it needs its own line here rather than inheriting this one.)
+1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: PRD #116's own save path, which does not exist yet. The module issue #862 actually created is **`crates/phoenix-simulation/src/snapshot.rs`**, and it is deliberately *not* that exception: a world snapshot is written as RON inside `vellum-save`'s envelope, so it imports no `serde_json` at all. If #116 ever lands a JSON save, it needs its own line here rather than inheriting this one.)
 2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens are the identity system — rendezvous peer ids and DataChannels are ephemeral. A token is **32 lowercase hex characters** (`crypto.getRandomValues(new Uint8Array(16))`, not a UUIDv4) held **primarily in `sessionStorage`**, so two console tabs on one desktop are two distinct players; `localStorage` holds a *persistent* copy that the first/only tab adopts, so one phone reconnects onto its station after a full browser restart. The resolution rule is the pure `decideToken()` in `gui/session-token.js`, backed by a `phoenix-live-tabs` liveness registry with a 2 s heartbeat and a 6 s TTL. Reserved token shapes (`__local_console__`, the `ai:` prefix) are refused at the network edge in `server.html` *and* in `lobby/handler.rs`.
 3. **Client is pure JS.** No client-side Rust/WASM, no new Rust glue for the client. Client state is built by pure `gui/*.js` modules (Vitest-tested); console UIs are per-console HTML iframes.
 4. **Captain authority.** Only the player at `CaptainChair` can set Red Alert (`SetRedAlert { active }`). Game start is collective `SetReady` auto-start, not a captain-only command.
 5. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console access derives from the station + `ShipConfig`. On disconnect the station keeps its holder and flips to the `Backfill` rating (AI operates its systems) until reconnect or a new claim.
 6. **Humans and AI are symmetric.** Both issue `ControlSystem { target: SystemId, payload }`; admission strips source identity. Never branch on human-vs-AI downstream of admission. The command log (issue #898) keeps this at the *recording* site too: it records everything the network boundary admits, without asking what a token looks like. What stays out of it is what a replay re-derives — the in-process AI emissions of `emit_ai_command`, which never cross that boundary.
-7. **AI decisions run on fixed ticks, not frames.** The whole simulation advances on a fixed logical tick (issue #895): `SimSet` is configured in Bevy's `FixedUpdate` at the TOML-authored `[global] sim_tick_hz` (default 60 Hz), counted by `SimTick` (`src/sim_tick.rs`). Helm commands apply the tick they are admitted (`AdmittedCommands` is cleared and refilled at admission each tick). **Every** AI policy host — the six per-axis helm systems, shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection, Captain, Sensors — runs under `run_if` on the one shared cadence in `src/ai/cadence.rs`, derived from the tick count as `sim_tick_hz / ai_tick_hz` logical ticks per decision (default 30 Hz; the slower `ai_snapshot_hz` cadence is a further whole multiple; both ratios are validated at world load), never once per rendered frame and never off a wall clock. An ungated sim system now runs once per *logical tick* — still gate deciders that must run slower. Never gate a decider inside its own body with an `Option<Res<_>>` that falls back to running every tick: every bare-`App` fixture takes that arm, so the shipped cadence ends up covered by no test at all (issue #889). **A command applies on the tick it is STAMPED for, and that tick travels with it (issues #898, #1116).** A logged command carries the tick it applies on; `command_admission::log::CommandDelay` is the gap between admission and that tick.
+7. **AI decisions run on fixed ticks, not frames.** The whole simulation advances on a fixed logical tick (issue #895): `SimSet` is configured in Bevy's `FixedUpdate` at the TOML-authored `[global] sim_tick_hz` (default 60 Hz), counted by `SimTick` (`crates/phoenix-simulation/src/sim_tick.rs`). Helm commands apply the tick they are admitted (`AdmittedCommands` is cleared and refilled at admission each tick). **Every** AI policy host — the six per-axis helm systems, shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection, Captain, Sensors — runs under `run_if` on the one shared cadence in `crates/phoenix-simulation/src/ai/cadence.rs`, derived from the tick count as `sim_tick_hz / ai_tick_hz` logical ticks per decision (default 30 Hz; the slower `ai_snapshot_hz` cadence is a further whole multiple; both ratios are validated at world load), never once per rendered frame and never off a wall clock. An ungated sim system now runs once per *logical tick* — still gate deciders that must run slower. Never gate a decider inside its own body with an `Option<Res<_>>` that falls back to running every tick: every bare-`App` fixture takes that arm, so the shipped cadence ends up covered by no test at all (issue #889). **A command applies on the tick it is STAMPED for, and that tick travels with it (issues #898, #1116).** A logged command carries the tick it applies on; `command_admission::log::CommandDelay` is the gap between admission and that tick.
 
   - **A lone host runs at `0`**, so the apply tick *is* the admission tick and "helm commands apply the tick they are admitted" holds exactly as it always did. Nothing in single-player play changed.
   - **A host in a FLEET runs at the mission's authored `[global] command_delay_ticks`** (default 6 — 100 ms at 60 Hz; validated at world load like the tick ratios beside it). Issue #1116 is the deliberate amendment this rule always said a non-zero delay would be, and it is a change of *value*, not of plumbing: the tick is still written on the command, still the key the future-tick queue drains on, and still the tick the log records. The delay is what buys agreement — every host has every peer's input for tick *T* before it simulates *T*, and a host that does not withholds the tick honestly (`Time<Virtual>` paused, so the tick never begins) rather than speculating.

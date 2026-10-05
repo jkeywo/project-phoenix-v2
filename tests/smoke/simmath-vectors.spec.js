@@ -1,6 +1,6 @@
 // Issue #909 — the browser half of the native↔wasm libm proof.
 //
-// `src/simmath_vectors.rs` runs the same deterministic vector battery
+// `crates/phoenix-simulation/src/simmath_vectors.rs` runs the same deterministic vector battery
 // (native, in `cargo test`) and the wasm build (here) through every
 // `crate::simmath` function *and* through the `nalgebra`/`glam` dependency
 // probes, folding every (function, input, output) tuple into one canonical
@@ -21,7 +21,7 @@
 import { test, expect, waitForWasmReady } from './fixtures';
 
 // Keep these in lockstep with the two `const`s in
-// `src/simmath_vectors.rs::tests` — see that file's doc comment on
+// `crates/phoenix-simulation/src/simmath_vectors.rs::tests` — see that file's doc comment on
 // `EXPECTED_DIGEST` for the re-derivation procedure if either changes.
 const EXPECTED_DIGEST = 'bbff93332c3b937e';
 const EXPECTED_CASE_COUNT = 1300;

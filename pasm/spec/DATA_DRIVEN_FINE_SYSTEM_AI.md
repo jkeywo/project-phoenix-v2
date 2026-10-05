@@ -398,7 +398,7 @@ same tick.
 AI uses an authoritative deterministic fixed-rate base tick aligned with
 Helm's control rhythm. Since issue #889 (`3d21957d`) there is exactly ONE such
 tick and every AI decider is on it: `AiTickTimer` / `AiTickReady` in
-`src/ai/cadence.rs`, authored as `[global] ai_tick_hz` (default 30 Hz, with the
+`crates/phoenix-simulation/src/ai/cadence.rs`, authored as `[global] ai_tick_hz` (default 30 Hz, with the
 pre-#889 `ai_helm_tick_hz` key kept as a serde alias). The slower cadence that
 Captain, Sensors and the world-snapshot rebuild ride is **derived** from the
 base as a whole number of base ticks rather than kept as a second clock, and a
@@ -431,7 +431,7 @@ point in the tick. That guarantee comes from **set ordering, not from a separate
 snapshot type**: every system writes its own blackboard exactly once per tick in
 `SimSet::Publish`, ship-wide aggregators run strictly after it in
 `SimSet::PublishAggregate`, and any consumer ordered earlier therefore reads the
-values written on the previous tick (`src/sim_sets.rs`). A literal snapshot
+values written on the previous tick (`crates/phoenix-simulation/src/sim_sets.rs`). A literal snapshot
 object is not required and is not planned; demanding one would be a rewrite for
 no behavioural gain. Where a host must read a live resource because the
 same-tick reading is the correct one — the torpedo in-flight count is the

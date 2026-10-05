@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Grid — reusable layers example</title>
+<style>
+body{max-width:48rem;margin:3rem auto;padding:0 1rem;background:#18212a;color:#edf4fa;font:18px system-ui}input,button{font:inherit;padding:.55rem;margin:.3rem}canvas{display:block;width:min(90vw,400px);height:auto;margin:1rem 0;border:1px solid #778}label{display:block}#status{min-height:2em}button:focus-visible{outline:3px solid #ffc857}
+</style>
+<h1>Grid</h1><p>Move the shared square. Host here or join a native host with its code.</p>
+<label>Rendezvous <input id="service" value="http://127.0.0.1:8788"></label>
+<button id="host">Host in this browser</button>
+<label>Join code <input id="code" autocomplete="off"></label><button id="join">Join</button>
+<p id="status" role="status">Choose a host or enter a code.</p>
+<canvas width="400" height="400" aria-label="Eight by eight grid"></canvas>
+<div aria-label="Movement"><button data-dx="0" data-dy="-1">↑ Up</button><button data-dx="-1" data-dy="0">← Left</button><button data-dx="1" data-dy="0">Right →</button><button data-dx="0" data-dy="1">Down ↓</button></div>
+<button id="recover">Request checkpoint</button><button id="disconnect">Disconnect</button>
+<pre id="digest"></pre><script type="module" src="app.js"></script></html>

@@ -17,9 +17,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/modifiers/power_system.rs, src/ship/continuation.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/power_system.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PowerState, capture_continuation, restore_continuation, ControlState, PolicyState, RecoveryHistory, capture_from, restore_into]
-      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", src/modifiers/power_system_tests.rs, src/ship/continuation_tests.rs]
+      tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", crates/phoenix-simulation/src/modifiers/power_system_tests.rs, crates/phoenix-simulation/src/ship/continuation_tests.rs]
 
   - component: startup-save-restore-driver
     core:
@@ -38,9 +38,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/startup_restore.rs, src/save_slots_lifecycle.rs, src/save_slots_store.rs, src/server/bridge.rs, src/lockstep/mod.rs]
+      paths: [crates/phoenix-simulation/src/startup_restore.rs, crates/phoenix-simulation/src/save_slots_lifecycle.rs, crates/phoenix-simulation/src/save_slots_store.rs, src/server/bridge.rs, crates/phoenix-simulation/src/lockstep/mod.rs]
       symbols: [StagedRestore, RestoreOutcome, RestoreFailure]
-      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js, src/startup_restore_tests.rs, src/save_slots_lifecycle_tests.rs, src/save_slots_store_tests.rs, src/server/bridge_tests.rs, src/lockstep/tests.rs]
+      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js, crates/phoenix-simulation/src/startup_restore_tests.rs, crates/phoenix-simulation/src/save_slots_lifecycle_tests.rs, crates/phoenix-simulation/src/save_slots_store_tests.rs, src/server/bridge_tests.rs, crates/phoenix-simulation/src/lockstep/tests.rs]
 
   - component: authoritative-state-digest-boundary
     core:
@@ -49,8 +49,8 @@ entities:
       title: Authoritative-State Digest Boundary
       summary: The decided, recorded boundary for a future cross-instance authoritative-state digest (issue #894, parent #849) — which types are in the fold, the order they fold in, how floats canonicalise, and what a digest's own type-shape pinning constraint means for this repository. No digest is computed here; this slice is the record a later implementation is checked against, and the enforcement test (below) is what keeps the record honest as new state is added.
       rationale:
-        - "[ai] This issue authors no new classification vocabulary for WHAT is in scope. `pasm/spec/architecture/` already carries the `classification: authoritative` vocabulary (`derived`, `replicated`, `local`, `ephemeral`, `observational`, `local-view`, `player-knowledge`, `authored` for the rest) across 113 `state` entities, 73 of them authoritative — reviewed and meaning what this record needs. A second, bespoke list would drift against the first the day either one moved. `EntitySnapshot` (`src/core/messages.rs`) is the tempting shortcut and is wrong: it carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored presentation, not authoritative state — which is why AC5's reviewer table below states the rejection explicitly rather than leaving it to be re-discovered."
-        - "The one vocabulary GAP: no existing classification term means 'structurally empty at the fold point'. `InterSystemQueue` (`inter-system-message-state`, owned by `src/core/messages.rs`, cleared every tick by `clear_inter_system_queue` in `command_admission::mod` before `SimSet::Input`) is authoritative in the existing sense — it is real inter-system-message state, not derived or presentation — but by the time a digest could fold over it in `RenderInterp`, it is always empty, on every instance, deterministically. Folding it changes nothing a divergence could ever move, so it is out for a reason distinct from every existing term, and gets the one new term this issue adds: `cleared-at-fold`."
+        - "[ai] This issue authors no new classification vocabulary for WHAT is in scope. `pasm/spec/architecture/` already carries the `classification: authoritative` vocabulary (`derived`, `replicated`, `local`, `ephemeral`, `observational`, `local-view`, `player-knowledge`, `authored` for the rest) across 113 `state` entities, 73 of them authoritative — reviewed and meaning what this record needs. A second, bespoke list would drift against the first the day either one moved. `EntitySnapshot` (`crates/phoenix-model/src/messages.rs`) is the tempting shortcut and is wrong: it carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored presentation, not authoritative state — which is why AC5's reviewer table below states the rejection explicitly rather than leaving it to be re-discovered."
+        - "The one vocabulary GAP: no existing classification term means 'structurally empty at the fold point'. `InterSystemQueue` (`inter-system-message-state`, owned by `crates/phoenix-model/src/messages.rs`, cleared every tick by `clear_inter_system_queue` in `command_admission::mod` before `SimSet::Input`) is authoritative in the existing sense — it is real inter-system-message state, not derived or presentation — but by the time a digest could fold over it in `RenderInterp`, it is always empty, on every instance, deterministically. Folding it changes nothing a divergence could ever move, so it is out for a reason distinct from every existing term, and gets the one new term this issue adds: `cleared-at-fold`."
         - "[ai] Binding is the size of the actual work, not the boundary decision. 113 conceptual PASM state entities against 171 Rust components and 134 resources is a real granularity mismatch, and 73 authoritative entities across 25 `pasm/spec/architecture/*.yaml` files have had `implementation.symbols` back-filled with real Rust type names as part of this issue (see each file's `state` entries) — the artefact that makes AC5 ('is X in the digest?', answerable from the record alone) literally true rather than aspirational. A handful of back-filled entries could not name one dedicated Rust type honestly (a `thread_local!` pair, a field on a larger resource, a value composed on read rather than stored) and say so in an inline comment next to their `symbols:` list rather than inventing a type that does not exist."
         - "Cross-reference for what happens with this record once #848 exists: #849's sequencing note puts this issue before #848, so the authoritative snapshot type does not exist yet. The two lists this record settles — the fold set and the exclusion classes — become the binding specification #848's snapshot type must satisfy, rather than something #848 re-litigates."
     architecture:
@@ -72,7 +72,7 @@ entities:
       summary: The fold order a future digest must use — a structured (namespace, tick, seq) tuple compared as a tuple, never as a rendered string, with namespaces folded in one fixed declared sequence and never merged into a single sorted run.
       rationale:
         - "SORT ON THE STRUCTURED VALUE, NEVER ITS STRING RENDERING. Once IDs become tick-scoped counters (issue #907), a naive string render `\"{tick}-{seq}\"` sorts `\"10-1\"` before `\"2-1\"` — stable within one instance, identical across two instances that agree, and WRONG: fold order becomes a function of how many ticks have elapsed, silently, while every same-seed comparison still passes. The key is `(namespace, tick, seq)` compared as a tuple of numbers. The string form stays for the wire and for human debugging only; where a string key is unavoidable its rendering is zero-padded fixed-width so lexicographic and numeric order coincide — a requirement recorded here rather than assumed at the point someone needs it."
-        - "[ai] NAMESPACES FOLD IN A FIXED DECLARED SEQUENCE, NEVER MERGED. `AsteroidUuid` (`src/server_app.rs`) is a DIFFERENT namespace from `EntityUuid` (`src/entities/spawner.rs`), deliberately — the comment at `src/ai/server.rs:347` records why asteroids carry their own id rather than being back-filled onto `EntityUuid`: streamed lifecycle identity (`src/asteroids/lifecycle.rs`) is not spawner identity, and conflating them would drag the rocks into radar/networking/targeting paths that key on `EntityUuid`. So 'sort by stable world id' is underspecified without an ordering ACROSS namespaces too. The declared sequence for the fold: `EntityUuid` (all entities, in id order), then `AsteroidUuid` (all asteroids, in id order). A THIRD namespace appends to the sequence; it must never be merged into one flat sorted run across namespaces, because a merge means a new namespace reorders every id that sorts near it and invalidates every previously recorded digest, where an appended sequence only ever adds new fold positions after the existing ones. Namespace membership is part of the minted id itself, so no id can collide across namespaces and the sort key and the fold grouping come from the same value."
+        - "[ai] NAMESPACES FOLD IN A FIXED DECLARED SEQUENCE, NEVER MERGED. `AsteroidUuid` (`src/server_app.rs`) is a DIFFERENT namespace from `EntityUuid` (`crates/phoenix-simulation/src/entities/spawner.rs`), deliberately — the comment at `crates/phoenix-simulation/src/ai/server.rs:347` records why asteroids carry their own id rather than being back-filled onto `EntityUuid`: streamed lifecycle identity (`crates/phoenix-simulation/src/asteroids/lifecycle.rs`) is not spawner identity, and conflating them would drag the rocks into radar/networking/targeting paths that key on `EntityUuid`. So 'sort by stable world id' is underspecified without an ordering ACROSS namespaces too. The declared sequence for the fold: `EntityUuid` (all entities, in id order), then `AsteroidUuid` (all asteroids, in id order). A THIRD namespace appends to the sequence; it must never be merged into one flat sorted run across namespaces, because a merge means a new namespace reorders every id that sorts near it and invalidates every previously recorded digest, where an appended sequence only ever adds new fold positions after the existing ones. Namespace membership is part of the minted id itself, so no id can collide across namespaces and the sort key and the fold grouping come from the same value."
         - "NEVER ECS ENTITY HANDLE. Bevy query iteration is archetype order — stable within one process, not across two instances that spawned entities in a different order or count. `handle_collisions` (`src/server_app.rs`) already demonstrates the fix issue #896 applied for its own reason (collision resolution order determinism): it sorts `ship_query.iter()` by `(uuid, entity.index())` rather than iterating `ship_query.iter_mut()` directly, with `entity.index()` used only as a same-uuid tiebreak, never as the primary key. A digest fold must do the same for every type it walks — the ordering constraint is general, not specific to collisions."
     architecture:
       kind: design-policy
@@ -81,10 +81,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/asteroids/lifecycle.rs, src/ai/server.rs, src/server_app/components.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/server_app/components.rs]
       symbols: [EntityUuid, AsteroidUuid]
 
-      tests: [src/asteroids/lifecycle_tests.rs, src/server_app/components_interior_write_access_tests.rs]
+      tests: [crates/phoenix-simulation/src/asteroids/lifecycle_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
   - state: world-id-mint-state
     core:
       status: implemented
@@ -102,10 +102,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/world_id.rs]
+      paths: [crates/phoenix-simulation/src/world_id.rs]
       symbols: [WorldIdMint, WorldId, IdNamespace]
 
-      tests: [src/world_id_tests.rs, src/world_id_live_namespace_tests.rs]
+      tests: [crates/phoenix-simulation/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs]
   - state: npc-ai-fidelity-state
     core:
       status: implemented
@@ -119,7 +119,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/ai/server.rs, src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs]
       symbols: [AiHighFidelity, LodTransitionTimer, AiHighFidelityComponents, AiFidelityState, ai_high_fidelity_components, has_ai_high_fidelity_components]
 
   - state: runtime-entity-projection-state
@@ -135,10 +135,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/snapshot.rs]
       symbols: [TrackedEntities, TrackedEntitiesState, reconcile_runtime_entities]
 
-      tests: [src/server_app/components_interior_write_access_tests.rs, src/server_app/broadcast_publish_lifecycle_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs]
   - component: tick-scoped-id-mint
     core:
       status: implemented
@@ -165,13 +165,13 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/world_id.rs
-        - src/sim_tick.rs
-        - src/sim_rng.rs
-        - src/sim_digest.rs
+        - crates/phoenix-simulation/src/world_id.rs
+        - crates/phoenix-simulation/src/sim_tick.rs
+        - crates/phoenix-simulation/src/sim_rng.rs
+        - crates/phoenix-simulation/src/sim_digest.rs
         - clippy.toml
       symbols: [WorldId, WorldIdMint, IdNamespace, mint_id_with, sync_world_id_mint]
-      tests: [cargo test, src/world_id_tests.rs, src/world_id_live_namespace_tests.rs, src/sim_tick_tests.rs, src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world_id_tests.rs, crates/phoenix-simulation/src/world_id_live_namespace_tests.rs, crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
 
   - component: digest-float-canonicalisation-policy
     core:
@@ -190,9 +190,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/ship/physics.rs, Cargo.toml]
+      paths: [crates/phoenix-simulation/src/ship/physics.rs, Cargo.toml]
 
-      tests: [src/ship/physics_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/physics_tests.rs]
   - component: libm-shared-math-policy
     core:
       status: proposed
@@ -223,10 +223,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/sim_rng.rs]
+      paths: [crates/phoenix-simulation/src/sim_rng.rs]
       symbols: [SimRng, SimStream]
 
-      tests: [src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs]
+      tests: [crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs]
   - component: digest-render-interp-fold-point
     core:
       status: proposed
@@ -234,8 +234,8 @@ entities:
       title: Digest Fold Point — Inside the RenderInterp Bracket
       summary: A digest folds INSIDE the RenderInterp bracket — after `SimSet` has fully advanced the tick and before any frame-time interpolation of positions for smooth rendering at a variable frame rate — never at frame time itself. RenderInterp is presentation and is explicitly excluded from the fold (see the exclusion classes below); it is named here separately because, unlike an ordinary excluded UI widget, it lives directly on simulation entities and carries transform-shaped data, making it the single easiest exclusion to get wrong by accident.
       rationale:
-        - "Issue #895 settled fixed-tick simulation: `SimSet` runs in Bevy's `FixedUpdate` at the authored `sim_tick_hz`, counted by `SimTick` (`src/sim_tick.rs`). A frame at 144Hz and a frame at 30Hz both observe the SAME committed tick state between two `FixedUpdate` steps; what differs between them is how far a renderer has interpolated a transform TOWARD the next not-yet-committed tick for smooth on-screen motion. Folding at frame time would hash that interpolated, frame-rate-dependent position — two instances that agree on every simulation tick would still produce different digests purely because they render at different frame rates, which is exactly backwards for a mechanism whose entire purpose is telling two AGREEING instances apart from two DIVERGING ones."
-        - "[ai] 'RenderInterp bracket' names the point in the tick/frame relationship where the fold must sit: after the authoritative tick has fully committed (all of `SimSet` has run) and before rendering has interpolated anything derived from it. `RenderInterp` now exists in `src/server/renderer.rs` for the local cinematic hull: `FixedLast` captures committed poses, `Update` interpolates presentation, and `FixedFirst` restores the exact authoritative transform before simulation can read it. It remains explicitly outside the digest."
+        - "Issue #895 settled fixed-tick simulation: `SimSet` runs in Bevy's `FixedUpdate` at the authored `sim_tick_hz`, counted by `SimTick` (`crates/phoenix-simulation/src/sim_tick.rs`). A frame at 144Hz and a frame at 30Hz both observe the SAME committed tick state between two `FixedUpdate` steps; what differs between them is how far a renderer has interpolated a transform TOWARD the next not-yet-committed tick for smooth on-screen motion. Folding at frame time would hash that interpolated, frame-rate-dependent position — two instances that agree on every simulation tick would still produce different digests purely because they render at different frame rates, which is exactly backwards for a mechanism whose entire purpose is telling two AGREEING instances apart from two DIVERGING ones."
+        - "[ai] 'RenderInterp bracket' names the point in the tick/frame relationship where the fold must sit: after the authoritative tick has fully committed (all of `SimSet` has run) and before rendering has interpolated anything derived from it. `RenderInterp` now exists in `crates/phoenix-presentation/src/server/renderer.rs` for the local cinematic hull: `FixedLast` captures committed poses, `Update` interpolates presentation, and `FixedFirst` restores the exact authoritative transform before simulation can read it. It remains explicitly outside the digest."
     architecture:
       kind: design-policy
       authority: authoritative
@@ -243,10 +243,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/sim_tick.rs, src/sim_sets.rs, src/server/renderer.rs]
+      paths: [crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/sim_sets.rs, crates/phoenix-presentation/src/server/renderer.rs]
       symbols: [SimTick, SimSet, RenderInterp]
 
-      tests: [src/sim_tick_tests.rs, src/server/renderer_tests.rs]
+      tests: [crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-presentation/src/server/renderer_tests.rs]
   - component: digest-exclusion-classes
     core:
       status: proposed
@@ -256,10 +256,10 @@ entities:
       rationale:
         - "[ai] #1449: PendingCrewRatingChanges is host-local ingress bookkeeping (Timer), retaining only unsent station-rating requests. Accepted requests live exclusively in canonical PendingCommands; every fleet peer, including the originating ship host, applies AssignStationRating on its agreed tick. Lobby reconnect/AFK snapshots overlay ordered pending and unsent choices over live ratings before admission, preserving within-delay restoration without an early authoritative write or a second in-flight queue. Input rating requests stage until the next tick; no-fleet and new-Lobby boundaries discard unsent requests."
         - "PRESENTATION (classification: derived / local-view, or the RenderInterp bracket above). The single most dangerous exclusion on this list, because unlike a UI widget it lives on simulation entities and carries transform-shaped data that looks authoritative at a glance. Excluded: RenderInterp (frame-time interpolated transforms — see the fold-point entry above)."
-        - "BROADCAST CACHES (classification: replicated, one-directional mirrors of already-authoritative state). Excluded: `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` beside `sim_state_broadcaster` (`src/server_app/broadcast.rs`), token-keyed `LastBroadcastHull` beside its owner in `src/console/repair/visibility.rs`, `LastBroadcastBlackboards` and the per-recipient Repair projection cache `LastVisibleRepairBlackboard` beside their owner in `src/server_app/broadcast_publish.rs`, plus the Weapons publisher's `LastWeaponsUpdate` delta cache and `WeaponsUpdateFirstTick` force-first-projection latch (`src/console/weapons/blackboard.rs`). These are records of what the network publisher has sent, or whether its initial projection is armed, rather than a second copy of simulation truth; folding them would fold the network layer's own bookkeeping. The Weapons lifecycle resets `LastWeaponsUpdate` and rearms `WeaponsUpdateFirstTick` for every run, while targeted reconnect projection reads and mutates neither. Issue #1250 removed `LastBroadcastShields`: the System-holder Shields publisher has its own broadcaster cadence and does not delta-suppress authoritative snapshots."
-        - "REPLICATION REGISTRIES (classification: cache / transport bookkeeping). `BroadcastRegistry<M>` records live producer registrations and cadence timers; `ReplicationLifecycleRegistry` (`src/core/broadcast/lifecycle.rs`) records stable-keyed reset/projector function pointers populated during app build. Neither is simulation state or a replica of gameplay truth, and folding callback catalogues would make app composition rather than authoritative outcomes part of the digest."
+        - "BROADCAST CACHES (classification: replicated, one-directional mirrors of already-authoritative state). Excluded: `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` beside `sim_state_broadcaster` (`crates/phoenix-simulation/src/server_app/broadcast.rs`), token-keyed `LastBroadcastHull` beside its owner in `crates/phoenix-simulation/src/console/repair/visibility.rs`, `LastBroadcastBlackboards` and the per-recipient Repair projection cache `LastVisibleRepairBlackboard` beside their owner in `crates/phoenix-simulation/src/server_app/broadcast_publish.rs`, plus the Weapons publisher's `LastWeaponsUpdate` delta cache and `WeaponsUpdateFirstTick` force-first-projection latch (`crates/phoenix-simulation/src/console/weapons/blackboard.rs`). These are records of what the network publisher has sent, or whether its initial projection is armed, rather than a second copy of simulation truth; folding them would fold the network layer's own bookkeeping. The Weapons lifecycle resets `LastWeaponsUpdate` and rearms `WeaponsUpdateFirstTick` for every run, while targeted reconnect projection reads and mutates neither. Issue #1250 removed `LastBroadcastShields`: the System-holder Shields publisher has its own broadcaster cadence and does not delta-suppress authoritative snapshots."
+        - "REPLICATION REGISTRIES (classification: cache / transport bookkeeping). `BroadcastRegistry<M>` records live producer registrations and cadence timers; `ReplicationLifecycleRegistry` (`crates/phoenix-simulation/src/core/broadcast/lifecycle.rs`) records stable-keyed reset/projector function pointers populated during app build. Neither is simulation state or a replica of gameplay truth, and folding callback catalogues would make app composition rather than authoritative outcomes part of the digest."
         - "[ai] OUTBOXES / TELEMETRY (classification: derived, or cleared-at-fold for a queue that is provably empty at the fold point). Excluded: `SimOutbox` (outbound wire messages plus the producer-selected Snapshot/Reliable delivery class, drained once sent — folding it folds transport state, not sim state), `DamageLog` (a telemetry/balance-tracer append log, read by tooling, never read back by simulation logic that decides an outcome). Issue #1250 removed the retired `SimBroadcastTimer` with the literal-Station Shields publisher that solely owned it."
-        - "DERIVED STATE — the AI cadence latches (classification: derived). Excluded: `AiTickReady`, `AiSnapshotReady`, `AiBaseInterval`. As of issue #895 these are PURE FUNCTIONS of the tick counter (`sim_tick_hz / ai_tick_hz` logical ticks per decision, `src/ai/cadence.rs`), and the tick counter is already in the fold via `SimTick`. `AiBaseInterval` is the same family as its two latch siblings — the shared base-cadence interval `tick_ai_cadence` derives alongside them, written every tick from the same `sim_tick_hz / ai_tick_hz` ratio — so it excludes for the identical reason, not a new one. The reason code matters distinctly from 'nobody thought about it': a reviewer who sees a timer excluded with no reason given would reasonably suspect an oversight, where 'derived, and its source is already folded' says plainly that excluding it loses no information the digest could otherwise catch."
+        - "DERIVED STATE — the AI cadence latches (classification: derived). Excluded: `AiTickReady`, `AiSnapshotReady`, `AiBaseInterval`. As of issue #895 these are PURE FUNCTIONS of the tick counter (`sim_tick_hz / ai_tick_hz` logical ticks per decision, `crates/phoenix-simulation/src/ai/cadence.rs`), and the tick counter is already in the fold via `SimTick`. `AiBaseInterval` is the same family as its two latch siblings — the shared base-cadence interval `tick_ai_cadence` derives alongside them, written every tick from the same `sim_tick_hz / ai_tick_hz` ratio — so it excludes for the identical reason, not a new one. The reason code matters distinctly from 'nobody thought about it': a reviewer who sees a timer excluded with no reason given would reasonably suspect an oversight, where 'derived, and its source is already folded' says plainly that excluding it loses no information the digest could otherwise catch."
         - "[ai] TEST INFRASTRUCTURE (classification: test-infra). `TestTrace` is installed only in the disposable Workshop Test harness, projects bounded read-only execution evidence through its private TestStatus bridge, and is never restored into or read by an authoritative mission."
         - "CLEARED-AT-FOLD (the one new term this issue adds; not an existing classification value). `InterSystemQueue` (`inter-system-message-state`) is real authoritative inter-system-message state — not derived, not a cache, not presentation — but `clear_inter_system_queue` (`command_admission::mod`) empties it every tick before `SimSet::Input`, so by the `RenderInterp` fold point it is ALWAYS empty on every correctly-running instance. A digest fold gains nothing folding a value that is provably constant at the fold point on every instance that agrees; a value that is NOT empty there is itself a bug the admission pipeline already needs to catch, independent of any digest."
     architecture:
@@ -270,13 +270,13 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/ai/cadence.rs
-        - src/core/messages.rs
-        - src/sim_tick.rs
-        - src/server_app/broadcast.rs
-        - src/server_app/registration.rs
-        - src/debug_overlay.rs
-      # src/command_admission/mod.rs (clear_inter_system_queue's real home) is
+        - crates/phoenix-simulation/src/ai/cadence.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/sim_tick.rs
+        - crates/phoenix-simulation/src/server_app/broadcast.rs
+        - crates/phoenix-simulation/src/server_app/registration.rs
+        - crates/phoenix-simulation/src/debug_overlay.rs
+      # crates/phoenix-simulation/src/command_admission/mod.rs (clear_inter_system_queue's real home) is
       # deliberately NOT a declared path here: it is also host-command-admission's
       # (engineering-damage.yaml) primary implementation file, and PASM's
       # dependency-drift scanner treats a file claimed by two entities as
@@ -306,13 +306,13 @@ entities:
       # (weapons.yaml) entities. Claiming those owner files here as well would
       # make PASM attribution ambiguous rather than improve the exclusion record.
 
-      tests: [src/ai/cadence_tests.rs, src/core/messages_view_mode_tests.rs, src/sim_tick_tests.rs, src/server_app/broadcast_replication_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/debug_overlay_tests.rs, src/command_admission/tests.rs]
+      tests: [crates/phoenix-simulation/src/ai/cadence_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/sim_tick_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/debug_overlay_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs]
   - component: digest-census-traceability-symbols
     core:
       status: proposed
       confidence: confirmed
       title: Digest Census — Traceability-Only Symbols
-      summary: "The `implementation.symbols` names that back the authoritative `state` entities for traceability but can never key the Rust declaration registry (`StateCensus`, src/authoritative.rs) — function/accessor names, a const, and value types that ride a larger folded resource rather than register as a component/resource of their own. Recorded here so that deleting the census guard's old `AUTHORITATIVE_SYMBOLS` const (issue #1222) loses nothing: these names stay documented in PASM, where they were always the source of truth."
+      summary: "The `implementation.symbols` names that back the authoritative `state` entities for traceability but can never key the Rust declaration registry (`StateCensus`, crates/phoenix-simulation/src/authoritative.rs) — function/accessor names, a const, and value types that ride a larger folded resource rather than register as a component/resource of their own. Recorded here so that deleting the census guard's old `AUTHORITATIVE_SYMBOLS` const (issue #1222) loses nothing: these names stay documented in PASM, where they were always the source of truth."
       rationale:
         - "Why they are not declared. `App::declare_state::<T>(class, pasm)` keys the census on a real Rust TYPE's `std::any::type_name::<T>()`. A free function, an accessor, or a `thread_local!`/const is not a type, and a value type carried on a larger folded resource never registers with Bevy in its own right — so none of these can appear in the registry the enumeration guard (`tests/authoritative_state_enumeration.rs`) scans, and forcing them into `declare_state` would assert a component/resource that does not exist. The registered authoritative type each one rides beside IS declared (issue #1222): e.g. `ShipScanRecord` for the scan value types, `WorldIdMint` for `WorldId`/`IdNamespace`, `SimRng` for `SimRngState`, `EntitySpawnOrigin` for `SpawnOrigin`, `InfrastructureCondition` for `InfrastructureState`."
         - "FUNCTION / ACCESSOR / CONST names (traceability only). apply_arc_bearing_request, apply_world_layer_changes, assess_hazards, assign_named_entity_uuids, build_catalog, build_helm_ai_surfaces_frame, clear_mod_pack_overlay, encode_local_facing, encode_local_velocity, is_instagib, mod_pack_overlay_get, on_site_systems, seed_helm_actuator_facts, push_mod_pack, remove_mod_pack, reorder_mod_packs, active_packs, spawn_immediate_entities_internal, sync_ship_position, tick_boost, tick_impulse, visible_entities, wasm_load_world, wasm_select_ship, and the const INTENT_NARRATION_SPAWN_SITES. Named in prose rather than a checked `symbols` entry for the same reason `clear_inter_system_queue` is on the exclusion-classes entity above: this is a record, not a claim of file ownership. Each already lives on its owning `state` entity's `implementation.symbols` across `pasm/spec/architecture/*.yaml`."
@@ -341,7 +341,7 @@ entities:
         - "IN: ship physics and hull (`ShipPhysics`/`ShipPhysicsComponent`, `EntitySystemHull` and friends) — the position/velocity/orientation and damage state a divergence most directly shows up as."
         - "IN: collisions (the attribution a collision resolves to — victim, damage, shield-absorbed, hull-damage — not merely its aggregate effect on hull totals, per issue #896's own fingerprint design in `src/headless/fingerprint.rs`)."
         - "OUT: `RenderInterp` (see the fold-point entry above — frame-time interpolated presentation, the most dangerous exclusion on this list precisely because it sits on simulation entities)."
-        - "[ai] REJECTED AS A SHORTCUT: `EntitySnapshot` (`src/core/messages.rs:1033`) is NOT the digest boundary and must not be treated as one. It carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored PRESENTATION fields mixed into what looks like a convenient one-stop entity view. Using it as the fold set would silently pull authored presentation into the pinned surface the type-shape constraint (AC4) protects."
+        - "[ai] REJECTED AS A SHORTCUT: `EntitySnapshot` (`crates/phoenix-model/src/messages.rs:1033`) is NOT the digest boundary and must not be treated as one. It carries `radar_icon`, `region_colour`, `colour`, `radar_size` — authored PRESENTATION fields mixed into what looks like a convenient one-stop entity view. Using it as the fold set would silently pull authored presentation into the pinned surface the type-shape constraint (AC4) protects."
     architecture:
       kind: design-policy
       authority: authoritative
@@ -349,10 +349,10 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/sim_rng.rs, src/core/messages.rs, src/headless/fingerprint.rs, src/server_app/components.rs, src/lobby/server.rs]
+      paths: [crates/phoenix-simulation/src/sim_rng.rs, crates/phoenix-model/src/messages.rs, src/headless/fingerprint.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/lobby/server.rs]
       symbols: [SimRng, GamePhase, GameOverReason, WorldResource, CaptainPriorityBoost, EntitySnapshot]
 
-      tests: [src/sim_rng_tests.rs, src/sim_rng_live_stream_tests.rs, src/core/messages_view_mode_tests.rs, src/server_app/components_interior_write_access_tests.rs, src/lobby/server_tests.rs]
+      tests: [crates/phoenix-simulation/src/sim_rng_tests.rs, crates/phoenix-simulation/src/sim_rng_live_stream_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
   - component: vellum-digest-primitive-reference
     core:
       status: proposed
@@ -369,7 +369,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: observed
-      paths: [pyproject.toml, Cargo.toml, src/sim_digest.rs]
+      paths: [pyproject.toml, Cargo.toml, crates/phoenix-simulation/src/sim_digest.rs]
 
   - component: authoritative-state-digest
     core:
@@ -380,7 +380,7 @@ entities:
       rationale:
         - "Issue #1412 moves trigger row ownership into WorldTriggerRegistry without changing the authoritative fold's row order, identity fields or latch traversal. Snapshot capture/restore uses that same registry and preserves the existing TriggerRuntimeState wire shape; successful restore invalidates observer generation while cardinality or index-set refusal changes no trigger latch. The generation is host observer history, not authoritative state, and neither it nor compiled handler references are added to the digest."
         - "FOLDED TODAY, in fold order. Run scope: `SimTick`; the whole `SimRngState` via `digest_postcard` (master seed, provenance, and every `SimStream`'s exact `Pcg32` position — so a divergent DRAW COUNT is caught the tick it happens); `WorldIdMint`'s tick and per-namespace sequence counters (issue #907 — the identity analogue, so a divergent SPAWN COUNT is caught the tick it happens rather than on the tick the next id is minted); `GamePhase` via `digest_postcard`; `GameOverReason` (reason string plus `Outcome`, the latter through its `as_str` label because it is not `Serialize`); `CaptainPriorityBoost`'s every `(scope, objective)` pair in sorted key order, read through the `boosts_sorted` accessor #901 added rather than through `HashMap` iteration; and the `WorldResource` projection below. Then the `EntityUuid` namespace in `FoldKey` order — id, `ShipPhysics`' eight fields as canonical bit patterns, `EntitySystemHull` per system in the hull's own stable insertion order, `ShipRedAlert`. Then the `AsteroidUuid` namespace — id, `Transform` translation, hull totals. Then collision attribution `(victim, damage, shield absorbed, hull damage)` in balance-tracer order, per the AC5 line and #896's fingerprint design."
-        - "[ai] DEFERRED, AND SAID SO RATHER THAN IMPLIED. `WorldResource` folds as a PROJECTION, not wholesale: `scenario_title`, `scenario_description`, and per authored entity (sorted by uuid) uuid / `position` / `yaw` / `hull_fraction` / `shield_fraction` / `warp_out_remaining_secs` / `objective_target`. The four authored presentation fields the reviewer table names by hand — `colour`, `radar_icon`, `region_colour`, `radar_size` — are excluded, because `EntitySnapshot` is that table's stated REJECTED shortcut and folding it whole would pull authored presentation into the surface the type-shape constraint protects. `EntitySnapshot`'s authored geometry (`shape`, `radius`, `inner_radius`, `half_extents`, `tags`) is static and not folded either. Beyond that: per-arc shield hull (`ShipArcHull`), ShieldsDamageHistory, PendingShieldsThreatBearing, SensorsThreatState, CoordinationQueue, CoordinationEnqueueCursor and its unread message suffix, ShipIntentNarration, RecentCombatActivity, ShipFrequencyHintState, NpcFrequencyMatchStates, ShipPhaserFrequency, PendingTacticalFrequencyHint, LastSystemTiers, PowerBrownoutState, ShieldsCoordinationState, the weapons state machines, power allocation, the modifier caches and the per-system blackboards are NOT folded yet. Those AI/coordination surfaces are nevertheless continuation-authoritative and travel through snapshot format 14's stable scalar projections: exact Shields damage record ticks plus fixed-clock combat ages; last_hp and previous-hull baselines; pending bearing and producer debounce memory; enqueue-ordered messages with exact first-due fixed-step offsets plus the cursor-defined unread suffix; narration's station-sorted full frontier and generation; the high-fidelity hint timer; the UUID-keyed NPC frequency-match map, current ship phaser frequencies and Tactical hint inboxes; independently sorted tier/HP maps; and Power/Shields notification latches. A present default component or resource remains Some(default) so restore replaces rather than inherits bootstrap memory. None of this deferred set is excluded by the boundary record — it is simply not reached by this slice. The distinction matters to a reviewer: `tests/authoritative_state_enumeration.rs` is the census ratchet that keeps its CLASSIFICATION honest, and the module doc on `src/sim_digest.rs` carries this same list so the code and the record cannot drift apart. Adding one is a re-blessing event under the type-shape constraint. ISSUE #1086 TOOK ONE OFF THIS LIST AND LEFT A NARROWER ONE BEHIND: the whole SCENARIO scope is folded now — the base and per-layer `FlagStore`s with each active layer's path, `loader_path` and POSITION in the activation order; each trigger row's authored identity and its latches; `PendingCallbacks` and `pending_world_events` in queue order; the entity groups, the deadline table, the commitments ledger, the evidence log and the workforce register; and the whole of `CommsState`. What stays deferred INSIDE that scope is `WorldContentRuntime::pending_delayed_actions` (the payload refuses to carry it, so folding it would break the at-restore digest equality `tests/snapshot_resume.rs` asserts) and `loaded_scenario_paths` (behaviour-bearing, not payload-carried, and a candidate for #1118's hardening); `name_to_uuid`, `observed_hull_fractions`, `mission_clock_anchor_secs` and `WorldTriggerRegistry::generation` are re-derived or are load history rather than state. The scenario walks also take the empty-walk affordance, which is why a world registering no scenario resource at all (the cross-target probe) folds to the number it folded before."
+        - "[ai] DEFERRED, AND SAID SO RATHER THAN IMPLIED. `WorldResource` folds as a PROJECTION, not wholesale: `scenario_title`, `scenario_description`, and per authored entity (sorted by uuid) uuid / `position` / `yaw` / `hull_fraction` / `shield_fraction` / `warp_out_remaining_secs` / `objective_target`. The four authored presentation fields the reviewer table names by hand — `colour`, `radar_icon`, `region_colour`, `radar_size` — are excluded, because `EntitySnapshot` is that table's stated REJECTED shortcut and folding it whole would pull authored presentation into the surface the type-shape constraint protects. `EntitySnapshot`'s authored geometry (`shape`, `radius`, `inner_radius`, `half_extents`, `tags`) is static and not folded either. Beyond that: per-arc shield hull (`ShipArcHull`), ShieldsDamageHistory, PendingShieldsThreatBearing, SensorsThreatState, CoordinationQueue, CoordinationEnqueueCursor and its unread message suffix, ShipIntentNarration, RecentCombatActivity, ShipFrequencyHintState, NpcFrequencyMatchStates, ShipPhaserFrequency, PendingTacticalFrequencyHint, LastSystemTiers, PowerBrownoutState, ShieldsCoordinationState, the weapons state machines, power allocation, the modifier caches and the per-system blackboards are NOT folded yet. Those AI/coordination surfaces are nevertheless continuation-authoritative and travel through snapshot format 14's stable scalar projections: exact Shields damage record ticks plus fixed-clock combat ages; last_hp and previous-hull baselines; pending bearing and producer debounce memory; enqueue-ordered messages with exact first-due fixed-step offsets plus the cursor-defined unread suffix; narration's station-sorted full frontier and generation; the high-fidelity hint timer; the UUID-keyed NPC frequency-match map, current ship phaser frequencies and Tactical hint inboxes; independently sorted tier/HP maps; and Power/Shields notification latches. A present default component or resource remains Some(default) so restore replaces rather than inherits bootstrap memory. None of this deferred set is excluded by the boundary record — it is simply not reached by this slice. The distinction matters to a reviewer: `tests/authoritative_state_enumeration.rs` is the census ratchet that keeps its CLASSIFICATION honest, and the module doc on `crates/phoenix-simulation/src/sim_digest.rs` carries this same list so the code and the record cannot drift apart. Adding one is a re-blessing event under the type-shape constraint. ISSUE #1086 TOOK ONE OFF THIS LIST AND LEFT A NARROWER ONE BEHIND: the whole SCENARIO scope is folded now — the base and per-layer `FlagStore`s with each active layer's path, `loader_path` and POSITION in the activation order; each trigger row's authored identity and its latches; `PendingCallbacks` and `pending_world_events` in queue order; the entity groups, the deadline table, the commitments ledger, the evidence log and the workforce register; and the whole of `CommsState`. What stays deferred INSIDE that scope is `WorldContentRuntime::pending_delayed_actions` (the payload refuses to carry it, so folding it would break the at-restore digest equality `tests/snapshot_resume.rs` asserts) and `loaded_scenario_paths` (behaviour-bearing, not payload-carried, and a candidate for #1118's hardening); `name_to_uuid`, `observed_hull_fractions`, `mission_clock_anchor_secs` and `WorldTriggerRegistry::generation` are re-derived or are load history rather than state. The scenario walks also take the empty-walk affordance, which is why a world registering no scenario resource at all (the cross-target probe) folds to the number it folded before."
         - "DEFERRED LIST EXTENSION — FORMAT 14. The preceding NOT-folded-yet list also includes `AiHighFidelity`, `LodTransitionTimer`, `ShipBoost`, `ShipImpulse`, `ShipSystemControlSources`, `NavigationWaypoint`, `NavClearanceIssueState`, `HelmWaypointClearance`, `CurrentPhaserMode`, `TrackedEntities`, and the exact `Time<Fixed>` overstep. Their continuation is structural, not inferred: every `Ship` receives an explicit High/Low `AiFidelityState` plus optional fixed-clock transition age; restore reconciles the complete canonical `AiHighFidelityComponents` bundle and timer before applying per-component continuation, so High-over-Low inserts the bundle and Low-over-High removes it. The outside-the-bundle drive runtime, damage-offline control gate and projection registry close first-continuation edges exposed by removing `ThrustInput` from readiness: an Added boost command is intentionally ignored by the normal transition system, damage sync runs after command admission, and an unseeded registry rewrites folded `WorldResource` on its next tick. Navigation frontiers and global/default weapons state are likewise exact replacement state, including present defaults, rather than bootstrap derivations."
         - "FOLD ORDER IS THE STRUCTURED KEY, AND #907 NOW POPULATES IT. `FoldKey { namespace, tick, seq, id }` is the record's `(namespace, tick, seq)` tuple, with `Ord` derived in that field order. This slice shipped the key ahead of the runtime and predicted #907 would fill the numeric fields with no call site moving; that is what happened. `FoldKey::from_world_id` now delegates to `world_id::WorldId::parse` — the same definition the renderer uses, so the format has exactly one owner — and `Namespace` IS `world_id::IdNamespace` rather than a parallel copy that could drift from the enum the mint stamps into the id. The `(0, 0)`-plus-raw-string fallback survives for one live population only: asteroids, whose `deterministic_cell_uuid` ids stay coordinate-derived by constraint 8 and are cross-instance identical without being numeric. `FoldKey`'s `namespace` argument stays caller-supplied rather than read out of the parsed id, because it is the walk's declaration of which group the key belongs to, and an unminted id has no namespace of its own to read. `Entity::index()` appears only as a same-key tiebreak, never as a primary key, exactly as `handle_collisions` uses it."
         - "[ai] DIVERGENCE SAMPLING LIVES INSIDE THE STEP, NOT IN A DRIVER CALLBACK. `DigestLedger` records `(tick, digest)` every N logical ticks, sampled in the single private `step` that both `continue_step` and `apply`'s advance loop call — so there is exactly one place sampling can attach and no path that advances unseen. `interval == 0` disables it and costs nothing: no digest is computed at all. `DigestLedger::first_divergence` pairs samples BY TICK rather than by index and reports `Divergence { tick, after, .. }` — the window between the last agreeing sample and the first disagreeing one. Without it the answer to 'these two runs differ' is the whole run; with it, it is a window somebody can read a log over."
@@ -402,11 +402,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/sim_digest.rs
+        - crates/phoenix-simulation/src/sim_digest.rs
         - src/headless/replay.rs
         - tests/replay_simulation.rs
       symbols: [FoldKey, Namespace, fold_optional_namespace, DigestLedger, Divergence, PhoenixSim, ReplayArtifact]
-      tests: [cargo test, src/sim_digest_tests.rs, src/headless/replay_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/sim_digest_tests.rs, src/headless/replay_tests.rs]
 
   - component: cross-target-determinism-probe
     core:
@@ -416,7 +416,7 @@ entities:
       summary: "Issue #904's proof that a native instance and a BROWSER instance, fed the same seed and the same command log under different frame pacing, fold bit-identical canonical digests. One seeded world (`crate::cross_target_probe`) built from Rust literals with no asset I/O, driven natively by `tests/cross_target_probe.rs` at one tick per `App::update()` and in a real Chromium by the `wasm_cross_target_probe` export at a bursty `1,2,3,4,2` ticks per update. Both fold `crate::sim_digest::world_digest` — the same #901 fold, not an approximation — into a `DigestLedger`, and the comparison is `first_divergence`, which names the tick."
       rationale:
         - "NATIVE×NATIVE CANNOT PROVE THIS, WHICH IS THE WHOLE POINT. #849's user story asks for 'two native instances under artificial delay'; two native processes share a build, a backend, a threading model and a libm, so they agree with each other while disagreeing with the browser and the P2P mesh desyncs regardless. The configuration that can detect the likely divergence is native↔wasm, and this slice runs exactly that. #907 made the digest cross-INSTANCE comparable (`tests/entity_id_minting.rs`); this makes it cross-TARGET comparable."
-        - "THE DIGEST HAD TO LEAVE `headless` FOR THE CLAIM TO BE MAKEABLE. `src/headless/digest.rs` moved to `src/sim_digest.rs` and `RunTelemetry` moved to `crate::core::telemetry`, because `headless` is `#[cfg(all(feature = \"headless\", not(target_arch = \"wasm32\")))]` and a digest that does not compile for wasm cannot be folded by a wasm instance. The rejected alternative was a `cfg`-conditional `fold_collisions` — real on native, a fixed marker on wasm — which would have made the fold itself a function of the target, denying precisely the property being asserted. `headless::digest` is now a `pub use` alias, so no existing path moved."
+        - "THE DIGEST HAD TO LEAVE `headless` FOR THE CLAIM TO BE MAKEABLE. `src/headless/digest.rs` moved to `crates/phoenix-simulation/src/sim_digest.rs` and `RunTelemetry` moved to `crate::core::telemetry`, because `headless` is `#[cfg(all(feature = \"headless\", not(target_arch = \"wasm32\")))]` and a digest that does not compile for wasm cannot be folded by a wasm instance. The rejected alternative was a `cfg`-conditional `fold_collisions` — real on native, a fixed marker on wasm — which would have made the fold itself a function of the target, denying precisely the property being asserted. `headless::digest` is now a `pub use` alias, so no existing path moved."
         - "A PURPOSE-BUILT WORLD, AND THE REASON IS NOT CONVENIENCE. `build_headless_app` reads the world TOML, every `assets/entities/*.toml` and the hull composition closure off the filesystem; a wasm page has no filesystem, and the in-page equivalent is the LIVE app with a renderer, a lobby and sessions a headless run does not have. Driving those two and comparing them would compare two different simulations. The probe world is instead the smallest one that still crosses every surface the cross-target risk lives on: rapier's broad/narrowphase over `KinematicPositionBased` ball colliders with the lowest-world-id contact pick `handle_collisions` uses (#896's `parallel` hazard), `crate::simmath` transcendentals compounding over 240 ticks (#908/#909), `SimRng` draw counts (#897), mid-run `WorldIdMint` mints (#907), and the fixed tick itself (#895). It folds BOTH namespaces: the ships mint into `Entity`, and a fixed hazard at the origin carries a v4 `AsteroidUuid`, which exercises the `(0,0)`-plus-string-tiebreak arm of `FoldKey` that a ships-only world would leave untouched."
         - "[ai] THE DELAY IS THE POINT OF COMPARISON, NOT A DECORATION. Every pacing cycle divides `CHECKPOINT_INTERVAL`, so both instances land on every sampling tick and the two ledgers share every checkpoint rather than a sparse intersection — a comparison that quietly narrowed to the ticks both happened to sample would weaken with every pacing change. The smoke spec asserts the browser ran `bursty` and the pin ran `even`, so the delay cannot silently disappear and leave a same-pacing check wearing this slice's name."
         - "ONE PIN, ONE RE-BLESS POINT, AND IT WILL MOVE OFTEN. `tests/fixtures/cross-target-ledger.json` holds every expected digest; the native test and the smoke spec both READ it and neither carries a copy. Re-blessing is `PHOENIX_BLESS_CROSS_TARGET_LEDGER=1 cargo test --test cross_target_probe`, then rebuilding `dist/` and running the spec BEFORE committing — re-blessing from native alone silently reduces a cross-target pin to a native self-consistency check, and re-blessing from the browser's numbers to make a red spec green erases the exact finding this slice exists to produce. Both failure messages say so at the point of failure."
@@ -433,9 +433,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/cross_target_probe.rs
-        - src/sim_digest.rs
-        - src/core/telemetry.rs
+        - crates/phoenix-simulation/src/cross_target_probe.rs
+        - crates/phoenix-simulation/src/sim_digest.rs
+        - crates/phoenix-simulation/src/core/telemetry.rs
         - tests/cross_target_probe.rs
         - tests/fixtures/cross-target-ledger.json
         - tests/smoke/cross-target-determinism.spec.js
@@ -455,7 +455,7 @@ entities:
         - "THE CONCRETE FAILURE, SO THE CLASS IS NOT ABSTRACT. `console::captain::server::handle_set_red_alert` writes `ShipRedAlert` in `SimSet::Input`; `console::command::server::operate_command_ai` and `apply_alert_change_to_stances` read it in the same set. Nothing ordered the three. The sort settled it in the readers' favour until #1346's `SecurityPlugin` added `operate_security_ai` and `handle_security_commands` to `SimSet::Input`, at which point it settled the other way and every AI-commanded ship in `duel` held the previous Tactical stance for a full `ai_snapshot_hz` period after each alert change — a folded `station-stances` difference, and a red `tests/archetype_order_determinism.rs`."
         - "A CADENCE-GATED CONSUMER TURNS ONE STEP INTO A PERIOD. An ungated consumer that loses the race reads last tick's value and self-corrects on the next step; the difference is one tick of staleness. `operate_command_ai` runs on `ai_snapshot_ready`, so losing the race costs it the whole cadence period — six ticks in `duel` — which is long enough for the wrong posture to change what the ship does. That is why this hazard is worth a label rather than a comment: the cost is not proportional to the size of the mistake."
         - "THE GUARD PERTURBS ONE VARIABLE. `tests/schedule_order_determinism.rs` runs `duel` twice under the same seed and adds a system that takes NO parameters — no queries, no resources, no commands — to `SimSet::Input` on the second run. It cannot change the simulation by executing; the only thing it can change is the shape of the graph the executor sorts. `tests/archetype_order_determinism.rs` moves TWO variables (the archetype layout it means to test, and the schedule, because the system performing its insert joins a set), which is why it caught #1346's regression while its failure message sent the reader looking for a raw-order RNG walk that was not there. One variable per guard."
-        - "[ai] FixedStep markers attach to concrete systems at their original registrations. src/sim_sets/order.rs records phase-local sequences and the identity, lobby, reconnect, output, asteroid-streaming and scenario-publication boundaries. The order preserves the built SingleThreaded baseline at 5ba6ad08; production never derives it from names, registration order, graph allocation IDs, observed timing or the checked-in proof fixture. Required owner markers resolve to exactly one actual system and phase boundaries to nonempty nested membership. Only the headless auto-start owner is explicitly absent on other host profiles."
+        - "[ai] FixedStep markers attach to concrete systems at their original registrations. crates/phoenix-simulation/src/sim_sets/order.rs records phase-local sequences and the identity, lobby, reconnect, output, asteroid-streaming and scenario-publication boundaries. The order preserves the built SingleThreaded baseline at 5ba6ad08; production never derives it from names, registration order, graph allocation IDs, observed timing or the checked-in proof fixture. Required owner markers resolve to exactly one actual system and phase boundaries to nonempty nested membership. Only the headless auto-start owner is explicitly absent on other host profiles."
         - "[ai] Execution order and deferred publication are separate contracts. Adding ordinary or ignore-deferred edges before Bevy's automatic insertion can suppress an existing flush or change where deferred work becomes visible. DeclaredOrder therefore appends a ScheduleBuildPass after AutoInsertApplyDeferred and adds only the listed execution edges to the flattened graph. Existing phase membership, conditions, access, system bodies, barriers and ambiguity annotations remain with their owners. Bevy performs the normal cycle, transitive-reduction and ambiguity checks afterwards; overlapping endpoints are rejected."
         - "[ai] Commands can hide consequential writes from ordinary ECS access conflicts. Region membership and AI LOD promotion/demotion publish through the same existing flush, so UpdateRegionMembership precedes LodAiShips explicitly to retain command-buffer application order. Structural validation compares all ordinary system instances, prior dependency paths, producer-to-barrier-to-consumer obligations and ordered deferred frontiers, rather than treating an unchanged barrier count or a zero ambiguity census as sufficient."
         - "[ai] The earlier three Power/Shields/Repair publisher annotations and five Tactical annotations retain their bounded commutation evidence and physical shared writes. Their opposed-order receipts describe the pre-declaration source. Current Tactical, publisher, admitted-producer, foreign-consumer and Captain/Sensors fixtures perturb actual plugin registration while preserving the declared production order, full access metadata and duplicate registrations. Gameplay, wire/cache, refusal, control-tenure, RNG and mint observations remain required; test-only reversed edges may not contradict the production contract. No annotation authorizes parallel writes."
@@ -473,12 +473,12 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/sim_sets.rs
-        - src/sim_sets/order.rs
-        - src/sim_sets/order/pass.rs
-        - src/server_app/registration.rs
-        - src/console/captain/server.rs
-        - src/console/command/server.rs
+        - crates/phoenix-simulation/src/sim_sets.rs
+        - crates/phoenix-simulation/src/sim_sets/order.rs
+        - crates/phoenix-simulation/src/sim_sets/order/pass.rs
+        - crates/phoenix-simulation/src/server_app/registration.rs
+        - crates/phoenix-simulation/src/console/captain/server.rs
+        - crates/phoenix-simulation/src/console/command/server.rs
         - src/headless/determinism_audit/graph.rs
         - tests/fixed_update_ambiguities.rs
         - tests/fixed_executor_policy.rs
@@ -504,4 +504,4 @@ entities:
         - docs/admitted-foreign-consumer-proof.md
         - docs/captain-sensors-order-proof.md
       symbols: [FixedStep, DeclaredOrder, configure_fixed_order, RedAlertApplied, handle_set_red_alert, operate_command_ai, apply_alert_change_to_stances]
-      tests: [cargo test, src/sim_sets/order/pass_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/sim_sets/order/pass_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

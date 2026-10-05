@@ -33,8 +33,8 @@ so a failure found during this run can be filed against the right owner.
 | --- | --- | --- | --- |
 | #1441 | `cb14b54c` | Canonical `GmActionLog` → `GmJournalProjection` on the existing `gm_session` channel; `gui/gm-journal-panel.js` read-only journal with operator/outcome filters and a detail region | `tests/gm_journal.rs`, `tests/client/gm-journal-panel.test.js`, `tests/smoke/gm-journal-200.spec.js` (200%-scale) |
 | #1442 | `b6e3e412` | `GmAction::UndoGmAction` as an ordinary typed action; per-field affected-state tracking (`GmAffectedField::{NpcDoctrine, FactionHostility}`); `UnknownGmAction`/`InverseUnsupported`/`InverseFactsMismatch`/`AffectedStateChanged`/`AlreadyInverted` refusals | `tests/gm_undo.rs` (18 tests), `tests/smoke/gm-undo-200.spec.js` (200%-scale) |
-| #1443 | `137bd381` | `GmAffectedField::SpawnedEntity`; `src/gm_exposure.rs` two-cumulative-second sensor-range latch; `SensorExposureElapsed` refusal | `tests/gm_spawn_undo.rs` (22 tests) |
-| #1444 | `a554f8ee` | `src/gm_despawn_undo.rs` capture-at-removal via `snapshot::capture_entity_state`/`apply_entity_state`; `RestoreIdentityOccupied`/`RestoreReferenceConflict` refusals; `GmJournalEntry::capture_lost` | `tests/gm_despawn_undo.rs` (12 tests) |
+| #1443 | `137bd381` | `GmAffectedField::SpawnedEntity`; `crates/phoenix-simulation/src/gm_exposure.rs` two-cumulative-second sensor-range latch; `SensorExposureElapsed` refusal | `tests/gm_spawn_undo.rs` (22 tests) |
+| #1444 | `a554f8ee` | `crates/phoenix-simulation/src/gm_despawn_undo.rs` capture-at-removal via `snapshot::capture_entity_state`/`apply_entity_state`; `RestoreIdentityOccupied`/`RestoreReferenceConflict` refusals; `GmJournalEntry::capture_lost` | `tests/gm_despawn_undo.rs` (12 tests) |
 | #1445 | `521d6e09` | `gui/gm-checkpoint-panel.js` named manual capture on the ordinary save path; `gm_checkpoint::confirmed_checkpoint` read-back rule; `CandidateBlock` compatibility preflight shared with the restore control | `tests/gm_checkpoint.rs` (7 tests), `tests/smoke/gm-checkpoint-200.spec.js` (200%-scale) |
 | #1446 | `72a0e91f` | `GmAction::RequestLiveRestore` on the canonical journal; single-simulation-peer restore: recovery-checkpoint-first, #1118 load/digest/rollback, #1119 fence, explicit-resume hold; `gui/gm-restore-control.js` | `tests/gm_restore.rs` (18 tests), `tests/smoke/gm-restore-200.spec.js` (200%-scale, shared with #1447) |
 | #1447 | `7c9f66ad` | Extends #1446 across every simulation peer: ten-real-second readiness countdown, canonical nonresponder disconnect, all-peers digest agreement, `MeshFrame::GmRestore` (protocol rev 12→13) | `tests/lockstep_gm_restore.rs` (14 tests), `tests/smoke/gm-restore-200.spec.js` (200%-scale, shared with #1446) |
@@ -488,12 +488,12 @@ Defect dispositions and required human reruns:
 
 ## 7. Source pointers for the coordinator
 
-- [Canonical GM action journal](../../src/gm_action.rs) (the `UndoGmAction` reducer lives here; there is no separate `gm_undo.rs`) and its [read-only projection](../../src/gm_journal.rs)
-- [Spawn exposure cutoff](../../src/gm_exposure.rs), [despawn capture/restore](../../src/gm_despawn_undo.rs)
+- [Canonical GM action journal](../../crates/phoenix-simulation/src/gm_action.rs) (the `UndoGmAction` reducer lives here; there is no separate `gm_undo.rs`) and its [read-only projection](../../crates/phoenix-simulation/src/gm_journal.rs)
+- [Spawn exposure cutoff](../../crates/phoenix-simulation/src/gm_exposure.rs), [despawn capture/restore](../../crates/phoenix-simulation/src/gm_despawn_undo.rs)
 - [Named checkpoint panel](../../gui/gm-checkpoint-panel.js), [shared compatibility preflight](../../gui/gm-checkpoint-preflight.js), [live restore control](../../gui/gm-restore-control.js), [journal panel](../../gui/gm-journal-panel.js)
 - [Confirmation policy registry](../../gui/gm-confirmation.js) — `action.undo`/`world.restore` categories and per-operator override
-- [Single-peer restore driver](../../src/gm_restore.rs) and its [multi-peer extension](../../src/lockstep/mod.rs)'s `MeshFrame::GmRestore`
-- [Public health banner](../../gui/gm-health-banner.js) and [its Rust source](../../src/gm_health.rs)
+- [Single-peer restore driver](../../crates/phoenix-simulation/src/gm_restore.rs) and its [multi-peer extension](../../crates/phoenix-simulation/src/lockstep/mod.rs)'s `MeshFrame::GmRestore`
+- [Public health banner](../../gui/gm-health-banner.js) and [its Rust source](../../crates/phoenix-simulation/src/gm_health.rs)
 - [#1320's two-ship preparation tooling](../../scripts/prepare-gm-live-event.mjs) and [its ignored boot precheck](../../tests/gm_live_event_precheck.rs), reused unchanged by §2/§5.6
 - [`pasm/spec/design/gm-console-t3.yaml`](../../pasm/spec/design/gm-console-t3.yaml) — the M5 design entries (`gm-t3-single-peer-live-restore`, `gm-t3-multi-peer-live-restore`) this kit's §5.5–5.7 exercise
 - [`pasm/spec/roadmap/gm-console-milestones.yaml`](../../pasm/spec/roadmap/gm-console-milestones.yaml) — M5 `gm-milestone-operations-safety` scope boundary

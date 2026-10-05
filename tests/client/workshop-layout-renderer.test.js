@@ -58,6 +58,19 @@ describe('Workshop layout renderer', () => {
   beforeEach(() => { window.requestAnimationFrame = callback => callback(); });
   afterEach(() => { mounted?.dispose(); vi.restoreAllMocks(); });
 
+  it('does not let a delayed dock focus callback steal a newer control focus', () => {
+    const frames = [];
+    window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+    ({ mounted } = mount());
+    const target = document.querySelector('[data-panel="source"] [data-placement="bottom"]');
+    pointerDock('files', target);
+    const inspector = document.querySelector('[data-panel="inspector"] .workshop-panel-tab');
+    inspector.focus();
+    expect(frames.length).toBeGreaterThan(0);
+    for (const callback of frames.splice(0)) callback();
+    expect(document.activeElement).toBe(inspector);
+  });
+
   it('reorders inside a strip without docking or remounting an embedded document', () => {
     const initial = dockWorkshopPanel(defaultWorkshopLayout(), 'inspector', 'source', 'tab');
     ({ mounted, changes, panels } = mount(initial));

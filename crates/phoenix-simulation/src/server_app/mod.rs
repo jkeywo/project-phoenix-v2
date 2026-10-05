@@ -1,0 +1,96 @@
+use crate::simmath;
+use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
+
+use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
+use crate::core::messages::{DeliveryClass, EntitySnapshot, GamePhase, ServerMessage};
+use crate::lobby::{LobbyOutbox, OutboundMessage, Target, WorldResource};
+#[cfg(test)]
+use crate::weapons::shield::ShieldSystem;
+
+use crate::debug_overlay::{DamageLog, DamageLogEntry};
+use crate::ship::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
+use crate::weapons::shield::attacker_bearing_relative;
+use bevy_rapier3d::prelude::ReadRapierContext;
+// Re-export ShipPhysics so `crate::server_app::ShipPhysics` and
+// `crate::server_app::ShipPhysics` both resolve.
+pub use crate::ship::state::ShipPhysics as ShipPhysicsComponent;
+
+use crate::core::messages::ModifierSlot;
+use crate::entities::spawner::{
+    AsteroidFieldSection, BehaviourSection, ColliderSection, EntityId, EntityName,
+    EntityTagsSection, EntityUuid, FactionComponent, MeshSection, RadarAppearanceSection,
+    RegionShapeSection,
+};
+use crate::modifiers::ShipModifiers;
+use crate::ship::impulse::ImpulseState;
+use crate::world::server::ObjectiveManagerRes;
+use std::collections::{BTreeMap, HashMap};
+
+// ── Beam constants ──────────────────────────────────────────────────────────
+pub use crate::console::weapons::{
+    weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
+    LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig,
+    TacticalRadarSelection, TorpedoSystemResource,
+};
+
+pub use crate::console::repair::server::{repair_state_broadcaster, ShipRepairTeams};
+
+pub use crate::ship::power::{
+    power_state_broadcaster, PowerConfigResource, PowerMultiplierResource, ShipPowerSystem,
+};
+
+// The command-admission seam lives in its own module (issue #736) so that
+// dependants can name it with an explicit `use crate::command_admission::…;`.
+// Re-exported here so the existing `crate::server_app::Admission*` call sites
+// keep resolving unchanged.
+pub use crate::command_admission::{
+    admit_system_commands, is_command_authorized, station_for_system, AdmissionPlugin, AdmissionSet,
+};
+
+// ── Simulation app assembly (issue #1199) ────────────────────────────────────
+//
+// The simulation half of `server_app` is split along four seams into the sibling
+// modules below (the render half lives in `phoenix_presentation::server_app_render`,
+// #1195). Every item each module defines is re-exported here, so nothing outside
+// the crate changes its `crate::server_app::X` import paths — this parent stays a
+// thin directory of the seam modules plus the (still-inline, per #1192) tests.
+//
+//   * `components`   — the ECS vocabulary: components, resources, SystemParam
+//                      bundles the simulation defines.
+//   * `registration` — `SimPluginOptions`, plugin ordering, and the
+//                      `add_simulation_plugins[_with]` assembly.
+//   * `broadcast`    — the sim-state snapshot builders.
+//   * `broadcast_publish` — the broadcaster factories + publish/HUD systems
+//                      downstream of `broadcast`'s snapshots (issue #1241:
+//                      split out once the combined file ran 2% over the
+//                      ~1,500-line ceiling; neither half calls into the
+//                      other's functions).
+//   * `world_setup`  — world setup and the game-start spawn systems.
+//   * `collision`    — the collision handler (its wide parameter list gathered
+//                      into named SystemParam bundles).
+//
+// Collision handling is a sibling module of `world_setup` rather than folded into
+// it: the two together exceed the ~1,500-line ceiling (`spawn_game_start_entities`
+// alone is ~1k lines), and collision is the seam #1199 singled out for the
+// SystemParam-bundling work.
+mod broadcast;
+mod broadcast_publish;
+mod collision;
+mod components;
+mod registration;
+mod world_setup;
+
+pub use broadcast::*;
+pub use broadcast_publish::*;
+pub(crate) use collision::*;
+pub use components::*;
+pub use registration::*;
+pub(crate) use world_setup::*;
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
+
+pub use world_setup::{stage_resume_game_start_entity_uuids, GameStartEntityUuids};

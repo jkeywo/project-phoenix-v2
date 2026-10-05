@@ -68,7 +68,7 @@ entities:
       paths:
         - server.html
         - src/server/bridge.rs
-        - src/world/mod_pack.rs
+        - crates/phoenix-simulation/src/world/mod_pack.rs
       tests: [cargo test, src/server/bridge_tests.rs]
 
   - decision: mod-pack-content-composition
@@ -125,9 +125,9 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/world/manifest.rs
+        - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: mod-scenario-provenance-visible
     core:
@@ -143,9 +143,9 @@ entities:
     implementation:
       status: confirmed
       paths:
-        - src/world/manifest.rs
+        - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: authored-scenario-scripting
     core:

@@ -29,7 +29,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/dock-layout-history.js, gui/dock-layout-model.js, gui/dock-layout-migration.js, gui/gm-temporary-actions.js, gui/gm-spawn-panel.js, gui/components/ph-navigation-map.js, gui/gm-station-puppet.js, gui/gm-presentation-panel.js, gui/workshop-source-link.js, scripts/generate-live-layout-fixture.mjs, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-definitions-panel.js, gui/workshop-scripts-panel.js, editor/workshop-scripts.js, editor/workshop-sound-cues.js, gui/workshop-layout-model.js, gui/live-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-authoring.js, gui/gm-workspace-shell.js, gui/operator-profile.js, src/native_host/panes/operator.rs, src/workshop/provider.rs, editor/workshop-provider.js]
+      paths: [gui/dock-layout-history.js, gui/dock-layout-model.js, gui/dock-layout-migration.js, gui/gm-temporary-actions.js, gui/gm-spawn-panel.js, gui/components/ph-navigation-map.js, gui/gm-station-puppet.js, gui/gm-presentation-panel.js, gui/workshop-source-link.js, scripts/generate-live-layout-fixture.mjs, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-definitions-panel.js, gui/workshop-scripts-panel.js, editor/workshop-scripts.js, editor/workshop-sound-cues.js, gui/workshop-layout-model.js, gui/live-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-authoring.js, gui/gm-workspace-shell.js, gui/operator-profile.js, src/native_host/panes/operator.rs, crates/phoenix-simulation/src/workshop/provider.rs, editor/workshop-provider.js]
       symbols: [WORKSHOP_INTRODUCTIONS, workshop_panels_added_after, sanitize_placement, sanitize_placement_node, createDockLayoutHistory, createDockLayoutModel, PANEL_KIND, createTemporaryActions, createDockLayoutMigration, workshop_panels_for, live_panels_for, workshopLayoutModel, liveLayoutModel, mountDockLayout, mountWorkshopAuthoring, mountGmWorkspaceShell, sanitize_authoring_layout, sanitize_live_layout]
       tests:
         - src/native_host/panes/operator_tests.rs
@@ -56,10 +56,10 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [editor/script-editor.js, editor/script-editor-view.js, editor/workshop-scripts.js, gui/workshop-scripts-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, src/world/script/authoring.rs, src/workshop/provider.rs]
+      paths: [editor/script-editor.js, editor/script-editor-view.js, editor/workshop-scripts.js, gui/workshop-scripts-panel.js, editor/workshop-runtime.js, editor/workshop-provider.js, crates/phoenix-simulation/src/world/script/authoring.rs, crates/phoenix-simulation/src/workshop/provider.rs]
       symbols: [extractScriptUnits, mountScriptEditor, replaceInlineScript, applyWorkshopScript, mountWorkshopScripts, host_fns, script_diagnostics, ScriptHostFunctions, ScriptDiagnostics]
       tests:
-        - src/world/script/authoring_tests.rs
+        - crates/phoenix-simulation/src/world/script/authoring_tests.rs
         - npx vitest run editor/tests/script-editor.test.js editor/tests/script-editor-view.test.js editor/tests/workshop-scripts.test.js tests/client/workshop-scripts-panel.test.js
         - cargo test --lib world::script::authoring workshop::provider native_host::panes::operator
 
@@ -94,17 +94,17 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/gm_entity_inspector.rs, src/gm_world_inspector.rs, src/gm_ship_inspector.rs, src/gm_region_inspector.rs, src/gm_presentation_inspector.rs, src/gm_inspector_coverage.rs, src/gm_projection.rs, gui/inspector-session.js, gui/gm-entity-inspector-panel.js, gui/gm-world-inspector-panel.js, gui/gm-ship-inspector-panel.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/live-layout-model.js, src/native_host/panes/operator.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, server.html]
+      paths: [crates/phoenix-simulation/src/gm_entity_inspector.rs, crates/phoenix-simulation/src/gm_world_inspector.rs, crates/phoenix-simulation/src/gm_ship_inspector.rs, crates/phoenix-simulation/src/gm_region_inspector.rs, crates/phoenix-simulation/src/gm_presentation_inspector.rs, crates/phoenix-simulation/src/gm_inspector_coverage.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/inspector-session.js, gui/gm-entity-inspector-panel.js, gui/gm-world-inspector-panel.js, gui/gm-ship-inspector-panel.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/live-layout-model.js, src/native_host/panes/operator.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, server.html]
       symbols: [EntityInspectorProjection, EntityInspectorField, EntityFieldGroup, EntityInspection, EntityReadingInputs, WorldInspectorProjection, WorldInspectorField, WorldInspection, ShipInspectorProjection, RegionInspectorProjection, RegionInspectorField, RegionInspection, RegionReadingInputs, PresentationInspectorProjection, PresentationInspectorField, PresentationInspection, ShipPresentationInputs, LiveInspectorDomain, LiveInspectorCoverageEntry, LiveInspectorCoverageSources, inventory, canonical_runtime_path, fields, reading, ship_reading, catalog_reading, asset_reading, sound_reading, catalog_readings, createInspectorSession, bindInspectorNavigation, createGmEntityInspectorPanel, createGmWorldInspectorPanel, createGmShipInspectorPanel, createGmRegionInspectorPanel, createGmPresentationInspectorPanel, parseGmEntityInspectorPayload, parseGmWorldInspectorPayload, parseGmShipInspectorPayload, parseGmRegionInspectorPayload, parseGmPresentationInspectorPayload]
       tests:
         - npx vitest run tests/client/inspector-session.test.js
-        - src/gm_entity_inspector_tests.rs
-        - src/gm_world_inspector_tests.rs
-        - src/gm_ship_inspector_tests.rs
-        - src/gm_region_inspector_tests.rs
-        - src/gm_presentation_inspector_tests.rs
-        - src/gm_inspector_coverage_tests.rs
-        - src/gm_projection_tests.rs
+        - crates/phoenix-simulation/src/gm_entity_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_world_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_ship_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_region_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_presentation_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_inspector_coverage_tests.rs
+        - crates/phoenix-simulation/src/gm_projection_tests.rs
         - src/native_host/panes/operator_tests.rs
         - cargo test --lib gm_entity_inspector
         - cargo test --lib gm_world_inspector
@@ -130,10 +130,10 @@ entities:
       depends_on: [gm-t2-authored-npc-doctrine]
     implementation:
       status: declared
-      paths: [src/inspector.rs, src/workshop/document.rs, gui/inspector-field.js, gui/workshop-authoring.js, gui/gm-npc-panel.js]
+      paths: [crates/phoenix-simulation/src/inspector.rs, crates/phoenix-simulation/src/workshop/document.rs, gui/inspector-field.js, gui/workshop-authoring.js, gui/gm-npc-panel.js]
       symbols: [FieldDescriptor, FieldOrigin, LiveMutability, renderInspectorMetadata, renderInspectorReadOnly]
       tests:
-        - src/workshop/document_tests.rs
+        - crates/phoenix-simulation/src/workshop/document_tests.rs
         - cargo test --lib workshop::document
         - npx vitest run tests/client/inspector-field.test.js tests/client/workshop-authoring.test.js
 
@@ -155,13 +155,13 @@ entities:
       coordinates: [gm-t2-directed-world-actions]
     implementation:
       status: declared
-      paths: [src/gm_npc.rs, src/gm_npc/inspector.rs, src/gm_action.rs, src/core/codec.rs, gui/gm-npc-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html, tests/gm_npc.rs]
+      paths: [crates/phoenix-simulation/src/gm_npc.rs, crates/phoenix-simulation/src/gm_npc/inspector.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/core/codec.rs, gui/gm-npc-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html, tests/gm_npc.rs]
       symbols: [SetNpcDoctrineChecked, apply_checked, NpcInspector, valid_revision]
       tests:
-        - src/gm_npc_tests.rs
-        - src/gm_npc/inspector_tests.rs
-        - src/gm_action_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-simulation/src/gm_npc_tests.rs
+        - crates/phoenix-simulation/src/gm_npc/inspector_tests.rs
+        - crates/phoenix-simulation/src/gm_action_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - cargo test --features headless --test gm_npc live_inspector_
         - cargo test --features host,headless --lib gm_npc::inspector
         - npx vitest run tests/client/gm-npc-panel.test.js tests/client/native-gm-workspace.test.js
@@ -189,10 +189,10 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/workshop/test_view.rs
-        - src/workshop/test_protocol.rs
-        - src/workshop/test_browser.rs
-        - src/workshop/test_clock.rs
+        - crates/phoenix-simulation/src/workshop/test_view.rs
+        - crates/phoenix-simulation/src/workshop/test_protocol.rs
+        - src/workshop_host/test_browser.rs
+        - crates/phoenix-simulation/src/workshop/test_clock.rs
         - gui/workshop-test-gm.js
         - gui/workshop-test-boot.js
         - gui/workshop-test-panel.js
@@ -206,8 +206,8 @@ entities:
         - workshop-test.html
       symbols: [TestView, TestShip, TestViewState, mountWorkshopTestGm, gmConsoleMarkup, TEST_GM_REFUSED_ACTIONS]
       tests:
-        - src/workshop/test_protocol_tests.rs
-        - src/workshop/test_clock_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_protocol_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_clock_tests.rs
         - cargo test --features headless --test gm_presentation_neutrality
         - npx vitest run tests/client/workshop-test-view.test.js
         - npx vitest run editor/tests/workshop-test-child.test.js tests/client/workshop-test-panel.test.js
@@ -234,14 +234,14 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/workshop/test_trace.rs, src/workshop/test_protocol.rs, src/workshop/test_browser.rs, src/native_host/workshop/test_process.rs, src/world/server.rs, src/world/script/load.rs, src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
+      paths: [crates/phoenix-simulation/src/workshop/test_trace.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/script/load.rs, crates/phoenix-simulation/src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
       symbols: [TestTrace, TestTraceRecord, TestTraceKind, named_function_lines, apply_script_call, tick_script_callbacks, mountWorkshopTestPanel]
       tests:
-        - src/workshop/test_trace_tests.rs
-        - src/workshop/test_protocol_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_trace_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_protocol_tests.rs
         - src/native_host/workshop/test_process_tests.rs
-        - src/world/script/load_tests.rs
-        - src/world/script/validate_tests.rs
+        - crates/phoenix-simulation/src/world/script/load_tests.rs
+        - crates/phoenix-simulation/src/world/script/validate_tests.rs
         - cargo test --lib workshop::test_trace world::server_tests::scripted_flag_write_chains_a_declarative_on_flag_set world::server_tests::scripted_callback_fires_after_the_delay_not_immediately
         - npx vitest run tests/client/workshop-test-panel.test.js tests/client/workshop-test-layout-model.test.js tests/client/workshop-authoring.test.js tests/client/operator-profile.test.js
 
@@ -264,12 +264,12 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/workshop/test_breakpoint.rs, src/workshop/test_clock.rs, src/workshop/test_protocol.rs, src/workshop/test_browser.rs, src/native_host/workshop/test_process.rs, editor/workshop-test-breakpoint.js, gui/workshop-test-panel.js]
+      paths: [crates/phoenix-simulation/src/workshop/test_breakpoint.rs, crates/phoenix-simulation/src/workshop/test_clock.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, editor/workshop-test-breakpoint.js, gui/workshop-test-panel.js]
       symbols: [TestBreakpoint, TestBreakpointCondition, TestBreakpointState, TestBreakpointHit, evaluate_breakpoint, validateTestBreakpoint]
       tests:
-        - src/workshop/test_breakpoint_tests.rs
-        - src/workshop/test_clock_tests.rs
-        - src/workshop/test_protocol_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_breakpoint_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_clock_tests.rs
+        - crates/phoenix-simulation/src/workshop/test_protocol_tests.rs
         - src/native_host/workshop/test_process_tests.rs
         - cargo test --lib workshop::test_clock workshop::test_breakpoint workshop::test_protocol
         - npx vitest run editor/tests/workshop-test-breakpoint.test.js tests/client/workshop-test-panel.test.js editor/tests/workshop-test-frame.test.js editor/tests/workshop-test-snapshot.test.js

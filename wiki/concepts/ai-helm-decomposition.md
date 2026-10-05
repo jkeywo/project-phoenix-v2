@@ -2,7 +2,7 @@
 title: AI Helm Decomposition
 type: concept
 tags: [ai, helm, per-axis, commands, control-source, tick, lod]
-sources: [src/console/helm/server.rs, src/ship/helm_ai/mod.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_ai/facts.rs, src/ship/helm_ai/steering.rs, src/ship/helm_ai/lateral.rs, src/ship/helm_ai/vertical.rs, src/ship/helm_ai/impulse.rs, src/ship/helm_ai/boost.rs, src/ship/helm_ai/engines.rs, src/ship_plugin.rs, src/ship/helm_planner.rs, src/ai/core.rs, src/ai/cadence.rs, src/ai/lod.rs, src/ai/server.rs, src/server_app_render.rs]
+sources: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-simulation/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/steering.rs, crates/phoenix-simulation/src/ship/helm_ai/lateral.rs, crates/phoenix-simulation/src/ship/helm_ai/vertical.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/boost.rs, crates/phoenix-simulation/src/ship/helm_ai/engines.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_planner.rs, crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-simulation/src/ai/lod.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-presentation/src/server_app_render.rs]
 updated: 2026-09-01
 ---
 
@@ -14,7 +14,7 @@ AI Helm is split by fine system. Each host decides one authored axis or drive ca
 
 | File | Responsibility |
 |---|---|
-| `src/ship/helm_ai/mod.rs` | Shared policy-machine state and the public module surface. |
+| `crates/phoenix-simulation/src/ship/helm_ai/mod.rs` | Shared policy-machine state and the public module surface. |
 | `surfaces.rs` | Builds one frozen, read-only decision frame per ship and projects policy output. |
 | `facts.rs` | Seeds authored facts and parameters into each policy host. |
 | `steering.rs` | Steering host and arc-bearing override. |
@@ -45,13 +45,13 @@ Authority is checked at admission. Nothing downstream can distinguish a human-is
 
 ## Shared cadence
 
-All policy hosts run on the deterministic logical-tick cadence in `src/ai/cadence.rs`. The world authors `sim_tick_hz`, `ai_tick_hz`, and `ai_snapshot_hz`; validation requires whole cadence ratios. Decisions therefore depend on `SimTick`, not rendered frames or wall-clock timers.
+All policy hosts run on the deterministic logical-tick cadence in `crates/phoenix-simulation/src/ai/cadence.rs`. The world authors `sim_tick_hz`, `ai_tick_hz`, and `ai_snapshot_hz`; validation requires whole cadence ratios. Decisions therefore depend on `SimTick`, not rendered frames or wall-clock timers.
 
 ## Simulation and render LOD
 
-AI simulation LOD in `src/ai/lod.rs` promotes nearby NPCs to `AiHighFidelity` and demotes distant ones with authored thresholds, hysteresis, and dwell. Every frozen-roster fleet ship is a permanent high-fidelity anchor on every peer; `LocalShip` is not an LOD input, so stationless GM and ship-host simulations agree. Authored world `LodBubble` entities also work without a local or fleet ship. High-fidelity ships run the full helm command/integration path. Low-fidelity ships use the cheaper deterministic path in `src/ai/server.rs` while retaining objective cursors and combat intent.
+AI simulation LOD in `crates/phoenix-simulation/src/ai/lod.rs` promotes nearby NPCs to `AiHighFidelity` and demotes distant ones with authored thresholds, hysteresis, and dwell. Every frozen-roster fleet ship is a permanent high-fidelity anchor on every peer; `LocalShip` is not an LOD input, so stationless GM and ship-host simulations agree. Authored world `LodBubble` entities also work without a local or fleet ship. High-fidelity ships run the full helm command/integration path. Low-fidelity ships use the cheaper deterministic path in `crates/phoenix-simulation/src/ai/server.rs` while retaining objective cursors and combat intent.
 
-Mesh LOD is unrelated. It is selected by the renderer in `src/server_app_render.rs` from the model rig's authored levels and only changes visuals.
+Mesh LOD is unrelated. It is selected by the renderer in `crates/phoenix-presentation/src/server_app_render.rs` from the model rig's authored levels and only changes visuals.
 
 ## Related
 

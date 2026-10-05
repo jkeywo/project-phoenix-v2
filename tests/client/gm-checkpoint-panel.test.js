@@ -3,8 +3,8 @@
 // Named GM checkpoints (issue #1445), mounted on the REAL `server.html` markup
 // with the REAL String Table, driven by the exact catalogue-row shape
 // `bridge::save_slot_js` publishes — including the `preflight` object whose
-// verdict `src/gm_checkpoint.rs` decides (pinned from the Rust side in
-// `src/gm_checkpoint.rs`'s own tests and `tests/gm_checkpoint.rs`).
+// verdict `crates/phoenix-simulation/src/gm_checkpoint.rs` decides (pinned from the Rust side in
+// `crates/phoenix-simulation/src/gm_checkpoint.rs`'s own tests and `tests/gm_checkpoint.rs`).
 import { beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -423,7 +423,7 @@ it('gives every candidate row a spoken name carrying its verdict', async () => {
 });
 
 it('reads an engine-named row as its authored sentence, in the row and the detail', async () => {
-  // `src/gm_restore.rs` bookmarks the recovery checkpoint it takes before a
+  // `crates/phoenix-simulation/src/gm_restore.rs` bookmarks the recovery checkpoint it takes before a
   // live restore (#1446) under the String Table id `RECOVERY_CHECKPOINT_NAME`,
   // because that crate has no locale. That row is an ordinary candidate here,
   // so the picker resolves the name instead of showing a GM the raw id.

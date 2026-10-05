@@ -77,5 +77,5 @@ entities:
           expect: "0.18"
     implementation:
       status: declared
-      paths: [src/server_app/world_setup.rs, tests/headless_runner.rs]
-      tests: [src/server_app/world_setup_game_start_identity_tests.rs]
+      paths: [crates/phoenix-simulation/src/server_app/world_setup.rs, tests/headless_runner.rs]
+      tests: [crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]

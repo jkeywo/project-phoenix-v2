@@ -2,7 +2,7 @@
 title: UiMaterial Shader Pattern
 type: concept
 tags: [ui, shader, wgsl, ui-material, viewscreen, vignette]
-sources: [src/server/viewscreen_border.rs, assets/shaders/red_alert_vignette.wgsl]
+sources: [crates/phoenix-presentation/src/server/viewscreen_border.rs, assets/shaders/red_alert_vignette.wgsl]
 updated: 2026-08-27
 ---
 
@@ -12,7 +12,7 @@ How to back a Bevy UI node with a custom WGSL shader, using a small `AsBindGroup
 
 ## Worked example: `RedAlertVignetteMaterial`
 
-The first use of this pattern in the codebase is the Red Alert vignette in [`src/server/viewscreen_border.rs`](../../src/server/viewscreen_border.rs):
+The first use of this pattern in the codebase is the Red Alert vignette in [`crates/phoenix-presentation/src/server/viewscreen_border.rs`](../../crates/phoenix-presentation/src/server/viewscreen_border.rs):
 
 ```rust
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
@@ -68,7 +68,7 @@ Bevy UI renders children in spawn order. The vignette `MaterialNode` is spawned 
 
 - WGSL fragment shader: `assets/shaders/<name>.wgsl`
 - Trunk `copy-dir` directive in `index.html` to publish the shader into `dist/`
-- Material struct + impl: alongside the consuming module (here, `src/server/viewscreen_border.rs`)
+- Material struct + impl: alongside the consuming module (here, `crates/phoenix-presentation/src/server/viewscreen_border.rs`)
 
 ## Related
 

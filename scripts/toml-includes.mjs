@@ -4,7 +4,7 @@
  *
  * `assets/entities/*.toml` compose: a hull declares `includes = [...]` and
  * inherits every top-level key it does not author itself
- * (`src/entities/include_resolve.rs`). A checker that reads only a file's OWN
+ * (`crates/phoenix-simulation/src/entities/include_resolve.rs`). A checker that reads only a file's OWN
  * keys therefore sees `class` on the four alliance hulls — which author it —
  * and nothing at all on a hull composed from fragments, even though Rust
  * resolves one and the client badges it. Issues #875 / #878 migrate the

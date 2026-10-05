@@ -227,8 +227,8 @@ Modded scenarios may read and write campaign facts only through declared namespa
 
 ## Canonical sources
 
-- `src/campaign/projection.rs` and `pasm/spec/architecture/world-files.yaml` for the implemented campaign fact vocabulary and projection boundary.
-- `src/snapshot.rs`, the host save/import/export surfaces, and snapshot PASM for exact-run persistence and compatibility.
+- `crates/phoenix-simulation/src/campaign/projection.rs` and `pasm/spec/architecture/world-files.yaml` for the implemented campaign fact vocabulary and projection boundary.
+- `crates/phoenix-simulation/src/snapshot.rs`, the host save/import/export surfaces, and snapshot PASM for exact-run persistence and compatibility.
 - `assets/worlds/falling_skyway.toml` and its end-to-end tests for the current seven-family handoff.
 - [Game and Session Lifecycle](./game-lifecycle.md) for live-session, round, lobby, and exit boundaries.
 - [Future Modes](../future/future-modes.md) for customisation, crew assignments, Patrol Mode, multi-ship, and GM scope.

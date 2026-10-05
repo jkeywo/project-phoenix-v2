@@ -47,7 +47,7 @@ use crate::core::codec::{self, JsonCodec};
 use crate::core::messages::ClientMessage;
 use crate::delivery::serve::HostedDocuments;
 use crate::native_host::connections::{ConnectionLeg, SharedConnections};
-use crate::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use crate::native_host::transport::{TransportDispatch, TransportEvent};
 use crate::session_connections::ConnectionId;
 
 use super::document::{mint_document_nonce, pane_document_path, pane_url};
@@ -795,7 +795,9 @@ fn route_pane_input(
     }
 }
 
-impl NativeTransport for PaneTransport {
+impl phoenix_transport::Transport<crate::native_host::transport::PhoenixProtocol>
+    for PaneTransport
+{
     fn share_connections(&mut self, shared: SharedConnections) {
         let mut state = self.bus.lock();
         assert!(
@@ -918,3 +920,6 @@ mod snapshot_tests;
 #[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+use phoenix_transport::transport::Transport;

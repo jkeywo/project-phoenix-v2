@@ -19,16 +19,19 @@ use std::{
     sync::{Arc, Mutex},
 };
 pub const PRODUCERS: [&str; 2] = [
-    "project_phoenix::console::captain::server::operate_captain_ai",
-    "project_phoenix::ship::sensors::operate_sensors_ai",
+    "phoenix_simulation::console::captain::server::operate_captain_ai",
+    "phoenix_simulation::ship::sensors::operate_sensors_ai",
 ];
 const CONSUMERS: [(usize, &str); 3] = [
     (
         0,
-        "project_phoenix::console::captain::server::handle_set_red_alert",
+        "phoenix_simulation::console::captain::server::handle_set_red_alert",
     ),
-    (1, "project_phoenix::ship::sensors::handle_sensors_messages"),
-    (1, "project_phoenix::science::server::tick_scans"),
+    (
+        1,
+        "phoenix_simulation::ship::sensors::handle_sensors_messages",
+    ),
+    (1, "phoenix_simulation::science::server::tick_scans"),
 ];
 pub fn key(graph: &ScheduleGraph, name: &str) -> SystemKey {
     let keys: Vec<_> = graph
@@ -302,8 +305,8 @@ pub fn capture(app: &mut App, order: &str) -> Value {
             assert!(!n.exclusive && !n.has_deferred && !n.apply_deferred);
         }
         let admission = [
-            lookup("project_phoenix::command_admission::admit_system_commands"),
-            lookup("project_phoenix::command_admission::clear_inter_system_queue"),
+            lookup("phoenix_simulation::command_admission::admit_system_commands"),
+            lookup("phoenix_simulation::command_admission::clear_inter_system_queue"),
         ];
         assert!(admission.iter().all(|a| reaches(a, &before)));
         assert!(reaches(&before, &ids[i]) && reaches(&ids[i], &after));

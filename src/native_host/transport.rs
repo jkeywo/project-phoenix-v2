@@ -36,58 +36,17 @@ use crate::lobby::handler::Target;
 use crate::lobby::{InboundMessage, OutboundMessage, PlayerDisconnected};
 use crate::logging::{LogCat, LogFilterConfig};
 
-/// Something a transport observed and is handing the simulation.
-///
-/// `Received` is larger than `Disconnected` (it carries a whole
-/// `ClientMessage`), but this is a low-frequency control event on the ingress
-/// seam — not a hot-loop value — so the size difference costs nothing and
-/// boxing would only add indirection to the common path.
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq)]
-pub enum TransportEvent {
-    /// A decoded client message from `token`. Decoded, not raw JSON: a network
-    /// transport runs `core::codec` itself (that is where `serde_json` lives),
-    /// and an in-process participant has nothing to decode.
-    Received { token: String, msg: ClientMessage },
-    /// `token`'s connection went away. The lobby owns what that means for the
-    /// station they held — the seam only reports it.
-    Disconnected { token: String },
+/// Phoenix's vocabulary binding; the transport implementation is reusable.
+pub struct PhoenixProtocol;
+impl phoenix_transport::Profile for PhoenixProtocol {
+    type Inbound = ClientMessage;
+    type Outbound = ServerMessage;
+    type Connections = SharedConnections;
 }
-
-/// One dispatch the simulation is handing a transport.
-///
-/// Borrowed rather than owned so a transport that only needs to look at the
-/// message (to route it, or to hand it straight to an in-process pane) pays no
-/// clone, and the `Target`/`DeliveryClass` pair arrives exactly as the
-/// broadcaster resolved it.
-pub struct TransportDispatch<'a> {
-    pub target: &'a Target,
-    pub msg: &'a ServerMessage,
-    pub delivery: DeliveryClass,
-}
-
-/// What a native transport must provide to carry the Phoenix protocol.
-///
-/// Two methods, matching the two systems in this module. Implementations are
-/// polled once per frame from `PreUpdate` and dispatched to once per frame from
-/// `PostUpdate`; neither is called from a fixed step, and neither may block.
-pub trait NativeTransport: Send + Sync + 'static {
-    /// Compose before polling any crew traffic. Physical adapters share one
-    /// connection registry; queue-only test transports need no connection map.
-    fn share_connections(&mut self, _connections: SharedConnections) {}
-
-    /// Everything that arrived since the last poll, in arrival order.
-    fn poll(&mut self) -> Vec<TransportEvent>;
-
-    /// Deliver one outbound message. Called once per `OutboundMessage`, in the
-    /// order the simulation produced them.
-    fn dispatch(&mut self, dispatch: TransportDispatch<'_>);
-
-    /// A short name for the operator log. Defaults to `"native"`.
-    fn name(&self) -> &'static str {
-        "native"
-    }
-}
+pub type TransportEvent = phoenix_transport::Event<ClientMessage>;
+pub type TransportDispatch<'a> = phoenix_transport::Dispatch<'a, ServerMessage>;
+pub trait NativeTransport: phoenix_transport::Transport<PhoenixProtocol> {}
+impl<T: phoenix_transport::Transport<PhoenixProtocol> + ?Sized> NativeTransport for T {}
 
 /// The transport a native host is currently using, if any.
 ///
@@ -211,74 +170,7 @@ fn flush_native_outbound(
 /// both, but only the current owner's physical connection can receive a Target.
 /// Compose before polling crew traffic. It nests, so a third leg is
 /// `PairedTransport::new(PairedTransport::new(a, b), c)`.
-pub struct PairedTransport<A: NativeTransport, B: NativeTransport> {
-    first: A,
-    second: B,
-}
-
-impl<A: NativeTransport, B: NativeTransport> PairedTransport<A, B> {
-    /// Drive `first` and `second` as one transport. Polled in that order, so a
-    /// frame's events are ordered by transport and then by arrival within it.
-    pub fn new(mut first: A, mut second: B) -> Self {
-        let connections = SharedConnections::default();
-        first.share_connections(connections.clone());
-        second.share_connections(connections);
-        Self { first, second }
-    }
-}
-
-/// A boxed transport is a transport (issue #1353).
-///
-/// [`PairedTransport`] nests, so three legs are `new(new(a, b), c)` — but the
-/// legs a native host actually has are each OPTIONAL (local panes, the cloud
-/// relay, direct LAN accept), and spelling every combination of three optional
-/// generic types out is eight arms of `match` in the binary for one resource.
-/// With this, `phoenix-host` folds whichever legs it has into one
-/// `Box<dyn NativeTransport>` and inserts that — and adding a fourth leg later
-/// is one more fold, not sixteen arms.
-impl NativeTransport for Box<dyn NativeTransport> {
-    fn share_connections(&mut self, connections: SharedConnections) {
-        (**self).share_connections(connections);
-    }
-
-    fn poll(&mut self) -> Vec<TransportEvent> {
-        (**self).poll()
-    }
-
-    fn dispatch(&mut self, dispatch: TransportDispatch<'_>) {
-        (**self).dispatch(dispatch)
-    }
-
-    fn name(&self) -> &'static str {
-        (**self).name()
-    }
-}
-
-impl<A: NativeTransport, B: NativeTransport> NativeTransport for PairedTransport<A, B> {
-    fn share_connections(&mut self, connections: SharedConnections) {
-        self.first.share_connections(connections.clone());
-        self.second.share_connections(connections);
-    }
-
-    fn poll(&mut self) -> Vec<TransportEvent> {
-        let mut events = self.first.poll();
-        events.extend(self.second.poll());
-        events
-    }
-
-    fn dispatch(&mut self, dispatch: TransportDispatch<'_>) {
-        self.first.dispatch(TransportDispatch {
-            target: dispatch.target,
-            msg: dispatch.msg,
-            delivery: dispatch.delivery,
-        });
-        self.second.dispatch(dispatch);
-    }
-
-    fn name(&self) -> &'static str {
-        "paired"
-    }
-}
+pub type PairedTransport<A, B> = phoenix_transport::PairedTransport<PhoenixProtocol, A, B>;
 
 // ── Loopback ────────────────────────────────────────────────────────────────
 
@@ -343,7 +235,9 @@ impl LoopbackHandle {
     }
 }
 
-impl NativeTransport for LoopbackTransport {
+impl phoenix_transport::Transport<crate::native_host::transport::PhoenixProtocol>
+    for LoopbackTransport
+{
     fn poll(&mut self) -> Vec<TransportEvent> {
         self.handle
             .inbox

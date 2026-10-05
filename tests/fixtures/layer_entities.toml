@@ -1,4 +1,4 @@
-# Layer-fixture world for the `src/world/server.rs` layer tests.
+# Layer-fixture world for the `crates/phoenix-simulation/src/world/server.rs` layer tests.
 #
 # The ENTITY half of the layer contract: a loaded layer's entities spawn and
 # register their names, and unload despawns exactly them. It was a deliberately

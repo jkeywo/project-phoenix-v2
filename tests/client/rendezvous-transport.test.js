@@ -369,6 +369,32 @@ describe('which route a client page load is on', () => {
 // ── The tracer ──────────────────────────────────────────────────────────────
 
 describe('typed join', () => {
+  it('keeps page transport factories when a caller forwards undefined', async () => {
+    const world = makeWorld();
+    const saved = globalThis.window;
+    globalThis.window = { ...saved, PhoenixTransportFactories: { socket: world.socket, peer: makePeerFactory() } };
+    let host;
+    let joiner;
+    try {
+      const started = await hostOn(world, { factories: undefined });
+      host = started.host;
+      expect(started.code).toBeTruthy();
+      joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test', data: DATA, code: started.code.suffix,
+        factories: undefined, getIdent: () => ({ token: 'page-factories', name: 'Ada' }),
+      });
+      await settle();
+      expect(started.inbound).toEqual([
+        { type: 'Identify', data: { token: 'page-factories', name: 'Ada' } },
+      ]);
+    } finally {
+      joiner?.close();
+      host?.close();
+      if (saved === undefined) delete globalThis.window;
+      else globalThis.window = saved;
+    }
+  });
+
   it('issues a code of the authored length to the host', async () => {
     const world = makeWorld();
     const { code } = await hostOn(world);
@@ -508,7 +534,7 @@ describe('distinct failures', () => {
   it('says unknown for a suffix nobody holds', async () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
-    expect(await errorsFor('ZZZZZZZZ', world, factories)).toContain('unknown');
+    expect(await errorsFor('ZZZZZ', world, factories)).toContain('unknown');
   });
 
   it('says wrong-type for a code minted in the server namespace', async () => {
@@ -537,7 +563,7 @@ describe('distinct failures', () => {
     const world = makeWorld();
     const { factories } = await hostOn(world);
     const sent = vi.fn();
-    expect(await errorsFor('ADMINXYZ', world, factories)).toContain('denied');
+    expect(await errorsFor('ADMIN', world, factories)).toContain('denied');
     expect(sent).not.toHaveBeenCalled();
   });
 });
@@ -806,7 +832,7 @@ describe('a joiner that fails cleans up after itself', () => {
     const joiner = createRendezvousJoiner({
       base: 'https://rendezvous.test',
       data: DATA,
-      code: 'ZZZZZZZZ',
+      code: 'ZZZZZ',
       factories,
     });
     await settle();

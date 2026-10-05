@@ -2,7 +2,7 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/entities/ship_spawn.rs, src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/collision.rs, src/server_app/broadcast_publish.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/lobby/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/server/bridge.rs, src/headless/app.rs]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/server_app/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-presentation/src/server_app_render.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/sensors.rs, src/server/bridge.rs, src/headless/app.rs]
 updated: 2026-10-04
 ---
 
@@ -14,14 +14,14 @@ updated: 2026-10-04
 
 | File | Current responsibility |
 |---|---|
-| `src/server_app/mod.rs` | Thin facade and re-exports. It keeps existing `crate::server_app::…` imports stable while implementation lives in focused sibling modules. |
-| `src/server_app/registration.rs` | The composition root: `SimPluginOptions`, fixed-tick setup, Rapier ordering, plugin registration, resources, systems, and broadcaster registration. |
-| `src/server_app/components.rs` | Cross-cutting ECS components, resources, and `SystemParam` bundles owned by the simulation assembly, including the explicitly classified `SimOutbox`. |
-| `src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`, its entity position/health delta caches, lifecycle reset, and explicit UUID pruning. |
-| `src/server_app/broadcast_publish.rs` | Publish/HUD systems, Blackboard live/lifecycle projection, `modifier_events_broadcaster`, the class-preserving `sim_outbox_broadcaster`, and world-setup publication. |
-| `src/server_app/collision.rs` | Rapier contact handling and collision damage. |
-| `src/server_app/world_setup.rs` | World setup, prepared crew inputs for shared ship spawning, fleet metadata and compatibility-resource publication. |
-| `src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
+| `crates/phoenix-simulation/src/server_app/mod.rs` | Thin facade and re-exports. It keeps existing `crate::server_app::…` imports stable while implementation lives in focused sibling modules. |
+| `crates/phoenix-simulation/src/server_app/registration.rs` | The composition root: `SimPluginOptions`, fixed-tick setup, Rapier ordering, plugin registration, resources, systems, and broadcaster registration. |
+| `crates/phoenix-simulation/src/server_app/components.rs` | Cross-cutting ECS components, resources, and `SystemParam` bundles owned by the simulation assembly, including the explicitly classified `SimOutbox`. |
+| `crates/phoenix-simulation/src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`, its entity position/health delta caches, lifecycle reset, and explicit UUID pruning. |
+| `crates/phoenix-simulation/src/server_app/broadcast_publish.rs` | Publish/HUD systems, Blackboard live/lifecycle projection, `modifier_events_broadcaster`, the class-preserving `sim_outbox_broadcaster`, and world-setup publication. |
+| `crates/phoenix-simulation/src/server_app/collision.rs` | Rapier contact handling and collision damage. |
+| `crates/phoenix-simulation/src/server_app/world_setup.rs` | World setup, prepared crew inputs for shared ship spawning, fleet metadata and compatibility-resource publication. |
+| `crates/phoenix-presentation/src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
 
 ## Registration contract
 
@@ -41,10 +41,10 @@ The registration root installs the console, ship, AI, world-support, infrastruct
 
 The registration root installs:
 
-- `weapons_update_broadcaster` from `src/console/weapons/blackboard.rs`;
-- `sim_state_broadcaster` from `src/server_app/broadcast.rs`;
-- `modifier_events_broadcaster` and `sim_outbox_broadcaster` from `src/server_app/broadcast_publish.rs`;
-- `shields_state_broadcaster` from `src/ship/shields.rs`, registered by `ShipShieldsPlugin` and routed to the holder of the Station that owns the authored `shields` System kind, regardless of its instance id.
+- `weapons_update_broadcaster` from `crates/phoenix-simulation/src/console/weapons/blackboard.rs`;
+- `sim_state_broadcaster` from `crates/phoenix-simulation/src/server_app/broadcast.rs`;
+- `modifier_events_broadcaster` and `sim_outbox_broadcaster` from `crates/phoenix-simulation/src/server_app/broadcast_publish.rs`;
+- `shields_state_broadcaster` from `crates/phoenix-simulation/src/ship/shields.rs`, registered by `ShipShieldsPlugin` and routed to the holder of the Station that owns the authored `shields` System kind, regardless of its instance id.
 
 `SimOutbox` is the arbitrary-target simulation queue. Its raw entries are
 private, so producers must choose `Snapshot` or `Reliable` through an explicit
@@ -63,7 +63,7 @@ delta caches.
 
 ## Tests
 
-Module-level composition tests live in `src/server_app/mod_tests.rs`. Cross-binary and schedule-order properties live in integration tests, including the headless runner and registration-order determinism checks. Render code stays outside those headless paths behind `SimPluginOptions::render`.
+Module-level composition tests live in `crates/phoenix-simulation/src/server_app/mod_tests.rs`. Cross-binary and schedule-order properties live in integration tests, including the headless runner and registration-order determinism checks. Render code stays outside those headless paths behind `SimPluginOptions::render`.
 
 ## Related
 

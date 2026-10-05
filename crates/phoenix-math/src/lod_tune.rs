@@ -23,7 +23,7 @@
 //!
 //! Offline tuning math, run at build time by the `tune-lods` bin, never in the
 //! shipped simulation — so platform-varying std transcendentals are fine here
-//! (issue #908, simmath.rs; same opt-out as src/viewer/camera.rs).
+//! (issue #908, simmath.rs; same opt-out as crates/phoenix-presentation/src/viewer/camera.rs).
 #![allow(clippy::disallowed_methods)]
 
 /// Alpha-aware RMS difference between two RGBA8 images of the same dimensions,

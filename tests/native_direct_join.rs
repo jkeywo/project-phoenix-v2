@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use phoenix_transport::transport::Transport;
 use project_phoenix::core::codec::{
     decode_handshake_frame, decode_rendezvous_frame, encode_handshake_frame,
     encode_rendezvous_frame, JsonCodec,
@@ -48,7 +49,7 @@ use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::direct_join::{AdmissionBudgets, DirectJoinService};
 use project_phoenix::native_host::join_codes::JoinCodeTable;
 use project_phoenix::native_host::relay_transport::{RelayHostConfig, RelayNotice, RelayTransport};
-use project_phoenix::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use project_phoenix::native_host::transport::{TransportDispatch, TransportEvent};
 
 const MANIFEST: &str = "assets/scenarios.toml";
 const JOIN_TABLE: &str = "assets/join/join-codes.toml";
@@ -438,7 +439,7 @@ fn a_phone_joins_a_native_host_with_no_external_service_anywhere() {
     let host = Host::start();
     assert_eq!(
         host.code.suffix.chars().count(),
-        8,
+        5,
         "the code is on the viewscreen before anybody has scanned anything"
     );
 
@@ -608,7 +609,7 @@ fn the_code_and_the_protocol_version_are_checked_as_the_worker_checks_them() {
     let mut joiner = Joiner::connect(&host);
     joiner.wait_for("ready");
     joiner.send(&RendezvousFrame {
-        code: Some(CodeField::Typed("XYZABCDE".to_string())),
+        code: Some(CodeField::Typed("XYZAB".to_string())),
         ..RendezvousFrame::new("join")
     });
     let refusal = joiner.wait_for("error");
@@ -709,7 +710,7 @@ fn wrong_code(n: usize) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKMNOPQRSTUVWXYZ";
     let mut out = String::new();
     let mut v = n;
-    for _ in 0..8 {
+    for _ in 0..5 {
         out.push(ALPHABET[v % ALPHABET.len()] as char);
         v /= ALPHABET.len();
     }

@@ -2,7 +2,7 @@
 title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai, human-seeking]
-sources: [src/ship/config.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/lobby/stations_config.rs, src/lobby/session.rs, src/ship/components.rs, src/ship/rating_systems.rs, gui/mount-plan.js, assets/entities/alliance_destroyer.toml, assets/entities/dynasty_player_cruiser.toml]
+sources: [crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, gui/mount-plan.js, assets/entities/alliance_destroyer.toml, assets/entities/dynasty_player_cruiser.toml]
 updated: 2026-09-21
 ---
 
@@ -16,7 +16,7 @@ the simulation but is not offered as a separate seat.
 ## Authoring and wire shape
 
 Each hull declares `[[station]]` blocks in its entity TOML. `StationConfig` in
-`src/ship/config.rs` parses and validates them. At startup,
+`crates/phoenix-simulation/src/ship/config.rs` parses and validates them. At startup,
 `stations_from_ship_config` projects the roster into `StationDef` values for
 `Welcome`, including:
 

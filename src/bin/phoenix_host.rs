@@ -905,7 +905,9 @@ fn main() {
                             stamp: content.manifest.stamp.clone(),
                         },
                     );
-                    relay_notices = Some(transport.notices());
+                    relay_notices = Some(native_host::relay_transport::RelayNotices(
+                        transport.notices(),
+                    ));
                     server.on_upgrade(std::sync::Arc::new(gate));
                     legs.push(Box::new(transport));
                     eprintln!(
@@ -944,8 +946,12 @@ fn main() {
                 // One notice queue however many legs there are: it is a channel
                 // to the OPERATOR, and there is one operator with one terminal.
                 match &relay_notices {
-                    Some(shared) => transport.share_notices(shared.clone()),
-                    None => relay_notices = Some(transport.notices()),
+                    Some(shared) => transport.share_notices(shared.0.clone()),
+                    None => {
+                        relay_notices = Some(native_host::relay_transport::RelayNotices(
+                            transport.notices(),
+                        ))
+                    }
                 }
                 legs.push(Box::new(transport));
                 eprintln!("phoenix-host: registering with {base} as {origin}");

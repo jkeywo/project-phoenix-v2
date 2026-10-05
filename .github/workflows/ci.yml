@@ -280,7 +280,7 @@ jobs:
       - name: Run the demo-build gate tests
         env:
           PHOENIX_DEMO_BUILD: 'true'
-        run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
+        run: cargo test -p phoenix-simulation --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 
   # Link the native host and capture tools, which the ordinary test feature
   # set does not build. Keep debug builds; these binaries need no release run.
@@ -337,40 +337,15 @@ jobs:
       - name: Run the viewer test suite
         run: |
           set -o pipefail
-          cargo test --lib --features viewer viewer:: | tee viewer-tests.log
+          cargo test -p phoenix-presentation --lib --features viewer viewer:: | tee viewer-tests.log
           # libtest succeeds on an empty selection; refuse that silent loss.
           grep -Eq 'test result: ok\. [1-9][0-9]* passed;' viewer-tests.log
 
-  # ── Sim → presentation boundary (`--no-default-features`) ──────────────────────
-  #
-  # THIS JOB IS THE IMPORT BAN (issue #1194). The intended architecture is a
-  # simulation half that never depends on the presentation half: the presentation
-  # code — the 3-D renderer, the JS↔WASM bridge, asset preloading and the
-  # viewscreen border — all lives under `crate::server`, gated behind the `server`
-  # feature (`#[cfg(feature = "server")] pub mod server;` in src/lib.rs). Every
-  # other module compiles unconditionally and IS the simulation.
-  #
-  # So "a simulation module imports a presentation module" is exactly "an
-  # always-compiled module names `crate::server::…` without a `feature = "server"`
-  # gate" — and that is exactly what fails to COMPILE when the feature is off.
-  # `cargo check --no-default-features` therefore turns the boundary into a
-  # compiler-checked invariant with zero false positives and zero false negatives:
-  # a legitimately `#[cfg(feature = "server")]`-gated reference compiles away, an
-  # ungated one is an `unresolved import crate::server` error, and CI goes red.
-  # This is more robust than any grep/clippy rule could be, because the crate
-  # already carries dozens of correctly-gated inline `crate::server` references
-  # (the debug-observability string seams, the render assembly, the wasm bridge
-  # glue) that a source scan would have to reimplement `cfg` evaluation to clear.
-  #
-  # It is a SEPARATE JOB for the same reason `viewer-test` is: `--no-default-
-  # features` is its own feature set and its own codegen, so folding it into `test`
-  # would serialise a full check behind that job rather than running concurrently
-  # here. It also builds the exact isolated Workshop preview feature set
-  # (`--no-default-features --features viewer`), closing the gap that `viewer-test`
-  # (which keeps the default `server` on) cannot see.
-  #
-  # To prove the guard bites: add an ungated `use crate::server::renderer::…;` to
-  # any always-compiled module and this job goes red; remove it and it is green.
+  # Package boundaries are compiled independently so workspace feature unification
+  # cannot hide rendering dependencies in simulation. Import rules also prevent
+  # reusable packages from acquiring game dependencies. The grid hosts exercise
+  # these shared mechanisms without Phoenix game code.
+  # The isolated Workshop preview retains its server-off feature check.
   boundary:
     needs: changes
     if: needs.changes.outputs.run == 'true'
@@ -386,12 +361,43 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
-      # The headline gate: no simulation module may import a presentation module.
-      - name: Check the sim builds without the presentation feature
-        run: cargo check --no-default-features
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Enforce package directions and renderer-free simulation graph
+        run: node scripts/check-layers.mjs --dependency-tree
+      - name: Check generated layer dependency graph
+        run: node scripts/generate-layers-graph.mjs --check
+      - name: Build and test simulation without workspace feature unification
+        run: cargo test -p phoenix-simulation --lib --no-default-features
+      - name: Check standalone platform rendering without host feature unification
+        run: cargo check -p phoenix-platform --features render
+      - name: Test the independent grid game
+        run: cargo test -p phoenix-grid
+
+      - name: Build both grid hosts
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build -p phoenix-grid
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.120
+      - run: node scripts/build-grid.mjs
+      - name: Exercise native and WASM grid hosts from a pure JavaScript console
+        run: |
+          npm ci --prefix tests/smoke
+          cd tests/smoke
+          npx playwright install --with-deps chromium
+          cd ../..
+          node tests/layers/grid-smoke.mjs
+
+      # The headline gate: simulation cannot depend on presentation.
+      - name: Check standalone simulation
+        run: cargo check -p phoenix-simulation --no-default-features
 
       # The server-OFF Workshop preview renderer remains an import boundary.
-      - name: Check the Workshop preview builds without the presentation feature
+      - name: Check the Workshop preview without the server feature
         run: cargo check --no-default-features --features viewer
 
   # ── WASM build ────────────────────────────────────────────────────────────────
@@ -819,7 +825,7 @@ jobs:
   # implementation — `phoenix-perf report` — rather than a second opinion
   # written in whatever language each job happens to have.
   #
-  # WARNINGS-ONLY (src/perf/mod.rs carries the rule). This job gates on NOTHING:
+  # WARNINGS-ONLY (crates/phoenix-simulation/src/perf/mod.rs carries the rule). This job gates on NOTHING:
   # every scenario is reported, and any metric with adverse baseline drift is filed as a
   # GitHub issue to fix later (see the "File issues" step). Enforcement lives in
   # the manual demo deploy (deploy-demo.yml), which runs `report --gate` on all
@@ -830,7 +836,7 @@ jobs:
   # bootstrapped here: on a push to main the job adopts it from its own capture
   # and commits it with [skip ci] (so the commit starts no new run). An existing
   # baseline is NEVER moved by CI — that stays a deliberate `adopt` in a diff a
-  # human reads (see src/perf/baseline.rs).
+  # human reads (see crates/phoenix-simulation/src/perf/baseline.rs).
   #
   # Still not in `deploy`'s `needs`.
   perf:
@@ -1042,7 +1048,7 @@ jobs:
             echo 'baseline yet is bootstrapped and committed on main. The demo'
             echo 'deploy (`deploy-demo.yml`) is what gates on these budgets. To'
             echo 'move an existing baseline deliberately, `adopt` from the'
-            echo '`perf-capture` artifact — see `src/perf/baseline.rs`.'
+            echo '`perf-capture` artifact — see `crates/phoenix-simulation/src/perf/baseline.rs`.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload captures

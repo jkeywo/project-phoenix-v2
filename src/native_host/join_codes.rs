@@ -357,7 +357,7 @@ impl JoinCodeTable {
     /// replay depends on.
     ///
     /// `None` only when every attempt landed on a denied word, which for a
-    /// 25^8 space and a deny-list of tens of entries means a broken `draw`.
+    /// 25^5 space and a deny-list of tens of entries means a broken `draw`.
     pub fn mint_suffix(&self, mut draw: impl FnMut(usize) -> usize) -> Option<String> {
         // The same ceiling `mintSuffix` uses, and for the same reason: a draw
         // that keeps landing on denied words must end in an answer rather than

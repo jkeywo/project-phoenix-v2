@@ -2,7 +2,7 @@
 title: Stations
 type: concept
 tags: [stations, lobby, ratings, authority, backfill, puppeting, human-seeking]
-sources: [src/lobby/stations_config.rs, src/lobby/session.rs, src/lobby/result_application.rs, src/lobby/crew_replication.rs, src/ship/config.rs, src/ship/rating_systems.rs, src/command_admission/policy.rs, src/gm_puppet.rs, src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/gm_puppet.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-09-29
 ---
 
@@ -52,7 +52,7 @@ overlay, roster ratings and live changes. World-authored floor selectors remain
 separate work under #1067; these tests do not imply that vocabulary is delivered.
 
 Lobby message results reach both loaded-Ship components through
-`LobbyResultApplier::apply` in `src/lobby/result_application.rs`. Before the
+`LobbyResultApplier::apply` in `crates/phoenix-simulation/src/lobby/result_application.rs`. Before the
 LocalShip exists, pending Lobby choices remain in `SessionManager`; no temporary
 rating component is created and discarded by each message system.
 
@@ -106,7 +106,7 @@ PreUpdate-before-FixedUpdate order and is then cleaned up by the loss.
 
 ## Admission
 
-`station_for_system` in `src/command_admission/policy.rs` resolves a command target through the ship's authored `[[system]]` entry. For a `human_seeking` system, the live host map wins over the authored home station. Shield arcs resolve through their synthesised fine-system entries, with a narrow legacy fixture fallback. Unknown or ownerless systems do not acquire human authority.
+`station_for_system` in `crates/phoenix-simulation/src/command_admission/policy.rs` resolves a command target through the ship's authored `[[system]]` entry. For a `human_seeking` system, the live host map wins over the authored home station. Shield arcs resolve through their synthesised fine-system entries, with a narrow legacy fixture fallback. Unknown or ownerless systems do not acquire human authority.
 
 A GM-issued Station command resolves the same payload-aware effective target
 and live availability before it reaches System consumers. Thus a Helm iframe's

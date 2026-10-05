@@ -218,7 +218,7 @@ fn a_panes_document_sits_at_the_client_directorys_own_depth() {
     assert_eq!(
         pane_url("127.0.0.1:8080", PaneId(3), "abcd", &identity()),
         "http://127.0.0.1:8080/client/pane-3-abcd.html\
-             #PANESEAT&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
+             #PANES&token=3f1a6c2e-0a11-4b3c-9d55-000000000001&name=Ada"
     );
 }
 
@@ -264,7 +264,7 @@ fn the_join_code_is_one_the_authored_table_accepts() {
     // did not round-trip would compose into an identifier the page then
     // refuses, and the console would come up behind the join overlay.
     const ALPHABET: &str = "ABCDEFGHIJKMNOPQRSTUVWXYZ";
-    assert_eq!(PANE_JOIN_CODE.len(), 8);
+    assert_eq!(PANE_JOIN_CODE.len(), 5);
     assert!(
         PANE_JOIN_CODE.chars().all(|c| ALPHABET.contains(c)),
         "{PANE_JOIN_CODE} is not spelled in assets/join/join-codes.toml's alphabet"

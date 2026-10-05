@@ -1,0 +1,76 @@
+[package]
+name = "phoenix-simulation"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[features]
+test-support = []
+default = ["server"]
+server = []
+viewer = []
+debug = ["bevy/debug"]
+headless = ["dep:bevy_ecs", "bevy/debug"]
+host = ["server", "dep:tungstenite"]
+perf = []
+capture = []
+ultralight = []
+falling-skyway-sim-tests = ["headless"]
+
+[dependencies]
+base64 = "0.22.1"
+phoenix-math = { path = "../phoenix-math" }
+phoenix-model = { path = "../phoenix-model", features = ["ecs"] }
+phoenix-content = { path = "../phoenix-content" }
+phoenix-platform = { path = "../phoenix-platform" }
+phoenix-runtime = { path = "../phoenix-runtime" }
+phoenix-transport = { path = "../phoenix-transport" }
+bevy = { version = "0.18.1", default-features = false, features = ["std", "async_executor", "multi_threaded", "bevy_asset", "bevy_state", "bevy_log"] }
+indexmap = { version = "2.14.0", default-features = false }
+glam = { version = "0.30", features = ["libm"] }
+nalgebra = { version = "0.34.2", features = ["libm"] }
+parry3d = { version = "0.25.3", features = ["enhanced-determinism"] }
+rapier3d = { version = "0.31.0", features = ["enhanced-determinism"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+wasm-bindgen = "0.2.120"
+rand = "0.9"
+noise = "0.9"
+toml = "1.0"
+toml_edit = "=0.25.11"
+strum = { version = "0.28.0", features = ["derive"] }
+libm = "0.2"
+vellum-perf = { workspace = true }
+vellum-rng = { workspace = true }
+vellum-replay = { workspace = true }
+vellum-digest = { workspace = true }
+vellum-save = { workspace = true }
+vellum-script = { workspace = true }
+rhai = { version = "1.25", features = ["sync", "no_float"] }
+
+[target."cfg(not(target_arch = \"wasm32\"))".dependencies]
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+httparse = "1.10.1"
+bevy_ecs = { version = "0.18.1", default-features = false, features = ["trace"], optional = true }
+bevy_rapier3d = { version = "0.33", default-features = false, features = ["dim3"] }
+tungstenite = { version = "0.28", optional = true, default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+ron = "0.12"
+vellum-save = { workspace = true, features = ["backend-fs"] }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies]
+bevy_rapier3d = { version = "0.33", default-features = false, features = ["dim3"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+vellum-save = { workspace = true, features = ["backend-web"] }
+
+[target."wasm32-unknown-unknown".dependencies]
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console", "Performance"] }
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+phoenix-transport = { path = "../phoenix-transport", features = ["test-support"] }
+phoenix-content = { path = "../phoenix-content", features = ["test-support"] }
+vellum-replay = { workspace = true, features = ["testkit"] }
+bevy = { version = "0.18.1", default-features = false, features = ["debug"] }

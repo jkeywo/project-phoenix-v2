@@ -3,7 +3,7 @@
 # overlap-a and overlap-b both carry `assets/worlds/shared_arena.toml`. Loading
 # the second while the first is active raises a non-blocking
 # `overlapping-pack-path` warning (winner + loser) yet still accepts — see
-# src/world/mod_pack.rs `fixture_overlapping_pair_warns_but_accepts`.
+# crates/phoenix-simulation/src/world/mod_pack.rs `fixture_overlapping_pair_warns_but_accepts`.
 #
 # Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
 # (byte-reproducible; gated by `--check`).

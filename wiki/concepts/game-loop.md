@@ -2,7 +2,7 @@
 title: Game Loop
 type: concept
 tags: [loop, ticks, simulation, rates, determinism, lockstep, fleet]
-sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/tactical_target_ordering.rs, tests/tactical_target_ordering/order_proof.rs, src/console/weapons/server.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, src/server_app/registration.rs, src/sim_tick.rs, src/ai/cadence.rs, src/command_admission/log.rs, src/gm_action.rs, src/lockstep/mod.rs, src/lockstep/session.rs, src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
+sources: [src/headless/determinism_audit.rs, tests/fixed_update_ambiguities.rs, tests/tactical_target_ordering.rs, tests/tactical_target_ordering/order_proof.rs, crates/phoenix-simulation/src/console/weapons/server.rs, tests/registration_order_determinism.rs, docs/fixed-update-ambiguity-audit.md, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/sim_tick.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-simulation/src/command_admission/log.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/session.rs, crates/phoenix-simulation/src/ship/physics.rs, src/server/bridge.rs, gui/host-actions.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/server-settings.js, AGENTS.md, src/boot/mod.rs, tests/fixed_executor_policy.rs, src/headless/args.rs, src/native_host/app.rs, tests/pool_equivalence.rs, docs/pool-equivalence-proof.md]
 updated: 2026-09-07
 ---
 
@@ -13,7 +13,7 @@ Bevy's frame loop runs at the browser's `requestAnimationFrame` rate, but the
 the whole `SimSet` chain is configured in
 Bevy's `FixedUpdate`, stepping zero or more whole ticks per frame at the
 TOML-authored `[global] sim_tick_hz` (serde default 60 Hz). `SimTick`
-(`src/sim_tick.rs`) counts the steps.
+(`crates/phoenix-simulation/src/sim_tick.rs`) counts the steps.
 
 ## FixedUpdate ambiguity audit
 
@@ -33,7 +33,7 @@ worker-source evidence; the integrator owns the census check on the combined
 candidate. Retained debt is not a claim that every unordered pair is commutative.
 
 The Tactical target selector/applier and phaser/blaster deciders declare only
-five scoped commutative Input pairs in `src/console/weapons/server.rs`. They keep
+five scoped commutative Input pairs in `crates/phoenix-simulation/src/console/weapons/server.rs`. They keep
 their real Bevy access incompatibilities, so shared command and blackboard
 storage remains serialized. Fire reads the prior published Viewscreen lock;
 selection writes Weapons intent and emits through the sole target applier.
@@ -75,7 +75,7 @@ integration candidate remains the integrator's responsibility.
    `SessionManager`, drive the countdown on tick time.
 2. **Command admission** — clears and refills every ship's `AdmittedCommands`
    exactly once per tick, before `SimSet::Input`. The same pass stamps the
-   application tick (`src/command_admission/log.rs`): an accepted command is
+   application tick (`crates/phoenix-simulation/src/command_admission/log.rs`): an accepted command is
    stamped for the tick it applies on (`SimTick` + `CommandDelay`) and queued
    for that tick in `PendingCommands`, ordered by `CommandOrder` — `(origin
    fleet slot, that slot's own sequence)`. When the tick comes round the queue
@@ -94,7 +94,7 @@ integration candidate remains the integrator's responsibility.
    on the same tick on every host, which is what gives each host time to receive
    every peer's input for a tick before it simulates it. A host that has not
    received it withholds the tick — `Time<Virtual>` paused, so the tick never
-   begins — rather than speculating. See `src/lockstep/`.
+   begins — rather than speculating. See `crates/phoenix-simulation/src/lockstep/`.
 
    **When a ship host vanishes (issue #1119)** the fleet keeps running: its ship
    is not removed and not replaced by a simplified sim — it keeps its complete
@@ -109,7 +109,7 @@ integration candidate remains the integrator's responsibility.
    `resolve_human_seeking_hosts` re-seeks its Comms/Nav to AI the same tick.
    Reordered, duplicate and delayed reports converge on one transition (the
    `PendingHostLoss` max-merge plus a departed-slot guard in the barrier). See
-   `src/lockstep/host_loss.rs` and `tests/lockstep_backfill.rs`.
+   `crates/phoenix-simulation/src/lockstep/host_loss.rs` and `tests/lockstep_backfill.rs`.
 3. **The `SimSet` chain** — Input → Physics → Damage → Modifiers → Publish →
    PublishAggregate → Broadcast, gated on `GamePhase::InProgress`.
 4. **Phase transitions** — Bevy's `StateTransition` schedule is inserted into
@@ -124,7 +124,7 @@ integration candidate remains the integrator's responsibility.
    fixtures and test drivers that write the phase from a frame schedule land
    on it now (e.g. `tests/headless_runner.rs` setting `NextState<GamePhase>`
    directly rather than through a fixed system).
-5. **AI cadence derivation** (`FixedLast`, `src/ai/cadence.rs`) — the AI
+5. **AI cadence derivation** (`FixedLast`, `crates/phoenix-simulation/src/ai/cadence.rs`) — the AI
    decision tick is every `sim_tick_hz / ai_tick_hz`-th logical tick, and the
    snapshot tick every `ai_tick_hz / ai_snapshot_hz`-th of those; both ratios
    are validated as integers at world load. No wall clock anywhere.
@@ -135,7 +135,7 @@ registered in `FixedUpdate` with `TimestepMode::Fixed` at the authored
 `PhysicsSet::SyncBackend` after `SimSet::Physics` (so it reads the transforms
 `sync_ship_position` just wrote) and `PhysicsSet::Writeback` before
 `SimSet::Damage` (so `handle_collisions` reads this tick's contacts). See
-`register_physics` in `src/server_app/registration.rs`.
+`register_physics` in `crates/phoenix-simulation/src/server_app/registration.rs`.
 
 ## 10 Hz channels
 

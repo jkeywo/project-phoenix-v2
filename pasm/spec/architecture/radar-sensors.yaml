@@ -14,8 +14,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/radar.rs, src/radar_config.rs, src/gui/radar.rs, src/server/radar.rs, gui/components/ph-radar.js, gui/components/ph-scope-chrome.js]
-      tests: [cargo test, npx vitest run, src/radar_tests.rs, src/radar_config_tests.rs, src/gui/radar_tests.rs, src/server/radar_tests.rs, src/server/radar_contact_override_tests.rs]
+      paths: [crates/phoenix-simulation/src/radar.rs, crates/phoenix-simulation/src/radar_config.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-presentation/src/server/radar.rs, gui/components/ph-radar.js, gui/components/ph-scope-chrome.js]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/radar_tests.rs, crates/phoenix-simulation/src/radar_config_tests.rs, crates/phoenix-presentation/src/gui/radar_tests.rs, crates/phoenix-presentation/src/server/radar_tests.rs, crates/phoenix-presentation/src/server/radar_contact_override_tests.rs]
 
   - state: radar-contact-projection-state
     core:
@@ -29,9 +29,9 @@ entities:
       derived_from: [authoritative-ship-motion-state, ship-modifier-state]
     implementation:
       status: declared
-      paths: [src/radar.rs, src/radar_config.rs, src/core/messages.rs, gui/console-state.js]
+      paths: [crates/phoenix-simulation/src/radar.rs, crates/phoenix-simulation/src/radar_config.rs, crates/phoenix-model/src/messages.rs, gui/console-state.js]
 
-      tests: [src/radar_tests.rs, src/radar_config_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/radar_tests.rs, crates/phoenix-simulation/src/radar_config_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: sensors-target-controller
     core:
       status: implemented
@@ -51,8 +51,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs, gui/components/ph-sensor-radar.js]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-model/src/messages.rs, gui/components/ph-sensor-radar.js]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: sensors-target-state
     core:
@@ -70,10 +70,10 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/ship/continuation.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-model/src/messages.rs]
       symbols: [SensorRadarSelection]
 
-      tests: [src/ship/continuation_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/continuation_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: sensors-threat-warning-producer
     core:
       status: implemented
@@ -91,9 +91,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/snapshot.rs, src/server_app/registration.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [tick_sensors_threat_warning, SensorsThreatState, SensorsThreatMemoryState]
-      tests: [cargo test, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
   - state: sensors-threat-debounce-state
     core:
@@ -107,10 +107,10 @@ entities:
       writers: [sensors-threat-warning-producer]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [SensorsThreatState, SensorsThreatMemoryState]
 
-      tests: [src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - state: tactical-radar-blackboard-state
     core:
       status: implemented
@@ -127,9 +127,9 @@ entities:
       derived_from: [weapons-target-state, radar-contact-projection-state]
     implementation:
       status: declared
-      paths: [src/console/weapons/blackboard.rs, src/core/messages.rs, gui/console-state.js, gui/components/ph-tactical-radar.js]
+      paths: [crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-model/src/messages.rs, gui/console-state.js, gui/components/ph-tactical-radar.js]
       symbols: [TacticalRadarBlackboard]
-      tests: [cargo test, npx vitest run, src/console/weapons/blackboard_lifecycle_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/console/weapons/blackboard_lifecycle_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: sensor-radar-blackboard-state
     core:
@@ -146,9 +146,9 @@ entities:
       derived_from: [sensors-target-state, authoritative-ship-motion-state, ship-power-state]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs, src/entities/config.rs, src/lobby/server.rs, gui/console-state.js, gui/sim-state.js, gui/components/ph-sensor-radar.js, gui/components/ph-radar.js, gui/components/ph-sensor-panel.js]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/lobby/server.rs, gui/console-state.js, gui/sim-state.js, gui/components/ph-sensor-radar.js, gui/components/ph-radar.js, gui/components/ph-sensor-panel.js]
       symbols: [SensorRadarBlackboard, SensorsProjectionConfig, buildTargetProjection]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/lobby/server_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/lobby/server_tests.rs]
 
   - message: sensors-target-designation
     core:
@@ -163,9 +163,9 @@ entities:
       payload: TargetDesignation
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs, src/ship_plugin.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship_plugin.rs]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: sensors-frequency-advisor
     core:
       status: implemented
@@ -186,9 +186,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-model/src/messages.rs]
       symbols: [tick_sensors_frequency_hint]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: sensors-frequency-advisor-ai-delayed
     core:
@@ -208,9 +208,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/server.rs, src/console_ai/core.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console_ai/core.rs]
       symbols: [tick_frequency_hint_high_fidelity, tick_frequency_hint, ShipFrequencyHintState]
-      tests: [cargo test, src/console_ai/core_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
   - state: sensors-frequency-hint-state
     core:
@@ -224,10 +224,10 @@ entities:
       writers: [sensors-frequency-advisor-ai-delayed]
     implementation:
       status: observed
-      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [FrequencyHintState, ShipFrequencyHintState, FrequencyHintContinuationState]
 
-      tests: [src/console_ai/core_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/console_ai/core_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - component: sensors-radar-publisher
     core:
       status: implemented
@@ -244,9 +244,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-model/src/messages.rs]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: sensors-ai-operator
     core:
       status: implemented
@@ -270,9 +270,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/ai/core.rs, src/ai/selector.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/ai/selector.rs]
       symbols: [operate_sensors_ai, effective_sensor_range, find_nearest_hostile, SensorsTargetSelector]
-      tests: [cargo test, src/ai/selector_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ai/selector_tests.rs]
 
   - component: sensors-target-selection-ai
     core:
@@ -291,6 +291,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ai/core.rs]
       symbols: [operate_sensors_ai, find_nearest_hostile]
       tests: [cargo test]

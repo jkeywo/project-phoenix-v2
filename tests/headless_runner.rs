@@ -3713,10 +3713,10 @@ fn a_world_naming_an_unresolvable_template_fails_the_build() {
 
 // ── `ShipPhysics` writer disjointness (issues #699, #886) ────────────────────
 //
-// `simulate_low_lod_ships` (`src/ai/server.rs`) writes `ShipPhysics.x/z/yaw`
+// `simulate_low_lod_ships` (`crates/phoenix-simulation/src/ai/server.rs`) writes `ShipPhysics.x/z/yaw`
 // directly instead of going through helm intent + `integrate_ship_physics`.
 // That is sanctioned — see the writer-policy table on `ShipPhysics`
-// (`src/ship/state.rs`) — but the whole justification rests on one property:
+// (`crates/phoenix-simulation/src/ship/state.rs`) — but the whole justification rests on one property:
 //
 //     No entity is ever moved by both the low-LOD substitute and the
 //     admitted/integrated helm path in the same tick.
@@ -3762,7 +3762,7 @@ struct PhysicsWriter {
 /// the access set is reachable through public API.
 ///
 /// Bevy observers are not part of any schedule and so never appear here —
-/// `handle_slow_zone_speed_clamp` (`src/regions/server.rs`) is one, and is
+/// `handle_slow_zone_speed_clamp` (`crates/phoenix-simulation/src/regions/server.rs`) is one, and is
 /// covered by the writer-policy table rather than by this scan.
 fn ship_physics_writers(app: &mut App) -> Vec<PhysicsWriter> {
     use bevy::ecs::schedule::Schedules;
@@ -3889,7 +3889,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
          integrating: the ship advances twice per tick and every distance, arrival and \
          intercept calculation downstream is silently wrong — nothing panics. Restore \
          the filter, or move the system onto helm intent components and delete its row \
-         from the writer-policy table on `ShipPhysics` (src/ship/state.rs). \
+         from the writer-policy table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). \
          ShipPhysics writers found:\n{inventory}"
     );
     assert_eq!(
@@ -3901,7 +3901,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
          `simulate_low_lod_ships` is dead-reckoning: both writers advance the same \
          ShipPhysics in one tick and the ship travels at roughly double speed along a \
          heading neither system chose. See the writer-policy table on `ShipPhysics` \
-         (src/ship/state.rs). ShipPhysics writers found:\n{inventory}"
+         (crates/phoenix-simulation/src/ship/state.rs). ShipPhysics writers found:\n{inventory}"
     );
 
     let low = &writers[only_low_lod[0]];
@@ -3920,7 +3920,7 @@ fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
 }
 
 /// Reconciles the scan against the writer-policy table on `ShipPhysics`
-/// (`src/ship/state.rs`). A new system that mutates `ShipPhysics` fails here
+/// (`crates/phoenix-simulation/src/ship/state.rs`). A new system that mutates `ShipPhysics` fails here
 /// until it is either given a disjoint filter or written into that table.
 #[test]
 fn ship_physics_writer_inventory_matches_the_policy_table() {
@@ -3942,7 +3942,7 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
-         table on `ShipPhysics` (src/ship/state.rs). Two systems integrating the same \
+         table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). Two systems integrating the same \
          ship is the bug class issue #699 exists for, and it is silent: nothing panics, \
          the ship simply moves further than everything downstream believes it did. If \
          you added a writer, prefer helm intent components; if it genuinely must write \
@@ -3968,7 +3968,7 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          response, blaster recoil, the tractor rig and the dock controller). \
          A change here means a correction grew an `AiHighFidelity` filter, or an integrator \
          lost one — either way the set of ships that get moved twice per tick has changed. \
-         Reconcile with the writer-policy table on `ShipPhysics` (src/ship/state.rs). \
+         Reconcile with the writer-policy table on `ShipPhysics` (crates/phoenix-simulation/src/ship/state.rs). \
          ShipPhysics writers found:\n{inventory}"
     );
 }
@@ -22162,7 +22162,7 @@ fn falling_skyway_the_early_collapse_leaves_one_berth_and_control_asks_for_a_nam
 
 /// **Issue #867 — the handoff fixture, on a real finished mission.**
 ///
-/// `src/campaign/projection.rs` proves the projection's rules against payloads
+/// `crates/phoenix-simulation/src/campaign/projection.rs` proves the projection's rules against payloads
 /// built by hand; that is where inclusion, exclusion, identity and defaults are
 /// settled, because they are claims about a pure function. What a hand-built
 /// payload cannot prove is that the fold matches the shape a mission ACTUALLY
@@ -25511,8 +25511,8 @@ fn no_combat_test_hostile_parks_in_its_bow_hold() {
 
 // ── Falling Skyway, Act 3: the corridor sheds (issue #1347) ──────────────────
 //
-// The unit suites under `src/debris/`, `src/science/scan.rs`, `src/ship/sensors.rs`
-// and `src/console/weapons/server.rs` pin the ENGINE — the projection, the four
+// The unit suites under `src/debris/`, `crates/phoenix-simulation/src/science/scan.rs`, `crates/phoenix-simulation/src/ship/sensors.rs`
+// and `crates/phoenix-simulation/src/console/weapons/server.rs` pin the ENGINE — the projection, the four
 // flags, the assessment gate on each Backfilled seat and the urgency ordering.
 // What none of them can pin is that the authored beat in `falling_skyway.toml`
 // actually runs: that three masses are shed where the world says, that a reading

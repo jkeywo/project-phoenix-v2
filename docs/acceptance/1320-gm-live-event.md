@@ -210,6 +210,6 @@ Defect dispositions and required human reruns:
 - [M1–M3 design and exit boundaries](../../pasm/spec/design/gm-console-t2.yaml)
 - [Role-preset controller](../../gui/gm-role-presets.js) and [knowledge comparison scope](../../gui/gm-knowledge-compare.js)
 - [Private confirmation controller](../../gui/gm-confirmation.js)
-- [Save catalogue UI](../../gui/save-slots.js), [export format](../../src/snapshot.rs) and [headless replay arguments](../../src/headless/args.rs)
+- [Save catalogue UI](../../gui/save-slots.js), [export format](../../crates/phoenix-simulation/src/snapshot.rs) and [headless replay arguments](../../src/headless/args.rs)
 
 After #1317 and the #1316 scenario preparation are integrated, use `docs/gm-comms-authoring.md` for the route and authored hail contract and the generated two-ship world for this event's choices. The generation inputs are [the preparation tool](../../scripts/prepare-gm-live-event.mjs), [second-ship fixture](fixtures/1320-second-ship.toml), and the integrated `assets/worlds/combat_test.toml`. Integrated runtime evidence and human acceptance remain prerequisites; this kit does not supply them.

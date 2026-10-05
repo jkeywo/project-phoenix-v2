@@ -969,9 +969,9 @@ describe('GM activity transport separation', () => {
   });
   it('uses only the page-local Host Channel and has a real server-page handler', () => {
     for (const file of [
-      'src/core/messages.rs',
-      'src/lockstep/frame.rs',
-      'src/server_app/components.rs',
+      'crates/phoenix-simulation/src/core/messages.rs',
+      'crates/phoenix-simulation/src/lockstep/frame.rs',
+      'crates/phoenix-simulation/src/server_app/components.rs',
     ]) {
       const sourceText = read(file);
       expect(sourceText).not.toContain('GmActivityFeed');

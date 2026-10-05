@@ -2,7 +2,7 @@
 title: GM Operator
 type: entity
 tags: [gm, operator, identity, reconnect, roster, readiness, force-start, action, pause, puppeting, backfill, host-mesh, map, activity, damage, destruction, objectives, triggers, red-alert, connections, regions, asteroids]
-sources: [gui/gm-action-bindings.js, tests/client/gm-action-bindings.test.js, src/gm_information/reports.rs, gui/sensor-report.js, gui/components/ph-sensor-panel.js, src/server/viewscreen_border.rs, src/gm_information.rs, src/gm_presentation.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, pasm/spec/design/t4-presentation.yaml, tests/gm_presentation.rs, src/gm_contact.rs, gui/gm-contact-panel.js, pasm/spec/design/t4-information-control.yaml, src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, src/gm_objective.rs, gui/gm-objective-panel.js, src/gm_event.rs, src/gm_effect.rs, src/gm_spawn.rs, src/world/config.rs, src/world/content.rs, src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, src/gm_roster.rs, src/gm_action.rs, src/gm_join.rs, src/gm_projection.rs, src/gm_entity_inspector.rs, src/gm_world_inspector.rs, src/gm_ship_inspector.rs, src/gm_region_inspector.rs, src/gm_presentation_inspector.rs, src/gm_inspector_coverage.rs, src/gm_activity.rs, src/gm_puppet.rs, src/objectives.rs, src/world/server.rs, src/ship/helm_ai/mod.rs, src/entities/config.rs, src/entities/tags.rs, src/asteroids/lifecycle.rs, src/boot/mod.rs, src/lobby/start_policy.rs, src/core/balance.rs, src/core/messages.rs, src/core/codec.rs, src/command_admission/log.rs, src/lobby/server.rs, src/lockstep/frame.rs, src/lockstep/host_loss.rs, src/lockstep/mod.rs, src/lockstep/snapshot_relay.rs, src/server/bridge.rs, src/server_app/broadcast.rs, src/server_app/world_setup.rs, src/snapshot.rs, src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html, src/gm_presentation/sound.rs, gui/host-content-fetch.js, tests/client/live-authored-audio.test.js]
+sources: [gui/gm-action-bindings.js, tests/client/gm-action-bindings.test.js, crates/phoenix-simulation/src/gm_information/reports.rs, gui/sensor-report.js, gui/components/ph-sensor-panel.js, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/gm_information.rs, crates/phoenix-simulation/src/gm_presentation.rs, gui/gm-presentation-panel.js, gui/presentation-card.js, pasm/spec/design/t4-presentation.yaml, tests/gm_presentation.rs, crates/phoenix-simulation/src/gm_contact.rs, gui/gm-contact-panel.js, pasm/spec/design/t4-information-control.yaml, crates/phoenix-simulation/src/gm_solo.rs, src/native_host/native_gm/mod.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, gui/gm-workspace.css, gui/native-gm-workspace.js, pasm/spec/design/native-bridge-operation.yaml, tests/smoke/gm-m2.spec.js, tests/smoke/gm-m2-evidence.js, docs/acceptance/1316-m2-combat-test.md, assets/worlds/combat_test.toml, gui/gm-confirmation.js, gui/gm-confirmation-settings.js, gui/gm-confirmation.css, crates/phoenix-simulation/src/gm_objective.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/gm_event.rs, crates/phoenix-simulation/src/gm_effect.rs, crates/phoenix-simulation/src/gm_spawn.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/content.rs, crates/phoenix-simulation/src/world/script/, gui/gm-mission-panel.js, gui/gm-direct-effect-panel.js, gui/gm-effect-scope.js, gui/gm-spawn-panel.js, gui/gm-knowledge-compare.js, gui/gm-role-presets.js, pasm/spec/design/gm-console-t2.yaml, crates/phoenix-simulation/src/gm_roster.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/gm_join.rs, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-simulation/src/gm_entity_inspector.rs, crates/phoenix-simulation/src/gm_world_inspector.rs, crates/phoenix-simulation/src/gm_ship_inspector.rs, crates/phoenix-simulation/src/gm_region_inspector.rs, crates/phoenix-simulation/src/gm_presentation_inspector.rs, crates/phoenix-simulation/src/gm_inspector_coverage.rs, crates/phoenix-simulation/src/gm_activity.rs, crates/phoenix-simulation/src/gm_puppet.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/tags.rs, crates/phoenix-simulation/src/asteroids/lifecycle.rs, src/boot/mod.rs, crates/phoenix-simulation/src/lobby/start_policy.rs, crates/phoenix-simulation/src/core/balance.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, crates/phoenix-simulation/src/command_admission/log.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/lockstep/frame.rs, crates/phoenix-simulation/src/lockstep/host_loss.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/lockstep/snapshot_relay.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, src/headless/replay.rs, gui/host-channel.js, gui/gm-local-projection.js, gui/gm-activity-feed.js, gui/gm-station-puppet.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/entity-inspector.js, gui/components/ph-navigation-map.js, gui/gm-session-actions.js, gui/gm-session-controls.js, gui/console-state.js, gui/console-core.js, gui/sim-state.js, gui/host-mesh.js, gui/fleet-session.js, gui/lobby-state.js, server.html, client.html, crates/phoenix-simulation/src/gm_presentation/sound.rs, gui/host-content-fetch.js, tests/client/live-authored-audio.test.js]
 updated: 2026-09-28
 ---
 
@@ -178,7 +178,7 @@ never enter the projection. Browser and native use the same panel, bounded
 Back/Forward history and stale final reading after a definition unloads.
 
 Issue #1494 joins those five descriptor tables into one deterministic coverage
-inventory in `src/gm_inspector_coverage.rs`. Each row records the domain,
+inventory in `crates/phoenix-simulation/src/gm_inspector_coverage.rs`. Each row records the domain,
 canonical descriptor path, canonical runtime reading-key grammar, Live
 mutability and any named owning panel. The inventory rejects drift between the
 descriptor and reading key, conflicting classifications, a missing domain, or
@@ -373,7 +373,7 @@ only the scenario: authored player slots supply ships and the GM may backfill
 empty slots before Start, without owning a local hull. The native GM workspace
 replaces the primary viewscreen after ingestion and participant ingress is
 disabled. There is no fleet owner to
-mint anything, so `src/gm_solo.rs` binds the identity instead. `wasm_prepare_game_master(standalone)`
+mint anything, so `crates/phoenix-simulation/src/gm_solo.rs` binds the identity instead. `wasm_prepare_game_master(standalone)`
 tells the profile which route booted it, and a standalone one installs a
 one-participant `FleetRoster` whose single `FleetGm` names `gm-1` on its own
 slot plus the matching connected, unready `GmRoster` row. Admission is then the
@@ -649,7 +649,7 @@ projection and does not optimistically change the displayed pause state.
 
 ## Authored events and directed world actions
 
-`src/gm_event.rs` resolves authored event controls and publishes the absolute,
+`crates/phoenix-simulation/src/gm_event.rs` resolves authored event controls and publishes the absolute,
 page-local `gm_mission` projection for `gui/gm-mission-panel.js`. Scripted
 `gm_event(id, label, handler)` and automatic registrations with
 `.gm_controls(id, label)` share one control set and ordinary trigger lifecycle.
@@ -663,7 +663,7 @@ consumes an armed Skip: only a qualifying automatic occurrence consumes it
 while the event remains present. `FireGmEvent`, `SetEventPaused`, and `ArmGmEventSkip` use the same
 attributed canonical action journal as session controls.
 
-`src/gm_attention.rs` lists the beats whose Fire would land right now in the
+`crates/phoenix-simulation/src/gm_attention.rs` lists the beats whose Fire would land right now in the
 peer-local attention queue (`gui/gm-attention-panel.js`), reading that same
 control state plus `world::content::manual_fire_would_land` — the predicate
 `fire_manual_trigger` itself applies — so nothing is evaluated twice and no
@@ -671,7 +671,7 @@ handler runs. `.attention_band(...)` on the control set chooses the row's band.
 Activating a beat row focuses that beat's existing mission-panel levers
 (`focusEvent`); it never fires anything.
 
-`src/gm_quiet.rs` adds the quiet-time advisory to that same queue: one
+`crates/phoenix-simulation/src/gm_quiet.rs` adds the quiet-time advisory to that same queue: one
 `Background` row, never escalated by age, after an authored interval of
 SIMULATION seconds with no meaningful crew activity. `GmCrewActivity` is the
 peer-local clock and `observe_crew_activity` the adapter, reading three sources
@@ -686,7 +686,7 @@ load. The row names only the interval — there is no
 keystroke telemetry anywhere in the path — and carries no target, so the desk
 draws it with Snooze and no Open.
 
-`src/gm_objective.rs` resolves `[[gm_objective_palette]]` entries and handles
+`crates/phoenix-simulation/src/gm_objective.rs` resolves `[[gm_objective_palette]]` entries and handles
 `ObjectiveAction` activation, completion and failure through the ordinary
 Objective lifecycle. Authored recipient ships are separate from subject
 `targets`; each Objective retains one status for its whole recipient scope.
@@ -697,7 +697,7 @@ when the selected record or scope changes. Snapshot and digest include the
 complete ordered records, including terminal statuses and recipient scope.
 
 `ApplyDirectEffect` carries an Entity UUID, whole-Entity/Station/System scope,
-damage or healing, and an amount in milli-HP. `src/gm_effect.rs` resolves and
+damage or healing, and an amount in milli-HP. `crates/phoenix-simulation/src/gm_effect.rs` resolves and
 arms the effect at the canonical action boundary; the ordinary Damage schedule
 applies it through the hull path and normal destruction lifecycle. It bypasses
 shields, clamps to the selected scope and records discarded overflow.
@@ -705,7 +705,7 @@ shields, clamps to the selected scope and records discarded overflow.
 hull totals and authored ownership; `gui/gm-effect-scope.js` supplies the
 shared browser scope vocabulary.
 
-`src/gm_spawn.rs` publishes the local `gm_spawn` palette projection for
+`crates/phoenix-simulation/src/gm_spawn.rs` publishes the local `gm_spawn` palette projection for
 `gui/gm-spawn-panel.js`. Scenario/mod `[[gm_palette]]` entries bind preloaded
 templates and closed authored variants. `SpawnPaletteEntity` carries only
 palette/variant ids and resolved position/heading. The shared map placement
@@ -732,7 +732,7 @@ the selected ship's recipient-filtered blackboard with the ordinary console
 builder's view of that same blackboard. The comparison excludes Station-private hull and
 blackboard detail, which remains accessible through Station puppeting.
 
-`src/gm_contact.rs` also owns M7's per-observer reported classifications.
+`crates/phoenix-simulation/src/gm_contact.rs` also owns M7's per-observer reported classifications.
 `SetContactClassification` selects a scenario/mod GM palette label for one
 real target, or clears that label. The contact panel uses the existing
 confirmation and canonical result lifecycle in browser and native GM workspaces.
@@ -746,7 +746,7 @@ to the digest, and is cleared with either identity or a new run. Despawn undo
 restores a captured classification alongside visibility without inventing a
 visibility override.
 
-`src/gm_information.rs` adds per-observer ghost reports. The shared contact
+`crates/phoenix-simulation/src/gm_information.rs` adds per-observer ghost reports. The shared contact
 panel sets or removes an ID, palette label and explicit integer world position
 without selecting a real target. These are canonical report records rather than
 ECS entities: Sensors and the Sensors Viewscreen show a basic point, but weapons
@@ -758,7 +758,7 @@ when their observer disappears. The same owner accepts mission
 `remove_ghost_contact` effects. See
 [`t4-information-control.yaml`](../../pasm/spec/design/t4-information-control.yaml).
 
-`src/gm_information/reports.rs` owns per-observer degraded and delayed Sensors
+`crates/phoenix-simulation/src/gm_information/reports.rs` owns per-observer degraded and delayed Sensors
 reports. The same typed contact-information command sets an explicit tick
 interval, position grid in world millimetres and optional identity suppression,
 or clears the policy. Capture uses the observing hull's authored Sensors config
@@ -860,7 +860,7 @@ loss schedule order; equal surviving GMs remain members when cleanup follows.
 
 ## NPC capability and lifecycle
 
-NPC capability is checked by `src/gm_puppet/capability.rs` at offer, ingress and
+NPC capability is checked by `crates/phoenix-simulation/src/gm_puppet/capability.rs` at offer, ingress and
 canonical application. The initial audited NPC interface is battleship Helm;
 Captain, Power and mixed interfaces with incomplete per-ship producers remain
 excluded. The common NPC spawn stores the normal `ShipClientConfig` projection
@@ -873,23 +873,23 @@ when its Ship/Station key changes, so stale messages cannot control a replacemen
 
 ## Safe entity removal
 
-`src/gm_despawn.rs` owns the shared apply-boundary policy and normal scripted-removal cleanup. Authored `gm_removable` tags opt eligible NPCs, structures and runtime hazards in; fleet hulls and foundational world geometry remain protected. `DespawnEntity` queues a stable UUID on `WorldContentRuntime` for the ordinary DestroyEntity trigger cascade. Snapshot format 27 preserves the pending queue, and `gm_entity` carries permission previews and attributed removal results to `gui/gm-despawn-panel.js`. Confirmation is tied to the selected UUID and invalidated by selection or permission changes. Live references clear while historical destruction predicates and Comms messages remain readable.
+`crates/phoenix-simulation/src/gm_despawn.rs` owns the shared apply-boundary policy and normal scripted-removal cleanup. Authored `gm_removable` tags opt eligible NPCs, structures and runtime hazards in; fleet hulls and foundational world geometry remain protected. `DespawnEntity` queues a stable UUID on `WorldContentRuntime` for the ordinary DestroyEntity trigger cascade. Snapshot format 27 preserves the pending queue, and `gm_entity` carries permission previews and attributed removal results to `gui/gm-despawn-panel.js`. Confirmation is tied to the selected UUID and invalidated by selection or permission changes. Live references clear while historical destruction predicates and Comms messages remain readable.
 
 ## Faction relations and undo
 
-`src/gm_faction.rs` is the narrowly typed, attributed adapter over faction hostility: `SetFactionHostility` names two authored faction reference names, resolves them against the live `FactionRegistry` at the apply tick and runs the same `add_enemy`/`remove_enemy` calls the `add_faction_enemy` trigger action uses. `GmFactionOverrides` records which ordered pairs a GM moved and what each held before any GM touched it, so a snapshot restores those decisions and the digest folds them once — and only once — a GM has actually moved a relation. Withdrawing a hostility arms `revalidate_gm_faction_locks`, which drops AI tactical locks immediately before `ai_target_selection`. `gui/gm-faction-panel.js` reads the authored roster from `GmSessionProjection::factions`; there is no free-text or UUID entry.
+`crates/phoenix-simulation/src/gm_faction.rs` is the narrowly typed, attributed adapter over faction hostility: `SetFactionHostility` names two authored faction reference names, resolves them against the live `FactionRegistry` at the apply tick and runs the same `add_enemy`/`remove_enemy` calls the `add_faction_enemy` trigger action uses. `GmFactionOverrides` records which ordered pairs a GM moved and what each held before any GM touched it, so a snapshot restores those decisions and the digest folds them once — and only once — a GM has actually moved a relation. Withdrawing a hostility arms `revalidate_gm_faction_locks`, which drops AI tactical locks immediately before `ai_target_selection`. `gui/gm-faction-panel.js` reads the authored roster from `GmSessionProjection::factions`; there is no free-text or UUID entry.
 
 `GmAction::UndoGmAction` reverses one earlier action of a reversible family. An `Applied` action of such a family records the exact affected field with its before and after values on `LoggedGmAction::affected`; the inverse carries the original's public identity and those recorded facts, and `undo_precheck` plus a live per-field check at the apply tick refuse an unknown original, an unreversible one, a stale reading, an already-applied inverse and an intervening change to that one field — while allowing every unrelated change. Both operators sit in the one journal: the undoing GM as the inverse row's operator, the original on `undo_of`. `gui/gm-journal-panel.js` offers the Undo control only where the canonical journal says one can work, and `gui/gm-inverse-preview.js` renders the before/after, technical and already-witnessed sentences under every confirmation policy. Snapshot format 34 carries the faction overrides.
 
 ## Taking a placement back
 
-A GM placement is reversible through the same `UndoGmAction` family, under one extra cutoff. `src/gm_exposure.rs` keeps `GmSpawnExposure`: one record per placement, keyed by the deterministic scenario name `PendingGmSpawn::derive_name` decides at the canonical apply tick — the uuid is not minted until the trigger pipeline drains the arm a fixed step later, so keying on it would leave a step unwatched. `observe_gm_spawn_exposure` runs in `FixedLast` before `advance_sim_tick` and counts one step per step in which the placement is inside some player hull's `ship::sensors::effective_sensor_range`. A player hull is the authored `player` tag or a live `FleetSlotOf` seat; overlapping hulls count once; leaving the range holds the count rather than resetting it; a paused world counts nothing because the step never starts. Concealment, identification, firing and damage are not consulted. At `GM_SPAWN_EXPOSURE_LIMIT_SECS` (two cumulative simulation seconds) a permanent latch closes and `SensorExposureElapsed` refuses every later inverse.
+A GM placement is reversible through the same `UndoGmAction` family, under one extra cutoff. `crates/phoenix-simulation/src/gm_exposure.rs` keeps `GmSpawnExposure`: one record per placement, keyed by the deterministic scenario name `PendingGmSpawn::derive_name` decides at the canonical apply tick — the uuid is not minted until the trigger pipeline drains the arm a fixed step later, so keying on it would leave a step unwatched. `observe_gm_spawn_exposure` runs in `FixedLast` before `advance_sim_tick` and counts one step per step in which the placement is inside some player hull's `ship::sensors::effective_sensor_range`. A player hull is the authored `player` tag or a live `FleetSlotOf` seat; overlapping hulls count once; leaving the range holds the count rather than resetting it; a paused world counts nothing because the step never starts. Concealment, identification, firing and damage are not consulted. At `GM_SPAWN_EXPOSURE_LIMIT_SECS` (two cumulative simulation seconds) a permanent latch closes and `SensorExposureElapsed` refuses every later inverse.
 
 Below the cutoff the inverse is the ordinary safe removal: `gm_despawn::validate_target` decides, so a palette entry whose authored tags lack `gm_removable` is still refused with `ProtectedEntity`, and an accepted one leaves through the same `DestroyEntity` cascade a GM despawn runs. Snapshot format 35 carries the counter and its latch, and the digest folds them once — and only once — a GM has placed something. `GmJournalEntry::spawn_exposure` publishes current eligibility in milliseconds of a stated limit; `gui/gm-inverse-preview.js` renders it as a sentence beside the eligibility one and hides the Undo control when the window has shut or when a session reports no clock at all.
 
 ## Putting a removal back
 
-`src/gm_despawn_undo.rs` is the removal family's inverse. An allowed removal arms a capture at the apply tick; `remove_entity` then RETURNS the attributed GM contact overrides it cleared, and the capture keeps them beside a `snapshot::EntityState` of the entity taken one instant before it stops existing. The restore goes back through `snapshot::spawn_from_origin` and `snapshot::apply_entity_state`, so a despawn undo is a one-entity restore rather than a second rebuild. An entity with no runtime spawn recipe — an authored `[[entity]]` block — cannot be rebuilt, and `GmJournalEntry::capture_lost` tells the page so before it offers a control. `restore_precheck` asks every fallible question before the first write: uuid not live, no authored name re-bound, no captured override pair holding a newer value, template still resolving. Attributed contact overrides come back; radar selections, weapon locks, tows, docking, transports, dispatched repair crews and anchored waypoints do not — and are not captured either, because a capture is folded into the digest and written into every save while those are derived from the presentation-class `TaskLifecycles` and from `LocalShip`-gated Comms state that two peers differ on by construction. The preview names those released kinds in one fixed sentence instead. The captures are bounded at `MAX_GM_DESPAWN_CAPTURES`, ride `WorldContentRuntime`, and are folded into the digest only once a GM has removed something.
+`crates/phoenix-simulation/src/gm_despawn_undo.rs` is the removal family's inverse. An allowed removal arms a capture at the apply tick; `remove_entity` then RETURNS the attributed GM contact overrides it cleared, and the capture keeps them beside a `snapshot::EntityState` of the entity taken one instant before it stops existing. The restore goes back through `snapshot::spawn_from_origin` and `snapshot::apply_entity_state`, so a despawn undo is a one-entity restore rather than a second rebuild. An entity with no runtime spawn recipe — an authored `[[entity]]` block — cannot be rebuilt, and `GmJournalEntry::capture_lost` tells the page so before it offers a control. `restore_precheck` asks every fallible question before the first write: uuid not live, no authored name re-bound, no captured override pair holding a newer value, template still resolving. Attributed contact overrides come back; radar selections, weapon locks, tows, docking, transports, dispatched repair crews and anchored waypoints do not — and are not captured either, because a capture is folded into the digest and written into every save while those are derived from the presentation-class `TaskLifecycles` and from `LocalShip`-gated Comms state that two peers differ on by construction. The preview names those released kinds in one fixed sentence instead. The captures are bounded at `MAX_GM_DESPAWN_CAPTURES`, ride `WorldContentRuntime`, and are folded into the digest only once a GM has removed something.
 
 ## Related
 
@@ -907,7 +907,7 @@ Its state classification is recorded in
 
 ## Viewscreen staging
 
-`src/gm_presentation.rs` owns per-ship active forced views and title/Comms cards. `GmAction::Presentation`, declarative `presentation` and the Rhai `force_view`, `title_card`, `incoming_comms` and `clear_presentation` hosts meet at the same validator/state transition. The receiving ship’s primary-rig camera markers and Comms audience are checked at application; the live Comms projection checks audience and orphaning again.
+`crates/phoenix-simulation/src/gm_presentation.rs` owns per-ship active forced views and title/Comms cards. `GmAction::Presentation`, declarative `presentation` and the Rhai `force_view`, `title_card`, `incoming_comms` and `clear_presentation` hosts meet at the same validator/state transition. The receiving ship’s primary-rig camera markers and Comms audience are checked at application; the live Comms projection checks audience and orphaning again.
 
 `WorldContentRuntime::presentation` carries the original simulation-tick expiry through snapshot and digest. A forced view overlays `ViewscreenArbiter` while crew commands continue updating its ordinary selection; release reveals that selection. `gui/gm-presentation-panel.js` mounts in both GM desks, and `gui/presentation-card.js` renders the same current HUD card on browser and native Viewscreens. Neither module retains a cue history. The sound-cue extension in audio issue #1466 emits an occurrence through the existing room audio owners, as described below.
 

@@ -5,7 +5,7 @@
 //!
 //! A `[[gm_role_preset]]` block is presentation-only: it is personal browser
 //! narrowing a Game Master selects for themselves, and a widget selects among
-//! surfaces this build already draws. `src/world/config.rs` says so in prose and
+//! surfaces this build already draws. `crates/phoenix-simulation/src/world/config.rs` says so in prose and
 //! `gui/gm-role-presets.js` says so in its header, but the Workshop's new preset
 //! form (#1477) puts that claim in an AUTHOR's hands — so the claim has to be
 //! measurable. If any authored preset field reached `GmOperator`, a `GmAction`,

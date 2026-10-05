@@ -18,7 +18,7 @@ describe('security-dispatch payloads', () => {
   });
 
   // The four verbs issue #1346 names as the required vocabulary, spelled the way
-  // `SecurityAction::as_str` spells them in src/security/teams.rs.
+  // `SecurityAction::as_str` spells them in crates/phoenix-simulation/src/security/teams.rs.
   it('carries the whole generic action vocabulary and nothing scenario-specific', () => {
     expect(SECURITY_ACTIONS).toEqual([
       'secure_contain',

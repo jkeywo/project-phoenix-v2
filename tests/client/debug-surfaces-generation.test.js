@@ -22,7 +22,7 @@ import {
 } from '../../scripts/generate-debug-surfaces.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const RUST_SOURCE = fs.readFileSync(path.join(ROOT, 'src/core/debug_surface.rs'), 'utf8');
+const RUST_SOURCE = fs.readFileSync(path.join(ROOT, 'crates/phoenix-model/src/debug_surface.rs'), 'utf8');
 const GENERATED_SOURCE = fs.readFileSync(
   path.join(ROOT, 'gui/debug-surfaces.generated.js'),
   'utf8',

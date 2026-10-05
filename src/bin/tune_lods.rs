@@ -81,7 +81,7 @@ use bevy::{
 
 use project_phoenix::entities::billboard::{orient_lod_billboards, spawn_billboard_child};
 use project_phoenix::entities::config::LodLevel;
-use project_phoenix::entities::model_rig::{sidecar_path, ModelRig, DEFAULT_VARIANT};
+use project_phoenix::entities::model_rig::{sidecar_path, DEFAULT_VARIANT};
 use project_phoenix::lod_tune::{find_knee, find_knee_increasing, image_diff_rms};
 use project_phoenix::render_capture::{
     create_render_target, frame_distance, measure_world_bounds, orbit_transform, unpad_rows,
@@ -236,7 +236,7 @@ fn load_config(args: TuneArgs) -> TuneConfig {
     let sidecar = sidecar_path(&model, Some(&variant));
     let rig = std::fs::read_to_string(&sidecar)
         .ok()
-        .and_then(|t| ModelRig::from_toml(&t).ok())
+        .and_then(|t| parse_model_rig(&t).ok())
         .unwrap_or_else(|| {
             eprintln!("[tune-lods] no readable rig sidecar at {sidecar}");
             std::process::exit(2);
@@ -451,7 +451,7 @@ fn resolve_near_base(config: &TuneConfig) -> Transform {
                 .unwrap_or_else(|| config.variant.clone());
             return std::fs::read_to_string(sidecar_path(model_path, Some(&variant)))
                 .ok()
-                .and_then(|t| ModelRig::from_toml(&t).ok())
+                .and_then(|t| parse_model_rig(&t).ok())
                 .map(|r| r.base_bevy_transform())
                 .unwrap_or_default();
         }
@@ -1450,3 +1450,7 @@ fn draw_line(img: &mut image::RgbaImage, x0: i64, y0: i64, x1: i64, y1: i64, c: 
 #[cfg(test)]
 #[path = "tests/tune_lods_cli_tests.rs"]
 mod cli_tests;
+
+use project_phoenix::entities::model_rig::parse_model_rig;
+
+use project_phoenix::entities::model_rig::ModelRigTransform as _;

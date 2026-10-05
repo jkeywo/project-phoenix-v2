@@ -1,0 +1,48 @@
+[package]
+name = "phoenix-presentation"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[features]
+default = ["server"]
+server = ["phoenix-simulation/server"]
+viewer = []
+capture = ["dep:crossbeam-channel"]
+debug = ["bevy/debug"]
+headless = ["phoenix-simulation/headless"]
+host = ["phoenix-simulation/host"]
+
+[dependencies]
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+phoenix-simulation = { path = "../phoenix-simulation", default-features = false }
+gltf = { version = "1.4.1", default-features = false, features = ["utils"] }
+base64 = "0.22.1"
+ktx2 = "0.4.0"
+phoenix-math = { path = "../phoenix-math" }
+phoenix-model = { path = "../phoenix-model" }
+bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
+crossbeam-channel = { version = "0.5", optional = true }
+glam = { version = "0.30", features = ["libm"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+wasm-bindgen = "0.2.120"
+rand = "0.9"
+noise = "0.9"
+toml = "1.0"
+libm = "0.2"
+vellum-perf = { workspace = true }
+bevy_rapier3d = { version = "0.33", default-features = false, features = ["dim3"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ron = "0.12"
+
+[target.wasm32-unknown-unknown.dependencies]
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console", "Performance"] }
+
+[dev-dependencies]
+phoenix-simulation = { path = "../phoenix-simulation", default-features = false, features = ["test-support"] }
+phoenix-content = { path = "../phoenix-content", features = ["test-support"] }

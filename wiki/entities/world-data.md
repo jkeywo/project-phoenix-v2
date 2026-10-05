@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/gm_spawn.rs, gui/gm-role-presets.js, src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/gm_action.rs, src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, src/server/renderer.rs, src/server_app/world_setup.rs, src/civilian/server.rs, src/ai/server.rs, server.html, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, tests/headless_runner.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/entities/region_convoy_recovery.toml, assets/scenarios.toml]
+sources: [crates/phoenix-simulation/src/gm_spawn.rs, gui/gm-role-presets.js, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/server_tests.rs, crates/phoenix-simulation/src/world/layers.rs, crates/phoenix-simulation/src/world/validate.rs, crates/phoenix-simulation/src/world/deadlines.rs, crates/phoenix-simulation/src/world/script/load.rs, crates/phoenix-simulation/src/world/script/schedule.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/entities/config_cache.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/sim_digest.rs, src/headless/replay.rs, src/server/bridge.rs, crates/phoenix-presentation/src/server/renderer.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-simulation/src/ai/server.rs, server.html, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/entity_override.rs, crates/phoenix-simulation/src/entities/include_resolve.rs, crates/phoenix-simulation/src/objectives/directive.rs, tests/snapshot_resume.rs, tests/cruiser_elimination.rs, tests/headless_runner.rs, assets/worlds/default.toml, assets/worlds/alliance_convoy_escort.toml, assets/worlds/cruiser_elimination.toml, assets/entities/region_convoy_recovery.toml, assets/scenarios.toml]
 updated: 2026-09-27
 ---
 
@@ -20,7 +20,7 @@ rows show both teams' outcomes. Its design is in
 `pasm/spec/design/cruiser-elimination.yaml`; runtime proofs are in
 `tests/cruiser_elimination.rs`.
 
-## Source schema (`src/world/config.rs`)
+## Source schema (`crates/phoenix-simulation/src/world/config.rs`)
 
 ```toml
 # Hull-agnostic selectors: Station ids (console families) or System kinds.
@@ -29,14 +29,14 @@ scenario_detail_floor = ["navigation"]
 [global]
 seed = 42                                # optional; drawn from the OS when omitted
 
-[ambient_light]                          # AmbientLightConfig in src/world/config.rs
+[ambient_light]                          # AmbientLightConfig in crates/phoenix-simulation/src/world/config.rs
 color = [0.6, 0.55, 0.5]                 # sRGB; default Color::srgb(0.6, 0.55, 0.5)
 brightness = 300.0                       # default 300.0
 
 [anchors]
 starbase = [0.0, 0.0, 0.0]               # normalised to [f32; 3]
 
-[[entity]]                               # WorldEntity in src/world/config.rs
+[[entity]]                               # WorldEntity in crates/phoenix-simulation/src/world/config.rs
 template_path = "assets/entities/station_axiom.toml"
 name = "axiom"                           # optional; overrides EntityConfig.name
 transform = { anchor = "starbase", offset = [10.0, 0.0, 0.0] }
@@ -73,7 +73,7 @@ the browser without changing GM authority. The typed `[gm_attention]` block
 tunes the GM attention queue's ADVISORY rows — the idle-NPC grace, its band and
 its off switch, and the quiet-time `quiet_time_secs` (a positive, finite count
 of simulation seconds) with its independent `quiet_time_disabled` — and can
-never suppress a technical warning. `src/world/config.rs` owns all three
+never suppress a technical warning. `crates/phoenix-simulation/src/world/config.rs` owns all three
 schemas; [GM Operator](./gm-operator.md) indexes their current runtime consumers.
 
 `scenario_detail_floor` is root-world-only: additive/supporting world loads reject
@@ -188,9 +188,9 @@ has reached current state and digest. Restoring a paused run retains the frozen
 logical-tick boundary and attributed action history needed for exact Resume and
 replay.
 
-## TransformConfig (`src/world/config.rs`)
+## TransformConfig (`crates/phoenix-simulation/src/world/config.rs`)
 
-Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence is defined by `TransformConfig::resolve` and `resolve_entity_position_with` in `src/world/config.rs`:
+Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence is defined by `TransformConfig::resolve` and `resolve_entity_position_with` in `crates/phoenix-simulation/src/world/config.rs`:
 
 1. `relative_to = "<id-or-name>" + offset` — resolved against another `[[entity]]` in the **same world file**, named by its `id` or its `name`. Declaration order is irrelevant: `build_named_entity_positions` builds the whole lookup table before anything is positioned, so a target below the reference resolves as readily as one above it. A `name` beats another entity's `id` of the same spelling. The target must not itself use `relative_to` — chains are unsupported — and a reference that resolves to nothing is an `unresolved-relative-to` **error** that blocks activation of the whole world (`validate_relative_to`, issue #969), rather than dropping the one entity
 2. `anchor = "<anchor-name>" + offset` — resolved against an entry in `[anchors]`
@@ -201,14 +201,14 @@ Additional fields:
 - `rotation: [f32; 3]` — XYZ Euler radians, applied via `Quat::from_euler(EulerRot::XYZ, x, y, z)`. Default `[0, 0, 0]`.
 - `scale: [f32; 3]` — uniform-per-axis scale; default `[1, 1, 1]`. **Scale lives only on `TransformConfig`**; there is no `EntityConfig.scale` field.
 
-## AmbientLightConfig (`src/world/config.rs`)
+## AmbientLightConfig (`crates/phoenix-simulation/src/world/config.rs`)
 
-Optional top-level `[ambient_light]` block on the world TOML. `apply_world_ambient_light` in `src/server/renderer.rs` applies it in `PostStartup`, after `insert_world_config_resource` has placed `WorldConfig`. Missing fields use `render_setup::default_ambient_light`.
+Optional top-level `[ambient_light]` block on the world TOML. `apply_world_ambient_light` in `crates/phoenix-presentation/src/server/renderer.rs` applies it in `PostStartup`, after `insert_world_config_resource` has placed `WorldConfig`. Missing fields use `render_setup::default_ambient_light`.
 
 ## EntityConfig name + lights
 
-- `EntityConfig.name: Option<String>` in `src/entities/config.rs` is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component in `src/entities/spawner.rs`.
-- `[[light]]` array-of-tables on `EntityConfig` spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. The `Lights` component in `src/entities/spawner.rs` carries them to `render_spawned_entities` in `src/server_app_render.rs`.
+- `EntityConfig.name: Option<String>` in `crates/phoenix-simulation/src/entities/config.rs` is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component in `crates/phoenix-simulation/src/entities/spawner.rs`.
+- `[[light]]` array-of-tables on `EntityConfig` spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. The `Lights` component in `crates/phoenix-simulation/src/entities/spawner.rs` carries them to `render_spawned_entities` in `crates/phoenix-presentation/src/server_app_render.rs`.
 - `[mesh].emissive: Option<f32>` on `EntityConfig` controls the StandardMaterial emissive multiplier (renderer default `0.4`; star templates use `2.0`).
 
 ## Entity template composition (`includes`)
@@ -250,7 +250,7 @@ enforce a merge policy puts the rule in the wrong layer. Historically,
 `behaviour.doctrine` was the clearest failure: it is the one array that
 reconciles here, so a tombstone deep-merged into the matching entry and serde
 silently ignored it. Issue #1268 now captures and rejects unknown doctrine keys,
-but sibling structs in `src/ship/config.rs` remain permissive and the parser
+but sibling structs in `crates/phoenix-simulation/src/ship/config.rs` remain permissive and the parser
 still does not own whether a tombstone is legal. A subtractive marker that can
 silently do nothing is the failure mode #838 existed to end, so rejection stays
 in the merge, where the guarantee is stated.
@@ -305,7 +305,7 @@ and reports per-field provenance. Every structured edit is still accepted only
 after the ordinary Rust resolver validates the exact candidate, so preview and
 runtime composition cannot establish separate authoring rules.
 
-Resolution is pure and lives in `src/entities/include_resolve.rs`. It returns one
+Resolution is pure and lives in `crates/phoenix-simulation/src/entities/include_resolve.rs`. It returns one
 resolved TOML document plus **provenance** — which template authored each dotted
 field path and the include chain that reached it. Cycles, missing fragments,
 unparseable fragments, malformed `includes` lists, and an invalid *resolved*

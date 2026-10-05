@@ -20,10 +20,10 @@ use std::{
 };
 
 const SYSTEMS: [&str; 4] = [
-    "project_phoenix::console::weapons::server::ai_target_selection",
-    "project_phoenix::console::weapons::beam::handle_set_target",
-    "project_phoenix::console::weapons::beam::ai_phaser_auto_fire",
-    "project_phoenix::console::weapons::blaster::tick_blaster_auto_fire",
+    "phoenix_simulation::console::weapons::server::ai_target_selection",
+    "phoenix_simulation::console::weapons::beam::handle_set_target",
+    "phoenix_simulation::console::weapons::beam::ai_phaser_auto_fire",
+    "phoenix_simulation::console::weapons::blaster::tick_blaster_auto_fire",
 ];
 const PAIRS: [(usize, usize); 5] = [(0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
 

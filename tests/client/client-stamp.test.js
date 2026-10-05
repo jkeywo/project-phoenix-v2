@@ -1,6 +1,6 @@
 // The client bundle's build-time delivery stamp (issue #1111).
 //
-// Reads the REAL src/core/messages.rs and assets/scenarios.toml, so a
+// Reads the REAL crates/phoenix-model/src/messages.rs and assets/scenarios.toml, so a
 // PROTOCOL_VERSION bump or a [content] epoch bump that stops reaching the
 // client page fails here rather than at a player's phone.
 
@@ -21,7 +21,7 @@ const read = (rel) => readFileSync(path.join(root, rel), 'utf8');
 
 describe('reading the repository sources', () => {
   it('finds the protocol version the wire vocabulary declares', () => {
-    const protocol = protocolVersionFrom(read('src/core/messages.rs'));
+    const protocol = protocolVersionFrom(read('crates/phoenix-model/src/messages.rs'));
     expect(Number.isInteger(protocol)).toBe(true);
     expect(protocol).toBeGreaterThan(0);
   });
@@ -41,7 +41,7 @@ describe('reading the repository sources', () => {
     const field = await clientStampField(root);
     expect(field.split('/')).toHaveLength(3);
     const [protocol, id, epoch] = field.split('/');
-    expect(Number(protocol)).toBe(protocolVersionFrom(read('src/core/messages.rs')));
+    expect(Number(protocol)).toBe(protocolVersionFrom(read('crates/phoenix-model/src/messages.rs')));
     expect(id).toBe(contentIdentityFrom(read('assets/scenarios.toml')).id);
     expect(Number(epoch)).toBe(contentIdentityFrom(read('assets/scenarios.toml')).epoch);
   });

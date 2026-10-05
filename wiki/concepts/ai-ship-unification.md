@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
-sources: [src/entities/ship_spawn.rs, src/entities/spawner.rs, src/ship/control_source.rs, src/ship/components.rs, src/ship_plugin.rs, src/ship/helm_ai/, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/console/navigation/server.rs, src/ai/server.rs, src/ai/host.rs]
+sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/ship/control_source.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/ai/host.rs]
 updated: 2026-10-04
 ---
 
@@ -51,15 +51,15 @@ commands identically.
 
 Examples:
 
-- the six Helm hosts live under `src/ship/helm_ai/`;
+- the six Helm hosts live under `crates/phoenix-simulation/src/ship/helm_ai/`;
 - `ai_target_selection` and weapon-family hosts live under
-  `src/console/weapons/`;
+  `crates/phoenix-simulation/src/console/weapons/`;
 - Captain, Sensors, Navigation, Repair, Comms, Shields, and Power each own their
   domain host;
 - scenario operation hosts use the same fine-system objectives and command
   adapters as their human controls.
 
-All policy hosts use the logical-tick cadence in `src/ai/cadence.rs`. World
+All policy hosts use the logical-tick cadence in `crates/phoenix-simulation/src/ai/cadence.rs`. World
 snapshots and policy memory are deterministic and snapshot-safe.
 
 A named operation objective may acquire its exact non-hostile target inside
@@ -73,7 +73,7 @@ that Tractor-only retention.
 ## Fidelity
 
 `AiHighFidelity` selects the full ship simulation path for nearby NPCs. Distant
-NPCs use the deterministic low-fidelity adapter in `src/ai/server.rs`; they
+NPCs use the deterministic low-fidelity adapter in `crates/phoenix-simulation/src/ai/server.rs`; they
 retain authored objectives and cursors rather than becoming a separate class of
 entity. Every frozen-roster `FleetSlotOf` hull always runs the full authoritative
 path and projects the same implicit fidelity bubble on every peer. `LocalShip`
@@ -83,7 +83,7 @@ set as both ship hosts. Authored `LodBubble` entities remain anchors even in a
 GM-only world with no fleet.
 
 An active canonical NPC Station takeover also holds that NPC at full fidelity.
-`src/gm_puppet.rs` installs the complete ordinary high-fidelity bundle before
+`crates/phoenix-simulation/src/gm_puppet.rs` installs the complete ordinary high-fidelity bundle before
 Admission, including when the first accepted command shares the takeover tick
 or was restored awaiting delivery. Joining an already active takeover never
 resets its intent or policy memory. After the last release, the ordinary

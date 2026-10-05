@@ -64,6 +64,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use phoenix_transport::transport::Transport;
 use project_phoenix::core::codec::{
     decode_handshake_frame, decode_rendezvous_frame, encode_handshake_frame,
     encode_rendezvous_frame, JsonCodec,
@@ -77,7 +78,7 @@ use project_phoenix::delivery::stamp::DeliveryStamp;
 use project_phoenix::lobby::handler::Target;
 use project_phoenix::native_host::relay_socket::WsRelaySocket;
 use project_phoenix::native_host::relay_transport::{RelayHostConfig, RelayNotice, RelayTransport};
-use project_phoenix::native_host::transport::{NativeTransport, TransportDispatch, TransportEvent};
+use project_phoenix::native_host::transport::{TransportDispatch, TransportEvent};
 
 fn base() -> String {
     std::env::var("PHOENIX_RENDEZVOUS").unwrap_or_else(|_| "http://127.0.0.1:8788".to_string())
@@ -296,7 +297,12 @@ fn a_browser_shaped_client_joins_a_native_host_over_a_real_relay() {
         _ => None,
     });
     println!("issued code {} ({})", code.suffix, code.full);
-    assert_eq!(code.suffix.len(), 5);
+    // Validate against the authored scheme; code length is not a wire constant.
+    let codes = project_phoenix::native_host::join_codes::JoinCodeTable::parse(include_str!(
+        "../assets/join/join-codes.toml"
+    ))
+    .expect("the shipped join-code table is valid");
+    assert_eq!(codes.validate_suffix(&code.suffix), Ok(code.suffix.clone()));
 
     // 2. A joiner resolves it — and is told this host has NO WebRTC, which is
     //    the field that stops a phone spending ninety seconds discovering it.

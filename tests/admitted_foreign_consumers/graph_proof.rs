@@ -21,13 +21,13 @@ use std::{
 };
 
 pub const PRODUCER: &str =
-    "project_phoenix::console::captain::server::backfill_captain_prefers_cinematic_view";
+    "phoenix_simulation::console::captain::server::backfill_captain_prefers_cinematic_view";
 pub const CONSUMERS: [&str; 5] = [
-    "project_phoenix::console::captain::server::handle_set_red_alert",
-    "project_phoenix::console::weapons::beam::handle_set_target",
-    "project_phoenix::console::weapons::torpedo::handle_set_torpedo_volley_target",
-    "project_phoenix::console::weapons::beam::handle_set_phaser_mode",
-    "project_phoenix::console::weapons::beam::handle_set_phaser_frequency",
+    "phoenix_simulation::console::captain::server::handle_set_red_alert",
+    "phoenix_simulation::console::weapons::beam::handle_set_target",
+    "phoenix_simulation::console::weapons::torpedo::handle_set_torpedo_volley_target",
+    "phoenix_simulation::console::weapons::beam::handle_set_phaser_mode",
+    "phoenix_simulation::console::weapons::beam::handle_set_phaser_frequency",
 ];
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,7 +62,14 @@ pub fn candidates() -> Vec<Candidate> {
     unique.sort();
     unique.dedup();
     assert_eq!(unique.len(), 275, "candidate multiplicity is explicit");
-    inventory.pairs
+    inventory
+        .pairs
+        .into_iter()
+        .map(|pair| Candidate {
+            producer: project_phoenix::headless::determinism_audit::migrated_symbol(&pair.producer),
+            consumer: project_phoenix::headless::determinism_audit::migrated_symbol(&pair.consumer),
+        })
+        .collect()
 }
 
 fn selected(pair: &Candidate) -> bool {
@@ -75,14 +82,14 @@ fn selected(pair: &Candidate) -> bool {
 // coverage, not a foreign-only behavioral claim. Pin the exact extension rather
 // than tolerating new access.
 fn shares_strike_reserve(pair: &Candidate) -> bool {
-    (pair.producer == "project_phoenix::console_ai::server::ai_power_allocation"
+    (pair.producer == "phoenix_simulation::console_ai::server::ai_power_allocation"
         && matches!(
             pair.consumer.as_str(),
-            "project_phoenix::console::weapons::beam::handle_fire_phaser"
-                | "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
+            "phoenix_simulation::console::weapons::beam::handle_fire_phaser"
+                | "phoenix_simulation::console::weapons::torpedo::handle_fire_torpedo"
         ))
-        || (pair.producer == "project_phoenix::console_ai::server::ai_torpedo_auto_fire"
-            && pair.consumer == "project_phoenix::console::weapons::beam::handle_fire_phaser")
+        || (pair.producer == "phoenix_simulation::console_ai::server::ai_torpedo_auto_fire"
+            && pair.consumer == "phoenix_simulation::console::weapons::beam::handle_fire_phaser")
 }
 
 fn key(graph: &ScheduleGraph, name: &str) -> SystemKey {

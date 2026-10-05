@@ -227,7 +227,7 @@ fn enabling_gm_on_the_final_countdown_tick_blocks_launch_and_keeps_loaded() {
         )
         .add_systems(PostUpdate, sync_presence);
     crate::sim_tick::register_sim_tick(&mut app);
-    crate::ship::test_support::drive_one_fixed_step_per_update(
+    crate::ship::test_clock::drive_one_fixed_step_per_update(
         &mut app,
         std::time::Duration::from_secs(1),
     );
@@ -308,7 +308,7 @@ fn unready_or_surface_loss_on_the_final_countdown_tick_cancels_launch() {
             )
             .add_systems(PostUpdate, sync_presence);
         crate::sim_tick::register_sim_tick(&mut app);
-        crate::ship::test_support::drive_one_fixed_step_per_update(
+        crate::ship::test_clock::drive_one_fixed_step_per_update(
             &mut app,
             std::time::Duration::from_secs(1),
         );

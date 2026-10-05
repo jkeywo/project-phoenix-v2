@@ -2,7 +2,7 @@
 title: CaptainPlugin
 type: concept
 tags: [captain, red-alert, viewscreen, objectives, authority, ai]
-sources: [src/console/captain/server.rs, src/command_admission/mod.rs, src/server_app/registration.rs, src/core/messages.rs, src/ship/viewscreen.rs, gui/stations/captain-actions.js, gui/action-map.js]
+sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, gui/stations/captain-actions.js, gui/action-map.js]
 updated: 2026-08-31
 ---
 
@@ -23,7 +23,7 @@ Captain authority is resolved at admission from the fine system named by the com
 
 Views are applied in deterministic order with scripted `ShowOnScreen` requests so simultaneous inputs produce one stable result. The renderer consumes the selected authoritative view; the console does not control a camera locally.
 
-`src/server_app/registration.rs` installs the plugin in the fixed `SimSet` chain. Tests live in `src/console/captain/server_tests.rs`.
+`crates/phoenix-simulation/src/server_app/registration.rs` installs the plugin in the fixed `SimSet` chain. Tests live in `crates/phoenix-simulation/src/console/captain/server_tests.rs`.
 
 ## Related
 

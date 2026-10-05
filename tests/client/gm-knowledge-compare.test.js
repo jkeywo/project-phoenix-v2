@@ -206,7 +206,7 @@ describe('crewContactRows', () => {
     '(issue #1318 review, finding 3)', () => {
     // Mirrors combat_test: a destroyer's sensors `shows` list includes
     // "planet", and Earth carries a radar icon and sits inside scan range,
-    // but src/gm_projection.rs's `world_kind` returns `None` for planets —
+    // but crates/phoenix-simulation/src/gm_projection.rs's `world_kind` returns `None` for planets —
     // Truth never models them, so they must never render as `crew_only`
     // ("Truth already dropped this identity").
     const planet = entitySnapshot({
@@ -300,7 +300,7 @@ describe('buildKnowledgeCompare', () => {
     const msgA = { id: 'msg-a', sender_name: 'Ops', subject: 'Comms A', is_read: false };
     const msgB = { id: 'msg-b', sender_name: 'Ops', subject: 'Comms B', is_read: false };
     const ship = shipProjection({});
-    // `src/gm_projection.rs` sorts this vector by system id
+    // `crates/phoenix-simulation/src/gm_projection.rs` sorts this vector by system id
     // (`blackboards.sort_by(|left, right| left.0.cmp(&right.0))`) before it
     // is ever serialised — no real payload can arrive with 'comms-b' before
     // 'comms-a'. The Truth arm here reads that sorted-first entry directly;
@@ -358,7 +358,7 @@ describe('buildKnowledgeCompare', () => {
     // 0.004999999888241291 is an f32 value one ULP below the exact fraction
     // that multiplies to 0.5. In plain f64 arithmetic `hullFraction * 100`
     // stays fractionally below 0.5 and rounds DOWN to 0. Rust's
-    // `percent()` (src/gm_projection.rs) computes the multiply itself in
+    // `percent()` (crates/phoenix-simulation/src/gm_projection.rs) computes the multiply itself in
     // f32: re-rounding the same exact f64 product to the nearest f32 lands
     // exactly on 0.5, and f32 `.round()` rounds halves away from zero, i.e.
     // UP to 1 — `Math.fround` reproduces that f32 rounding before

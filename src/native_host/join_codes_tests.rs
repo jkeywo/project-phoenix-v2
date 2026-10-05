@@ -37,16 +37,22 @@ fn canonicalisation_folds_exactly_what_the_client_folds() {
 
 #[test]
 fn a_denied_word_is_refused_in_every_confusable_spelling() {
-    // Containment, because the suffix is longer than the words on the list:
-    // a code is refused for READING as one of them wherever it does.
+    // Confusable spellings still hit the authored deny list.
     let t = table();
-    assert_eq!(t.validate_suffix("ADMINXYZ"), Err("denied"));
-    assert_eq!(t.validate_suffix("XYZADMIN"), Err("denied"));
-    assert_eq!(t.validate_suffix("XYADM1NZ"), Err("denied"));
+    assert_eq!(t.validate_suffix("ADMIN"), Err("denied"));
+    assert_eq!(t.validate_suffix("LOGIN"), Err("denied"));
+    assert_eq!(t.validate_suffix("ADM1N"), Err("denied"));
     assert_eq!(t.validate_suffix(""), Err("empty"));
     assert_eq!(t.validate_suffix("ABC"), Err("length"));
-    assert_eq!(t.validate_suffix("ABCDEFG$"), Err("charset"));
-    assert_eq!(t.validate_suffix("quarking"), Ok("QUARKING".to_string()));
+    assert_eq!(t.validate_suffix("ABCD$"), Err("charset"));
+    assert_eq!(t.validate_suffix("quark"), Ok("QUARK".to_string()));
+}
+
+#[test]
+fn a_short_denied_word_is_refused_inside_a_suffix() {
+    let mut t = table();
+    t.denied.insert("ADM".to_string());
+    assert_eq!(t.validate_suffix("XADMY"), Err("denied"));
 }
 
 #[test]
@@ -64,8 +70,8 @@ fn a_minted_code_is_one_the_clients_own_parser_would_accept() {
         .expect("a code is mintable");
     assert_eq!(
         code.suffix.chars().count(),
-        8,
-        "the authored length, and 25^8 ≈ 1.5e11 is the whole defence"
+        5,
+        "the authored five-letter operator code"
     );
     assert_eq!(code.namespace, NAMESPACE_CLIENT);
     assert_eq!(
@@ -86,7 +92,7 @@ fn the_mint_never_draws_a_denied_word_even_when_the_draw_insists() {
     // every one of the 64 attempts draws the same denied spelling rather
     // than a rotation of it that happens to be clean.
     let t = table();
-    let denied: Vec<char> = "ADMINXYZ".chars().collect();
+    let denied: Vec<char> = "ADMIN".chars().collect();
     assert_eq!(
         denied.len(),
         t.suffix_length,
@@ -100,7 +106,7 @@ fn the_mint_never_draws_a_denied_word_even_when_the_draw_insists() {
     });
     assert!(
         minted.is_none(),
-        "64 denied draws produce no code, not ADMINXYZ"
+        "64 denied draws produce no code, not ADMIN"
     );
 }
 
@@ -109,9 +115,9 @@ fn record(t: &JoinCodeTable) -> crate::core::rendezvous::JoinCode {
         full: t.compose(
             t.project_for(NAMESPACE_CLIENT).unwrap(),
             t.version(),
-            "QUARKING",
+            "QUARK",
         ),
-        suffix: "QUARKING".to_string(),
+        suffix: "QUARK".to_string(),
         project: t.project_for(NAMESPACE_CLIENT).unwrap().to_string(),
         version: t.version().to_string(),
         namespace: NAMESPACE_CLIENT.to_string(),
@@ -127,8 +133,8 @@ fn the_full_code_a_qr_carries_resolves_and_so_does_the_bare_suffix() {
     let t = table();
     let rec = record(&t);
     assert_eq!(t.resolve(&rec.full, NAMESPACE_CLIENT, &rec), Ok(()));
-    assert_eq!(t.resolve("QUARKING", NAMESPACE_CLIENT, &rec), Ok(()));
-    assert_eq!(t.resolve("qu-ark ing", NAMESPACE_CLIENT, &rec), Ok(()));
+    assert_eq!(t.resolve("QUARK", NAMESPACE_CLIENT, &rec), Ok(()));
+    assert_eq!(t.resolve("qu-ark", NAMESPACE_CLIENT, &rec), Ok(()));
     assert_eq!(
         t.resolve(
             &format!("http://host/client/index.html#{}", rec.full),
@@ -147,14 +153,11 @@ fn the_three_typed_refusals_stay_three_answers() {
     // guest back to re-type a code that was already right.
     let t = table();
     let rec = record(&t);
-    assert_eq!(
-        t.resolve("XYZABCDE", NAMESPACE_CLIENT, &rec),
-        Err("unknown")
-    );
+    assert_eq!(t.resolve("XYZAB", NAMESPACE_CLIENT, &rec), Err("unknown"));
     let other_release = t.compose(
         &rec.project,
         "00000000-0000-4000-8000-000000000000",
-        "QUARKING",
+        "QUARK",
     );
     assert_eq!(
         t.resolve(&other_release, NAMESPACE_CLIENT, &rec),
@@ -163,7 +166,7 @@ fn the_three_typed_refusals_stay_three_answers() {
     let fleet = t.compose(
         t.project_for(NAMESPACE_SERVER).unwrap(),
         t.version(),
-        "QUARKING",
+        "QUARK",
     );
     assert_eq!(t.resolve(&fleet, NAMESPACE_CLIENT, &rec), Err("wrong-type"));
     // A phone asking in the fleet namespace for this crew record is the
@@ -215,7 +218,7 @@ fn a_head_is_told_apart_from_a_typed_suffix() {
     assert!(!is_code_head(""));
     assert!(!is_code_head("has space"));
     // The coupling to the authored length: a WHOLE suffix must never read
-    // as an identifier head, or `QUARKING_` would be reported malformed
+    // as an identifier head, or `QUARK_` would be reported malformed
     // instead of resolving. Raising `suffix.length` past this is what this
     // assertion is here to catch.
     let t = table();

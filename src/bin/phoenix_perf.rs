@@ -8,7 +8,7 @@
 //!
 //! Exit codes: 0 whatever the verdict, 1 IO/parse failure, 2 bad arguments,
 //! 3 a gated regression. The verdict only reaches the exit code when `--gate`
-//! asks it to — see the gating decision in `src/perf/mod.rs`.
+//! asks it to — see the gating decision in `crates/phoenix-simulation/src/perf/mod.rs`.
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -172,7 +172,7 @@ fn report(args: ReportArgs) -> Result<(), String> {
             if gate && project_phoenix::perf::gates(&findings) {
                 eprintln!(
                     "phoenix-perf: {scenario} is a gating scenario and its budget was not met \
-                     (see src/perf/mod.rs for which scenarios gate, and why)"
+                     (see crates/phoenix-simulation/src/perf/mod.rs for which scenarios gate, and why)"
                 );
                 std::process::exit(3);
             }

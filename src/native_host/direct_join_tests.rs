@@ -69,7 +69,7 @@ fn guess(record: &Arc<Record>, j: &mut Joiner) {
         record,
         j,
         &RendezvousFrame {
-            code: Some(CodeField::Typed("XYZABCDE".to_string())),
+            code: Some(CodeField::Typed("XYZAB".to_string())),
             ..client("join")
         },
     );
@@ -122,7 +122,7 @@ fn the_service_opens_with_the_frame_that_makes_a_host_register() {
     let frame = decode_rendezvous_frame(&first[0]).unwrap();
     assert_eq!(frame.kind, "ready");
     assert_eq!(frame.v, RENDEZVOUS_PROTOCOL);
-    assert_eq!(code.suffix.chars().count(), 8);
+    assert_eq!(code.suffix.chars().count(), 5);
     assert!(service.is_open());
 }
 
@@ -194,7 +194,7 @@ fn the_refusals_a_phone_gets_are_the_ones_the_worker_would_have_given() {
         &record,
         &mut j,
         &RendezvousFrame {
-            code: Some(CodeField::Typed("XYZABCDE".to_string())),
+            code: Some(CodeField::Typed("XYZAB".to_string())),
             ..client("join")
         },
     );
@@ -955,11 +955,16 @@ fn the_composite_guess_rate_holds_however_many_addresses_it_is_spread_over() {
         opening <= ceiling * 1.5,
         "even the ramp's own window stays near the ceiling: {opening:.2}/s"
     );
-    // …and at that rate the authored keyspace is not a target. 25^8 / 2 guesses
-    // at the sustained rate, in years.
-    let years = (25f64.powi(8) / 2.0) / sustained / (365.0 * 24.0 * 3600.0);
-    println!("expected search at the composite rate: {years:.0} years");
-    assert!(years > 100.0, "the margin is centuries, not hours: {years}");
+    // Report the actual authored search space. The five-letter product choice
+    // does not change the admission ceilings asserted above.
+    let data: serde_json::Value =
+        serde_json::from_str(include_str!("../../assets/join/join-codes.json")).unwrap();
+    let alphabet = data["suffix"]["alphabet"].as_str().unwrap().chars().count();
+    let length = data["suffix"]["length"].as_u64().unwrap();
+    let combinations = (alphabet as u64).pow(length as u32);
+    assert_eq!(combinations, 9_765_625, "the authored five-letter keyspace");
+    let days = (combinations as f64 / 2.0) / sustained / (24.0 * 3600.0);
+    println!("expected search at the composite rate: {days:.1} days");
 }
 
 #[test]

@@ -22,7 +22,7 @@
  *
  * Everything drives the REAL modules against a real jsdom document. The CSS and
  * cross-language claims are read off disk — `gui/tokens.css`, `client.html`,
- * `server.html`, `src/server/viewscreen_border.rs` — because a rule that is
+ * `server.html`, `crates/phoenix-presentation/src/server/viewscreen_border.rs` — because a rule that is
  * only in a file nobody imports is not a rule. What jsdom cannot do is composite
  * an animation or run the WASM renderer; that half is
  * `tests/smoke/viewscreen-effects.render.spec.js`.
@@ -87,7 +87,7 @@ const CLIENT_HTML = read('client.html');
 const SERVER_HTML = read('server.html');
 const CONSOLE_CSS = read('gui/console.css');
 const LOBBY_CSS = read('gui/host-lobby.css');
-const BORDER_RS = read('src/server/viewscreen_border.rs');
+const BORDER_RS = read('crates/phoenix-presentation/src/server/viewscreen_border.rs');
 const BRIDGE_RS = read('src/server/bridge.rs');
 const PRESENTATION_RS = read('src/native_host/viewscreen_presentation.rs');
 const HUD_RS = read('src/native_host/panes/hud.rs');

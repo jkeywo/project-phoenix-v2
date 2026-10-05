@@ -18,7 +18,7 @@
 // ladders, so the script and the shipped sidecars could disagree forever and
 // nothing would say so. Here the model rig sidecar is the only author: a
 // `[[lod]]` level that was decimated out of another file declares how, in a
-// `[lod.generate]` sub-table (src/entities/config.rs, `LodGeneration`):
+// `[lod.generate]` sub-table (crates/phoenix-simulation/src/entities/config.rs, `LodGeneration`):
 //
 //   [[lod]]
 //   max_distance = 100.0
@@ -65,7 +65,7 @@
 // directory by `every_shipped_sidecar_parses_strictly`. It is build metadata,
 // so it does not ship to the browser either.
 //
-// File SIZE is not judged here. `src/perf/assets.rs` (issue #868) already owns
+// File SIZE is not judged here. `crates/phoenix-simulation/src/perf/assets.rs` (issue #868) already owns
 // the byte measurement, and a test there asserts the `output_bytes` recorded
 // below agree with the inventory it takes — one measurement, two readers.
 // Triangle and texture-count budgets belong to issue #905, which measures them
@@ -569,7 +569,7 @@ function formatBytes(bytes) {
  * almost always a mesh meshoptimizer could not reduce — split vertices,
  * non-manifold shells — and that is worth saying out loud at the moment it
  * happens rather than discovering it as a download regression. `grew` is the
- * flag; the byte figures themselves belong to `src/perf/assets.rs` (#868),
+ * flag; the byte figures themselves belong to `crates/phoenix-simulation/src/perf/assets.rs` (#868),
  * which measures the whole tree, and triangle counts to issue #905.
  */
 export function sizeReport(previous, observed) {

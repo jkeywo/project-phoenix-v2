@@ -19,9 +19,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/shields.rs, src/ship/config.rs, src/core/broadcast/audience.rs, src/weapons/shield.rs, src/entities/config.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/core/broadcast/audience.rs, crates/phoenix-simulation/src/weapons/shield.rs, crates/phoenix-simulation/src/entities/config.rs]
       symbols: [tick_shields, shields_state_broadcaster, register_shields_replication_lifecycle, reconnect_shields_projection, station_for_system_kind, shield_facing_statuses, ShieldSystem, ShieldArcConfig, ShieldFacing, fraction]
-      tests: [cargo test, tests/smoke/shields-console.spec.js, src/core/broadcast/audience_tests.rs]
+      tests: [cargo test, tests/smoke/shields-console.spec.js, crates/phoenix-simulation/src/core/broadcast/audience_tests.rs]
 
   - state: shield-arc-state
     core:
@@ -36,10 +36,10 @@ entities:
       replicas: [shield-status-blackboard-state]
     implementation:
       status: declared
-      paths: [src/weapons/shield.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/weapons/shield.rs, crates/phoenix-model/src/messages.rs]
       symbols: [ShieldSystem]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: shields-coordination-debounce-state
     core:
       status: implemented
@@ -53,10 +53,10 @@ entities:
       derived_from: [shield-arc-state]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [ShieldsCoordinationState, ShieldsCoordinationContinuationState]
 
-      tests: [src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - component: shield-focus-controller
     core:
       status: implemented
@@ -74,10 +74,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/shields.rs, src/core/messages.rs, gui/action-map.js]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-model/src/messages.rs, gui/action-map.js]
       symbols: [handle_shields_messages]
       messages: [SetShieldArcFocus]
-      tests: [cargo test, tests/client/ph-shield-facings.test.js, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, tests/client/ph-shield-facings.test.js, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - message: set-shield-arc-focus-command
     core:
@@ -94,10 +94,10 @@ entities:
       payload: SetShieldArcFocus
     implementation:
       status: declared
-      paths: [src/core/messages.rs, gui/action-map.js]
+      paths: [crates/phoenix-model/src/messages.rs, gui/action-map.js]
       messages: [SetShieldArcFocus]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: shield-damage-router
     core:
       status: implemented
@@ -112,7 +112,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/shield.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/server_app/collision.rs]
+      paths: [crates/phoenix-simulation/src/weapons/shield.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/server_app/collision.rs]
       symbols: [ShieldSystem]
       tests: [cargo test]
 
@@ -128,9 +128,9 @@ entities:
       derived_from: [shield-arc-state]
     implementation:
       status: declared
-      paths: [src/ship/shields.rs, src/core/messages.rs, gui/components/ph-shield-panel.js]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-model/src/messages.rs, gui/components/ph-shield-panel.js]
       symbols: [ShieldsBlackboard]
-      tests: [cargo test, tests/client/ph-shield-panel.test.js, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, tests/client/ph-shield-panel.test.js, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: shields-recent-damage-ai
     core:
@@ -143,7 +143,7 @@ entities:
         - "Issue #747 corrected the recent-damage focus signal. (1) ShieldsDamageHistory.last_hp holds a per-arc previous-health snapshot observed every tick, so real incoming damage is measured as prev_hp - current_hp rather than misreading a stored delta as prior health (the original defect). (2) Damage concentration is now measured over the AUTHORED damage_window_secs (floored at min_damage_window_secs), not a fixed last-min_damage_window_secs slice, so 'concentrated damage over authored windows' is honoured; the pruning window and the concentration window agree. (3) A focus-decay guard skips HP drops on a non-focused arc still at or above its reduced effective max_hp (ShieldSystem::tick decay bleeding toward the cap), so a focus side effect is never recorded as incoming fire. (4) ai_shield_focus now emits through the single-owner console_ai::shields_emit::emit_shields_ai_command wrapper (mirroring src/ship/helm_ai_emit.rs), making this operator's dependency on host-command-admission an observed per-entity code edge."
         - "Issue #783 converted the Shields Backfill behaviour to an inline stateless policy on the #775 channel/verb spine (NOT the #776 selector: shield arcs are a fixed 4-set of in-ship indices, not UUID entities, so there is nothing for a candidate-source selector to union). The retained arc-ranking kernel tick_shield_focus_ai (damage-concentration primary, health-imbalance fallback — already tested and correct) is kept as the 4-way argmax; the AUTHORED windows/thresholds moved out of the typed ai_cfg.* reads and into the policy `param` map (damage_window_secs, min_damage_window_secs, damage_pct_threshold, health_ratio_threshold), and a value-less focus_shield_arc verb on the shield_focus channel gates WHETHER the kernel acts this tick (None → idle/hold, emit nothing). Per-arc BOUNDED recent incoming-damage is exposed to policy guards as facts via seed_shields_focus_facts (recent_damage_<arc-id>, recent_damage_total, recent_damage_fraction_max/recent_damage_pct_max concentration, health_fraction_min_ratio fallback), computed from the already-pruned window only. At #783 an omitted [shields_console.ai_policy] was filled by a canonical synthesiser (a priority-10 damage rule plus a priority-0 unconditional imbalance fallback, params seeded from the retained typed default_shields_ai_* values) that reproduced the pre-#783 decisions bit-for-bit. Human control still prevents AI focus via the operate_ai admission gate (no second write path); there is no policy memory to reset — the only per-arc state is ShieldsDamageHistory, whose records self-expire via prune_old and whose last_hp baseline resets when a facing comes back online."
         - "Issue #885 (8555e336) deleted that synthesiser. default_shields_focus_ai_config is gone along with every call site, strict AI-declaration mode is the default in EntityConfig::from_toml, and a hull that declares no [shields_console.ai_policy] fails the entity load rather than having a policy invented for it — so on any hull that loads, the focus policy is authored content. The authored blocks were proved byte-equivalent to what the synthesiser produced, through the real spawner on every shipped hull."
-        - "Issue #1211 deleted the single-owner console_ai::shields_emit::emit_shields_ai_command shim the #747 bullet describes (superseding that bullet's 'observed per-entity code edge' claim). ai_shield_focus now emits both SetShieldArcFocus decisions through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — the same command_admission::ai_emit::emit_ai_command seam, unchanged payloads/token/admission gate/same-tick guarantee — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: the admission edge is now carried unambiguously by the spine's single-owner src/ai/host.rs, but this operator's only single-owner file WAS that shim; its remaining files (console_ai/server.rs, ship/shields.rs, …) are co-owned, so PASM can no longer attribute a per-entity edge and reports depends_on ai-policy-host-spine as missing-observed — the same shape helm-ai-operator/impulse/boost and the sensors AI hosts already carry. The edge itself is observed at the spine; the per-host attribution is the co-ownership limit PASM's observed-edge rule (validation.py) imposes, not a lost dependency."
+        - "Issue #1211 deleted the single-owner console_ai::shields_emit::emit_shields_ai_command shim the #747 bullet describes (superseding that bullet's 'observed per-entity code edge' claim). ai_shield_focus now emits both SetShieldArcFocus decisions through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — the same command_admission::ai_emit::emit_ai_command seam, unchanged payloads/token/admission gate/same-tick guarantee — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: the admission edge is now carried unambiguously by the spine's single-owner crates/phoenix-simulation/src/ai/host.rs, but this operator's only single-owner file WAS that shim; its remaining files (console_ai/server.rs, ship/shields.rs, …) are co-owned, so PASM can no longer attribute a per-entity edge and reports depends_on ai-policy-host-spine as missing-observed — the same shape helm-ai-operator/impulse/boost and the sensors AI hosts already carry. The edge itself is observed at the spine; the per-host attribution is the co-ownership limit PASM's observed-edge rule (validation.py) imposes, not a lost dependency."
         - "Issue #1258 moves the post-lag ThreatBearing consequence into Shields. process_coordination_lag emits generic DeliveredCoordination only after resolving an AI Station; receive_shields_coordination validates the authored shield-arc Station and live authored Shields focus capability, then writes PendingShieldsThreatBearing. ai_shield_focus consumes that inbox on its following decision and preserves the existing closest-authored-facing override. Human remains the generic popup path and Offline remains consume/drop; the lag router no longer knows the Shields pending-state representation."
         - "Issue #1258's continuation repair persists BOTH pieces of authoritative Shields AI state through EntityState::shield_ai: ShieldsDamageHistory's per-arc records and last_hp baseline plus PendingShieldsThreatBearing's one-shot value. The serializable ShieldAiState is a scalar projection rather than serde on runtime components. Each damage record carries its exact authoritative recorded_tick, so the strict integer pruning boundary is unchanged after restore. EntityState::sensors_threat additionally carries Sensors' producer-side debounce memory; otherwise a fresh restore re-emits the already-seen hostile and changes Shields focus after the Coordination delay. EntityState::coordination_queue replaces the bootstrap's already-enqueued duplicate with the capture's enqueue-ordered messages and their exact first-due fixed-step offsets; PhoenixSnapshot::coordination_staging does the same for the cursor-defined unread suffix before the queue. SNAPSHOT_FORMAT moved 13 → 14 because a same-content older save cannot distinguish genuinely empty AI state from state its payload never knew how to carry. Restore also re-derives AiTickReady/AiSnapshotReady/AiBaseInterval from restored SimTick before the first continuation frame."
     architecture:
@@ -156,14 +156,14 @@ entities:
       # Issue #1211 deleted the single-owner console_ai::shields_emit shim;
       # ai_shield_focus now emits through the AI host spine's AiHostEnv::emitter()
       # and so depends on ai-policy-host-spine, which carries the single-owner
-      # observed command_admission::ai_emit edge in src/ai/host.rs.
+      # observed command_admission::ai_emit edge in crates/phoenix-simulation/src/ai/host.rs.
       depends_on: [ai-policy-host-spine]
       runs_in: [host-browser-runtime]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/policy.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/ai/policy.rs]
       symbols: [ai_shield_focus, tick_shield_focus_ai, receive_shields_coordination, PendingShieldsThreatBearing, ShieldsDamageHistory, ShieldsAiConfigToml, ShieldsFocusAiPolicy, seed_shields_focus_facts, SHIELD_FOCUS_CHANNEL, SHIELD_FOCUS_VERB]
-      tests: [cargo test, src/console_ai/core_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]
 
   - state: shields-damage-history-state
     core:
@@ -177,10 +177,10 @@ entities:
       writers: [shields-recent-damage-ai]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [ShieldsDamageHistory, DamageRecord, ShieldsAiState]
 
-      tests: [src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - state: shields-threat-bearing-inbox-state
     core:
       status: implemented
@@ -194,6 +194,6 @@ entities:
       derived_from: [coordination-delivery-state]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs, src/console_ai/server.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [PendingShieldsThreatBearing, receive_shields_coordination, ai_shield_focus]
-      tests: [src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

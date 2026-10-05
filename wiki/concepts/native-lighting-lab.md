@@ -2,7 +2,7 @@
 title: Native Lighting Lab
 type: concept
 tags: [rendering, native, prototype, dust, lighting]
-sources: [prototypes/web-lighting/src/main.rs, prototypes/web-lighting/src/flare.rs, prototypes/web-lighting/README.md, run-web-lighting-lab.bat, prototypes/native-lighting/src/main.rs, prototypes/native-lighting/src/flare.rs, prototypes/native-lighting/flare.wgsl, prototypes/native-lighting/scene.toml, prototypes/native-lighting/README.md, run-lighting-lab.bat, src/server/native_visuals/mod.rs, src/server/native_visuals/flare.rs, src/server/native_visuals/web_flare.rs, src/server/native_visuals/web_occlusion.rs, src/world/native_render_config.rs, assets/shaders/star_flare.wgsl]
+sources: [prototypes/web-lighting/src/main.rs, prototypes/web-lighting/src/flare.rs, prototypes/web-lighting/README.md, run-web-lighting-lab.bat, prototypes/native-lighting/src/main.rs, prototypes/native-lighting/src/flare.rs, prototypes/native-lighting/flare.wgsl, prototypes/native-lighting/scene.toml, prototypes/native-lighting/README.md, run-lighting-lab.bat, crates/phoenix-presentation/src/server/native_visuals/mod.rs, crates/phoenix-presentation/src/server/native_visuals/flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_flare.rs, crates/phoenix-presentation/src/server/native_visuals/web_occlusion.rs, crates/phoenix-simulation/src/world/native_render_config.rs, assets/shaders/star_flare.wgsl]
 ---
 
 # Native Lighting Lab
@@ -27,7 +27,7 @@ Flare intensity is adjustable live with - / +, with Shift for finer changes;
 ## Native gameplay
 
 The approved motes, star shadows and flare now live in
-`src/server/native_visuals/`, registered by `RendererPlugin` on native and web.
+`crates/phoenix-presentation/src/server/native_visuals/`, registered by `RendererPlugin` on native and web.
 Both targets use the same fixed mote pool; the old PFX dust emitter is disabled. No volumetric effect is added.
 Both the lab and native gameplay default to flare intensity **3**.
 

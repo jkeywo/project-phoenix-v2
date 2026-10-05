@@ -194,7 +194,7 @@ describe('PhPhasersControls', () => {
 
   // ── Shared weapon readiness contract (issue #764) ──────────────────────
   // The same observable blocking cases the server publishes (see
-  // src/console/weapons/blackboard.rs + blaster.rs model tests): Ready,
+  // crates/phoenix-simulation/src/console/weapons/blackboard.rs + blaster.rs model tests): Ready,
   // NoTarget, OutOfRange, OutOfArc, Offline.
 
   function readyBank(reason, extra) {

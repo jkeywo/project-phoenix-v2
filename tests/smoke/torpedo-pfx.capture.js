@@ -1,7 +1,7 @@
 // Manual capture: boots a self-contained minimal world (cruiser player +
 // stationary raider dead ahead), loads and fires a torpedo tube, and
 // screenshots the viewscreen so the textured photon-torpedo PFX
-// (src/server/pfx.rs sync_torpedo_pfx: core+shell billboards, directional
+// (crates/phoenix-presentation/src/server/pfx.rs sync_torpedo_pfx: core+shell billboards, directional
 // flare, trail, launch flash, impact burst) can be eyeballed in flight and
 // on impact.
 //

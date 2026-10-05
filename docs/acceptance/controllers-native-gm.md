@@ -99,7 +99,7 @@ The native suite used `PHOENIX_AMBIGUITY_BASE_REF=a57bcca4dac4569ab0d1f1ee788f2f
 The browser and embedded checks used the matching Trunk/client bundle built from
 `04c254be`; subsequent changes corrected the native GM queue and test fixtures.
 The final native check used `host,ultralight`. After returning from the shared
-build directory's other worktree, `src/lib.rs` was timestamp-refreshed without
+build directory's other worktree, `crates/phoenix-simulation/src/lib.rs` was timestamp-refreshed without
 changing its SHA-256. Cargo reported a fresh library build from this checkout,
 and its dependency record included the expected native pane and GM sources.
 

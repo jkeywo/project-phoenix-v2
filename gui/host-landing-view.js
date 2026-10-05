@@ -109,7 +109,7 @@
  *
  * Join as Peer and Connect to Host both open `join-code` and both borrow
  * `#landing-join-panel`, because they ask the operator the same question —
- * eight letters — and differ only in what a good answer MEANS. That difference
+ * five letters — and differ only in what a good answer MEANS. That difference
  * is the row's `join` descriptor and nothing else: which typed namespace the
  * suffix composes into, which surface's wording a refusal takes, and which
  * action the caller runs. A third route that also wants a code adds a row with
@@ -600,7 +600,7 @@ const PLATFORM_LABEL = {
 /**
  * What every join route says about the FIELD itself (issue #1364).
  *
- * "Join code", "eight letters", "or paste the whole code" are facts about the
+ * "Join code", "five letters", "or paste the whole code" are facts about the
  * authored format and not about the route, so both rows share them and neither
  * repeats them. A row may still override any of the three by naming it in its
  * own `join`, which is what a third route with a different kind of code would

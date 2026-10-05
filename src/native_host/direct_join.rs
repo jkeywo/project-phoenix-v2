@@ -268,20 +268,16 @@ const PEER_PREFIX: &str = "lan-";
 /// times, close, dial again. Measured against this service before these
 /// budgets existed, a single machine on loopback sustained ~2,340 wrong-code
 /// guesses per second across churned connections — at which rate the five
-/// letters this scheme used to author (25^5 ≈ 9.77e6, 23.2 bits) fall in about
+/// authored letters (25^5 ≈ 9.77e6, 23.2 bits) fall in about
 /// **35 minutes** of expected search, single-threaded. The join stamp is
 /// public, so a hit is a join, a `relay-open` and an acting participant.
 ///
 /// # The arithmetic these numbers are sized against
 ///
-/// The authored suffix is now **eight** letters over the same 25-letter
-/// alphabet: 25^8 ≈ 1.526e11 codes, 37.15 bits. Even at the OLD unlimited
-/// 2,340 guesses/s the expected search is 1.526e11 / 2 / 2340 ≈ 3.26e7 s ≈
-/// **377 days**. The three layers below then take the achievable rate down by
-/// another three orders of magnitude, so the code is out of reach by a margin
-/// no session, LAN party or weekend has room for. The layering is deliberate:
-/// entropy alone would be a single point of failure, and limits alone would
-/// leave a 35-minute secret behind a lock somebody only has to be patient with.
+/// The authored suffix is **five** letters over a 25-letter alphabet:
+/// 25^5 = 9,765,625 combinations, about 23.2 bits. The QR carries the full
+/// identifier; the operator types only the suffix. The budgets below retain
+/// their existing limits across reconnects and multiple source addresses.
 ///
 /// # What these bounds do NOT stop, stated rather than implied
 ///
@@ -295,8 +291,7 @@ const PEER_PREFIX: &str = "lan-";
 /// answers is held up to [`Self::breaker_max`], so the WHOLE SERVICE settles at
 /// `unjoined_total / breaker_max` ≈ 8 evaluated guesses a second (plus
 /// `breaker_free / breaker_window`) however many addresses it is spread over —
-/// which against 25^8 is expected search measured in centuries. Guessing stays
-/// infeasible.
+/// the composite test asserts that ceiling independently of code length.
 ///
 /// What such a caller CAN do, and this is the accepted residual, is spend the
 /// un-joined budget: with [`Self::unjoined_per_source`] at a quarter of the
@@ -329,14 +324,14 @@ pub struct AdmissionBudgets {
     /// room can share one address (a phone hotspot, a venue router, a
     /// port-forward from outside), and a CORRECT code costs nothing — only a
     /// FAILED lookup is charged — so this is a budget for TYPOS, not for joins.
-    /// Twenty covers a dozen people fumbling eight letters once or twice each
+    /// Twenty covers a dozen people fumbling five letters once or twice each
     /// in the same minute, and it refills underneath them while they do.
     pub guess_burst: u32,
     /// How long one wrong guess takes to refund.
     ///
     /// Five seconds: a sustained 0.2 guesses/s per source. A human retyping a
-    /// code cannot notice it; a churner drops from 2,340/s to 17,280/DAY, which
-    /// against 25^8 is expected search measured in millions of years.
+    /// correct code costs nothing. After the burst, one source can evaluate
+    /// at most 17,280 failed guesses per day.
     pub guess_refill: Duration,
     /// Accepted-but-not-yet-joined sockets one source may hold at once.
     ///

@@ -1,6 +1,6 @@
 // The client bundle's delivery stamp (issue #1111).
 //
-// `src/delivery/stamp.rs` pins a Phoenix host to three numbers: the wire
+// `crates/phoenix-simulation/src/delivery/stamp.rs` pins a Phoenix host to three numbers: the wire
 // protocol revision and the served content set's id/epoch. A native host reads
 // a caller's copy off the `x-phoenix-client-stamp: <protocol>/<id>/<epoch>`
 // header. The browser client has no WASM to compile a version into, so the
@@ -59,7 +59,7 @@ export function stampField(protocol, content) {
 export async function clientStampField(root) {
   try {
     const [messages, manifest] = await Promise.all([
-      readFile(path.join(root, 'src/core/messages.rs'), 'utf8'),
+      readFile(path.join(root, 'crates/phoenix-model/src/messages.rs'), 'utf8'),
       readFile(path.join(root, 'assets/scenarios.toml'), 'utf8'),
     ]);
     return stampField(protocolVersionFrom(messages), contentIdentityFrom(manifest));

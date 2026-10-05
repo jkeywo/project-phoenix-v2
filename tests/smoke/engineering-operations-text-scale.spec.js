@@ -75,7 +75,7 @@ import {
  * `flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;` — added when that
  * hull's Helm mounted a dock system (#1388) specifically because
  * `docked_to_name`/`available_target_name` are WORLD ENTITY NAME ids
- * (`src/core/messages.rs`: "coupled_target_name is a world entity name id"),
+ * (`crates/phoenix-simulation/src/core/messages.rs`: "coupled_target_name is a world entity name id"),
  * unbounded in length, sitting in a `display: flex` row next to a button. That
  * fix was never backported to the equivalent rows this issue also covers:
  * `gui/destroyer/helm.html`'s `.dock-status` AND `.tow-load-target`, and the

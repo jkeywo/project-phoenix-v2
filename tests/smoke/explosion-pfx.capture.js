@@ -1,9 +1,9 @@
 // Manual capture: boots a self-contained minimal world (cruiser player +
 // stationary raider dead ahead, mirroring tactical-fire-flow.spec.js), locks
 // the raider, boosts phaser DPS so one beam tick kills it, and screenshots
-// the viewscreen so the ship death-explosion PFX (src/server/pfx.rs
+// the viewscreen so the ship death-explosion PFX (crates/phoenix-presentation/src/server/pfx.rs
 // spawn_ship_explosions, driven by ShipDestroyedVfx from
-// src/console/weapons/server.rs) can be eyeballed.
+// crates/phoenix-simulation/src/console/weapons/server.rs) can be eyeballed.
 //
 // Not part of the smoke suite (AGENTS.md: renderer visual output is not
 // tested) — this is a verification aid, modeled on blaster-pfx.capture.js.

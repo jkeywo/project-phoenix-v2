@@ -2,7 +2,7 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui, authoring, gm, activity]
-sources: [src/world/script/recipient_refs.rs, src/workshop/mod.rs, gui/components/ph-objective-list.js, src/core/messages.rs, src/gm_objective.rs, src/objective_instances/control.rs, gui/gm-objective-panel.js, src/snapshot.rs, src/sim_digest.rs, src/objectives.rs, src/objective_instances.rs, src/recipients.rs, src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/world/server.rs, src/world/dispatch.rs, src/core/balance.rs, src/gm_activity.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/server/radar.rs, src/gui/radar.rs, src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, src/ship/helm_ai/mod.rs, src/ship/helm_ai/impulse.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+sources: [crates/phoenix-simulation/src/world/script/recipient_refs.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/components/ph-objective-list.js, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/objective_instances/control.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/objective_instances.rs, crates/phoenix-simulation/src/recipients.rs, crates/phoenix-simulation/src/objectives/directive.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/core/balance.rs, crates/phoenix-simulation/src/gm_activity.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-presentation/src/server/radar.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/console-state.js, editor/workshop-objective-snippet.js, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ai/core.rs, assets/worlds/combat_test.toml]
 updated: 2026-09-28
 ---
 
@@ -81,7 +81,7 @@ or UUID fallbacks keep those rows addressable by the activity feed's ship filter
 
 ## Explicit multi-ship instances
 
-`src/recipients.rs` owns shared authoritative input preparation through
+`crates/phoenix-simulation/src/recipients.rs` owns shared authoritative input preparation through
 `RecipientSources` and its exclusive-World adapter `prepare_in_world` (#1559).
 Addressed actions, Comms, and script/GM named-instance commands reuse the same
 authored slot, live faction and player-ship membership projection. Delivery
@@ -91,7 +91,7 @@ destroyed hulls at deferred execution, while Comms separately checks live
 endpoints and the receiving Comms System. Neither eligibility filter changes
 Objective assignment, frozen history or completion credit.
 
-`src/recipients.rs` also reads effective current instance members for addressed
+`crates/phoenix-simulation/src/recipients.rs` also reads effective current instance members for addressed
 script actions and Comms. This union does not change Objective assignment
 precedence or use a ship's frozen last-known view as current membership.
 
@@ -130,7 +130,7 @@ Workshop's Scenario scripts panel uses `editor/workshop-objective-snippet.js`
 to insert or update those Rhai fields in exact source. Save runs candidate
 validation and Test runs live membership; the form does not duplicate the
 authoritative resolver.
-The literal recipient scanner in `src/world/script/recipient_refs.rs` checks
+The literal recipient scanner in `crates/phoenix-simulation/src/world/script/recipient_refs.rs` checks
 instance ties across the composed script set using the runtime specificity rule.
 Computed selectors defer to activation. Live faction refusals also enter the
 bounded recipient diagnostics and Workshop Test trace.

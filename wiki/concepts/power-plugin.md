@@ -2,13 +2,13 @@
 title: Power Runtime
 type: concept
 tags: [power, battery, brownout, modifiers, ai, semantic-actions, feedback]
-sources: [src/ship/power.rs, src/modifiers/power_system.rs, src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/snapshot.rs, tests/snapshot_resume.rs, src/console_ai/server.rs, src/server_app/registration.rs, src/modifiers/coordination.rs, src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js, assets/entities/dynasty_player_cruiser.toml, pasm/spec/design/dynasty-balance.yaml]
+sources: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/modifiers/power_system.rs, crates/phoenix-simulation/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js, assets/entities/dynasty_player_cruiser.toml, pasm/spec/design/dynasty-balance.yaml]
 updated: 2026-09-27
 ---
 
 # Power Runtime
 
-`ShipPowerPlugin` in `src/ship/power.rs` owns the server adapter for authored reactor allocation, battery state, brownout advisories, and power publication. The pure `PowerSystem` state machine lives in `src/modifiers/power_system.rs`.
+`ShipPowerPlugin` in `crates/phoenix-simulation/src/ship/power.rs` owns the server adapter for authored reactor allocation, battery state, brownout advisories, and power publication. The pure `PowerSystem` state machine lives in `crates/phoenix-simulation/src/modifiers/power_system.rs`.
 
 ## Command and tick path
 
@@ -26,11 +26,11 @@ client never changes allocation before the next authoritative projection.
 
 The primary runtime state is per ship (`ShipPowerSystem`, `PowerConfigResource`, and `PowerMultiplierResource` components). Resource fallbacks remain for isolated fixtures and compatibility paths; production ships use their own authored components.
 
-`PowerSystem::capture_continuation` and `restore_continuation` own the saved reactor projection, `PowerState`, in `src/modifiers/power_system.rs`. Snapshot orchestration calls them after resolving the ship identity and retains the modifier rebuild order. The old `snapshot::PowerState` path is a re-export. Fresh-App continuation and next-tick modifier coverage live in `tests/snapshot_resume.rs`.
+`PowerSystem::capture_continuation` and `restore_continuation` own the saved reactor projection, `PowerState`, in `crates/phoenix-simulation/src/modifiers/power_system.rs`. Snapshot orchestration calls them after resolving the ship identity and retains the modifier rebuild order. The old `snapshot::PowerState` path is a re-export. Fresh-App continuation and next-tick modifier coverage live in `tests/snapshot_resume.rs`.
 
 ## Modifier boundary
 
-Power does not write `ShipModifiers` directly. `translate_power_modifiers` in `src/modifiers/coordination.rs` reads the current allocation and authored multipliers, then writes keyed modifiers for the affected domains. This keeps the modifier cache's single-writer contract intact.
+Power does not write `ShipModifiers` directly. `translate_power_modifiers` in `crates/phoenix-simulation/src/modifiers/coordination.rs` reads the current allocation and authored multipliers, then writes keyed modifiers for the affected domains. This keeps the modifier cache's single-writer contract intact.
 
 `power_state_broadcaster` publishes the LocalShip reactor state at 10 Hz to the holder of the authored `power-reactor` system. The audience is derived from `ShipConfig`, not from a hardcoded station name.
 

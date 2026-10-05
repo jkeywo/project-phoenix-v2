@@ -892,7 +892,7 @@ describe('idle-NPC rows', () => {
   });
 });
 
-/** One quiet-time advisory row, exactly as `src/gm_quiet.rs` publishes it. */
+/** One quiet-time advisory row, exactly as `crates/phoenix-simulation/src/gm_quiet.rs` publishes it. */
 function quiet(id, extra = {}) {
   return {
     id,
@@ -932,7 +932,7 @@ describe('GM attention queue: the quiet-time advisory', () => {
   it('keeps ageing the lull row when nothing republishes, and says so', () => {
     const { panel, onAge } = mount();
     // The start of a lull, five seconds in. Rust will not publish again while
-    // only the age changes, and `src/gm_quiet.rs` holds one id and one
+    // only the age changes, and `crates/phoenix-simulation/src/gm_quiet.rs` holds one id and one
     // authored `seconds` for the whole lull, so this is the last payload the
     // page will see until the crew do something.
     panel.update(payload(quiet('quiet:1', { age_ms: 5000 })));

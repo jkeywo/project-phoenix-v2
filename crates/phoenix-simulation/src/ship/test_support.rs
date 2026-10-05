@@ -1,0 +1,743 @@
+//! Shared test fixtures for the ship-module system tests, extracted from the
+//! old `ship_plugin.rs` `mod tests` during the #820 mechanical split. This is
+//! the one sanctioned non-pure-move element of that split: these helpers were
+//! shared by test groups that now live in different modules.
+#![allow(dead_code)]
+
+use bevy::prelude::*;
+
+use crate::core::messages::ClientMessage;
+use crate::lobby::{InboundMessage, LobbyPlugin};
+use crate::modifiers::ShipModifiers;
+use crate::server_app::{LocalShip, Ship, ShipBoost, ShipImpulse};
+use crate::ship::components::{
+    ActiveStationRatings, CoordinationQueue, HelmWaypointClearance, LastHelmInput,
+    ShipConfigComponent, ShipSystemControlSources,
+};
+use crate::ship::control_source::ControlSource;
+use crate::ship::helm::{SteeringInput, ThrustInput};
+use crate::ship::state::ShipPhysics;
+use crate::ship_plugin::ShipPlugin;
+
+/// The virtual time one harness `tick()` advances the simulation by.
+pub const TEST_TICK: std::time::Duration = std::time::Duration::from_millis(200);
+
+pub use super::test_clock::{discard_stale_overstep, drive_one_fixed_step_per_update};
+
+pub fn test_app() -> App {
+    let mut app = App::new();
+    app.add_plugins(LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .add_plugins(crate::server_app::AdmissionPlugin)
+        // Mirror the production SimSet chain (server_app) so cross-set ordering
+        // holds: admission (`.before(SimSet::Input)`) → Input → Physics → …
+        // Issue #830 moved `handle_navigation_waypoint` / `handle_dispatch_repair_team`
+        // into Physics `.after(operate_*_ai)`, which only runs after admission
+        // when Input precedes Physics — this chain is what guarantees it.
+        // In `FixedUpdate`, where the production chain lives (issue #895).
+        .configure_sets(
+            FixedUpdate,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(ShipPlugin);
+    // ShipPlugin owns the generic delayed router, while production registers
+    // this typed consumer through HelmPlugin. Keep the test twin's historical
+    // end-to-end Helm coordination behavior without pulling in Helm's publisher
+    // and its unrelated display resources.
+    app.add_systems(
+        FixedUpdate,
+        crate::console::helm::server::receive_helm_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(crate::ship_plugin::process_coordination_lag),
+    );
+    // The shared AI host spine's read-only world context (issue #1205), the same
+    // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
+    // so a fixture that runs a host through it must register these here or fail
+    // loudly at schedule build — which is the point: the fixture cannot take a
+    // different code path than production.
+    crate::ai::host::register_ai_host_env(&mut app);
+    drive_one_fixed_step_per_update(&mut app, TEST_TICK);
+    let hull_config = &[
+        (crate::core::messages::SystemId("helm".into()), 25.0_f32),
+        (crate::core::messages::SystemId("tactical".into()), 25.0),
+        (crate::core::messages::SystemId("power".into()), 25.0),
+        (crate::core::messages::SystemId("shields".into()), 25.0),
+    ];
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship,
+            LocalShip,
+            // What `world_setup::insert_player_core_bundle` gives every ship in
+            // the fleet (issue #1116). These used to arrive as `LocalShip`'s
+            // `#[require]`s; they are now explicit on the player bundle, because
+            // making their PRESENCE follow the marker would give two hosts of
+            // one mission different component sets on the same hull. A fixture
+            // that wants the human-seeking and detail-floor resolvers to run —
+            // they are scoped to ships a host in the fleet flies — has to look
+            // like one.
+            (
+                crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+                crate::ship_plugin::HumanSeekingHosts::default(),
+                crate::ship_plugin::VisitingStationHosts::default(),
+                crate::ship_plugin::ScenarioDetailFloor::default(),
+            ),
+            Transform::default(),
+            ShipPhysics::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
+            crate::core::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(hull_config),
+            ),
+            LastHelmInput::default(),
+            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
+        ))
+        .id();
+    app.world_mut().entity_mut(ship).insert((
+        ShipModifiers::new(),
+        ShipBoost::default(),
+        // The high-fidelity marker plus every per-ship AI component that travels
+        // with it (helm intents, frequency-hint state, the #882 policy runtime
+        // state), taken from the SAME definition both production spawn paths
+        // use — so this test twin cannot drift out of step with production.
+        crate::ai::server::ai_high_fidelity_components(),
+    ));
+    app.world_mut().entity_mut(ship).insert((
+        // The console-owned surfaces the AI helm derives its goals from
+        // (issue #702). Production spawns all four on every ship; see
+        // `HelmAiSurfaces`.
+        crate::console::weapons::TacticalRadarSelection::default(),
+        crate::console::navigation::NavigationWaypoint::default(),
+        HelmWaypointClearance::default(),
+        crate::ai::server::ObjectiveCursors::default(),
+    ));
+    attach_shipped_ai_declarations(&mut app, ship);
+    app
+}
+
+/// Attach every SHIP-LEVEL AI declaration a shipped hull authors, decoded from
+/// the shipped TOML (issue #885b stage 5d).
+///
+/// Before stage 5d a bare-`App` fixture needed none of this: each AI host kept a
+/// tick-local fallback to a Rust-side `default_*_ai_config()` and a ship with no
+/// policy component behaved exactly like one carrying the canonical default.
+/// The synthesisers are gone, and with them that fallback — an undeclared fine
+/// system now takes no action at all, which is what PRD #774 US7 asks for and
+/// what strict AI-declaration mode enforces at load.
+///
+/// So a fixture that wants a ship to BEHAVE has to give it the declarations a
+/// real hull authors. Taking them from `assets/entities/` rather than from a
+/// hand-written literal is deliberate: the fixture then exercises shipped
+/// content, and cannot drift away from it.
+///
+/// The per-WEAPON declarations are not here — they are per bank and per tube, so
+/// a fixture that spawns weapons attaches its own map.
+pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
+    use crate::entities::authored_ai_pins::{shipped_policy_toml, shipped_selector_toml};
+    let policy = |kind: &str| {
+        shipped_policy_toml(kind)
+            .to_policy()
+            .expect("a shipped authored policy decodes")
+    };
+    let selector = |kind: &str| {
+        shipped_selector_toml(kind)
+            .to_selector()
+            .expect("a shipped authored selector decodes")
+    };
+    app.world_mut().entity_mut(ship).insert((
+        crate::console::captain::server::CaptainAiPolicy(policy("captain")),
+        // The six helm axes' authored policies now ride the ONE keyed
+        // `FineSystemAiPolicies` map (issue #1209), keyed by fine-system id —
+        // the same one entry per authored `[helm_console.*_ai]` block the
+        // spawner builds.
+        crate::ship::helm_ai::FineSystemAiPolicies(std::collections::BTreeMap::from([
+            (
+                crate::ship::system_registry::helm_thrust_system_id(),
+                policy("engines"),
+            ),
+            (
+                crate::ship::system_registry::helm_steering_system_id(),
+                policy("steering"),
+            ),
+            (
+                crate::ship::system_registry::lateral_thrust_system_id(),
+                policy("lateral"),
+            ),
+            (
+                crate::ship::system_registry::vertical_thrust_system_id(),
+                policy("vertical"),
+            ),
+            (
+                crate::ship::system_registry::helm_impulse_system_id(),
+                policy("impulse"),
+            ),
+            (
+                crate::ship::system_registry::helm_boost_system_id(),
+                policy("boost"),
+            ),
+        ])),
+        crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
+        crate::ship::power::PowerAiPolicy(policy("power")),
+        crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),
+    ));
+    app.world_mut().entity_mut(ship).insert((
+        crate::ship::sensors::SensorsTargetSelector {
+            selector: selector("sensors"),
+            power_rating: None,
+        },
+        crate::console::weapons::TacticalTargetSelector {
+            selector: selector("tactical"),
+            power_rating: None,
+            idle: false,
+        },
+        crate::console::navigation::NavigationTargetSelector {
+            selector: selector("navigation"),
+            power_rating: None,
+        },
+        crate::console::repair::server::RepairTargetSelector {
+            selector: selector("repair"),
+            power_rating: None,
+        },
+        crate::console::comms::server::CommsTargetSelector {
+            selector: selector("comms_hail"),
+            power_rating: None,
+        },
+    ));
+}
+
+pub fn get_last_helm_input(app: &mut App) -> LastHelmInput {
+    app.world_mut()
+        .query_filtered::<&LastHelmInput, With<LocalShip>>()
+        .single(app.world())
+        .copied()
+        .unwrap_or_default()
+}
+
+pub fn set_last_helm_input(app: &mut App, val: LastHelmInput) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(ship).insert(val);
+}
+
+pub fn find_ship_entity(app: &mut App) -> Entity {
+    app.world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .expect("LocalShip entity must exist")
+}
+
+pub fn push(app: &mut App, token: &str, msg: ClientMessage) {
+    app.world_mut()
+        .resource_mut::<Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: token.into(),
+            msg,
+        });
+}
+
+pub fn tick(app: &mut App) {
+    app.update();
+}
+
+pub fn tick_twice(app: &mut App) {
+    tick(app);
+    tick(app);
+}
+
+pub fn start_game_with_helm_and_science(app: &mut App) {
+    push(
+        app,
+        "captain",
+        ClientMessage::Identify {
+            token: "captain".into(),
+            name: "Alice".into(),
+        },
+    );
+    tick(app);
+    push(
+        app,
+        "captain",
+        ClientMessage::SelectStation {
+            station: "Captain".into(),
+        },
+    );
+    tick(app);
+    push(
+        app,
+        "helm",
+        ClientMessage::Identify {
+            token: "helm".into(),
+            name: "Hikaru".into(),
+        },
+    );
+    tick(app);
+    push(
+        app,
+        "helm",
+        ClientMessage::SelectStation {
+            station: "Helm".into(),
+        },
+    );
+    tick(app);
+    push(app, "captain", ClientMessage::SetReady { ready: true });
+    push(app, "helm", ClientMessage::SetReady { ready: true });
+    tick(app);
+}
+
+/// Put the whole helm — the coarse `helm` system and all four per-axis
+/// systems — on `source`.
+///
+/// Before #704 this set the coarse system alone, which was enough: the
+/// `operate_helm_ai` monolith gated on the coarse policy and drove every
+/// axis whose own system was not AI, so "coarse = Ai" *was* "the helm is on
+/// AI". #704 deleted the monolith and with it the coarse fallback, so the
+/// coarse system alone now drives nothing at all and a fixture that set only
+/// it would assert against a ship no system is flying — a vacuous pass.
+///
+/// Setting all five together is the faithful successor because it is what
+/// the shipped hulls actually do: every one of the nine declares all four
+/// axes with the same owner as the coarse `helm` (thrust/steering since
+/// #800, impulse/lateral since #704), so an unmanned station backfills all
+/// five to AI and a manned one leaves all five on the human. They move
+/// together in content; they move together here.
+///
+/// Tests that need the axes to diverge from the coarse system — the
+/// per-axis gate and stand-down tests — call `set_fine_control_source`
+/// afterwards to override individual axes.
+pub fn set_helm_control_source(app: &mut App, source: ControlSource) {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+    for mut cs in q.iter_mut(app.world_mut()) {
+        cs.0.set(
+            crate::ship::system_registry::helm_thrust_system_id(),
+            source,
+        );
+        cs.0.set(
+            crate::ship::system_registry::helm_steering_system_id(),
+            source,
+        );
+        cs.0.set(
+            crate::ship::system_registry::helm_impulse_system_id(),
+            source,
+        );
+        cs.0.set(crate::ship::system_registry::helm_boost_system_id(), source);
+        cs.0.set(
+            crate::ship::system_registry::lateral_thrust_system_id(),
+            source,
+        );
+    }
+}
+
+pub fn get_ship_physics(app: &mut App) -> ShipPhysics {
+    let mut q = app.world_mut().query_filtered::<&ShipPhysics, With<Ship>>();
+    *q.single(app.world())
+        .expect("expected Ship entity with ShipPhysics")
+}
+
+// Test helper for directly seeding ship physics state — the avoidance
+// tests use it to give the ship a forward speed, which the projection and
+// the `AVOIDANCE_MIN_SPEED` gate both depend on.
+pub fn set_ship_physics(app: &mut App, physics: ShipPhysics) {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipPhysics, With<Ship>>();
+    let mut p = q
+        .single_mut(app.world_mut())
+        .expect("expected Ship with ShipPhysics");
+    *p = physics;
+}
+
+pub fn get_ship_control_sources(app: &mut App) -> ShipSystemControlSources {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipSystemControlSources, With<Ship>>();
+    q.single(app.world())
+        .expect("expected Ship entity with ShipSystemControlSources")
+        .clone()
+}
+
+pub fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ActiveStationRatings, With<Ship>>();
+    q.single(app.world())
+        .expect("expected Ship entity with ActiveStationRatings")
+        .clone()
+}
+
+/// Add the shield-arc fine Systems that `EntityConfig::from_toml` synthesises
+/// from a real hull's `[[shield_arc]]` blocks to the lightweight default ship
+/// fixture. `ShipConfigComponent::default()` predates that parse-time step, so
+/// a Coordination test that resolves the Station owning `shield_arc` must add
+/// the same topology explicitly rather than inventing a literal destination.
+pub fn add_default_shield_arc_systems(config: &mut crate::ship::config::ShipConfig) {
+    if config
+        .systems
+        .iter()
+        .any(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+    {
+        return;
+    }
+    let prototype = config
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)
+        .expect("default ship fixture carries shields-system")
+        .clone();
+    for facing in crate::weapons::shield::ShieldSystem::default().facings {
+        let mut system = prototype.clone();
+        system.id = crate::ship::system_registry::shield_arc_system_id(&facing.id)
+            .expect("default shield facing has a non-empty id");
+        system.kind = crate::ship::system_registry::SHIELD_ARC_KIND.into();
+        config.systems.push(system);
+    }
+}
+
+// ── Helm system control-source tests ───────────────────────────────────
+
+pub fn get_ship_impulse(app: &mut App) -> crate::ship::impulse::ImpulseState {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ShipImpulse, With<LocalShip>>();
+    q.single(app.world())
+        .expect("expected LocalShip entity with ShipImpulse")
+        .0
+}
+
+pub fn set_ship_impulse(app: &mut App, state: crate::ship::impulse::ImpulseState) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<ShipImpulse>()
+        .unwrap()
+        .0 = state;
+}
+
+pub fn reach_scored_objective(anchor: &str, score: f32) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
+        id: format!("reach-{anchor}"),
+        score,
+        directive: crate::core::messages::AiDirective::Reach {
+            anchor: anchor.into(),
+        },
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
+            progress: None,
+            unassigned: false,
+            id: format!("reach-{anchor}"),
+            text: format!("Reach {anchor}"),
+            text_params: Default::default(),
+            mandatory: true,
+            status: crate::core::messages::ObjectiveStatus::Active,
+            targets: vec![],
+            source: crate::core::messages::ObjectiveSource::Mission,
+        },
+    }
+}
+
+pub fn retreat_scored_objective(
+    anchor: &str,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
+        id: format!("retreat-{anchor}"),
+        score,
+        directive: crate::core::messages::AiDirective::Retreat {
+            anchor: anchor.into(),
+        },
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
+            progress: None,
+            unassigned: false,
+            id: format!("retreat-{anchor}"),
+            text: format!("Retreat to {anchor}"),
+            text_params: Default::default(),
+            mandatory: false,
+            status: crate::core::messages::ObjectiveStatus::Active,
+            targets: vec![],
+            source: crate::core::messages::ObjectiveSource::Mission,
+        },
+    }
+}
+
+/// Point a fine system's control source at `source` on every ship.
+pub fn set_fine_control_source(
+    app: &mut App,
+    system_id: crate::core::messages::SystemId,
+    source: ControlSource,
+) {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+    for mut cs in q.iter_mut(app.world_mut()) {
+        cs.0.set(system_id.clone(), source);
+    }
+}
+
+/// The pre-#800 shape: the coarse `helm` system on AI with all four per-axis
+/// systems left Human — which is what an *undeclared* axis resolves to
+/// (`ControlSource::default() == Human`, so `operate_ai == false`).
+///
+/// This was the configuration `operate_helm_ai` was built to serve, and the
+/// one every shipped hull was in before #800/#704 declared the axes. Since
+/// #704 deleted the monolith it drives nothing at all, and several tests
+/// below exist to pin exactly that: the coarse system is inert on its own,
+/// there is no coarse fallback, and re-introducing one would light these up.
+pub fn set_coarse_helm_only_ai(app: &mut App) {
+    set_helm_control_source(app, ControlSource::Human);
+    set_fine_control_source(
+        app,
+        // #801: "helm" is a station id, not a system. Seeding it here is
+        // the point of the test — it must drive nothing.
+        crate::core::messages::SystemId(crate::ship::system_registry::HELM_STATION_ID.to_string()),
+        ControlSource::Ai,
+    );
+}
+
+/// The "partial automation" wiring the per-axis systems exist for: the
+/// coarse helm stays human-held while both per-axis systems are AI.
+pub fn set_per_axis_helm_ai(app: &mut App) {
+    set_helm_control_source(app, ControlSource::Human);
+    set_fine_control_source(
+        app,
+        crate::ship::system_registry::helm_thrust_system_id(),
+        ControlSource::Ai,
+    );
+    set_fine_control_source(
+        app,
+        crate::ship::system_registry::helm_steering_system_id(),
+        ControlSource::Ai,
+    );
+}
+
+pub fn get_thrust_input(app: &mut App) -> f32 {
+    app.world_mut()
+        .query_filtered::<&ThrustInput, With<Ship>>()
+        .single(app.world())
+        .expect("expected Ship with ThrustInput")
+        .0
+}
+
+pub fn get_steering_input(app: &mut App) -> f32 {
+    app.world_mut()
+        .query_filtered::<&SteeringInput, With<Ship>>()
+        .single(app.world())
+        .expect("expected Ship with SteeringInput")
+        .0
+}
+
+pub fn patrol_scored_objective(
+    anchors: Vec<&str>,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
+        id: "obj-defend".into(),
+        score,
+        directive: crate::core::messages::AiDirective::Patrol {
+            anchors: anchors.into_iter().map(str::to_string).collect(),
+            loop_path: true,
+        },
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
+            progress: None,
+            unassigned: false,
+            id: "obj-defend".into(),
+            text: "Defend Starbase Alpha".into(),
+            text_params: Default::default(),
+            mandatory: true,
+            status: crate::core::messages::ObjectiveStatus::Active,
+            targets: vec!["Starbase Alpha".into()],
+            source: crate::core::messages::ObjectiveSource::Mission,
+        },
+    }
+}
+
+pub fn destroy_scored_objective(
+    target: &str,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
+        id: format!("destroy-{target}"),
+        score,
+        directive: crate::core::messages::AiDirective::Destroy {
+            target: target.into(),
+        },
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![
+            crate::core::messages::SystemAffinity::Helm,
+            crate::core::messages::SystemAffinity::Weapons,
+            crate::core::messages::SystemAffinity::Captain,
+        ],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
+            progress: None,
+            unassigned: false,
+            id: format!("destroy-{target}"),
+            text: format!("Destroy {target}"),
+            text_params: Default::default(),
+            mandatory: true,
+            status: crate::core::messages::ObjectiveStatus::Active,
+            targets: vec![target.into()],
+            source: crate::core::messages::ObjectiveSource::Mission,
+        },
+    }
+}
+
+// ── Fine Helm system tests (issue #511) ───────────────────────────────────
+
+/// Build an app that includes HelmEnginePort + HelmEngineStarboard hull
+/// entries alongside the usual coarse consoles. Used for engine-damage tests.
+pub fn test_app_with_engine_hull() -> App {
+    let mut app = App::new();
+    app.add_plugins(LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .add_plugins(crate::server_app::AdmissionPlugin)
+        // See `test_app` — mirror the production SimSet chain (issues #830,
+        // #895: the chain lives in `FixedUpdate`).
+        .configure_sets(
+            FixedUpdate,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(ShipPlugin);
+    app.add_systems(
+        FixedUpdate,
+        crate::console::helm::server::receive_helm_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(crate::ship_plugin::process_coordination_lag),
+    );
+    // The shared AI host spine's read-only world context (issue #1205), the same
+    // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
+    // so a fixture that runs a host through it must register these here or fail
+    // loudly at schedule build — which is the point: the fixture cannot take a
+    // different code path than production.
+    crate::ai::host::register_ai_host_env(&mut app);
+    drive_one_fixed_step_per_update(&mut app, TEST_TICK);
+    let hull_config = &[
+        (crate::core::messages::SystemId("helm".into()), 25.0_f32),
+        (crate::core::messages::SystemId("tactical".into()), 25.0),
+        (crate::core::messages::SystemId("power".into()), 25.0),
+        (crate::core::messages::SystemId("shields".into()), 25.0),
+        (
+            crate::core::messages::SystemId("helm-engine-port".into()),
+            15.0,
+        ),
+        (
+            crate::core::messages::SystemId("helm-engine-starboard".into()),
+            15.0,
+        ),
+    ];
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship,
+            LocalShip,
+            // What `world_setup::insert_player_core_bundle` gives every ship in
+            // the fleet (issue #1116). These used to arrive as `LocalShip`'s
+            // `#[require]`s; they are now explicit on the player bundle, because
+            // making their PRESENCE follow the marker would give two hosts of
+            // one mission different component sets on the same hull. A fixture
+            // that wants the human-seeking and detail-floor resolvers to run —
+            // they are scoped to ships a host in the fleet flies — has to look
+            // like one.
+            (
+                crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+                crate::ship_plugin::HumanSeekingHosts::default(),
+                crate::ship_plugin::VisitingStationHosts::default(),
+                crate::ship_plugin::ScenarioDetailFloor::default(),
+            ),
+            Transform::default(),
+            ShipPhysics::default(),
+            ShipConfigComponent::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            CoordinationQueue::default(),
+            crate::core::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(hull_config),
+            ),
+            LastHelmInput::default(),
+            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
+        ))
+        .id();
+    app.world_mut()
+        .entity_mut(ship)
+        .insert((ShipModifiers::new(), ShipBoost::default()));
+    // This ship carries no AiHighFidelity bundle by default (unlike
+    // `test_app()`), but `integrate_ship_physics` (issue #695) is
+    // scoped to `AiHighFidelity`, and these engine-thrust tests drive
+    // `ShipPhysics` purely through `LastHelmInput` + the human
+    // admission/physics pipeline. Add the marker + helm intent
+    // components so physics keeps integrating for this ship, matching
+    // pre-#695 behavior where `process_helm_inputs` computed physics
+    // for any `LocalShip` unconditionally.
+    app.world_mut().entity_mut(ship).insert((
+        crate::ai::server::AiHighFidelity,
+        crate::ship::helm::ThrustInput::default(),
+        crate::ship::helm::SteeringInput::default(),
+        crate::ship::helm::LateralThrustInput::default(),
+        crate::ship::helm::VerticalThrustInput::default(),
+        crate::ship::helm::ImpulseCommand::default(),
+        crate::ship::helm::BoostCommand::default(),
+        // The console-owned surfaces the AI helm derives its goals from
+        // (issue #702) — see `HelmAiSurfaces`.
+        crate::console::weapons::TacticalRadarSelection::default(),
+        crate::console::navigation::NavigationWaypoint::default(),
+        HelmWaypointClearance::default(),
+        crate::ai::server::ObjectiveCursors::default(),
+    ));
+    app
+}
+
+/// Set the HP of a specific system on the LocalShip hull to `new_hp`.
+/// Delegates to `SystemHull::set_hp` which directly sets the value.
+pub fn set_console_hp_direct(
+    app: &mut App,
+    system_id: crate::core::messages::SystemId,
+    new_hp: f32,
+) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    let mut entity_mut = app.world_mut().entity_mut(ship);
+    let mut hull = entity_mut
+        .get_mut::<crate::entities::spawner::EntitySystemHull>()
+        .unwrap();
+    hull.0.set_hp(&system_id, new_hp);
+}

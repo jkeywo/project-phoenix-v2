@@ -286,8 +286,7 @@ pub enum WorldIngest {
 /// A preloaded host still owes the root-script half of its content identity.
 /// Consumed once by WorldPlugin's Startup chain after script compilation and
 /// before either spawn pass. Reader-based and deferred boots never insert it.
-#[derive(Resource)]
-pub(crate) struct PendingHostContentFreeze;
+pub(crate) use crate::world::PendingHostContentFreeze;
 
 /// Everything [`build`] needs that is not implied by the [`BootProfile`].
 ///

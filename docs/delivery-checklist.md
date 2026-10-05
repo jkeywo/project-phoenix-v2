@@ -24,7 +24,7 @@ picture.
 | Concern | Handled in repo by | Verified by |
 | --- | --- | --- |
 | Native PC host serving client + manifest + catalogue | `phoenix-host` (`src/delivery/`, `--features host`) | `tests/native_host.rs`, `src/delivery/*` unit tests |
-| Version pin (protocol + content id/epoch) | `delivery::stamp`; startup pin against the bundle, request-time pin against a client | `tests/native_host.rs`, `src/delivery/stamp.rs` |
+| Version pin (protocol + content id/epoch) | `delivery::stamp`; startup pin against the bundle, request-time pin against a client | `tests/native_host.rs`, `crates/phoenix-simulation/src/delivery/stamp.rs` |
 | Native and browser hosts publishing the same catalogue | `delivery::payload` — one field list, walked by the wasm bridge and by the JSON encoder | `the_native_hosts_catalogue_is_the_browser_hosts_catalogue_with_no_packs_applied` |
 | Curated public catalogue | `assets/scenarios.demo.toml`, selected by `--manifest` (native) / `?manifest=` (browser) | `the_curated_public_manifest_really_does_restrict_what_the_native_host_publishes` |
 | No runtime widening of the curated catalogue | `wasm_add_mod_pack` absent from a demo build; upload control removed | `build_flags::a_demo_build_that_curates_its_catalogue_offers_no_mod_pack_upload`, deploy-demo.yml's verify step |

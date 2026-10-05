@@ -3,7 +3,7 @@
 //
 // The sibling of `viewscreen-reduced-motion.render.spec.js`, and it exists for
 // the same reason: the intensity MATH is unit-tested without a GPU in
-// `src/server/viewscreen_border.rs` (`shake_magnitude` / `scaled_flash_intensity`)
+// `crates/phoenix-presentation/src/server/viewscreen_border.rs` (`shake_magnitude` / `scaled_flash_intensity`)
 // and the settings behaviour in `tests/client/visual-effects.test.js`, but what
 // only a real browser can prove is the WIRING between them — that a choice made
 // on the Display tab crosses into the WASM render path, that the live shake

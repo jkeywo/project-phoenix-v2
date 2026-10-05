@@ -1966,15 +1966,15 @@ pub fn set_host_channel_callback(callback: Function) {
     edge::publish_host_channel_cb(Some(callback));
 }
 
-/// Called by [`viewscreen_border::apply_camera_shake`] (WASM builds only) to
-/// store the current frame's screen-shake offset for JS.
+/// Legacy host input for callers without a PageShakeOffset resource.
+/// Normal presentation publishes the current frame through that resource.
 #[cfg(target_arch = "wasm32")]
 pub fn set_shake_offset(x: f32, y: f32) {
     edge::publish_shake_offset((x, y));
 }
 
-/// Called by [`crate::server::audio::drive_forcefield_level`] (WASM builds
-/// only) to store the current frame's forcefield SFX volume for JS.
+/// Legacy host input for callers without a ForcefieldLevel resource.
+/// Normal presentation publishes the current frame through that resource.
 #[cfg(target_arch = "wasm32")]
 pub fn set_forcefield_level(level: f32) {
     edge::publish_forcefield_level(level);
@@ -4847,7 +4847,15 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
 /// The message channels are drained even when no callback is registered, so
 /// registering late never replays a backlog.
 #[cfg(target_arch = "wasm32")]
-fn flush_host_channels(
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HostFramePresentation<'w> {
+    lifecycle: Res<'w, crate::server::audio_lifecycle::RoomAudioLifecycle>,
+    shake: Option<Res<'w, crate::server::viewscreen_border::PageShakeOffset>>,
+    forcefield: Option<Res<'w, crate::server::audio::ForcefieldLevel>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn flush_host_channels(
     mut hud: MessageReader<HudStateChanged>,
     mut lobby: MessageReader<LobbyStateChanged>,
     mut chatter: MessageReader<AiChatterEvent>,
@@ -4863,13 +4871,14 @@ fn flush_host_channels(
     mut gm_attention: MessageReader<GmAttentionChanged>,
     mut gm_health: MessageReader<GmHealthChanged>,
     mut gm_workload: MessageReader<GmWorkloadChanged>,
-    audio_lifecycle: Res<crate::server::audio_lifecycle::RoomAudioLifecycle>,
+    presentation: HostFramePresentation,
 ) {
     // Declarative channel table: name → drained JSON payloads. Adding a
     // message channel = one row here (see `host_channels`).
     // Lifecycle precedes config/HUD/cues as one local presentation transaction:
     // a restored HUD can never become an old-timeline siren edge. Other channels
     // retain their own independent semantics.
+    let audio_lifecycle = &presentation.lifecycle;
     let boundary_changed = audio_lifecycle.is_changed();
     let lifecycle_payloads = if boundary_changed {
         codec::to_json(&audio_lifecycle.state).into_iter().collect()
@@ -4994,7 +5003,10 @@ fn flush_host_channels(
         }
 
         // Per-frame tap: shake, unconditional.
-        let (x, y) = edge::read_shake_offset();
+        let (x, y) = presentation
+            .shake
+            .as_ref()
+            .map_or_else(edge::read_shake_offset, |offset| (offset.0, offset.1));
         let offset = Array::of2(&JsValue::from_f64(x as f64), &JsValue::from_f64(y as f64));
         let _ = cb.call2(
             &JsValue::NULL,
@@ -5006,7 +5018,10 @@ fn flush_host_channels(
         if boundary_changed {
             edge::publish_last_sent_forcefield(-1.0);
         }
-        let current = edge::read_forcefield_level();
+        let current = presentation
+            .forcefield
+            .as_ref()
+            .map_or_else(edge::read_forcefield_level, |level| level.0);
         let last = edge::read_last_sent_forcefield();
         if (current - last).abs() >= 0.001 {
             edge::publish_last_sent_forcefield(current);
@@ -5057,3 +5072,5 @@ fn publish_continuation_status(
 #[cfg(test)]
 #[path = "bridge_tests.rs"]
 mod tests;
+
+use crate::entities::include_resolve::ParseEntityTemplate as _;

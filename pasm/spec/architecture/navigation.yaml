@@ -21,9 +21,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs, src/console/navigation/server.rs, src/core/messages.rs, gui/stations/navigation-actions.js, gui/components/ph-navigation-map.js]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-model/src/messages.rs, gui/stations/navigation-actions.js, gui/components/ph-navigation-map.js]
       symbols: [handle_navigation_waypoint, enqueue_navigate_to_clearance]
-      tests: [cargo test, "cargo test correlated_waypoint_owner_applies_or_refuses_each_exact_occurrence", npx vitest run, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, "cargo test correlated_waypoint_owner_applies_or_refuses_each_exact_occurrence", npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: navigation-waypoint-state
     core:
@@ -41,10 +41,10 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-model/src/messages.rs]
       symbols: [NavigationWaypoint, WaypointMode]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: navigation-clearance-issue-state
     core:
       status: implemented
@@ -58,7 +58,7 @@ entities:
       derived_from: [navigation-waypoint-state, system-control-source-state]
     implementation:
       status: declared
-      paths: [src/console/navigation/server.rs, src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/snapshot.rs]
       symbols: [NavClearanceIssueState, NavigationClearanceIssueState]
 
   - component: navigation-anchor-refresher
@@ -75,7 +75,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs]
       tests: [cargo test]
 
   - component: navigation-chart-publisher
@@ -94,9 +94,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs, src/core/messages.rs, gui/components/ph-navigation-map.js]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-model/src/messages.rs, gui/components/ph-navigation-map.js]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: navigation-ai-operator
     core:
       status: implemented
@@ -115,9 +115,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/navigation/mod.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-model/src/messages.rs]
       symbols: [operate_navigation_ai, NavigationTargetSelector]
-      tests: [cargo test, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: civilian-order-ai-operator
     core:
@@ -138,9 +138,9 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/objectives.rs, src/console/navigation/server.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/console/navigation/server.rs]
       symbols: [operate_civilian_order_ai, AiDirective, SystemAffinity]
-      tests: [cargo test, "cargo test civilian_order_ai_emits_the_console_order_through_admission", "cargo test --features headless --test headless_runner falling_skyway_backfill_orders_traffic_clear_of_all_three_bands", src/core/messages_view_mode_tests.rs, src/objectives_tests.rs]
+      tests: [cargo test, "cargo test civilian_order_ai_emits_the_console_order_through_admission", "cargo test --features headless --test headless_runner falling_skyway_backfill_orders_traffic_clear_of_all_three_bands", crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: helm-shared-waypoint-consumer
     core:
@@ -160,14 +160,14 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/helm/server.rs, src/ship/helm_ai/surfaces.rs, src/ship/helm_planner.rs]
+      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-simulation/src/ship/helm_planner.rs]
       symbols:
         - receive_helm_coordination
         - cleared_nav_waypoint
         - build_helm_ai_surfaces_frame
         - helm_ai_decision
         - helm_motion_planner
-      tests: [cargo test, src/console/helm/server_tests.rs, src/ship/helm_planner_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-simulation/src/ship/helm_planner_tests.rs]
 
   - state: helm-waypoint-clearance-state
     core:
@@ -182,10 +182,10 @@ entities:
       derived_from: [coordination-delivery-state]
     implementation:
       status: declared
-      paths: [src/console/helm/server.rs, src/ship/components.rs, src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs]
       symbols: [HelmWaypointClearance, HelmWaypointClearanceState]
 
-      tests: [src/console/helm/server_tests.rs, src/ship/components_tests.rs]
+      tests: [crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs]
   - component: civilian-traffic-adapter
     core:
       status: implemented
@@ -211,15 +211,15 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/civilian/traffic.rs
-        - src/civilian/server.rs
-        - src/core/messages.rs
-        - src/world/config.rs
-        - src/world/validate.rs
-        - src/world/dispatch.rs
-        - src/world/script/effects.rs
-        - src/console/navigation/mod.rs
-        - src/console/navigation/server.rs
+        - crates/phoenix-simulation/src/civilian/traffic.rs
+        - crates/phoenix-simulation/src/civilian/server.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/world/config.rs
+        - crates/phoenix-simulation/src/world/validate.rs
+        - crates/phoenix-simulation/src/world/dispatch.rs
+        - crates/phoenix-simulation/src/world/script/effects.rs
+        - crates/phoenix-simulation/src/console/navigation/mod.rs
+        - crates/phoenix-simulation/src/console/navigation/server.rs
         - gui/components/ph-civilian-traffic.js
         - gui/action-map.js
       symbols:
@@ -239,7 +239,7 @@ entities:
         - PendingCivilianOrder
         - tick_civilian_traffic
         - CIVILIAN_ROUTE_OBJECTIVE_ID
-      tests: [cargo test, "cargo test a_correlated_console_order_is_applied_only_by_the_civilian_owner", "cargo test correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner", npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic", src/civilian/traffic_tests.rs, src/civilian/server_tests.rs, src/core/messages_view_mode_tests.rs, src/world/script/effects_tests.rs]
+      tests: [cargo test, "cargo test a_correlated_console_order_is_applied_only_by_the_civilian_owner", "cargo test correlated_unknown_and_malformed_orders_are_refused_by_the_civilian_owner", npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic", crates/phoenix-simulation/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown"
@@ -264,14 +264,14 @@ entities:
       replicas: [civilian-traffic-published-state]
     implementation:
       status: declared
-      paths: [src/civilian/traffic.rs, src/civilian/server.rs]
+      paths: [crates/phoenix-simulation/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs]
       symbols:
         - CivilianState
         - CivilianTraffic
         - ComplianceState
         - ComplianceTransition
         - REASON_UNABLE
-      tests: [cargo test, "cargo test --features headless --test snapshot_resume civilians", src/civilian/traffic_tests.rs, src/civilian/server_tests.rs]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume civilians", crates/phoenix-simulation/src/civilian/traffic_tests.rs, crates/phoenix-simulation/src/civilian/server_tests.rs]
     evidence:
       - kind: test
         reference: "tests/snapshot_resume.rs::the_resumed_world_keeps_a_civilians_lane_order_and_place_in_the_negotiation"
@@ -294,9 +294,9 @@ entities:
       writers: [civilian-traffic-adapter]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/console/navigation/server.rs, gui/components/ph-civilian-traffic.js, gui/action-map.js]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/console/navigation/server.rs, gui/components/ph-civilian-traffic.js, gui/action-map.js]
       symbols:
         - CivilianTrafficSnapshot
         - CivilianOrderOptionSnapshot
         - publish_navigation_blackboard
-      tests: [cargo test, "npx vitest run tests/client/ph-civilian-traffic.test.js", src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, "npx vitest run tests/client/ph-civilian-traffic.test.js", crates/phoenix-model/src/messages_view_mode_tests.rs]

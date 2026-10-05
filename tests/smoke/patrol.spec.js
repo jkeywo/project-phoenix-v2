@@ -28,12 +28,12 @@ import {
 // world authors the `npc` tag the assertion below selects on, rather than
 // inheriting whatever the hull happens to describe itself as: the tags go
 // through `overrides`, which the instance layer *replaces* wholesale
-// (src/entities/entity_override.rs), so the production hull's third tag
+// (crates/phoenix-simulation/src/entities/entity_override.rs), so the production hull's third tag
 // (`comms_contact`) is dropped and this spec owns the whole array. Three
 // shipped worlds narrow this same hull the same way.
 //
 // A bare `tags = [...]` on the `[[entity]]` block would NOT work: `WorldEntity`
-// (src/world/config.rs) has no such field and serde drops unknown keys
+// (crates/phoenix-simulation/src/world/config.rs) has no such field and serde drops unknown keys
 // silently, which is precisely how the production coupling survived unnoticed.
 const PATROL_TEST_WORLD = `
 [global]

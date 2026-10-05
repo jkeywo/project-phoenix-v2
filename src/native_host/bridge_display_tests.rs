@@ -1,4 +1,5 @@
 use super::*;
+use phoenix_transport::transport::Transport;
 
 use crate::native_host::bridge_layout::LayoutAction;
 
@@ -140,7 +141,6 @@ fn losing_a_station_monitor_at_runtime_closes_the_pane_it_carried() {
     use crate::native_host::panes::identity::PaneIdentity;
     use crate::native_host::panes::transport::PaneBus;
     use crate::native_host::panes::PaneBusResource;
-    use crate::native_host::transport::NativeTransport;
 
     let mut app = App::new();
     app.insert_resource(BridgeDisplayConfig {
@@ -287,7 +287,6 @@ fn losing_one_of_two_identical_monitors_closes_only_its_own_pane() {
     use crate::native_host::panes::identity::PaneIdentity;
     use crate::native_host::panes::transport::PaneBus;
     use crate::native_host::panes::PaneBusResource;
-    use crate::native_host::transport::NativeTransport;
 
     let mut app = App::new();
     app.insert_resource(BridgeDisplayConfig {
@@ -1262,7 +1261,6 @@ fn unassigning_closes_the_console_frees_the_screen_and_shuts_its_window() {
     // The off button: the pane closes through the ordinary dropped-phone
     // path (its station falls back to AI control), the Station window goes,
     // and the monitor reads as free everywhere.
-    use crate::native_host::transport::NativeTransport;
 
     let (mut app, bus) = console_host();
     seat(&mut app, "helm", BENQ);
@@ -1518,7 +1516,6 @@ fn unplugging_a_monitor_holding_a_runtime_console_closes_exactly_it() {
     // that is unplugged closes — its token disconnects and its station falls
     // back to AI control, the #1125 display-loss semantics — while a console
     // on a screen that is still there does not.
-    use crate::native_host::transport::NativeTransport;
 
     let (mut app, bus) = console_host();
     choose(&mut app, DELL);
@@ -1638,7 +1635,6 @@ fn an_unplug_and_a_press_inside_the_settle_window_does_not_strand_a_console() {
     // driven by the surfaces it had just emptied, then had nothing to close:
     // the pane stayed open forever, its station never reached Backfill, and
     // the camera went on rendering to a despawned window.
-    use crate::native_host::transport::NativeTransport;
 
     let (mut app, bus) = console_host();
     seat(&mut app, "helm", BENQ);
@@ -1885,7 +1881,6 @@ fn unplugging_the_screen_an_authored_console_has_left_does_not_close_it() {
     // operator had since moved it to, and closed it — ending a human's watch
     // over a display their console was not on, and minting a fresh token in
     // its place.
-    use crate::native_host::transport::NativeTransport;
 
     let (mut app, bus) = authored_console_host();
     let booted = bus
@@ -2575,7 +2570,7 @@ fn a_re_tiling_notice_settles_rather_than_flapping() {
 #[test]
 fn a_superseded_console_is_not_recreated_or_unseated_when_its_slot_is_missing() {
     use crate::native_host::connections::SharedConnections;
-    use crate::native_host::transport::NativeTransport;
+
     let (mut app, bus) = console_host();
     let shared = SharedConnections::default();
     bus.transport().share_connections(shared.clone());
@@ -3681,7 +3676,6 @@ fn an_unplugged_console_does_not_respawn_and_a_replug_puts_it_back_on_that_scree
     };
     use crate::native_host::panes::PaneHome;
     use crate::native_host::panes::RecordingSurface;
-    use crate::native_host::transport::NativeTransport;
 
     let (mut app, bus) = console_host();
     let bridge = HostLobbyBridge::new();

@@ -12,7 +12,7 @@
 // by the real editor exporter — and are handled by the special builders below;
 // they are byte-reproducible under `--check` all the same. Those .zip bytes are
 // validated from BOTH languages against the ONE archive:
-//   - Rust  : src/world/mod_pack.rs `include_bytes!`s each and runs it through
+//   - Rust  : crates/phoenix-simulation/src/world/mod_pack.rs `include_bytes!`s each and runs it through
 //             `validate_mod_pack`, asserting accept/reject + finding category;
 //   - JS    : editor/tests/mod-pack-export.test.js reads the committed bytes
 //             through `readStoreZip`, and tests/smoke/mod-pack.spec.js uploads

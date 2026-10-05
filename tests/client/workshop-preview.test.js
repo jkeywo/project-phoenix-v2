@@ -160,7 +160,7 @@ describe('the preview subject', () => {
     ]);
     // The viewer dispatches [star], [planet] and [mesh] from the template
     // itself, so there is no separate star or planet list to drift.
-    const subject = readFileSync('src/viewer/subject.rs', 'utf8');
+    const subject = readFileSync('crates/phoenix-presentation/src/viewer/subject.rs', 'utf8');
     expect(subject).toContain('insert_star_visual');
     expect(subject).toContain('insert_planet_visual');
   });
@@ -177,12 +177,12 @@ describe('the preview subject', () => {
   it('boots the renderer with the settings its own controls claim', () => {
     // A reading that claimed gizmos were on while the App booted with them off
     // would make the first frame contradict its own checkbox.
-    const protocol = readFileSync('src/workshop/test_protocol.rs', 'utf8');
+    const protocol = readFileSync('crates/phoenix-simulation/src/workshop/test_protocol.rs', 'utf8');
     expect(protocol).toContain('#[serde(default = "gizmos_on")]');
     const runtime = readFileSync('editor/workshop-preview-runtime.js', 'utf8');
     expect(runtime).toContain("lighting: 'ambient'");
     // Which is the viewer's own default, not a guess.
-    const lighting = readFileSync('src/viewer/lighting.rs', 'utf8');
+    const lighting = readFileSync('crates/phoenix-presentation/src/viewer/lighting.rs', 'utf8');
     expect(lighting.replace(/\s+/g, ' ')).toContain('#[default] Ambient,');
   });
 });

@@ -25,8 +25,8 @@ entities:
         - "The charging group must be authored with a zero floor. Units per allocated level and capacity must be positive and finite. Backfill can restart a zero charging group through ordinary allocation commands; zero on an equipment demand still preserves the cold-order rule. Strike-reserve allocation and charge participate in snapshot continuation and the entity digest; existing reactor digest scope is unchanged."
     implementation:
       status: declared
-      paths: [src/modifiers/power_system.rs, src/entities/config/power.rs, src/sim_digest.rs, assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/power.html]
-      tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser, src/modifiers/power_system_tests.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/power_system.rs, crates/phoenix-simulation/src/entities/config/power.rs, crates/phoenix-simulation/src/sim_digest.rs, assets/entities/dynasty_player_cruiser.toml, gui/dynasty-cruiser/power.html]
+      tests: [cargo test --lib strike_reserve_conserves, cargo test --test dynasty_player_cruiser, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
   - decision: dynasty-global-strike-boost
     core:
       status: implemented
@@ -38,8 +38,8 @@ entities:
         - "Existing fixed-step ordering arbitrates simultaneous families: blaster emissions, delayed torpedo bursts, beam starts, immediate torpedo launches. Authored bank order and admitted command order arbitrate within each family. Paid damage bonuses remain attached to active attacks through snapshot restore and participate in the reserve hull digest."
     implementation:
       status: declared
-      paths: [src/modifiers/strike_reserve.rs, src/console/weapons/strike.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/snapshot.rs, gui/components/ph-strike-reserve.js]
-      tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js, src/modifiers/strike_reserve_tests.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/snapshot.rs, gui/components/ph-strike-reserve.js]
+      tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js, crates/phoenix-simulation/src/modifiers/strike_reserve_tests.rs]
   - decision: dynasty-backfill-strike-cycle
     core:
       status: implemented
@@ -52,5 +52,5 @@ entities:
         - "Attack ranges, movement speeds and reserve thresholds are authored tuning proposals; parity acceptance belongs to the separate seeded Dynasty balance evaluation."
     implementation:
       status: declared
-      paths: [assets/entities/dynasty_player_cruiser.toml, src/entities/ai_flag_hosts.rs, src/ship/power.rs, src/ship/helm_ai/mod.rs, tests/dynasty_backfill.rs]
+      paths: [assets/entities/dynasty_player_cruiser.toml, crates/phoenix-simulation/src/entities/ai_flag_hosts.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, tests/dynasty_backfill.rs]
       tests: [cargo test --features headless --test dynasty_backfill]

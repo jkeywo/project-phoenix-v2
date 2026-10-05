@@ -40,7 +40,7 @@ import { buildTable } from '../../gui/strings.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const entitiesDir = path.join(root, 'assets', 'entities');
-const registryFile = path.join(root, 'src', 'ship', 'system_registry.rs');
+const registryFile = path.join(root, 'crates', 'phoenix-simulation', 'src', 'ship', 'system_registry.rs');
 const stringsFile = path.join(root, 'assets', 'strings', 'strings.csv');
 
 /**
@@ -75,7 +75,7 @@ const NON_MOUNT_KINDS = new Set([
   'power_battery', 'power_reactor', 'shield_arc',
 ]);
 
-/** Every `*_KIND` constant declared in src/ship/system_registry.rs. */
+/** Every `*_KIND` constant declared in crates/phoenix-simulation/src/ship/system_registry.rs. */
 function registryKinds(src) {
   const found = [...src.matchAll(/pub const [A-Z0-9_]+_KIND\s*:\s*&str\s*=\s*"([^"]+)"/g)];
   return new Set(found.map((m) => m[1]));

@@ -2,7 +2,7 @@
 title: Workshop Authoring
 type: entity
 tags: [workshop, editor, tooling, scenario, entity, models, mod]
-sources: [gui/workshop-edit-session.js, src/native_host/workshop/asset_job.rs, workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-objective-snippet.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/workshop-native-test-view.js, gui/workshop-native-test-document.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-scripts-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, src/workshop/mod.rs, src/workshop/document.rs, src/workshop/provider.rs, src/workshop/test_source.rs, src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/native_host/workshop/test_frames.rs, src/native_host/workshop/test_render.rs, src/delivery/args.rs, src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
+sources: [gui/workshop-edit-session.js, src/native_host/workshop/asset_job.rs, workshop.html, editor.html, viewer.html, editor/workshop-launch.js, editor/workshop-document.js, editor/workshop-runtime.js, editor/workshop-recovery.js, editor/workshop-provider.js, editor/workshop-source-provider.js, editor/workshop-preview.js, editor/workshop-preview-runtime.js, editor/workshop-composition.js, editor/workshop-entity-composition.js, editor/workshop-ship-authoring.js, editor/workshop-slot-authoring.js, editor/workshop-presets.js, editor/workshop-spatial.js, editor/workshop-scripts.js, editor/workshop-objective-snippet.js, editor/workshop-models.js, editor/workshop-model-structure.js, editor/workshop-test.js, editor/workshop-native-test-view.js, gui/workshop-native-test-document.js, editor/mod-pack-workspace.js, editor/mod-pack-export.js, gui/workshop-boot.js, gui/workshop-redirect.js, gui/native-workshop.js, gui/workshop-authoring.js, gui/workshop-slot-authoring-panel.js, gui/workshop-scripts-panel.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, gui/workshop-layout-model.js, gui/workshop-layout-renderer.js, gui/workshop-test-panel.js, scripts/build-workshop.mjs, scripts/dev-workshop.mjs, crates/phoenix-simulation/src/workshop/mod.rs, crates/phoenix-simulation/src/workshop/document.rs, crates/phoenix-simulation/src/workshop/provider.rs, crates/phoenix-simulation/src/workshop/test_source.rs, crates/phoenix-simulation/src/ship_slots.rs, src/native_host/workshop/mod.rs, src/native_host/workshop/bridge.rs, src/native_host/workshop/document.rs, src/native_host/workshop/preview.rs, src/native_host/workshop/test_frames.rs, src/native_host/workshop/test_render.rs, crates/phoenix-simulation/src/delivery/args.rs, crates/phoenix-presentation/src/viewer/preview.rs, pasm/spec/architecture/workshop-model-authoring.yaml, pasm/spec/architecture/workshop-live-inspector.yaml]
 updated: 2026-10-01
 ---
 
@@ -55,7 +55,7 @@ Test have separate lifetimes.
 
 Workshop retains supported model, texture and sound members as exact bytes.
 The ordinary host upload and offline Workshop validator both use
-`src/world/pack_asset_validation.rs`: actual glTF buffer/accessor/primitive
+`crates/phoenix-simulation/src/world/pack_asset_validation.rs`: actual glTF buffer/accessor/primitive
 checks, image decoding and the shared MP3/OGG/WAV decoder. Browser dependency
 capture uses the build's length/CRC manifest and dependency names; native
 validation uses an explicit byte snapshot. Replacing an external buffer also
@@ -63,7 +63,7 @@ validates its existing model consumers. A missing or changed immutable
 dependency refuses the operation. These checks do not install the candidate.
 
 Accepted packs retain their source archive alongside source and asset members.
-`src/entities/pack_assets.rs` registers the common Bevy reader, giving every
+`crates/phoenix-presentation/src/entities/pack_assets.rs` registers the common Bevy reader, giving every
 accepted stack revision new asset identities. Model, planet, LOD, viewer and
 dust consumers retire their previous visual state before render extraction;
 late completion of an old load cannot overwrite a current handle. Canonical
@@ -145,7 +145,7 @@ The field inspector uses `toml_edit` source spans in the same Rust module. It
 patches exactly one scalar and refuses stale documents or incompatible types;
 comments, unknown fields, ordering and unchanged line endings remain byte-for-byte.
 World `[global]` descriptors derive expected types and defaults from the actual
-`GlobalConfig` fields. Model sidecars use `src/workshop/model_fields.rs` to derive
+`GlobalConfig` fields. Model sidecars use `crates/phoenix-simulation/src/workshop/model_fields.rs` to derive
 scalar types from the runtime rig and LOD fields, including array elements and
 generation/capture metadata. Integer-spelled float values remain editable as
 floats. Base transforms expose their runtime defaults; required geometry and
@@ -153,7 +153,7 @@ optional entity-dependent LOD values do not invent defaults. Enum spellings and
 unsigned integer limits use the field's runtime deserializer. Other scalar paths,
 including unknown fields, remain source fallbacks and pass the same final runtime gate.
 These source fields are Authoring-only; none provides an arbitrary live write.
-`src/inspector.rs` and `gui/inspector-field.js` share their type, default, source,
+`crates/phoenix-simulation/src/inspector.rs` and `gui/inspector-field.js` share their type, default, source,
 validation and Live mutability metadata with the connected GM's constrained
 [NPC doctrine inspector](../concepts/npc-doctrine-controls.md). Exact source
 locations come from the document spans; a Live reading without such a span
@@ -221,8 +221,8 @@ The runtime exact-source editor changes only selected fields and offers, retaini
 comments, BOMs, unchanged line endings and per-hull labels (#1558). The hull list
 uses Test's composed runtime catalogue and labels each winning draft, base or
 retained-pack source; selecting a dependency hull does not copy it into the draft.
-The Test catalogue in `src/workshop/test_source.rs` exposes each authored
-slot's hull choices; `src/ship_slots.rs` freezes one Test-controlled slot and
+The Test catalogue in `crates/phoenix-simulation/src/workshop/test_source.rs` exposes each authored
+slot's hull choices; `crates/phoenix-simulation/src/ship_slots.rs` freezes one Test-controlled slot and
 the other slots' Backfill or Absent decisions. Browser and native Test adapters
 install that frozen roster before simulation startup. Legacy worlds keep their
 single-hull Test path.
@@ -258,7 +258,7 @@ native shell opens through `phoenix-host --workshop-project DIR` or
 `--workshop-mod DIR`, with `--client-dir` and an Ultralight build.
 
 Native `load-sources` returns source text bytes and immutable asset-version
-references from `src/workshop/provider/assets.rs`. The selected root owns the
+references from `crates/phoenix-simulation/src/workshop/provider/assets.rs`. The selected root owns the
 private blob store; references cannot name authored or arbitrary filesystem paths.
 Asset imports and preview reads use 64 KiB chunks. Save materializes and verifies
 each referenced version before the existing runtime and external-edit gates.
@@ -369,7 +369,7 @@ an unchanged script returns without validation or a history entry.
 
 The Authoring sound panel reads `assets/audio/sound-cues.toml` from the current
 draft. A catalog declares packaged MP3/OGG/WAV assets, categories, audiences and
-informative equivalents; shared JavaScript checks and `src/sound_cues.rs` reject
+informative equivalents; shared JavaScript checks and `crates/phoenix-simulation/src/sound_cues.rs` reject
 invalid definitions. Known shipped sounds retain their category and minimum
 information requirements. New nested packaged sounds use ordinary local asset
 resolution and decoding. Source comments and byte history remain the document

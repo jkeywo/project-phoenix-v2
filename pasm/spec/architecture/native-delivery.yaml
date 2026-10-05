@@ -31,7 +31,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/delivery/payload.rs, src/core/messages.rs, src/core/codec.rs, src/server/bridge.rs, src/native_host/world_load.rs]
+      paths: [crates/phoenix-simulation/src/delivery/payload.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, src/server/bridge.rs, src/native_host/world_load.rs]
       symbols:
         [
           CatalogShipWire,
@@ -48,7 +48,7 @@ entities:
           wasm_get_scenario_catalog,
           wasm_delivery_stamp,
         ]
-      tests: [cargo test, tests/native_host.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, tests/smoke/mod-pack.spec.js, src/delivery/payload_tests.rs, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [cargo test, tests/native_host.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, tests/smoke/mod-pack.spec.js, crates/phoenix-simulation/src/delivery/payload_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: delivery-version-pin
     core:
@@ -68,7 +68,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/delivery/stamp.rs, src/core/messages.rs, src/delivery/mod.rs]
+      paths: [crates/phoenix-simulation/src/delivery/stamp.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/delivery/mod.rs]
       symbols:
         [
           PROTOCOL_VERSION,
@@ -78,7 +78,7 @@ entities:
           check_bundle_content,
           client_stamp_from_request,
         ]
-      tests: [cargo test, tests/native_host.rs, src/delivery/stamp_tests.rs, src/core/messages_view_mode_tests.rs, src/delivery/tests.rs]
+      tests: [cargo test, tests/native_host.rs, crates/phoenix-simulation/src/delivery/stamp_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/tests.rs]
 
   - component: delivery-http-contract
     core:
@@ -100,14 +100,14 @@ entities:
       status: declared
       paths:
         [
-          src/delivery/http.rs,
+          crates/phoenix-simulation/src/delivery/http.rs,
           deploy/cloudflare/_headers,
           scripts/deploy-headers.mjs,
           scripts/check-deploy-headers.mjs,
           .github/workflows/check-deploy-headers.yml,
         ]
       symbols: [HttpVersion, Request, parse_request, CachePolicy, cache_policy_for, content_type_for, resolve_static_path, checkProbe, checkAll]
-      tests: [cargo test, npx vitest run, src/delivery/http_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/delivery/http_tests.rs]
 
   - component: native-delivery-host
     core:
@@ -134,15 +134,15 @@ entities:
       status: declared
       paths:
         [
-          src/delivery/serve.rs,
-          src/delivery/args.rs,
+          crates/phoenix-simulation/src/delivery/serve.rs,
+          crates/phoenix-simulation/src/delivery/args.rs,
           src/bin/phoenix_host.rs,
           src/native_host/mod.rs,
           src/native_host/app.rs,
           src/native_host/transport.rs,
           src/native_host/direct_join.rs,
           src/boot/mod.rs,
-          src/entities/template_preload.rs,
+          crates/phoenix-simulation/src/entities/template_preload.rs,
           assets/scenarios.demo.toml,
         ]
       symbols:
@@ -179,7 +179,7 @@ entities:
           tests/native_host_snapshot.rs,
           tests/native_viewscreen_render.rs,
           tests/native_direct_join.rs,
-         src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, src/native_host/app_tests.rs, src/native_host/transport_tests.rs]
+         crates/phoenix-simulation/src/delivery/serve_tests.rs, crates/phoenix-simulation/src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, src/native_host/app_tests.rs, src/native_host/transport_tests.rs]
 
   - component: native-runtime-world-load
     core:
@@ -215,19 +215,19 @@ entities:
         [
           src/native_host/world_load.rs,
           tests/native_host_lobby/preparation.rs,
-          src/gm_solo.rs,
+          crates/phoenix-simulation/src/gm_solo.rs,
           tests/native_host_lobby/round_return.rs,
           tests/client/native-retained-lobby.test.js,
-          src/world/materialization.rs,
+          crates/phoenix-simulation/src/world/materialization.rs,
           tests/native_host_lobby/materialization.rs,
-          src/lobby/scenario_arbiter.rs,
+          crates/phoenix-simulation/src/lobby/scenario_arbiter.rs,
           src/native_host/app.rs,
           src/boot/mod.rs,
-          src/delivery/serve.rs,
-          src/delivery/args.rs,
+          crates/phoenix-simulation/src/delivery/serve.rs,
+          crates/phoenix-simulation/src/delivery/args.rs,
           src/bin/phoenix_host.rs,
-          src/lobby/handler.rs,
-          src/content_ledger.rs,
+          crates/phoenix-simulation/src/lobby/handler.rs,
+          crates/phoenix-simulation/src/content_ledger.rs,
           gui/scenario-arbiter.js,
           tests/fixtures/scenario-arbiter-parity.json,
         ]
@@ -264,7 +264,7 @@ entities:
           cargo test,
           tests/native_host_lobby.rs,
           tests/client/scenario-arbiter-parity.test.js,
-         src/native_host/world_load_tests.rs, src/lobby/scenario_arbiter_tests.rs, src/native_host/app_tests.rs, src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, src/content_ledger_tests.rs]
+         src/native_host/world_load_tests.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter_tests.rs, src/native_host/app_tests.rs, crates/phoenix-simulation/src/delivery/serve_tests.rs, crates/phoenix-simulation/src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs, crates/phoenix-simulation/src/content_ledger_tests.rs]
 
   - component: curated-public-catalogue-gate
     core:
@@ -288,14 +288,14 @@ entities:
       paths:
         [
           assets/scenarios.demo.toml,
-          src/build_flags.rs,
+          crates/phoenix-simulation/src/build_flags.rs,
           src/server/bridge.rs,
           gui/build-flags.js,
           server.html,
           .github/workflows/deploy-demo.yml,
         ]
       symbols: [accepts_mod_pack_uploads, offersModPackUpload, wasm_add_mod_pack]
-      tests: [cargo test, npx vitest run, tests/native_host.rs, src/build_flags_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, npx vitest run, tests/native_host.rs, crates/phoenix-simulation/src/build_flags_tests.rs, src/server/bridge_tests.rs]
 
   - component: native-station-pane
     core:
@@ -336,20 +336,20 @@ entities:
           src/native_host/panes/registry.rs,
           src/native_host/panes/registry/snapshot.rs,
           src/native_host/panes/transport/snapshot_tests.rs,
-          src/session_connections.rs,
+          crates/phoenix-simulation/src/session_connections.rs,
           src/native_host/panes/transport.rs,
           src/native_host/panes/surface.rs,
           src/native_host/panes/document.rs,
           src/native_host/panes/ultralight.rs,
           src/native_host/panes/hud.rs,
           src/native_host/panes/pane_thread.rs,
-          src/core/codec.rs,
+          crates/phoenix-simulation/src/core/codec.rs,
           gui/viewscreen-hud.html,
           tests/client/viewscreen-hud.test.js,
           src/native_host/panes/pane_boot.js,
           src/native_host/panes/pane_link.js,
-          src/delivery/serve.rs,
-          src/delivery/args.rs,
+          crates/phoenix-simulation/src/delivery/serve.rs,
+          crates/phoenix-simulation/src/delivery/args.rs,
           src/bin/phoenix_host.rs,
         ]
       symbols:
@@ -388,7 +388,7 @@ entities:
           tests/native_host_panes.rs,
           tests/native_host_pane_ultralight.rs,
           "npx vitest run tests/client/viewscreen-hud.test.js",
-         src/native_host/panes/identity_tests.rs, src/native_host/panes/registry_tests.rs, src/session_connections_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/surface_tests.rs, src/native_host/panes/document_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/panes/hud_tests.rs, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, src/core/codec_mesh_frame_tests.rs, src/delivery/serve_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
+         src/native_host/panes/identity_tests.rs, src/native_host/panes/registry_tests.rs, crates/phoenix-simulation/src/session_connections_tests.rs, src/native_host/panes/transport_tests.rs, src/native_host/panes/surface_tests.rs, src/native_host/panes/document_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/panes/hud_tests.rs, src/native_host/panes/pane_thread_wheel_tests.rs, src/native_host/panes/pane_thread_thread_tests.rs, src/native_host/panes/pane_thread_doubles_tests.rs, src/native_host/panes/pane_thread_tests.rs, src/native_host/panes/pane_thread_loop_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, crates/phoenix-simulation/src/delivery/serve_tests.rs, crates/phoenix-simulation/src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
 
   - component: bridge-display-profile
     core:
@@ -437,7 +437,7 @@ entities:
           src/native_host/bridge_profile.rs,
           src/native_host/bridge_display.rs,
           src/native_host/app.rs,
-          src/delivery/args.rs,
+          crates/phoenix-simulation/src/delivery/args.rs,
           src/bin/phoenix_host.rs,
         ]
       symbols:
@@ -466,7 +466,7 @@ entities:
           reconcile_seated_consoles,
           run_setup,
         ]
-      tests: [cargo test, tests/native_bridge_displays.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/bridge_display_tests.rs, src/native_host/app_tests.rs, src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
+      tests: [cargo test, tests/native_bridge_displays.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/bridge_display_tests.rs, src/native_host/app_tests.rs, crates/phoenix-simulation/src/delivery/args_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
 
   - component: bridge-layout-law
     core:
@@ -824,7 +824,7 @@ entities:
         - "[ai] WHERE THE QR POINTS is the one genuinely native decision, and it is the defect a naive implementation ships. The surface loads over loopback, because that is what an embedded view on this machine can dial — and it is the one address in the building no phone can open, so a QR built from the document's own location.href would look perfectly correct on the viewscreen and be unscannable. native_host::host_lobby::join therefore decides the page base from what the LISTENER bound: a specific --addr is the operator's own answer and is used as given; the documented 0.0.0.0 wildcard takes the interface the machine would route out of (a UDP connect to TEST-NET-3 — a routing-table lookup, no packet, no DNS, nothing that could be mistaken for a call home); no route falls back to loopback and says so at the prompt. The URL itself is still assembled by gui/join-url.js, extracted out of the crew transport for this, so both hosts build a join link the same way and the rule about naming a non-default rendezvous service lives in one place. Every way that answer can still be wrong is REPORTED at the prompt rather than found with a phone. join_addr_reach classifies the address the QR names — loopback, carrier-grade NAT (a Tailscale 100.64/10 interface, which the default route prefers precisely because it is a tunnel), link-local (nothing answered DHCP), or simply not private — and says why no phone in the room can open it, with --addr as the recourse in every case; only loopback was warned about before, and the rest looked exactly like success. The other half is not about the address at all: the client's ?rendezvous= gate reads the PARAMETER's own host, not the page's origin, so a loopback override IS honoured from a LAN page (and then resolves on the phone, where nothing is listening) while a non-loopback one — a deployed worker — is silently swapped for the bundle's built-in service, sending every scanned phone somewhere this host never registered. phoenix-host now says so; the gate itself is #1112's security posture and a follow-up issue's to revisit."
         - "[ai] Two states, not three: a code, or joining is OFF. --solo (or no --rendezvous) means there will never be a code, so the panel says that in words from the string table rather than framing an empty QR — 'the code has not arrived yet' and 'there will never be a code' look identical on a wall. The waiting window itself is deliberately unmodelled: nothing is pushed until the service answers, which leaves the same empty framed panel a browser host shows for the same second. A transient service loss likewise leaves the code up, because a reclaim (#1115) usually returns the very same letters and blanking the wall for a reconnection that succeeds seconds later costs the room more than it tells them."
         - "[ai] A phone's ToggleQrCode reaches a native host at last. That button predates the native host and had never worked against one: server.html intercepts the frame in its own per-connection handler, so the message had no Rust variant and arrived at the codec as undecodable. It is now ClientMessage::ToggleQrCode — a unit variant, TogglePause's shape, in EVERY build unlike its two toggle neighbours, because showing the code that lets somebody else join is what the panel is for rather than a lever a stranger can pull — drained frame-driven and never through command admission. It is the one EDGE on this bridge (a count, not a state: two presses are two flips), and the page owns the resulting visibility, so no boolean crosses to be a second opinion about what is on screen."
-        - "[ai] THE PICKER IS THE HOST PAGE'S PICKER (issue #1328), by the third application of the same extraction: gui/host-scenario-render.js now holds every DOM write renderScenarioLockState made inside #world-list and gui/host-scenarios.css holds its rules, over the gui/host-scenarios.js view model #1230 had already lifted out. What crosses the bridge is exactly scenarioCatalogView's three arguments — the catalogue, the arbiter's lock state, and whether a world has landed — so the viewscreen cannot be deciding a stage the browser would not. The two side effects that genuinely differ between the surfaces are hooks rather than branches: which arbiter a pick reaches (server.html holds one in its own page, the native surface's host holds one in src/lobby/scenario_arbiter.rs), and whether the panel's show/hide is this render's business (on the page it is lifecycle — driveWorldLoad hides it — and on the viewscreen there is no lifecycle, so an opt-in option gives the renderer the panel, exactly as revealChrome gives it the lobby's). server.html passes neither and behaves as it did."
+        - "[ai] THE PICKER IS THE HOST PAGE'S PICKER (issue #1328), by the third application of the same extraction: gui/host-scenario-render.js now holds every DOM write renderScenarioLockState made inside #world-list and gui/host-scenarios.css holds its rules, over the gui/host-scenarios.js view model #1230 had already lifted out. What crosses the bridge is exactly scenarioCatalogView's three arguments — the catalogue, the arbiter's lock state, and whether a world has landed — so the viewscreen cannot be deciding a stage the browser would not. The two side effects that genuinely differ between the surfaces are hooks rather than branches: which arbiter a pick reaches (server.html holds one in its own page, the native surface's host holds one in crates/phoenix-simulation/src/lobby/scenario_arbiter.rs), and whether the panel's show/hide is this render's business (on the page it is lifecycle — driveWorldLoad hides it — and on the viewscreen there is no lifecycle, so an opt-in option gives the renderer the panel, exactly as revealChrome gives it the lobby's). server.html passes neither and behaves as it did."
         - "[ai] A pick from the viewscreen enters the arbiter as a ClientMessage under LOCAL_CONSOLE_TOKEN — the token server.html's OWN picker submits under through __localConsoleSend. That is not the surface acquiring an identity: the token means 'the host operator acting on the host's own window', it is reserved so no network peer may claim it, and both selection variants are explicit no-ops in the lobby handler, so nothing but the arbiter acts on them. The arbiter then treats the viewscreen as one participant among the phones under first-valid-wins, with no priority — which is the rule the browser host has always applied to its own page."
         - "[ai] A REFUSED pick repaints nothing, and that is parity rather than an omission: arbiterSelectScenario returns before its render on any non-accepted outcome, so on both hosts the panel goes on showing the stage that is actually true. Nothing is lost by it, because the surface makes no optimistic local move to be rolled back — every render comes from the host's authoritative answer. The refusal is not silent either: drain_scenario_selection logs it at warn level, on both hosts, through the same log_outcome."
         - "[ai] FORCE-START STOPPED BEING BROWSER GLUE. PendingForceStart and apply_force_start were behind cfg(wasm32), so the only route to a mission with nobody at a console was the host page's button — and a native lobby whose crew are all on phones had no way to launch at all. Both are de-gated and native_host::app registers apply_force_start on the same two edges wasm_init gives it (.before(SimSet::Input) for #907's tick-scoped transition, and .after(NativeWorldLoadSet) so a press on the tick a runtime world lands sees that world). Only drain_force_start_input stays wasm-only, because a thread-local JavaScript sets is the one part that really is glue. The rule gains one guard — refuse with no WorldConfig, the same one solo_auto_start carries — which is inert in the browser, where the world is loaded before wasm_init composes the App, and a request that arrives with no world is DROPPED rather than held, because remembering it would start the mission the instant somebody else's scenario pick landed."
@@ -863,7 +863,7 @@ entities:
           src/native_host/bridge_display.rs,
           src/native_host/world_load.rs,
           src/server/bridge.rs,
-          src/core/codec.rs,
+          crates/phoenix-simulation/src/core/codec.rs,
           src/bin/phoenix_host.rs,
           run-native.bat,
           gui/host-lobby-render.js,
@@ -931,4 +931,4 @@ entities:
           npx vitest run,
           tests/native_host_lobby.rs,
           tests/native_host_lobby_ultralight.rs,
-         src/native_host/host_lobby/tests.rs, src/native_host/host_lobby/document_tests.rs, src/native_host/host_lobby/bridge_tests.rs, src/native_host/host_lobby/layout_tests.rs, src/native_host/host_lobby/reveal_tests.rs, src/native_host/host_lobby/join_tests.rs, src/native_host/host_lobby/scenario_tests.rs, src/native_host/host_lobby/fleet_tests.rs, src/native_host/session_role_tests.rs, src/native_host/fleet_identity_tests.rs, src/native_host/native_gm/tests.rs, src/native_host/native_gm/start_tests.rs, src/native_host/relay_socket_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/app_tests.rs, src/native_host/bridge_display_tests.rs, src/native_host/world_load_tests.rs, src/server/bridge_tests.rs, src/core/codec_mesh_frame_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]
+         src/native_host/host_lobby/tests.rs, src/native_host/host_lobby/document_tests.rs, src/native_host/host_lobby/bridge_tests.rs, src/native_host/host_lobby/layout_tests.rs, src/native_host/host_lobby/reveal_tests.rs, src/native_host/host_lobby/join_tests.rs, src/native_host/host_lobby/scenario_tests.rs, src/native_host/host_lobby/fleet_tests.rs, src/native_host/session_role_tests.rs, src/native_host/fleet_identity_tests.rs, src/native_host/native_gm/tests.rs, src/native_host/native_gm/start_tests.rs, src/native_host/relay_socket_tests.rs, src/native_host/panes/ultralight_keyboard_tests.rs, src/native_host/panes/ultralight_resize_tile_targets_tests.rs, src/native_host/app_tests.rs, src/native_host/bridge_display_tests.rs, src/native_host/world_load_tests.rs, src/server/bridge_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs, src/bin/tests/phoenix_host_launch_path_tests.rs, src/bin/tests/phoenix_host_tests.rs]

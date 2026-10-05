@@ -44,15 +44,9 @@ const DATA = JSON.parse(
 setJoinCodeData(DATA);
 
 describe('authored format data', () => {
-  it('mints eight letters from an alphabet that excludes every normalised-away letter', () => {
-    // EIGHT, and the number is the scheme's whole defence rather than a taste:
-    // the code is the only secret in front of a game (the join stamp is
-    // public), and five letters over this 25-letter alphabet is 25^5 ≈ 9.77e6
-    // — 23.2 bits — which a host answering ~2,340 wrong guesses a second walks
-    // in about 35 minutes. 25^8 ≈ 1.526e11 (37.15 bits) is ~377 days at that
-    // same rate, before any attempt-limiting. See the [suffix] note in
-    // assets/join/join-codes.toml.
-    expect(DATA.suffix.length).toBe(8);
+  it('mints five letters from an alphabet that excludes every normalised-away letter', () => {
+    // The shipped operator code has five letters; admission budgets are tested separately.
+    expect(DATA.suffix.length).toBe(5);
     for (const from of Object.keys(DATA.suffix.normalise)) {
       expect(DATA.suffix.alphabet).not.toContain(from);
     }
@@ -125,19 +119,19 @@ describe('canonicalisation', () => {
 });
 
 describe('suffix validation', () => {
-  it('accepts eight canonical letters', () => {
-    expect(validateSuffix('quarking')).toEqual({ ok: true, suffix: 'QUARKING' });
+  it('accepts five canonical letters', () => {
+    expect(validateSuffix('quark')).toEqual({ ok: true, suffix: 'QUARK' });
   });
 
   it('accepts input that only becomes valid after normalisation', () => {
-    expect(validateSuffix('b01ldest')).toEqual({ ok: true, suffix: 'BOIIDEST' });
+    expect(validateSuffix('b01ld')).toEqual({ ok: true, suffix: 'BOIID' });
   });
 
   it('separates empty, wrong-length and out-of-alphabet input', () => {
     expect(validateSuffix('')).toMatchObject({ ok: false, reason: 'empty' });
-    expect(validateSuffix('QUARKIN')).toMatchObject({ ok: false, reason: 'length' });
-    expect(validateSuffix('QUARKINGS')).toMatchObject({ ok: false, reason: 'length' });
-    expect(validateSuffix('QU4RKING')).toMatchObject({ ok: false, reason: 'charset' });
+    expect(validateSuffix('QUAR')).toMatchObject({ ok: false, reason: 'length' });
+    expect(validateSuffix('QUARKS')).toMatchObject({ ok: false, reason: 'length' });
+    expect(validateSuffix('QU4RK')).toMatchObject({ ok: false, reason: 'charset' });
   });
 
   it('refuses the authored deny-list wherever it appears inside a suffix', () => {
@@ -147,8 +141,7 @@ describe('suffix validation', () => {
     expect(validateSuffix(padded(denied).toLowerCase()))
       .toMatchObject({ ok: false, reason: 'denied' });
     // A word buried in the MIDDLE is the case exact matching used to miss, and
-    // the reason the rule is containment now the suffix is longer than the
-    // list's words: a code is refused for READING as one of them.
+    // containment helper must keep handling words inside longer input too.
     expect(isDenied('XADMINYZ')).toBe(true);
     expect(isDenied('adminxyz')).toBe(true);
     expect(isDenied('xyzwadmin')).toBe(true);
@@ -158,7 +151,7 @@ describe('suffix validation', () => {
   });
 
   it('does not refuse an ordinary code', () => {
-    expect(isDenied('QUARKING')).toBe(false);
+    expect(isDenied('QUARK')).toBe(false);
   });
 });
 
@@ -167,25 +160,25 @@ describe('full join identifiers', () => {
   const server = projectGuidFor(NAMESPACE_SERVER);
 
   it('composes PROJECT_VERSION_SUFFIX from local context when only a suffix is typed', () => {
-    const built = joinCodeForSuffix('quarking', NAMESPACE_CLIENT);
-    expect(built).toMatchObject({ ok: true, suffix: 'QUARKING', namespace: NAMESPACE_CLIENT });
-    expect(built.full).toBe(`${client}_${versionGuid()}_QUARKING`);
+    const built = joinCodeForSuffix('quark', NAMESPACE_CLIENT);
+    expect(built).toMatchObject({ ok: true, suffix: 'QUARK', namespace: NAMESPACE_CLIENT });
+    expect(built.full).toBe(`${client}_${versionGuid()}_QUARK`);
   });
 
   it('round-trips a composed code back to its three parts', () => {
-    const full = composeJoinCode({ project: server, version: versionGuid(), suffix: 'QUARKING' });
+    const full = composeJoinCode({ project: server, version: versionGuid(), suffix: 'QUARK' });
     const parsed = parseJoinCode(full, NAMESPACE_CLIENT);
     expect(parsed).toMatchObject({
       ok: true,
       typed: 'full',
       project: server,
-      suffix: 'QUARKING',
+      suffix: 'QUARK',
       namespace: NAMESPACE_SERVER,
     });
   });
 
   it('reads a bare suffix as the page-supplied namespace', () => {
-    expect(parseJoinCode('quarking', NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode('quark', NAMESPACE_CLIENT)).toMatchObject({
       ok: true,
       typed: 'suffix',
       namespace: NAMESPACE_CLIENT,
@@ -194,26 +187,26 @@ describe('full join identifiers', () => {
   });
 
   it('reads a QR link by taking the code out of the URL fragment', () => {
-    const full = `${client}_${versionGuid()}_QUARKING`;
+    const full = `${client}_${versionGuid()}_QUARK`;
     const parsed = parseJoinCode(`https://example.test/client/index.html#${full}`, NAMESPACE_CLIENT);
-    expect(parsed).toMatchObject({ ok: true, typed: 'full', suffix: 'QUARKING', project: client });
+    expect(parsed).toMatchObject({ ok: true, typed: 'full', suffix: 'QUARK', project: client });
   });
 
   it('reaches the identical identifier from typed suffix, pasted code and QR link', () => {
-    const typed = parseJoinCode('quarking', NAMESPACE_CLIENT);
-    const pasted = parseJoinCode(`${client}_${versionGuid()}_quarking`, NAMESPACE_CLIENT);
-    const scanned = parseJoinCode(`https://x.test/client/#${client}_${versionGuid()}_QUARKING`, NAMESPACE_CLIENT);
+    const typed = parseJoinCode('quark', NAMESPACE_CLIENT);
+    const pasted = parseJoinCode(`${client}_${versionGuid()}_quark`, NAMESPACE_CLIENT);
+    const scanned = parseJoinCode(`https://x.test/client/#${client}_${versionGuid()}_QUARK`, NAMESPACE_CLIENT);
     expect(pasted.full).toBe(typed.full);
     expect(scanned.full).toBe(typed.full);
   });
 
   it('names an unrecognised project GUID rather than retyping it', () => {
-    const parsed = parseJoinCode(`not-a-known-project_${versionGuid()}_QUARKING`, NAMESPACE_CLIENT);
+    const parsed = parseJoinCode(`not-a-known-project_${versionGuid()}_QUARK`, NAMESPACE_CLIENT);
     expect(parsed).toMatchObject({ ok: false, reason: 'unknown-project' });
   });
 
   it('rejects a code with the wrong number of parts', () => {
-    expect(parseJoinCode(`${client}_QUARKING`, NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode(`${client}_QUARK`, NAMESPACE_CLIENT)).toMatchObject({
       ok: false,
       reason: 'malformed',
     });
@@ -225,33 +218,33 @@ describe('full join identifiers', () => {
     // Splitting before deciding the shape reported this as "not readable",
     // which is a lie about input the scheme accepts.
     for (const typed of [
-      'QU_ARKING', 'qu_arking', 'Q_U_A_R_K_I_N_G', ' q-u a_r k-i n_g ', 'QUAR KING',
+      'QU_ARK', 'qu_ark', 'Q_U_A_R_K', ' q-u a_r k ', 'QU ARK',
     ]) {
       expect(parseJoinCode(typed, NAMESPACE_CLIENT), typed).toMatchObject({
         ok: true,
         typed: 'suffix',
-        suffix: 'QUARKING',
+        suffix: 'QUARK',
       });
     }
   });
 
   it('keeps a punctuated suffix failure specific rather than calling it malformed', () => {
-    expect(parseJoinCode('AD_MINXYZ', NAMESPACE_CLIENT)).toMatchObject({ reason: 'denied' });
-    expect(parseJoinCode('QU-ARKIN', NAMESPACE_CLIENT)).toMatchObject({ reason: 'length' });
+    expect(parseJoinCode('AD_MIN', NAMESPACE_CLIENT)).toMatchObject({ reason: 'denied' });
+    expect(parseJoinCode('QU-AR', NAMESPACE_CLIENT)).toMatchObject({ reason: 'length' });
   });
 
   it('reads a full code that was retyped with spaces around the separators', () => {
-    const full = `${client} _ ${versionGuid()} _ QUARKING`;
+    const full = `${client} _ ${versionGuid()} _ QUARK`;
     expect(parseJoinCode(full, NAMESPACE_CLIENT)).toMatchObject({
       ok: true,
       typed: 'full',
       project: client,
-      suffix: 'QUARKING',
+      suffix: 'QUARK',
     });
   });
 
   it('refuses a denied suffix even inside a well-formed full code', () => {
-    expect(parseJoinCode(`${client}_${versionGuid()}_ADMINXYZ`, NAMESPACE_CLIENT)).toMatchObject({
+    expect(parseJoinCode(`${client}_${versionGuid()}_ADMIN`, NAMESPACE_CLIENT)).toMatchObject({
       ok: false,
       reason: 'denied',
     });
@@ -277,11 +270,11 @@ describe('minting', () => {
     // written that way asserts nothing about the branch it is named for.
     const a = DATA.suffix.alphabet;
     const draws = (word) => [...word].map((c) => a.indexOf(c));
-    const script = [...draws('QUARKING'), ...draws('MOISTURE')];
+    const script = [...draws('QUARK'), ...draws('MOIST')];
     let i = 0;
-    const taken = new Set(['QUARKING']);
+    const taken = new Set(['QUARK']);
     const minted = mintSuffix(DATA, (s) => taken.has(s), () => script[i++]);
-    expect(minted).toEqual({ ok: true, suffix: 'MOISTURE' });
+    expect(minted).toEqual({ ok: true, suffix: 'MOIST' });
     expect(i, 'the collision was never drawn, so the retry never ran')
       .toBe(script.length);
   });
@@ -291,10 +284,10 @@ describe('minting', () => {
     // fall through to the next one — which is the branch that matters now the
     // rule is containment rather than equality.
     const a = DATA.suffix.alphabet;
-    const admin = [...'ADMINXYZ'].map((c) => a.indexOf(c));
-    const quark = [...'QUARKING'].map((c) => a.indexOf(c));
+    const admin = [...'ADMIN'].map((c) => a.indexOf(c));
+    const quark = [...'QUARK'].map((c) => a.indexOf(c));
     const minted = mintSuffix(DATA, () => false, seq([...admin, ...quark]));
-    expect(minted).toEqual({ ok: true, suffix: 'QUARKING' });
+    expect(minted).toEqual({ ok: true, suffix: 'QUARK' });
   });
 
   it('gives up with a reason rather than looping on a saturated namespace', () => {
@@ -304,7 +297,7 @@ describe('minting', () => {
 
 describe('reason reporting', () => {
   /**
-   * Every code `StampMismatch::code()` can emit — src/delivery/stamp.rs.
+   * Every code `StampMismatch::code()` can emit — crates/phoenix-simulation/src/delivery/stamp.rs.
    *
    * Hardcoded on purpose: these five strings cross a language boundary
    * (Rust → encode_join_verdict → server.html → JoinRefused → this module), so
@@ -326,13 +319,13 @@ describe('reason reporting', () => {
 
   /**
    * Pull the string literals straight out of `StampMismatch::code()`'s match
-   * arms in src/delivery/stamp.rs — the arms are a clean
+   * arms in crates/phoenix-simulation/src/delivery/stamp.rs — the arms are a clean
    * `Variant { .. } => "literal",` block, so scanning for the balanced brace
    * that closes the function and regexing the quoted literals inside it is
    * enough, with no Rust parser involved.
    */
   function stampMismatchCodesFromRust() {
-    const src = readFileSync(path.join(root, 'src/delivery/stamp.rs'), 'utf8');
+    const src = readFileSync(path.join(root, 'crates/phoenix-simulation/src/delivery/stamp.rs'), 'utf8');
     const marker = 'fn code(';
     const fnStart = src.indexOf(marker);
     if (fnStart === -1) return [];
@@ -373,7 +366,7 @@ describe('reason reporting', () => {
     // shipped "no ship is using that code" for every refusal.
     expect(
       rustCodes.length,
-      'extracted zero string literals from fn code() in src/delivery/stamp.rs — the regex or the fn code( marker is stale',
+      'extracted zero string literals from fn code() in crates/phoenix-simulation/src/delivery/stamp.rs — the regex or the fn code( marker is stale',
     ).toBeGreaterThan(0);
     // Set equality, not mere containment: this catches BOTH a new Rust
     // variant with no row here (the bug this test exists to prevent) AND a
@@ -395,7 +388,7 @@ describe('reason reporting', () => {
   });
 
   it('maps both native identity refusals to authored recovery messages', () => {
-    const source = readFileSync(path.join(root, 'src/native_host/relay_transport.rs'), 'utf8');
+    const source = readFileSync(path.join(root, 'crates/phoenix-transport/src/relay.rs'), 'utf8');
     const codes = [...source.matchAll(/pub const (?:RESERVED|INVALID)_TOKEN_CODE: &str = "([a-z-]+)"/g)]
       .map((match) => match[1]);
     expect(new Set(codes)).toEqual(new Set(['reserved-token', 'invalid-token']));
@@ -421,10 +414,10 @@ describe('reason reporting', () => {
     // using that code" — the least actionable sentence in the game, and a lie
     // about a correct code with a live host behind it.
     const registry = readFileSync(
-      path.join(root, 'worker-rendezvous/src/registry.js'),
+      path.join(root, 'packages/transport/src/service-registry.js'),
       'utf8',
     );
-    const relay = readFileSync(path.join(root, 'worker-rendezvous/src/relay.js'), 'utf8');
+    const relay = readFileSync(path.join(root, 'packages/transport/src/service-relay.js'), 'utf8');
     const emitted = new Set([
       // `fail(connId, request, 'reason')` / `cut(...)` — the error frames.
       ...[...registry.matchAll(/(?:fail|cut)\([^)]*?'([a-z-]+)'\s*\)/g)].map((m) => m[1]),

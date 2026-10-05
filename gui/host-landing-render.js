@@ -67,7 +67,7 @@
  * else here, with one exception that is deliberate: this never writes
  * `#landing-join-code`'s value. Every render is a rebuild, and a rebuild that
  * restored the value would fight somebody mid-word while one that cleared it
- * would delete the eight letters a refusal is about. The sentences around the
+ * would delete the five letters a refusal is about. The sentences around the
  * field are this module's; what is in it is theirs.
  *
  * ## What it does NOT draw
@@ -410,7 +410,7 @@ function renderPacks(doc, vm, t, h) {
  *   `submitJoin` carries a typed join code back with the open row's own `join`
  *   descriptor (issue #1364) — the descriptor and not the entry id, so the
  *   caller dispatches on the row's `action` and never on which entry it came
- *   from. Nothing is judged here: whether eight letters are a code at all is
+ *   from. Nothing is judged here: whether five letters are a code at all is
  *   `landingJoinAttempt`'s answer, and this module has no more business
  *   parsing one than it has deciding whether an entry may open.
  *
@@ -610,7 +610,7 @@ export function renderHostLanding(doc, vm, t, hooks, opts) {
   // of this block rather than a shortcut. This function runs again on every
   // menu click and on every refusal, so a render that restored the value would
   // fight an operator who is mid-word, and one that cleared it would delete
-  // eight letters the moment their first attempt was refused — at exactly the
+  // five letters the moment their first attempt was refused — at exactly the
   // point they need to see what they typed. The operator owns the field; this
   // owns the sentences around it.
   //

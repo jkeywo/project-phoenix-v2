@@ -167,8 +167,8 @@ Update PASM with intended ownership/behavior in the same implementation slice, t
 
 PROGRESS.md records the current handoff and remaining checks. Recheck current GitHub state and source before filing additional slices; tracker checkboxes can lag delivered implementation. Scope changes discovered by regression tests belong explicitly in the slice description, not in unrelated cleanup.
 
-[save-lifecycle]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/save_slots_lifecycle.rs
-[save-store]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/save_slots_store.rs
+[save-lifecycle]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/save_slots_lifecycle.rs
+[save-store]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/save_slots_store.rs
 [bridge]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/server/bridge.rs
 [save-tests]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/tests/save_slots_persistence.rs
 [native-snapshot]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/tests/native_host_snapshot.rs
@@ -179,23 +179,23 @@ PROGRESS.md records the current handoff and remaining checks. Recheck current Gi
 [sessions]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/sessions-replication.yaml
 [rendezvous]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/rendezvous-transport.yaml
 [native-spec]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/native-delivery.yaml
-[payload]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/delivery/payload.rs
-[arbiter]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/lobby/scenario_arbiter.rs
-[messages]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/core/messages.rs
+[payload]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/delivery/payload.rs
+[arbiter]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/lobby/scenario_arbiter.rs
+[messages]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/core/messages.rs
 [game-flow]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/game-flow.yaml
 [ship-config]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/ship-entity-configuration.yaml
 [perf-spec]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/performance-measurement.yaml
-[script-effects]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/world/script/schedule.rs
+[script-effects]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/world/script/schedule.rs
 [scripting]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/scenario-scripting.yaml
 [triggers]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/trigger-pipeline.yaml
 [comms-spec]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/comms.yaml
-[world-server]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/world/server.rs
-[ship-power]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/ship/power.rs
-[power-system]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/modifiers/power_system.rs
-[snapshot]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/snapshot.rs
+[world-server]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/world/server.rs
+[ship-power]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/ship/power.rs
+[power-system]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/modifiers/power_system.rs
+[snapshot]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/snapshot.rs
 [snapshot-tests]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/tests/snapshot_resume.rs
 [power-spec]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/power-modifiers-regions.yaml
-[lobby-server]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/lobby/server.rs
+[lobby-server]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/crates/phoenix-simulation/src/lobby/server.rs
 [station-authority]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/pasm/spec/architecture/station-system-authority.yaml
 [world-load]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/src/native_host/world_load.rs
 [native-lobby-tests]: C:/Coding/project-phoenix-v2/.worktrees/review-followup-plan/tests/native_host_lobby.rs

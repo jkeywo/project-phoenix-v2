@@ -87,6 +87,8 @@ async function main() {
 
   // gui/ (JS modules + console HTML + borders)
   await cp(path.join(root, 'gui'), path.join(out, 'gui'), { recursive: true });
+  await cp(path.join(root, 'packages'), path.join(out, 'packages'), { recursive: true });
+  await cp(path.join(root, 'packages'), path.join(root, 'dist', 'packages'), { recursive: true });
 
   // The native host document is assembled from dist/index.html, so its
   // absolute `./gui/...` imports resolve against dist/gui rather than the

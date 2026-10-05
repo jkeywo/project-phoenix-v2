@@ -4,6 +4,7 @@ use crate::core::messages::StationId;
 use crate::native_host::bridge_profile::{BridgeProfile, PaneSplit};
 use crate::native_host::panes::{transport::PaneBus, PaneBusResource};
 use crate::ship::components::PendingShipConfig;
+use phoenix_transport::transport::Transport;
 
 const MAIN: &str = "Main@1920x1080";
 const SIDE: &str = "Side@1920x1080";
@@ -172,7 +173,7 @@ fn selected_roster_removes_invalid_seats_and_never_retries_deferred_intent() {
 
 fn roster_removal_closes_only_its_console(monitor_blip: bool) {
     use crate::native_host::panes::PaneIdentity;
-    use crate::native_host::transport::{NativeTransport, TransportEvent};
+    use crate::native_host::transport::TransportEvent;
 
     let (mut app, bus) = host(Some(profile(true)));
     app.insert_resource(hull(&["tactical", "science"]));

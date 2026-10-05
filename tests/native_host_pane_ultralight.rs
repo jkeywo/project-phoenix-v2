@@ -146,7 +146,7 @@ impl Delivery {
             skip_bundle_check: true,
             sim: None,
             // Issue #1123's bridge-display flags. Neither claim in this file is
-            // about them; `src/delivery/args.rs`'s own tests and
+            // about them; `crates/phoenix-simulation/src/delivery/args.rs`'s own tests and
             // `src/native_host/bridge_profile.rs`'s cover `--setup`/`--profile`.
             setup: false,
             test_output: None,
@@ -206,7 +206,10 @@ struct Observing<T: NativeTransport> {
     seen: Observed,
 }
 
-impl<T: NativeTransport> NativeTransport for Observing<T> {
+impl<T: NativeTransport>
+    phoenix_transport::Transport<project_phoenix::native_host::transport::PhoenixProtocol>
+    for Observing<T>
+{
     fn poll(&mut self) -> Vec<TransportEvent> {
         let events = self.inner.poll();
         self.seen

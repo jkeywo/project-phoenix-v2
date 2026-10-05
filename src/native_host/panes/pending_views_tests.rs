@@ -4,6 +4,7 @@ use crate::native_host::bridge_display::{BridgeStationSurface, StationPane};
 use crate::native_host::bridge_profile::{MonitorGeometry, PaneRect};
 use crate::native_host::panes::{service_faults, PaneIdentity};
 use bevy::prelude::Entity;
+use phoenix_transport::transport::Transport;
 
 const BENQ: &str = "BenQ EX@1920x1080";
 
@@ -151,7 +152,7 @@ fn preparation_faults_missing_seat_once_and_retries_on_the_same_identity() {
 #[test]
 fn preparation_never_builds_or_faults_an_open_superseded_view() {
     use crate::native_host::connections::SharedConnections;
-    use crate::native_host::transport::NativeTransport;
+
     let bus = PaneBus::default();
     let shared = SharedConnections::default();
     bus.transport().share_connections(shared.clone());

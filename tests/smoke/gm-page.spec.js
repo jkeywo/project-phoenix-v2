@@ -1165,8 +1165,8 @@ test('rendererless GM maps and inspects stable local ship truth', { tag: '@core'
 // reuse the rendererless GM boot above: that profile opens its OWN fleet as
 // lead with no ship host ever joining it, so `roster.len() == 0` and
 // `spawn_game_start_entities` never marks any GameStart row `is_fleet_ship`
-// (src/server_app/world_setup.rs) — no `Ship`/`FleetSlotOf` entity, therefore
-// no row `gm_station`'s ships query (src/gm_projection.rs) can ever find, no
+// (crates/phoenix-simulation/src/server_app/world_setup.rs) — no `Ship`/`FleetSlotOf` entity, therefore
+// no row `gm_station`'s ships query (crates/phoenix-simulation/src/gm_projection.rs) can ever find, no
 // matter how long the wait or whether an ordinary (station-less) crew member
 // also connects to that same solo GM host. A `selectedShipId` needs a REAL
 // fleet ship, which needs a SHIP host (not `?gm=1`) to open the fleet and the
@@ -1316,7 +1316,7 @@ test('a GM compares Truth and Crew Knowledge for the one connected fleet ship', 
     const panel = document.getElementById('gm-knowledge-panel');
     return !!panel && !panel.hidden && !!window.__hostGmKnowledgeState?.().selectedShipId;
   }, undefined, { timeout: 30_000 });
-  // `publish_sensors_blackboard` (src/ship/sensors.rs) computes every ship's
+  // `publish_sensors_blackboard` (crates/phoenix-simulation/src/ship/sensors.rs) computes every ship's
   // Sensors blackboard regardless of locality, so `default.toml`'s starbase
   // and patrol raider — within this world's default radar range from the
   // spawn point — join the Sensors-contacts category from the first tick.
@@ -2953,7 +2953,7 @@ test('a GM reaches and operates a spatial Helm Station at 1280x720, then release
 
   // Wait for at least one real row so the assertions below inspect actual
   // rendered cells rather than an empty table. `publish_sensors_blackboard`
-  // (src/ship/sensors.rs) computes every ship's Sensors blackboard regardless
+  // (crates/phoenix-simulation/src/ship/sensors.rs) computes every ship's Sensors blackboard regardless
   // of locality, so `default.toml`'s starbase and patrol raider — within this
   // world's default radar range — join the Sensors-contacts category from
   // the first tick. Comms-contacts is NOT the same category to wait on here:

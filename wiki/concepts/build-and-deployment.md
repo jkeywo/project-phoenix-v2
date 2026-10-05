@@ -2,7 +2,7 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, crates/phoenix-simulation/src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
 updated: 2026-10-01
 ---
 
@@ -36,7 +36,7 @@ Outputs land in `dist/` with the client at `dist/client/`. The QR code on the vi
 **Nothing in a built bundle fetches a script from a CDN.** The QR encoder is vendored at `gui/vendor/qrcode.js` (issue #1329) and carried into both bundles by Trunk's `copy-dir gui` link and `build-client.mjs`, so a host serving its own bundle — a native host on a bridge machine especially — draws a join code with no internet at all. Google Fonts is the one remaining external `<link>`, and it degrades to a fallback face rather than to no join code.
 
 Debug Surface identity, stable order, and wire names are authored in the Rust
-macro at `src/core/debug_surface.rs`. Run `npm run debug-surfaces` after changing
+macro at `crates/phoenix-model/src/debug_surface.rs`. Run `npm run debug-surfaces` after changing
 those rows; `npm run debug-surfaces:check`, the editor-test job, and the client
 build enforce that the committed `gui/debug-surfaces.generated.js` agrees.
 
@@ -175,7 +175,7 @@ gzipped WASM and its glue being cached for a year, which is what
 `/project-phoenix-*` names.
 
 Checked in three places: `tests/client/deploy-headers.test.js` (the rules, over
-canned fixtures, every push), `src/delivery/http.rs`'s unit tests (the same
+canned fixtures, every push), `crates/phoenix-simulation/src/delivery/http.rs`'s unit tests (the same
 contract as the native host serves it, every push), and
 `scripts/check-deploy-headers.mjs <url>` against a real deploy — run from a
 laptop (Node 20, no dependencies) or by dispatching the *Check Deploy Headers*
@@ -208,7 +208,7 @@ Windows prompts to allow it through the firewall on first run. Pass
   Either way there is no TLS or auth — LAN or behind something else, never a
   public address.
 
-The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
+The catalogue it publishes is the browser host's own: `crates/phoenix-simulation/src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON
 encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
 

@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, src/command_admission/mod.rs, src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/server.rs, src/world/server.rs, tests/publisher_ordering.rs, src/comms/scripted.rs, src/core/messages.rs, src/gm_comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm_comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-09-27
 ---
 
@@ -26,9 +26,9 @@ Hail, response, clear, and show-on-screen use correlated commands. Their existin
 
 ## Server path
 
-`src/recipients.rs` resolves script Comms and addressed actions from authored
+`crates/phoenix-simulation/src/recipients.rs` resolves script Comms and addressed actions from authored
 ship slots, live factions, all player ships and current Objective-instance
-members. `src/world/script/recipient_refs.rs` checks literal names at Workshop
+members. `crates/phoenix-simulation/src/world/script/recipient_refs.rs` checks literal names at Workshop
 Save; computed selectors are checked at execution. Empty or refused selections
 appear in Workshop Test trace and `gui/gm-recipient-diagnostics.js`. The Comms
 adapter evaluates one root and binds a separate ordinary private thread to each
@@ -43,7 +43,7 @@ actual host transition and wire delivery across ordinary and opposed schedules.
 
 Authored titles, bodies, speaker names, and responses are string ids resolved through `assets/strings/strings.csv`. The bounded literal transmission added in #1317 carries `literal_body: true`; `gui/strings.js` preserves its exact body and subject even when they match a String Table id. The renderer still uses text content.
 
-`src/gm_comms.rs` resolves scenario-authored routes to existing hailable identities and live Fleet ships. `gui/gm-comms-panel.js` captures sender, recipients, route, and content before its optional shared confirmation seam; canonical GM results retain the exact intent and operator attribution. The `gm_comms` Host Channel stays raw until that panel renders display fields. Authoring examples live in `docs/gm-comms-authoring.md`.
+`crates/phoenix-simulation/src/gm_comms.rs` resolves scenario-authored routes to existing hailable identities and live Fleet ships. `gui/gm-comms-panel.js` captures sender, recipients, route, and content before its optional shared confirmation seam; canonical GM results retain the exact intent and operator attribution. The `gm_comms` Host Channel stays raw until that panel renders display fields. Authoring examples live in `docs/gm-comms-authoring.md`.
 
 A routed inbox message belongs to one immutable `ShipKey`; one multi-recipient send creates one ordinary thread per selected ship. Blackboard publication, client Comms state, Backfill decisions, response admission, clear, and viewscreen selection all respect that audience. Queued scripted hails and subsequent `ScriptedDialogue` nodes carry it through snapshot restoration and continuation. Legacy messages with no audience remain fleet-visible.
 

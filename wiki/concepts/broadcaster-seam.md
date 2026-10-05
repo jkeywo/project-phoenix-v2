@@ -2,7 +2,7 @@
 title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, networking, audience, cadence, delivery-class, snapshot, reliable]
-sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/console/weapons/server.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/lobby/server.rs, src/debug_overlay.rs]
+sources: [crates/phoenix-simulation/src/core/broadcast/, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/debug_overlay.rs]
 updated: 2026-09-08
 ---
 
@@ -41,13 +41,13 @@ with typed owners they follow those owners without reordering one another.
 
 | Producer | Authoritative output | Audience/cadence | Home |
 |---|---|---|---|
-| `sim_state_broadcaster` | `SimState` and hull snapshots | all, 10 Hz | `src/server_app/broadcast.rs` |
-| `weapons_update_broadcaster` | Tactical weapons state | weapons holder, 10 Hz | `src/console/weapons/blackboard.rs` |
-| `power_state_broadcaster` | reactor/power state | holder of `power-reactor`, 10 Hz | `src/ship/power.rs` |
-| `repair_state_broadcaster` | repair state | holder of `repair`, 10 Hz | `src/console/repair/server.rs` |
-| `shields_state_broadcaster` | shield facings and frequency | holder of the authored `shields` System kind, 10 Hz | `src/ship/shields.rs` |
-| `modifier_events_broadcaster` | modifier add/remove edges | all, on event | `src/server_app/broadcast_publish.rs` |
-| `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target and class already carried by each entry | `src/server_app/broadcast_publish.rs` |
+| `sim_state_broadcaster` | `SimState` and hull snapshots | all, 10 Hz | `crates/phoenix-simulation/src/server_app/broadcast.rs` |
+| `weapons_update_broadcaster` | Tactical weapons state | weapons holder, 10 Hz | `crates/phoenix-simulation/src/console/weapons/blackboard.rs` |
+| `power_state_broadcaster` | reactor/power state | holder of `power-reactor`, 10 Hz | `crates/phoenix-simulation/src/ship/power.rs` |
+| `repair_state_broadcaster` | repair state | holder of `repair`, 10 Hz | `crates/phoenix-simulation/src/console/repair/server.rs` |
+| `shields_state_broadcaster` | shield facings and frequency | holder of the authored `shields` System kind, 10 Hz | `crates/phoenix-simulation/src/ship/shields.rs` |
+| `modifier_events_broadcaster` | modifier add/remove edges | all, on event | `crates/phoenix-simulation/src/server_app/broadcast_publish.rs` |
+| `sim_outbox_broadcaster` | arbitrary-target `SimOutbox` entries | target and class already carried by each entry | `crates/phoenix-simulation/src/server_app/broadcast_publish.rs` |
 
 The lobby deliberately does **not** route its outbox through the phase-gated
 generic broadcaster. `LobbyOutboxPlugin` drains `LobbyOutbox` directly in
@@ -70,7 +70,7 @@ the class at the Rust-to-JavaScript boundary.
 
 ## Stable-keyed replication lifecycle
 
-`src/core/broadcast/lifecycle.rs` lets each replication owner register a
+`crates/phoenix-simulation/src/core/broadcast/lifecycle.rs` lets each replication owner register a
 `ReplicationLifecycleAdapter` under a stable semantic key with a reset callback,
 a reconnect projection callback, or both. The registry is a `BTreeMap`, so
 reset and reconnect runners invoke owners in lexical key order regardless of
@@ -80,8 +80,8 @@ reconnecting token as Snapshot traffic and knows no message variant.
 
 The complete registry has five owners in lexical order:
 
-- `LastBroadcastBlackboards`, its live diff publisher, reset, and reconnect projector live together in `src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient `LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by `SystemId`, applies the same Repair visibility policy as live publication, and does not mutate either cache.
-- `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` live beside `sim_state_broadcaster` in `src/server_app/broadcast.rs` under the reset-only `entity-state` key. `Welcome` already carries current world state, so this owner has no reconnect projector. Its explicit UUID-pruning function is called only by asteroid/runtime despawn paths; unrelated caches have no synthetic pruning hook.
+- `LastBroadcastBlackboards`, its live diff publisher, reset, and reconnect projector live together in `crates/phoenix-simulation/src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient `LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by `SystemId`, applies the same Repair visibility policy as live publication, and does not mutate either cache.
+- `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` live beside `sim_state_broadcaster` in `crates/phoenix-simulation/src/server_app/broadcast.rs` under the reset-only `entity-state` key. `Welcome` already carries current world state, so this owner has no reconnect projector. Its explicit UUID-pruning function is called only by asteroid/runtime despawn paths; unrelated caches have no synthetic pruning hook.
 - `RepairPlugin` registers token-keyed `LastBroadcastHull` beside `push_hull_updates` under the stable `hull` key. Reconnect uses the same `HullVisibility` projection as live publication, including on-site detail, without writing the cache or perturbing another recipient's next delta.
 - `ShipShieldsPlugin` registers a cache-free reconnect projector under `shields`. It reuses the periodic publisher's current-message builder and `HoldingSystemKind("shields")` audience, so only the holder of the Station that owns the authored Shields capability receives the snapshot even when a hull chooses another instance id.
 - `WeaponsPlugin` registers both publisher caches, `LastWeaponsUpdate` and `WeaponsUpdateFirstTick`, beside `weapons_update_broadcaster` under the stable `weapons` key. Each run resets the last-value cache and rearms the first-projection latch. Reconnect uses the same authored Weapons Station ownership rule and current message builder as live publication, returns nothing for a non-holder, and neither reads nor mutates either cache.
@@ -92,7 +92,7 @@ The complete registry has five owners in lexical order:
 2. Build a registered producer or use `SimOutbox` for arbitrary per-message targets.
 3. Select the narrowest typed `Audience`, suitable `Cadence`, and explicit delivery class at the owning seam.
 4. Register reset/reconnect behavior beside any replicated-state owner through a stable lifecycle key.
-5. Register the broadcaster from the owning plugin or `src/server_app/registration.rs`.
+5. Register the broadcaster from the owning plugin or `crates/phoenix-simulation/src/server_app/registration.rs`.
 6. Add an observable routing/cadence test; do not write directly to the bridge from the domain system.
 
 ## Related

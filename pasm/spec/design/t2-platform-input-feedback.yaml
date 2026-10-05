@@ -130,9 +130,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [src/save_slots.rs, src/save_slots_lifecycle.rs, src/startup_restore.rs, src/save_slots_store.rs, src/server/bridge.rs]
+      paths: [crates/phoenix-simulation/src/save_slots.rs, crates/phoenix-simulation/src/save_slots_lifecycle.rs, crates/phoenix-simulation/src/startup_restore.rs, crates/phoenix-simulation/src/save_slots_store.rs, src/server/bridge.rs]
       symbols: [SaveSchedule, RestoreOutcome, RestoreFailure]
-      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js, src/save_slots_tests.rs, src/save_slots_lifecycle_tests.rs, src/startup_restore_tests.rs, src/save_slots_store_tests.rs, src/server/bridge_tests.rs]
+      tests: [tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js, crates/phoenix-simulation/src/save_slots_tests.rs, crates/phoenix-simulation/src/save_slots_lifecycle_tests.rs, crates/phoenix-simulation/src/startup_restore_tests.rs, crates/phoenix-simulation/src/save_slots_store_tests.rs, src/server/bridge_tests.rs]
 
   - decision: t2-existing-editor-polish-boundary
     core:

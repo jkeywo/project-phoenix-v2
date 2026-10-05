@@ -5,7 +5,7 @@
 //   → [ 0.3421, 0.3567, 0.3810 ]
 //
 // The farthest LOD level a model declares is a procedural sphere (see the
-// `[[lod]] shape = "sphere"` block in the rig sidecar, src/entities/model_rig.rs).
+// `[[lod]] shape = "sphere"` block in the rig sidecar, crates/phoenix-simulation/src/entities/model_rig.rs).
 // A sphere the colour of the hull reads, at 400+ units, as "a ship-sized grey
 // thing over there" rather than a default-tinted blob — so this collapses the
 // base-colour texture to one representative colour the sidecar can carry.

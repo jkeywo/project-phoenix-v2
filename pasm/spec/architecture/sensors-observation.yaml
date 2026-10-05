@@ -14,6 +14,6 @@ entities:
       writers: [gm-t4-sensor-report-policy]
     implementation:
       status: declared
-      paths: [src/gm_information/reports.rs, src/entities/spawner.rs, src/server_app/registration.rs]
+      paths: [crates/phoenix-simulation/src/gm_information/reports.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [SensorsObservationConfig, SensorsObservationSpawn]
-      tests: ["cargo test --features headless --test authoritative_state_enumeration", "cargo test --features headless --test gm_contact report_policy", src/gm_information/reports_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: ["cargo test --features headless --test authoritative_state_enumeration", "cargo test --features headless --test gm_contact report_policy", crates/phoenix-simulation/src/gm_information/reports_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

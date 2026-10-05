@@ -13,9 +13,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/power.rs, src/ship/config.rs, src/modifiers/power_system.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/config.rs, crates/phoenix-simulation/src/modifiers/power_system.rs]
       symbols: [handle_power_messages, tick_power_system, authored_power_group_seed, from_authored_groups, AuthoredPowerGroup, floor_for, is_group_cold, PowerState, capture_continuation, restore_continuation]
-      tests: [cargo test, tests/smoke/power-console.spec.js, src/modifiers/power_system_tests.rs]
+      tests: [cargo test, tests/smoke/power-console.spec.js, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
 
   - state: ship-power-state
     core:
@@ -30,9 +30,9 @@ entities:
       replicas: [ship-system-blackboards-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
-      paths: [src/ship/power.rs, src/core/messages.rs, src/modifiers/power_system.rs, src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/modifiers/power_system.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
       symbols: [PowerBlackboard, PowerState, capture_continuation, restore_continuation]
-      tests: [cargo test --features headless --test snapshot_resume power_continuation_, src/core/messages_view_mode_tests.rs, src/modifiers/power_system_tests.rs]
+      tests: [cargo test --features headless --test snapshot_resume power_continuation_, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
 
   - state: power-brownout-coordination-state
     core:
@@ -47,10 +47,10 @@ entities:
       derived_from: [ship-power-state]
     implementation:
       status: observed
-      paths: [src/ship/power.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [PowerBrownoutState, PowerBrownoutContinuationState, tick_power_brownout_advisory]
 
-      tests: [src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - component: ship-modifier-cache
     core:
       status: implemented
@@ -66,9 +66,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/modifiers/cache.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/cache.rs, crates/phoenix-model/src/messages.rs]
       symbols: [ShipModifiers]
-      tests: [cargo test, src/modifiers/cache_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/modifiers/cache_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: authored-power-ai-rule-evaluator
     core:
@@ -90,9 +90,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/ai/policy.rs, src/modifiers/power_system.rs]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ai/policy.rs, crates/phoenix-simulation/src/modifiers/power_system.rs]
       symbols: [ai_power_allocation, PowerAiPolicy, AiPolicy, resolve_channel, seed_power_facts, POWER_SET_ALLOCATION_VERB, authored_power_group_seed, plan_allocation, AllocationBid, bid_guarantee, is_group_cold, max_commanded_total]
-      tests: [cargo test, src/modifiers/power_system_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/modifiers/power_system_tests.rs]
 
   - state: ship-modifier-state
     core:
@@ -107,10 +107,10 @@ entities:
       replicas: [simulation-state-replica]
     implementation:
       status: declared
-      paths: [src/modifiers/cache.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/cache.rs, crates/phoenix-model/src/messages.rs]
       symbols: [ShipModifiers]
 
-      tests: [src/modifiers/cache_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/modifiers/cache_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: ship-modifier-translator
     core:
       status: implemented
@@ -132,9 +132,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/modifiers/coordination.rs, src/regions/server.rs, src/ship/shields.rs, src/weapons/shield.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/coordination.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/weapons/shield.rs]
       symbols: [apply_power_modifiers, apply_region_effects, apply_impulse_to, tick_shields, tick_with_regen_scale]
-      tests: [cargo test, src/modifiers/coordination_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/modifiers/coordination_tests.rs]
 
   - component: region-containment-service
     core:
@@ -150,9 +150,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/regions/server.rs, src/regions/shape.rs]
+      paths: [crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/regions/shape.rs]
       symbols: [RegionPlugin, RegionShape]
-      tests: [cargo test, src/regions/shape_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/regions/shape_tests.rs]
 
   - state: region-membership-state
     core:
@@ -166,10 +166,10 @@ entities:
       writers: [region-containment-service]
     implementation:
       status: declared
-      paths: [src/regions/server.rs, src/regions/effects.rs]
+      paths: [crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/regions/effects.rs]
       symbols: [RegionEffectKind]
 
-      tests: [src/regions/effects_tests.rs]
+      tests: [crates/phoenix-simulation/src/regions/effects_tests.rs]
   - component: region-effect-resolution
     core:
       status: implemented
@@ -184,6 +184,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/regions/effects.rs, src/regions/server.rs, src/modifiers/coordination.rs]
+      paths: [crates/phoenix-simulation/src/regions/effects.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/modifiers/coordination.rs]
       symbols: [RegionEffectKind]
-      tests: [cargo test, src/regions/effects_tests.rs, src/modifiers/coordination_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/regions/effects_tests.rs, crates/phoenix-simulation/src/modifiers/coordination_tests.rs]

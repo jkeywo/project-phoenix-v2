@@ -7,7 +7,7 @@ entities:
       summary: "Issues #1523 and #1528: named instances of one Objective carry independent progress and lifecycle. TOML and Rhai address the same typed instance commands. Recipient selectors resolve live authored ship-slot, faction or all-player membership with explicit-slot > faction > all specificity; duplicate explicit-slot matches reject before a ship joins, and other equal matches refuse atomically. A refused live faction edit restores the ship's last accepted faction in the Membership phase before gameplay Input. Completion captures members once, while later joins inherit terminal state without replaying effects or credit. Issue #1542 adds equal-GM named-instance and explicit all-instance controls over the same pure reducer; bulk mutations preview in sorted key order and commit atomically, with typed scope retained in canonical grants and attributed results."
       rationale:
         - "[ai] Issue #1528 completion: crew snapshots expose optional instance progress, retaining the frozen value after departure. Literal script selectors are checked across composed worlds with the runtime specificity rule; computed selectors defer to atomic activation. Refused faction changes enter the existing recipient diagnostics and Workshop trace."
-        - "[ai] Issue #1559: script and GM named-instance commands obtain current fleet membership, authored slot names and known factions from the shared RecipientSources preparation in src/recipients.rs. The pure Objective reducers still own precedence, atomic refusal, frozen views and completion credit; preparation does not change reconciliation or its finalized scheduling edges."
+        - "[ai] Issue #1559: script and GM named-instance commands obtain current fleet membership, authored slot names and known factions from the shared RecipientSources preparation in crates/phoenix-simulation/src/recipients.rs. The pure Objective reducers still own precedence, atomic refusal, frozen views and completion credit; preparation does not change reconciliation or its finalized scheduling edges."
     architecture:
       kind: authoritative-state-machine
       authority: authoritative
@@ -15,9 +15,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/objective_instances.rs, src/objective_instances/control.rs, src/gm_objective.rs, src/gm_action.rs, gui/gm-objective-panel.js, src/ship_slots.rs, src/server_app/world_setup.rs, src/world/config.rs, src/world/dispatch.rs, src/world/script/effects.rs, src/world/script/schedule.rs, src/narrative.rs, src/snapshot.rs, src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/objective_instances.rs, crates/phoenix-simulation/src/objective_instances/control.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/ship_slots.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/script/schedule.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId, ObjectiveInstanceScope, apply_instance_command, apply_instance_control]
-      tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js, src/objective_instances_tests.rs, src/gm_objective_tests.rs, src/gm_action_tests.rs, src/ship_slots_tests.rs, src/server_app/world_setup_game_start_identity_tests.rs, src/world/script/effects_tests.rs, src/world/script/schedule_tests.rs, src/narrative_tests.rs]
+      tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js, crates/phoenix-simulation/src/objective_instances_tests.rs, crates/phoenix-simulation/src/gm_objective_tests.rs, crates/phoenix-simulation/src/gm_action_tests.rs, crates/phoenix-simulation/src/ship_slots_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs]
 
   - state: objective-instance-state
     core:
@@ -31,10 +31,10 @@ entities:
       writers: [objective-instance-contract]
     implementation:
       status: declared
-      paths: [src/objective_instances.rs, src/ship_slots.rs, src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/objective_instances.rs, crates/phoenix-simulation/src/ship_slots.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [ObjectiveInstanceRecord, ObjectiveInstanceManager, AuthoredShipSlotId]
 
-      tests: [src/objective_instances_tests.rs, src/ship_slots_tests.rs]
+      tests: [crates/phoenix-simulation/src/objective_instances_tests.rs, crates/phoenix-simulation/src/ship_slots_tests.rs]
   - component: objective-directive-contract
     core:
       status: implemented
@@ -52,9 +52,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/objectives.rs, src/ai/core.rs]
+      paths: [crates/phoenix-simulation/src/objectives/directive.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/ai/core.rs]
       symbols: [DirectiveKind, AuthoredDirective, DirectiveError, interpret, authored_doctrine_directive, authored_world_directive, directive_relevance]
-      tests: [cargo test doctrine_and_world_adapters --lib, cargo test nonempty_text_lists_reject_blank_elements --lib, cargo test unknown_directive_fields --lib, cargo test add_objective_rejects_an_unknown_directive_field --lib, src/objectives/directive_tests.rs, src/world/script/effects_tests.rs, src/objectives_tests.rs]
+      tests: [cargo test doctrine_and_world_adapters --lib, cargo test nonempty_text_lists_reject_blank_elements --lib, cargo test unknown_directive_fields --lib, cargo test add_objective_rejects_an_unknown_directive_field --lib, crates/phoenix-simulation/src/objectives/directive_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - state: objective-directive-state
     core:
@@ -68,10 +68,10 @@ entities:
       writers: [objective-directive-contract]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-model/src/messages.rs]
       symbols: [AiDirective, ScoredObjective]
 
-      tests: [src/objectives_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: objective-doctrine-score-policy
     core:
       status: implemented
@@ -92,9 +92,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/ship/viewscreen.rs, src/ai/server.rs, src/server_app/broadcast.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/ship/viewscreen.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/server_app/broadcast.rs]
       symbols: [UtilityConfig, WorldConditions, attacked_recently, last_landed_hit_secs]
-      tests: [cargo test, src/objectives_tests.rs, src/ship/viewscreen_tests.rs, src/server_app/broadcast_replication_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/ship/viewscreen_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs]
 
   - component: objective-target-name-resolver
     core:
@@ -110,9 +110,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ai/core.rs, src/world/server.rs, src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [resolve_objective_target]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - state: objective-target-resolution-state
     core:
@@ -126,7 +126,7 @@ entities:
       derived_from: [objective-directive-state, world-name-binding-state]
     implementation:
       status: declared
-      paths: [src/ai/core.rs, src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [plan_helm_travel, resolve_objective_target]
 
   - component: objective-outcome-controller
@@ -143,9 +143,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [ObjectiveManager]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: objective-authoring-actions
     core:
@@ -162,7 +162,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/config.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [TriggerAction, tick_trigger_pipeline]
       tests: [cargo test]
 
@@ -180,9 +180,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/world/server.rs, src/gm_objective.rs, src/snapshot.rs, src/sim_digest.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
-      tests: [cargo test, src/objectives_tests.rs, src/gm_objective_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/gm_objective_tests.rs]
 
   - state: objective-runtime-state
     core:
@@ -196,9 +196,9 @@ entities:
       writers: [objective-manager, objective-authoring-actions]
     implementation:
       status: declared
-      paths: [src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs]
       symbols: [ObjectiveManager]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - state: scored-objective-pool-state
     core:
@@ -212,9 +212,9 @@ entities:
       writers: [objective-manager]
     implementation:
       status: declared
-      paths: [src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs]
       symbols: [WorldConditions, UtilityConfig]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: objective-ai-projection
     core:
@@ -229,9 +229,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs, src/console/comms/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
+      paths: [crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console_ai/server.rs]
       symbols: [score_doctrine_pool, plan_helm_travel, directive_relevance, top_operate_directive, operate_comms_ai]
-      tests: [cargo test, src/objectives_tests.rs, src/console/repair/external_server_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs]
 
   - component: captain-objective-priority
     core:
@@ -248,7 +248,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, gui/action-map.js]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, gui/action-map.js]
       symbols: [handle_set_objective_priority]
       tests: [cargo test]
 
@@ -264,9 +264,9 @@ entities:
       writers: [captain-objective-priority]
     implementation:
       status: declared
-      paths: [src/server_app/components.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
-      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
   - component: objective-player-projection
     core:
@@ -284,7 +284,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/console/comms/server.rs, gui/components/ph-objective-list.js]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, gui/components/ph-objective-list.js]
       symbols: [publish_captain_blackboard, publish_comms_blackboard]
       tests: [cargo test, npx vitest run]
 
@@ -303,9 +303,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/server_app/components.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/server_app/components.rs]
       symbols: [handle_set_objective_priority, CaptainPriorityBoost]
-      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
   - state: scoped-objective-priority-state
     core:
@@ -319,9 +319,9 @@ entities:
       writers: [scoped-objective-priority]
     implementation:
       status: declared
-      paths: [src/server_app/components.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
-      tests: [cargo test, src/server_app/components_interior_write_access_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
 
   - component: objective-visibility-policy
     core:
@@ -336,9 +336,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/console/captain/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [is_visible_objective, publish_captain_blackboard, publish_comms_blackboard]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: objective-authoring-validation
     core:
@@ -354,7 +354,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/validate.rs, src/headless/app.rs, src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/world/validate.rs, src/headless/app.rs, crates/phoenix-simulation/src/world/server.rs]
       symbols: [validate_objectives, validate_composition]
       tests: [cargo test]
 
@@ -372,9 +372,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [apply_world_layer_changes]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: comms-objective-ai
     core:
@@ -389,9 +389,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [operate_comms_ai, directive_relevance]
-      tests: [cargo test, src/objectives_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
   - component: objective-comms-consequence-router
     core:
@@ -408,7 +408,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/world/config.rs, src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs]
       tests: [cargo test]
 
   - component: objective-player-ai-divergence-contract
@@ -425,5 +425,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/console/comms/server.rs, src/ai/core.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
-      tests: [cargo test, src/console/repair/external_server_tests.rs]
+      paths: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/ai/core.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console_ai/server.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console/repair/external_server_tests.rs]

@@ -13,9 +13,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/damage.rs, src/server_app/collision.rs, src/ship_plugin.rs]
+      paths: [crates/phoenix-simulation/src/ship/damage.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/ship_plugin.rs]
       symbols: [DamageTier, SystemHull]
-      tests: [cargo test, src/ship/damage_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
 
   - component: damage-source-router
     core:
@@ -31,8 +31,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app/collision.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/ship/damage.rs]
-      tests: [cargo test, src/ship/damage_tests.rs]
+      paths: [crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/ship/damage.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
 
   - component: repair-team-cycle-policy
     core:
@@ -52,7 +52,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/modifiers/repair_teams.rs, src/console/repair/server.rs]
+      paths: [crates/phoenix-simulation/src/modifiers/repair_teams.rs, crates/phoenix-simulation/src/console/repair/server.rs]
       symbols: [RepairTeams, tick_repair_teams]
       tests: [cargo test]
 
@@ -70,8 +70,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/damage.rs, src/console/weapons/mod.rs, src/server_app/collision.rs]
-      tests: [cargo test, src/ship/damage_tests.rs]
+      paths: [crates/phoenix-simulation/src/ship/damage.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/server_app/collision.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/ship/damage_tests.rs]
 
   - runtime: host-browser-runtime
     core:
@@ -241,15 +241,15 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/ship/damage.rs
-        - src/entities/spawner.rs
-        - src/ship_plugin.rs
+        - crates/phoenix-simulation/src/ship/damage.rs
+        - crates/phoenix-simulation/src/entities/spawner.rs
+        - crates/phoenix-simulation/src/ship_plugin.rs
       symbols:
         - SystemHull
         - DamageTier
         - sync_console_damage_tiers
       tests:
-        - src/ship/damage_tests.rs
+        - crates/phoenix-simulation/src/ship/damage_tests.rs
         - cargo test
 
   - state: authoritative-damage-state
@@ -271,14 +271,14 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/ship/damage.rs
-        - src/console/repair/server.rs
-        - src/core/messages.rs
+        - crates/phoenix-simulation/src/ship/damage.rs
+        - crates/phoenix-simulation/src/console/repair/server.rs
+        - crates/phoenix-model/src/messages.rs
       symbols:
         - SystemHull
         - RepairBlackboard
 
-      tests: [src/ship/damage_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/damage_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: system-damage-tier-memory-state
     core:
       status: implemented
@@ -292,10 +292,10 @@ entities:
       derived_from: [authoritative-damage-state]
     implementation:
       status: observed
-      paths: [src/ship/components.rs, src/ship/damage_sync.rs, src/snapshot.rs, src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/components.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
       symbols: [LastSystemTiers, LastSystemTiersState, detect_damage_tier_crossings]
 
-      tests: [src/ship/components_tests.rs, src/ship/damage_sync_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/ship/damage_sync_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - component: host-command-admission
     core:
       status: implemented
@@ -317,7 +317,7 @@ entities:
       depends_on:
         - system-command-admission-policy
         - admitted-command-router
-        # src/command_admission/mod.rs declares `pub mod debug_route` — the
+        # crates/phoenix-simulation/src/command_admission/mod.rs declares `pub mod debug_route` — the
         # phone client's Debug/Cheat gate (issue #940), which the seam's
         # policy consults for the one command ordinary station tenure cannot
         # authorise.
@@ -327,9 +327,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/command_admission/mod.rs
-        - src/command_admission/ai_emit.rs
-        - src/command_admission/log.rs
+        - crates/phoenix-simulation/src/command_admission/mod.rs
+        - crates/phoenix-simulation/src/command_admission/ai_emit.rs
+        - crates/phoenix-simulation/src/command_admission/log.rs
       symbols:
         - AdmissionPlugin
         - AdmissionSet
@@ -348,9 +348,9 @@ entities:
       messages:
         - ControlSystem
       tests:
-        - src/command_admission/tests.rs
-        - src/command_admission/ai_emit_tests.rs
-        - src/command_admission/log_tests.rs
+        - crates/phoenix-simulation/src/command_admission/tests.rs
+        - crates/phoenix-simulation/src/command_admission/ai_emit_tests.rs
+        - crates/phoenix-simulation/src/command_admission/log_tests.rs
         - cargo test
     evidence:
       - kind: test
@@ -422,8 +422,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/console/repair/dispatch.rs
-        - src/console/repair/server.rs
+        - crates/phoenix-simulation/src/console/repair/dispatch.rs
+        - crates/phoenix-simulation/src/console/repair/server.rs
       symbols:
         - handle_dispatch_repair_team
         - handle_recall_repair_team
@@ -442,13 +442,13 @@ entities:
         - OrderedCoordinationPopup
         - CoordinationPopup
       tests:
-        - src/console/repair/dispatch_tests.rs
+        - crates/phoenix-simulation/src/console/repair/dispatch_tests.rs
         - cargo test
     evidence:
       - kind: test
         reference: non_repair_sender_is_ignored
         summary: >-
-          src/console/repair/dispatch.rs names the admission seam with a
+          crates/phoenix-simulation/src/console/repair/dispatch.rs names the admission seam with a
           top-level `use crate::command_admission::AdmissionSet;` and pins the
           router `.after(AdmissionSet)`, so it can only ever read commands that
           admission already validated.
@@ -542,7 +542,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: observed
-      # `src/console/repair/server.rs` is genuinely part of this entity's
+      # `crates/phoenix-simulation/src/console/repair/server.rs` is genuinely part of this entity's
       # surface — `publish_repair_blackboard` constructs the unprojected
       # blackboard, `queue_depth` included. It is deliberately NOT listed: five
       # other entities already claim that file (repair-team-cycle-policy,
@@ -552,7 +552,7 @@ entities:
       # attribution, only obscure the ownership. The projection seam this entity
       # is actually observed at is `visibility.rs`, which owns the decision.
       paths:
-        - src/console/repair/visibility.rs
+        - crates/phoenix-simulation/src/console/repair/visibility.rs
       symbols:
         - HullVisibility
         - LastBroadcastHull
@@ -564,11 +564,11 @@ entities:
         - may_receive_repair_blackboard
         - project_repair_blackboard
       tests:
-        - src/console/repair/visibility_tests.rs
+        - crates/phoenix-simulation/src/console/repair/visibility_tests.rs
         - cargo test
     evidence:
       - kind: code
-        reference: src/console/repair/visibility.rs
+        reference: crates/phoenix-simulation/src/console/repair/visibility.rs
         summary: >-
           Host-only module. Names the authoritative damage store with a
           line-start `use crate::damage::SystemHull;` and the repair-team state
@@ -668,8 +668,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/console/repair/server.rs
-        - src/modifiers/repair_teams.rs
+        - crates/phoenix-simulation/src/console/repair/server.rs
+        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
       symbols:
         - ShipRepairTeams
         - RepairTeams
@@ -695,15 +695,15 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/modifiers/repair_teams.rs
-        - src/console/repair/server.rs
-        - src/core/messages.rs
+        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
+        - crates/phoenix-simulation/src/console/repair/server.rs
+        - crates/phoenix-model/src/messages.rs
       symbols:
         - TeamSlot
         - RepairTeams
         - on_site_systems
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: engineering-aggregate-hull-state
     core:
       status: implemented
@@ -916,7 +916,7 @@ entities:
     implementation:
       status: suspected
       paths:
-        - src/modifiers/repair_teams.rs
+        - crates/phoenix-simulation/src/modifiers/repair_teams.rs
         - gui/console-state.js
       symbols:
         - on_site_systems
@@ -989,14 +989,14 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
       messages:
         - DispatchRepairTeam
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
 
   - message: recall-repair-team-command
@@ -1026,17 +1026,17 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
-        - src/console/repair/dispatch.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
+        - crates/phoenix-simulation/src/console/repair/dispatch.rs
         - gui/repair-dispatch.js
         - gui/action-map.js
       messages:
         - RecallRepairTeam
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
-        - src/console/repair/dispatch_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-simulation/src/console/repair/dispatch_tests.rs
         - tests/client/repair-dispatch.test.js
         - tests/client/action-map.test.js
 
@@ -1085,16 +1085,16 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/core/messages.rs
-        - src/core/codec.rs
+        - crates/phoenix-model/src/messages.rs
+        - crates/phoenix-simulation/src/core/codec.rs
         - gui/action-map.js
         - gui/repair-dispatch.js
       messages:
         - SetRepairPriority
         - SetRepairTargetPriority
       tests:
-        - src/core/messages_view_mode_tests.rs
-        - src/core/codec_mesh_frame_tests.rs
+        - crates/phoenix-model/src/messages_view_mode_tests.rs
+        - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - tests/client/action-map.test.js
         - tests/client/repair-dispatch.test.js
 

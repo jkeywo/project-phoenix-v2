@@ -32,9 +32,9 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, server.html, gui/scenario-arbiter.js, gui/lobby-state.js]
+      paths: [crates/phoenix-model/src/messages.rs, server.html, gui/scenario-arbiter.js, gui/lobby-state.js]
       symbols: [ScenarioCatalogPayload, ScenarioCatalogWire, ActivePackWire]
-      tests: [npx vitest run, src/core/messages_view_mode_tests.rs]
+      tests: [npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - state: scenario-ship-catalog-state
     core:
@@ -49,9 +49,9 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/world/manifest.rs, src/world/config.rs, src/core/messages.rs, src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
+      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html]
       symbols: [ScenarioCatalog, build_catalog, build_merged_catalog, ScenarioCatalogPayload, catalogue_snapshot, WorldConfig]
-      tests: [cargo test, src/world/manifest_tests.rs, src/core/messages_view_mode_tests.rs, src/delivery/payload_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/payload_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: scenario-ship-selection-arbiter
     core:
@@ -71,9 +71,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/scenario-arbiter.js, server.html, src/world/manifest.rs, src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs]
+      paths: [gui/scenario-arbiter.js, server.html, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs]
       symbols: [build_catalog, ScenarioCatalog]
-      tests: [npx vitest run, cargo test, src/world/manifest_tests.rs, src/lobby/scenario_arbiter_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [npx vitest run, cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter_tests.rs, src/native_host/world_load_tests.rs]
 
   - message: select-scenario-command
     core:
@@ -90,9 +90,9 @@ entities:
       payload: SelectScenario
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, server.html]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, gui/action-map.js, server.html]
       messages: [SelectScenario]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - message: select-player-ship-command
     core:
@@ -109,9 +109,9 @@ entities:
       payload: SelectPlayerShip
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, server.html]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, gui/action-map.js, server.html]
       messages: [SelectPlayerShip]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - state: world-load-request-state
     core:
@@ -143,10 +143,10 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/handler.rs, src/lobby/server.rs, src/server_app/components.rs, src/server/asset_preload.rs]
+      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-presentation/src/server/asset_preload.rs]
       symbols: [GameOverReason]
       messages: [GameStarted, GameOver, LoadingProgress, ReturnedToLobby]
-      tests: [cargo test, tests/client/lobby-state.test.js, src/lobby/server_tests.rs, src/server_app/components_interior_write_access_tests.rs, src/server/asset_preload_tests.rs]
+      tests: [cargo test, tests/client/lobby-state.test.js, crates/phoenix-simulation/src/lobby/server_tests.rs, crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-presentation/src/server/asset_preload_tests.rs]
 
   - state: game-phase-state
     core:
@@ -161,10 +161,10 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/server_app/registration.rs]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/server_app/registration.rs]
       symbols: [GamePhase]
 
-      tests: [src/core/messages_view_mode_tests.rs, src/server_app/registration_physics_boundary_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
   - state: game-over-reason-state
     core:
       status: implemented
@@ -178,10 +178,10 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/server_app/components.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [GameOverReason]
 
-      tests: [src/server_app/components_interior_write_access_tests.rs]
+      tests: [crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs]
   - component: round-return-controller
     core:
       status: implemented
@@ -196,9 +196,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/handler.rs, src/lobby/session.rs, client.html, server.html]
+      paths: [crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/lobby/session.rs, client.html, server.html]
       messages: [ReturnToLobby, ReturnedToLobby, StationAssigned]
-      tests: [cargo test, npx vitest run, src/lobby/session_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-simulation/src/lobby/session_tests.rs]
 
   - component: game-start-entity-lifecycle
     core:
@@ -214,8 +214,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app/world_setup.rs, src/world/server.rs, src/entities/spawner.rs]
-      tests: [cargo test, src/server_app/world_setup_game_start_identity_tests.rs]
+      paths: [crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/entities/spawner.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]
 
   - component: entity-destruction-lifecycle
     core:
@@ -233,8 +233,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app/broadcast.rs, src/world/server.rs, src/console/weapons/mod.rs, src/regions/server.rs]
-      tests: [cargo test, src/server_app/broadcast_replication_tests.rs]
+      paths: [crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs]
 
   - component: terminal-round-outcome-router
     core:
@@ -254,6 +254,6 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [src/server_app/broadcast_publish.rs, src/server_app/registration.rs, src/server/viewscreen_border.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [on_game_over_enter, push_game_over_hud_state]
-      tests: [cargo test, tests/native_host_lobby.rs, tests/snapshot_resume.rs, src/server_app/broadcast_publish_lifecycle_tests.rs, src/server_app/registration_physics_boundary_tests.rs, src/server/viewscreen_border_tests.rs]
+      tests: [cargo test, tests/native_host_lobby.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]

@@ -1,0 +1,41 @@
+pub mod boost;
+pub mod combat_activity;
+pub mod command_stance;
+pub mod components;
+pub mod config;
+pub mod continuation;
+pub mod control_source;
+pub mod coordination;
+pub mod coordination_systems;
+pub mod damage;
+pub mod damage_sync;
+pub mod eligibility;
+pub mod helm;
+pub mod helm_admission;
+pub mod helm_ai;
+pub mod helm_planner;
+pub mod impulse;
+pub mod impulse_boost_systems;
+pub mod intent_narration;
+pub mod intent_narration_systems;
+pub mod lateral_thrust;
+pub mod manual;
+pub mod physics;
+pub mod physics_systems;
+pub mod power;
+pub mod rating;
+pub mod rating_systems;
+pub mod sensors;
+pub mod shields;
+#[cfg(test)]
+mod star_rating_tests;
+
+#[cfg(test)]
+mod cruiser_rating_tests;
+pub mod state;
+pub mod system_registry;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_clock;
+#[cfg(test)]
+pub mod test_support;
+pub mod viewscreen;

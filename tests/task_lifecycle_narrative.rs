@@ -1,7 +1,7 @@
 //! The continuous-task lifecycle, end to end (issue #1341, PRD #1337).
 //!
-//! `src/core/task_lifecycle.rs` unit-tests the vocabulary, the key and the
-//! registry; `src/narrative.rs` unit-tests the emitter's four decisions against
+//! `crates/phoenix-simulation/src/core/task_lifecycle.rs` unit-tests the vocabulary, the key and the
+//! registry; `crates/phoenix-simulation/src/narrative.rs` unit-tests the emitter's four decisions against
 //! a bare app. Four claims need a whole seeded run of a real world, driven
 //! through the real admitted-command path:
 //!

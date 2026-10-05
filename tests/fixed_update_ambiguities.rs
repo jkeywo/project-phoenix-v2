@@ -174,7 +174,7 @@ fn membership_rollback_precedes_pre_input_lifecycle_and_admission() {
         .iter()
         .find(|node| {
             node.kind == "system"
-                && node.name == "project_phoenix::objective_instances::reconcile_memberships"
+                && node.name == "phoenix_simulation::objective_instances::reconcile_memberships"
         })
         .expect("membership rollback is installed");
     let mut reachable = std::collections::BTreeSet::new();
@@ -191,19 +191,19 @@ fn membership_rollback_precedes_pre_input_lifecycle_and_admission() {
         }
     }
     for name in [
-        "project_phoenix::ai::server::register_ai_tokens_on_spawn",
-        "project_phoenix::ai::server::unregister_on_despawn",
-        "project_phoenix::asteroids::lifecycle::check_destroyed_asteroids",
-        "project_phoenix::gm_puppet::prepare_station_puppet_fidelity",
-        "project_phoenix::gm_puppet::prune_removed_station_puppets",
-        "project_phoenix::lobby::crew_replication::replicate_local_crew_ratings",
-        "project_phoenix::lobby::server::drain_lobby_outbox",
-        "project_phoenix::server_app::broadcast_publish::broadcast_world_setup_on_start",
-        "project_phoenix::server_app::broadcast_publish::emit_phase_change_balance_events",
-        "project_phoenix::server_app::broadcast_publish::reconcile_runtime_entities",
-        "project_phoenix::server_app::broadcast_publish::refresh_caches_on_midgame_reconnect",
-        "project_phoenix::server_app::components::sim_processing_anchor",
-        "project_phoenix::command_admission::admit_system_commands",
+        "phoenix_simulation::ai::server::register_ai_tokens_on_spawn",
+        "phoenix_simulation::ai::server::unregister_on_despawn",
+        "phoenix_simulation::asteroids::lifecycle::check_destroyed_asteroids",
+        "phoenix_simulation::gm_puppet::prepare_station_puppet_fidelity",
+        "phoenix_simulation::gm_puppet::prune_removed_station_puppets",
+        "phoenix_simulation::lobby::crew_replication::replicate_local_crew_ratings",
+        "phoenix_simulation::lobby::server::drain_lobby_outbox",
+        "phoenix_simulation::server_app::broadcast_publish::broadcast_world_setup_on_start",
+        "phoenix_simulation::server_app::broadcast_publish::emit_phase_change_balance_events",
+        "phoenix_simulation::server_app::broadcast_publish::reconcile_runtime_entities",
+        "phoenix_simulation::server_app::broadcast_publish::refresh_caches_on_midgame_reconnect",
+        "phoenix_simulation::server_app::components::sim_processing_anchor",
+        "phoenix_simulation::command_admission::admit_system_commands",
     ] {
         let readers: Vec<_> = graph
             .nodes

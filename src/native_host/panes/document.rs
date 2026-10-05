@@ -303,7 +303,7 @@ pub fn fragment_encode(raw: &str) -> String {
 /// It resolves to nothing and is meant to: the pane's own socket stand-in
 /// answers `joined` to whatever it is handed, so this is a sentinel that gets
 /// the page onto its join route, not a code any service has heard of.
-pub const PANE_JOIN_CODE: &str = "PANESEAT";
+pub const PANE_JOIN_CODE: &str = "PANES";
 
 /// The URL a pane's view navigates to — **including its identity**.
 ///

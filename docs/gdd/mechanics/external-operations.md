@@ -102,4 +102,4 @@ it does not run a second progress simulation.
 - [World files architecture](../../../pasm/spec/architecture/world-files.yaml)
 - [Falling Skyway world](../../../assets/worlds/falling_skyway.toml)
 - `src/tractor/`, `src/dock/`, `src/umbilical/`
-- `src/console/repair/external_server.rs`
+- `crates/phoenix-simulation/src/console/repair/external_server.rs`

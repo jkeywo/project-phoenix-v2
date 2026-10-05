@@ -2,7 +2,7 @@
 #
 # overlap-b carries the SAME `assets/worlds/shared_arena.toml` path as overlap-a.
 # Validated with overlap-a already active, it accepts with an
-# `overlapping-pack-path` warning — see src/world/mod_pack.rs
+# `overlapping-pack-path` warning — see crates/phoenix-simulation/src/world/mod_pack.rs
 # `fixture_overlapping_pair_warns_but_accepts`.
 #
 # Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`

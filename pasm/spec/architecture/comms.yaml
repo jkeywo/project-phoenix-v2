@@ -16,9 +16,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/recipients.rs, src/world/script/recipient_refs.rs, src/world/script/effects.rs, src/world/server.rs, src/comms/scripted.rs, src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
+      paths: [crates/phoenix-simulation/src/recipients.rs, crates/phoenix-simulation/src/world/script/recipient_refs.rs, crates/phoenix-simulation/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/gm-recipient-diagnostics.js]
       symbols: [RecipientSelection, RecipientCatalog, RecipientSources, PreparedRecipients, prepare_in_world, RecipientDiagnostics, addressed_action, apply_addressed_action]
-      tests: [cargo test --lib addressed, cargo test --lib recipients, src/recipients_tests.rs, src/world/script/recipient_refs_tests.rs, src/world/script/effects_tests.rs]
+      tests: [cargo test --lib addressed, cargo test --lib recipients, crates/phoenix-simulation/src/recipients_tests.rs, crates/phoenix-simulation/src/world/script/recipient_refs_tests.rs, crates/phoenix-simulation/src/world/script/effects_tests.rs]
 
   - component: comms-dialogue-controller
     core:
@@ -46,8 +46,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/server.rs, src/comms/scripted.rs, src/world/server.rs]
-      tests: [cargo test, src/console/comms/inbox_tests.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/server.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/console/comms/inbox_tests.rs]
 
   - state: comms-inbox-state
     core:
@@ -62,10 +62,10 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/comms/server.rs, src/core/messages.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-model/src/messages.rs]
       symbols: [CommsInboxRes, CommsInbox]
 
-      tests: [src/console/comms/inbox_tests.rs, src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-simulation/src/console/comms/inbox_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: comms-dialogue-state
     core:
       status: implemented
@@ -78,7 +78,7 @@ entities:
       writers: [comms-dialogue-controller]
     implementation:
       status: declared
-      paths: [src/comms/content.rs, src/comms/server.rs, src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [CommsRuntime, ActiveDialogue, ScriptedDialogue]
 
   - component: comms-range-enforcer
@@ -100,8 +100,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/comms/range.rs, src/comms/component.rs, src/comms/server.rs, src/console/comms/server.rs]
-      tests: [cargo test, src/comms/range_tests.rs]
+      paths: [crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/comms/range_tests.rs]
 
   - state: comms-range-state
     core:
@@ -115,7 +115,7 @@ entities:
       writers: [comms-range-enforcer]
     implementation:
       status: declared
-      paths: [src/comms/server.rs, src/console/comms/server.rs, src/comms/component.rs]
+      paths: [crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/comms/component.rs]
       # The flags are fields on CommsRuntime — range_flags/range_active (the
       # LocalShip projection, presentation only) and fleet_range_flags/
       # fleet_range_active (per FleetSlotOf hull, the host-neutral reading every
@@ -144,9 +144,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/comms/roster.rs, src/comms/component.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs]
+      paths: [crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs]
       symbols: [EntityContact, merge_entity_contacts, entity_contact_label, CommsHailable, CommsConfig, update_comms_range_flags, init_comms_runtime]
-      tests: [cargo test, src/comms/roster_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/comms/roster_tests.rs]
 
   - component: comms-blackboard-publisher
     core:
@@ -162,9 +162,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/core/messages.rs, gui/comms-state.js]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, gui/comms-state.js]
 
-      tests: [src/core/messages_view_mode_tests.rs]
+      tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: comms-ai-operator
     core:
       status: implemented
@@ -191,9 +191,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/selector.rs, src/ai/policy.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/ai/selector.rs, crates/phoenix-simulation/src/ai/policy.rs]
       symbols: [operate_comms_ai, operate_comms_response_ai, CommsTargetSelector, CommsResponseAiPolicy, comms_console_ai_components, seed_comms_hail_facts, seed_comms_self_facts, seed_comms_response_facts]
-      tests: [cargo test, src/server_app/world_setup_game_start_identity_tests.rs, src/ai/selector_tests.rs]
+      tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-simulation/src/ai/selector_tests.rs]
 
   - component: important-comms-decision-presentation
     core:
@@ -208,9 +208,9 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/config.rs, src/core/messages.rs, src/comms/content.rs, gui/components/ph-comms-current-message.js]
+      paths: [crates/phoenix-simulation/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/comms/content.rs, gui/components/ph-comms-current-message.js]
       symbols: [CommsResponseView, response_views]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: comms-response-availability-presentation
     core:
@@ -225,9 +225,9 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/comms/server.rs, src/console/comms/server.rs, gui/components/ph-comms-current-message.js]
+      paths: [crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, gui/components/ph-comms-current-message.js]
       symbols: [CommsResponseView, broadcast_comms_state, publish_comms_blackboard]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs]
 
   - component: comms-response-rejection-feedback
     core:
@@ -242,9 +242,9 @@ entities:
       runs_in: [host-browser-runtime, phone-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/core/messages.rs, src/core/codec.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/components/ph-comms-current-message.js]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/core/codec.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/components/ph-comms-current-message.js]
       symbols: [handle_respond_to_message, CommsRespondAux]
-      tests: [cargo test, npx vitest run, src/core/messages_view_mode_tests.rs, src/core/codec_mesh_frame_tests.rs]
+      tests: [cargo test, npx vitest run, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs]
 
   - component: comms-semantic-action-adapters
     core:
@@ -263,9 +263,9 @@ entities:
       runs_in: [phone-browser-runtime, host-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/stations/comms-actions.js, gui/stations/comms-console.js, gui/console-core.js, gui/client-semantic-actions.js, gui/action-map.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, src/command_admission/mod.rs, src/console/comms/server.rs]
+      paths: [gui/stations/comms-actions.js, gui/stations/comms-console.js, gui/console-core.js, gui/client-semantic-actions.js, gui/action-map.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [registerCommsActions, createCommsActionRegistry, makeCommsRender, handle_hail, handle_respond_to_message, handle_clear_comms, handle_show_on_screen]
-      tests: [cargo test, npx vitest run, npx playwright test, src/command_admission/tests.rs]
+      tests: [cargo test, npx vitest run, npx playwright test, crates/phoenix-simulation/src/command_admission/tests.rs]
 
   - component: client-comms-thread-inbox
     core:

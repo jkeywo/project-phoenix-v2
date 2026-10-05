@@ -2,7 +2,7 @@
 title: Localisation
 type: concept
 tags: [localisation, strings, client, display-text]
-sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-boot.js, gui/workshop-scripts-panel.js, gui/workshop-test-panel.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/script-editor-view.js, editor/workshop-localisation.js, src/core/messages.rs, src/lobby/handler.rs, src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, scripts/generate-german.py, scripts/german-domain-draft.json, scripts/german-dynasty-draft.json, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md, docs/acceptance/1554-german-catalogue-v1.md]
+sources: [assets/strings/strings.csv, gui/csv.js, gui/string-catalogue.js, gui/strings.js, gui/strings-boot.js, gui/locale-preference.js, gui/locale-edit-context.js, gui/surface-language.js, gui/gm-language.js, gui/gm-workspace.js, gui/gm-entity-tree.js, gui/gm-direct-effect-panel.js, gui/gm-activity-feed.js, gui/gm-journal-panel.js, gui/game-over-view.js, gui/workshop-authoring.js, gui/workshop-layout-model.js, gui/workshop-boot.js, gui/workshop-scripts-panel.js, gui/workshop-test-panel.js, gui/rendezvous-transport.js, gui/workshop-localisation-panel.js, gui/snapshot-status.js, editor/script-editor-view.js, editor/workshop-localisation.js, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/world/mod_pack.rs, src/server/bridge.rs, server.html, scripts/check-strings.mjs, scripts/extract-strings.mjs, scripts/generate-german.py, scripts/german-domain-draft.json, scripts/german-dynasty-draft.json, docs/strings-authoring-guide.md, docs/acceptance/1538-localised-host-journey.md, docs/acceptance/1554-german-catalogue-v1.md]
 updated: 2026-09-27
 ---
 
@@ -62,7 +62,7 @@ finds it by name and resolves `t(id, params)`, so a figure the server computed
 lands inside the sentence instead of only on a panel beside it. A script authors
 it as an optional `params` / `text_params` key; an empty table is not sent at
 all, so payloads that name a figure-free string are unchanged.
-`TEXT_PARAMS_SUFFIX` in `src/core/messages.rs` is the contract.
+`TEXT_PARAMS_SUFFIX` in `crates/phoenix-model/src/messages.rs` is the contract.
 Numeric presentation parameters format with `Intl.NumberFormat` in the private
 locale; typed ISO date/time values use `Intl.DateTimeFormat`. Counted interface
 text uses `.one`/`.other` String Id families through `tPlural()` and

@@ -1,6 +1,6 @@
 # Declared FixedUpdate execution order (#1400)
 
-`src/sim_sets/order.rs` records the execution order of conflicting owners within
+`crates/phoenix-simulation/src/sim_sets/order.rs` records the execution order of conflicting owners within
 the existing simulation phases. Each owner joins a concrete `FixedStep` set at
 its original registration. Phase membership, conditions, system parameters and
 function bodies stay with that registration. The policy also names the early

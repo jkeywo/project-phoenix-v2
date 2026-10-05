@@ -43,9 +43,9 @@ entities:
     implementation:
       status: declared
       paths:
-        - src/native_capture.rs
-        - src/workshop/provider.rs
-        - src/workshop/provider/test_snapshot.rs
+        - crates/phoenix-simulation/src/native_capture.rs
+        - crates/phoenix-simulation/src/workshop/provider.rs
+        - crates/phoenix-simulation/src/workshop/provider/test_snapshot.rs
         - src/native_host/workshop/mod.rs
         - editor/workshop-document.js
         - editor/workshop-diff.js
@@ -66,7 +66,7 @@ entities:
         - proposeContentPinMigration
         - proposeWorkshopMigration
       tests:
-        - src/native_capture_tests.rs
+        - crates/phoenix-simulation/src/native_capture_tests.rs
         - cargo test --lib native_capture
         - src/native_host/panes/operator_tests.rs
         - npx vitest run editor/tests/workshop-document.test.js editor/tests/workshop-diff.test.js editor/tests/workshop-migration.test.js
@@ -201,9 +201,9 @@ entities:
       paths:
         - editor/workshop-ship-authoring.js
         - gui/workshop-ship-authoring-panel.js
-        - src/workshop/mod.rs
-        - src/workshop/wasm.rs
-        - src/workshop/provider.rs
+        - crates/phoenix-simulation/src/workshop/mod.rs
+        - crates/phoenix-simulation/src/workshop/wasm.rs
+        - crates/phoenix-simulation/src/workshop/provider.rs
         - editor/workshop-runtime.js
         - editor/workshop-provider.js
         - gui/workshop-authoring.js

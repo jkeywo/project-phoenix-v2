@@ -4,7 +4,7 @@
  *
  * `tests/fixtures/scenario-arbiter-parity.json` is a case table consumed by two
  * test suites: this one, driving `gui/scenario-arbiter.js`, and the
- * `scenario_arbiter_parity_*` tests in `src/lobby/scenario_arbiter.rs`, driving
+ * `scenario_arbiter_parity_*` tests in `crates/phoenix-simulation/src/lobby/scenario_arbiter.rs`, driving
  * the Rust transcription of the same rules. Neither suite owns the cases;
  * neither may skip one. New behaviour goes in the JSON, and a case only one side
  * can satisfy is a bug in that side.

@@ -379,5 +379,5 @@ No current client-side action may shut down the host or end the session for ever
 - [Game phases](../../../wiki/concepts/game-phases.md) — current phase-oriented code map
 - [Networking](../../../wiki/concepts/networking.md) — current browser connection lifecycle
 - [Player](../../../wiki/entities/player.md) and [Session](../../../wiki/entities/session.md) — current identity and reconnect model
-- [Lobby handler](../../../src/lobby/handler.rs), [session manager](../../../src/lobby/session.rs), and [lobby runtime](../../../src/lobby/server.rs) — runtime truth
+- [Lobby handler](../../../crates/phoenix-simulation/src/lobby/handler.rs), [session manager](../../../crates/phoenix-simulation/src/lobby/session.rs), and [lobby runtime](../../../crates/phoenix-simulation/src/lobby/server.rs) — runtime truth
 - [Host page](../../../server.html) and [phone client](../../../client.html) — pre-scenario selection, connection presentation, and exit surfaces

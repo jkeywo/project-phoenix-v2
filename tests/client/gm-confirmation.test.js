@@ -24,7 +24,7 @@ describe('private GM confirmation policies', () => {
     const registry = createSemanticActionRegistry();
     expect(() => registry.register(definition, () => true)).toThrow(/metadata/);
     expect(() => registry.register({ ...definition, ...gmConfirmationMetadata('effect.damage') }, () => true)).not.toThrow();
-    const source = readFileSync('src/gm_action.rs', 'utf8');
+    const source = readFileSync('crates/phoenix-simulation/src/gm_action.rs', 'utf8');
     const body = source.split('pub enum GmAction {')[1].split(/\r?\n}\r?\n/)[0];
     const variants = [...body.matchAll(/^ {4}(\w+) \{/gm)].map((match) => match[1]);
     expect(variants.length).toBeGreaterThan(0);

@@ -154,7 +154,7 @@ A hull/scenario slice is ready when its authoring validates; contextual tutorial
 
 ## Canonical sources
 
-- `src/headless/`, `src/core/balance.rs`, and `scripts/balance-runs.mjs`.
+- `src/headless/`, `crates/phoenix-simulation/src/core/balance.rs`, and `scripts/balance-runs.mjs`.
 - `scripts/balance-runs.demo.toml` and related matchup matrices.
 - `tests/headless_runner.rs` and whole-scenario tests.
 - `pasm/spec/architecture/headless-balance-telemetry.yaml` and the roadmap balance/readiness records.

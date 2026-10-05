@@ -2,7 +2,7 @@
 title: Captain Console
 type: entity
 tags: [console, captain, red-alert, view-mode, authority]
-sources: [src/console/captain/server.rs, src/core/messages.rs, gui/components/ph-red-alert.js, gui/components/ph-camera-select.js]
+sources: [crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-model/src/messages.rs, gui/components/ph-red-alert.js, gui/components/ph-camera-select.js]
 updated: 2026-08-27
 ---
 

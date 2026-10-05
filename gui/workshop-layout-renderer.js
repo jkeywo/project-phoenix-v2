@@ -111,6 +111,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     const visit = node => !node ? [] : node.type === 'tabs' ? [activeTab(node)] : node.children.flatMap(visit);
     return new Set([...visit(value.root), ...value.floats.map(row => row.panel)]);
   };
+  let focusRequest = 0;
   const emit = (next, focusPanel = next.selected, guard = true) => {
     if (guard) {
       const showing = visibleIn(next);
@@ -123,6 +124,7 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
         }) !== true) return;
       }
     }
+    const request = ++focusRequest;
     state = settle(next, narrow ? undefined : canvasBounds()); projectedPanel = null;
     render(); onChange?.(state);
     const restoreFocus = () => {
@@ -133,9 +135,12 @@ export function mountDockLayout({ root, surface, panels, labels, initial, onChan
     };
     // The newly rendered control already exists. Restore focus now so a
     // throttled animation frame cannot strand keyboard docking on <body>, then
-    // repeat after layout in case the browser's resize observer repaints it.
+    // retry after layout only if a repaint lost focus. A later gesture or a
+    // deliberate focus change belongs to the user, not this queued callback.
     restoreFocus();
-    win.requestAnimationFrame?.(restoreFocus);
+    win.requestAnimationFrame?.(() => {
+      if (request === focusRequest && doc.activeElement === doc.body) restoreFocus();
+    });
   };
   const updateFloatStacking = () => {
     const active = doc.activeElement;

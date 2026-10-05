@@ -1,0 +1,6624 @@
+use super::*;
+use crate::core::messages::*;
+use std::collections::{BTreeMap, HashMap};
+use strum::IntoEnumIterator;
+
+fn assert_client_roundtrip(msg: ClientMessage) {
+    for encoded in [
+        JsonCodec.encode_client(&msg).unwrap(),
+        serde_json::to_string_pretty(&msg).unwrap(),
+    ] {
+        assert_eq!(msg, JsonCodec.decode_client(&encoded).unwrap());
+    }
+}
+
+fn assert_server_roundtrip(msg: ServerMessage) {
+    for encoded in [
+        JsonCodec.encode_server(&msg).unwrap(),
+        serde_json::to_string_pretty(&msg).unwrap(),
+    ] {
+        assert_eq!(msg, JsonCodec.decode_server(&encoded).unwrap());
+    }
+}
+
+fn station_address(id: &str) -> CoordinationAddress {
+    CoordinationAddress::Station(StationId(id.to_string()))
+}
+
+fn test_coordination_presentation() -> CoordinationPresentation {
+    CoordinationPresentation::new("coordination.test.title", "Literal body")
+}
+
+fn player() -> Player {
+    Player {
+        token: "tok".into(),
+        name: "Alice".into(),
+        connected: true,
+        ready: false,
+        station: None,
+        last_rating: None,
+        spectator: false,
+        afk: false,
+    }
+}
+
+fn state() -> GameState {
+    GameState {
+        phase: GamePhase::Lobby,
+        players: vec![player()],
+        world: None,
+    }
+}
+
+fn empty_ship_stations() -> crate::lobby::stations_config::ShipStations {
+    crate::lobby::stations_config::ShipStations::default()
+}
+
+fn sample_entity_snapshot() -> EntitySnapshot {
+    EntitySnapshot {
+        uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        id: None,
+        name: None,
+        position: Some([12.5, 0.0, -8.0]),
+        tags: vec!["asteroid".into()],
+        shape: None,
+        radius: Some(2.0),
+        colour: None,
+        yaw: None,
+        hull_fraction: None,
+        shield_fraction: None,
+        inner_radius: None,
+        warp_out_remaining_secs: None,
+        radar_size: None,
+        region_colour: None,
+        half_extents: None,
+        radar_icon: None,
+        objective_target: false,
+        target_tags: Vec::new(),
+        threat_level: None,
+        target_description: None,
+        infrastructure: None,
+    }
+}
+
+/// Issue #1025: the published infrastructure block survives the wire.
+///
+/// Its own test rather than a field on `sample_entity_snapshot`, because
+/// that sample is an asteroid and an asteroid has no infrastructure — a
+/// populated block on it would pin a shape nothing produces. What matters
+/// here is that the flag list and the capacity list, both tuple-typed,
+/// round-trip in order and with their booleans intact.
+#[test]
+fn a_published_infrastructure_block_round_trips() {
+    let snapshot = EntitySnapshot {
+        uuid: "550e8400-e29b-41d4-a716-446655440001".into(),
+        tags: vec!["station".into()],
+        infrastructure: Some(crate::core::messages::InfrastructureSnapshot {
+            condition_fraction: 0.3,
+            flags: vec![
+                ("depot_transfer_capable".into(), false),
+                ("depot_docking_capable".into(), true),
+            ],
+            capacities: vec![("depot_transfer_throughput".into(), 40)],
+        }),
+        ..EntitySnapshot::default()
+    };
+    let json = serde_json::to_string(&snapshot).expect("serialises");
+    let back: EntitySnapshot = serde_json::from_str(&json).expect("deserialises");
+    assert_eq!(back, snapshot, "the whole block must survive verbatim");
+
+    let bare = EntitySnapshot {
+        uuid: "550e8400-e29b-41d4-a716-446655440002".into(),
+        ..EntitySnapshot::default()
+    };
+    let json = serde_json::to_string(&bare).expect("serialises");
+    assert!(
+        !json.contains("infrastructure"),
+        "an entity with no infrastructure must not pay for the field on the wire — every \
+         entity shipped today is in this arm, got {json}"
+    );
+}
+
+// ── Table-driven round-trip harness (issue #610) ──────────────────────────
+//
+// One sample message per `ClientMessage` / `ServerMessage` variant. Adding a
+// variant to either enum means adding a table row here — the exhaustiveness
+// tests below (`client_message_table_covers_every_variant` /
+// `server_message_table_covers_every_variant`) fail with the missing
+// variant's name if a row is forgotten, and the round-trip tests
+// (`client_message_table_round_trips` / `server_message_table_round_trips`)
+// exercise every row through compact and pretty JSON with the production decoder.
+//
+// `ClientMessageDiscriminants` / `ServerMessageDiscriminants` come from
+// `#[derive(strum::EnumDiscriminants)]` on the two enums in `messages.rs`:
+// a fieldless companion enum with a `strum::IntoEnumIterator` impl that is
+// regenerated from the real enum on every build, so it can never drift out
+// of sync with the variant list the way a hand-maintained list could.
+
+fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
+    vec![
+        (
+            ClientMessageDiscriminants::SelectCrewSpectatorTarget,
+            ClientMessage::SelectCrewSpectatorTarget {
+                uuid: "remaining-ship".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::Identify,
+            ClientMessage::Identify {
+                token: "t".into(),
+                name: "Bob".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SetName,
+            ClientMessage::SetName {
+                name: "Carol".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SelectStation,
+            ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ReleaseStation,
+            ClientMessage::ReleaseStation,
+        ),
+        (
+            ClientMessageDiscriminants::SetReady,
+            ClientMessage::SetReady { ready: true },
+        ),
+        (
+            ClientMessageDiscriminants::SetSpectator,
+            ClientMessage::SetSpectator { spectator: true },
+        ),
+        (
+            ClientMessageDiscriminants::SetAfk,
+            ClientMessage::SetAfk { afk: true },
+        ),
+        (
+            ClientMessageDiscriminants::ControlSystem,
+            ClientMessage::ControlSystem {
+                target: crate::ship::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.75 },
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ControlSystemCorrelated,
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                target: SystemId("red-alert".into()),
+                payload: SystemControlPayload::SetRedAlert { active: true },
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ControlSystem,
+            ClientMessage::ControlSystem {
+                target: crate::ship::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: -0.25 },
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SetStationRating,
+            ClientMessage::SetStationRating {
+                rating_name: "Assisted".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ReportStationEligibility,
+            ClientMessage::ReportStationEligibility {
+                ineligible: vec![crate::core::messages::StationId("science".into())],
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SendCoordination,
+            ClientMessage::SendCoordination {
+                address: station_address("tactical"),
+                payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
+                presentation: test_coordination_presentation(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ReturnToLobby,
+            ClientMessage::ReturnToLobby,
+        ),
+        (
+            ClientMessageDiscriminants::SelectScenario,
+            ClientMessage::SelectScenario {
+                scenario_id: "default".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SelectShipSlot,
+            ClientMessage::SelectShipSlot {
+                slot_id: "player".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ReleaseShipSlot,
+            ClientMessage::ReleaseShipSlot,
+        ),
+        (
+            ClientMessageDiscriminants::SelectPlayerShip,
+            ClientMessage::SelectPlayerShip {
+                template_path: "assets/entities/alliance_cruiser.toml".into(),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::StationVisited,
+            ClientMessage::StationVisited {
+                station: crate::core::messages::StationId("comms".into()),
+            },
+        ),
+        // The two client settings-menu routes (issue #940). Both rows carry
+        // the same `#[cfg]` the variants do, so in a demo build the table
+        // shrinks with the enum and the exhaustiveness test below still
+        // balances — `strum`'s `EnumDiscriminants` copies `cfg` onto the
+        // generated discriminant enum, so both sides lose the same names.
+        #[cfg(not(phoenix_demo_build))]
+        (
+            ClientMessageDiscriminants::ToggleDebugFlag,
+            ClientMessage::ToggleDebugFlag {
+                flag: crate::core::messages::DebugSurface::Regions,
+            },
+        ),
+        #[cfg(not(phoenix_demo_build))]
+        (
+            ClientMessageDiscriminants::TogglePause,
+            ClientMessage::TogglePause,
+        ),
+        // NOT `#[cfg]`ed, unlike the two around it (issue #1329): showing the
+        // code that lets somebody else join is what the join panel is for, and
+        // a demo wants it more than anything else does.
+        (
+            ClientMessageDiscriminants::ToggleQrCode,
+            ClientMessage::ToggleQrCode,
+        ),
+        // The client half of console input-to-feedback latency (issue #1169) —
+        // durations only, measured on the reporting client's own clock, never
+        // timestamps. Same `#[cfg]` as its two neighbours above.
+        #[cfg(not(phoenix_demo_build))]
+        (
+            ClientMessageDiscriminants::ReportConsoleLatency,
+            ClientMessage::ReportConsoleLatency {
+                samples: vec![crate::core::messages::ConsoleLatencySample {
+                    action: "fire_phaser".into(),
+                    input_to_send_ms: 2.5,
+                    send_to_ack_ms: 48.0,
+                }],
+                expired: vec![crate::core::messages::ConsoleLatencyExpiry {
+                    action: "set_impulse".into(),
+                    count: 3,
+                }],
+            },
+        ),
+    ]
+}
+
+fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
+    vec![
+        (
+            ServerMessageDiscriminants::CrewSpectatorState,
+            ServerMessage::CrewSpectatorState(CrewSpectatorPayload {
+                active: true,
+                can_select: true,
+                target: Some("remaining-ship".into()),
+                ships: vec![CrewSpectatorShip {
+                    uuid: "remaining-ship".into(),
+                    name: "Ship".into(),
+                }],
+            }),
+        ),
+        (
+            ServerMessageDiscriminants::Welcome,
+            ServerMessage::Welcome {
+                state: state(),
+                ship_stations: empty_ship_stations(),
+                ship_config: ShipClientConfig::default(),
+                station_ratings: HashMap::new(),
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                    ready: true,
+                }],
+                string_catalogues: vec![StringCatalogueSource {
+                    source: "de-pack".into(),
+                    csv: "id,de\nstation.helm.name,Ruder\n".into(),
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::GmRosterChanged,
+            ServerMessage::GmRosterChanged {
+                gms: vec![crate::gm_roster::GmOperator {
+                    id: "gm-1".into(),
+                    name: "Morgan".into(),
+                    connected: true,
+                    ready: true,
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::PlayerJoined,
+            ServerMessage::PlayerJoined { player: player() },
+        ),
+        (
+            ServerMessageDiscriminants::PlayerLeft,
+            ServerMessage::PlayerLeft {
+                token: "tok".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::StationAssigned,
+            ServerMessage::StationAssigned {
+                token: "tok".into(),
+                station: Some("Captain".into()),
+                station_id: Some(StationId("captain".into())),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ReadyChanged,
+            ServerMessage::ReadyChanged {
+                token: "tok".into(),
+                ready: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::SpectatorChanged,
+            ServerMessage::SpectatorChanged {
+                token: "tok".into(),
+                spectator: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::AfkChanged,
+            ServerMessage::AfkChanged {
+                token: "tok".into(),
+                afk: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ActionFeedback,
+            ServerMessage::ActionFeedback {
+                correlation: ActionCorrelationId::new("feedback-1").unwrap(),
+                outcome: ActionFeedbackOutcome::Applied,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::NameChanged,
+            ServerMessage::NameChanged {
+                token: "tok".into(),
+                name: "Dave".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::GameStarted,
+            ServerMessage::GameStarted,
+        ),
+        (
+            ServerMessageDiscriminants::GameStartCountdown,
+            ServerMessage::GameStartCountdown { remaining_secs: 5 },
+        ),
+        (
+            ServerMessageDiscriminants::LoadingProgress,
+            ServerMessage::LoadingProgress { fraction: 0.5 },
+        ),
+        (
+            ServerMessageDiscriminants::SimState,
+            ServerMessage::SimState {
+                snapshot: SimSnapshot {
+                    entity_states: vec![EntityStateSnapshot {
+                        uuid: "ast-1".into(),
+                        position: Some([12.0, 0.0, -5.0]),
+                        yaw: Some(0.5),
+                        hull_fraction: Some(1.0),
+                        shield_fraction: None,
+                        flags: vec![],
+                        shields: None,
+                        shield_freq: None,
+                        warp_out_remaining_secs: None,
+                    }],
+                    station_hosts: vec![StationHostSnapshot {
+                        station: StationId("navigation".into()),
+                        host: Some(StationId("tactical".into())),
+                        rating: "Std".into(),
+                    }],
+                    station_health: vec![StationHealthSnapshot {
+                        station: StationId("navigation".into()),
+                        health: Some(0.5),
+                    }],
+                    station_importance: vec![StationImportanceSnapshot {
+                        station: StationId("navigation".into()),
+                        unread: true,
+                        critical: false,
+                    }],
+                    control_sources: BTreeMap::from([
+                        (SystemId("navigation".into()), "Human".into()),
+                        (SystemId("shields-system".into()), "Ai".into()),
+                    ]),
+                    system_depths: BTreeMap::from([(
+                        SystemId("navigation".into()),
+                        crate::ship::rating::SystemDepth::Simplified,
+                    )]),
+                    station_puppets: vec![StationPuppetSnapshot {
+                        station: StationId("navigation".into()),
+                        operators: vec!["gm-1".into()],
+                        latest_activity: Some(StationPuppetActivitySnapshot {
+                            tick: 44,
+                            operator_id: "gm-1".into(),
+                            target: SystemId("navigation".into()),
+                            action: "SetWaypoint".into(),
+                        }),
+                    }],
+                },
+            },
+        ),
+        (
+            ServerMessageDiscriminants::WorldSetup,
+            ServerMessage::WorldSetup {
+                world: WorldData {
+                    entities: vec![sample_entity_snapshot()],
+                    ..Default::default()
+                },
+            },
+        ),
+        (
+            ServerMessageDiscriminants::TargetLock,
+            ServerMessage::TargetLock {
+                uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+                locked: true,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::WeaponsUpdate,
+            ServerMessage::WeaponsUpdate {
+                target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+                target_name: Some("Klingon Raider".into()),
+                banks: vec![PhaserBankState {
+                    id: "port".to_string(),
+                    fire_ready: true,
+                    on_cooldown: false,
+                    cooldown_remaining: 0.0,
+                    readiness: WeaponReadiness::default(),
+                }],
+                tubes: vec![TorpedoTubeState {
+                    id: "fore_port".to_string(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
+                    volley_max: 3,
+                    loaded_count: 2,
+                    target_count: 3,
+                    load_progress: 1.0,
+                    readiness: WeaponReadiness::default(),
+                    active_barrels: Vec::new(),
+                    pattern_step: 0,
+                    pattern_len: 0,
+                }],
+                torpedo_count: 10,
+                phaser_mode: PhaserMode::Auto,
+                blasters: vec![],
+                phaser_frequency: 0.5,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::BeamStarted,
+            ServerMessage::BeamStarted {
+                bank: "port".to_string(),
+                source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+                target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::BeamEnded,
+            ServerMessage::BeamEnded {
+                bank: "port".to_string(),
+                source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+                target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::AsteroidDestroyed,
+            ServerMessage::AsteroidDestroyed {
+                uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::PhaserFired,
+            ServerMessage::PhaserFired {
+                bank: "port".to_string(),
+                target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::RepairState,
+            ServerMessage::RepairState {
+                teams: vec![
+                    TeamSlot::Idle,
+                    TeamSlot::Travelling {
+                        system_id: Some(SystemId("helm".into())),
+                        display_name: Some("Helm".into()),
+                        elapsed: 2.5,
+                        priority: None,
+                    },
+                    TeamSlot::Repairing {
+                        system_id: Some(SystemId("tactical".into())),
+                        display_name: Some("Tactical".into()),
+                        priority: None,
+                        priority_system_id: None,
+                    },
+                    TeamSlot::Returning {
+                        remaining: 3.0,
+                        system_id: None,
+                        display_name: None,
+                        queued_system_id: Some(SystemId("tactical".into())),
+                        queued_display_name: Some("Tactical".into()),
+                    },
+                ],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ShieldStatus,
+            ServerMessage::ShieldStatus {
+                facings: vec![ShieldFacingStatus {
+                    label: "Fore".into(),
+                    hp: 80,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                    center_deg: 0.0,
+                    width_deg: 90.0,
+                    arc_id: "fore".into(),
+                    priority: 1,
+                }],
+                frequency: 0.5,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::TorpedoLaunched,
+            ServerMessage::TorpedoLaunched {
+                uuid: "torpedo-uuid-1".into(),
+                tube: "fore_starboard".to_string(),
+                x: 10.5,
+                y: 3.25,
+                z: -20.0,
+                heading: 1.57,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::TorpedoDestroyed,
+            ServerMessage::TorpedoDestroyed {
+                uuid: "torpedo-uuid-1".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::BlasterFired,
+            ServerMessage::BlasterFired {
+                bank: "fore".to_string(),
+                source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+                projectile_id: "proj-uuid-1".into(),
+                x: 5.0,
+                z: -10.0,
+                heading: 0.0,
+                visual_scale: 1.0,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::BlasterHit,
+            ServerMessage::BlasterHit {
+                bank: "fore".to_string(),
+                projectile_id: "proj-uuid-1".into(),
+                target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ModifierAdded,
+            ServerMessage::ModifierAdded {
+                source: ModifierSource::PowerGroup(PowerGroupId("sensors".to_string())),
+                slot: ModifierSlot::RadarRange,
+                bonus: 0.5,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ModifierRemoved,
+            ServerMessage::ModifierRemoved {
+                source: ModifierSource::ImpulseDrive,
+                slot: ModifierSlot::MaxYawRate,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::AsteroidSpawned,
+            ServerMessage::AsteroidSpawned {
+                uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+                x: 100.0,
+                y: 0.0,
+                z: -50.0,
+                config_path: "assets/entities/asteroid_small.toml".into(),
+                max_hp: 30,
+                current_hp: 30,
+                radius: 2.0,
+                radar_icon: Some("asteroid".into()),
+                radar_colour: None,
+                radar_size: None,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::PowerState,
+            ServerMessage::PowerState {
+                helm: 3,
+                weapons: 2,
+                shields: 4,
+                battery_charge: 65.5,
+                draining: true,
+                locked: false,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::EntitySpawned,
+            ServerMessage::EntitySpawned {
+                snapshot: sample_entity_snapshot(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::EntityDespawned,
+            ServerMessage::EntityDespawned {
+                uuid: "run-entity-001".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::StationSpawned,
+            ServerMessage::StationSpawned {
+                uuid: "station-1".into(),
+                name: "Deep Space 9".into(),
+                position: [100.0, 0.0, -50.0],
+                shape: "cylinder".into(),
+                radius: 15.0,
+                hull_integrity: 200.0,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::StationDestroyed,
+            ServerMessage::StationDestroyed {
+                uuid: "station-1".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ObjectiveSummary,
+            ServerMessage::ObjectiveSummary {
+                objectives: vec![ObjectiveSnapshot {
+                    progress: None,
+                    unassigned: false,
+                    id: "obj-1".into(),
+                    text: "Destroy the convoy".into(),
+                    text_params: Default::default(),
+                    mandatory: true,
+                    status: ObjectiveStatus::Active,
+                    targets: vec!["Axiom Station".into()],
+                    source: ObjectiveSource::Mission,
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::CommsState,
+            ServerMessage::CommsState {
+                messages: vec![CommsMessage {
+                    id: "m1".into(),
+                    sender_uuid: "station-abc".into(),
+                    sender_name: "Starbase 12".into(),
+                    subject: "Greetings".into(),
+                    body: "Welcome to the sector.".into(),
+                    body_params: Default::default(),
+                    recipient_ship: None,
+                    literal_body: false,
+                    responses: vec![crate::core::messages::CommsResponseView {
+                        text: "Acknowledged".into(),
+                        important: true,
+                        available: true,
+                    }],
+                    selected_response: Some(0),
+                    is_read: false,
+                    is_orphaned: false,
+                    sender_in_range: true,
+                    thread_id: "thread-001".into(),
+                    priority: CommsPriority::Routine,
+                    is_urgent: false,
+                }],
+                objectives: vec![],
+                contacts: vec![CommsContact {
+                    uuid: "station-abc".into(),
+                    name: "Starbase 12".into(),
+                    in_range: true,
+                    is_urgent: false,
+                }],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::CommsResponseRejected,
+            ServerMessage::CommsResponseRejected {
+                message_id: "m1".into(),
+                response_index: 2,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::CivilianOrderRejected,
+            ServerMessage::CivilianOrderRejected {
+                target: "world.entity.hauler_kestrel.name".into(),
+                reason: "civilian.order.rejected.unknown_target".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ShipDestroyed,
+            ServerMessage::ShipDestroyed,
+        ),
+        (
+            ServerMessageDiscriminants::GameOver,
+            ServerMessage::GameOver {
+                reason: "server.game_over.ship_destroyed".into(),
+                outcome: Some("defeat".into()),
+                report: Vec::new(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ReturnedToLobby,
+            ServerMessage::ReturnedToLobby,
+        ),
+        (
+            ServerMessageDiscriminants::ScenarioCatalog,
+            ServerMessage::ScenarioCatalog(ScenarioCatalogPayload {
+                scenarios: vec![crate::core::messages::ScenarioCatalogWire {
+                    id: "default".into(),
+                    world: "assets/worlds/default.toml".into(),
+                    label: Some("Starbase Alpha".into()),
+                    description: None,
+                    ships: vec![CatalogShipWire {
+                        template_path: "assets/entities/alliance_cruiser.toml".into(),
+                        label: Some("Cruiser".into()),
+                        ..Default::default()
+                    }],
+                    slots: Vec::new(),
+                    source: "base".into(),
+                }],
+                locked_scenario: None,
+                locked_slot: None,
+                locked_ship: None,
+                active_packs: vec![],
+            }),
+        ),
+        (
+            ServerMessageDiscriminants::RatingChanged,
+            ServerMessage::RatingChanged {
+                station_id: StationId("captain".into()),
+                rating_name: "Assisted".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::SystemHullUpdate,
+            ServerMessage::SystemHullUpdate {
+                entries: vec![SystemHullStatus {
+                    system_id: SystemId("helm".into()),
+                    display_name: "Helm".into(),
+                    current: 25.0,
+                    max_hp: 25.0,
+                    tier: crate::ship::damage::DamageTier::Operational,
+                    debuff_magnitude: 0.0,
+                }],
+                aggregate_fraction: Some(0.75),
+                destroyed_fraction: Some(0.25),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::DamageTaken,
+            ServerMessage::DamageTaken {
+                hull: 3.5,
+                shield: 10.0,
+            },
+        ),
+        (
+            ServerMessageDiscriminants::CoordinationPopup,
+            ServerMessage::CoordinationPopup {
+                address: station_address("helm"),
+                payload: CoordinationPayload::Alert {
+                    title: "Shield down".into(),
+                    body: "Fore shield offline".into(),
+                },
+                presentation: test_coordination_presentation(),
+                sender_label: "AI Tactical".into(),
+                to_label: "station.helm.name".into(),
+            },
+        ),
+        (
+            ServerMessageDiscriminants::BlackboardUpdate,
+            ServerMessage::BlackboardUpdate {
+                presentation_generation: Some(17),
+                updates: vec![(
+                    SystemId("helm".into()),
+                    SystemBlackboard::Helm(HelmBlackboard {
+                        yaw: 0.785,
+                        forward_speed: 75.0,
+                        x: 1200.5,
+                        z: -800.3,
+                        impulse_charge: 0.0,
+                        boost_battery: 0.5,
+                        boost_active: true,
+                        boost_enabled: true,
+                        radar_range: 0.0,
+                        lateral_speed: 0.0,
+                        hostile_weapon_arcs: Vec::new(),
+                    }),
+                )],
+            },
+        ),
+        (
+            ServerMessageDiscriminants::ShipManual,
+            ServerMessage::ShipManual {
+                manual: crate::ship::manual::ShipManualWire {
+                    stations: vec![
+                        crate::ship::manual::StationManualWire {
+                            station_id: StationId("captain".into()),
+                            overview: Some("You command the bridge.".into()),
+                            sections: vec![],
+                        },
+                        crate::ship::manual::StationManualWire {
+                            station_id: StationId("science".into()),
+                            overview: Some("Sensors and shields.".into()),
+                            sections: vec![crate::ship::manual::SystemManualSection {
+                                kind: "shields".into(),
+                                metrics: vec![
+                                    crate::ship::manual::SystemManualMetric {
+                                        code: "max_hp".into(),
+                                        value: 100.0,
+                                    },
+                                    crate::ship::manual::SystemManualMetric {
+                                        code: "arcs".into(),
+                                        value: 4.0,
+                                    },
+                                ],
+                                capabilities: vec![],
+                                automation: vec![crate::ship::manual::StationRatingAutomation {
+                                    rating: "Backfill".into(),
+                                    automated_systems: vec![SystemId("shield-arc-fore".into())],
+                                }],
+                            }],
+                        },
+                        // Helm station: exercises the #773 `capabilities`
+                        // list (movement mode as a machine value_code) on
+                        // the round-trip so the wire field is covered.
+                        crate::ship::manual::StationManualWire {
+                            station_id: StationId("helm".into()),
+                            overview: Some("Fly the ship.".into()),
+                            sections: vec![crate::ship::manual::SystemManualSection {
+                                kind: "helm_thrust".into(),
+                                metrics: vec![crate::ship::manual::SystemManualMetric {
+                                    code: "max_speed".into(),
+                                    value: 10.0,
+                                }],
+                                capabilities: vec![crate::ship::manual::SystemManualCapability {
+                                    code: "movement_mode".into(),
+                                    value_code: "bounded".into(),
+                                }],
+                                automation: vec![],
+                            }],
+                        },
+                    ],
+                },
+            },
+        ),
+        (
+            ServerMessageDiscriminants::DebugState,
+            ServerMessage::DebugState {
+                // Mixed on/off so a pair whose flag and bool were swapped
+                // in the encoding would not still round-trip.
+                flags: crate::core::messages::DebugSurface::ALL
+                    .iter()
+                    .map(|f| (*f, *f == crate::core::messages::DebugSurface::Modifiers))
+                    .collect(),
+                // Mixed again, for the same reason: two adjacent bools that
+                // agree cannot catch a transposition.
+                paused: false,
+                god_mode: true,
+            },
+        ),
+    ]
+}
+
+#[test]
+fn client_message_table_covers_every_variant() {
+    let covered: std::collections::HashSet<ClientMessageDiscriminants> =
+        client_message_table().into_iter().map(|(d, _)| d).collect();
+    for variant in ClientMessageDiscriminants::iter() {
+        assert!(
+            covered.contains(&variant),
+            "ClientMessage variant {variant:?} has no sample row in client_message_table(); \
+             add one so the round-trip harness covers it"
+        );
+    }
+}
+
+#[test]
+fn server_message_table_covers_every_variant() {
+    let covered: std::collections::HashSet<ServerMessageDiscriminants> =
+        server_message_table().into_iter().map(|(d, _)| d).collect();
+    for variant in ServerMessageDiscriminants::iter() {
+        assert!(
+            covered.contains(&variant),
+            "ServerMessage variant {variant:?} has no sample row in server_message_table(); \
+             add one so the round-trip harness covers it"
+        );
+    }
+}
+
+#[test]
+fn client_message_table_round_trips() {
+    for (discriminant, msg) in client_message_table() {
+        assert_client_roundtrip(msg.clone());
+        assert_eq!(
+            ClientMessageDiscriminants::from(&msg),
+            discriminant,
+            "table row discriminant mismatch for {msg:?}"
+        );
+    }
+}
+
+#[test]
+fn server_message_table_round_trips() {
+    for (discriminant, msg) in server_message_table() {
+        assert_server_roundtrip(msg.clone());
+        assert_eq!(
+            ServerMessageDiscriminants::from(&msg),
+            discriminant,
+            "table row discriminant mismatch for {msg:?}"
+        );
+    }
+}
+
+/// The tow-load helm penalty's `ModifierSource::TractorLoad` (issue #1157)
+/// crosses the wire on the same `ModifierAdded` / `ModifierRemoved` messages
+/// every other source rides. The table above pins one sample per
+/// discriminant, not one per `ModifierSource` variant, so the new fieldless
+/// variant gets its own round-trip here — added and removed, on both the
+/// `MaxSpeed` and `MaxYawRate` slots it writes.
+#[test]
+fn tractor_load_modifier_source_round_trips() {
+    for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
+        assert_server_roundtrip(ServerMessage::ModifierAdded {
+            source: ModifierSource::TractorLoad,
+            slot: slot.clone(),
+            bonus: -0.37,
+        });
+        assert_server_roundtrip(ServerMessage::ModifierRemoved {
+            source: ModifierSource::TractorLoad,
+            slot,
+        });
+    }
+}
+
+// ── Wire-format string pins ────────────────────────────────────────────
+//
+// These assert an exact JSON string rather than just round-trip equality
+// — they pin the on-the-wire shape itself (important for cross-client /
+// JS-side compatibility), which the table-driven harness above does not
+// inherently cover.
+
+/// Chatter JSON wire shape pin (issues #818, #1255): the `"chatter"`
+/// host channel keeps the typed payload and carries the same producer-owned
+/// presentation envelope the phone receives.
+#[test]
+fn chatter_json_wire_shape_matches_js_handler() {
+    let ev = crate::console_bridge::AiChatterEvent {
+        from_label: "chatter.sender.sensors".into(),
+        to_label: "tactical".into(),
+        payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency: 0.5 },
+        presentation: crate::core::messages::CoordinationPresentation::new(
+            "coordination.frequency_hint.title",
+            "coordination.frequency_hint.body",
+        )
+        .with_body_param("frequency", 0.5_f32),
+    };
+    let encoded = to_json(&ev).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"from_label":"chatter.sender.sensors","to_label":"tactical","payload":{"type":"FrequencyHint","data":{"frequency":0.5}},"presentation":{"title":"coordination.frequency_hint.title","body":"coordination.frequency_hint.body","body_params":{"frequency":0.5}}}"#,
+        "chatter wire shape must match the Viewscreen's semantic payload and presentation contract"
+    );
+}
+
+#[test]
+fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
+    let payload = crate::gm_projection::GmEntityProjectionPayload {
+        recipient_diagnostics: Vec::new(),
+        world_membership: Default::default(),
+        world_inspector: Default::default(),
+        entity_inspector: Default::default(),
+        ship_inspector: Default::default(),
+        region_inspector: Default::default(),
+        presentation_inspector: Default::default(),
+        presentation: Default::default(),
+        presentation_results: Vec::new(),
+        presentation_messages: Vec::new(),
+        presentation_sounds: Vec::new(),
+        presentation_cameras: Default::default(),
+        system_controls: Default::default(),
+        system_results: Default::default(),
+        npc_doctrines: Default::default(),
+        npc_doctrine_results: Vec::new(),
+        despawn_results: Vec::new(),
+        contact_results: Vec::new(),
+        contact_overrides: Default::default(),
+        contact_classifications: Default::default(),
+        contact_information: Default::default(),
+        contact_classification_palette: Default::default(),
+        entities: vec![
+            crate::gm_projection::GmEntityProjection {
+                removable: false,
+                entity_id: "00000000-0000-0000-0000-000000000001".into(),
+                name: "Axiom".into(),
+                kind: crate::gm_projection::GmEntityKind::PlayerShip,
+                position: [12.0, 0.0, -8.0],
+                faction: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
+                    name: "faction.alliance.display_name".into(),
+                }),
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: Some(73),
+                    condition_percent: None,
+                    destroyed: false,
+                    hull_current_milli_hp: Some(146_000),
+                    hull_max_milli_hp: Some(200_000),
+                    // The scoped-effect breakdown (issue #1311): one owned
+                    // System carrying its Station's authored name, and one the
+                    // ship config assigns to no Station, so the pin covers both
+                    // spellings of `station_id` and both of `station_name` —
+                    // including the omission that keeps an unowned row's shape.
+                    systems: vec![
+                        crate::gm_projection::GmSystemHullStatus {
+                            system_id: crate::core::messages::SystemId("impulse-drive".into()),
+                            station_id: Some(crate::core::messages::StationId("helm".into())),
+                            station_name: Some("station.helm.display_name".into()),
+                            name: "system.impulse_drive.display_name".into(),
+                            current_milli_hp: 96_000,
+                            max_milli_hp: 120_000,
+                        },
+                        crate::gm_projection::GmSystemHullStatus {
+                            system_id: crate::core::messages::SystemId("core".into()),
+                            station_id: None,
+                            station_name: None,
+                            name: "system.core.display_name".into(),
+                            current_milli_hp: 50_000,
+                            max_milli_hp: 80_000,
+                        },
+                    ],
+                },
+                current_target: Some(crate::gm_projection::GmEntityReference {
+                    entity_id: "00000000-0000-0000-0000-000000000002".into(),
+                    name: "Raider".into(),
+                }),
+                geometry: None,
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: Some("playerShip".into()),
+                    colour: Some([0.2, 0.8, 1.0]),
+                    size: Some(4.0),
+                    region_colour: None,
+                },
+            },
+            crate::gm_projection::GmEntityProjection {
+                removable: false,
+                entity_id: "00000000-0000-0000-0000-000000000003".into(),
+                name: "entity.asteroid_belt.display_name".into(),
+                kind: crate::gm_projection::GmEntityKind::AsteroidField,
+                position: [100.0, 0.0, 200.0],
+                faction: None,
+                status: crate::gm_projection::GmEntityStatus {
+                    hull_percent: None,
+                    condition_percent: None,
+                    destroyed: false,
+                    hull_current_milli_hp: None,
+                    hull_max_milli_hp: None,
+                    systems: Vec::new(),
+                },
+                current_target: None,
+                geometry: Some(crate::regions::shape::RegionShape::Torus {
+                    inner_radius: 25.0,
+                    outer_radius: 125.0,
+                }),
+                radar: crate::gm_projection::GmRadarAppearance {
+                    icon: None,
+                    colour: None,
+                    size: None,
+                    region_colour: Some([0.4, 0.35, 0.3]),
+                },
+            },
+        ],
+        results: Vec::new(),
+    };
+    assert_eq!(
+        to_json(&payload).unwrap(),
+        r#"{"world_membership":{},"entity_inspector":{"fields":[],"readings":{}},"entities":[{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000001","name":"Axiom","kind":"player_ship","position":[12.0,0.0,-8.0],"faction":{"entity_id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","name":"faction.alliance.display_name"},"status":{"hull_percent":73,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":146000,"hull_max_milli_hp":200000,"systems":[{"system_id":"impulse-drive","station_id":"helm","station_name":"station.helm.display_name","name":"system.impulse_drive.display_name","current_milli_hp":96000,"max_milli_hp":120000},{"system_id":"core","station_id":null,"name":"system.core.display_name","current_milli_hp":50000,"max_milli_hp":80000}]},"current_target":{"entity_id":"00000000-0000-0000-0000-000000000002","name":"Raider"},"geometry":null,"radar":{"icon":"playerShip","colour":[0.2,0.8,1.0],"size":4.0,"region_colour":null}},{"removable":false,"entity_id":"00000000-0000-0000-0000-000000000003","name":"entity.asteroid_belt.display_name","kind":"asteroid_field","position":[100.0,0.0,200.0],"faction":null,"status":{"hull_percent":null,"condition_percent":null,"destroyed":false,"hull_current_milli_hp":null,"hull_max_milli_hp":null},"current_target":null,"geometry":{"type":"torus","inner_radius":25.0,"outer_radius":125.0},"radar":{"icon":null,"colour":null,"size":null,"region_colour":[0.4,0.35,0.3]}}],"results":[]}"#
+    );
+}
+
+#[test]
+fn gm_despawn_ingress_accepts_only_one_bounded_stable_target() {
+    let raw = r#"{"operator_id":"gm-1","correlation":"remove-1","action":"despawn_entity","target":"npc"}"#;
+    let request = decode_gm_action_request(raw).expect("typed removal");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::DespawnEntity {
+            target: "npc".into()
+        }
+    );
+    for target in [
+        serde_json::json!(""),
+        serde_json::json!("x".repeat(129)),
+        serde_json::json!("bad\nidentity"),
+        serde_json::Value::Null,
+        serde_json::json!(42),
+    ] {
+        let mut value: serde_json::Value = serde_json::from_str(raw).unwrap();
+        value["target"] = target;
+        assert!(decode_gm_action_request(&value.to_string()).is_none());
+    }
+    let mut extra: serde_json::Value = serde_json::from_str(raw).unwrap();
+    extra["force"] = serde_json::json!(true);
+    assert!(decode_gm_action_request(&extra.to_string()).is_none());
+}
+
+#[test]
+fn gm_ship_slot_backfill_ingress_is_exact_and_bounded() {
+    let raw = r#"{"operator_id":"gm-1","correlation":"slot-1","action":"backfill_ship_slot","slot":"wing"}"#;
+    let request = decode_gm_action_request(raw).expect("typed slot backfill");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::BackfillShipSlot {
+            slot: "wing".into()
+        }
+    );
+    let mut extra: serde_json::Value = serde_json::from_str(raw).unwrap();
+    extra["hull"] = serde_json::json!("assets/entities/forged.toml");
+    assert!(decode_gm_action_request(&extra.to_string()).is_none());
+    let mut empty: serde_json::Value = serde_json::from_str(raw).unwrap();
+    empty["slot"] = serde_json::json!("");
+    assert!(decode_gm_action_request(&empty.to_string()).is_none());
+}
+
+#[test]
+fn gm_activity_feed_json_pins_the_local_host_channel_shape() {
+    use crate::gm_activity::{
+        GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,
+        GmActivityConnectionRole, GmActivityConnectionState, GmActivityDamage, GmActivityDetail,
+        GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityLink,
+        GmActivityLinkRole, GmActivityObjective, GmActivityObjectiveStatus,
+        GmActivityPublicIdentity, GmActivityRedAlert, GmActivityTrigger,
+    };
+    let ship = crate::gm_projection::GmEntityReference {
+        entity_id: "00000000-0000-4000-8000-000000000001".into(),
+        name: "entity.alliance_cruiser.display_name".into(),
+    };
+    let ship_link = GmActivityLink {
+        role: GmActivityLinkRole::Ship,
+        entity: ship.clone(),
+    };
+    let payload = GmActivityFeedPayload {
+        capacity: 128,
+        entries: vec![
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Damage,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Damage(GmActivityDamage {
+                    victim_kind: crate::core::balance::VictimKind::Ship,
+                    weapon: "region".into(),
+                    amount: 4.0,
+                    shield_absorbed: 1.0,
+                    hull_damage: 3.0,
+                    system_hit: None,
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Destruction,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::Destruction,
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Objective,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Objective(GmActivityObjective {
+                    objective_id: "reach_beacon".into(),
+                    status: GmActivityObjectiveStatus::Completed,
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Trigger,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::Trigger(GmActivityTrigger {
+                    trigger_id: "arrival".into(),
+                    origin: "world.rhai".into(),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::RedAlert,
+                ships: vec![ship.clone()],
+                links: vec![ship_link.clone()],
+                detail: GmActivityDetail::RedAlert(GmActivityRedAlert { active: true }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::Connection,
+                ships: vec![ship.clone()],
+                links: vec![ship_link],
+                detail: GmActivityDetail::Connection(GmActivityConnection {
+                    identity: GmActivityPublicIdentity {
+                        id: "crew-1".into(),
+                        name: "Ari".into(),
+                    },
+                    role: GmActivityConnectionRole::Crew,
+                    state: GmActivityConnectionState::Connected,
+                    ship: Some(ship),
+                }),
+            },
+            GmActivityEntry {
+                tick: 42,
+                category: GmActivityCategory::GmAction,
+                ships: vec![],
+                links: vec![],
+                detail: GmActivityDetail::GmAction(GmActivityGmAction {
+                    operator: GmActivityPublicIdentity {
+                        id: "gm-alpha".into(),
+                        name: "Morgan".into(),
+                    },
+                    correlation: "pause-1".into(),
+                    action: GmActivityAction::SetSessionPaused { active: true },
+                    outcome: GmActivityActionOutcome::Refused,
+                    reason: Some("wrong-phase".into()),
+                    order: Some(crate::gm_action::GmActionOrder::new(
+                        crate::command_admission::log::HostSlot(1),
+                        9,
+                    )),
+                }),
+            },
+        ],
+    };
+    assert_eq!(
+        to_json(&payload).unwrap(),
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"damage","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"damage","data":{"victim_kind":"ship","weapon":"region","amount":4.0,"shield_absorbed":1.0,"hull_damage":3.0,"system_hit":null}}},{"tick":42,"category":"destruction","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"destruction"}},{"tick":42,"category":"objective","ships":[],"links":[],"detail":{"type":"objective","data":{"objective_id":"reach_beacon","status":"completed"}}},{"tick":42,"category":"trigger","ships":[],"links":[],"detail":{"type":"trigger","data":{"trigger_id":"arrival","origin":"world.rhai"}}},{"tick":42,"category":"red_alert","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"red_alert","data":{"active":true}}},{"tick":42,"category":"connection","ships":[{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}],"links":[{"role":"ship","entity":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}],"detail":{"type":"connection","data":{"identity":{"id":"crew-1","name":"Ari"},"role":"crew","state":"connected","ship":{"entity_id":"00000000-0000-4000-8000-000000000001","name":"entity.alliance_cruiser.display_name"}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alpha","name":"Morgan"},"correlation":"pause-1","action":{"type":"set_session_paused","active":true},"outcome":"refused","reason":"wrong-phase","order":{"sequence":9,"origin":1}}}}]}"#
+    );
+}
+
+/// The two action families issue #1442 added cross the Host Channel in their
+/// own vocabulary, and survive the round trip unchanged.
+///
+/// Pinned here beside the shape test above because this is the seam the browser
+/// parses: `gui/gm-activity-feed.js` accepts exactly these keys, and a family
+/// that silently reshaped — or fell back onto `set_session_paused`, which is
+/// what it did before it had an arm of its own — would tell every GM that a
+/// colleague paused the session when they changed a faction relation.
+#[test]
+fn gm_activity_feed_json_pins_the_faction_and_inverse_action_shapes() {
+    use crate::gm_activity::{
+        GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityDetail,
+        GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityPublicIdentity,
+    };
+    let alex = GmActivityPublicIdentity {
+        id: "gm-alex".into(),
+        name: "Alex".into(),
+    };
+    let row = |correlation: &str,
+               operator: &GmActivityPublicIdentity,
+               action: GmActivityAction,
+               outcome: GmActivityActionOutcome,
+               reason: Option<&str>| GmActivityEntry {
+        tick: 42,
+        category: GmActivityCategory::GmAction,
+        ships: vec![],
+        links: vec![],
+        detail: GmActivityDetail::GmAction(GmActivityGmAction {
+            operator: operator.clone(),
+            correlation: correlation.into(),
+            action,
+            outcome,
+            reason: reason.map(str::to_owned),
+            order: Some(crate::gm_action::GmActionOrder::new(
+                crate::command_admission::log::HostSlot(1),
+                9,
+            )),
+        }),
+    };
+    let payload = GmActivityFeedPayload {
+        capacity: 128,
+        entries: vec![
+            row(
+                "faction-1",
+                &alex,
+                GmActivityAction::SetFactionHostility {
+                    faction: "Alliance".into(),
+                    enemy: Some("Harrow".into()),
+                    hostile: true,
+                },
+                GmActivityActionOutcome::Applied,
+                None,
+            ),
+            // A refusal moved no pair, so `enemy` is absent rather than empty —
+            // and every pre-#1442 fact keeps its exact shape for the same
+            // `skip_serializing_if` reason.
+            row(
+                "faction-2",
+                &alex,
+                GmActivityAction::SetFactionHostility {
+                    faction: "Alliance".into(),
+                    enemy: None,
+                    hostile: false,
+                },
+                GmActivityActionOutcome::Refused,
+                Some("unknown-faction"),
+            ),
+            row(
+                "undo-1",
+                &GmActivityPublicIdentity {
+                    id: "gm-blake".into(),
+                    name: "Blake".into(),
+                },
+                GmActivityAction::UndoGmAction {
+                    original_operator: alex.clone(),
+                    original_correlation: "faction-1".into(),
+                },
+                GmActivityActionOutcome::Applied,
+                None,
+            ),
+        ],
+    };
+    let wire = to_json(&payload).unwrap();
+    assert_eq!(
+        wire,
+        r#"{"capacity":128,"entries":[{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-1","action":{"type":"set_faction_hostility","faction":"Alliance","enemy":"Harrow","hostile":true},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-alex","name":"Alex"},"correlation":"faction-2","action":{"type":"set_faction_hostility","faction":"Alliance","hostile":false},"outcome":"refused","reason":"unknown-faction","order":{"sequence":9,"origin":1}}}},{"tick":42,"category":"gm_action","ships":[],"links":[],"detail":{"type":"gm_action","data":{"operator":{"id":"gm-blake","name":"Blake"},"correlation":"undo-1","action":{"type":"undo_gm_action","original_operator":{"id":"gm-alex","name":"Alex"},"original_correlation":"faction-1"},"outcome":"applied","reason":null,"order":{"sequence":9,"origin":1}}}}]}"#
+    );
+    // Round trip: what a peer reads back is what was published, including the
+    // absent `enemy` a refusal carries.
+    let decoded: GmActivityFeedPayload = serde_json::from_str(&wire).unwrap();
+    assert_eq!(decoded, payload);
+    assert!(!wire.contains("set_session_paused"));
+}
+
+/// Chatter JSON must escape quotes/backslashes in the labels and in
+/// any text carried inside the payload — the pre-#818 hand-rolled `format!`
+/// encoder did this by hand; serde now owns it. Round-trips through
+/// `serde_json::Value` to prove the output is valid JSON with the original
+/// strings intact.
+#[test]
+fn chatter_json_escapes_special_characters() {
+    let ev = crate::console_bridge::AiChatterEvent {
+        from_label: r#"AI "Sensors""#.into(),
+        to_label: r"helm\aux".into(),
+        payload: crate::core::messages::CoordinationPayload::Advisory {
+            message: "line1\nline2".into(),
+        },
+        presentation: crate::core::messages::CoordinationPresentation::new(
+            r#"Literal "title""#,
+            "line1\nline2",
+        ),
+    };
+    let encoded = to_json(&ev).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
+    assert_eq!(v["from_label"], r#"AI "Sensors""#);
+    assert_eq!(v["to_label"], r"helm\aux");
+    assert_eq!(v["payload"]["data"]["message"], "line1\nline2");
+    assert_eq!(v["presentation"]["title"], r#"Literal "title""#);
+    assert_eq!(v["presentation"]["body"], "line1\nline2");
+}
+
+#[test]
+fn client_control_system_json_shape_uses_string_ids() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("power-reactor".into()),
+        payload: SystemControlPayload::SetPowerGroupAllocation {
+            group: PowerGroupId("weapons".into()),
+            level: 3,
+        },
+    };
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"power-reactor","payload":{"type":"SetPowerGroupAllocation","data":{"group":"weapons","level":3}}}}"#
+    );
+}
+
+/// Blaster fire command codec round-trip (issue #631).
+///
+/// `FireBlaster` is a `SystemControlPayload` variant carried by
+/// `ClientMessage::ControlSystem`. This test verifies the JSON shape and
+/// round-trip fidelity for the fire action.
+#[test]
+fn fire_blaster_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("blaster-fore".into()),
+        payload: SystemControlPayload::FireBlaster,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — JS action-map.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"FireBlaster"}}}"#,
+        "FireBlaster wire shape must match what action-map.js sends"
+    );
+}
+
+/// `SystemAffinity` round-trips including the `Comms` variant (issue #753)
+/// and Navigation's objective affinity (issue #1141).
+///
+/// `SystemAffinity` is replicated inside `ScoredObjective` on the viewscreen
+/// blackboard, so the new `Comms` variant must survive the wire codec.
+#[test]
+fn system_affinity_comms_variant_round_trips() {
+    let affinities = vec![
+        SystemAffinity::Helm,
+        SystemAffinity::Weapons,
+        SystemAffinity::Captain,
+        SystemAffinity::Comms,
+        SystemAffinity::Navigation,
+        SystemAffinity::Sensors,
+        // The issue-#1162 operate affinities.
+        SystemAffinity::Engineering,
+        SystemAffinity::Repair,
+    ];
+    let encoded = serde_json::to_string(&affinities).unwrap();
+    let decoded: Vec<SystemAffinity> = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, affinities);
+    assert!(
+        encoded.contains("Comms"),
+        "the Comms affinity variant must serialize by name"
+    );
+    assert!(
+        encoded.contains("Sensors"),
+        "the Sensors affinity variant must serialize by name"
+    );
+    assert!(
+        encoded.contains("Engineering") && encoded.contains("Repair"),
+        "the operate affinities must serialize by name"
+    );
+    assert!(
+        encoded.contains("Navigation"),
+        "the Navigation affinity variant must serialize by name"
+    );
+}
+
+/// `AiDirective` round-trips every variant including the issue-#1162 operate
+/// verbs and `Dock` (#1028). `AiDirective` is replicated inside
+/// `ScoredObjective` on the viewscreen blackboard, so a new variant that
+/// failed the wire codec would strand every operate host that reads the pool
+/// off a projected copy.
+#[test]
+fn ai_directive_operate_variants_round_trip() {
+    use crate::core::messages::AiDirective;
+    let directives = vec![
+        AiDirective::None,
+        AiDirective::Destroy {
+            target: "enemy".into(),
+        },
+        AiDirective::Dock {
+            target: "berth".into(),
+        },
+        AiDirective::Scan {
+            target: "survey-rung".into(),
+        },
+        AiDirective::Tow {
+            target: "hulk".into(),
+        },
+        AiDirective::Stabilise {
+            target: "depot".into(),
+        },
+        AiDirective::Escort {
+            target: "convoy".into(),
+        },
+        AiDirective::Transfer {
+            target: "tender".into(),
+        },
+        AiDirective::FieldRepair {
+            target: "ally".into(),
+        },
+        AiDirective::Order {
+            target: "civilian".into(),
+            route: "storm_shelter_run".into(),
+        },
+    ];
+    let encoded = serde_json::to_string(&directives).unwrap();
+    let decoded: Vec<AiDirective> = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, directives);
+    for name in [
+        "Tow",
+        "Stabilise",
+        "Escort",
+        "Transfer",
+        "FieldRepair",
+        "Dock",
+        "Order",
+        "Scan",
+    ] {
+        assert!(
+            encoded.contains(name),
+            "the {name} directive variant must serialize by its tag"
+        );
+    }
+}
+
+/// ChargeBlasterStart / ChargeBlasterCancel codec round-trips (issue #636).
+#[test]
+fn charge_blaster_start_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("blaster-fore".into()),
+        payload: SystemControlPayload::ChargeBlasterStart,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterStart"}}}"#,
+        "ChargeBlasterStart wire shape must match what action-map.js sends"
+    );
+}
+
+#[test]
+fn charge_blaster_cancel_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("blaster-fore".into()),
+        payload: SystemControlPayload::ChargeBlasterCancel,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterCancel"}}}"#,
+        "ChargeBlasterCancel wire shape must match what action-map.js sends"
+    );
+}
+
+/// Phaser fire as a ControlSystem payload (issue #846).
+#[test]
+fn fire_phaser_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("phaser-fore".into()),
+        payload: SystemControlPayload::FirePhaser,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"phaser-fore","payload":{"type":"FirePhaser"}}}"#,
+        "FirePhaser wire shape must match what action-map.js sends"
+    );
+}
+
+/// Command stance selection as a ControlSystem payload (issue #1107).
+#[test]
+fn set_station_stance_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("command".into()),
+        payload: SystemControlPayload::SetStationStance {
+            station: StationId("tactical".into()),
+            stance: "tactical-weapons-free".into(),
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"SetStationStance","data":{"station":"tactical","stance":"tactical-weapons-free"}}}}"#,
+        "SetStationStance wire shape must match what action-map.js sends"
+    );
+}
+
+/// Server-authored crew-rating replication as a ControlSystem payload (#1119).
+#[test]
+fn assign_station_rating_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("command".into()),
+        payload: SystemControlPayload::AssignStationRating {
+            station: StationId("captain".into()),
+            rating: "Human".into(),
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"AssignStationRating","data":{"station":"captain","rating":"Human"}}}}"#,
+        "AssignStationRating wire shape stays stable for the fleet mesh replay"
+    );
+}
+
+/// Torpedo fire as a ControlSystem payload (issue #846).
+#[test]
+fn fire_torpedo_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("torpedo-tube-fore-port".into()),
+        payload: SystemControlPayload::FireTorpedo {
+            target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"FireTorpedo","data":{"target_uuid":"550e8400-e29b-41d4-a716-446655440000"}}}}"#,
+        "FireTorpedo wire shape must match what action-map.js sends"
+    );
+}
+
+/// Load tube as a ControlSystem payload (issue #846).
+#[test]
+fn load_tube_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("torpedo-tube-fore-port".into()),
+        payload: SystemControlPayload::LoadTube,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"LoadTube"}}}"#,
+        "LoadTube wire shape must match what action-map.js sends"
+    );
+}
+
+/// Unload tube as a ControlSystem payload (issue #846).
+#[test]
+fn unload_tube_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("torpedo-tube-aft".into()),
+        payload: SystemControlPayload::UnloadTube,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-aft","payload":{"type":"UnloadTube"}}}"#,
+        "UnloadTube wire shape must match what action-map.js sends"
+    );
+}
+
+/// `CoordinationPayload::TargetDesignation` round-trip, embedded in both
+/// directions of the channel-3 bus (issue #676 — replaces the old direct
+/// `SensorsTargetSuggestion`).
+#[test]
+fn target_designation_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::TargetDesignation {
+            uuid: "asteroid-42".into(),
+            label: "Asteroid".into(),
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::TargetDesignation {
+            uuid: "asteroid-42".into(),
+            label: "Asteroid".into(),
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Sensors".into(),
+        to_label: "station.tactical.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+#[test]
+fn coordination_wire_shape_distinguishes_station_and_ship_addresses() {
+    let station = ClientMessage::SendCoordination {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        presentation: CoordinationPresentation::new(
+            "coordination.frequency_hint.title",
+            "coordination.frequency_hint.body",
+        )
+        .with_body_param("frequency", 0.83_f32),
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&station).unwrap(),
+        r#"{"type":"SendCoordination","data":{"address":{"type":"Station","data":"tactical"},"payload":{"type":"FrequencyHint","data":{"frequency":0.83}},"presentation":{"title":"coordination.frequency_hint.title","body":"coordination.frequency_hint.body","body_params":{"frequency":0.83}}}}"#,
+        "a Station address is a typed StationId, never a SystemId-shaped target"
+    );
+
+    let ship = ServerMessage::CoordinationPopup {
+        address: CoordinationAddress::Ship,
+        payload: CoordinationPayload::Alert {
+            title: "coordination.test.title".into(),
+            body: "coordination.test.body".into(),
+        },
+        presentation: CoordinationPresentation::new(
+            "coordination.test.title",
+            "Literal authored body",
+        )
+        .with_title_param("label", CoordinationParam::text("station.helm.name")),
+        sender_label: "station.tactical.name".into(),
+        to_label: "chatter.addressee.ship".into(),
+    };
+    assert_eq!(
+        JsonCodec.encode_server(&ship).unwrap(),
+        r#"{"type":"CoordinationPopup","data":{"address":{"type":"Ship"},"payload":{"type":"Alert","data":{"title":"coordination.test.title","body":"coordination.test.body"}},"presentation":{"title":"coordination.test.title","title_params":{"label":"station.helm.name"},"body":"Literal authored body"},"sender_label":"station.tactical.name","to_label":"chatter.addressee.ship"}}"#,
+        "whole-Ship delivery carries an explicit address, route label and the producer-owned presentation"
+    );
+}
+
+/// `CoordinationPayload::ArcBearingRequest` round-trip, embedded in both
+/// directions of the channel-3 bus (issue #677 — Weapons asks Helm to
+/// bring the phaser firing arc to bear).
+#[test]
+fn arc_bearing_request_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("helm"),
+        payload: CoordinationPayload::ArcBearingRequest {
+            uuid: "hostile-7".into(),
+            label: "Raider".into(),
+            family: crate::core::messages::WeaponFamily::Blasters,
+            arcs: vec![
+                crate::core::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 90.0,
+                    range: 35.0,
+                },
+                crate::core::messages::WeaponEmitterArc {
+                    facing_deg: 180.0,
+                    arc_deg: 60.0,
+                    range: 40.0,
+                },
+            ],
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("helm"),
+        payload: CoordinationPayload::ArcBearingRequest {
+            uuid: "hostile-7".into(),
+            label: "Raider".into(),
+            family: crate::core::messages::WeaponFamily::Torpedoes,
+            arcs: vec![crate::core::messages::WeaponEmitterArc {
+                facing_deg: 0.0,
+                arc_deg: 45.0,
+                range: 120.0,
+            }],
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Weapons".into(),
+        to_label: "station.helm.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::ArcBearingWithdraw` round-trip (issue #932):
+/// Weapons withdraws a standing request once its emitting family goes
+/// unusable.
+#[test]
+fn arc_bearing_withdraw_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("helm"),
+        payload: CoordinationPayload::ArcBearingWithdraw {
+            family: crate::core::messages::WeaponFamily::Torpedoes,
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("helm"),
+        payload: CoordinationPayload::ArcBearingWithdraw {
+            family: crate::core::messages::WeaponFamily::Blasters,
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Weapons".into(),
+        to_label: "station.helm.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::PowerBrownout` round-trip, embedded in both
+/// directions of the channel-3 bus (issue #678).
+#[test]
+fn power_brownout_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::PowerBrownout {
+            group: "weapons".into(),
+            label: "WEAPONS".into(),
+            allocated_level: 2,
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::PowerBrownout {
+            group: "weapons".into(),
+            label: "WEAPONS".into(),
+            allocated_level: 2,
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Power".into(),
+        to_label: "station.tactical.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::NavigateTo` round-trip, embedded in both
+/// directions of the channel-3 bus (issue #681 — Navigation clears Helm to
+/// follow the ship's waypoint).
+///
+/// The `generation` is the navigation contract: the waypoint itself is the
+/// shared goal, Helm's `receive_helm_coordination` latches only this after the
+/// generic lag router delivers it, and it names which waypoint the Helm is
+/// cleared for. The `x` / `z` alongside it are display-only (issue #977 — the
+/// chatter popup formats them, replacing the English label Rust used to
+/// compose). The generation is a `u64`
+/// (not a timestamp) for PRD #620 lockstep determinism, so a value beyond
+/// f64's exact-integer range is used here to pin that it survives the JSON
+/// codec without precision loss — the failure mode a naive `f32`/`f64`
+/// generation would have.
+#[test]
+fn navigate_to_coordination_payload_round_trips() {
+    let generation = u64::MAX - 1;
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("helm"),
+        payload: CoordinationPayload::NavigateTo {
+            generation,
+            x: 300.0,
+            z: -100.0,
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("helm"),
+        payload: CoordinationPayload::NavigateTo {
+            generation,
+            x: 300.0,
+            z: -100.0,
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Navigation".into(),
+        to_label: "station.helm.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::RepairRequest` round-trip (issue #682 — damaged
+/// system pushes repair request to the Repair console).
+#[test]
+fn repair_request_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("repair"),
+        payload: CoordinationPayload::RepairRequest {
+            system_id: crate::core::messages::SystemId("helm-radar".into()),
+            station_id: "helm".into(),
+            station_label: "Helm".into(),
+            tier: crate::ship::damage::DamageTier::Damaged,
+            deficit: Some(12.5),
+        },
+        presentation: CoordinationPresentation::titled("coordination.repair.title")
+            .with_title_param("label", CoordinationParam::text("station.helm.name")),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("repair"),
+        payload: CoordinationPayload::RepairRequest {
+            system_id: crate::core::messages::SystemId("helm-radar".into()),
+            station_id: "helm".into(),
+            station_label: "Helm".into(),
+            tier: crate::ship::damage::DamageTier::Disabled,
+            // The wire form of a coarsened popup: tier crosses, exact
+            // deficit withheld (issue #737).
+            deficit: None,
+        },
+        presentation: CoordinationPresentation::titled("coordination.repair.title")
+            .with_title_param("label", CoordinationParam::text("station.helm.name")),
+        sender_label: "Helm System".into(),
+        to_label: "station.repair.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::ThreatBearing` round-trip (issue #683 — sensors
+/// warns shields of incoming threat).
+#[test]
+fn threat_bearing_coordination_payload_round_trips() {
+    let send_msg = ClientMessage::SendCoordination {
+        address: station_address("shields"),
+        payload: CoordinationPayload::ThreatBearing {
+            bearing_rad: 0.698,
+            label: "Hostile closing".into(),
+        },
+        presentation: test_coordination_presentation(),
+    };
+    assert_client_roundtrip(send_msg.clone());
+
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: station_address("shields"),
+        payload: CoordinationPayload::ThreatBearing {
+            bearing_rad: 2.094,
+            label: "Incoming torpedo".into(),
+        },
+        presentation: test_coordination_presentation(),
+        sender_label: "Sensors".into(),
+        to_label: "station.shields.name".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+}
+
+/// `CoordinationPayload::IntentAdvisory` round-trip (issue #879 — a
+/// backfilled seat's coarsened intent advisory, broadcast to every human
+/// seat on the source ship).
+#[test]
+fn intent_advisory_coordination_payload_round_trips() {
+    let popup_msg = ServerMessage::CoordinationPopup {
+        address: CoordinationAddress::Ship,
+        payload: CoordinationPayload::IntentAdvisory {
+            kind: crate::core::messages::IntentKind::TargetSwitched,
+            subject: Some("Harrow Raider".into()),
+            generation: 4,
+        },
+        presentation: CoordinationPresentation::new(
+            "coordination.intent.target_switched",
+            "Harrow Raider",
+        ),
+        sender_label: "Tactical".into(),
+        to_label: "chatter.addressee.ship".into(),
+    };
+    assert_server_roundtrip(popup_msg.clone());
+
+    // The subject-less kinds, which serialise without the optional field.
+    let bare = ServerMessage::CoordinationPopup {
+        address: CoordinationAddress::Ship,
+        payload: CoordinationPayload::IntentAdvisory {
+            kind: crate::core::messages::IntentKind::BreakingOff,
+            subject: None,
+            generation: 5,
+        },
+        presentation: CoordinationPresentation::titled("coordination.intent.breaking_off"),
+        sender_label: "Helm".into(),
+        to_label: "chatter.addressee.ship".into(),
+    };
+    assert_server_roundtrip(bare.clone());
+}
+
+/// BlasterFired server message round-trip (issue #631, extended #638).
+#[test]
+fn blaster_fired_server_message_round_trips() {
+    let msg = ServerMessage::BlasterFired {
+        bank: "fore".to_string(),
+        source_uuid: "11111111-1111-1111-1111-111111111111".into(),
+        projectile_id: "proj-uuid-abc".into(),
+        x: 5.0,
+        z: -10.0,
+        heading: 1.57,
+        visual_scale: 1.5,
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// BlasterFired defaults visual_scale to 1.0 when absent (wire compat).
+#[test]
+fn blaster_fired_defaults_visual_scale_when_absent() {
+    // Simulate an older wire message that has no visual_scale field.
+    let json = r#"{"type":"BlasterFired","data":{"bank":"fore","source_uuid":"11111111-1111-1111-1111-111111111111","projectile_id":"proj-uuid-abc","x":5.0,"z":-10.0,"heading":1.57}}"#;
+    let codec = crate::core::codec::JsonCodec;
+    let decoded: ServerMessage = codec.decode_server(json).unwrap();
+    if let ServerMessage::BlasterFired { visual_scale, .. } = decoded {
+        assert!(
+            (visual_scale - 1.0).abs() < f32::EPSILON,
+            "visual_scale must default to 1.0 when absent from wire, got {visual_scale}"
+        );
+    } else {
+        panic!("expected BlasterFired");
+    }
+}
+
+// ── Parameterised text ids ────────────────────────────────────────────
+
+/// A text id with no parameter table encodes EXACTLY as it did before the
+/// table existed — the whole basis on which this could be added to a shipped
+/// wire without a revision bump, and what makes the change digest-neutral.
+///
+/// Pinned as a literal rather than as "has no `text_params` key", because
+/// the claim is about bytes: a reader that never heard of the field must see
+/// the same string, in the same order, with the same punctuation.
+#[test]
+fn an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire() {
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::ObjectiveSummary {
+            objectives: vec![ObjectiveSnapshot {
+                progress: None,
+                unassigned: false,
+                id: "obj-a3-window".into(),
+                text: "world.falling_skyway.objective.window.text".into(),
+                text_params: Default::default(),
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::core::messages::ObjectiveSource::Mission,
+            }],
+        })
+        .unwrap();
+
+    assert_eq!(
+        encoded,
+        r#"{"type":"ObjectiveSummary","data":{"objectives":[{"id":"obj-a3-window","text":"world.falling_skyway.objective.window.text","mandatory":true,"status":"Active","source":"Mission"}]}}"#,
+        "an objective naming a figure-free string must encode as it always did"
+    );
+}
+
+/// The same for a comms body, which carries its table under `body_params`.
+#[test]
+fn a_comms_message_with_no_params_carries_no_params_key() {
+    let msg = crate::core::messages::CommsMessage::injected(
+        "m1".into(),
+        "u1".into(),
+        "entity.skyway_control.name".into(),
+        "world.falling_skyway.comms.window_closes".into(),
+        Default::default(),
+        vec![],
+        "t1".into(),
+        true,
+        false,
+    );
+    let encoded = serde_json::to_string(&msg).unwrap();
+    assert!(
+        !encoded.contains("body_params"),
+        "an empty table must not appear on the wire at all, got {encoded}"
+    );
+}
+
+/// A non-empty table rides beside the id, and its keys are in sorted order —
+/// the `BTreeMap` property the encoding's determinism rests on. A `HashMap`
+/// would pass an "is the key present" assertion and still emit these three
+/// names in a different order on a different run.
+#[test]
+fn objective_text_params_ride_the_wire_in_sorted_key_order() {
+    let params = ["shortfall", "available", "claimed"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, k)| (k.to_string(), i.to_string()))
+        .collect();
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::ObjectiveSummary {
+            objectives: vec![ObjectiveSnapshot {
+                progress: None,
+                unassigned: false,
+                id: "obj".into(),
+                text: "some.id".into(),
+                text_params: params,
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::core::messages::ObjectiveSource::Mission,
+            }],
+        })
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let obj = &value["data"]["objectives"][0];
+    assert_eq!(
+        obj.as_object()
+            .expect("objective is an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<&str>>(),
+        std::collections::BTreeSet::from([
+            "id",
+            "text",
+            "text_params",
+            "mandatory",
+            "status",
+            "source"
+        ]),
+        "the params table is the only key a figure-carrying objective adds"
+    );
+
+    // Sorted, not insertion order: the map was built shortfall/available/claimed.
+    let rendered = encoded
+        .split_once("\"text_params\":")
+        .expect("text_params is present")
+        .1;
+    assert!(
+        rendered.starts_with(r#"{"available":"1","claimed":"2","shortfall":"0"}"#),
+        "keys must serialise in sorted order, got {rendered}"
+    );
+
+    // And it survives the round trip it will actually make.
+    let decoded = JsonCodec.decode_server(&encoded).unwrap();
+    let ServerMessage::ObjectiveSummary { objectives } = decoded else {
+        panic!("expected ObjectiveSummary");
+    };
+    assert_eq!(objectives[0].text_params["shortfall"], "0");
+}
+
+/// A payload written by a peer that predates the field still decodes — the
+/// `serde(default)` half of the contract.
+#[test]
+fn an_objective_without_the_params_key_still_decodes() {
+    let legacy = r#"{"type":"ObjectiveSummary","data":{"objectives":[{"id":"o","text":"t","mandatory":false,"status":"Active","source":"Mission"}]}}"#;
+    let ServerMessage::ObjectiveSummary { objectives } = JsonCodec.decode_server(legacy).unwrap()
+    else {
+        panic!("expected ObjectiveSummary");
+    };
+    assert!(objectives[0].text_params.is_empty());
+}
+
+// ── GameOver carries the authored outcome (PRD #1023 module 4) ────────
+
+/// The whole surface of the message the game-over screen reads. `outcome`
+/// and `report` are written even when they are empty, so the client tests
+/// one shape.
+#[test]
+fn game_over_wire_keys_are_reason_outcome_and_report() {
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::GameOver {
+            reason: "world.falling_skyway.ending.held".into(),
+            outcome: Some("victory".into()),
+            report: Vec::new(),
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        value["data"]
+            .as_object()
+            .expect("GameOver data is an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<&str>>(),
+        std::collections::BTreeSet::from(["reason", "outcome", "report"]),
+        "the ending's whole surface: what happened, which side it was, and \
+         the report rows if it authored any"
+    );
+    assert_eq!(value["data"]["outcome"], "victory");
+    assert!(value["data"]["report"].as_array().unwrap().is_empty());
+
+    // Still written when there is no declared side, because a key that
+    // came and went would make absence and defeat look alike to a client
+    // testing for the field rather than its value.
+    let undeclared = JsonCodec
+        .encode_server(&ServerMessage::GameOver {
+            reason: "r".into(),
+            outcome: None,
+            report: Vec::new(),
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&undeclared).unwrap();
+    assert!(value["data"].as_object().unwrap().contains_key("outcome"));
+    assert!(value["data"]["outcome"].is_null());
+}
+
+#[test]
+fn game_over_outcome_round_trips_and_defaults_when_absent() {
+    for outcome in [Some("victory".to_string()), Some("defeat".into()), None] {
+        assert_server_roundtrip(ServerMessage::GameOver {
+            reason: "server.game_over.ship_destroyed".into(),
+            outcome: outcome.clone(),
+            report: Vec::new(),
+        });
+    }
+
+    // A peer still sending the pre-#1023 `{reason}` shape decodes as an
+    // undeclared ending rather than failing the message.
+    let legacy = r#"{"type":"GameOver","data":{"reason":"Ship destroyed"}}"#;
+    match JsonCodec.decode_server(legacy).unwrap() {
+        ServerMessage::GameOver {
+            reason,
+            outcome,
+            report,
+        } => {
+            assert_eq!(reason, "Ship destroyed");
+            assert_eq!(outcome, None);
+            assert!(report.is_empty(), "a pre-#1344 peer authored no report");
+        }
+        other => panic!("expected GameOver, got {other:?}"),
+    }
+}
+
+// ── The report rides GameOver, score-free (issue #1344) ───────────────
+
+/// Every row field a player surface needs, and nothing a player must not
+/// see. The `score` on `core::report::ReportRow` has no home in this shape
+/// at all — a compile-time absence, not a runtime filter — and this pins the
+/// key set so adding one would have to be a deliberate act.
+#[test]
+fn game_over_report_rows_carry_ids_and_state_but_never_a_score() {
+    let encoded = JsonCodec
+        .encode_server(&ServerMessage::GameOver {
+            reason: "world.falling_skyway.game_over.mission_complete".into(),
+            outcome: Some("victory".into()),
+            report: vec![crate::core::messages::GameOverReportRow {
+                id: "lyra".into(),
+                heading: "world.falling_skyway.report.lyra.heading".into(),
+                outcome: "world.falling_skyway.report.lyra.saved".into(),
+                state: "saved".into(),
+            }],
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let rows = value["data"]["report"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<&str>>(),
+        std::collections::BTreeSet::from(["id", "heading", "outcome", "state"]),
+        "a player-facing row names the thing and its fate: no score, no \
+         total, no grade"
+    );
+    assert_eq!(rows[0]["state"], "saved");
+    assert_eq!(
+        rows[0]["heading"],
+        "world.falling_skyway.report.lyra.heading"
+    );
+    assert!(
+        !encoded.contains("score"),
+        "score must never reach the wire"
+    );
+}
+
+#[test]
+fn game_over_report_rows_round_trip_in_authored_order() {
+    let rows = vec![
+        crate::core::messages::GameOverReportRow {
+            id: "lyra".into(),
+            heading: "world.falling_skyway.report.lyra.heading".into(),
+            outcome: "world.falling_skyway.report.lyra.lost".into(),
+            state: "lost".into(),
+        },
+        crate::core::messages::GameOverReportRow {
+            id: "traffic".into(),
+            heading: "world.falling_skyway.report.traffic.heading".into(),
+            outcome: "world.falling_skyway.report.traffic.partial".into(),
+            state: "partial".into(),
+        },
+    ];
+    assert_server_roundtrip(ServerMessage::GameOver {
+        reason: "world.falling_skyway.game_over.lark_collision".into(),
+        outcome: Some("defeat".into()),
+        report: rows,
+    });
+}
+
+// ── Human-seeking hosts on the wire (issue #984) ──────────────────────
+
+/// `host_station` is how the resolved seek reaches a console, and it rides
+/// the seeking system's own blackboard. The key is always written — the
+/// client's push router recognises a seeking system BY that key, so a key
+/// that disappeared on `None` would make "the seek let go" unroutable.
+#[test]
+fn seeking_blackboards_always_carry_a_host_station_key() {
+    let comms = serde_json::to_value(crate::core::messages::SystemBlackboard::Comms(
+        crate::core::messages::CommsBlackboard::default(),
+    ))
+    .unwrap();
+    // Adjacently tagged (`{"kind":…,"data":…}`) — the shape
+    // gui/sim-state.js unwraps and gui/dirty-consoles.js inspects.
+    assert_eq!(comms["kind"], "Comms");
+    assert!(
+        comms["data"]
+            .as_object()
+            .expect("a comms blackboard is an object")
+            .contains_key("host_station"),
+        "an unhosted comms blackboard still names the field"
+    );
+    assert!(comms["data"]["host_station"].is_null());
+
+    let nav = serde_json::to_value(crate::core::messages::SystemBlackboard::Navigation(
+        crate::core::messages::NavigationBlackboard {
+            host_station: Some(StationId("engineering".into())),
+            ..Default::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(nav["kind"], "Navigation");
+    assert_eq!(nav["data"]["host_station"], "engineering");
+}
+
+#[test]
+fn seeking_blackboards_default_their_host_when_a_peer_omits_it() {
+    // The pre-#984 shape: every other field, no `host_station`.
+    let legacy = r#"{"messages":[],"objectives":[],"contacts":[]}"#;
+    let bb: crate::core::messages::CommsBlackboard = serde_json::from_str(legacy).unwrap();
+    assert_eq!(bb.host_station, None);
+}
+
+/// BlasterHit server message round-trip (issue #631).
+#[test]
+fn blaster_hit_server_message_round_trips() {
+    let msg = ServerMessage::BlasterHit {
+        bank: "fore".to_string(),
+        projectile_id: "proj-uuid-abc".into(),
+        target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// Torpedo volley target command codec round-trip (issue #632).
+///
+/// `SetTorpedoVolleyTarget` is a `SystemControlPayload` variant carried by
+/// `ClientMessage::ControlSystem`. The target SystemId addresses a specific
+/// torpedo tube (e.g. `"torpedo-tube-fore-port"`).
+#[test]
+fn set_torpedo_volley_target_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: crate::ship::system_registry::torpedo_tube_system_id("fore_port")
+            .expect("fore_port resolves"),
+        payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 3 },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — action-map.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"SetTorpedoVolleyTarget","data":{"count":3}}}}"#,
+        "SetTorpedoVolleyTarget wire shape must match what action-map.js sends"
+    );
+}
+
+/// SetRedAlert command round-trip (issue #748).
+///
+/// `SetRedAlert { active }` is a `SystemControlPayload` variant carried by
+/// `ClientMessage::ControlSystem` targeting `red-alert`. Both the captain
+/// UI and the Captain AI send the desired end state, so the wire shape must
+/// match what `gui/action-map.js` sends.
+#[test]
+fn set_red_alert_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("red-alert".into()),
+        payload: SystemControlPayload::SetRedAlert { active: true },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — action-map.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+        "SetRedAlert wire shape must match what action-map.js sends"
+    );
+
+    // The inactive request must round-trip identically.
+    let off = ClientMessage::ControlSystem {
+        target: SystemId("red-alert".into()),
+        payload: SystemControlPayload::SetRedAlert { active: false },
+    };
+    assert_client_roundtrip(off.clone());
+}
+
+/// The correlated Red Alert tracer has its own additive envelope.  The
+/// correlation is beside target/payload — never inside simulation semantics.
+#[test]
+fn correlated_red_alert_and_action_feedback_round_trip() {
+    let correlation = ActionCorrelationId::new("red-alert-4f4f").unwrap();
+    let request = ClientMessage::ControlSystemCorrelated {
+        correlation: correlation.clone(),
+        target: SystemId("red-alert".into()),
+        payload: SystemControlPayload::SetRedAlert { active: true },
+    };
+    let encoded = JsonCodec.encode_client(&request).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystemCorrelated","data":{"correlation":"red-alert-4f4f","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+    );
+    assert_client_roundtrip(request);
+
+    let response = ServerMessage::ActionFeedback {
+        correlation,
+        outcome: ActionFeedbackOutcome::Refused,
+    };
+    assert_eq!(
+        JsonCodec.encode_server(&response).unwrap(),
+        r#"{"type":"ActionFeedback","data":{"correlation":"red-alert-4f4f","outcome":"Refused"}}"#,
+    );
+    assert_server_roundtrip(response);
+}
+
+#[test]
+fn action_correlation_rejects_empty_invisible_and_oversized_values() {
+    assert!(ActionCorrelationId::new("").is_err());
+    assert!(ActionCorrelationId::new("contains space").is_err());
+    assert!(ActionCorrelationId::new("x".repeat(MAX_ACTION_CORRELATION_BYTES + 1)).is_err());
+    assert!(JsonCodec
+        .decode_client(
+            r#"{"type":"ControlSystemCorrelated","data":{"correlation":"","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+        )
+        .is_err());
+}
+
+/// SetRepairPriority command round-trip (issue #739).
+#[test]
+fn set_repair_priority_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("repair".into()),
+        payload: SystemControlPayload::SetRepairPriority {
+            team_idx: 1,
+            priority: 2,
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — action-map.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"SetRepairPriority","data":{"team_idx":1,"priority":2}}}}"#,
+        "SetRepairPriority wire shape must match what action-map.js sends"
+    );
+}
+
+/// RecallRepairTeam command round-trip (issue #1385) — the RECALL control on an
+/// internal repair team's card.
+///
+/// It names its team, where the external `RecallExternalRepair` beside it
+/// carries no fields: a ship dispatches one team abroad at a time, but it can
+/// have every internal team out on a different job at once, so nothing
+/// server-side could resolve which of them "come home" meant.
+#[test]
+fn recall_repair_team_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallRepairTeam { team_idx: 1 },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"RecallRepairTeam","data":{"team_idx":1}}}}"#,
+        "RecallRepairTeam wire shape must match what repair-dispatch.js sends"
+    );
+}
+
+/// DispatchRepairTeam naming the FIELD target round-trips (issue #1386) — the
+/// field row on a repair team's own card.
+///
+/// The `External` arm carries no uuid: the destination is Tactical's lock, which
+/// the server resolves exactly as it does for the fieldless
+/// `DispatchExternalRepair`, so the only thing the console says is which team
+/// crosses over. Pinned beside the station form because `repair-dispatch.js`
+/// builds all three arms through one `repairTargetFor`.
+#[test]
+fn dispatch_repair_team_to_the_field_target_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 2,
+            target: crate::core::messages::RepairTarget::External,
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":2,"target":{"type":"External"}}}}}"#,
+        "RepairTarget::External wire shape must match what repair-dispatch.js sends"
+    );
+
+    // The two older arms are unmoved by the new one.
+    let station = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
+        },
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&station).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":0,"target":{"type":"Station","data":"helm"}}}}}"#,
+    );
+    let core = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchRepairTeam {
+            team_idx: 0,
+            target: crate::core::messages::RepairTarget::Core,
+        },
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&core).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchRepairTeam","data":{"team_idx":0,"target":{"type":"Core"}}}}}"#,
+    );
+}
+
+/// SetRepairTargetPriority command round-trip (issue #1015) — the repair
+/// console's damaged-systems taps. Unlike `SetRepairPriority` above it
+/// carries no ordinal at all: the host resolves which team's sweep covers
+/// the named system and pins that system directly, because #737 hides
+/// most of the candidates from the console.
+#[test]
+fn set_repair_target_priority_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId("repair".into()),
+        payload: SystemControlPayload::SetRepairTargetPriority {
+            system_id: SystemId("helm-engine-port".into()),
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    // Pin the on-the-wire JSON shape — repair-dispatch.js depends on this.
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"SetRepairTargetPriority","data":{"system_id":"helm-engine-port"}}}}"#,
+        "SetRepairTargetPriority wire shape must match what repair-dispatch.js sends"
+    );
+}
+
+/// The console-facing half of issue #1015: the pin the host resolved a tap
+/// to rides home on the `Repairing` slot, so `normalizeTeamSlot` in
+/// `gui/console-state.js` can highlight the tapped row.
+///
+/// `#[serde(default)]` on the new field is what keeps a pre-#1015 snapshot
+/// (issue #862 restores `TeamSlot`s verbatim) loadable, so the absent-field
+/// decode is pinned here too.
+#[test]
+fn repairing_slot_carries_its_priority_pin() {
+    let slot = TeamSlot::Repairing {
+        system_id: Some(SystemId("helm-engine-port".into())),
+        display_name: Some("Port Engine".into()),
+        priority: Some(2),
+        priority_system_id: Some(SystemId("helm-engine-starboard".into())),
+    };
+    let encoded = serde_json::to_string(&slot).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"Repairing":{"system_id":"helm-engine-port","display_name":"Port Engine","priority":2,"priority_system_id":"helm-engine-starboard"}}"#,
+        "the repair console reads `priority_system_id` off this exact shape"
+    );
+    assert_eq!(serde_json::from_str::<TeamSlot>(&encoded).unwrap(), slot);
+
+    let legacy = r#"{"Repairing":{"system_id":"helm","display_name":"Helm","priority":1}}"#;
+    assert_eq!(
+        serde_json::from_str::<TeamSlot>(legacy).unwrap(),
+        TeamSlot::Repairing {
+            system_id: Some(SystemId("helm".into())),
+            display_name: Some("Helm".into()),
+            priority: Some(1),
+            priority_system_id: None,
+        },
+        "a slot serialised before #1015 must still decode"
+    );
+}
+
+/// ToggleGodMode command round-trip (issue #900). Sent from
+/// `bridge::drain_god_mode_toggle` (not JS directly — the wasm export
+/// keeps its old zero-argument signature) under `LOCAL_CONSOLE_TOKEN`, but
+/// the wire shape it produces is pinned here the same way every other
+/// `ControlSystem` payload is.
+#[test]
+fn toggle_god_mode_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
+        payload: SystemControlPayload::ToggleGodMode,
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"god-mode","payload":{"type":"ToggleGodMode"}}}"#,
+        "ToggleGodMode wire shape must stay pinned"
+    );
+}
+
+/// The scan command (issue #1032).
+///
+/// It targets the real, station-owned `sensors` system rather than a scan
+/// system id of its own — the suite is the thing aboard the ship that can be
+/// damaged and commanded, the reading is not — so the wire shape pinned here
+/// is what gives it the ordinary station-tenure admission check, the same one
+/// `SetScienceTarget` takes.
+#[test]
+fn scan_target_control_system_round_trips() {
+    let msg = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.into()),
+        payload: SystemControlPayload::ScanTarget {
+            uuid: "00000000-0000-8000-8000-000000000042".into(),
+        },
+    };
+    assert_client_roundtrip(msg.clone());
+
+    let encoded = JsonCodec.encode_client(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"sensors","payload":{"type":"ScanTarget","data":{"uuid":"00000000-0000-8000-8000-000000000042"}}}}"#,
+        "ScanTarget wire shape must stay pinned"
+    );
+}
+
+/// The tractor engage/release commands (issue #1156).
+///
+/// Both target the real, station-owned `tractor` system rather than a
+/// channel of their own — the tractor IS a thing aboard the ship that can be
+/// damaged and commanded — so the wire shapes pinned here are what give them
+/// the ordinary station-tenure admission check the engineering seat holds.
+/// Fieldless: the beam couples to whatever Tactical has locked, read
+/// server-side, and release needs no argument.
+#[test]
+fn tractor_engage_and_release_control_system_round_trip() {
+    let engage = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::EngageTractor,
+    };
+    assert_client_roundtrip(engage.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&engage).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"EngageTractor"}}}"#,
+        "EngageTractor wire shape must stay pinned"
+    );
+
+    let release = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::ReleaseTractor,
+    };
+    assert_client_roundtrip(release.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&release).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"ReleaseTractor"}}}"#,
+        "ReleaseTractor wire shape must stay pinned"
+    );
+}
+
+/// The dock/undock commands (issue #1159).
+///
+/// Both target the real, helm-owned `dock` system rather than a channel of
+/// their own — the dock IS a thing aboard the ship that can be damaged and
+/// commanded — so the wire shapes pinned here give them the ordinary
+/// station-tenure admission check the helm seat holds. Fieldless: the
+/// manoeuvre mates the nearest viable dock-marker pair, resolved server-side,
+/// and undock needs no argument.
+#[test]
+fn dock_and_undock_control_system_round_trip() {
+    let dock = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
+        payload: SystemControlPayload::Dock,
+    };
+    assert_client_roundtrip(dock.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&dock).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Dock"}}}"#,
+        "Dock wire shape must stay pinned"
+    );
+
+    let undock = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
+        payload: SystemControlPayload::Undock,
+    };
+    assert_client_roundtrip(undock.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&undock).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Undock"}}}"#,
+        "Undock wire shape must stay pinned"
+    );
+}
+
+/// The dock blackboard (issue #1159): the `SystemBlackboard::Dock` variant
+/// round-trips, is additive on the wire, and an idle control carries no
+/// absent-field noise.
+#[test]
+fn system_blackboard_dock_round_trips_and_is_additive() {
+    use crate::core::messages::{DockBlackboard, SystemBlackboard};
+    // A docked control carries the relationship the umbilical (#1160) reads.
+    let docked = SystemBlackboard::Dock(DockBlackboard {
+        range: 200.0,
+        available: false,
+        available_target: None,
+        available_target_name: None,
+        engaged: true,
+        docked: true,
+        docked_to: Some("berth-1".into()),
+        docked_to_name: Some("world.probe_dock.entity.berth.name".into()),
+        refusal: None,
+    });
+    let encoded = serde_json::to_string(&docked).unwrap();
+    let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, docked);
+
+    // An idle control writes no absent-field noise: every optional field is
+    // skipped, so a bare payload decodes to defaults.
+    let idle = SystemBlackboard::Dock(DockBlackboard::default());
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("docked_to")
+            && !idle_json.contains("refusal")
+            && !idle_json.contains("available_target"),
+        "an idle dock blackboard omits its optional fields, got {idle_json}"
+    );
+    let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+    assert_eq!(idle_decoded, idle);
+}
+
+/// The sensor-radar blackboard (issues #749, #1339, #1397): the
+/// `SystemBlackboard::SensorRadar` variant round-trips with every target-scoped
+/// replica populated, and an idle radar writes none of them.
+///
+/// `selected_target_weapons_cold` is pinned here because it is a wire field the
+/// Sensors scan card reads and NOTHING else derives: the entity snapshot carries
+/// no power level, so a client that lost this field would silently stop showing
+/// the WEAPONS row rather than fall back to something. It is also deliberately
+/// NOT part of any shared target-facts payload — it exists only on this
+/// blackboard, which is the visibility boundary that keeps a target's restraint
+/// on the Sensors surface.
+#[test]
+fn system_blackboard_sensor_radar_round_trips_and_is_additive() {
+    use crate::core::messages::{SensorRadarBlackboard, SystemBlackboard};
+
+    let scanning = SystemBlackboard::SensorRadar(SensorRadarBlackboard {
+        selected_target: Some("enemy-1".into()),
+        selected_target_alert: Some(true),
+        selected_target_relative_velocity: Some([0.0, -20.0]),
+        selected_target_weapons_cold: Some(true),
+    });
+    let encoded = serde_json::to_string(&scanning).unwrap();
+    assert!(
+        encoded.contains("selected_target_weapons_cold"),
+        "a populated radar must carry the weapons-cold replica, got {encoded}"
+    );
+    let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, scanning);
+
+    // A powered target is the distinct `Some(false)` reading, not an absence —
+    // the client renders POWERED for it and nothing at all for `None`.
+    let powered = SystemBlackboard::SensorRadar(SensorRadarBlackboard {
+        selected_target: Some("enemy-2".into()),
+        selected_target_weapons_cold: Some(false),
+        ..Default::default()
+    });
+    let powered_json = serde_json::to_string(&powered).unwrap();
+    let powered_decoded: SystemBlackboard = serde_json::from_str(&powered_json).unwrap();
+    assert_eq!(powered_decoded, powered);
+
+    // An idle radar writes no absent-field noise, and a payload from a host
+    // that predates the field still decodes (additive `#[serde(default)]`).
+    let idle = SystemBlackboard::SensorRadar(SensorRadarBlackboard::default());
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("selected_target_weapons_cold")
+            && !idle_json.contains("selected_target_alert")
+            && !idle_json.contains("selected_target_relative_velocity"),
+        "an idle sensor-radar blackboard omits its optional fields, got {idle_json}"
+    );
+    let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+    assert_eq!(idle_decoded, idle);
+}
+
+/// External repair dispatch (issue #1161): the fieldless
+/// `DispatchExternalRepair` / `RecallExternalRepair` control payloads
+/// round-trip and keep their pinned wire shape. They target the `repair`
+/// system and take no argument — a team crosses to whatever the ship has
+/// designated, read server-side, and recall needs nothing to disambiguate.
+#[test]
+fn external_repair_dispatch_and_recall_control_system_round_trip() {
+    let dispatch = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchExternalRepair,
+    };
+    assert_client_roundtrip(dispatch.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&dispatch).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchExternalRepair"}}}"#,
+        "DispatchExternalRepair wire shape must stay pinned"
+    );
+
+    let recall = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallExternalRepair,
+    };
+    assert_client_roundtrip(recall.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&recall).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"RecallExternalRepair"}}}"#,
+        "RecallExternalRepair wire shape must stay pinned"
+    );
+}
+
+/// Security dispatch and recall (issue #1346): both control payloads round-trip
+/// and keep their pinned wire shape. Unlike `DispatchExternalRepair`, both NAME
+/// their team — and the dispatch also names its target and action — because a
+/// hull with two teams working two places cannot resolve any of the three from a
+/// single Tactical lock.
+#[test]
+fn security_dispatch_and_recall_control_system_round_trip() {
+    let dispatch = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DispatchSecurityTeam {
+            team_idx: 1,
+            target: "00000000-0000-8000-8000-000000000042".into(),
+            action: "assist_evacuation".into(),
+        },
+    };
+    assert_client_roundtrip(dispatch.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&dispatch).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DispatchSecurityTeam","data":{"team_idx":1,"target":"00000000-0000-8000-8000-000000000042","action":"assist_evacuation"}}}}"#,
+        "DispatchSecurityTeam wire shape must stay pinned"
+    );
+
+    let recall = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::RecallSecurityTeam { team_idx: 0 },
+    };
+    assert_client_roundtrip(recall.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&recall).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"RecallSecurityTeam","data":{"team_idx":0}}}}"#,
+        "RecallSecurityTeam wire shape must stay pinned"
+    );
+}
+
+/// Detonate charges (issue #1350): the fourth stage of a controlled demolition
+/// round-trips and keeps its pinned wire shape. It targets the `security` system
+/// the team was dispatched from — the station that fires the charges — and NAMES
+/// its obstruction, because a ship can be running more than one demolition.
+#[test]
+fn detonate_charges_control_system_round_trips() {
+    let detonate = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::SECURITY_SYSTEM_ID.into()),
+        payload: SystemControlPayload::DetonateCharges {
+            target: "00000000-0000-8000-8000-000000000042".into(),
+        },
+    };
+    assert_client_roundtrip(detonate.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&detonate).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"security","payload":{"type":"DetonateCharges","data":{"target":"00000000-0000-8000-8000-000000000042"}}}}"#,
+        "DetonateCharges wire shape must stay pinned"
+    );
+}
+
+/// The Security blackboard (issue #1346) round-trips whole, and an idle muster
+/// pays for none of the optional fields — so a hull that musters teams and has
+/// used none of them puts a payload on the wire with no refusal and no
+/// assignments in it.
+#[test]
+fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
+    use crate::core::messages::{
+        SecurityActionOption, SecurityBlackboard, SecurityTargetOption, SecurityTeamSlot,
+    };
+
+    let working = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![
+            SecurityTeamSlot {
+                state: "working".into(),
+                target: Some("00000000-0000-8000-8000-000000000042".into()),
+                target_name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+                action: Some("secure_contain".into()),
+                progress: 0.5,
+                risk: 0.6,
+            },
+            SecurityTeamSlot {
+                state: "available".into(),
+                ..Default::default()
+            },
+        ],
+        targets: vec![SecurityTargetOption {
+            uuid: "00000000-0000-8000-8000-000000000042".into(),
+            name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
+            separation: 180.0,
+            in_range: true,
+            actions: vec![SecurityActionOption {
+                action: "assist_evacuation".into(),
+                duration_secs: 20.0,
+                risk: 0.35,
+                priority: "life_safety".into(),
+                warning: Some("security.warning.evacuation_under_fire".into()),
+            }],
+        }],
+        refusal: Some("security.dispatch.refused.team_busy".into()),
+    });
+    let json = serde_json::to_string(&working).unwrap();
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        working
+    );
+    assert!(
+        json.contains(r#""kind":"Security""#),
+        "the blackboard is tagged by kind so the JS mirror can switch on it, got {json}"
+    );
+
+    let idle = SystemBlackboard::Security(SecurityBlackboard {
+        range: 400.0,
+        teams: vec![SecurityTeamSlot {
+            state: "available".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("refusal")
+            && !idle_json.contains("target_name")
+            && !idle_json.contains("\"action\""),
+        "an idle muster omits its optional fields, got {idle_json}"
+    );
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&idle_json).unwrap(),
+        idle
+    );
+}
+
+/// The external repair-dispatch fields on the repair blackboard (issue #1161)
+/// round-trip, and a hull that authored no dispatch pays for none of the
+/// optional fields — so its wire shape is byte-identical to one built before
+/// this existed.
+#[test]
+fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
+    use crate::core::messages::RepairBlackboard;
+
+    let dispatching = SystemBlackboard::Repair(RepairBlackboard {
+        external_dispatch_range: Some(800.0),
+        external_dispatch_target: Some("00000000-0000-8000-8000-000000000042".into()),
+        external_dispatch_target_name: Some("world.probe_external_repair.entity.ally.name".into()),
+        external_dispatch_refusal: Some("repair.dispatch.refused.out_of_range".into()),
+        // Which team went, and how the target it is working is doing (issue
+        // #1386) — the two fields the ABROAD card is drawn from.
+        external_dispatch_team_idx: Some(2),
+        external_dispatch_target_condition: Some(0.42),
+        external_dispatch_candidate_name: Some("world.probe.entity.next.name".into()),
+        external_dispatch_candidate_refusal: Some("repair.dispatch.refused.out_of_range".into()),
+        ..Default::default()
+    });
+    let json = serde_json::to_string(&dispatching).unwrap();
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        dispatching
+    );
+
+    // A hull that can dispatch nothing pays for none of the optional fields.
+    let idle = SystemBlackboard::Repair(RepairBlackboard::default());
+    let json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !json.contains("external_dispatch"),
+        "a repair blackboard with no dispatch capability must carry no absent-field noise: \
+         {json}"
+    );
+
+    // A payload written before #1386 — capability present, nobody abroad —
+    // still decodes, and reads as no team abroad rather than as team 0.
+    let older = r#"{"kind":"Repair","data":{"teams":[],"travel_duration_secs":5.0,"external_dispatch_range":800.0}}"#;
+    let decoded = serde_json::from_str::<SystemBlackboard>(older).unwrap();
+    let SystemBlackboard::Repair(bb) = decoded else {
+        panic!("expected a repair blackboard");
+    };
+    assert_eq!(bb.external_dispatch_team_idx, None);
+    assert_eq!(bb.external_dispatch_target_condition, None);
+    assert_eq!(bb.external_dispatch_candidate_name, None);
+    assert_eq!(bb.external_dispatch_candidate_refusal, None);
+}
+
+/// The start/stop transfer commands (issue #1160).
+///
+/// Both target the real, engineering-owned `umbilical` system rather than a
+/// channel of their own — the umbilical IS a thing aboard the ship that can be
+/// damaged and commanded — so the wire shapes pinned here give them the
+/// ordinary station-tenure admission check the engineering seat holds.
+/// Fieldless: what moves, how fast and which way are the hull's authored
+/// `[umbilical]` terms, resolved server-side, and stop needs no argument.
+#[test]
+fn start_and_stop_transfer_control_system_round_trip() {
+    let start = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
+        payload: SystemControlPayload::StartTransfer,
+    };
+    assert_client_roundtrip(start.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&start).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StartTransfer"}}}"#,
+        "StartTransfer wire shape must stay pinned"
+    );
+
+    let stop = ClientMessage::ControlSystem {
+        target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
+        payload: SystemControlPayload::StopTransfer,
+    };
+    assert_client_roundtrip(stop.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&stop).unwrap(),
+        r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StopTransfer"}}}"#,
+        "StopTransfer wire shape must stay pinned"
+    );
+}
+
+/// The umbilical blackboard (issue #1160): the `SystemBlackboard::Umbilical`
+/// variant round-trips, is additive on the wire, and an idle umbilical carries
+/// no absent-field noise.
+#[test]
+fn system_blackboard_umbilical_round_trips_and_is_additive() {
+    use crate::core::messages::{SystemBlackboard, UmbilicalBlackboard};
+
+    // A running umbilical carries both ends' levels the console shows.
+    let running = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+        capacity: "reserve_fuel".into(),
+        rate: 5.0,
+        direction: "deliver".into(),
+        running: true,
+        operator_level: Some(80),
+        partner_level: Some(20),
+        refusal: None,
+    });
+    let encoded = serde_json::to_string(&running).unwrap();
+    assert!(encoded.contains(r#""kind":"Umbilical""#), "got: {encoded}");
+    let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, running);
+
+    // An idle umbilical writes no absent-field noise: the optional fields are
+    // skipped, so a bare payload decodes to defaults.
+    let idle = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+        capacity: "reserve_fuel".into(),
+        rate: 5.0,
+        direction: "deliver".into(),
+        ..Default::default()
+    });
+    let idle_json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !idle_json.contains("operator_level")
+            && !idle_json.contains("partner_level")
+            && !idle_json.contains("refusal"),
+        "an idle umbilical blackboard omits its optional fields, got {idle_json}"
+    );
+    let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+    assert_eq!(idle_decoded, idle);
+
+    // …and every field is serde-default, so a bare payload decodes whole.
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{}}"#).unwrap(),
+        SystemBlackboard::Umbilical(UmbilicalBlackboard::default())
+    );
+}
+
+/// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
+/// variant round-trips, is additive on the wire, and an idle beam carries no
+/// absent-field noise.
+#[test]
+fn system_blackboard_tractor_round_trips_and_is_additive() {
+    use crate::core::messages::TractorBlackboard;
+
+    let held = SystemBlackboard::Tractor(TractorBlackboard {
+        range: 600.0,
+        engaged: true,
+        coupled_target: Some("00000000-0000-8000-8000-000000000042".into()),
+        coupled_target_name: Some("world.probe_tractor.entity.derelict.name".into()),
+        refusal: None,
+    });
+    assert_server_roundtrip(ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
+        updates: vec![(
+            SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+            held.clone(),
+        )],
+    });
+    let json = serde_json::to_string(&held).unwrap();
+    assert!(json.contains(r#""kind":"Tractor""#), "got: {json}");
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        held
+    );
+
+    // An idle beam holding nothing pays for none of the optional fields.
+    let idle = SystemBlackboard::Tractor(TractorBlackboard {
+        range: 600.0,
+        ..Default::default()
+    });
+    let json = serde_json::to_string(&idle).unwrap();
+    assert!(
+        !json.contains("coupled_target") && !json.contains("refusal"),
+        "an idle tractor blackboard must carry no absent-field noise: {json}"
+    );
+
+    // Additive on the wire: a payload minted before this variant existed
+    // still decodes, because the enum's other variants are untouched.
+    let legacy = r#"{"kind":"Captain","data":{"red_alert":false,"view_direction":"fore","hull_integrity_pct":100.0}}"#;
+    assert!(matches!(
+        serde_json::from_str::<SystemBlackboard>(legacy).unwrap(),
+        SystemBlackboard::Captain(_)
+    ));
+    // …and every field on the payload is serde-default, so a bare one decodes.
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Tractor","data":{}}"#).unwrap(),
+        SystemBlackboard::Tractor(TractorBlackboard::default())
+    );
+}
+
+/// The scan blackboard (issue #1032), and the derivation-purity guarantee
+/// stated where the payload is actually made: **as the reading's whole key
+/// set**.
+///
+/// `pasm/spec/design/simulation-differentiation.yaml` says a sensor readout
+/// must not be "scripted exposition dressed as sensor output". In a language
+/// with no reflection, the enforceable form of that is the assertion below:
+/// a reading has exactly these ten keys, every one of them a quantity read
+/// off the subject's condition track (or its content identity, for `mass` —
+/// issue #1154) or a `strings.csv` id an author wrote against a quantity —
+/// and none of them a result, a summary, a narration or a description. A
+/// `scan_text` field would have to be added here, in a diff, moving this
+/// test.
+///
+/// Issue #1347 moved it exactly that way, and the ten stay ten: the bulk class
+/// and the debris projection are `skip_serializing_if`, so a reading of an
+/// ordinary structure puts the same keys on the wire it always did. What the
+/// three new keys may say is pinned separately, by
+/// [`a_debris_reading_carries_a_projection_and_still_no_prose`].
+#[test]
+fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
+    use crate::core::messages::{ScanBlackboard, ScanReadingSnapshot};
+    use std::collections::BTreeSet;
+
+    let reading = ScanReadingSnapshot {
+        subject_uuid: "00000000-0000-8000-8000-000000000042".into(),
+        subject_name: "world.entity.skyhook.name".into(),
+        band: "detailed".into(),
+        band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
+        taken_at_tick: 900,
+        condition_fraction: 0.31,
+        condition_step: 0.01,
+        mass: 250_000.0,
+        mass_class: String::new(),
+        mass_class_label: String::new(),
+        debris: None,
+        flags: vec![("world.skyhook.transfer.label".into(), false)],
+        capacities: vec![("world.skyhook.berths.label".into(), 4)],
+    };
+
+    let value: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    assert_eq!(
+        value
+            .as_object()
+            .expect("a reading is an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<&str>>(),
+        BTreeSet::from([
+            "subject_uuid",
+            "subject_name",
+            "band",
+            "band_label",
+            "taken_at_tick",
+            "condition_fraction",
+            "condition_step",
+            "mass",
+            "flags",
+            "capacities",
+        ]),
+        "the reading's whole surface — every key is a measured quantity, its \
+         content identity, or a label an author wrote against one, and there \
+         is nowhere for a written-out scan result to ride"
+    );
+
+    let bb = SystemBlackboard::Scan(ScanBlackboard {
+        capable: true,
+        reading: Some(reading),
+        refusal: None,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains(r#""kind":"Scan""#), "got: {json}");
+    assert_eq!(serde_json::from_str::<SystemBlackboard>(&json).unwrap(), bb);
+
+    // A refused scan carries the reason and no stale reading.
+    let refused = SystemBlackboard::Scan(ScanBlackboard {
+        capable: true,
+        reading: None,
+        refusal: Some(crate::science::ScanRefusal::OutOfRange.string_id().into()),
+    });
+    let json = serde_json::to_string(&refused).unwrap();
+    assert!(
+        !json.contains("reading") && json.contains("scan.refusal.out_of_range"),
+        "a refusal replaces the reading rather than sitting beside it: {json}"
+    );
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+        refused
+    );
+
+    // ADDITIVE ON THE WIRE: adding this variant moved no other variant's
+    // decoding, and every field on it is `#[serde(default)]`.
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Scan","data":{}}"#).unwrap(),
+        SystemBlackboard::Scan(ScanBlackboard::default())
+    );
+
+    let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
+        updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// The debris half of a reading (issue #1347), pinned as its own key set for
+/// the reason the reading above is pinned as one.
+///
+/// A moving hazard is exactly the subject a scripted reveal would be most
+/// tempting for — "IT IS GOING TO HIT THE DEPOT" is a sentence somebody could
+/// have typed — so the wire shape says, in a form the compiler enforces, that
+/// nobody did: six keys, five of them numbers or a boolean derived from
+/// numbers, and one a `strings.csv` id an author wrote against **the protected
+/// asset** rather than against the threat. There is nowhere for a warning to
+/// ride.
+#[test]
+fn a_debris_reading_carries_a_projection_and_still_no_prose() {
+    use crate::core::messages::ScanReadingSnapshot;
+    use std::collections::BTreeSet;
+
+    let reading = ScanReadingSnapshot {
+        subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
+        subject_name: "world.falling_skyway.entity.skyway_debris_alpha.name".into(),
+        band: "detailed".into(),
+        band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
+        taken_at_tick: 1200,
+        condition_fraction: 1.0,
+        condition_step: 0.01,
+        mass: 4_200.0,
+        mass_class: "medium".into(),
+        mass_class_label: "entity.alliance_destroyer.scan.mass_class.medium.label".into(),
+        debris: Some(crate::debris::DebrisAssessment {
+            protected_name: "world.falling_skyway.entity.depot_ladder_b.name".into(),
+            course: [-14.0, 3.0],
+            closest_approach: 6.5,
+            seconds_to_closest_approach: 41.0,
+            on_collision_course: true,
+            seconds_to_impact: Some(37.0),
+        }),
+        flags: Vec::new(),
+        capacities: Vec::new(),
+    };
+
+    let value: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    let debris = value
+        .get("debris")
+        .and_then(|d| d.as_object())
+        .expect("an assessed debris reading carries its projection");
+    assert_eq!(
+        debris
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<&str>>(),
+        BTreeSet::from([
+            "protected_name",
+            "course",
+            "closest_approach",
+            "seconds_to_closest_approach",
+            "on_collision_course",
+            "seconds_to_impact",
+        ]),
+        "the projection's whole surface — geometry and the protected asset's own \
+         name id, and nowhere for an authored warning to ride"
+    );
+
+    // Round-trips, and the absent-arrival case stays absent rather than
+    // decaying to a zero a crew would read as "impact now".
+    let decoded: ScanReadingSnapshot =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    assert_eq!(decoded, reading);
+    let mut misses = reading.clone();
+    if let Some(d) = misses.debris.as_mut() {
+        d.on_collision_course = false;
+        d.seconds_to_impact = None;
+    }
+    let json = serde_json::to_string(&misses).unwrap();
+    assert!(
+        !json.contains("seconds_to_impact"),
+        "a contact that never arrives says nothing about when: {json}"
+    );
+}
+
+/// The dossier blackboard (issue #1030), and the hidden-truth guarantee
+/// stated where the payload is actually made: **as the payload's whole key
+/// set**.
+///
+/// This is the wire half of `dossier::projection`'s own tests. In a language
+/// with no reflection, "structurally absent, not filtered at render time"
+/// means the serialised dossier has exactly these five keys and a fact
+/// exactly two — so a field a secret could ride in would have to be added
+/// here, in a diff, moving this test. A render-time filter would not satisfy
+/// it: the assertion is over the type's whole surface.
+#[test]
+fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
+    use crate::core::messages::{
+        DossierBlackboard, DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot,
+        DossierValue,
+    };
+    use std::collections::BTreeSet;
+
+    let dossier = DossierSnapshot {
+        uuid: "00000000-0000-8000-8000-000000000042".into(),
+        name: "world.entity.skyhook.name".into(),
+        summary: "world.entity.skyhook.description".into(),
+        facts: vec![
+            DossierFactSnapshot {
+                label: crate::dossier::FACT_FACTION.into(),
+                value: DossierValue::Text("faction.alliance.display_name".into()),
+            },
+            DossierFactSnapshot {
+                label: crate::dossier::FACT_COMMS.into(),
+                value: DossierValue::Flag(true),
+            },
+            DossierFactSnapshot {
+                label: crate::dossier::FACT_CONDITION.into(),
+                value: DossierValue::Fraction(0.5),
+            },
+            DossierFactSnapshot {
+                label: "world.skyhook.berths.label".into(),
+                value: DossierValue::Count(4),
+            },
+        ],
+        evidence: Vec::new(),
+    };
+
+    // The key set, read off the type rather than off this instance.
+    let value: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&dossier).unwrap()).unwrap();
+    let keys: BTreeSet<&str> = value
+        .as_object()
+        .expect("a dossier is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        BTreeSet::from(["uuid", "name", "summary", "facts", "evidence"]),
+        "the dossier's whole surface — there is nowhere for hidden truth to ride"
+    );
+    for fact in value["facts"].as_array().unwrap() {
+        let keys: BTreeSet<&str> = fact
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            BTreeSet::from(["label", "value"]),
+            "a fact is a label and a value; there is no third column"
+        );
+    }
+    assert_eq!(
+        value["facts"][2]["value"],
+        serde_json::json!({"kind": "fraction", "value": 0.5}),
+        "a value is TAGGED, so the panel formats a percentage rather than guessing"
+    );
+
+    let bb = SystemBlackboard::Dossiers(DossierBlackboard {
+        subjects: vec![dossier],
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains(r#""kind":"Dossiers""#), "got: {json}");
+    assert_eq!(serde_json::from_str::<SystemBlackboard>(&json).unwrap(), bb);
+
+    // The #1031 seam, pinned by #1030 before anything wrote to it and kept
+    // BYTE-FOR-BYTE here now that something does: appending entries was
+    // additive, and this literal is the proof — the slice that filled the
+    // list did not have to move a character of it.
+    let with_evidence = r#"{"kind":"Dossiers","data":{"subjects":[{"uuid":"u","name":"n",
+        "facts":[],"evidence":[{"text":"world.x.evidence","provenance":"scan",
+        "gathered_at_tick":900}]}]}}"#;
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(with_evidence).unwrap(),
+        SystemBlackboard::Dossiers(DossierBlackboard {
+            subjects: vec![DossierSnapshot {
+                uuid: "u".into(),
+                name: "n".into(),
+                summary: String::new(),
+                facts: Vec::new(),
+                evidence: vec![DossierEvidenceSnapshot {
+                    text: "world.x.evidence".into(),
+                    provenance: "scan".into(),
+                    gathered_at_tick: 900,
+                }],
+            }],
+        })
+    );
+
+    // Every field is `#[serde(default)]`, so a payload minted before any one
+    // of them decodes rather than being refused whole.
+    assert_eq!(
+        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Dossiers","data":{}}"#).unwrap(),
+        SystemBlackboard::Dossiers(DossierBlackboard::default())
+    );
+
+    // An evidence ENTRY's whole key set, asserted the same way a fact's is
+    // (issue #1031). Three columns and no fourth: what was learned, how, and
+    // when. There is deliberately no "actual value" beside the reported one
+    // and no confidence score — a scenario that misleads the crew authors the
+    // misleading finding and the contradiction as two entries they can
+    // compare, which is why inspecting this payload cannot reveal anything
+    // they were not shown.
+    let entry: serde_json::Value = serde_json::from_str(
+        &serde_json::to_string(&DossierEvidenceSnapshot {
+            text: "world.x.evidence".into(),
+            provenance: "dialogue".into(),
+            gathered_at_tick: 900,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        entry
+            .as_object()
+            .expect("an entry is an object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<&str>>(),
+        BTreeSet::from(["text", "provenance", "gathered_at_tick"]),
+    );
+
+    // And the provenance crosses as the SCRIPT's own name, so the panel's
+    // PROVENANCE_LABELS keys, a scenario's `provenance: "scan"` and a save
+    // are one vocabulary rather than three.
+    for provenance in crate::dossier::EvidenceProvenance::ALL {
+        assert_eq!(
+            serde_json::to_string(&provenance).unwrap(),
+            format!("\"{}\"", provenance.as_str())
+        );
+    }
+
+    let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
+        updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// The phone settings menu's wire shapes (issue #940), pinned because
+/// `gui/settings-panel.js` hand-builds them: the two messages it sends and
+/// the `DebugState` read-back it folds.
+///
+/// The two client messages are `#[cfg]`-gated with the variants they name;
+/// the read-back is not, because it is reported in every build.
+#[test]
+fn client_settings_menu_wire_shapes_are_pinned() {
+    use crate::core::messages::DebugSurface;
+
+    #[cfg(not(phoenix_demo_build))]
+    {
+        let msg = ClientMessage::ToggleDebugFlag {
+            flag: DebugSurface::Regions,
+        };
+        assert_client_roundtrip(msg.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&msg).unwrap(),
+            r#"{"type":"ToggleDebugFlag","data":{"flag":"Regions"}}"#,
+            "ToggleDebugFlag wire shape must match what settings-panel.js sends"
+        );
+
+        // A unit variant, so the adjacently-tagged encoding omits `data`
+        // entirely — exactly what `connection-manager.js` puts on the wire
+        // when `send()` is given no data, which is how `settings-panel.js`
+        // sends it and how `ReleaseStation` has always been sent. Pinned
+        // because the JS builds this by hand.
+        let pause = ClientMessage::TogglePause;
+        assert_client_roundtrip(pause.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&pause).unwrap(),
+            r#"{"type":"TogglePause"}"#,
+            "TogglePause wire shape must match what settings-panel.js sends"
+        );
+        // An explicit null is the same message; an empty object is NOT, and
+        // the JS must not start sending one.
+        assert!(JsonCodec
+            .decode_client(r#"{"type":"TogglePause","data":null}"#)
+            .is_ok());
+        assert!(
+            JsonCodec
+                .decode_client(r#"{"type":"TogglePause","data":{}}"#)
+                .is_err(),
+            "`data: {{}}` is not this message — settings-panel.js sends no data at all"
+        );
+    }
+
+    // The join-QR toggle (issue #1329), pinned in the same way and for a
+    // sharper reason: a browser host answers this message in JavaScript and
+    // never decodes it, so THIS is the only place the wire shape a native host
+    // must understand is checked against the shape the phone sends.
+    let qr = ClientMessage::ToggleQrCode;
+    assert_client_roundtrip(qr.clone());
+    assert_eq!(
+        JsonCodec.encode_client(&qr).unwrap(),
+        r#"{"type":"ToggleQrCode"}"#,
+        "ToggleQrCode wire shape must match what settings-panel.js sends"
+    );
+    assert!(JsonCodec
+        .decode_client(r#"{"type":"ToggleQrCode","data":null}"#)
+        .is_ok());
+    assert!(
+        JsonCodec
+            .decode_client(r#"{"type":"ToggleQrCode","data":{}}"#)
+            .is_err(),
+        "`data: {{}}` is not this message — settings-panel.js must send no data at all"
+    );
+
+    let report = ServerMessage::DebugState {
+        flags: vec![
+            (DebugSurface::Regions, true),
+            (DebugSurface::Modifiers, false),
+        ],
+        paused: true,
+        god_mode: true,
+    };
+    assert_server_roundtrip(report.clone());
+    assert_eq!(
+        JsonCodec.encode_server(&report).unwrap(),
+        r#"{"type":"DebugState","data":{"flags":[["Regions",true],["Modifiers",false]],"paused":true,"god_mode":true}}"#,
+        "DebugState wire shape must match what settings-panel.js folds"
+    );
+
+    // The station-activity flag rides the same `ToggleDebugFlag` route the
+    // phone sends by hand (issue #1145) — pin its spelling with the others.
+    #[cfg(not(phoenix_demo_build))]
+    {
+        let msg = ClientMessage::ToggleDebugFlag {
+            flag: DebugSurface::StationActivity,
+        };
+        assert_client_roundtrip(msg.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&msg).unwrap(),
+            r#"{"type":"ToggleDebugFlag","data":{"flag":"StationActivity"}}"#,
+            "the StationActivity flag spelling must match settings-panel.js"
+        );
+
+        // The AI doctrine-pool flag rides the same route (issue #1149).
+        let msg = ClientMessage::ToggleDebugFlag {
+            flag: DebugSurface::AiDoctrine,
+        };
+        assert_client_roundtrip(msg.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&msg).unwrap(),
+            r#"{"type":"ToggleDebugFlag","data":{"flag":"AiDoctrine"}}"#,
+            "the AiDoctrine flag spelling must match settings-panel.js"
+        );
+    }
+}
+
+/// The station-activity debug payload's JSON shape (issue #1145, PRD #1144),
+/// pinned because `gui/station-activity-chart.js` parses it by field name and
+/// the two must not drift. This is the schema-conventions contract the later
+/// PRD #1144 surfaces copy: a versioned envelope plus a sorted time series.
+#[test]
+fn station_activity_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{
+        StationActivityBucket, StationActivityEntry, StationActivityPayload, DEBUG_SCHEMA_VERSION,
+    };
+
+    let payload = StationActivityPayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        bucket_ticks: 900,
+        bucket_secs: 15.0,
+        buckets: vec![StationActivityBucket {
+            start_tick: 0,
+            stations: vec![StationActivityEntry {
+                station: "helm".into(),
+                human: 3,
+                ai: 1,
+                offline: 0,
+            }],
+        }],
+    };
+    let json = crate::core::codec::encode_station_activity(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"bucket_ticks":900,"bucket_secs":15.0,"buckets":[{"start_tick":0,"stations":[{"station":"helm","human":3,"ai":1,"offline":0}]}]}"#,
+        "the station-activity JSON shape must match gui/station-activity-chart.js"
+    );
+    // Round-trips back to the same payload — the schema is stable both ways.
+    let decoded: StationActivityPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+/// The AI doctrine-pool payload's JSON shape (issue #1149, PRD #1144), pinned
+/// because `gui/ai-doctrine-panel.js` parses it by field name and the headless
+/// report embeds it — the two must not drift. Follows the same versioned
+/// envelope + sorted-collection contract the station-activity surface set.
+#[test]
+fn ai_doctrine_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{
+        AiStatePayload, DoctrineCandidate, DoctrineChoice, ShipDoctrine, DEBUG_SCHEMA_VERSION,
+    };
+
+    let payload = AiStatePayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        tick: 42,
+        ships: vec![ShipDoctrine {
+            ship: "Harrow".into(),
+            uuid: Some("uuid-1".into()),
+            chosen: Some(DoctrineChoice {
+                id: "kill".into(),
+                directive: "Destroy(Ashrender)".into(),
+                target: Some("Ashrender".into()),
+                score: 38.0,
+            }),
+            candidates: vec![DoctrineCandidate {
+                id: "kill".into(),
+                score: 38.0,
+                source: "Doctrine".into(),
+                relevance: vec!["Weapons".into()],
+                directive: "Destroy(Ashrender)".into(),
+                target: Some("Ashrender".into()),
+                mandatory: true,
+                status: "Active".into(),
+            }],
+        }],
+        // #1152's per-host surface: empty here, so this pins that an
+        // absent-machine world still emits the field as `[]` — the shape the
+        // dock panel and headless report read.
+        hosts: Vec::new(),
+    };
+    let json = crate::core::codec::encode_ai_doctrine(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"tick":42,"ships":[{"ship":"Harrow","uuid":"uuid-1","chosen":{"id":"kill","directive":"Destroy(Ashrender)","target":"Ashrender","score":38.0},"candidates":[{"id":"kill","score":38.0,"source":"Doctrine","relevance":["Weapons"],"directive":"Destroy(Ashrender)","target":"Ashrender","mandatory":true,"status":"Active"}]}],"hosts":[]}"#,
+        "the AI doctrine JSON shape must match gui/ai-doctrine-panel.js"
+    );
+    // Round-trips back to the same payload — the schema is stable both ways.
+    let decoded: AiStatePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+/// The scenario-state payload's JSON shape is pinned to what
+/// `gui/scenario-state-panel.js` parses (issue #1148). Same contract as the
+/// station-activity test: a versioned envelope, deterministic ordering, and a
+/// round-trip. If the wire shape changes, the panel and this test move
+/// together.
+#[test]
+fn scenario_state_payload_wire_shape_is_pinned() {
+    use crate::core::messages::{AiDirective, ObjectiveStatus};
+    use crate::debug::payload::{
+        ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry,
+        ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+        DEBUG_SCHEMA_VERSION,
+    };
+
+    let payload = ScenarioStatePayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        flags: vec![ScenarioFlag {
+            name: "alarm".into(),
+            value: 1,
+        }],
+        objectives: vec![ScenarioObjective {
+            id: "kill".into(),
+            status: ObjectiveStatus::Active,
+            mandatory: true,
+            base_priority: 7.0,
+            directive: AiDirective::Destroy {
+                target: "raider".into(),
+            },
+        }],
+        triggers: vec![ScenarioTrigger {
+            id: Some("beat".into()),
+            condition: "on_timer(after_secs=30)".into(),
+            when: Some("flag(ready)".into()),
+            repeat: false,
+            fired: false,
+            pending: true,
+            when_holds: false,
+            last_fired_secs: None,
+            // #1151: additive, always emitted (an unfired trigger's is empty).
+            fire_history: vec![crate::debug::payload::TriggerFire {
+                fired_secs: 30.0,
+                predicate_values: vec![crate::debug::payload::PredicateValue {
+                    atom: "flag(ready)".into(),
+                    value: "true".into(),
+                }],
+            }],
+        }],
+        delayed_actions: vec![ScenarioDelayedAction {
+            action: "set_world_flag(reinforce)".into(),
+            entity: None,
+            fire_at_secs: 45.0,
+        }],
+        deadlines: vec![ScenarioDeadline {
+            id: "window".into(),
+            label: "world.deadline.window".into(),
+            visible: true,
+            due_tick: 36000,
+            state: "pending".into(),
+        }],
+        commitments: vec![ScenarioCommitment {
+            id: "passage".into(),
+            made_to: "strike_committee".into(),
+            terms: "terms.passage".into(),
+            resolves_when: String::new(),
+            state: "open".into(),
+            made_at_tick: 10,
+            resolved_at_tick: None,
+        }],
+        dossier: vec![ScenarioDossierEntry {
+            subject_uuid: "uuid-1".into(),
+            text: "evidence.forged_manifest".into(),
+            provenance: "records".into(),
+            gathered_at_tick: 40,
+        }],
+    };
+    let json = crate::core::codec::encode_scenario_state(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"flags":[{"name":"alarm","value":1}],"objectives":[{"id":"kill","status":"Active","mandatory":true,"base_priority":7.0,"directive":{"kind":"Destroy","target":"raider"}}],"triggers":[{"id":"beat","condition":"on_timer(after_secs=30)","when":"flag(ready)","repeat":false,"fired":false,"pending":true,"when_holds":false,"fire_history":[{"fired_secs":30.0,"predicate_values":[{"atom":"flag(ready)","value":"true"}]}]}],"delayed_actions":[{"action":"set_world_flag(reinforce)","fire_at_secs":45.0}],"deadlines":[{"id":"window","label":"world.deadline.window","visible":true,"due_tick":36000,"state":"pending"}],"commitments":[{"id":"passage","made_to":"strike_committee","terms":"terms.passage","state":"open","made_at_tick":10}],"dossier":[{"subject_uuid":"uuid-1","text":"evidence.forged_manifest","provenance":"records","gathered_at_tick":40}]}"#,
+        "the scenario-state JSON shape must match gui/scenario-state-panel.js"
+    );
+    // Round-trips back to the same payload — the schema is stable both ways.
+    let decoded: ScenarioStatePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+// ── The four migrated legacy overlays' wire shapes (issue #1150) ─────────
+//
+// The same pinning contract as `station_activity_payload_wire_shape_is_pinned`,
+// one per surface: the Rust encoder and the JS dock renderer read the same
+// keys, so a rename on one side without the other fails here before it ships.
+
+#[test]
+fn damage_debug_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{DamageDebugPayload, DamageEntry, DEBUG_SCHEMA_VERSION};
+    let payload = DamageDebugPayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        entries: vec![
+            DamageEntry {
+                source: "region-zone".into(),
+                shield_arc: None,
+                amount: 3.0,
+            },
+            DamageEntry {
+                source: "asteroid-42".into(),
+                shield_arc: Some("Fore".into()),
+                amount: 12.5,
+            },
+        ],
+    };
+    let json = crate::core::codec::encode_damage_debug(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"entries":[{"source":"region-zone","shield_arc":null,"amount":3.0},{"source":"asteroid-42","shield_arc":"Fore","amount":12.5}]}"#,
+        "the damage JSON shape must match gui/debug-overlays.js"
+    );
+    let decoded: DamageDebugPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
+fn modifier_debug_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{
+        FloatContribution, FloatModifierEntry, IntContribution, IntModifierEntry,
+        ModifierDebugPayload, ModifierFlagEntry, DEBUG_SCHEMA_VERSION,
+    };
+    let payload = ModifierDebugPayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        flags: vec![ModifierFlagEntry {
+            flag: "CommsJammed".into(),
+            sources: vec!["ImpulseDrive".into()],
+        }],
+        float_modifiers: vec![FloatModifierEntry {
+            slot: "MaxSpeed".into(),
+            multiplier: 1.5,
+            contributions: vec![FloatContribution {
+                source: "ImpulseDrive".into(),
+                bonus: 0.5,
+            }],
+        }],
+        int_modifiers: vec![IntModifierEntry {
+            slot: "RepairTeams".into(),
+            sum: 2,
+            contributions: vec![IntContribution {
+                source: "ImpulseDrive".into(),
+                bonus: 2,
+            }],
+        }],
+    };
+    let json = crate::core::codec::encode_modifier_debug(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"flags":[{"flag":"CommsJammed","sources":["ImpulseDrive"]}],"float_modifiers":[{"slot":"MaxSpeed","multiplier":1.5,"contributions":[{"source":"ImpulseDrive","bonus":0.5}]}],"int_modifiers":[{"slot":"RepairTeams","sum":2,"contributions":[{"source":"ImpulseDrive","bonus":2}]}]}"#,
+        "the modifier JSON shape must match gui/debug-overlays.js"
+    );
+    let decoded: ModifierDebugPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
+fn entity_behavior_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{EntityBehaviorEntry, EntityBehaviorPayload, DEBUG_SCHEMA_VERSION};
+    let payload = EntityBehaviorPayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        entries: vec![EntityBehaviorEntry {
+            name: "Aurora".into(),
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            target: "none".into(),
+        }],
+    };
+    let json = crate::core::codec::encode_entity_behavior(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"entries":[{"name":"Aurora","x":1.0,"y":2.0,"z":3.0,"target":"none"}]}"#,
+        "the entity-behavior JSON shape must match gui/debug-overlays.js"
+    );
+    let decoded: EntityBehaviorPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
+fn entity_inspector_payload_wire_shape_is_pinned() {
+    use crate::debug::payload::{
+        EntityInspectorPayload, InspectorEntity, InspectorHullEntry, InspectorPlayer,
+        InspectorShieldFacing, DEBUG_SCHEMA_VERSION,
+    };
+    let payload = EntityInspectorPayload {
+        schema_version: DEBUG_SCHEMA_VERSION,
+        player: Some(InspectorPlayer {
+            x: 10.0,
+            z: 20.0,
+            hull: vec![InspectorHullEntry {
+                system: "core".into(),
+                current: 50.0,
+                max: 100.0,
+            }],
+            shields: vec![InspectorShieldFacing {
+                label: "Fore".into(),
+                hp: 20,
+                max_hp: 40,
+                offline: false,
+                focused: true,
+            }],
+        }),
+        entities: vec![InspectorEntity {
+            name: "Scout".into(),
+            tags: vec!["ship".into()],
+            x: 13.0,
+            z: 24.0,
+            distance: 5.0,
+            faction: Some("Hostiles".into()),
+            hull_current: Some(30.0),
+            hull_max: Some(60.0),
+            comms_hailable: Some(true),
+            comms_in_range: Some(true),
+            comms_range: Some(500.0),
+            ai_target: Some("none".into()),
+        }],
+    };
+    let json = crate::core::codec::encode_entity_inspector(&payload);
+    assert_eq!(
+        json,
+        r#"{"schema_version":1,"player":{"x":10.0,"z":20.0,"hull":[{"system":"core","current":50.0,"max":100.0}],"shields":[{"label":"Fore","hp":20,"max_hp":40,"offline":false,"focused":true}]},"entities":[{"name":"Scout","tags":["ship"],"x":13.0,"z":24.0,"distance":5.0,"faction":"Hostiles","hull_current":30.0,"hull_max":60.0,"comms_hailable":true,"comms_in_range":true,"comms_range":500.0,"ai_target":"none"}]}"#,
+        "the entity-inspector JSON shape must match gui/debug-overlays.js"
+    );
+    let decoded: EntityInspectorPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+// ── The demo build's missing routes (issue #940) ─────────────────────────
+//
+// **These are the gate tests, and they are the only ones that ask the
+// question the way an attacker would: over the wire.** Everything else
+// about the client settings menu is checked through a Rust predicate, and a
+// predicate can only be consulted by code that chose to consult it. These
+// two decode a raw JSON frame — exactly what `bridge.rs` hands the codec
+// when a phone speaks — and assert it is understood in a dev build and
+// meaningless in a demo one.
+//
+// HONESTLY, WHAT THESE SEE, and what they leave to their neighbour: they
+// pin the ROUTE to the cfg. A variant that quietly loses its `#[cfg]`
+// decodes in the demo run and fails here; one that gains a stray `#[cfg]`
+// fails the dev run. What they cannot see is the cfg itself being wrong —
+// they ask `is_demo_cfg()` the same question the code under test asks, so
+// a `build.rs` that stopped tracking `PHOENIX_DEMO_BUILD` would move both
+// sides together and these would still pass. That half is
+// `build_flags::the_cfg_gate_and_the_runtime_flag_agree`, which compares
+// the cfg against the `option_env!` read of the same variable. The two
+// tests are in the same CI step for exactly that reason; neither is
+// sufficient alone. (Checked, not assumed: inverting `build.rs` turns that
+// test red under `PHOENIX_DEMO_BUILD=true`.)
+
+/// A demo binary cannot be told to draw a debug overlay by a phone: the
+/// variant is not compiled, so the frame does not parse.
+#[test]
+fn the_client_debug_route_is_absent_from_a_demo_build() {
+    let decoded =
+        JsonCodec.decode_client(r#"{"type":"ToggleDebugFlag","data":{"flag":"Regions"}}"#);
+    assert_eq!(
+        decoded.is_ok(),
+        !crate::build_flags::is_demo_cfg(),
+        "ToggleDebugFlag must decode in a dev build and be an unknown \
+         message in a demo build — a hidden Debug/Cheat tab is a forgeable \
+         UI fact, so the wire shape has to go too"
+    );
+}
+
+/// A demo binary cannot be paused by a phone. This is the one that matters
+/// in play: a demo is N strangers on N phones, any one of whom could
+/// otherwise freeze the mission for everyone, repeatedly, with nothing in
+/// the drain checking station, captaincy or `GamePhase`.
+///
+/// The host's own pause (issue #939) is a different path — a `wasm_*`
+/// export the host page calls directly — and is deliberately untouched in
+/// every build.
+#[test]
+fn the_client_pause_route_is_absent_from_a_demo_build() {
+    for frame in [
+        r#"{"type":"TogglePause"}"#,
+        r#"{"type":"TogglePause","data":null}"#,
+    ] {
+        assert_eq!(
+            JsonCodec.decode_client(frame).is_ok(),
+            !crate::build_flags::is_demo_cfg(),
+            "a demo build must not understand {frame} from any phone"
+        );
+    }
+}
+
+/// A demo binary cannot be told console-latency measurements by a phone
+/// (issue #1169): the variant is not compiled, so the frame does not parse.
+///
+/// The same reasoning as its two siblings above, applied to a route that carries
+/// diagnostics rather than commands. A demo build has no Debug/Cheat tab, so
+/// nothing there would ever ask a phone to measure — and "nothing asks" is a
+/// UI fact, which is exactly the kind that is forgeable. The wire shape goes too.
+#[test]
+fn the_client_console_latency_route_is_absent_from_a_demo_build() {
+    for frame in [
+        r#"{"type":"ReportConsoleLatency","data":{"samples":[],"expired":[]}}"#,
+        // The `expired` list is `#[serde(default)]`, so a client that predates it
+        // still decodes in a dev build — and still must not in a demo build.
+        r#"{"type":"ReportConsoleLatency","data":{"samples":[{"action":"fire_phaser","input_to_send_ms":1.0,"send_to_ack_ms":40.0}]}}"#,
+    ] {
+        assert_eq!(
+            JsonCodec.decode_client(frame).is_ok(),
+            !crate::build_flags::is_demo_cfg(),
+            "a demo build must not understand {frame} from any phone"
+        );
+    }
+}
+
+/// A client does not name its own surface (issue #1169 review, finding on
+/// forgery). There is no field for it, so a peer trying to file against the
+/// host's own `SimHost` series — the one a CI perf budget compares — has nothing
+/// to put the claim in; the host assigns `PhoneConsole` to everything that
+/// arrives over a session.
+#[cfg(not(phoenix_demo_build))]
+#[test]
+fn a_console_latency_report_carries_no_surface_to_forge() {
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ReportConsoleLatency {
+            samples: vec![crate::core::messages::ConsoleLatencySample {
+                action: "fire_phaser".into(),
+                input_to_send_ms: 1.0,
+                send_to_ack_ms: 40.0,
+            }],
+            expired: vec![crate::core::messages::ConsoleLatencyExpiry {
+                action: "set_impulse".into(),
+                count: 2,
+            }],
+        })
+        .expect("encodes");
+    assert!(
+        !encoded.contains("surface") && !encoded.contains("SimHost"),
+        "the wire must carry no surface field for a client to claim: {encoded}"
+    );
+
+    // A frame that tries to name one anyway is simply ignored by serde — the
+    // field does not exist — rather than honoured.
+    let forged = r#"{"type":"ReportConsoleLatency","data":{"samples":[{"action":"x","surface":"SimHost","input_to_send_ms":0.0,"send_to_ack_ms":0.0}]}}"#;
+    let decoded = JsonCodec.decode_client(forged).expect("decodes");
+    assert!(matches!(
+        decoded,
+        ClientMessage::ReportConsoleLatency { .. }
+    ));
+}
+
+/// The host page's settings cog paints from the simulation's own flag
+/// read-back (issue #1169 review, C2), so the encoder that feeds it has to key
+/// by the flag names JS asks for and stay deterministic.
+#[test]
+fn debug_flag_readback_encodes_a_flat_object_keyed_by_flag_name() {
+    use crate::core::messages::DebugSurface;
+    let json = crate::core::codec::encode_debug_surfaces(&[
+        (DebugSurface::ConsoleLatency, true),
+        (DebugSurface::Regions, false),
+    ]);
+    assert_eq!(json, r#"{"ConsoleLatency":true,"Regions":false}"#);
+
+    // Every flag the wire reports must be reachable by the name the client
+    // settings table spells, so a new flag cannot be silently unpaintable.
+    let all: Vec<_> = DebugSurface::ALL.iter().map(|f| (*f, false)).collect();
+    let encoded = crate::core::codec::encode_debug_surfaces(&all);
+    let parsed: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
+    for flag in DebugSurface::ALL {
+        assert!(
+            parsed.get(flag.wire_name()).is_some(),
+            "{flag:?} is missing from the cog read-back: {encoded}"
+        );
+    }
+
+    // The enum's serde spelling and the catalogue's bridge spelling are the
+    // same declaration, not merely two strings that happen to agree today.
+    let report = ServerMessage::DebugState {
+        flags: DebugSurface::ALL
+            .into_iter()
+            .map(|surface| (surface, false))
+            .collect(),
+        paused: false,
+        god_mode: false,
+    };
+    let wire = JsonCodec.encode_server(&report).expect("encode DebugState");
+    let wire: serde_json::Value = serde_json::from_str(&wire).expect("valid JSON");
+    let wire_names: Vec<_> = wire["data"]["flags"]
+        .as_array()
+        .expect("flags array")
+        .iter()
+        .map(|pair| pair[0].as_str().expect("surface wire name"))
+        .collect();
+    assert_eq!(
+        wire_names,
+        DebugSurface::ALL
+            .into_iter()
+            .map(DebugSurface::wire_name)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).
+#[test]
+fn torpedo_tube_state_volley_fields_round_trip() {
+    use crate::core::messages::{PhaserMode, TorpedoTubeState};
+    let msg = ServerMessage::WeaponsUpdate {
+        target_uuid: None,
+        target_name: None,
+        banks: vec![],
+        tubes: vec![TorpedoTubeState {
+            id: "fore_port".to_string(),
+            loaded: true,
+            reload_secs: 3.5,
+            state: "loading".into(),
+            progress: 0.65,
+            load_time: 10.0,
+            volley_max: 4,
+            loaded_count: 2,
+            target_count: 4,
+            load_progress: 0.65,
+            readiness: WeaponReadiness::default(),
+            // Patterned attack in progress (issue #766): step 2 of 3,
+            // barrel 1 firing this round.
+            active_barrels: vec![1],
+            pattern_step: 2,
+            pattern_len: 3,
+        }],
+        torpedo_count: 8,
+        phaser_mode: PhaserMode::Auto,
+        blasters: vec![],
+        phaser_frequency: 0.5,
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// `TorpedoTubeState` patterned-attack fields round-trip (issue #766).
+#[test]
+fn torpedo_tube_state_pattern_fields_round_trip() {
+    use crate::core::messages::{PhaserMode, TorpedoTubeState, WeaponReadiness};
+    let msg = ServerMessage::WeaponsUpdate {
+        target_uuid: None,
+        target_name: None,
+        banks: vec![],
+        tubes: vec![TorpedoTubeState {
+            id: "fore-centre".to_string(),
+            loaded: true,
+            reload_secs: 0.0,
+            state: "loaded".into(),
+            progress: 1.0,
+            load_time: 3.0,
+            volley_max: 3,
+            loaded_count: 3,
+            target_count: 3,
+            load_progress: 1.0,
+            readiness: WeaponReadiness::default(),
+            // Patterned attack: step 2 of 3, barrel 1 active this round.
+            active_barrels: vec![1],
+            pattern_step: 2,
+            pattern_len: 3,
+        }],
+        torpedo_count: 27,
+        phaser_mode: PhaserMode::Manual,
+        blasters: vec![],
+        phaser_frequency: 0.5,
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// Shared weapon readiness contract (issue #764): each family's per-instance
+/// state carries a `WeaponReadiness` that round-trips with its blocking
+/// reason + range/arc intact, across all three families in one message.
+#[test]
+fn weapon_readiness_contract_round_trips_for_all_families() {
+    use crate::core::messages::{
+        BlasterBankState, PhaserBankState, PhaserMode, TorpedoTubeState, WeaponBlockReason,
+        WeaponReadiness,
+    };
+    let msg = ServerMessage::WeaponsUpdate {
+        target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+        target_name: Some("Raider".into()),
+        banks: vec![PhaserBankState {
+            id: "port".into(),
+            fire_ready: false,
+            on_cooldown: false,
+            cooldown_remaining: 0.0,
+            readiness: WeaponReadiness {
+                ready: false,
+                blocking_reason: WeaponBlockReason::OutOfArc,
+                target_range: Some(42.0),
+                target_arc: Some(120.0),
+            },
+        }],
+        tubes: vec![TorpedoTubeState {
+            id: "fore".into(),
+            loaded: false,
+            reload_secs: 3.0,
+            state: "loading".into(),
+            progress: 0.5,
+            load_time: 10.0,
+            volley_max: 2,
+            loaded_count: 0,
+            target_count: 2,
+            load_progress: 0.5,
+            readiness: WeaponReadiness {
+                ready: false,
+                blocking_reason: WeaponBlockReason::Loading,
+                target_range: Some(100.0),
+                target_arc: Some(10.0),
+            },
+            active_barrels: Vec::new(),
+            pattern_step: 0,
+            pattern_len: 0,
+        }],
+        torpedo_count: 4,
+        phaser_mode: PhaserMode::Manual,
+        blasters: vec![BlasterBankState {
+            id: "starboard".into(),
+            fire_ready: false,
+            on_cooldown: false,
+            cooldown_remaining: 0.0,
+            pending_volley: 2,
+            charge_progress: 0.0,
+            has_charge: false,
+            readiness: WeaponReadiness {
+                ready: true,
+                blocking_reason: WeaponBlockReason::Ready,
+                target_range: Some(12.5),
+                target_arc: Some(3.0),
+            },
+            // Patterned attack in progress (issue #765): step 1 of 3,
+            // barrels 0 and 2 firing simultaneously.
+            active_barrels: vec![0, 2],
+            pattern_step: 1,
+            pattern_len: 3,
+        }],
+        phaser_frequency: 0.5,
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+/// Regression: the on-the-wire JSON for `LoadingProgress` must place
+/// `fraction` directly under `data`, not under `data.data`.
+///
+/// Earlier the variant carried a nested `data: LoadingProgress` field,
+/// which combined with `#[serde(content = "data")]` produced
+/// `{"type":"LoadingProgress","data":{"data":{"fraction":0.5}}}` —
+/// the JS handlers in `server.html` and `client.html` read
+/// `parsed.data?.fraction` and got `undefined` (an object has no
+/// `fraction`), so the loading bar stuck at 0 % for the entire
+/// duration of `GamePhase::Loading`.
+#[test]
+fn server_loading_progress_wire_format() {
+    let msg = ServerMessage::LoadingProgress { fraction: 0.5 };
+    let encoded = JsonCodec.encode_server(&msg).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"LoadingProgress","data":{"fraction":0.5}}"#,
+        "LoadingProgress wire format must put `fraction` at data.fraction (not data.data.fraction); JS clients depend on this exact layout",
+    );
+}
+
+#[test]
+fn host_lobby_payload_carries_exact_presentation_readiness_boolean() {
+    let payload = LobbyStatePayload {
+        phase: "Lobby".into(),
+        scenario_title: String::new(),
+        scenario_body: String::new(),
+        crew_count: 0,
+        max_players: 0,
+        all_stations_filled: false,
+        all_ready: false,
+        readiness: crate::lobby::start_policy::ReadinessTally::default(),
+        station_ratings: Vec::new(),
+        presentation_ready: true,
+        stations: Vec::new(),
+        spectators: Vec::new(),
+        gms: Vec::new(),
+        loading_progress: None,
+        countdown_secs: 0,
+    };
+
+    let encoded = to_json(&payload).expect("encode host lobby state");
+    let json: serde_json::Value = serde_json::from_str(&encoded).expect("valid lobby JSON");
+    assert_eq!(
+        json.get("presentation_ready"),
+        Some(&serde_json::Value::Bool(true))
+    );
+}
+
+#[test]
+fn entity_snapshot_shield_fraction_is_present_as_a_number_on_the_wire() {
+    // (#471) shield_fraction: Some(0.0..=1.0) must appear as a bare number
+    // on the wire, not e.g. wrapped or stringified.
+    let msg = ServerMessage::WorldSetup {
+        world: WorldData {
+            entities: vec![EntitySnapshot {
+                shield_fraction: Some(0.42),
+                ..sample_entity_snapshot()
+            }],
+            ..Default::default()
+        },
+    };
+    let json = JsonCodec.encode_server(&msg).expect("encode");
+    assert!(
+        json.contains("\"shield_fraction\":0.42"),
+        "wire must contain shield_fraction=0.42, got: {json}"
+    );
+}
+
+#[test]
+fn entity_snapshot_shield_fraction_none_is_omitted_from_wire() {
+    // (#471) When shield_fraction is None, the field should be entirely
+    // absent from the JSON wire format.
+    let msg = ServerMessage::WorldSetup {
+        world: WorldData {
+            entities: vec![sample_entity_snapshot()],
+            ..Default::default()
+        },
+    };
+    let json = JsonCodec.encode_server(&msg).expect("encode");
+    assert!(
+        !json.contains("shield_fraction"),
+        "shield_fraction=None must be omitted from wire, got: {json}"
+    );
+}
+
+#[test]
+fn entity_snapshot_radar_size_none_is_omitted_from_json() {
+    let msg = ServerMessage::WorldSetup {
+        world: WorldData {
+            entities: vec![sample_entity_snapshot()],
+            ..Default::default()
+        },
+    };
+    let encoded = JsonCodec.encode_server(&msg).expect("encode");
+    assert!(
+        !encoded.contains("radar_size"),
+        "None radar_size must be omitted from JSON, got: {}",
+        encoded
+    );
+}
+
+// ── Version-skew tests: envelope decode path (issue #610) ─────────────
+//
+// These pin the CURRENT decode behaviour of the `ClientMessage` /
+// `ServerMessage` envelopes (`#[serde(tag = "type", content = "data")]`,
+// no `#[serde(deny_unknown_fields)]`) for two version-skew scenarios:
+// an unrecognised field on a known variant's payload, and a completely
+// unknown `type` tag. No policy change is made here — this is
+// documentation-by-test of whatever serde already does. If the pinned
+// behaviour ever changes intentionally, update the doc comments below.
+
+/// Pins current behaviour: an unrecognised field inside a known
+/// variant's `data` payload is silently ignored by serde on the client
+/// decode path (no `#[serde(deny_unknown_fields)]` on `ClientMessage`).
+/// A newer client sending an extra field to an older server (or vice
+/// versa) will not fail to decode — the extra field is simply dropped.
+/// If this changes (e.g. `deny_unknown_fields` is added), update this
+/// comment and the assertion below.
+#[test]
+fn client_decode_unknown_field_in_known_variant_is_ignored() {
+    let json = r#"{"type":"SetReady","data":{"ready":true,"totally_unknown_field":42}}"#;
+    let decoded = JsonCodec.decode_client(json);
+    assert_eq!(
+        decoded.expect("unknown field must not fail decode"),
+        ClientMessage::SetReady { ready: true }
+    );
+}
+
+/// Pins current behaviour: a `type` tag that does not match any
+/// `ClientMessage` variant is a hard decode error — serde's internally
+/// tagged enum representation has no wildcard/fallback arm. A client on
+/// a newer wire format that introduces a brand-new variant will produce
+/// an unrecoverable decode error on an older server, not a silently
+/// dropped message. If this changes (e.g. an explicit `Unknown` catch-all
+/// variant is introduced), update this comment.
+#[test]
+fn client_decode_unknown_type_tag_is_decode_error() {
+    let json = r#"{"type":"TotallyMadeUpVariant","data":{}}"#;
+    let decoded = JsonCodec.decode_client(json);
+    assert!(
+        decoded.is_err(),
+        "an unknown `type` tag must fail to decode, got: {decoded:?}"
+    );
+}
+
+/// Pins current behaviour: an unrecognised field inside a known
+/// variant's `data` payload is silently ignored by serde on the server
+/// decode path (no `#[serde(deny_unknown_fields)]` on `ServerMessage`).
+/// An older cached client meeting a newer server payload shape (extra
+/// fields added to an existing variant) will not error — it just won't
+/// see the new field. If this policy ever changes intentionally, update
+/// this comment.
+#[test]
+fn server_decode_unknown_field_in_known_variant_is_ignored() {
+    let json = r#"{"type":"LoadingProgress","data":{"fraction":0.5,"totally_unknown_field":"x"}}"#;
+    let decoded = JsonCodec.decode_server(json);
+    assert_eq!(
+        decoded.expect("unknown field must not fail decode"),
+        ServerMessage::LoadingProgress { fraction: 0.5 }
+    );
+}
+
+/// Pins current behaviour: a `type` tag that does not match any
+/// `ServerMessage` variant is a hard decode error, for the same reason
+/// as the client-side case above. A cached older client that receives a
+/// message using a brand-new server-only variant it doesn't know about
+/// will fail to decode that message outright (and must handle/log the
+/// error), rather than silently ignoring it. If this changes, update
+/// this comment.
+#[test]
+fn server_decode_unknown_type_tag_is_decode_error() {
+    let json = r#"{"type":"TotallyMadeUpVariant","data":{}}"#;
+    let decoded = JsonCodec.decode_server(json);
+    assert!(
+        decoded.is_err(),
+        "an unknown `type` tag must fail to decode, got: {decoded:?}"
+    );
+}
+
+// ── Bridge decode helper tests (decode_bridge_client_message) ──────────
+//
+// The short-form system-control shim was retired by issue #822: every
+// emitter now sends the full `ClientMessage` envelope, so the bridge
+// decode is a plain serde decode.
+
+#[test]
+fn decode_bridge_client_message_accepts_full_client_message() {
+    let msg = decode_bridge_client_message(r#"{"type":"SetReady","data":{"ready":true}}"#).unwrap();
+
+    assert_eq!(msg, ClientMessage::SetReady { ready: true });
+}
+
+/// Post-#822 the bridge no longer rewrites bare short-form payloads such
+/// as `{"type":"SetThrust",...}` — they are a hard decode error, exactly
+/// like any other unknown `type` tag.
+#[test]
+fn decode_bridge_client_message_rejects_short_form_payloads() {
+    for json in [
+        r#"{"type":"SetThrust","data":{"value":0.5}}"#,
+        r#"{"type":"StartImpulseCharge"}"#,
+        r#"{"type":"Hail","data":{"target_uuid":"s1"}}"#,
+    ] {
+        assert!(
+            decode_bridge_client_message(json).is_err(),
+            "short-form payload must no longer decode: {json}"
+        );
+    }
+}
+
+/// Comms control payloads round-trip inside the `ControlSystem` envelope
+/// (issue #822 — pins the shapes `gui/action-map.js` now emits after the
+/// short-form shim was retired).
+#[test]
+fn comms_control_system_payloads_round_trip() {
+    let payloads = vec![
+        SystemControlPayload::Hail {
+            target_uuid: "starbase-1".into(),
+        },
+        SystemControlPayload::SelectCommsMessage {
+            message_id: "m1".into(),
+        },
+        SystemControlPayload::RespondToMessage {
+            message_id: "m1".into(),
+            response_index: 0,
+        },
+        SystemControlPayload::ClearComms,
+        SystemControlPayload::ShowOnScreen {
+            message_id: "m1".into(),
+        },
+    ];
+    for payload in payloads {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::comms_system_id(),
+            payload,
+        };
+        assert_client_roundtrip(msg.clone());
+    }
+
+    // Pin one wire shape exactly — action-map.js `hail` depends on this.
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::comms_system_id(),
+            payload: SystemControlPayload::Hail {
+                target_uuid: "starbase-1".into(),
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"comms","payload":{"type":"Hail","data":{"target_uuid":"starbase-1"}}}}"#,
+        "Hail wire shape must match what action-map.js sends"
+    );
+}
+
+/// Navigation waypoint payloads round-trip inside the `ControlSystem`
+/// envelope (issue #822 — pins the shapes `gui/action-map.js` now emits).
+#[test]
+fn navigation_control_system_payloads_round_trip() {
+    for payload in [
+        SystemControlPayload::SetNavigationWaypoint {
+            x: 12.5,
+            z: -8.0,
+            source_uuid: None,
+        },
+        SystemControlPayload::SetNavigationWaypoint {
+            x: 12.5,
+            z: -8.0,
+            source_uuid: Some("station-alpha".into()),
+        },
+        SystemControlPayload::ClearNavigationWaypoint,
+    ] {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::navigation_system_id(),
+            payload,
+        };
+        assert_client_roundtrip(msg.clone());
+    }
+
+    // Pin the unit-payload wire shape — action-map.js
+    // `clear_navigation_waypoint` depends on this.
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::navigation_system_id(),
+            payload: SystemControlPayload::ClearNavigationWaypoint,
+        })
+        .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"navigation","payload":{"type":"ClearNavigationWaypoint"}}}"#,
+        "ClearNavigationWaypoint wire shape must match what action-map.js sends"
+    );
+}
+
+/// Civilian orders (issue #1028) round-trip inside the `ControlSystem`
+/// envelope, targeting the same `navigation` system the waypoint payloads do.
+///
+/// All three verbs, and both flavours of `divert`, because the order is a
+/// *nested* enum on the payload — the one shape in this envelope where a
+/// serde tag sits inside a serde tag — and a rename on either level would
+/// break traffic control while every other navigation payload kept working.
+#[test]
+fn civilian_order_payloads_round_trip() {
+    use crate::civilian::CivilianOrder;
+    for order in [
+        CivilianOrder::Hold,
+        CivilianOrder::divert_to_route("depot_run"),
+        CivilianOrder::divert_to_anchor("holding_point"),
+        CivilianOrder::dock_at("world.entity.skyhook_depot.name"),
+    ] {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::navigation_system_id(),
+            payload: SystemControlPayload::OrderCivilian {
+                target: "world.entity.hauler_kestrel.name".into(),
+                order,
+            },
+        };
+        assert_client_roundtrip(msg.clone());
+    }
+
+    // Pin the wire shape the nav console's order controls send.
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::navigation_system_id(),
+            payload: SystemControlPayload::OrderCivilian {
+                target: "hauler".into(),
+                order: CivilianOrder::divert_to_route("depot_run"),
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"navigation","payload":{"type":"OrderCivilian","data":{"target":"hauler","order":{"verb":"divert","route":"depot_run"}}}}}"#,
+        "the civilian order wire shape must match what action-map.js sends"
+    );
+}
+
+/// Vertical thrust (issue #744) round-trips through the `ControlSystem`
+/// envelope, targeting `helm-vertical-thrust`. AI-only on the wire, but the
+/// payload must survive the codec like every other admitted command.
+#[test]
+fn vertical_thrust_control_system_payload_round_trips() {
+    for vertical in [-1.0_f32, -0.25, 0.0, 0.6, 1.0] {
+        let msg = ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::vertical_thrust_system_id(),
+            payload: SystemControlPayload::VerticalThrustInput { vertical },
+        };
+        assert_client_roundtrip(msg.clone());
+    }
+
+    // Pin the wire shape.
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::vertical_thrust_system_id(),
+            payload: SystemControlPayload::VerticalThrustInput { vertical: 0.5 },
+        })
+        .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"type":"ControlSystem","data":{"target":"helm-vertical-thrust","payload":{"type":"VerticalThrustInput","data":{"vertical":0.5}}}}"#,
+        "VerticalThrustInput wire shape must be stable"
+    );
+}
+
+// ── ModifierSource / FlagKind / EntityTag / RegionEffectKind ───────────
+// (not ClientMessage/ServerMessage envelope tests — out of scope for the
+// table-driven harness, kept as-is)
+
+#[test]
+fn modifier_source_world_hash_and_eq() {
+    use std::collections::HashSet;
+
+    let a = ModifierSource::World {
+        id: "s1".into(),
+        tag: "t1".into(),
+    };
+    let b = ModifierSource::World {
+        id: "s1".into(),
+        tag: "t1".into(),
+    };
+    let c = ModifierSource::World {
+        id: "s1".into(),
+        tag: "t2".into(),
+    };
+    let d = ModifierSource::World {
+        id: "s2".into(),
+        tag: "t1".into(),
+    };
+
+    // Same (id, tag) → equal
+    assert_eq!(a, b);
+
+    // Different tag → not equal
+    assert_ne!(a, c);
+
+    // Different id → not equal
+    assert_ne!(a, d);
+
+    // HashSet deduplication: same pair stored once
+    let mut set = HashSet::new();
+    set.insert(a.clone());
+    set.insert(b.clone());
+    assert_eq!(set.len(), 1);
+
+    // Different tag stored separately
+    set.insert(c);
+    assert_eq!(set.len(), 2);
+
+    // Different id stored separately
+    set.insert(d);
+    assert_eq!(set.len(), 3);
+}
+
+#[test]
+fn flag_kind_round_trips() {
+    for flag in &[
+        crate::core::messages::FlagKind::CommsJammed,
+        crate::core::messages::FlagKind::SensorBlind,
+    ] {
+        let json = serde_json::to_string(flag).unwrap();
+        let decoded: crate::core::messages::FlagKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(*flag, decoded);
+    }
+}
+
+#[test]
+fn shield_facing_status_with_arc_geometry_round_trips() {
+    let msg = ShieldFacingStatus {
+        label: "Fore".into(),
+        hp: 150,
+        max_hp: 150,
+        online: true,
+        offline_remaining: 0.0,
+        is_focused: true,
+        center_deg: 0.0,
+        width_deg: 90.0,
+        arc_id: "fore".into(),
+        priority: 3,
+    };
+    let encoded = serde_json::to_string(&msg).unwrap();
+    let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(msg, decoded);
+    // Wire compat: pre-#514 payloads without center_deg/width_deg/arc_id
+    // must still deserialize with the defaults filled in.
+    let legacy_json =
+        r#"{"label":"Fore","hp":100,"max_hp":100,"online":true,"offline_remaining":0.0}"#;
+    let legacy_decoded: ShieldFacingStatus = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(legacy_decoded.center_deg, 0.0);
+    assert_eq!(legacy_decoded.width_deg, 90.0);
+    assert_eq!(legacy_decoded.arc_id, "");
+    assert!(!legacy_decoded.is_focused);
+    assert_eq!(legacy_decoded.priority, 1);
+}
+
+#[test]
+fn coordination_frequency_hint_round_trips() {
+    let payload = CoordinationPayload::FrequencyHint { frequency: 0.33 };
+    let json = serde_json::to_string(&payload).unwrap();
+    let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
+fn coordination_frequency_hint_boundary_values_round_trip() {
+    for f in [0.0f32, 1.0f32] {
+        let payload = CoordinationPayload::FrequencyHint { frequency: f };
+        let json = serde_json::to_string(&payload).unwrap();
+        let decoded: CoordinationPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+}
+
+// ── RegionEffectKind serde round-trips (moved from regions/effects.rs #524) ──
+
+fn region_effect_round_trip(effect: crate::regions::effects::RegionEffectKind) {
+    let json = serde_json::to_string(&effect).unwrap();
+    let decoded: crate::regions::effects::RegionEffectKind = serde_json::from_str(&json).unwrap();
+    assert_eq!(effect, decoded);
+}
+
+#[test]
+fn region_effect_damage_zone_round_trips() {
+    region_effect_round_trip(crate::regions::effects::RegionEffectKind::DamageZone {
+        dps: 15.0,
+        shield_pierce: 0.0,
+    });
+}
+
+#[test]
+fn region_effect_slow_zone_round_trips() {
+    use crate::regions::effects::RegionEffectKind::SlowZone;
+    region_effect_round_trip(SlowZone {
+        thrust_modifier: Some(0.5),
+        yaw_rate_modifier: Some(-0.3),
+    });
+    region_effect_round_trip(SlowZone {
+        thrust_modifier: Some(0.5),
+        yaw_rate_modifier: None,
+    });
+    region_effect_round_trip(SlowZone {
+        thrust_modifier: None,
+        yaw_rate_modifier: Some(-0.3),
+    });
+    region_effect_round_trip(SlowZone {
+        thrust_modifier: None,
+        yaw_rate_modifier: None,
+    });
+}
+
+#[test]
+fn region_effect_blocks_impulse_round_trips() {
+    region_effect_round_trip(crate::regions::effects::RegionEffectKind::BlocksImpulse);
+}
+
+#[test]
+fn region_effect_radar_dampening_round_trips() {
+    region_effect_round_trip(crate::regions::effects::RegionEffectKind::RadarDampening {
+        multiplier: 0.3,
+    });
+}
+
+#[test]
+fn region_effect_comms_jam_round_trips() {
+    region_effect_round_trip(crate::regions::effects::RegionEffectKind::CommsJam);
+}
+
+#[test]
+fn region_effect_sensor_blind_round_trips() {
+    region_effect_round_trip(crate::regions::effects::RegionEffectKind::SensorBlind);
+}
+
+#[test]
+fn region_effect_nebula_fog_round_trips() {
+    use crate::regions::effects::RegionEffectKind::NebulaFog;
+    region_effect_round_trip(NebulaFog {
+        color: [0.25, 0.08, 0.32],
+        density: 0.008,
+    });
+    region_effect_round_trip(NebulaFog {
+        color: [0.5, 0.1, 0.2],
+        density: 0.015,
+    });
+}
+
+#[test]
+fn region_effect_negative_and_zero_values_round_trip() {
+    use crate::regions::effects::RegionEffectKind::{DamageZone, RadarDampening, SlowZone};
+    region_effect_round_trip(DamageZone {
+        dps: -5.0,
+        shield_pierce: 0.0,
+    });
+    region_effect_round_trip(SlowZone {
+        thrust_modifier: Some(-1.0),
+        yaw_rate_modifier: None,
+    });
+    region_effect_round_trip(DamageZone {
+        dps: 0.0,
+        shield_pierce: 0.0,
+    });
+    region_effect_round_trip(RadarDampening { multiplier: 0.0 });
+}
+
+#[test]
+fn entity_tag_round_trips() {
+    for tag in &[
+        EntityTag::Asteroid,
+        EntityTag::Ship,
+        EntityTag::AsteroidField,
+        EntityTag::Star,
+        EntityTag::Planet,
+        EntityTag::Region,
+    ] {
+        let json = serde_json::to_string(tag).unwrap();
+        let decoded: EntityTag = serde_json::from_str(&json).unwrap();
+        assert_eq!(*tag, decoded);
+    }
+}
+
+// ── Comms wire version-skew (field-level, not envelope-level) ──────────
+
+#[test]
+fn comms_contact_missing_in_range_defaults_to_true() {
+    let json = r#"{"uuid":"x","name":"X"}"#;
+    let contact: CommsContact = serde_json::from_str(json).unwrap();
+    assert!(
+        contact.in_range,
+        "in_range should default to true for backward compat"
+    );
+}
+
+#[test]
+fn comms_message_missing_sender_in_range_defaults_to_true() {
+    let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
+    let msg: CommsMessage = serde_json::from_str(json).unwrap();
+    assert!(
+        msg.sender_in_range,
+        "sender_in_range should default to true for backward compat"
+    );
+}
+
+#[test]
+fn comms_message_missing_thread_id_defaults_to_empty() {
+    let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
+    let msg: CommsMessage = serde_json::from_str(json).unwrap();
+    assert!(
+        msg.thread_id.is_empty(),
+        "thread_id should default to empty string for backward compat"
+    );
+}
+
+#[test]
+fn comms_response_view_missing_flags_default_important_false_available_true() {
+    // A pre-#761 wire payload carries responses as bare `{ "text": ... }`
+    // objects. `important` must default to false and `available` to true.
+    let json = r#"{"text":"Acknowledge"}"#;
+    let view: crate::core::messages::CommsResponseView = serde_json::from_str(json).unwrap();
+    assert_eq!(view.text, "Acknowledge");
+    assert!(!view.important, "important must default to false");
+    assert!(view.available, "available must default to true");
+}
+
+#[test]
+fn comms_response_view_round_trips_important_and_available() {
+    let view = crate::core::messages::CommsResponseView {
+        text: "Fire everything".into(),
+        important: true,
+        available: false,
+    };
+    let json = serde_json::to_string(&view).unwrap();
+    let back: crate::core::messages::CommsResponseView = serde_json::from_str(&json).unwrap();
+    assert_eq!(view, back);
+}
+
+#[test]
+fn comms_state_payload_with_no_range_flags_defaults_both_to_true() {
+    // A pre-feature server payload contains neither `in_range` on contacts
+    // nor `sender_in_range` on messages. Both must deserialize as true so
+    // older clients/servers interoperate.
+    let json = r#"{
+        "type":"CommsState",
+        "data":{
+            "messages":[{"id":"m1","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"is_orphaned":false}],
+            "objectives":[],
+            "contacts":[{"uuid":"c1","name":"C"}]
+        }
+    }"#;
+    let msg = JsonCodec.decode_server(json).expect("decode");
+    match msg {
+        ServerMessage::CommsState {
+            messages, contacts, ..
+        } => {
+            assert_eq!(messages.len(), 1);
+            assert!(
+                messages[0].sender_in_range,
+                "sender_in_range must default to true"
+            );
+            assert_eq!(contacts.len(), 1);
+            assert!(contacts[0].in_range, "in_range must default to true");
+        }
+        other => panic!("expected CommsState, got {other:?}"),
+    }
+}
+
+#[test]
+fn comms_priority_decodes_legacy_urgency_but_new_field_is_authoritative() {
+    let legacy = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"is_urgent":true}"#;
+    let legacy: CommsMessage = serde_json::from_str(legacy).expect("legacy message decodes");
+    assert_eq!(legacy.priority, CommsPriority::Urgent);
+    assert!(legacy.is_urgent);
+
+    let explicit = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"priority":"Routine","is_urgent":true}"#;
+    let explicit: CommsMessage = serde_json::from_str(explicit).expect("priority message decodes");
+    assert_eq!(explicit.priority, CommsPriority::Routine);
+    assert!(
+        !explicit.is_urgent,
+        "the compatibility boolean is normalised from authoritative priority"
+    );
+}
+
+#[test]
+fn critical_serializes_with_legacy_urgent_projection() {
+    let mut message = CommsMessage::injected(
+        "m".into(),
+        "s".into(),
+        "Sender".into(),
+        "body".into(),
+        Default::default(),
+        vec![],
+        "thread".into(),
+        true,
+        CommsPriority::Critical,
+    );
+    // Even a stale hand-built compatibility value is projected from priority.
+    message.is_urgent = false;
+    let json = serde_json::to_value(&message).expect("message encodes");
+    assert_eq!(json["priority"], "Critical");
+    assert_eq!(json["is_urgent"], true);
+    let round_trip: CommsMessage = serde_json::from_value(json).expect("message decodes");
+    assert_eq!(round_trip.priority, CommsPriority::Critical);
+
+    let ron = ron::to_string(&message).expect("message encodes as RON");
+    assert!(
+        ron.contains("priority:Critical"),
+        "the save format carries the same bare priority as the JSON wire: {ron}"
+    );
+    let round_trip: CommsMessage = ron::from_str(&ron).expect("RON message decodes");
+    assert_eq!(round_trip.priority, CommsPriority::Critical);
+    assert!(round_trip.is_urgent);
+}
+
+#[test]
+fn ron_comms_message_without_priority_uses_legacy_urgency() {
+    let legacy = r#"(
+        id: "m",
+        sender_uuid: "s",
+        sender_name: "Sender",
+        subject: "body",
+        body: "body",
+        responses: [],
+        selected_response: None,
+        is_read: false,
+        is_urgent: true,
+    )"#;
+    let decoded: CommsMessage = ron::from_str(legacy).expect("legacy RON message decodes");
+    assert_eq!(decoded.priority, CommsPriority::Urgent);
+    assert!(decoded.is_urgent);
+
+    let explicit = r#"(
+        id: "m",
+        sender_uuid: "s",
+        sender_name: "Sender",
+        subject: "body",
+        body: "body",
+        responses: [],
+        selected_response: None,
+        is_read: false,
+        priority: Routine,
+        is_urgent: true,
+    )"#;
+    let decoded: CommsMessage =
+        ron::from_str(explicit).expect("priority-bearing RON message decodes");
+    assert_eq!(decoded.priority, CommsPriority::Routine);
+    assert!(
+        !decoded.is_urgent,
+        "a present authoritative priority overrides the compatibility boolean"
+    );
+}
+
+#[test]
+fn entity_state_snapshot_without_shields_field_defaults_to_none() {
+    // Shields field omitted from JSON → deserializes to None
+    let json = r#"{"type":"SimState","data":{"snapshot":{"red_alert":false,"view_mode":{"kind":"Camera","data":"Fore"},"ship_x":0.0,"ship_z":0.0,"ship_yaw":0.0,"hull_integrity":1.0,"power_levels":[2,2,2],"flags":[],"entity_states":[{"uuid":"e1","flags":[]}],"radar_state":{"helm_range":50.0,"tactical_range":60.0,"science_long_range":200.0,"science_system_map":500.0}}}}"#;
+    let decoded: ServerMessage = JsonCodec.decode_server(json).unwrap();
+    if let ServerMessage::SimState { snapshot } = decoded {
+        assert_eq!(snapshot.entity_states.len(), 1);
+        assert!(
+            snapshot.entity_states[0].shields.is_none(),
+            "shields must default to None when absent"
+        );
+        assert!(
+            snapshot.control_sources.is_empty(),
+            "control_sources must default empty for an older compatible host"
+        );
+    } else {
+        panic!("expected SimState");
+    }
+}
+
+// ── HTML console bridge (de)serialisation ─────────────────────────────
+
+#[test]
+fn hud_state_json_round_trips() {
+    let state = ViewscreenHudState {
+        presentation_card: None,
+        heading: 90,
+        hull_pct: 75,
+        condition: "ALERT".into(),
+        red_alert: true,
+        engine_thrust: 0.0,
+        phaser_firing: true,
+        game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
+        game_over_outcome: None,
+        scenario_title: None,
+        sensor_report: None,
+    };
+    let json = to_json(&state).expect("encode hud");
+    let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
+    assert_eq!(state, decoded);
+}
+
+#[test]
+fn hud_state_json_emits_snake_case_fields() {
+    let state = ViewscreenHudState {
+        presentation_card: None,
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
+        game_over_outcome: None,
+        scenario_title: None,
+        sensor_report: None,
+    };
+    let json = to_json(&state).expect("encode hud");
+    assert!(json.contains("\"heading\":0"), "got: {json}");
+    assert!(json.contains("\"hull_pct\":100"), "got: {json}");
+    assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
+    assert!(json.contains("\"red_alert\":false"), "got: {json}");
+}
+
+#[test]
+fn hud_state_json_carries_the_computer_message_when_present() {
+    use crate::core::messages::ComputerMessageWire;
+    let state = ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: Some(ComputerMessageWire {
+            id: "hail_debris".into(),
+            text: "world.probe.computer_message.text".into(),
+            severity: "advisory".into(),
+            station: Some("tactical".into()),
+        }),
+        presentation_card: None,
+        game_over_report: Vec::new(),
+        game_over_outcome: None,
+        scenario_title: None,
+        sensor_report: None,
+    };
+    let json = to_json(&state).expect("encode hud");
+    assert!(json.contains("\"computer_message\":{"), "got: {json}");
+    let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
+    assert_eq!(state, decoded);
+}
+
+#[test]
+fn hud_state_json_omits_absent_computer_message() {
+    let state = ViewscreenHudState {
+        presentation_card: None,
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".into(),
+        red_alert: false,
+        engine_thrust: 0.0,
+        phaser_firing: false,
+        game_over_message: None,
+        computer_message: None,
+        game_over_report: Vec::new(),
+        game_over_outcome: None,
+        scenario_title: None,
+        sensor_report: None,
+    };
+    let json = to_json(&state).expect("encode hud");
+    assert!(
+        !json.contains("computer_message"),
+        "absent field must not appear at all: {json}"
+    );
+}
+
+// ── SystemBlackboard tag-shape tests (not envelope round-trips) ────────
+
+#[test]
+fn system_blackboard_helm_serde_fields() {
+    let bb = SystemBlackboard::Helm(HelmBlackboard {
+        yaw: 1.5,
+        forward_speed: 42.0,
+        x: 10.0,
+        z: -20.0,
+        impulse_charge: 0.3,
+        boost_battery: 0.8,
+        boost_active: false,
+        boost_enabled: true,
+        radar_range: 0.0,
+        lateral_speed: 0.0,
+        hostile_weapon_arcs: Vec::new(),
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"Helm\""), "got: {json}");
+    assert!(json.contains("\"yaw\":1.5"), "got: {json}");
+    assert!(json.contains("\"forward_speed\":42.0"), "got: {json}");
+    assert!(json.contains("\"impulse_charge\":0.3"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+/// The hostile weapon-arc overlay payload (issue #874) round-trips.
+///
+/// Populated deliberately: the empty case is what `#[serde(default)]` plus
+/// `skip_serializing_if` already cover, and the field only earns its place
+/// on the wire when it carries sectors.
+#[test]
+fn system_blackboard_helm_hostile_weapon_arcs_round_trip() {
+    use crate::core::messages::{HostileWeaponArc, HostileWeaponArcContact};
+    let bb = SystemBlackboard::Helm(HelmBlackboard {
+        hostile_weapon_arcs: vec![HostileWeaponArcContact {
+            uuid: "1f6b4c8e-0000-4000-8000-000000000001".into(),
+            x: 120.0,
+            z: -45.5,
+            arcs: vec![
+                HostileWeaponArc {
+                    bearing_deg: -30.0,
+                    half_angle_deg: 45.0,
+                    range: 800.0,
+                },
+                HostileWeaponArc {
+                    bearing_deg: 150.0,
+                    half_angle_deg: 60.0,
+                    range: 500.0,
+                },
+            ],
+        }],
+        ..Default::default()
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"hostile_weapon_arcs\""), "got: {json}");
+    assert!(json.contains("\"bearing_deg\":-30.0"), "got: {json}");
+    assert!(json.contains("\"half_angle_deg\":45.0"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+/// An empty arc list stays OFF the wire — the red-alert gate must cost
+/// nothing when it is closed, which is the common case.
+#[test]
+fn system_blackboard_helm_omits_empty_hostile_weapon_arcs() {
+    let bb = SystemBlackboard::Helm(HelmBlackboard::default());
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(!json.contains("hostile_weapon_arcs"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+/// `SystemBlackboard::Repair` round-trip, tag shape and full envelope
+/// (issue #737).
+///
+/// The repair blackboard is the only blackboard carrying gated damage
+/// detail, and #737 added two wire fields to it: `QueueEntryPreview
+/// ::station_id` — the bucket the host projection decides entitlement from,
+/// which the client also keys its queue rows by — and
+/// `RepairBlackboard::aggregate_hull_fraction`, the one whole-ship figure
+/// every recipient may have now that `system_hull` is a projection and can
+/// no longer be summed into one. Both are new on the wire; neither had any
+/// round-trip coverage. `queue_depth` and `system_hull` are populated here
+/// because the empty-vec case is what `#[serde(default)]` already covers.
+///
+/// Issue #1014 added a third: `destroyed_hull_fraction`, the companion
+/// whole-ship scalar for capability at the `Destroyed` tier. It is
+/// `#[serde(default)]` like the other two, so a payload predating it decodes
+/// to `None` rather than failing — pinned below.
+#[test]
+fn system_blackboard_repair_round_trips() {
+    fn hull(id: &str, current: f32, tier: crate::ship::damage::DamageTier) -> SystemHullStatus {
+        SystemHullStatus {
+            system_id: SystemId(id.into()),
+            display_name: id.into(),
+            current,
+            max_hp: 100.0,
+            tier,
+            debuff_magnitude: 0.25,
+        }
+    }
+
+    let bb = SystemBlackboard::Repair(RepairBlackboard {
+        teams: vec![],
+        travel_duration_secs: 5.0,
+        system_hull: vec![
+            hull("core", 40.0, crate::ship::damage::DamageTier::Damaged),
+            hull(
+                "repair",
+                100.0,
+                crate::ship::damage::DamageTier::Operational,
+            ),
+        ],
+        damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
+        priority_targets: vec![SystemId("core".into())],
+        queue_depth: vec![
+            QueueEntryPreview {
+                station_id: "core".into(),
+                station_label: "Core".into(),
+                tier: crate::ship::damage::DamageTier::Damaged,
+                deficit: 60.0,
+            },
+            QueueEntryPreview {
+                station_id: "helm".into(),
+                station_label: "Helm".into(),
+                tier: crate::ship::damage::DamageTier::Disabled,
+                deficit: 90.0,
+            },
+        ],
+        aggregate_hull_fraction: Some(0.75),
+        destroyed_hull_fraction: Some(0.2),
+        ..Default::default()
+    });
+
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"Repair\""), "got: {json}");
+    assert!(json.contains("\"station_id\":\"core\""), "got: {json}");
+    assert!(json.contains("\"station_id\":\"helm\""), "got: {json}");
+    assert!(
+        json.contains("\"aggregate_hull_fraction\":0.75"),
+        "got: {json}"
+    );
+    assert!(
+        json.contains("\"destroyed_hull_fraction\":0.2"),
+        "got: {json}"
+    );
+    assert!(
+        json.contains("\"priority_targets\":[\"core\"]"),
+        "got: {json}"
+    );
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+
+    // A payload written before #1014 carries no `destroyed_hull_fraction`;
+    // `#[serde(default)]` must decode it to `None` rather than reject the
+    // whole blackboard.
+    let legacy = r#"{"kind":"Repair","data":{"teams":[],"travel_duration_secs":5.0,
+        "system_hull":[],"damageable_systems":[],"queue_depth":[],
+        "aggregate_hull_fraction":0.75}}"#;
+    let decoded_legacy: SystemBlackboard = serde_json::from_str(legacy).unwrap();
+    let SystemBlackboard::Repair(legacy_bb) = decoded_legacy else {
+        panic!("expected a Repair blackboard");
+    };
+    assert_eq!(legacy_bb.destroyed_hull_fraction, None);
+    assert_eq!(legacy_bb.aggregate_hull_fraction, Some(0.75));
+    assert!(legacy_bb.priority_targets.is_empty());
+
+    // ...and through the envelope it actually ships in. Post-#737 this is
+    // sent per token (`Target::Token`), not broadcast, but the encoding is
+    // the same one the resync path reuses.
+    let msg = ServerMessage::BlackboardUpdate {
+        presentation_generation: None,
+        updates: vec![(SystemId("repair".into()), bb)],
+    };
+    assert_server_roundtrip(msg.clone());
+}
+
+#[test]
+fn system_blackboard_weapons_serde_fields() {
+    let bb = SystemBlackboard::Weapons(WeaponsBlackboard {
+        target_uuid: Some("truth-uuid".into()),
+        locked_target: Some("intent-uuid".into()),
+        target_name: Some("Raider".into()),
+        torpedo_count: 4,
+        ..Default::default()
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"Weapons\""), "got: {json}");
+    assert!(
+        json.contains("\"target_uuid\":\"truth-uuid\""),
+        "got: {json}"
+    );
+    assert!(
+        json.contains("\"locked_target\":\"intent-uuid\""),
+        "got: {json}"
+    );
+    assert!(json.contains("\"torpedo_count\":4"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn weapons_blackboard_legacy_wire_shape_defaults_locked_target() {
+    // Pre-#697 payloads carry no `locked_target`; they must still decode,
+    // defaulting the AI-intent field to None.
+    let legacy_json = r#"{"kind":"Weapons","data":{
+        "target_uuid":"truth-uuid",
+        "target_name":null,
+        "banks":[],
+        "tubes":[],
+        "torpedo_count":0,
+        "phaser_mode":"Manual"
+    }}"#;
+    let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
+    match decoded {
+        SystemBlackboard::Weapons(bb) => {
+            assert_eq!(bb.target_uuid.as_deref(), Some("truth-uuid"));
+            assert_eq!(bb.locked_target, None);
+        }
+        other => panic!("expected Weapons blackboard, got {other:?}"),
+    }
+}
+
+#[test]
+fn system_blackboard_phaser_bank_serde_fields() {
+    let bb = SystemBlackboard::PhaserBank(PhaserBankBlackboard {
+        is_online: true,
+        on_cooldown: false,
+        cooldown_remaining: 0.0,
+        fire_ready: true,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"PhaserBank\""), "got: {json}");
+    assert!(json.contains("\"fire_ready\":true"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn system_blackboard_torpedo_magazine_serde_fields() {
+    let bb = SystemBlackboard::TorpedoMagazine(TorpedoMagazineBlackboard {
+        is_online: false,
+        torpedoes_remaining: 3,
+        capacity: 10,
+        torpedoes_in_flight: 0,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"TorpedoMagazine\""), "got: {json}");
+    assert!(json.contains("\"is_online\":false"), "got: {json}");
+    assert!(json.contains("\"torpedoes_remaining\":3"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn system_blackboard_power_reactor_serde_fields() {
+    let bb = SystemBlackboard::PowerReactor(PowerReactorBlackboard {
+        total_allocation: 5,
+        max_allocation: 8,
+        is_online: false,
+        draining: true,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"PowerReactor\""), "got: {json}");
+    assert!(json.contains("\"is_online\":false"), "got: {json}");
+    assert!(json.contains("\"total_allocation\":5"), "got: {json}");
+    assert!(json.contains("\"draining\":true"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn system_blackboard_power_battery_serde_fields() {
+    let bb = SystemBlackboard::PowerBattery(PowerBatteryBlackboard {
+        charge: 15.0,
+        capacity: 100.0,
+        is_online: false,
+        emergency_threshold: 0.25,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"PowerBattery\""), "got: {json}");
+    assert!(json.contains("\"is_online\":false"), "got: {json}");
+    assert!(json.contains("\"charge\":15"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn system_blackboard_shield_arc_serde_fields() {
+    let bb = SystemBlackboard::ShieldArc(ShieldArcBlackboard {
+        label: "Aft".into(),
+        hp: 0,
+        max_hp: 75,
+        is_online: false,
+        is_focused: false,
+        offline_remaining: 4.5,
+        center_deg: 180.0,
+        width_deg: 90.0,
+    });
+    let json = serde_json::to_string(&bb).unwrap();
+    assert!(json.contains("\"kind\":\"ShieldArc\""), "got: {json}");
+    assert!(json.contains("\"label\":\"Aft\""), "got: {json}");
+    assert!(json.contains("\"hp\":0"), "got: {json}");
+    assert!(json.contains("\"max_hp\":75"), "got: {json}");
+    assert!(json.contains("\"is_online\":false"), "got: {json}");
+    assert!(json.contains("\"is_focused\":false"), "got: {json}");
+    assert!(json.contains("\"offline_remaining\":4.5"), "got: {json}");
+    assert!(json.contains("\"center_deg\":180"), "got: {json}");
+    assert!(json.contains("\"width_deg\":90"), "got: {json}");
+    let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+    assert_eq!(bb, decoded);
+}
+
+#[test]
+fn radar_blip_with_new_fields_round_trips() {
+    let blip = RadarBlip {
+        uuid: "abc-123".into(),
+        radar_x: 0.5,
+        radar_y: -0.3,
+        scaled_radius: 0.02,
+        kind: "ship".into(),
+        icon: "ship".into(),
+        color: [1.0, 0.502, 0.376],
+        objective_target: true,
+        name: Some("Pirate Raider".into()),
+        selectable: true,
+        threat_level: Some("medium".into()),
+        description: Some("A pirate vessel".into()),
+        target_tags: vec!["ship".into(), "pirate".into()],
+        torpedo_armed: true,
+    };
+    let json = serde_json::to_string(&blip).unwrap();
+    let decoded: RadarBlip = serde_json::from_str(&json).unwrap();
+    assert_eq!(blip, decoded);
+    assert!(json.contains("\"icon\":\"ship\""), "got: {json}");
+    assert!(json.contains("\"objective_target\":true"), "got: {json}");
+    assert!(json.contains("\"name\":\"Pirate Raider\""), "got: {json}");
+    assert!(json.contains("\"torpedo_armed\":true"), "got: {json}");
+}
+
+#[test]
+fn radar_blip_new_fields_default_when_absent() {
+    // JSON without the new fields (as emitted by pre-#445 server)
+    let json =
+        r#"{"uuid":"old-uuid","radar_x":0.1,"radar_y":0.2,"scaled_radius":0.01,"kind":"asteroid"}"#;
+    let blip: RadarBlip = serde_json::from_str(json).unwrap();
+    assert_eq!(blip.icon, "");
+    assert_eq!(blip.color, [0.0, 0.0, 0.0]);
+    assert!(!blip.objective_target);
+    assert!(blip.name.is_none());
+    // Issue #957: an old payload carries no capability claim, and the
+    // absence must read as "not known to be torpedo-armed" rather than
+    // badging every legacy contact.
+    assert!(!blip.torpedo_armed);
+}
+
+#[test]
+fn radar_region_round_trips() {
+    let region = RadarRegion {
+        uuid: "region-1".into(),
+        x: 100.0,
+        z: -200.0,
+        shape: "sphere".into(),
+        radius: Some(50.0),
+        inner_radius: None,
+        outer_radius: Some(50.0),
+        half_extents: None,
+        yaw: None,
+        color: [1.0, 0.0, 0.0],
+        name: Some("Danger Zone".into()),
+    };
+    let json = serde_json::to_string(&region).unwrap();
+    let decoded: RadarRegion = serde_json::from_str(&json).unwrap();
+    assert_eq!(region, decoded);
+}
+
+#[test]
+fn radar_region_box_round_trips() {
+    let region = RadarRegion {
+        uuid: "region-box".into(),
+        x: 0.0,
+        z: 0.0,
+        shape: "box".into(),
+        radius: None,
+        inner_radius: None,
+        outer_radius: None,
+        half_extents: Some([40.0, 30.0]),
+        yaw: Some(0.785),
+        color: [0.0, 1.0, 0.5],
+        name: None,
+    };
+    let json = serde_json::to_string(&region).unwrap();
+    let decoded: RadarRegion = serde_json::from_str(&json).unwrap();
+    assert_eq!(region, decoded);
+}
+
+// ── issue #616 (parent #516): SystemId-keyed hull + Power group additive shapes ──
+// These tests cover the new-shape wire types introduced alongside the
+// legacy `Console`-keyed shapes. Publishers emit both; consumers may read
+// either. Legacy payloads without the new fields must still deserialize.
+
+#[test]
+fn system_hull_status_round_trips() {
+    let status = SystemHullStatus {
+        system_id: SystemId("phaser-fore".into()),
+        display_name: "Phaser Bank (Fore)".into(),
+        current: 42.5,
+        max_hp: 100.0,
+        tier: crate::ship::damage::DamageTier::Damaged,
+        debuff_magnitude: 0.15,
+    };
+    let json = serde_json::to_string(&status).unwrap();
+    let decoded: SystemHullStatus = serde_json::from_str(&json).unwrap();
+    assert_eq!(status, decoded);
+    assert!(
+        json.contains("\"system_id\":\"phaser-fore\""),
+        "got: {json}"
+    );
+    assert!(
+        json.contains("\"display_name\":\"Phaser Bank (Fore)\""),
+        "got: {json}"
+    );
+}
+
+#[test]
+fn system_hull_status_debuff_defaults_when_absent() {
+    // Legacy payload without debuff_magnitude must still deserialize.
+    let json = r#"{"system_id":"helm","display_name":"Helm","current":10.0,"max_hp":25.0,"tier":"Damaged"}"#;
+    let decoded: SystemHullStatus = serde_json::from_str(json).unwrap();
+    assert_eq!(decoded.debuff_magnitude, 0.0);
+    assert_eq!(decoded.system_id, SystemId("helm".into()));
+}
+
+#[test]
+fn system_hull_update_legacy_wire_shape_defaults_destroyed_fraction() {
+    // A payload written before #1014 carries no `destroyed_fraction`;
+    // `#[serde(default)]` must decode it to `None` rather than reject the
+    // whole message.
+    let legacy = r#"{"type":"SystemHullUpdate","data":{"entries":[],"aggregate_fraction":0.75}}"#;
+    let decoded = JsonCodec.decode_server(legacy).unwrap();
+    let ServerMessage::SystemHullUpdate {
+        aggregate_fraction,
+        destroyed_fraction,
+        ..
+    } = decoded
+    else {
+        panic!("expected SystemHullUpdate");
+    };
+    assert_eq!(aggregate_fraction, Some(0.75));
+    assert_eq!(destroyed_fraction, None);
+}
+
+#[test]
+fn system_hull_update_legacy_wire_shape_defaults_aggregate_fraction() {
+    // Same pre-existing gap, one field further back: a payload that also
+    // predates `aggregate_fraction` must default it to `None` too.
+    let legacy = r#"{"type":"SystemHullUpdate","data":{"entries":[]}}"#;
+    let decoded = JsonCodec.decode_server(legacy).unwrap();
+    let ServerMessage::SystemHullUpdate {
+        aggregate_fraction,
+        destroyed_fraction,
+        ..
+    } = decoded
+    else {
+        panic!("expected SystemHullUpdate");
+    };
+    assert_eq!(aggregate_fraction, None);
+    assert_eq!(destroyed_fraction, None);
+}
+
+#[test]
+fn team_slot_new_wire_shape_decodes_without_legacy_console_field() {
+    // Post-#619 wire form: no `console` / `queued` fields at all.
+    // Unknown fields (if a legacy payload sends them) are silently
+    // ignored by serde since the struct no longer declares them.
+    let new_json = r#"{
+        "type": "RepairState",
+        "data": {
+            "teams": [
+                { "Travelling": { "system_id": "helm", "display_name": "Helm", "elapsed": 0.5 } },
+                { "Repairing": { "system_id": "phaser-fore", "display_name": "Phaser Bank (Fore)" } },
+                { "Returning": { "remaining": 1.0, "queued_system_id": "tactical", "queued_display_name": "Tactical" } }
+            ]
+        }
+    }"#;
+    let decoded = JsonCodec.decode_server(new_json).unwrap();
+    match decoded {
+        ServerMessage::RepairState { teams } => {
+            match &teams[0] {
+                TeamSlot::Travelling {
+                    system_id,
+                    display_name,
+                    ..
+                } => {
+                    assert_eq!(*system_id, Some(SystemId("helm".into())));
+                    assert_eq!(display_name.as_deref(), Some("Helm"));
+                }
+                other => panic!("expected Travelling, got {other:?}"),
+            }
+            match &teams[1] {
+                TeamSlot::Repairing {
+                    system_id,
+                    display_name,
+                    ..
+                } => {
+                    assert_eq!(*system_id, Some(SystemId("phaser-fore".into())));
+                    assert_eq!(display_name.as_deref(), Some("Phaser Bank (Fore)"));
+                }
+                other => panic!("expected Repairing, got {other:?}"),
+            }
+            match &teams[2] {
+                TeamSlot::Returning {
+                    queued_system_id,
+                    queued_display_name,
+                    ..
+                } => {
+                    assert_eq!(*queued_system_id, Some(SystemId("tactical".into())));
+                    assert_eq!(queued_display_name.as_deref(), Some("Tactical"));
+                }
+                other => panic!("expected Returning, got {other:?}"),
+            }
+        }
+        other => panic!("expected RepairState, got {other:?}"),
+    }
+}
+
+#[test]
+fn power_blackboard_legacy_wire_shape_defaults_groups_field() {
+    // Pre-#616 blackboard payload without `groups` must still deserialize
+    // (post-#516 sub-PR-follow-up the `consoles` field is gone from the
+    // struct entirely; the legacy field is now an "unknown field" that
+    // serde silently ignores, and `groups` defaults to the empty vec).
+    // `locked` joined `consoles` in that ignored set when issue #952
+    // retired the brownout lock; `draining` defaults to false in its place.
+    let legacy_json = r#"{
+        "kind": "Power",
+        "data": {
+            "consoles": [],
+            "total": 0,
+            "total_max": 8,
+            "battery_charge": 0.0,
+            "battery_max": 100.0,
+            "locked": false
+        }
+    }"#;
+    let decoded: SystemBlackboard = serde_json::from_str(legacy_json).unwrap();
+    match decoded {
+        SystemBlackboard::Power(bb) => {
+            assert!(bb.groups.is_empty(), "groups defaults to empty vec");
+            assert!(
+                !bb.draining,
+                "a pre-#952 payload's `locked` must not be read as `draining` — \
+                 they are different questions"
+            );
+        }
+        other => panic!("expected Power blackboard, got {other:?}"),
+    }
+}
+
+#[test]
+fn power_group_entry_round_trips() {
+    // PowerGroupEntry became a dedicated struct after the parent-issue
+    // #516 cleanup (previously a type alias for the deleted
+    // `PowerConsoleEntry`). Sanity: it constructs and round-trips through
+    // JSON with the same field shape.
+    let entry = PowerGroupEntry {
+        id: "helm".into(),
+        label: "HELM".into(),
+        level: 1,
+        commanded_level: 3,
+        min_level: 2,
+        max_level: 4,
+    };
+    let json = serde_json::to_string(&entry).unwrap();
+    let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, entry);
+    // Named explicitly: the round trip above would pass just as well if
+    // `min_level` were dropped on encode and refilled by its default, and
+    // the whole point of issue #1004 is that the AUTHORED floor reaches the
+    // client rather than a value the client guessed.
+    assert!(
+        json.contains(r#""min_level":2"#),
+        "the authored floor must be ON the wire, not reconstructed: {json}"
+    );
+
+    // A legacy payload has neither field. Both must still decode, to
+    // DIFFERENT defaults — they are different questions:
+    //   - `commanded_level` (pre-#952) has no meaningful absent value, so
+    //     its bare `#[serde(default)]` 0 reads as "unknown" and the client
+    //     steps from `level`.
+    //   - `min_level` (pre-#1004) does: any server that omitted it was
+    //     already clamping to GROUP_LEVEL_MIN, so it defaults to 1. A 0
+    //     here would draw the phantom rung this field exists to remove.
+    let legacy: PowerGroupEntry =
+        serde_json::from_str(r#"{"id":"helm","label":"HELM","level":2,"max_level":4}"#).unwrap();
+    assert_eq!(legacy.commanded_level, 0);
+    assert_eq!(
+        legacy.min_level,
+        crate::ship::config::default_min_power_level(),
+        "a pre-#1004 entry must decode to the engine's floor, not to 0"
+    );
+    assert_eq!(legacy.min_level, 1);
+
+    // An AUTHORED floor of 0 — the coldable weapons group of issue #1395 — has
+    // to survive the round trip as 0. `0` is `u8::default()`, so a
+    // `skip_serializing_if`-style optimisation on this field would drop it from
+    // the wire and the client would decode it back as 1: the panel would gate
+    // its `−` at 1 and refuse to offer the one order the whole feature exists
+    // for.
+    let coldable = PowerGroupEntry {
+        id: "weapons".into(),
+        label: "WEAPONS".into(),
+        level: 0,
+        commanded_level: 0,
+        min_level: 0,
+        max_level: 4,
+    };
+    let json = serde_json::to_string(&coldable).unwrap();
+    assert!(
+        json.contains(r#""min_level":0"#),
+        "a floor of 0 must be ON the wire: {json}"
+    );
+    let decoded: PowerGroupEntry = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, coldable);
+    assert_eq!(decoded.min_level, 0);
+    assert_eq!(decoded.level, 0);
+}
+
+// ── Batch inbound decode (issue #602) ────────────────────────────────
+
+#[test]
+fn decode_bridge_client_messages_passes_valid_json() {
+    let entries = vec![(
+        "t1".into(),
+        r#"{"type":"SetReady","data":{"ready":true}}"#.into(),
+    )];
+    let (successes, failures) = decode_bridge_client_messages(entries);
+    assert_eq!(successes.len(), 1);
+    assert!(failures.is_empty());
+    assert_eq!(successes[0].0, "t1");
+    assert_eq!(successes[0].1, ClientMessage::SetReady { ready: true });
+}
+
+#[test]
+fn decode_bridge_client_messages_logs_garbage_with_truncated_fields() {
+    let entries = vec![
+        ("t1".into(), "{{{bogus}}}".into()),
+        (
+            "this-is-a-very-long-token-value-that-exceeds-twelve".into(),
+            "x".repeat(200),
+        ),
+    ];
+    let (successes, failures) = decode_bridge_client_messages(entries);
+    assert!(successes.is_empty());
+    assert_eq!(failures.len(), 2);
+    // Token truncated to 12 chars
+    assert_eq!(failures[0].token, "t1");
+    assert_eq!(failures[1].token, "this-is-a-ve");
+    // Payload truncated to 80 chars
+    assert_eq!(failures[0].payload_snippet.len(), 11);
+    assert_eq!(failures[1].payload_snippet.len(), 80);
+}
+
+#[test]
+fn decode_bridge_client_messages_mixed_valid_and_invalid() {
+    let entries = vec![
+        (
+            "t1".into(),
+            r#"{"type":"SetReady","data":{"ready":true}}"#.into(),
+        ),
+        ("t2".into(), "{{{garbage}}}".into()),
+    ];
+    let (successes, failures) = decode_bridge_client_messages(entries);
+    assert_eq!(successes.len(), 1);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(successes[0].0, "t1");
+    assert_eq!(failures[0].token, "t2");
+}
+
+// ── station_systems round-trip (issue #625) ───────────────────────────
+
+#[test]
+fn ship_client_config_station_systems_round_trips() {
+    // Build a config that carries a station→system map.
+    let mut station_systems = HashMap::new();
+    station_systems.insert(
+        "helm".to_string(),
+        vec!["helm".to_string(), "helm-engine-port".to_string()],
+    );
+    station_systems.insert("tactical".to_string(), vec!["tactical".to_string()]);
+    let config = ShipClientConfig {
+        station_systems,
+        blaster_banks: vec![BlasterBankClientConfig {
+            id: "fore".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 120.0,
+            cooldown_secs: 2.5,
+        }],
+        ..ShipClientConfig::default()
+    };
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: config.clone(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    assert_server_roundtrip(msg.clone());
+    // Verify the station_systems field survives the round-trip.
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert_eq!(ship_config.station_systems, config.station_systems);
+        assert_eq!(ship_config.blaster_banks, config.blaster_banks);
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_console_families_round_trip_as_public_strings() {
+    let system_console_families = HashMap::from([
+        ("bridge-orders".to_string(), ConsoleFamily::Command),
+        ("berthing-clamps".to_string(), ConsoleFamily::Helm),
+        ("main-drive".to_string(), ConsoleFamily::Helm),
+    ]);
+    let blackboard_console_families = HashMap::from([
+        ("helm".to_string(), ConsoleFamily::Helm),
+        ("scan".to_string(), ConsoleFamily::Sensors),
+    ]);
+    let system_kinds = HashMap::from([
+        (
+            "port-flight-vector".to_string(),
+            "helm_steering".to_string(),
+        ),
+        ("berthing-clamps".to_string(), "dock".to_string()),
+    ]);
+    let config = ShipClientConfig {
+        system_console_families,
+        system_kinds,
+        blackboard_console_families,
+        ..ShipClientConfig::default()
+    };
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: config.clone(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    assert!(json.contains("\"bridge-orders\":\"command\""));
+    assert!(json.contains("\"berthing-clamps\":\"helm\""));
+    assert!(json.contains("\"main-drive\":\"helm\""));
+    assert!(json.contains("\"scan\":\"sensors\""));
+    assert!(json.contains("\"port-flight-vector\":\"helm_steering\""));
+    assert!(json.contains("\"berthing-clamps\":\"dock\""));
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert_eq!(
+            ship_config.system_console_families,
+            config.system_console_families
+        );
+        assert_eq!(
+            ship_config.blackboard_console_families,
+            config.blackboard_console_families
+        );
+        assert_eq!(ship_config.system_kinds, config.system_kinds);
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_console_families_default_empty_when_missing() {
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    assert!(
+        !json.contains("system_console_families"),
+        "the empty projection is omitted from the public payload"
+    );
+    assert!(
+        !json.contains("blackboard_console_families"),
+        "the empty blackboard projection is omitted from the public payload"
+    );
+    assert!(
+        !json.contains("system_kinds"),
+        "the empty authored-kind projection is omitted from the public payload"
+    );
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert!(ship_config.system_console_families.is_empty());
+        assert!(ship_config.blackboard_console_families.is_empty());
+        assert!(ship_config.system_kinds.is_empty());
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_station_systems_defaults_empty_when_missing() {
+    // Old server payloads without station_systems should decode cleanly.
+    // Build a minimal Welcome message, encode it, strip the station_systems
+    // key, then re-decode — the #[serde(default)] must fill in an empty map.
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    let full_json = JsonCodec.encode_server(&msg).unwrap();
+    // Remove the station_systems entry to simulate an old server payload.
+    let stripped = full_json.replace(",\"station_systems\":{}", "");
+    let decoded = JsonCodec.decode_server(&stripped).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert!(
+            ship_config.station_systems.is_empty(),
+            "station_systems defaults to empty map"
+        );
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_helm_capability_round_trips() {
+    // Build a config that carries helm capability fields.
+    let config = ShipClientConfig {
+        helm_systems: vec![
+            "helm-thrust".to_string(),
+            "helm-steering".to_string(),
+            "helm-impulse".to_string(),
+            "helm-boost".to_string(),
+            "helm-lateral-thrust".to_string(),
+        ],
+        vertical_movement_mode: "bounded".to_string(),
+        impulse_steering_multiplier: 0.1,
+        ..ShipClientConfig::default()
+    };
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: config.clone(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    assert_server_roundtrip(msg.clone());
+    // Verify the helm capability fields survive the round-trip.
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert_eq!(ship_config.helm_systems, config.helm_systems);
+        assert_eq!(
+            ship_config.vertical_movement_mode,
+            config.vertical_movement_mode
+        );
+        assert_eq!(
+            ship_config.impulse_steering_multiplier,
+            config.impulse_steering_multiplier
+        );
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+// ── station_tutorials round-trip (issue #916) ─────────────────────────
+
+#[test]
+fn ship_client_config_station_tutorials_round_trip() {
+    // One overlay per shipped trigger kind, exercising every optional
+    // field of the trigger vocabulary. Content fields are strings.csv ids
+    // (structured codes on the wire — never composed English).
+    let mut station_tutorials = HashMap::new();
+    station_tutorials.insert(
+        "helm".to_string(),
+        vec![
+            TutorialOverlayWire {
+                id: "helm-welcome".into(),
+                trigger: TutorialTriggerWire {
+                    kind: "first_visit".into(),
+                    control: None,
+                    path: None,
+                    op: None,
+                    value: None,
+                },
+                title: "entity.test.station.helm.tutorial.welcome.title".into(),
+                text: "entity.test.station.helm.tutorial.welcome.text".into(),
+                anchor: Some("helm-radar".into()),
+                priority: 0,
+            },
+            TutorialOverlayWire {
+                id: "helm-boost".into(),
+                trigger: TutorialTriggerWire {
+                    kind: "state".into(),
+                    control: Some("set_boost".into()),
+                    path: Some("boost_battery".into()),
+                    op: Some("gte".into()),
+                    value: Some(1.0),
+                },
+                title: "entity.test.station.helm.tutorial.boost.title".into(),
+                text: "entity.test.station.helm.tutorial.boost.text".into(),
+                anchor: None,
+                priority: 10,
+            },
+        ],
+    );
+    let config = ShipClientConfig {
+        station_tutorials,
+        ..ShipClientConfig::default()
+    };
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: config.clone(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    assert_server_roundtrip(msg.clone());
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert_eq!(ship_config.station_tutorials, config.station_tutorials);
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+#[test]
+fn ship_client_config_station_tutorials_default_empty_when_missing() {
+    // A Welcome from a build predating #916 carries no station_tutorials
+    // key at all (skip_serializing_if on the sender side too) — the field
+    // must decode as an empty map, not fail.
+    let msg = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    let json = JsonCodec.encode_server(&msg).unwrap();
+    assert!(
+        !json.contains("station_tutorials"),
+        "empty map must be skipped on encode"
+    );
+    let decoded = JsonCodec.decode_server(&json).unwrap();
+    if let ServerMessage::Welcome { ship_config, .. } = decoded {
+        assert!(ship_config.station_tutorials.is_empty());
+    } else {
+        panic!("expected Welcome");
+    }
+}
+
+// ── Crew-public GM roster (issue #1289) ──────────────────────────────
+
+#[test]
+fn gm_roster_decoder_canonicalises_a_bounded_full_replacement() {
+    let roster = decode_gm_roster(
+        r#"[
+            {"id":"gm-2","name":"","connected":false,"ready":false},
+            {"id":"gm-1","name":"Morgan","connected":true,"ready":true}
+        ]"#,
+    )
+    .expect("valid public roster");
+
+    assert_eq!(
+        roster
+            .operators()
+            .iter()
+            .map(|operator| operator.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gm-1", "gm-2"]
+    );
+    assert!(roster.operators()[0].connected);
+    assert!(!roster.operators()[1].connected);
+}
+
+#[test]
+fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
+    assert!(decode_gm_roster(
+        r#"[
+            {"id":"gm-1","name":"One","connected":true,"ready":false},
+            {"id":"gm-1","name":"Two","connected":false,"ready":false}
+        ]"#
+    )
+    .is_none());
+
+    let too_many = serde_json::to_string(
+        &(0..=crate::gm_roster::MAX_GM_OPERATORS)
+            .map(|index| crate::gm_roster::GmOperator {
+                id: format!("gm-{index}"),
+                name: String::new(),
+                connected: true,
+                ready: false,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert!(decode_gm_roster(&too_many).is_none());
+
+    // `role_preset`/`rolePreset` (issue #1319) is personal browser
+    // presentation, never a crew-public roster field — see
+    // `gui/gm-role-presets.js` and `pasm/spec/design/gm-console-t2.yaml`'s
+    // `gm-t2-performing-surface`. `GmOperator`'s `deny_unknown_fields` must
+    // refuse either spelling exactly like the other private fields below.
+    for private_field in [
+        "peer",
+        "credential",
+        "owner",
+        "leader",
+        "station",
+        "role_preset",
+        "rolePreset",
+    ] {
+        let raw = format!(
+            r#"[{{"id":"gm-1","name":"Morgan","connected":true,"ready":false,"{private_field}":"secret"}}]"#
+        );
+        assert!(
+            decode_gm_roster(&raw).is_none(),
+            "private field {private_field} must be refused at the codec boundary"
+        );
+    }
+}
+
+#[test]
+fn gm_wire_rows_have_only_public_identity_name_presence_and_readiness() {
+    let message = ServerMessage::GmRosterChanged {
+        gms: vec![crate::gm_roster::GmOperator {
+            id: "gm-1".into(),
+            name: "Morgan".into(),
+            connected: true,
+            ready: true,
+        }],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let row = &value["data"]["gms"][0];
+    assert_eq!(
+        row.as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["connected", "id", "name", "ready"].into_iter().collect()
+    );
+}
+
+#[test]
+fn gm_roster_decoder_requires_the_exact_ready_field() {
+    assert!(decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true}]"#).is_none());
+    let roster =
+        decode_gm_roster(r#"[{"id":"gm-1","name":"Morgan","connected":true,"ready":false}]"#)
+            .unwrap();
+    assert!(!roster.operators()[0].ready);
+}
+
+// ── Scenario-authored GM role presets (issue #1319) ──────────────────────
+
+#[test]
+fn gm_role_preset_encoder_round_trips_authored_order_and_facets() {
+    use crate::world::config::GmRolePresetEntry;
+
+    use crate::world::config::GmRolePresetWidget;
+
+    let presets = vec![
+        GmRolePresetEntry {
+            id: "tactical".to_string(),
+            label: "world.fs.gm_role_preset.tactical.label".to_string(),
+            panels: vec!["gm-map-panel".to_string(), "gm-activity".to_string()],
+            quick_actions: vec!["gm-session-pause".to_string()],
+            contacts: vec!["enemy_frigate".to_string()],
+            widget: vec![GmRolePresetWidget {
+                id: "urgent-only".to_string(),
+                kind: "attention".to_string(),
+                label: "world.fs.gm_widget.urgent_only.label".to_string(),
+                band: Some("urgent".to_string()),
+                ..Default::default()
+            }],
+        },
+        GmRolePresetEntry {
+            id: "narrative".to_string(),
+            ..Default::default()
+        },
+    ];
+    let encoded = encode_gm_role_presets(&presets);
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value[0]["id"], "tactical");
+    assert_eq!(value[0]["label"], "world.fs.gm_role_preset.tactical.label");
+    assert_eq!(
+        value[0]["panels"],
+        serde_json::json!(["gm-map-panel", "gm-activity"])
+    );
+    assert_eq!(
+        value[0]["quick_actions"],
+        serde_json::json!(["gm-session-pause"])
+    );
+    assert_eq!(value[0]["contacts"], serde_json::json!(["enemy_frigate"]));
+    // The authored widget composition (issue #1439) crosses to the browser on
+    // the SAME payload, keyed `type` rather than `kind`, and carries only the
+    // facets its own type owns — `gui/gm-widgets-panel.js` reads exactly this.
+    assert_eq!(
+        value[0]["widget"],
+        serde_json::json!([{
+            "id": "urgent-only",
+            "type": "attention",
+            "label": "world.fs.gm_widget.urgent_only.label",
+            "band": "urgent",
+        }])
+    );
+    assert_eq!(value[1]["id"], "narrative");
+    assert_eq!(value[1]["panels"], serde_json::json!([]));
+    // A preset with no widgets says nothing about widgets at all, so a build
+    // that never authored one sends the payload it always sent.
+    assert!(value[1].get("widget").is_none());
+
+    let decoded: Vec<GmRolePresetEntry> = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, presets);
+}
+
+#[test]
+fn gm_role_preset_encoder_returns_an_empty_array_for_a_world_with_none() {
+    assert_eq!(encode_gm_role_presets(&[]), "[]");
+}
+
+// ── GM palette placement ingress (issue #1305) ───────────────────────────
+
+#[test]
+fn gm_placement_ingress_accepts_exactly_the_palette_shape() {
+    let request = decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"place-1","action":"spawn_palette_entity",
+            "palette":"raider","variant":"blood_eagle",
+            "position_mm":[120500,0,-40250],"heading_mdeg":90000}"#,
+    )
+    .expect("a complete placement decodes");
+    assert_eq!(
+        request.action,
+        crate::gm_action::GmAction::SpawnPaletteEntity {
+            palette: "raider".to_string(),
+            variant: Some("blood_eagle".to_string()),
+            position_mm: [120_500, 0, -40_250],
+            heading_mdeg: 90_000,
+        }
+    );
+
+    // `variant: null` is the bare template, and keeps the field count exact.
+    let bare = decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"place-2","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":0}"#,
+    )
+    .expect("a variant-free placement decodes");
+    assert!(matches!(
+        bare.action,
+        crate::gm_action::GmAction::SpawnPaletteEntity { variant: None, .. }
+    ));
+}
+
+#[test]
+fn gm_placement_ingress_refuses_asset_paths_pixels_and_malformed_placements() {
+    // There is no template/asset field at all, and a smuggled one blows the
+    // exact field-count guard rather than being ignored.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":0,
+            "template_path":"assets/entities/alliance_battleship.toml"}"#
+    )
+    .is_none());
+    // A missing variant is a different shape, not a defaulted one.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","position_mm":[0,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Screen pixels would arrive as a two-element pair; world space is three.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[100,200],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Floats are not a placement: the wire carries fixed point.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[1.5,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    // Out of range on either axis is refused before it can become a grant.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[5000000001,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"raider","variant":null,"position_mm":[0,0,0],"heading_mdeg":360001}"#
+    )
+    .is_none());
+    // An empty palette id names nothing.
+    assert!(decode_gm_action_request(
+        r#"{"operator_id":"gm-1","correlation":"p","action":"spawn_palette_entity",
+            "palette":"","variant":null,"position_mm":[0,0,0],"heading_mdeg":0}"#
+    )
+    .is_none());
+}
+
+#[test]
+fn gm_spawn_projection_encodes_palette_ids_and_labels_only() {
+    use crate::gm_spawn::{GmPaletteOption, GmPaletteVariantOption, GmSpawnProjection};
+
+    let payload = GmSpawnProjection {
+        palette: vec![GmPaletteOption {
+            id: "raider".to_string(),
+            label: "world.fs.gm_palette.raider.label".to_string(),
+            variants: vec![GmPaletteVariantOption {
+                id: "blood_eagle".to_string(),
+                label: "world.fs.gm_palette.raider.blood_eagle.label".to_string(),
+            }],
+        }],
+        results: Vec::new(),
+    };
+    let encoded = to_json(&payload).expect("projection encodes");
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value["palette"][0]["id"], "raider");
+    assert_eq!(
+        value["palette"][0]["label"],
+        "world.fs.gm_palette.raider.label"
+    );
+    assert_eq!(value["palette"][0]["variants"][0]["id"], "blood_eagle");
+    assert_eq!(value["results"], serde_json::json!([]));
+    assert!(
+        !encoded.contains("assets/"),
+        "the browser is never handed a spawnable asset path: {encoded}"
+    );
+}
+
+#[test]
+fn start_grant_codec_enforces_exact_id_mode_and_attribution() {
+    let automatic =
+        decode_start_grant(r#"{"id":"start-1","mode":"automatic","operator_id":null}"#).unwrap();
+    assert_eq!(automatic.validate(), Ok(1));
+    assert_eq!(
+        automatic.apply_tick, 0,
+        "missing means an owner-edge proposal"
+    );
+    let scheduled = decode_start_grant(
+        r#"{"id":"start-2","mode":"forced","operator_id":"gm-1","apply_tick":42}"#,
+    )
+    .unwrap();
+    assert_eq!(scheduled.apply_tick, 42);
+    assert!(
+        decode_start_grant(r#"{"id":"start-3","mode":"automatic","operator_id":"gm-1"}"#).is_none()
+    );
+    assert!(decode_start_grant(r#"{"id":"start-4","mode":"forced","operator_id":null}"#).is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-5","mode":"forced","operator_id":"gm-1","owner":true}"#
+    )
+    .is_none());
+    assert!(decode_start_grant(
+        r#"{"id":"start-6","mode":"automatic","operator_id":null,"apply_tick":9007199254740992}"#
+    )
+    .is_none());
+}
+
+#[test]
+fn start_grant_result_codec_preserves_the_fixed_source_tick() {
+    let encoded = to_json(&crate::lobby::start_policy::StartGrantResult {
+        tick: 41,
+        status: crate::lobby::start_policy::StartGrantStatus::Refused,
+        operator_id: Some("gm-1".into()),
+        reason: Some(crate::lobby::start_policy::StartGrantReason::MissedApplyTick),
+        grant_id: Some("start-7".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"tick":41,"status":"refused","operator_id":"gm-1","reason":"missed-apply-tick","grant_id":"start-7"}"#
+    );
+}
+
+#[test]
+fn fleet_join_status_codec_is_exact_and_generation_stamped() {
+    let encoded = to_json(&crate::lockstep::FleetJoinStatus {
+        generation: 17,
+        status: crate::lockstep::FleetJoinStatusKind::Refused,
+        reason: Some("fleet-leave-not-lobby".into()),
+    })
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["generation", "reason", "status"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+    assert_eq!(value["generation"], 17);
+    assert_eq!(value["status"], "refused");
+    assert_eq!(value["reason"], "fleet-leave-not-lobby");
+}
+
+#[test]
+fn welcome_gm_projection_defaults_empty_for_older_senders() {
+    let message = ServerMessage::Welcome {
+        state: state(),
+        ship_stations: empty_ship_stations(),
+        ship_config: ShipClientConfig::default(),
+        station_ratings: HashMap::new(),
+        gms: vec![],
+        string_catalogues: vec![],
+    };
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    assert!(!encoded.contains("\"gms\""));
+    let decoded = JsonCodec.decode_server(&encoded).unwrap();
+    assert!(matches!(decoded, ServerMessage::Welcome { gms, .. } if gms.is_empty()));
+}
+
+// ── The browser host's join-handshake verdict (issue #1111) ─────────────────
+
+#[test]
+fn a_join_verdict_says_ok_and_names_the_host_stamp() {
+    let host = crate::delivery::stamp::DeliveryStamp {
+        protocol: PROTOCOL_VERSION,
+        content_id: "phoenix-base".into(),
+        content_epoch: 3,
+    };
+    let json = encode_join_verdict(&Ok(()), &host);
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["ok"], serde_json::Value::Bool(true));
+    assert_eq!(value["host"]["content_id"], "phoenix-base");
+    assert_eq!(value["host"]["content_epoch"], 3);
+}
+
+#[test]
+fn a_refused_join_carries_the_same_machine_code_the_native_host_answers_with() {
+    let host = crate::delivery::stamp::DeliveryStamp {
+        protocol: PROTOCOL_VERSION,
+        content_id: "phoenix-base".into(),
+        content_epoch: 1,
+    };
+    let bad = format!("{}/phoenix-base/1", PROTOCOL_VERSION + 1);
+    let verdict = crate::delivery::check_join_stamp(&host, Some(&bad));
+    let json = encode_join_verdict(&verdict, &host);
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["ok"], serde_json::Value::Bool(false));
+    assert_eq!(value["code"], "protocol-mismatch");
+    assert!(value["detail"].as_str().unwrap().contains("protocol"));
+}
+
+/// Version 3's frozen receiver: fields introduced by #1407 are deliberately
+/// absent. This tests the actual old JSON rules, not a new type with defaults.
+#[derive(Debug, serde::Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+enum LegacyCatalogueMessage {
+    ScenarioCatalog {
+        scenarios: Vec<LegacyCatalogueEntry>,
+        locked_scenario: Option<String>,
+        locked_ship: Option<String>,
+    },
+}
+
+#[derive(Debug, serde::Deserialize, PartialEq)]
+struct LegacyCatalogueEntry {
+    id: String,
+    world: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    ships: Vec<crate::world::config::AvailableShipEntry>,
+}
+
+#[test]
+fn catalogue_v3_json_remains_readable_with_explicit_base_and_empty_pack_defaults() {
+    let old = include_str!("../../../../tests/fixtures/scenario-catalogue-v3.json");
+    let message = JsonCodec.decode_server(old).unwrap();
+    let ServerMessage::ScenarioCatalog(ref catalog) = message else {
+        unreachable!()
+    };
+    assert_eq!(catalog.scenarios[0].source, "base");
+    assert!(catalog.active_packs.is_empty());
+    assert_eq!(catalog.scenarios[0].ships[0].class, None);
+    assert_eq!(catalog.scenarios[0].ships[0].mass, None);
+    let encoded = JsonCodec.encode_server(&message).unwrap();
+    let old_reader: LegacyCatalogueMessage = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(
+        old_reader,
+        serde_json::from_str::<LegacyCatalogueMessage>(old).unwrap()
+    );
+}
+
+#[test]
+fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/scenario-catalogue-wire.json"
+    ))
+    .unwrap();
+    for snapshot in fixture["snapshots"].as_array().unwrap() {
+        let expected = &snapshot["message"];
+        let message = JsonCodec.decode_server(&expected.to_string()).unwrap();
+        assert_server_roundtrip(message.clone());
+        // The crew transports carry UTF-8 JSON, including the native binary's
+        // transport. There is no binary ServerMessage codec; postcard digests
+        // are not peer messages and cannot establish wire compatibility.
+        let bytes = JsonCodec.encode_server(&message).unwrap().into_bytes();
+        let decoded = JsonCodec
+            .decode_server(std::str::from_utf8(&bytes).unwrap())
+            .unwrap();
+        assert_eq!(decoded, message);
+        let old_reader: LegacyCatalogueMessage = serde_json::from_slice(&bytes).unwrap();
+        let ServerMessage::ScenarioCatalog(current) = message else {
+            unreachable!()
+        };
+        let LegacyCatalogueMessage::ScenarioCatalog {
+            scenarios,
+            locked_scenario,
+            locked_ship,
+        } = old_reader;
+        assert_eq!(locked_scenario, current.locked_scenario);
+        assert_eq!(locked_ship, current.locked_ship);
+        assert_eq!(scenarios.len(), current.scenarios.len());
+        for (old, new) in scenarios.iter().zip(&current.scenarios) {
+            assert_eq!(
+                (&old.id, &old.world, &old.label, &old.description),
+                (&new.id, &new.world, &new.label, &new.description)
+            );
+            assert_eq!(
+                old.ships
+                    .iter()
+                    .map(|s| (&s.template_path, &s.label))
+                    .collect::<Vec<_>>(),
+                new.ships
+                    .iter()
+                    .map(|s| (&s.template_path, &s.label))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    // The legacy v3 catalogue remains readable under the current v4 join pin;
+    // assigned-station authority changed the protocol, not this JSON shape.
+    assert_eq!(PROTOCOL_VERSION, 4);
+}
+
+/// The removal inverse's ingress (issue #1444).
+///
+/// `expected` is the `affected` object the journal projection published, echoed
+/// back verbatim by a page that never constructs one. The variant is new, so
+/// this pins that the ingress reads it, bounds it exactly as it bounds every
+/// other affected field, and refuses a pair that names no entity — the whole
+/// point of the echo being that the reducer can compare it against the fact.
+#[test]
+fn undo_of_a_removal_decodes_the_published_presence_pair_verbatim() {
+    let request = |expected: &str| {
+        format!(
+            r#"{{"operator_id":"gm-blake","correlation":"undo-1","action":"undo_gm_action",
+                "original":"remove-1","original_operator":"gm-alex","original_sequence":9,
+                "expected":{expected}}}"#
+        )
+    };
+    let decoded = crate::core::codec::decode_gm_action_request(&request(
+        r#"{"entity-presence":{"entity":"raider-7","before":true,"after":false}}"#,
+    ))
+    .expect("the published pair round-trips through the browser wire");
+    assert_eq!(
+        decoded.action,
+        crate::gm_action::GmAction::UndoGmAction {
+            original: crate::gm_action::GmActionId::new("remove-1".to_string()).unwrap(),
+            original_operator: "gm-alex".into(),
+            original_sequence: 9,
+            expected: crate::gm_action::GmAffectedField::EntityPresence {
+                entity: "raider-7".into(),
+                before: true,
+                after: false,
+            },
+        }
+    );
+    // A pair whose two sides are the same describes no change, and an unbounded
+    // identity is not vocabulary: both are refused at ingress rather than
+    // becoming a canonical grant that can only ever be refused.
+    for rejected in [
+        r#"{"entity-presence":{"entity":"raider-7","before":true,"after":true}}"#,
+        r#"{"entity-presence":{"entity":"","before":true,"after":false}}"#,
+        r#"{"entity-presence":{"before":true,"after":false}}"#,
+    ] {
+        assert!(
+            crate::core::codec::decode_gm_action_request(&request(rejected)).is_none(),
+            "{rejected}"
+        );
+    }
+}
+
+#[test]
+fn instance_progress_and_frozen_assignment_round_trip() {
+    let legacy = r#"{"id":"hold","text":"objective.hold","mandatory":true,"status":"Active","source":"Mission"}"#;
+    let mut snapshot: ObjectiveSnapshot = serde_json::from_str(legacy).unwrap();
+    assert_eq!(snapshot.progress, None);
+    assert!(serde_json::to_value(&snapshot)
+        .unwrap()
+        .get("progress")
+        .is_none());
+    snapshot.id = "hold::alliance".into();
+    snapshot.progress = Some(0.25);
+    snapshot.unassigned = true;
+    assert_server_roundtrip(ServerMessage::ObjectiveSummary {
+        objectives: vec![snapshot],
+    });
+}

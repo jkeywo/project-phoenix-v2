@@ -509,7 +509,7 @@ fn a_freshly_built_ring_seeds_focus_onto_its_first_pane() {
     // panes exist — not a blank ring in which keys go nowhere until the first
     // Ctrl+Tab. `from_order` (nothing focused) was the defect;
     // `focused_on_first_pane` is the seed.
-    let ring = FocusRing::focused_on_first_pane(vec![pane(3), pane(7)]);
+    let ring = crate::native_host::input_routing::focused_on_first_pane(vec![pane(3), pane(7)]);
     assert_eq!(
         ring.focused(),
         Some(pane(3)),
@@ -520,7 +520,7 @@ fn a_freshly_built_ring_seeds_focus_onto_its_first_pane() {
 
 #[test]
 fn a_freshly_built_ring_with_no_panes_focuses_nothing() {
-    let ring = FocusRing::focused_on_first_pane(vec![]);
+    let ring = crate::native_host::input_routing::focused_on_first_pane(vec![]);
     assert_eq!(ring.focused(), None);
 }
 
@@ -532,7 +532,8 @@ fn a_ring_holding_only_the_host_lobby_surface_seeds_nothing() {
     // focus frame and corner brackets over chrome that has no typeable control —
     // a reticle advertising a keyboard target that accepts nothing. The seed
     // skips the surface; the honest initial state is no focus and no reticle.
-    let ring = FocusRing::focused_on_first_pane(vec![HOST_LOBBY_SURFACE_ID]);
+    let ring =
+        crate::native_host::input_routing::focused_on_first_pane(vec![HOST_LOBBY_SURFACE_ID]);
     assert_eq!(
         ring.focused(),
         None,
@@ -549,10 +550,18 @@ fn a_ring_holding_only_the_host_lobby_surface_seeds_nothing() {
 fn seeding_skips_the_lobby_surface_and_lands_on_the_first_real_pane() {
     // The surface is placed LAST in the router, so this is the ordinary
     // `--pane` host; the guard also holds if a later layout ever puts it first.
-    let ring = FocusRing::focused_on_first_pane(vec![HOST_LOBBY_SURFACE_ID, pane(4), pane(9)]);
+    let ring = crate::native_host::input_routing::focused_on_first_pane(vec![
+        HOST_LOBBY_SURFACE_ID,
+        pane(4),
+        pane(9),
+    ]);
     assert_eq!(ring.focused(), Some(pane(4)));
 
-    let ring = FocusRing::focused_on_first_pane(vec![pane(4), pane(9), HOST_LOBBY_SURFACE_ID]);
+    let ring = crate::native_host::input_routing::focused_on_first_pane(vec![
+        pane(4),
+        pane(9),
+        HOST_LOBBY_SURFACE_ID,
+    ]);
     assert_eq!(ring.focused(), Some(pane(4)));
 }
 
@@ -561,7 +570,10 @@ fn the_lobby_surface_is_still_reachable_by_keyboard_traversal() {
     // Excluding it from the SEED must not exclude it from the CYCLE: acceptance
     // criterion 5 is that a keyboard operates every surface, and later slices put
     // real controls on this one.
-    let mut ring = FocusRing::focused_on_first_pane(vec![pane(0), HOST_LOBBY_SURFACE_ID]);
+    let mut ring = crate::native_host::input_routing::focused_on_first_pane(vec![
+        pane(0),
+        HOST_LOBBY_SURFACE_ID,
+    ]);
     assert_eq!(ring.focused(), Some(pane(0)));
     assert_eq!(ring.focus_next(), Some(HOST_LOBBY_SURFACE_ID));
     assert_eq!(ring.focus_next(), Some(pane(0)));

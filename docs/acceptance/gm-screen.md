@@ -112,8 +112,8 @@ illustrative artboard.
   Station, an operator, an alert or a deliberate pause); the quiet pill is the
   `gm_attention` quiet-time occurrence's own age; the checkpoint pill is the
   highest capture tick in this browser's own catalogue.
-- **The quiet pill counts with the row, not with the payload.** `src/gm_attention.rs`
-  deliberately does not republish on age alone, and `src/gm_quiet.rs` keeps one
+- **The quiet pill counts with the row, not with the payload.** `crates/phoenix-simulation/src/gm_attention.rs`
+  deliberately does not republish on age alone, and `crates/phoenix-simulation/src/gm_quiet.rs` keeps one
   id and one authored `seconds` for a whole lull, so the last payload of a lull
   is the only one the page sees. The queue panel — the one surface that knows
   when this browser first saw a row — therefore ages its own rows, reports that

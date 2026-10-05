@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "suffix": {
+    "length": 5,
+    "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    "strip": "-_ \t",
+    "normalise": {}
+  },
+  "namespaces": {
+    "client": "b798ac03-079f-4f13-a5dd-d8dd27097332",
+    "server": "b98891e5-1bce-4e30-bb7e-d623c0d97a30"
+  },
+  "version": {
+    "guid": "17c26cb8-019a-4fc7-8ce7-286cf998fa7b"
+  },
+  "limits": {},
+  "deny": []
+}

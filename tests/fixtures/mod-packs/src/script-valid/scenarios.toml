@@ -3,7 +3,7 @@
 #
 # Regenerate the .zip with `node scripts/build-mod-pack-fixtures.mjs`
 # (byte-reproducible; gated by `--check`). The SAME .zip bytes are validated
-# from both Rust (src/world/mod_pack.rs) and JS (editor/tests/mod-pack-export.test.js).
+# from both Rust (crates/phoenix-simulation/src/world/mod_pack.rs) and JS (editor/tests/mod-pack-export.test.js).
 
 [pack]
 format = 1

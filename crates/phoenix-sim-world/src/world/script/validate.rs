@@ -308,7 +308,7 @@ pub fn validate_deadline_handlers(
 /// mistaken for code, while an authored string like an `on_pick` fn name is
 /// still readable as data ([`Tok::Str`]).
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Tok {
+pub(crate) enum Tok {
     /// An identifier run (`flags`, `score`, `ctx`, `increment`, …).
     Ident(String),
     /// A string or char literal, carrying its contents. Whatever is inside is
@@ -334,9 +334,9 @@ pub(super) enum Tok {
 }
 
 /// A token plus the 1-based source line it starts on (for locating a finding).
-pub(super) struct Token {
-    pub(super) kind: Tok,
-    pub(super) line: usize,
+pub(crate) struct Token {
+    pub(crate) kind: Tok,
+    pub(crate) line: usize,
 }
 
 /// If a compound-assignment operator starts at `chars[i]`, its length in chars
@@ -379,7 +379,7 @@ fn lex_significant(source: &str) -> Vec<Token> {
 
 /// Preserve exact literal spelling for source-aware recipient validation.
 /// Existing callers continue to consume the same significant token stream.
-pub(super) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
+pub(crate) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
     let chars: Vec<char> = source.chars().collect();
     let n = chars.len();
     let mut tokens = Vec::new();
@@ -487,7 +487,10 @@ pub(super) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
                 }
                 if i + h < n && chars[i + h] == '"' {
                     // Body runs until a `"` followed by exactly `h` `#`s.
-                    let mut j = i + h + 1;
+                    let body_start = i + h + 1;
+                    let start_line = line;
+                    let mut body_end = chars.len();
+                    let mut j = body_start;
                     loop {
                         if j >= n {
                             break;
@@ -498,6 +501,7 @@ pub(super) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
                         } else if chars[j] == '"'
                             && (0..h).all(|k| j + 1 + k < n && chars[j + 1 + k] == '#')
                         {
+                            body_end = j;
                             j = j + 1 + h;
                             break;
                         } else {
@@ -505,6 +509,10 @@ pub(super) fn lex_significant_raw(source: &str) -> Vec<(Token, String)> {
                         }
                     }
                     i = j;
+                    tokens.push(Token {
+                        kind: Tok::Str(chars[body_start..body_end].iter().collect()),
+                        line: start_line,
+                    });
                 } else {
                     // A lone `#` (e.g. the `#` of a `#{ … }` map) — a separator.
                     tokens.push(Token {

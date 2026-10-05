@@ -3424,33 +3424,66 @@ pub fn resolved_script_spawn_refs(
 /// nothing, which is the same "computed is invisible" bargain as a computed
 /// path.
 ///
-/// # Comments and strings, in one pass
-///
-/// [`blank_comments`] runs first and handles both together, because neither is
-/// decidable alone: a `//` inside a string literal is not a comment, and a quote
-/// inside a comment is not a string. Doing them separately is what let a
-/// `/* … */` block hide nothing at all (block comments were never stripped, so a
-/// commented-out wave still queued a fetch and still reached the composition
-/// gate) and let an apostrophe in prose desynchronise the brace matcher for the
-/// rest of the file.
+/// Shared Rhai lexing strips comments and isolates all literal forms before
+/// this pass reasons about call/map structure. Computed values stay opaque.
 fn script_spawn_refs(source: &str) -> Vec<ScannedSpawn> {
-    let code = blank_comments(source);
+    use crate::world::script::validate::{lex_significant_raw, Tok};
+    let tokens = lex_significant_raw(source);
+    crate::world::script::init_hashing_seed();
+    let engine = rhai::Engine::new_raw();
     let mut out = Vec::new();
-    for (open, close) in spawn_call_maps(&code) {
-        let entries = top_level_entries(&code, open, close);
-        let Some(path) = entries
-            .iter()
-            .find(|e| e.key == "template_path")
-            .and_then(|e| string_literal(&code[e.value.clone()]))
-        else {
+    let mut i = 0;
+    while i + 2 < tokens.len() {
+        if tokens[i].0.kind != Tok::Ident("spawn_entity".into())
+            || tokens[i + 1].0.kind != Tok::Other('(')
+        {
+            i += 1;
             continue;
+        }
+        let mut open = i + 2;
+        if tokens[open].0.kind == Tok::Other('#') {
+            open += 1;
+        }
+        if open >= tokens.len() || tokens[open].0.kind != Tok::Other('{') {
+            i += 1;
+            continue;
+        }
+        let Some(close) = token_close(&tokens, open) else {
+            break;
         };
-        let overrides = entries.iter().find(|e| e.key == "overrides");
-        out.push(ScannedSpawn {
-            template_path: path,
-            line: line_of_offset(&code, open),
-            overrides: overrides.map(|e| classify_overrides(&code[e.value.clone()])),
-        });
+        let entries = token_entries(&tokens, open, close);
+        let path = entries
+            .iter()
+            .find(|(key, _)| key == "template_path")
+            .and_then(|(_, value)| {
+                if value.len() != 1 {
+                    return None;
+                }
+                let (token, raw) = &tokens[value.start];
+                // Backticks may interpolate; a path must be wholly literal.
+                if raw.starts_with('`') || raw.starts_with('\'') {
+                    return None;
+                }
+                match &token.kind {
+                    Tok::Str(_) => engine
+                        .eval::<rhai::ImmutableString>(raw)
+                        .ok()
+                        .map(|path| path.to_string()),
+                    _ => None,
+                }
+            });
+        if let Some(template_path) = path {
+            let overrides = entries
+                .iter()
+                .find(|(key, _)| key == "overrides")
+                .map(|(_, value)| classify_override_tokens(&tokens[value.clone()]));
+            out.push(ScannedSpawn {
+                template_path,
+                line: tokens[open].0.line,
+                overrides,
+            });
+        }
+        i = close + 1;
     }
     out
 }
@@ -3477,419 +3510,97 @@ pub enum OverrideShape {
     MayRestateDoctrine,
 }
 
-/// Classify an `overrides` value expression.
-///
-/// Only a literal map can be ruled out, and only when the whole of it is
-/// visible. A call (`wave_8_overrides()` — `combat_test.toml`'s shape) is opaque
-/// and has to be assumed to restate doctrine, because it does.
-///
-/// # "Contains no `doctrine`" is not enough on its own
-///
-/// A map can be a literal and still hide doctrine one level down, in two ways
-/// this checks for by name:
-///
-/// * a NESTED CALL — `#{ behaviour: build_behaviour() }` mentions no
-///   `doctrine` and may return an entry that restates one;
-/// * a TOP-LEVEL MERGE — `#{ … } + stand_the_patrol_down()` starts with a
-///   literal map and is not one, and the right operand need not even be a call
-///   (`#{ … } + saved_overrides` is a variable).
-///
-/// The two SCALAR VALUE MARKERS are the deliberate exception.
-/// [`crate::world::script::effects`]' `flt(…)` and `int(…)` wrap a number to pin
-/// its TOML type across the Rhai boundary; they take a literal and return that
-/// same scalar, so neither can introduce a map, an array or a doctrine entry.
-/// Allowing them is what keeps three shipped references on the full-strength arm
-/// (`falling_skyway.toml` x2, `probe_collapse_min.toml` x1) instead of softening
-/// them for a type annotation.
-///
-/// # Why an opaque value is a warning and not an error
-///
-/// `overrides: noop()` — an override laundered through a call that does nothing
-/// — lands on the WARNING arm deliberately, and that is the weaker guarantee
-/// this split exists to make honest rather than a hole in it. Erroring on any
-/// value the scan cannot read would block `combat_test.toml`, whose wave 8
-/// passes `wave_8_overrides()` and is correct; the laundering is not silent
-/// either, because the warning is logged at boot (`boot::log_non_error_findings`)
-/// naming the spawn's own file and line.
-fn classify_overrides(value: &str) -> OverrideShape {
-    /// Calls that cannot introduce doctrine, because their whole job is to wrap
-    /// ONE scalar to pin its TOML type and hand back the same scalar.
-    const SCALAR_MARKERS: [&str; 2] = ["flt", "int"];
+type SpawnToken = (crate::world::script::validate::Token, String);
 
-    let trimmed = value.trim_start();
-    let is_literal_map = trimmed.starts_with("#{") || trimmed.starts_with('{');
-    let readable = is_literal_map
-        && !contains_word(value, "doctrine")
-        && !has_foreign_call(value, &SCALAR_MARKERS)
-        && !has_top_level_merge(value);
-    if readable {
+/// Matching delimiters operate on significant tokens, never string contents.
+fn token_close(tokens: &[SpawnToken], open: usize) -> Option<usize> {
+    use crate::world::script::validate::Tok;
+    let (left, right) = match tokens[open].0.kind {
+        Tok::Other('{') => (Tok::Other('{'), Tok::Other('}')),
+        Tok::Other('(') => (Tok::Other('('), Tok::Other(')')),
+        Tok::LBracket => (Tok::LBracket, Tok::RBracket),
+        _ => return None,
+    };
+    let mut depth = 0;
+    for (index, (token, _)) in tokens.iter().enumerate().skip(open) {
+        if token.kind == left {
+            depth += 1;
+        }
+        if token.kind == right {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+/// Map entries stay scoped to the immediate map, preserving source order.
+fn token_entries(
+    tokens: &[SpawnToken],
+    open: usize,
+    close: usize,
+) -> Vec<(String, std::ops::Range<usize>)> {
+    use crate::world::script::validate::Tok;
+    let mut entries = Vec::new();
+    let mut i = open + 1;
+    while i < close {
+        if tokens[i].0.kind == Tok::Other(',') {
+            i += 1;
+            continue;
+        }
+        let key = match &tokens[i].0.kind {
+            Tok::Ident(key) | Tok::Str(key) => key.clone(),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        if i + 1 >= close || tokens[i + 1].0.kind != Tok::Colon {
+            i += 1;
+            continue;
+        }
+        let start = i + 2;
+        i = start;
+        while i < close && tokens[i].0.kind != Tok::Other(',') {
+            if let Some(end) = token_close(tokens, i) {
+                i = end + 1;
+            } else {
+                i += 1;
+            }
+        }
+        entries.push((key, start..i));
+    }
+    entries
+}
+
+fn classify_override_tokens(tokens: &[SpawnToken]) -> OverrideShape {
+    use crate::world::script::validate::Tok;
+    let open = usize::from(
+        tokens
+            .first()
+            .is_some_and(|(t, _)| t.kind == Tok::Other('#')),
+    );
+    let literal = tokens
+        .get(open)
+        .is_some_and(|(t, _)| t.kind == Tok::Other('{'))
+        && token_close(tokens, open) == tokens.len().checked_sub(1);
+    let doctrine = tokens.windows(2).any(|w| {
+        matches!(&w[0].0.kind,
+        Tok::Ident(key) | Tok::Str(key) if key == "doctrine")
+            && w[1].0.kind == Tok::Colon
+    });
+    let foreign_call = tokens.windows(2).any(|w| {
+        matches!(&w[0].0.kind,
+        Tok::Ident(name) if name != "flt" && name != "int")
+            && w[1].0.kind == Tok::Other('(')
+    });
+    if literal && !doctrine && !foreign_call {
         OverrideShape::ReadableWithoutDoctrine
     } else {
         OverrideShape::MayRestateDoctrine
     }
-}
-
-/// Does `value` call anything that is not in `allowed`?
-///
-/// A call is an identifier run followed by `(`. Grouping parentheses are
-/// preceded by an operator or a `:`, never by an identifier, so they do not
-/// match; a method call (`x.rounded()`) does, which is the intended reading —
-/// this pass cannot know what one returns either.
-fn has_foreign_call(value: &str, allowed: &[&str]) -> bool {
-    let b = value.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'"' {
-            i = match_string(value, i).map_or(b.len(), |e| e + 1);
-            continue;
-        }
-        if !is_ident_byte(b[i]) || (i > 0 && is_ident_byte(b[i - 1])) {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < b.len() && is_ident_byte(b[i]) {
-            i += 1;
-        }
-        let after = skip_ws(b, i);
-        if after < b.len() && b[after] == b'(' && !allowed.contains(&&value[start..i]) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Is there a `+` outside every bracket — i.e. is this expression a MAP MERGE
-/// with something the map itself does not contain?
-fn has_top_level_merge(value: &str) -> bool {
-    let b = value.as_bytes();
-    let mut depth = 0i32;
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'"' => {
-                i = match_string(value, i).map_or(b.len(), |e| e + 1);
-                continue;
-            }
-            b'{' | b'[' | b'(' => depth += 1,
-            b'}' | b']' | b')' => depth -= 1,
-            b'+' if depth <= 0 => return true,
-            _ => {}
-        }
-        i += 1;
-    }
-    false
-}
-
-/// Blank every comment and backtick string in `source`, preserving byte offsets
-/// and line breaks.
-///
-/// Blanked bytes become spaces (newlines stay newlines, so line numbers and
-/// offsets both survive); `"…"` literals are copied through untouched, because
-/// a template path is read out of one. ONE pass handles all three, because none
-/// of them is decidable alone: a `//` inside a string is not a comment, a quote
-/// inside a comment is not a string, and a `"` inside a backtick literal is
-/// neither.
-///
-/// See [`script_spawn_refs`].
-fn blank_comments(source: &str) -> String {
-    let b = source.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'"' => {
-                out.push(b'"');
-                i += 1;
-                while i < b.len() {
-                    if b[i] == b'\\' {
-                        out.push(b[i]);
-                        if i + 1 < b.len() {
-                            out.push(b[i + 1]);
-                        }
-                        i += 2;
-                        continue;
-                    }
-                    let closing = b[i] == b'"';
-                    out.push(b[i]);
-                    i += 1;
-                    if closing {
-                        break;
-                    }
-                }
-            }
-            // Rhai's OTHER string literal, and it is BLANKED rather than copied
-            // through the way a `"…"` one is. Two reasons pulling the same way:
-            // nothing downstream reads a backtick literal — a template path is
-            // matched as `"…"` by [`string_literal`], so blanking one costs no
-            // reference — and its contents are otherwise live code to every pass
-            // after this, so a backtick string carrying
-            // `spawn_entity(#{ template_path: "…" })` (prose, or a code sample
-            // in a message) yielded a phantom spawn. Blanking the DELIMITERS too
-            // is what stops an unmatched `"` inside one from desynchronising the
-            // scan for the rest of the file — the same failure the one-pass
-            // treatment of comments exists to prevent.
-            b'`' => {
-                out.push(b' ');
-                i += 1;
-                while i < b.len() {
-                    let closing = b[i] == b'`';
-                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
-                    i += 1;
-                    if closing {
-                        break;
-                    }
-                }
-            }
-            b'/' if i + 1 < b.len() && b[i + 1] == b'/' => {
-                while i < b.len() && b[i] != b'\n' {
-                    out.push(b' ');
-                    i += 1;
-                }
-            }
-            b'/' if i + 1 < b.len() && b[i + 1] == b'*' => {
-                out.push(b' ');
-                out.push(b' ');
-                i += 2;
-                while i < b.len() {
-                    if b[i] == b'*' && i + 1 < b.len() && b[i + 1] == b'/' {
-                        out.push(b' ');
-                        out.push(b' ');
-                        i += 2;
-                        break;
-                    }
-                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
-                    i += 1;
-                }
-            }
-            _ => {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-    }
-    // Only original bytes and ASCII are ever pushed, so this cannot fail; the
-    // fallback keeps the scan best-effort rather than panicking on content.
-    String::from_utf8(out).unwrap_or_else(|_| source.to_string())
-}
-
-/// Byte offsets of the `{ … }` map literal argument of every `spawn_entity`
-/// call in `code` (already comment-blanked), as `(open, close)`.
-///
-/// A call whose argument is not a literal map yields nothing.
-fn spawn_call_maps(code: &str) -> Vec<(usize, usize)> {
-    const CALL: &str = "spawn_entity";
-    let b = code.as_bytes();
-    let mut out = Vec::new();
-    let mut from = 0;
-    while let Some(rel) = code[from..].find(CALL) {
-        let at = from + rel;
-        from = at + CALL.len();
-        let before_ok = at == 0 || !is_ident_byte(b[at - 1]);
-        let after_ok = from >= b.len() || !is_ident_byte(b[from]);
-        if !before_ok || !after_ok {
-            continue;
-        }
-        let mut i = skip_ws(b, from);
-        if i >= b.len() || b[i] != b'(' {
-            continue;
-        }
-        i = skip_ws(b, i + 1);
-        // Rhai object maps are `#{`; a bare `{` is accepted too so the scan does
-        // not hinge on a sigil.
-        if i < b.len() && b[i] == b'#' {
-            i += 1;
-            i = skip_ws(b, i);
-        }
-        if i >= b.len() || b[i] != b'{' {
-            continue;
-        }
-        if let Some(close) = match_brace(code, i) {
-            out.push((i, close));
-            from = close + 1;
-        }
-    }
-    out
-}
-
-/// One top-level `key: value` entry of a map literal.
-struct MapEntry {
-    key: String,
-    value: std::ops::Range<usize>,
-}
-
-/// Every TOP-LEVEL `key: value` entry of the map literal spanning
-/// `open ..= close`.
-///
-/// Nested maps, arrays and calls are stepped over rather than descended into,
-/// which is what keeps a data sub-map's `template_path` and a sibling sub-map's
-/// `overrides` out of the answer.
-fn top_level_entries(code: &str, open: usize, close: usize) -> Vec<MapEntry> {
-    let b = code.as_bytes();
-    let mut out = Vec::new();
-    let mut i = open + 1;
-    while i < close {
-        i = skip_ws(b, i);
-        if i >= close {
-            break;
-        }
-        if b[i] == b',' {
-            i += 1;
-            continue;
-        }
-        // A key is a bare identifier (or a quoted one) followed by `:`.
-        let key_start = i;
-        while i < close && (is_ident_byte(b[i]) || b[i] == b'"') {
-            i += 1;
-        }
-        if i == key_start {
-            // Not a key — step over whatever this is and carry on.
-            i = step_over(code, i, close);
-            continue;
-        }
-        let key = code[key_start..i].trim_matches('"').to_string();
-        let after_key = skip_ws(b, i);
-        if after_key >= close || b[after_key] != b':' {
-            i = step_over(code, after_key, close);
-            continue;
-        }
-        let value_start = skip_ws(b, after_key + 1);
-        let mut j = value_start;
-        while j < close {
-            match b[j] {
-                b',' => break,
-                b'"' | b'{' | b'[' | b'(' | b'#' => j = step_over(code, j, close),
-                _ => j += 1,
-            }
-        }
-        out.push(MapEntry {
-            key,
-            value: value_start..j.min(close),
-        });
-        i = j;
-    }
-    out
-}
-
-/// Step over one string, map, array or call starting at `i`; otherwise advance
-/// one byte. Never returns a position past `close`.
-fn step_over(code: &str, i: usize, close: usize) -> usize {
-    let b = code.as_bytes();
-    if i >= close {
-        return close;
-    }
-    match b[i] {
-        b'"' => match_string(code, i).map_or(close, |e| (e + 1).min(close)),
-        b'#' => {
-            let j = skip_ws(b, i + 1);
-            if j < close && b[j] == b'{' {
-                match_brace(code, j).map_or(close, |e| (e + 1).min(close))
-            } else {
-                i + 1
-            }
-        }
-        b'{' => match_brace(code, i).map_or(close, |e| (e + 1).min(close)),
-        b'[' => match_delim(code, i, b'[', b']').map_or(close, |e| (e + 1).min(close)),
-        b'(' => match_delim(code, i, b'(', b')').map_or(close, |e| (e + 1).min(close)),
-        _ => i + 1,
-    }
-}
-
-fn skip_ws(b: &[u8], mut i: usize) -> usize {
-    while i < b.len() && b[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i
-}
-
-/// End offset (the closing quote) of the string literal opening at `i`.
-fn match_string(code: &str, i: usize) -> Option<usize> {
-    let b = code.as_bytes();
-    let mut j = i + 1;
-    while j < b.len() {
-        if b[j] == b'\\' {
-            j += 2;
-            continue;
-        }
-        if b[j] == b'"' {
-            return Some(j);
-        }
-        j += 1;
-    }
-    None
-}
-
-fn match_brace(code: &str, i: usize) -> Option<usize> {
-    match_delim(code, i, b'{', b'}')
-}
-
-/// Offset of the delimiter closing the one that opens at `i`, skipping string
-/// literals so a brace inside `"…"` neither opens nor closes a span.
-fn match_delim(code: &str, i: usize, open: u8, close: u8) -> Option<usize> {
-    let b = code.as_bytes();
-    let mut depth = 0usize;
-    let mut j = i;
-    while j < b.len() {
-        match b[j] {
-            b'"' => j = match_string(code, j)?,
-            c if c == open => depth += 1,
-            c if c == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(j);
-                }
-            }
-            _ => {}
-        }
-        j += 1;
-    }
-    None
-}
-
-/// The contents of `value` when it is exactly one string literal, else `None`.
-fn string_literal(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if !trimmed.starts_with('"') {
-        return None;
-    }
-    let end = match_string(trimmed, 0)?;
-    // Anything after the closing quote means the value is an expression
-    // (`"a" + b`), which is computed and therefore not a literal path.
-    if trimmed[end + 1..].trim().is_empty() {
-        Some(trimmed[1..end].to_string())
-    } else {
-        None
-    }
-}
-
-/// Does `haystack` contain `word` as a whole identifier?
-fn contains_word(haystack: &str, word: &str) -> bool {
-    let b = haystack.as_bytes();
-    let mut from = 0;
-    while let Some(rel) = haystack[from..].find(word) {
-        let at = from + rel;
-        from = at + word.len();
-        let before_ok = at == 0 || !is_ident_byte(b[at - 1]);
-        let after_ok = from >= b.len() || !is_ident_byte(b[from]);
-        if before_ok && after_ok {
-            return true;
-        }
-    }
-    false
-}
-
-/// 1-based line number of `offset` within `code`.
-fn line_of_offset(code: &str, offset: usize) -> usize {
-    code[..offset.min(code.len())]
-        .bytes()
-        .filter(|b| *b == b'\n')
-        .count()
-        + 1
-}
-
-/// Is `b` part of a Rust/Rhai identifier?
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Partition immediate-spawn entity instances into (asteroid_field, other).

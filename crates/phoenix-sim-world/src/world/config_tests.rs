@@ -4436,3 +4436,31 @@ fn a_world_with_no_gm_palette_table_offers_nothing_placeable() {
     let cfg = parse_world("[global]\nseed = 1\n").expect("world parses");
     assert!(cfg.gm_palette.is_empty());
 }
+
+#[test]
+fn spawn_scan_shares_nested_comment_and_literal_rules() {
+    let refs = resolved_script_spawn_refs(
+        "unicode.rhai",
+        r##"/* outer /* nested */
+spawn_entity(#{ template_path: "phantom.toml" }); */
+let prose = `spawn_entity(#{ template_path: "prose.toml" })`;
+// 雪 preserves line locations
+spawn_entity(#{ template_path: "assets/\u96ea.toml", overrides: #{ text: "doctrine", count: int(2) } });
+spawn_entity(#{ template_path: #"raw.toml"#, overrides: #{ behaviour: make() } });
+spawn_entity(#{ template_path: "prefix" + path });
+"##,
+    );
+    assert_eq!(refs.len(), 2);
+    assert_eq!(
+        (&*refs[0].template_path, refs[0].line, refs[0].overrides),
+        (
+            "assets/雪.toml",
+            5,
+            Some(OverrideShape::ReadableWithoutDoctrine)
+        )
+    );
+    assert_eq!(
+        (&*refs[1].template_path, refs[1].line, refs[1].overrides),
+        ("raw.toml", 6, Some(OverrideShape::MayRestateDoctrine))
+    );
+}

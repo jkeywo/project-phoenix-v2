@@ -92,19 +92,35 @@ impl ScriptedWorld {
     /// not meant to bound; the per-CALL operation cap on the engine still
     /// applies, so a runaway handler still fails.
     pub fn call_at(&self, fn_name: &str, flags: &FlagStore, clock: &SchedClock) -> CallEffects {
-        let path = self
-            .asts
-            .keys()
+        let mut candidates = self.asts.iter().filter(|(_, ast)| {
+            ast.iter_functions()
+                .any(|function| function.name == fn_name)
+        });
+        let (path, _) = candidates
             .next()
-            .expect("the world must author a [script] block")
-            .clone();
-        let ast = &self.asts[&path];
+            .expect("handler must exist in a script unit");
+        assert!(
+            candidates.next().is_none(),
+            "ambiguous handler: use call_in or fire"
+        );
+        self.call_in(path, fn_name, flags, clock)
+    }
+
+    /// Call a handler with its source identity, as production invocation does.
+    pub fn call_in(
+        &self,
+        path: &str,
+        fn_name: &str,
+        flags: &FlagStore,
+        clock: &SchedClock,
+    ) -> CallEffects {
+        let ast = &self.asts[path];
         let mut budget = TickBudget::new();
         self.host.call(
             &mut budget,
             clock,
             ast,
-            &path,
+            path,
             fn_name,
             // Fixtures are base-scope: a one-entry chain is what a base-world
             // handler gets in production (issue #1045).
@@ -118,7 +134,8 @@ impl ScriptedWorld {
 
     /// Call the handler of trigger `index`, in registration order.
     pub fn fire(&self, index: usize, flags: &FlagStore, clock: &SchedClock) -> CallEffects {
-        self.call_at(&self.triggers[index].handler, flags, clock)
+        let trigger = &self.triggers[index];
+        self.call_in(&trigger.source_path, &trigger.handler, flags, clock)
     }
 
     /// The declarative [`TriggerAction`]s a handler buffers — the name-resolving
@@ -140,3 +157,7 @@ pub fn buffered_actions(effects: Vec<BufferedEffect>) -> Vec<TriggerAction> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "fixture_tests.rs"]
+mod tests;

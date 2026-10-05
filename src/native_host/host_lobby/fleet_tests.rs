@@ -262,15 +262,34 @@ fn continuation_publication_follows_only_its_runtime_generation() {
         generation: 91,
         status: serde_json::to_value(&pending).unwrap(),
     });
-    world.resource_mut::<OwnerContinuation>().state.status = pending;
+    {
+        let mut lane = world.resource_mut::<OwnerContinuation>();
+        lane.state
+            .begin(
+                1,
+                crate::command_admission::HostSlot(1),
+                crate::command_admission::HostSlot(2),
+                vec![crate::command_admission::HostSlot(2)],
+                crate::command_admission::HostSlot(1),
+                crate::command_admission::HostSlot(2),
+                vec![
+                    crate::command_admission::HostSlot(1),
+                    crate::command_admission::HostSlot(2),
+                ],
+            )
+            .unwrap();
+        for _ in 0..7 {
+            lane.state.note_request();
+        }
+        lane.state.mark_pending();
+    }
     assert_eq!(
         continuation_result(&world).unwrap().status["status"],
         "pending"
     );
     {
         let mut lane = world.resource_mut::<OwnerContinuation>();
-        lane.state.status.status = ContinuationPhase::Replayed;
-        lane.state.status.loss_tick = Some(72);
+        lane.state.acknowledge_replay(1, Some(71)).unwrap();
     }
     let result = continuation_result(&world).unwrap();
     assert_eq!(result.generation, 91);
@@ -279,8 +298,7 @@ fn continuation_publication_follows_only_its_runtime_generation() {
     world
         .resource_mut::<OwnerContinuation>()
         .state
-        .status
-        .generation = 8;
+        .note_request();
     assert_eq!(
         continuation_result(&world).unwrap().status["status"],
         "pending"

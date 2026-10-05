@@ -1125,8 +1125,7 @@ pub fn apply_mesh_inbox(
                 if digest.from == session.local() || session.has_departed(digest.from) {
                     continue;
                 }
-                if let Some(found) =
-                    agreement.compare_sample(digest.from, digest.tick, digest.digest)
+                if let Some(found) = agreement.record_peer(digest.from, digest.tick, digest.digest)
                 {
                     crate::perror!(
                         log,
@@ -1136,24 +1135,17 @@ pub fn apply_mesh_inbox(
                                  are byte-identical on hosts that agree.",
                     );
                 }
-                agreement
-                    .peers
-                    .entry(digest.from)
-                    .or_insert_with(|| crate::sim_digest::DigestLedger::new(DIGEST_INTERVAL_TICKS))
-                    .record(digest.tick, digest.digest);
             }
             MeshFrame::HostLoss(hl) => {
                 // Owner loss is committed once all survivors have reconciled.
                 // An eager transport observation must not discard its watermark.
                 if start_admission.continuation.as_deref().is_some_and(|lane| {
                     lane.state
-                        .transaction
-                        .as_ref()
+                        .transaction()
                         .is_some_and(|tx| tx.previous_owner == hl.lost)
                         || lane
                             .state
-                            .committed
-                            .as_ref()
+                            .committed()
                             .is_some_and(|tx| tx.previous_owner == hl.lost)
                 }) {
                     continue;
@@ -1780,19 +1772,7 @@ pub fn sample_and_publish_digest(world: &mut World) {
     let digest = crate::sim_digest::world_digest(world);
     let mut discovered = Vec::new();
     if let Some(mut agreement) = world.get_resource_mut::<MeshAgreement>() {
-        agreement.local.record(tick, digest);
-        // A faster peer may already have sent this checkpoint in PreUpdate.
-        // Compare it now rather than leaving agreement dependent on arrival order.
-        let early: Vec<_> = agreement
-            .peers
-            .iter()
-            .filter_map(|(peer, ledger)| ledger.digest_at(tick).map(|digest| (*peer, digest)))
-            .collect();
-        for (peer, peer_digest) in early {
-            if let Some(found) = agreement.compare_sample(peer, tick, peer_digest) {
-                discovered.push(found);
-            }
-        }
+        discovered = agreement.record_local(tick, digest);
     }
     let log = world.get_resource::<crate::logging::LogFilterConfig>();
     for found in discovered {

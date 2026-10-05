@@ -579,6 +579,35 @@ impl MeshAgreement {
         self.disagreements.first().copied()
     }
 
+    /// Retain an authenticated peer checkpoint and compare if local arrived first.
+    pub fn record_peer(
+        &mut self,
+        peer: HostSlot,
+        tick: u64,
+        digest: u64,
+    ) -> Option<MeshDisagreement> {
+        let found = self.compare_sample(peer, tick, digest);
+        self.peers
+            .entry(peer)
+            .or_insert_with(|| phoenix_runtime::digest::DigestLedger::new(self.local.interval))
+            .record(tick, digest);
+        found
+    }
+
+    /// Retain our checkpoint and reconcile all peers that arrived before it.
+    pub fn record_local(&mut self, tick: u64, digest: u64) -> Vec<MeshDisagreement> {
+        self.local.record(tick, digest);
+        let early: Vec<_> = self
+            .peers
+            .iter()
+            .filter_map(|(peer, ledger)| ledger.digest_at(tick).map(|digest| (*peer, digest)))
+            .collect();
+        early
+            .into_iter()
+            .filter_map(|(peer, digest)| self.compare_sample(peer, tick, digest))
+            .collect()
+    }
+
     /// Compare when either half of a checkpoint arrives last. Discovery order
     /// and duplicate suppression are shared by inbound and local sampling.
     pub fn compare_sample(
@@ -667,3 +696,7 @@ impl MeshDiagnostics {
         self.current_run > 0
     }
 }
+
+#[cfg(test)]
+#[path = "agreement_tests.rs"]
+mod agreement_tests;

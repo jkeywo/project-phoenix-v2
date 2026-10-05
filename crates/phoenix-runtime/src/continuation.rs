@@ -52,18 +52,76 @@ pub struct Transaction {
     pub previous_owner: HostSlot,
     pub next_owner: HostSlot,
     pub participants: Vec<HostSlot>,
-    pub replayed: bool,
+    replayed: bool,
 }
 
 /// Peer-local state: neither captured nor folded into authoritative snapshots.
 #[derive(Clone, Debug, Default)]
 pub struct Continuation {
-    pub status: ContinuationStatus,
-    pub transaction: Option<Transaction>,
-    pub committed: Option<Transaction>,
-    pub committed_loss_tick: Option<u64>,
+    status: ContinuationStatus,
+    transaction: Option<Transaction>,
+    committed: Option<Transaction>,
+    committed_loss_tick: Option<u64>,
 }
 impl Continuation {
+    pub fn status(&self) -> &ContinuationStatus {
+        &self.status
+    }
+    pub fn transaction(&self) -> Option<&Transaction> {
+        self.transaction.as_ref()
+    }
+    pub fn committed(&self) -> Option<&Transaction> {
+        self.committed.as_ref()
+    }
+    pub fn note_request(&mut self) {
+        self.status.generation = self.status.generation.saturating_add(1);
+    }
+    pub fn mark_pending(&mut self) {
+        if self.status.status != ContinuationPhase::Refused {
+            self.status.status = ContinuationPhase::Pending;
+        }
+    }
+    pub fn accepts_replay(&self, epoch: u64) -> bool {
+        self.status.status != ContinuationPhase::Refused
+            && self
+                .transaction
+                .as_ref()
+                .is_some_and(|tx| tx.epoch == epoch)
+    }
+    pub fn acknowledge_replay(
+        &mut self,
+        epoch: u64,
+        watermark: Option<u64>,
+    ) -> Result<(), &'static str> {
+        let loss_tick = watermark
+            .and_then(|tick| tick.checked_add(1))
+            .ok_or("missing-owner-frontier")?;
+        self.replayed(epoch)?;
+        self.status.loss_tick = Some(loss_tick);
+        Ok(())
+    }
+    /// Recognize an inert exact retry, retaining refusal latching for a failed retry.
+    pub fn retry_commit(
+        &mut self,
+        epoch: u64,
+        previous_owner: HostSlot,
+        next_owner: HostSlot,
+        loss_tick: u64,
+    ) -> bool {
+        let exact = self.transaction.is_none()
+            && self.status.status != ContinuationPhase::Refused
+            && self.committed.as_ref().is_some_and(|tx| {
+                tx.epoch == epoch
+                    && tx.previous_owner == previous_owner
+                    && tx.next_owner == next_owner
+                    && self.committed_loss_tick == Some(loss_tick)
+            });
+        if exact {
+            self.status.status = ContinuationPhase::Committed;
+        }
+        exact
+    }
+
     pub fn held(&self) -> bool {
         self.transaction.is_some()
     }
@@ -139,7 +197,7 @@ impl Continuation {
         Ok(())
     }
     #[allow(clippy::too_many_arguments)]
-    pub fn validate_commit(
+    pub fn prepare_commit(
         &self,
         epoch: u64,
         previous_owner: HostSlot,
@@ -148,7 +206,7 @@ impl Continuation {
         acked: &[HostSlot],
         watermark: Option<u64>,
         now: u64,
-    ) -> Result<(), &'static str> {
+    ) -> Result<PreparedCommit, &'static str> {
         let tx = self
             .transaction
             .as_ref()
@@ -167,12 +225,33 @@ impl Continuation {
         if watermark.and_then(|tick| tick.checked_add(1)) != Some(loss_tick) || now > loss_tick {
             return Err("unsafe-loss-frontier");
         }
-        Ok(())
+        Ok(PreparedCommit {
+            transaction: tx.clone(),
+            loss_tick,
+        })
     }
-    pub fn commit(&mut self, loss_tick: u64) {
+    pub fn commit(&mut self, prepared: PreparedCommit) -> Result<(), &'static str> {
+        if self.status.status == ContinuationPhase::Refused
+            || self.transaction.as_ref() != Some(&prepared.transaction)
+        {
+            return Err("continuation-changed-after-validation");
+        }
         self.committed = self.transaction.take();
-        self.committed_loss_tick = Some(loss_tick);
+        self.committed_loss_tick = Some(prepared.loss_tick);
+        self.status.loss_tick = Some(prepared.loss_tick);
         self.status.status = ContinuationPhase::Committed;
         self.status.reason = None;
+        Ok(())
     }
 }
+
+/// Successful validation, consumed only after the host applies ownership effects.
+#[derive(Debug)]
+pub struct PreparedCommit {
+    transaction: Transaction,
+    loss_tick: u64,
+}
+
+#[cfg(test)]
+#[path = "continuation_tests.rs"]
+mod tests;

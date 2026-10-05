@@ -13,7 +13,7 @@ impl OwnerContinuation {
         self.state.held()
     }
     pub fn status(&self) -> &ContinuationStatus {
-        &self.state.status
+        self.state.status()
     }
 }
 pub fn not_held(continuation: Option<Res<OwnerContinuation>>) -> bool {
@@ -26,7 +26,7 @@ pub fn not_held(continuation: Option<Res<OwnerContinuation>>) -> bool {
 pub fn enqueue(world: &mut World, request: ContinuationRequest) -> ContinuationStatus {
     world.init_resource::<OwnerContinuation>();
     let mut lane = world.remove_resource::<OwnerContinuation>().unwrap();
-    lane.state.status.generation = lane.state.status.generation.saturating_add(1);
+    lane.state.note_request();
     let result = if lane.pending.is_some() {
         Err("continuation-operation-pending")
     } else if let ContinuationRequest::Begin {
@@ -60,10 +60,7 @@ pub fn enqueue(world: &mut World, request: ContinuationRequest) -> ContinuationS
         }
     } else {
         lane.pending = Some(request);
-        // Keep the phase Refused latched: a later replay must not bless bad tails.
-        if lane.state.status.status != ContinuationPhase::Refused {
-            lane.state.status.status = ContinuationPhase::Pending;
-        }
+        lane.state.mark_pending();
         Ok(())
     };
     if let Err(reason) = result {
@@ -88,14 +85,7 @@ pub fn enqueue_frame(
 ) -> bool {
     let active = world
         .get_resource::<OwnerContinuation>()
-        .is_some_and(|lane| {
-            lane.state.status.status != ContinuationPhase::Refused
-                && lane
-                    .state
-                    .transaction
-                    .as_ref()
-                    .is_some_and(|tx| tx.epoch == epoch)
-        });
+        .is_some_and(|lane| lane.state.accepts_replay(epoch));
     let supported = matches!(
         &frame,
         super::MeshFrame::Tick(_)
@@ -147,21 +137,12 @@ pub fn drain_after_mesh(world: &mut World) {
     };
     let result = match request {
         ContinuationRequest::Replayed { epoch } => {
-            let loss_tick = lane.state.transaction.as_ref().and_then(|tx| {
+            let watermark = lane.state.transaction().and_then(|tx| {
                 world
                     .get_resource::<FleetLockstep>()?
-                    .watermark_of(tx.previous_owner)?
-                    .checked_add(1)
+                    .watermark_of(tx.previous_owner)
             });
-            if let Some(loss_tick) = loss_tick {
-                let result = lane.state.replayed(epoch);
-                if result.is_ok() {
-                    lane.state.status.loss_tick = Some(loss_tick);
-                }
-                result
-            } else {
-                Err("missing-owner-frontier")
-            }
+            lane.state.acknowledge_replay(epoch, watermark)
         }
         ContinuationRequest::Commit {
             epoch,
@@ -170,14 +151,10 @@ pub fn drain_after_mesh(world: &mut World) {
             loss_tick,
             acked,
         } => {
-            let duplicate = lane.state.committed.as_ref().is_some_and(|tx| {
-                tx.epoch == epoch
-                    && tx.previous_owner == previous_owner
-                    && tx.next_owner == next_owner
-                    && lane.state.committed_loss_tick == Some(loss_tick)
-            });
-            if duplicate && !lane.held() {
-                lane.state.status.status = ContinuationPhase::Committed;
+            if lane
+                .state
+                .retry_commit(epoch, previous_owner, next_owner, loss_tick)
+            {
                 Ok(())
             } else {
                 let now = world
@@ -186,7 +163,7 @@ pub fn drain_after_mesh(world: &mut World) {
                 let watermark = world
                     .get_resource::<FleetLockstep>()
                     .and_then(|session| session.watermark_of(previous_owner));
-                let valid = lane.state.validate_commit(
+                let valid = lane.state.prepare_commit(
                     epoch,
                     previous_owner,
                     next_owner,
@@ -195,45 +172,50 @@ pub fn drain_after_mesh(world: &mut World) {
                     watermark,
                     now,
                 );
-                if valid.is_ok() {
-                    let roster = world.get_resource::<FleetRoster>();
-                    if roster.is_none_or(|roster| {
-                        roster.owner() != previous_owner || !roster.is_member(next_owner)
-                    }) {
-                        lane.state.refuse("owner-changed-during-continuation");
-                    } else {
-                        world
-                            .resource_mut::<FleetRoster>()
-                            .transfer_owner(previous_owner, next_owner);
-                        world.resource_mut::<FleetLockstep>().depart(previous_owner);
-                        world
-                            .resource_mut::<PendingHostLoss>()
-                            .observe(previous_owner, loss_tick);
-                        lane.state.commit(loss_tick);
-                        // All old-owner grants are now in the journal. Retry only
-                        // proposals still ungranted, under the successor's normal
-                        // authorization and sequencing on the next inbox pass.
-                        for proposal in lane.deferred_proposals.drain(..) {
-                            let granted = world
-                                .get_resource::<crate::gm_action::GmActionJournal>()
-                                .is_some_and(|journal| {
-                                    journal
-                                        .grant_for(&proposal.operator_id, &proposal.correlation)
-                                        .is_some()
-                                });
-                            if !granted {
-                                let source = proposal.from;
-                                world.resource_mut::<super::MeshInbox>().push_from(
-                                    super::MeshFrame::GmAction(
-                                        crate::gm_action::GmActionFrame::Proposal(proposal),
-                                    ),
-                                    super::MeshOrigin::Peer(source),
-                                );
+                match valid {
+                    Ok(prepared) => {
+                        let roster = world.get_resource::<FleetRoster>();
+                        if roster.is_none_or(|roster| {
+                            roster.owner() != previous_owner || !roster.is_member(next_owner)
+                        }) {
+                            lane.state.refuse("owner-changed-during-continuation");
+                        } else {
+                            world
+                                .resource_mut::<FleetRoster>()
+                                .transfer_owner(previous_owner, next_owner);
+                            world.resource_mut::<FleetLockstep>().depart(previous_owner);
+                            world
+                                .resource_mut::<PendingHostLoss>()
+                                .observe(previous_owner, loss_tick);
+                            lane.state
+                                .commit(prepared)
+                                .expect("no continuation mutation during world effects");
+                            // All old-owner grants are now in the journal. Retry only
+                            // proposals still ungranted, under the successor's normal
+                            // authorization and sequencing on the next inbox pass.
+                            for proposal in lane.deferred_proposals.drain(..) {
+                                let granted = world
+                                    .get_resource::<crate::gm_action::GmActionJournal>()
+                                    .is_some_and(|journal| {
+                                        journal
+                                            .grant_for(&proposal.operator_id, &proposal.correlation)
+                                            .is_some()
+                                    });
+                                if !granted {
+                                    let source = proposal.from;
+                                    world.resource_mut::<super::MeshInbox>().push_from(
+                                        super::MeshFrame::GmAction(
+                                            crate::gm_action::GmActionFrame::Proposal(proposal),
+                                        ),
+                                        super::MeshOrigin::Peer(source),
+                                    );
+                                }
                             }
                         }
+                        Ok(())
                     }
+                    Err(reason) => Err(reason),
                 }
-                valid
             }
         }
         ContinuationRequest::Begin { .. } => unreachable!("begin is synchronous"),

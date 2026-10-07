@@ -84,6 +84,7 @@ pub(crate) use activation::insert_raw_world_source_resource;
 pub use activation::insert_world_config_resource;
 pub(crate) use activation::load_extra_worlds;
 pub(crate) use activation::merge_layer_scripts;
+#[cfg(test)]
 pub(crate) use activation::merge_script_triggers;
 pub use activation::seed_ship_power_counter;
 pub use activation::world_activation_blocked;
@@ -111,4 +112,5 @@ pub use effects::WorldLayerParams;
 mod layers;
 use layers::apply_pending_scenario_loads;
 use layers::apply_world_layer_changes;
+#[cfg(test)]
 use layers::remove_layer_triggers;

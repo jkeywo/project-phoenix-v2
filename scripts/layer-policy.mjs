@@ -1,5 +1,6 @@
 // Cargo identity resolution shared by enforcement and the source-derived graph.
 export const allowed = {
+  'phoenix-delivery': ['phoenix-model', 'phoenix-content', 'phoenix-platform'],
   'phoenix-math': [], 'phoenix-runtime': ['phoenix-math'],
   'phoenix-transport': ['phoenix-runtime'], 'phoenix-platform': [],
   'phoenix-model': ['phoenix-math', 'phoenix-transport'],

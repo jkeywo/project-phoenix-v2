@@ -47,7 +47,7 @@ entities:
       derived_from: [ship-power-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/power.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [PowerBrownoutState, PowerBrownoutContinuationState, tick_power_brownout_advisory]
 
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

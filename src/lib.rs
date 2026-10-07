@@ -27,3 +27,13 @@ pub(crate) use phoenix_platform::native_file;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod layer_tests;
+
+/// Host delivery and compatibility paths.
+pub mod delivery;
+pub mod core {
+    pub use phoenix_simulation::core::*;
+    pub mod codec {
+        pub use phoenix_delivery::codec::*;
+        pub use phoenix_simulation::core::codec::*;
+    }
+}

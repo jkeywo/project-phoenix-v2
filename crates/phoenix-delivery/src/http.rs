@@ -2,7 +2,7 @@
 //!
 //! Everything here is string/byte in, string/byte out: request-line parsing,
 //! the static-path guard, the MIME table and the caching policy. The socket
-//! loop that calls it lives in [`crate::delivery::serve`] and is the only part
+//! loop that calls it lives in [`crate::serve`] and is the only part
 //! that touches the network, so the contract this module states is testable
 //! without binding a port — and the same policy table is what
 //! `scripts/check-deploy-headers.mjs` asserts against a *deployed* URL, so the
@@ -18,7 +18,7 @@ pub const CONTENT_ADDRESSED_MAX_AGE: u32 = 14_400;
 /// An hour, for assets that are stable within a deploy but not hash-named.
 pub const SHORT_MAX_AGE: u32 = 3_600;
 
-/// The endpoint publishing the host's own [`crate::delivery::stamp`].
+/// The endpoint publishing the host's own [`crate::stamp`].
 pub const STAMP_PATH: &str = "/host/stamp.json";
 /// Read-only current native asset revision; no gameplay or content mutation.
 pub const ASSET_REVISION_PATH: &str = "/host/asset-revision.json";

@@ -49,9 +49,9 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html, crates/phoenix-sim-contracts/src/catalogue.rs]
+      paths: [crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-model/src/messages.rs, src/delivery/payload.rs, src/server/bridge.rs, src/native_host/world_load.rs, server.html, crates/phoenix-sim-contracts/src/catalogue.rs, crates/phoenix-content-preparation/src/world/manifest.rs]
       symbols: [ScenarioCatalog, build_catalog, build_merged_catalog, ScenarioCatalogPayload, catalogue_snapshot, WorldConfig]
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/payload_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/payload_tests.rs, src/server/bridge_tests.rs, src/native_host/world_load_tests.rs]
 
   - component: scenario-ship-selection-arbiter
     core:
@@ -71,9 +71,9 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [gui/scenario-arbiter.js, server.html, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs, crates/phoenix-sim-contracts/src/catalogue.rs]
+      paths: [gui/scenario-arbiter.js, server.html, crates/phoenix-simulation/src/world/manifest.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, src/native_host/world_load.rs, crates/phoenix-sim-contracts/src/catalogue.rs, crates/phoenix-content-preparation/src/world/manifest.rs]
       symbols: [build_catalog, ScenarioCatalog]
-      tests: [npx vitest run, cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter_tests.rs, src/native_host/world_load_tests.rs]
+      tests: [npx vitest run, cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, crates/phoenix-simulation/src/lobby/scenario_arbiter_tests.rs, src/native_host/world_load_tests.rs]
 
   - message: select-scenario-command
     core:

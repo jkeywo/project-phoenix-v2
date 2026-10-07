@@ -310,23 +310,3 @@ fn scenario_arbiter_parity_derived_answers() {
         );
     }
 }
-
-#[test]
-fn the_wire_catalogue_carries_every_entry_and_its_hulls() {
-    let wire = crate::delivery::payload::catalog_payload(&catalog());
-    assert_eq!(wire.len(), 2);
-    assert_eq!(wire[0].id, "combat_test");
-    assert_eq!(wire[0].world, "assets/worlds/combat_test.toml");
-    assert_eq!(wire[0].label.as_deref(), Some("combat_test label"));
-    assert_eq!(
-        wire[0]
-            .ships
-            .iter()
-            .map(|s| s.template_path.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "assets/entities/alliance_destroyer.toml",
-            "assets/entities/alliance_cruiser.toml"
-        ]
-    );
-}

@@ -3,18 +3,7 @@
 //! Native-only Clap declarations own syntax and generated help. The pure,
 //! non-exiting conversion retains Phoenix's domain and mode validation.
 
-/// Where the client bundle comes from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClientSource {
-    /// Serve a built bundle from disk (a `trunk dist/`).
-    Bundled { dir: String },
-    /// Serve no assets at all — the client is hosted elsewhere (Cloudflare
-    /// Pages, GitHub Pages) and only the manifest/stamp endpoints are served.
-    /// PRD #855 story 2's "use compatible hosted clients" half; the version pin
-    /// still applies, at request time, because that is exactly the case where a
-    /// mismatched pair is likeliest.
-    Hosted,
-}
+pub use phoenix_delivery::ClientSource;
 
 /// A parsed `phoenix-host` invocation.
 #[derive(Clone, Debug, PartialEq, Eq)]

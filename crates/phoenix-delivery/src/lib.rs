@@ -7,8 +7,7 @@
 //! the two "consume the same content manifest, snapshots, and protocol
 //! contracts", so this module is built to make forking them awkward:
 //!
-//! * [`payload`] projects shared serde wire types for delivery, both
-//!   pickers and every crew catalogue message.
+//! * Host adapters supply shared Model wire payloads for catalogue publication.
 //! * [`stamp`] holds the version pin, built from numbers that already existed
 //!   (`messages::PROTOCOL_VERSION`, the manifest's `[content]` identity).
 //! * The catalogue itself is `world::manifest`'s, unchanged — the native host
@@ -19,15 +18,13 @@
 //! [`http`] is the pure transport contract (paths, MIME, caching); [`serve`] is
 //! the only part that touches a socket and is native-only.
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod args;
+pub mod codec;
 pub mod http;
-pub mod payload;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod serve;
 pub mod stamp;
 
-use payload::ScenarioPayload;
+use phoenix_model::messages::ScenarioCatalogWire as ScenarioPayload;
 use stamp::{DeliveryStamp, StampMismatch};
 
 /// The document a host publishes at [`http::MANIFEST_PATH`]: who the host is,
@@ -35,7 +32,7 @@ use stamp::{DeliveryStamp, StampMismatch};
 ///
 /// This is the whole "content manifest" contract of PRD #855 — a native host
 /// and the browser host build it from the same `world::manifest` catalogue and
-/// encode it with the same `core::codec::encode_delivery_manifest`.
+/// encode it with the same `codec::encode_delivery_manifest`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeliveryManifest {
     pub stamp: DeliveryStamp,
@@ -194,3 +191,32 @@ pub fn check_host_stamp(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+/// Where the client bundle comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClientSource {
+    /// Serve a built bundle from disk (a `trunk dist/`).
+    Bundled { dir: String },
+    /// Serve no assets at all — the client is hosted elsewhere (Cloudflare
+    /// Pages, GitHub Pages) and only the manifest/stamp endpoints are served.
+    /// PRD #855 story 2's "use compatible hosted clients" half; the version pin
+    /// still applies, at request time, because that is exactly the case where a
+    /// mismatched pair is likeliest.
+    Hosted,
+}
+
+/// Host-owned content, prepared before serving; overlay reads remain live.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait ContentSource: Send + Sync {
+    fn prepared_catalogue(&self) -> Result<serve::LoadedContent, String>;
+    fn overlay_text(&self, path: &str) -> Option<String>;
+    fn overlay_asset(&self, path: &str) -> Option<std::sync::Arc<[u8]>>;
+    fn revision(&self) -> u64;
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub trait HostConfiguration {
+    fn address(&self) -> &str;
+    fn client(&self) -> &ClientSource;
+    fn skip_bundle_check(&self) -> bool;
+    fn content_source(&self) -> Result<std::sync::Arc<dyn ContentSource>, String>;
+}

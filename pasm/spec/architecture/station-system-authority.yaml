@@ -203,7 +203,7 @@ entities:
       writers: [system-control-source-resolver]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js]
+      paths: [crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [ControlSourceResolver, ShipSystemControlSources, EntityState, SimSnapshot, build_control_source_snapshots]
 
       tests: [crates/phoenix-sim-gameplay/src/ship/control_source_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]

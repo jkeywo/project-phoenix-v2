@@ -43,7 +43,7 @@
 //!    with every cache-only reader answering `Default`.
 //!
 //! It is deliberately NOT the same walk as
-//! [`delivery::serve::preload_templates`](crate::delivery::serve::preload_templates),
+//! `project_phoenix::delivery::serve::preload_templates`,
 //! which is unsorted, validates no markers and silently skips anything that
 //! fails to parse. That one exists to enrich a published catalogue, where a
 //! missing field is cosmetic. This one feeds a simulation, where a missing

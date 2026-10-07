@@ -164,7 +164,7 @@ entities:
       readers: [narrative-timeline-projector, host-state-broadcaster, viewscreen-hud-effects, run-outcome-classifier]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-world/src/core/report.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs]
+      paths: [crates/phoenix-sim-world/src/core/report.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [MissionReport, ReportRow, ReportRowState, SnapshotReportRow, GameOverReportRow, reset_mission_report]
       tests: [cargo test, tests/narrative_timeline.rs, tests/snapshot_resume.rs, crates/phoenix-sim-world/src/core/report_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 

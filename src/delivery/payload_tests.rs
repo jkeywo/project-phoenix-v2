@@ -72,3 +72,67 @@ fn projection_preserves_provenance_manifest_order_and_curated_hulls() {
     assert_eq!(payload[0].ships.len(), 1);
     assert_eq!(payload[0].ships[0].template_path, "curated.toml");
 }
+
+mod wire_catalogue {
+    use crate::world::config::AvailableShipEntry;
+    use crate::world::manifest::{ScenarioCatalog, ScenarioCatalogEntry};
+
+    fn catalog() -> ScenarioCatalog {
+        ScenarioCatalog {
+            scenarios: vec![
+                entry(
+                    "combat_test",
+                    "assets/worlds/combat_test.toml",
+                    &[
+                        "assets/entities/alliance_destroyer.toml",
+                        "assets/entities/alliance_cruiser.toml",
+                    ],
+                ),
+                entry(
+                    "patrol",
+                    "assets/worlds/patrol.toml",
+                    &["assets/entities/alliance_cruiser.toml"],
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn the_wire_catalogue_carries_every_entry_and_its_hulls() {
+        let wire = crate::delivery::payload::catalog_payload(&catalog());
+        assert_eq!(wire.len(), 2);
+        assert_eq!(wire[0].id, "combat_test");
+        assert_eq!(wire[0].world, "assets/worlds/combat_test.toml");
+        assert_eq!(wire[0].label.as_deref(), Some("combat_test label"));
+        assert_eq!(
+            wire[0]
+                .ships
+                .iter()
+                .map(|s| s.template_path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "assets/entities/alliance_destroyer.toml",
+                "assets/entities/alliance_cruiser.toml"
+            ]
+        );
+    }
+
+    fn entry(id: &str, world: &str, ships: &[&str]) -> ScenarioCatalogEntry {
+        ScenarioCatalogEntry {
+            id: id.to_string(),
+            world: world.to_string(),
+            label: Some(format!("{id} label")),
+            description: None,
+            ships: ships.iter().map(|p| ship(p)).collect(),
+            slots: Vec::new(),
+            origin: None,
+        }
+    }
+
+    fn ship(path: &str) -> AvailableShipEntry {
+        AvailableShipEntry {
+            template_path: path.to_string(),
+            label: None,
+        }
+    }
+}

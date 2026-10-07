@@ -292,7 +292,7 @@ entities:
       derived_from: [authoritative-damage-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [LastSystemTiers, LastSystemTiersState, detect_damage_tier_crossings]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/ship/damage_sync_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

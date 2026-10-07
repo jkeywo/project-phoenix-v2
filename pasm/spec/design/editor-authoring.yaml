@@ -127,7 +127,7 @@ entities:
       paths:
         - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: mod-scenario-provenance-visible
     core:
@@ -145,7 +145,7 @@ entities:
       paths:
         - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
 
   - mechanic: authored-scenario-scripting
     core:

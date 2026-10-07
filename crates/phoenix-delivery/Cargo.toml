@@ -1,0 +1,11 @@
+[package]
+name = "phoenix-delivery"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+[dependencies]
+phoenix-model = { path = "../phoenix-model" }
+phoenix-content = { path = "../phoenix-content" }
+serde_json = "1"
+httparse = "1.10.1"
+base64 = "0.22.1"

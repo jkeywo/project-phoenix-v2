@@ -52,7 +52,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server/mod.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/world/server/activation.rs, crates/phoenix-simulation/src/world/server/effects.rs, crates/phoenix-simulation/src/world/server/triggers.rs]
       symbols: [collect_world_events, AiEventReaders, anchor_mission_clock, arm_mission_clock]
       tests: [cargo test]
     evidence:
@@ -75,7 +75,7 @@ entities:
       writers: [world-event-collector]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server/mod.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/world/server/state.rs]
       symbols: [WorldEventBuffer]
       tests: [cargo test]
 
@@ -174,7 +174,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/script/engine.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/script/engine.rs, crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/world/server/effects.rs, crates/phoenix-simulation/src/world/server/layers.rs, crates/phoenix-simulation/src/world/server/state.rs, crates/phoenix-simulation/src/world/server/triggers.rs]
       symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
       tests: [cargo test, crates/phoenix-sim-world/src/world/script/engine_tests.rs, crates/phoenix-sim-world/src/world/script/schedule_tests.rs]
     evidence:
@@ -265,7 +265,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/delayed.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/delayed.rs, crates/phoenix-simulation/src/world/server/triggers.rs]
       symbols: [tick_delayed_actions, DelayedAction, partition_delayed_actions]
       tests: [cargo test, crates/phoenix-sim-world/src/world/delayed_tests.rs]
     evidence:

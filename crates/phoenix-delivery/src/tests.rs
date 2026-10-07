@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::messages::PROTOCOL_VERSION;
+use phoenix_model::messages::PROTOCOL_VERSION;
 
 fn request(head: &str) -> http::Request {
     http::parse_request(head).expect("well-formed head")

@@ -256,7 +256,7 @@ entities:
       paths:
         - crates/phoenix-simulation/src/world/manifest.rs
         - src/server/bridge.rs
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
         reference: merged_catalog_contains_only_manifest_listed_scenarios
@@ -349,7 +349,7 @@ entities:
       paths:
         - crates/phoenix-simulation/src/world/manifest.rs
       symbols: [parse_pack_manifest, PackManifest, PackMeta, PackRequires, parse_content_identity, ContentIdentity, SUPPORTED_PACK_FORMAT]
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs]
 
   - component: mod-pack-script-trust-boundary
     core:
@@ -392,7 +392,7 @@ entities:
       paths:
         [crates/phoenix-simulation/src/world/manifest.rs, src/server/bridge.rs, server.html, crates/phoenix-sim-contracts/src/catalogue.rs]
       symbols: [build_merged_catalog, MergedCatalog, ScenarioCatalogEntry]
-      tests: [cargo test, crates/phoenix-simulation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, crates/phoenix-content-preparation/src/world/manifest_tests.rs, src/server/bridge_tests.rs]
     evidence:
       - kind: test
         reference: "merged_catalog_base_scenarios_report_no_origin (crates/phoenix-simulation/src/world/manifest.rs)"

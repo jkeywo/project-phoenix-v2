@@ -10,6 +10,7 @@ await init;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const descriptions = {
+  'phoenix-delivery': 'HTTP routing, bundle serving, prepared catalogue publication and version pins; host-injected content.',
   'project-phoenix': 'Host composition, native and browser adapters, headless runner and Workshop host.',
   'phoenix-presentation': 'Shared 3D view: renderer, effects, cameras, HUD and Workshop preview.',
   'phoenix-simulation': 'Composition: schedules, live cross-domain adapters, materialization, snapshots and recovery.',
@@ -83,6 +84,8 @@ const before = readFileSync(path, 'utf8');
 if (!before.includes('<script id="graph-data" type="application/json">')) throw new Error('Missing graph data element');
 const embedded = JSON.stringify(data, null, 2).replaceAll('<', '\\u003c');
 const after = before.replace(/(<script id="graph-data" type="application\/json">)[\s\S]*?(<\/script>)/, (_, start, end) => `${start}\n${embedded}\n${end}`);
-if (after === before) console.log('Layer graph is current.');
+// Git may check this generated HTML out with CRLF on Windows.
+// Compare content without making checkout line endings a dependency change.
+if (after.replaceAll('\r\n', '\n') === before.replaceAll('\r\n', '\n')) console.log('Layer graph is current.');
 else if (process.argv.includes('--check')) { console.error('Layer graph is stale. Run npm run layers:graph.'); process.exitCode = 1; }
 else { writeFileSync(path, after, 'utf8'); console.log(`Updated layer graph: ${rustEdges.size} Rust and ${jsEdges.size} JavaScript dependency edges.`); }

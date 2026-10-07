@@ -162,7 +162,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/world/server/triggers.rs]
       symbols: [TriggerAction, tick_trigger_pipeline]
       tests: [cargo test]
 
@@ -180,7 +180,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/gm/operations/objective.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/gm/operations/objective.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs, crates/phoenix-simulation/src/world/server/state.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/gm/operations/objective_tests.rs]
 
@@ -354,7 +354,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/validate.rs, src/headless/app.rs, crates/phoenix-simulation/src/world/server/mod.rs]
+      paths: [crates/phoenix-simulation/src/world/validate.rs, src/headless/app.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-content-preparation/src/world/validate.rs]
       symbols: [validate_objectives, validate_composition]
       tests: [cargo test]
 
@@ -372,7 +372,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/layers.rs]
       symbols: [apply_world_layer_changes]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 

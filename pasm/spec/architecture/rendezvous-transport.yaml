@@ -309,7 +309,7 @@ entities:
       paths:
         - src/native_host/direct_join.rs
         - src/native_host/join_codes.rs
-        - crates/phoenix-simulation/src/delivery/serve.rs
+        - src/delivery/serve.rs
         - src/bin/phoenix_host.rs
         - gui/join-url.js
         - assets/join/join-codes.toml
@@ -359,8 +359,8 @@ entities:
     implementation:
       status: declared
       paths:
-        - crates/phoenix-simulation/src/delivery/mod.rs
-        - crates/phoenix-simulation/src/delivery/stamp.rs
+        - crates/phoenix-delivery/src/lib.rs
+        - crates/phoenix-delivery/src/stamp.rs
         - src/server/bridge.rs
         - crates/phoenix-simulation/src/core/codec.rs
         - scripts/client-stamp.mjs

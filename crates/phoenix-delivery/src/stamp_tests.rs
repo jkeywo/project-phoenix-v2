@@ -10,12 +10,12 @@ fn host() -> DeliveryStamp {
 fn fleet_field_round_trips_through_the_shared_native_and_browser_checker() {
     let stamp = host();
     assert_eq!(
-        crate::delivery::parse_stamp_field(&stamp.to_field()),
+        crate::parse_stamp_field(&stamp.to_field()),
         Some(stamp.clone())
     );
-    assert!(crate::delivery::check_host_stamp(&stamp, Some(&stamp.to_field())).is_ok());
+    assert!(crate::check_host_stamp(&stamp, Some(&stamp.to_field())).is_ok());
     let missing = DeliveryStamp::for_manifest("");
-    assert!(crate::delivery::check_host_stamp(&missing, Some(&missing.to_field())).is_err());
+    assert!(crate::check_host_stamp(&missing, Some(&missing.to_field())).is_err());
 }
 
 #[test]

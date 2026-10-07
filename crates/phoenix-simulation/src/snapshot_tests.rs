@@ -1,5 +1,5 @@
 use super::application::apply_repair;
-use super::capture::repair_state;
+use super::capture::{capture_entities, repair_state};
 use super::*;
 use crate::sim_rng::InstallSimRng;
 

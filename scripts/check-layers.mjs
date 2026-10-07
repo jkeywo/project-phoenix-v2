@@ -15,7 +15,7 @@ for (const name of Object.keys(allowed)) {
   const folder = name === 'phoenix-grid' ? 'examples/grid' : `crates/${name}`;
   const manifest = parse(readFileSync(resolve(root, folder, 'Cargo.toml'), 'utf8'));
   failures.push(...layerDependencyFailures(name, manifest, workspace));
-  if (name.startsWith('phoenix-sim')) {
+  if (name.startsWith('phoenix-sim') || ['phoenix-content-preparation', 'phoenix-delivery'].includes(name)) {
     for (const entry of dependencyEntries(manifest, workspace).filter(e => e.name === 'bevy')) {
       if (entry.definition['default-features'] !== false) failures.push(`${name} must opt out of Bevy default features (${entry.kind}, ${entry.target})`);
     }
@@ -67,7 +67,7 @@ for (const folder of ['packages/transport', 'packages/session', 'examples/grid']
 if (process.argv.includes('--dependency-tree')) {
   // A separate root selection matters: workspace feature unification could conceal a renderer dependency.
   const banned = /^(bevy_(render|pbr|window|winit|scene|ui|camera|light|gltf)|vellum-ultralight|ul-next|wgpu) v/m;
-  for (const name of Object.keys(allowed).filter(name => name.startsWith('phoenix-sim'))) {
+  for (const name of Object.keys(allowed).filter(name => name.startsWith('phoenix-sim') || ['phoenix-content-preparation', 'phoenix-delivery'].includes(name))) {
     const tree = execFileSync('cargo', ['tree', '-p', name, '--no-default-features', '--edges', 'normal', '--prefix', 'none', '--format', '{p}'], { cwd: root, encoding: 'utf8' });
     if (banned.test(tree)) failures.push(`${name} pulls presentation machinery: ${tree.match(banned)[0]}`);
   }

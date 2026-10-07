@@ -297,7 +297,7 @@ describe('minting', () => {
 
 describe('reason reporting', () => {
   /**
-   * Every code `StampMismatch::code()` can emit — crates/phoenix-simulation/src/delivery/stamp.rs.
+   * Every code `StampMismatch::code()` can emit — crates/phoenix-delivery/src/stamp.rs.
    *
    * Hardcoded on purpose: these five strings cross a language boundary
    * (Rust → encode_join_verdict → server.html → JoinRefused → this module), so
@@ -319,13 +319,13 @@ describe('reason reporting', () => {
 
   /**
    * Pull the string literals straight out of `StampMismatch::code()`'s match
-   * arms in crates/phoenix-simulation/src/delivery/stamp.rs — the arms are a clean
+   * arms in crates/phoenix-delivery/src/stamp.rs — the arms are a clean
    * `Variant { .. } => "literal",` block, so scanning for the balanced brace
    * that closes the function and regexing the quoted literals inside it is
    * enough, with no Rust parser involved.
    */
   function stampMismatchCodesFromRust() {
-    const src = readFileSync(path.join(root, 'crates/phoenix-simulation/src/delivery/stamp.rs'), 'utf8');
+    const src = readFileSync(path.join(root, 'crates/phoenix-delivery/src/stamp.rs'), 'utf8');
     const marker = 'fn code(';
     const fnStart = src.indexOf(marker);
     if (fnStart === -1) return [];
@@ -366,7 +366,7 @@ describe('reason reporting', () => {
     // shipped "no ship is using that code" for every refusal.
     expect(
       rustCodes.length,
-      'extracted zero string literals from fn code() in crates/phoenix-simulation/src/delivery/stamp.rs — the regex or the fn code( marker is stale',
+      'extracted zero string literals from fn code() in crates/phoenix-delivery/src/stamp.rs — the regex or the fn code( marker is stale',
     ).toBeGreaterThan(0);
     // Set equality, not mere containment: this catches BOTH a new Rust
     // variant with no row here (the bug this test exists to prevent) AND a

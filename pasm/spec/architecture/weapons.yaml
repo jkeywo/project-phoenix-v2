@@ -160,7 +160,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [tick_npc_auto_match_frequency, NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchStatesState]
       tests: [cargo test, crates/phoenix-simulation/src/console_ai/core_tests.rs]
 
@@ -176,7 +176,7 @@ entities:
       writers: [npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [NpcFrequencyMatchStates, FrequencyMatchState, NpcFrequencyMatchState, NpcFrequencyMatchStatesState]
 
       tests: [crates/phoenix-simulation/src/console_ai/core_tests.rs]
@@ -240,7 +240,7 @@ entities:
       writers: [tactical-weapons-controls, npc-phaser-frequency-match-ai]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [ShipPhaserFrequency, ShipPhaserFrequencyState]
 
       tests: [crates/phoenix-sim-gameplay/src/ship/state_tests.rs]
@@ -256,7 +256,7 @@ entities:
       writers: [tactical-weapons-controls]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/application.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [PendingTacticalFrequencyHint, TacticalFrequencyHintInboxState, receive_tactical_coordination, apply_tactical_frequency_hint]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs]

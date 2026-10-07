@@ -4991,6 +4991,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-delivery"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "httparse",
+ "phoenix-content",
+ "phoenix-model",
+ "serde_json",
+]
+
+[[package]]
 name = "phoenix-grid"
 version = "0.1.0"
 dependencies = [
@@ -5162,11 +5173,9 @@ dependencies = [
  "bevy",
  "bevy_ecs",
  "bevy_rapier3d",
- "clap",
  "console_error_panic_hook",
  "getrandom 0.3.4",
  "glam 0.30.10",
- "httparse",
  "indexmap",
  "js-sys",
  "libm",
@@ -5427,6 +5436,7 @@ dependencies = [
  "nalgebra",
  "parry3d",
  "phoenix-content",
+ "phoenix-delivery",
  "phoenix-math",
  "phoenix-model",
  "phoenix-platform",

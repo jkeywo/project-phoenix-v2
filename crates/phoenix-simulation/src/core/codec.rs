@@ -414,80 +414,12 @@ pub fn encode_hud_update_script(json: &str) -> String {
     format!("window.__updateHud({argument})")
 }
 
-fn stamp_json(stamp: &crate::delivery::stamp::DeliveryStamp) -> serde_json::Value {
-    serde_json::json!({
-        "protocol": stamp.protocol,
-        "content_id": stamp.content_id,
-        "content_epoch": stamp.content_epoch,
-    })
-}
-
 /// Encode named Objective-instance lifecycle/report state at the one JSON
 /// boundary used by headless and native diagnostics.
 pub fn encode_objective_instances(
     manager: &crate::objective_instances::ObjectiveInstanceManager,
 ) -> String {
     serde_json::to_string(manager).unwrap_or_else(|_| r#"{"instances":[],"history":{}}"#.into())
-}
-
-/// Encode a host's own version stamp — the body of `/host/stamp.json`.
-pub fn encode_delivery_stamp(stamp: &crate::delivery::stamp::DeliveryStamp) -> String {
-    stamp_json(stamp).to_string()
-}
-
-/// Advertise the native delivery owner's asset revision without losing u64
-/// precision in a pure-JS consumer. This is local delivery metadata, not a
-/// simulation message or a cue record.
-pub fn encode_native_asset_revision(revision: u64) -> String {
-    serde_json::json!({
-        "capability": "phoenix-native-asset-revision", "version": 1,
-        "revision": revision.to_string(),
-    })
-    .to_string()
-}
-
-/// Encode the browser host's join-handshake verdict (issue #1111).
-///
-/// The same `StampMismatch::code()` the native host answers
-/// `/host/manifest.json` with, shaped for the host page's JS rather than for
-/// HTTP: `{"ok":true,…}` or `{"ok":false,"code":…,"detail":…}`, always carrying
-/// the host's own stamp so a refused client can see what it should have been.
-/// `detail` is operator prose, not player-visible text — see
-/// [`crate::delivery::stamp::StampMismatch::detail`].
-pub fn encode_join_verdict(
-    verdict: &Result<(), crate::delivery::stamp::StampMismatch>,
-    host: &crate::delivery::stamp::DeliveryStamp,
-) -> String {
-    match verdict {
-        Ok(()) => serde_json::json!({ "ok": true, "host": stamp_json(host) }).to_string(),
-        Err(mismatch) => serde_json::json!({
-            "ok": false,
-            "code": mismatch.code(),
-            "detail": mismatch.detail(),
-            "host": stamp_json(host),
-        })
-        .to_string(),
-    }
-}
-
-/// Encode the content manifest + catalogue a host publishes.
-pub fn encode_delivery_manifest(manifest: &crate::delivery::DeliveryManifest) -> String {
-    serde_json::json!({
-        "stamp": stamp_json(&manifest.stamp),
-        "manifest_path": manifest.manifest_path,
-        "scenarios": manifest.scenarios,
-    })
-    .to_string()
-}
-
-/// Encode a version-pin refusal — the body of a `409` from either host.
-pub fn encode_delivery_refusal(refusal: &crate::delivery::DeliveryRefusal) -> String {
-    serde_json::json!({
-        "error": refusal.mismatch.code(),
-        "detail": refusal.mismatch.detail(),
-        "host": stamp_json(&refusal.host),
-    })
-    .to_string()
 }
 
 #[cfg(test)]

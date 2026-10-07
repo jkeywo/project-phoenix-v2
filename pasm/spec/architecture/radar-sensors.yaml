@@ -91,7 +91,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-sim-gameplay/src/ship/sensors.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-sim-gameplay/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [tick_sensors_threat_warning, SensorsThreatState, SensorsThreatMemoryState]
       tests: [cargo test, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
@@ -107,7 +107,7 @@ entities:
       writers: [sensors-threat-warning-producer]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/sensors.rs]
+      paths: [crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/sensors.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [SensorsThreatState, SensorsThreatMemoryState]
 
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
@@ -224,7 +224,7 @@ entities:
       writers: [sensors-frequency-advisor-ai-delayed]
     implementation:
       status: observed
-      paths: [crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/snapshot/schema.rs]
       symbols: [FrequencyHintState, ShipFrequencyHintState, FrequencyHintContinuationState]
 
       tests: [crates/phoenix-simulation/src/console_ai/core_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

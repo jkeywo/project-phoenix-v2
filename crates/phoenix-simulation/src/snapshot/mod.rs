@@ -316,7 +316,6 @@ pub use schema::WorldEventRecord;
 
 mod capture;
 pub use capture::capture;
-use capture::capture_entities;
 pub(crate) use capture::capture_entity_state;
 use capture::fixed_elapsed_secs;
 

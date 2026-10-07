@@ -2,7 +2,7 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, crates/phoenix-simulation/src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
 updated: 2026-10-01
 ---
 
@@ -175,7 +175,7 @@ gzipped WASM and its glue being cached for a year, which is what
 `/project-phoenix-*` names.
 
 Checked in three places: `tests/client/deploy-headers.test.js` (the rules, over
-canned fixtures, every push), `crates/phoenix-simulation/src/delivery/http.rs`'s unit tests (the same
+canned fixtures, every push), `crates/phoenix-delivery/src/http.rs`'s unit tests (the same
 contract as the native host serves it, every push), and
 `scripts/check-deploy-headers.mjs <url>` against a real deploy — run from a
 laptop (Node 20, no dependencies) or by dispatching the *Check Deploy Headers*
@@ -208,7 +208,7 @@ Windows prompts to allow it through the firewall on first run. Pass
   Either way there is no TLS or auth — LAN or behind something else, never a
   public address.
 
-The catalogue it publishes is the browser host's own: `crates/phoenix-simulation/src/delivery/payload.rs`
+The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON
 encoder walk. See `pasm/spec/architecture/native-delivery.yaml`.
 

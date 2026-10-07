@@ -29,3 +29,22 @@ describe('simulation branch dependency rules', () => {
     expect(entries[0].definition['default-features']).toBe(true);
   });
 });
+
+describe('preparation and delivery boundaries', () => {
+  it('allows preparation to compose authored domains without a reverse import', () => {
+    expect(layerDependencyFailures('phoenix-content-preparation', { dependencies: {
+      'phoenix-sim-gameplay': '*', 'phoenix-sim-world': '*', 'phoenix-sim-contracts': '*',
+    } }, {})).toEqual([]);
+    for (const owner of ['phoenix-sim-gameplay', 'phoenix-sim-world', 'phoenix-sim-session']) {
+      expect(layerDependencyFailures(owner, { dependencies: { 'phoenix-content-preparation': '*' } }, {})).toHaveLength(1);
+    }
+  });
+  it('rejects hidden parent and domain dependencies in delivery', () => {
+    for (const owner of ['phoenix-simulation', 'phoenix-presentation', 'phoenix-sim-world', 'phoenix-sim-gameplay', 'phoenix-sim-session', 'phoenix-content-preparation']) {
+      expect(layerDependencyFailures('phoenix-delivery', { target: { 'cfg(windows)': {
+        'dev-dependencies': { hidden: { package: owner } },
+      } } }, {})).toHaveLength(1);
+    }
+    expect(layerDependencyFailures('phoenix-delivery', { dependencies: { 'phoenix-model': '*', 'phoenix-content': '*' } }, {})).toEqual([]);
+  });
+});

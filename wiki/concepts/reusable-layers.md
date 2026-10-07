@@ -2,8 +2,8 @@
 title: Reusable Layers
 type: concept
 tags: [architecture, packages, reuse, testing]
-sources: [Cargo.toml, scripts/check-layers.mjs, src/lib.rs, src/boot/mod.rs, crates/phoenix-runtime/src/lib.rs, crates/phoenix-transport/src/lib.rs, crates/phoenix-platform/src/lib.rs, crates/phoenix-model/src/lib.rs, crates/phoenix-content/src/lib.rs, crates/phoenix-simulation/src/lib.rs, crates/phoenix-sim-contracts/src/lib.rs, crates/phoenix-sim-gameplay/src/lib.rs, crates/phoenix-sim-world/src/lib.rs, crates/phoenix-sim-session/src/lib.rs, crates/phoenix-presentation/src/lib.rs, examples/grid/src/lib.rs, packages/transport/src/rendezvous-transport.js, packages/session/src/session-token.js, gui/action-map.js, editor/workshop-provider.js, worker-rendezvous/src/index.js, worker/src/index.js, pasm/spec/architecture/reusable-layers.yaml, src/server/fleet_staging.rs, src/server_app/mod.rs, crates/phoenix-simulation/src/world/mod_pack.rs]
-updated: 2026-10-05
+sources: [crates/phoenix-content-preparation/src/lib.rs, crates/phoenix-delivery/src/lib.rs, Cargo.toml, scripts/check-layers.mjs, src/lib.rs, src/boot/mod.rs, crates/phoenix-runtime/src/lib.rs, crates/phoenix-transport/src/lib.rs, crates/phoenix-platform/src/lib.rs, crates/phoenix-model/src/lib.rs, crates/phoenix-content/src/lib.rs, crates/phoenix-simulation/src/lib.rs, crates/phoenix-sim-contracts/src/lib.rs, crates/phoenix-sim-gameplay/src/lib.rs, crates/phoenix-sim-world/src/lib.rs, crates/phoenix-sim-session/src/lib.rs, crates/phoenix-presentation/src/lib.rs, examples/grid/src/lib.rs, packages/transport/src/rendezvous-transport.js, packages/session/src/session-token.js, gui/action-map.js, editor/workshop-provider.js, worker-rendezvous/src/index.js, worker/src/index.js, pasm/spec/architecture/reusable-layers.yaml, src/server/fleet_staging.rs, src/server_app/mod.rs, crates/phoenix-simulation/src/world/mod_pack.rs]
+updated: 2026-10-07
 ---
 
 # Reusable Layers
@@ -12,6 +12,8 @@ This guide explains what each module owns, what calls it, and what it calls.
 Use it to choose where a change belongs and how much of the project you need to
 understand for that change. The [interactive dependency graph](../../docs/architecture/layers.html)
 shows the same package boundaries; select a node to inspect individual imports.
+The [physical Rust line report](../../docs/architecture/simulation-composition-lines.md)
+records each extraction stage and the internal ownership groups.
 
 The root host assembles a running application. Simulation assembles the game
 from Gameplay, World and Session. Presentation draws the resulting state.
@@ -46,7 +48,7 @@ three simulation branches (`phoenix-sim-gameplay`, `phoenix-sim-world`,
 | Game assembly | [Simulation](#simulation-composition-and-adapters) | How do the game domains form one running mission? |
 | Game domains | [Gameplay](#simulation-gameplay), [World](#simulation-world), [Session](#simulation-session) | How do entities act, what happens in the scenario, and who controls what? |
 | Shared game definitions | [Contracts](#simulation-contracts), [Model](#model) | Which types and rules cross a boundary? |
-| Content | [Content preparation](#content-preparation), [Authored assets](#authored-assets) | How are files loaded, and where are tunable values authored? |
+| Content | [Content preparation](#content-preparation-and-offline-authoring), [Content foundations](#content-loading-foundations), [Authored assets](#authored-assets) | How are files loaded, and where are tunable values authored? |
 | Screens | [3D presentation](#3d-presentation), [Browser UI and Workshop](#browser-ui-and-workshop) | How does a person see and operate the game? |
 | Reusable foundations | [Runtime](#runtime), [Transport](#rust-transport), [Platform](#platform), [Maths](#maths) | How do peers coordinate, bytes travel and hosts use their machine? |
 | Browser foundations | [Transport](#browser-transport), [Session](#browser-session) | How does a browser connect and retain its identity? |
@@ -62,7 +64,7 @@ presentation inputs to simulation, exposes browser exports, and integrates
 native windows, local Station panes and delivery. Its compatibility re-exports
 preserve public paths after code has moved into another crate.
 
-**Uses:** Simulation, Presentation, Maths, Model, Content, Platform, Runtime and
+**Uses:** Delivery, Simulation, Presentation, Maths, Model, Content, Platform, Runtime and
 Transport. Native and browser adapters also connect to the JavaScript surfaces
 through their respective bridges.
 
@@ -90,20 +92,36 @@ Simulation. The semantic validator retains the parsed identity and hands off
 content, assets and source archive together; browser and native adapters do not
 reconstruct an accepted pack.
 
+## Host delivery
+
+**Owner:** [`phoenix-delivery`](../../crates/phoenix-delivery/src/lib.rs).
+
+**Responsible for:** HTTP parsing and routing, bundle files, private local documents,
+connection upgrades, prepared catalogue publication and version-stamp codecs.
+
+**Uses:** Model wire payloads and Content manifest identities. Its `ContentSource`
+interface reads host-supplied overlay text/assets, revision and a prepared catalogue;
+it never installs templates or reads simulation's global caches.
+
+**Used by:** native delivery-only and authoritative hosts, plus browser host stamp
+checks. [`src/delivery/`](../../src/delivery/) retains CLI parsing, catalogue
+projection, template preload and live-cache adapters. The root delivery and codec
+paths remain compatibility facades; Simulation has no delivery dependency.
+
 ## Content preparation and offline authoring
 
 **Owner:** `phoenix-content-preparation`.
 
 **Responsible for:** entity/World composition validation, immutable accepted-pack
 handoff, World loading over explicit readers and Workshop source editing and
-validation. It returns prepared definitions, scripts, findings and ledger plans;
+validation. It returns prepared definitions, scripts, findings and ledger plans.
 The authoring schema includes Console feeds, composed equipment, AI state trees
 and repair-job workflows from their current Gameplay owners.
 Callers install content and apply ledger writes. Immutable overlay data remains
 in Content, shared without importing a live host.
 
 **Uses:** Gameplay, World, Contracts, Content and Model. **Used by:** Simulation's
-compatibility facades and host adapters. It has no dependency on Simulation,
+compatibility facades; Host adapters reach preparation through those facades. It has no dependency on Simulation,
 Session or Presentation. Browser fetch/cache readers and disposable Workshop
 Test clocks, tracing and providers remain in Simulation.
 
@@ -113,12 +131,12 @@ Test clocks, tracing and providers remain in Simulation.
 
 **Responsible for:** assembling the simulation schedule and connecting the
 independent game domains. It owns live adapters, spawning and materialization,
-validation that combines entity definitions with scenario definitions, command
+live adapters to offline content preparation, command
 application, state publication, snapshots, digest traversal and recovery
 integration. Systems that still combine several domains live here, so this is
 still a substantial implementation package.
 
-**Uses:** Gameplay, World, Session, Contracts, Maths, Model, Content, Platform,
+**Uses:** Content Preparation, Gameplay, World, Session, Contracts, Maths, Model, Content, Platform,
 Runtime and Transport. Bevy supplies ECS and scheduling. The independent
 simulation build contains no renderer, window stack or Ultralight.
 
@@ -143,7 +161,19 @@ invariants at decode and aggregation boundaries.
 plugin registration, activation, spawning, trigger evaluation, ordered effect
 application, layer lifecycle and Objective publication. Registration preserves
 one explicit schedule chain; the children do not install competing schedules.
-Cross-domain World execution tests remain at the facade.
+Local state/effect tests live beside their implementations. Cross-domain World
+execution tests remain at the facade.
+
+| Module | Responsibility | Called by | Uses |
+|---|---|---|---|
+| `state` | Runtime resources, pending work and scoped flag reads | Execution modules and domain adapters | World and Contracts data |
+| `registration` | Install the explicit plugin schedule | Host composition through `WorldPlugin` | Execution systems and existing materialization systems |
+| `activation` | Prepare scripts, initialise runtime and anchor mission time | Startup and runtime World loading | Preparation adapters, content ledger and World state |
+| `spawning` | Materialise authored entities in their existing order | Activation and layer loading | Shared entity operations, templates and UUID mint |
+| `triggers` | Evaluate events, predicates and delayed callbacks | Registered tick systems | Script runtime, World state and synchronous effect application |
+| `effects` | Apply the ordered effects of script execution | Trigger and callback execution | Domain mutation adapters and pending-work queues |
+| `layers` | Admit, activate and retire World layers | Registered lifecycle systems | Preparation, activation and shared spawning |
+| `publication` | Publish Objective summaries | Registered publication systems | Objective state and Console notifications |
 
 ### State continuity inside Simulation
 
@@ -154,6 +184,19 @@ and storage remain in `save_slots_lifecycle` and `save_slots_store`. Lockstep ow
 fleet recovery coordination and calls the same snapshot operations. Snapshot
 format and simulation-rule versions are unchanged by these moves.
 
+| Module | Responsibility | Called by | Uses |
+|---|---|---|---|
+| `schema` | Snapshot payloads and saved field defaults | Capture, restoration and serialization | Model and domain value types |
+| `capture` | One ordered traversal of authoritative state | Saves, checkpoints and recovery | Live simulation resources and components |
+| `artifact` | Artifact versions, encoding and stored-run handling | Save and transfer adapters | Schema, content identity and save primitives |
+| `preflight` | Check and prepare a restore candidate before application | Restore coordinator | Content/template adapters and candidate state |
+| `materialization` | Rebuild the entities needed by a restore | Restore coordinator | Existing shared entity materialization |
+| `application` | Apply saved components, queues and continuations | Restore coordinator | Simulation and domain state |
+| `restore` | Coordinate the existing ordered restore sequence | Host, save and lockstep adapters | Preflight, materialization and application |
+
+Capture and artifact tests are local to those modules. Cross-domain round-trip,
+authority and deterministic continuation tests remain at composition level.
+
 ### GM ownership inside Simulation
 
 `gm::actions` owns admission, ordering and the journal; `gm::operations` owns
@@ -163,6 +206,13 @@ owns its typed change notification. The Console bridge re-exports and routes
 those notifications; it does not construct GM decisions. Legacy `gm_*` public
 paths remain aliases. GM restore continues to use lockstep and snapshot rather
 than introducing another recovery protocol.
+
+| Group | Responsibility | Called by | Uses |
+|---|---|---|---|
+| `actions` | Admission, grants, ordering and attributed journal state | GM ingress, operations and observation | Authority contracts and simulation clock |
+| `operations` | Entity, Objective, faction, crew and other live mutations | Admitted GM action execution | Actions/journal plus existing domain adapters |
+| `observation` | Projections, inspectors, activity, attention and workload | Publication and inspector requests | Actions/journal and live domain state |
+| `continuity` | Join, checkpoints and GM restore adapters | Session and recovery composition | Actions, snapshot operations and lockstep fences |
 
 ## Simulation gameplay
 
@@ -179,7 +229,7 @@ game data; Content for content preparation mechanisms; Maths for deterministic
 calculations. It also uses Bevy and physics libraries where its implementation
 requires them.
 
-**Used by:** Simulation directly. Other application layers reach these mechanics
+**Used by:** Simulation and Content Preparation directly. Other application layers reach these mechanics
 through Simulation's public surface.
 
 **Work here for:** a damage calculation, weapon rule, steering operator or entity
@@ -199,7 +249,7 @@ parent's adapters.
 **Uses:** Contracts, Model, Content and Maths. Rhai and the script support library
 provide script execution machinery.
 
-**Used by:** Simulation directly.
+**Used by:** Simulation and Content Preparation directly.
 
 **Work here for:** Objective lifecycle semantics, script vocabulary or scenario
 state rules. Change the scenario's actual timing and content in its authored
@@ -237,7 +287,7 @@ join branches without introducing sibling imports.
 **Uses:** Model, Content, Maths, Runtime and Rust Transport. Its simulation-facing
 types can use Bevy ECS without pulling in a renderer.
 
-**Used by:** Gameplay, World, Session and Simulation.
+**Used by:** Gameplay, World, Session, Content Preparation and Simulation.
 
 **Work here for:** a shared command or scheduling contract whose meaning must be
 identical across domains. State or a rule owned by one domain stays with that
@@ -274,14 +324,14 @@ simulation or drawing a screen.
 optional `ecs` feature supplies the existing ECS traits on relevant game types;
 the default package needs neither ECS nor rendering.
 
-**Used by:** Host, Content, Contracts, Gameplay, World, Session, Simulation and
+**Used by:** Host, Delivery, Content, Contracts, Gameplay, World, Session, Simulation and
 Presentation.
 
 **Work here for:** a shared wire payload, identity type or visual declaration.
 A rule for advancing game state belongs in a simulation domain. A shared
 simulation tick or authority contract belongs in Contracts.
 
-## Content preparation
+## Content loading foundations
 
 **Owner:** [`phoenix-content`](../../crates/phoenix-content/src/lib.rs).
 
@@ -293,13 +343,13 @@ for admission without creating a GPU or window.
 **Uses:** Model for common declarations, Maths for shared calculations and
 Platform for machine-level file mechanisms.
 
-**Used by:** Host, Contracts, Gameplay, World and Simulation at runtime;
+**Used by:** Host, Contracts, Gameplay, World, Content Preparation, Delivery and Simulation at runtime;
 Presentation in tests.
 
-**Work here for:** include resolution, pack admission, manifest handling or
+**Work here for:** include resolution, archive validation, manifest parsing or
 content version tracking. The complete entity parser belongs to Gameplay and
 the complete world parser belongs to World. Validation requiring both domains
-stays in Simulation. Content accepts data or injected resolvers to keep these
+belongs in Content Preparation. Content accepts data or injected resolvers to keep these
 dependencies pointing downwards.
 
 ## Runtime

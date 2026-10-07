@@ -137,6 +137,14 @@ continuation transitions; adapters apply game ownership effects before consuming
 its prepared completion. Readiness and bounded histories validate their
 invariants at decode and aggregation boundaries.
 
+### World execution inside Simulation
+
+`world::server` is a compatibility facade. Its child modules own runtime state,
+plugin registration, activation, spawning, trigger evaluation, ordered effect
+application, layer lifecycle and Objective publication. Registration preserves
+one explicit schedule chain; the children do not install competing schedules.
+Cross-domain World execution tests remain at the facade.
+
 ## Simulation gameplay
 
 **Owner:** [`phoenix-sim-gameplay`](../../crates/phoenix-sim-gameplay/src/lib.rs).

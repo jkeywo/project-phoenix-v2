@@ -6,6 +6,7 @@ entities:
       title: Reusable Game Layers
       summary: Cargo and JavaScript package boundaries separate reusable runtime, transport and platform mechanisms from Phoenix data, content, simulation and presentation. Existing host entry points compose those packages through compatibility facades.
       rationale:
+        - World execution keeps a stable simulation facade over state, registration, activation, spawning, triggers, ordered effects, layer lifecycle and publication modules. Registration owns one unchanged schedule chain and reviewed symbol aliases preserve historical census comparisons.
         - Content preparation owns offline cross-domain validation and authoring over explicit readers and resolvers. It returns prepared data and ledger plans; simulation retains live cache and installation adapters. Preparation may consume Gameplay and World, which never import it.
         - Runtime orders admitted commands and coordinates readiness, digests and recovery without choosing game rules. Transport owns connection identity and delivery without interpreting Phoenix commands. Platform owns files and surfaces without choosing Station or lobby roles.
         - Model carries shared game vocabulary. Content prepares authored bytes through manifests, includes, overlays, archives and asset validation. Entity and world semantic validation remains beside the simulation registries it validates, consuming the content mechanisms in one direction.

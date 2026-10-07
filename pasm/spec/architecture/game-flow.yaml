@@ -214,7 +214,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/entities/spawner.rs]
+      paths: [crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/entities/spawner.rs]
       tests: [cargo test, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs]
 
   - component: entity-destruction-lifecycle
@@ -233,7 +233,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs]
+      paths: [crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/regions/server.rs]
       tests: [cargo test, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs]
 
   - component: terminal-round-outcome-router
@@ -254,6 +254,6 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      paths: [crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [on_game_over_enter, push_game_over_hud_state]
       tests: [cargo test, tests/native_host_lobby.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs]

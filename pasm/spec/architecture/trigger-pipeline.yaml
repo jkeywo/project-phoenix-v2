@@ -52,7 +52,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [collect_world_events, AiEventReaders, anchor_mission_clock, arm_mission_clock]
       tests: [cargo test]
     evidence:
@@ -75,7 +75,7 @@ entities:
       writers: [world-event-collector]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [WorldEventBuffer]
       tests: [cargo test]
 
@@ -105,7 +105,7 @@ entities:
       # module whose imports a scanner would attribute here wholesale.
       paths:
         - crates/phoenix-simulation/src/world/spawn_origin.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - crates/phoenix-simulation/src/entities/spawner.rs
       symbols:
         - SpawnOrigin
@@ -174,7 +174,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/script/engine.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/content.rs, crates/phoenix-sim-world/src/world/trigger_registry.rs, crates/phoenix-sim-world/src/world/script/engine.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
       symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_script_call, ScriptCallContext, ScriptEventTarget, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
       tests: [cargo test, crates/phoenix-sim-world/src/world/script/engine_tests.rs, crates/phoenix-sim-world/src/world/script/schedule_tests.rs]
     evidence:
@@ -214,7 +214,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-sim-world/src/commands.rs]
+      paths: [crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols: [dispatch_action, dispatch_state_action, dispatch_entity_modifier_action, dispatch_world_flag_action, dispatch_destroy_entity, dispatch_spawn_entity, DispatchContext, DispatchResult, ActionCmd, TemplateLoader]
       tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs]
     evidence:
@@ -231,7 +231,7 @@ entities:
       goals:
         - "declare the new variant on the TriggerAction enum and, if a script should be able to buffer it, give it a host fn (crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-sim-world/src/world/script/effects.rs). It is no longer parsed from world TOML - issue #985 deleted the `[[trigger.action]]` array, so a variant reaches the world either as a `BufferedEffect::Action` from a script or as a `DelayedAction` from `ctx.schedule.in_seconds`"
         - add a dispatch arm in the pure table (crates/phoenix-simulation/src/world/dispatch.rs), routed into the matching per-group function or a new group function for a new action family
-        - when the action needs a new ECS effect, add an ActionCmd variant and an applier arm (apply_dispatch_result in crates/phoenix-simulation/src/world/server.rs); actions that resolve to existing commands need no applier change
+        - when the action needs a new ECS effect, add an ActionCmd variant and an applier arm (apply_dispatch_result in crates/phoenix-simulation/src/world/server/mod.rs); actions that resolve to existing commands need no applier change
         - add pure unit tests beside the dispatch table and pipeline tests beside the Bevy systems
       rationale:
         - "[ai] keeping every match exhaustive turns \"did I wire the new variant everywhere\" into a compile error rather than a runtime gap"
@@ -244,7 +244,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/commands.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols: [TriggerAction, ActionCmd]
       tests: [cargo test]
 
@@ -265,7 +265,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/delayed.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/delayed.rs]
       symbols: [tick_delayed_actions, DelayedAction, partition_delayed_actions]
       tests: [cargo test, crates/phoenix-sim-world/src/world/delayed_tests.rs]
     evidence:

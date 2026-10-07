@@ -110,7 +110,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [resolve_objective_target]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
@@ -126,7 +126,7 @@ entities:
       derived_from: [objective-directive-state, world-name-binding-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [plan_helm_travel, resolve_objective_target]
 
   - component: objective-outcome-controller
@@ -143,7 +143,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-world/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [ObjectiveManager]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
@@ -162,7 +162,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/console/comms/server.rs]
+      paths: [crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs]
       symbols: [TriggerAction, tick_trigger_pipeline]
       tests: [cargo test]
 
@@ -180,7 +180,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/gm_objective_tests.rs]
 
@@ -354,7 +354,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/validate.rs, src/headless/app.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/world/validate.rs, src/headless/app.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [validate_objectives, validate_composition]
       tests: [cargo test]
 
@@ -372,7 +372,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/objectives.rs]
       symbols: [apply_world_layer_changes]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs]
 
@@ -408,7 +408,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       tests: [cargo test]
 
   - component: objective-player-ai-divergence-contract

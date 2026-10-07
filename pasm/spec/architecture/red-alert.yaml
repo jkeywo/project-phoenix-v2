@@ -111,7 +111,7 @@ entities:
         - host-browser-runtime
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml, crates/phoenix-sim-contracts/src/power.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-sim-world/src/commands.rs]
+      paths: [crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, assets/entities/ship_harrow_patrol.toml, assets/worlds/probe_restraint.toml, assets/worlds/probe_picket.toml, assets/worlds/falling_skyway.toml, crates/phoenix-sim-contracts/src/power.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-sim-world/src/commands.rs]
       symbols:
         - ActionCmd
         - ScriptedPowerLevel

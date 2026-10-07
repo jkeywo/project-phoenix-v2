@@ -126,7 +126,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [spawn_entity, spawn_entity_with_ship_seed, ShipSpawnSeed]
       tests: [cargo test]
 

@@ -16,7 +16,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/recipients.rs, crates/phoenix-sim-world/src/world/script/recipient_refs.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/gm-recipient-diagnostics.js, crates/phoenix-sim-world/src/recipients.rs]
+      paths: [crates/phoenix-simulation/src/recipients.rs, crates/phoenix-sim-world/src/world/script/recipient_refs.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/workshop/mod.rs, gui/gm-recipient-diagnostics.js, crates/phoenix-sim-world/src/recipients.rs]
       symbols: [RecipientSelection, RecipientCatalog, RecipientSources, PreparedRecipients, prepare_in_world, RecipientDiagnostics, addressed_action, apply_addressed_action]
       tests: [cargo test --lib addressed, cargo test --lib recipients, crates/phoenix-simulation/src/recipients_tests.rs, crates/phoenix-sim-world/src/world/script/recipient_refs_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs]
 
@@ -46,7 +46,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       tests: [cargo test, crates/phoenix-simulation/src/console/comms/inbox_tests.rs]
 
   - state: comms-inbox-state

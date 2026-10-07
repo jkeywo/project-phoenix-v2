@@ -292,7 +292,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-sim-gameplay/src/command_admission/feedback.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs]
+      paths: [crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-sim-gameplay/src/command_admission/feedback.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server/mod.rs]
       symbols: [AdmittedConsumerRegistry, ConsumerMatcher, ConsumerRegistration, FeedbackAddress, FeedbackSupport, action_feedback, admitted_action_feedback, RegisterAdmittedConsumer, warn_unrouted_admitted_commands, unrouted_command_targets, unrouted_commandable_systems]
       tests: [cargo test, crates/phoenix-simulation/src/command_admission/router_tests.rs, crates/phoenix-simulation/src/command_admission/tests.rs, crates/phoenix-simulation/src/gm_action_tests.rs, crates/phoenix-simulation/src/gm_puppet_tests.rs, crates/phoenix-simulation/src/gm_quiet_tests.rs, crates/phoenix-simulation/src/ship/system_registry_tests.rs, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
     evidence:

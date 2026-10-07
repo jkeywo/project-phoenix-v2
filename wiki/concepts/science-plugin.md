@@ -2,7 +2,7 @@
 title: Science / Sensors target
 type: concept
 tags: [science, sensors, scans, objectives, ai, blackboard]
-sources: [crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-model/src/observation.rs, crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
+sources: [crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-model/src/observation.rs, crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
 updated: 2026-10-14
 ---
 
@@ -12,7 +12,7 @@ updated: 2026-10-14
 
 `science::SciencePlugin` is the authoritative scan plugin, implemented in
 `crates/phoenix-simulation/src/science/server.rs` and registered by `WorldPlugin` in
-`crates/phoenix-simulation/src/world/server.rs`. It applies admitted scan requests in `tick_scans` and
+`crates/phoenix-simulation/src/world/server/mod.rs`. It applies admitted scan requests in `tick_scans` and
 publishes each ship's scan blackboard. The independently selected
 Science/Sensors **target** is first-class per-ship state owned by the Sensors
 system in `crates/phoenix-simulation/src/ship/sensors.rs`:

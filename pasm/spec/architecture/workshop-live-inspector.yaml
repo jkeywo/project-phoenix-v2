@@ -234,7 +234,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/workshop/test_trace.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/script/load.rs, crates/phoenix-sim-world/src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
+      paths: [crates/phoenix-simulation/src/workshop/test_trace.rs, crates/phoenix-simulation/src/workshop/test_protocol.rs, src/workshop_host/test_browser.rs, src/native_host/workshop/test_process.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/script/load.rs, crates/phoenix-sim-world/src/world/script/validate.rs, gui/workshop-test-panel.js, gui/workshop-test-layout-model.js, gui/workshop-authoring.js]
       symbols: [TestTrace, TestTraceRecord, TestTraceKind, named_function_lines, apply_script_call, tick_script_callbacks, mountWorkshopTestPanel]
       tests:
         - crates/phoenix-simulation/src/workshop/test_trace_tests.rs

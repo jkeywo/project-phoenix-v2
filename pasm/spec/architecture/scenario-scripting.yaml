@@ -192,7 +192,7 @@ entities:
     implementation:
       status: observed
       paths:
-        [crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-simulation/src/world/script_invocation.rs, crates/phoenix-sim-contracts/src/sim_tick.rs]
+        [crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/world/script_invocation.rs, crates/phoenix-sim-contracts/src/sim_tick.rs]
       symbols: [ScheduledCall, PendingCallbacks, TickBudget, Schedule, ScheduleSink, SchedClock, register_scheduling, seconds_to_ticks, apply_script_call, ScriptCallContext, ScriptEventTarget, invoke_effects, invoke_dialogue, prepare_invocation_tick, reset_invocation_budget]
       tests: [cargo test, crates/phoenix-sim-world/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/world/script_invocation_tests.rs, crates/phoenix-simulation/src/comms/scripted_tests.rs, crates/phoenix-simulation/src/console/comms/server_tests.rs]
     evidence:
@@ -203,7 +203,7 @@ entities:
         reference: failed_script_call_discards_all_six_effect_buffers
         summary: "A raising call exposes no effects and leaks no buffered work into the next call."
       - kind: test
-        reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (crates/phoenix-simulation/src/world/server.rs)"
+        reference: "world::server tests::scripted_in_seconds_effect_routes_through_tick_delayed_actions (crates/phoenix-simulation/src/world/server/mod.rs)"
         summary: "A scripted `in_seconds` effect routes through the existing tick `DelayedAction` queue rather than a parallel timer — proving the schedule seam reuses the declarative delay path."
 
   - component: scripted-entity-removal
@@ -228,7 +228,7 @@ entities:
         - crates/phoenix-sim-world/src/world/script/effects.rs
         - crates/phoenix-sim-world/src/world/script/schedule.rs
         - crates/phoenix-simulation/src/world/dispatch.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - assets/worlds/probe_destroy_chain.toml
         - docs/toml-authoring-guide.md
       symbols:
@@ -244,7 +244,7 @@ entities:
         - "cargo test --features headless --test snapshot_resume an_entity_destroyed_before_the_save"
     evidence:
       - kind: test
-        reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (crates/phoenix-simulation/src/world/server.rs)"
+        reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (crates/phoenix-simulation/src/world/server/mod.rs)"
         summary: "A script destroys group members one at a time through the LIVE trigger pipeline: the group's `OnAllDestroyed` stays silent with one of two down and fires when the LAST one goes. The negative half is what makes the positive half mean anything — a trigger that fired on the first kill would satisfy a fires-at-the-end assertion just as well."
       - kind: test
         reference: "tests/headless_runner.rs::a_scripted_destroy_chains_its_triggers_off_the_removal"
@@ -350,7 +350,7 @@ entities:
       paths:
         - crates/phoenix-simulation/src/content_ledger.rs
         - crates/phoenix-simulation/src/world/materialization.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - crates/phoenix-simulation/src/server_app/world_setup.rs
         - crates/phoenix-sim-world/src/world/config.rs
         - crates/phoenix-simulation/src/world/dispatch.rs
@@ -429,7 +429,7 @@ entities:
         - crates/phoenix-sim-world/src/world/script/deadlines.rs
         - crates/phoenix-sim-world/src/world/config.rs
         - crates/phoenix-sim-world/src/world/script/validate.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - crates/phoenix-simulation/src/console/captain/server.rs
         - crates/phoenix-model/src/messages.rs
         - gui/components/ph-deadline-list.js
@@ -480,7 +480,7 @@ entities:
       # the `dependencies` note. The persistence is traced through the evidence
       # and the test reference instead.
       paths:
-        [crates/phoenix-sim-world/src/world/deadlines.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
+        [crates/phoenix-sim-world/src/world/deadlines.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-sim-world/src/world/script/schedule.rs]
       symbols:
         - DeadlineTable
         - DeadlineRecord
@@ -530,7 +530,7 @@ entities:
         - crates/phoenix-sim-world/src/world/script/engine.rs
         - crates/phoenix-sim-world/src/world/script/schedule.rs
         - crates/phoenix-sim-world/src/world/script/comms.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - crates/phoenix-simulation/src/comms/scripted.rs
         - crates/phoenix-simulation/src/console/comms/server.rs
         - assets/worlds/probe_commitments.toml
@@ -580,7 +580,7 @@ entities:
       # bump the evidence below records) is traced through the evidence instead.
       paths:
         - crates/phoenix-sim-world/src/world/commitments.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
       symbols:
         - CommitmentLedger
         - Commitment
@@ -618,7 +618,7 @@ entities:
         - crates/phoenix-sim-world/src/world/workforce.rs
         - crates/phoenix-sim-world/src/world/config.rs
         - crates/phoenix-simulation/src/world/dispatch.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
         - crates/phoenix-sim-world/src/world/script/effects.rs
         - crates/phoenix-sim-gameplay/src/infrastructure/condition.rs
         - assets/worlds/probe_strike_min.toml
@@ -669,7 +669,7 @@ entities:
       # traced through the evidence instead.
       paths:
         - crates/phoenix-sim-world/src/world/workforce.rs
-        - crates/phoenix-simulation/src/world/server.rs
+        - crates/phoenix-simulation/src/world/server/mod.rs
       symbols:
         - WorkforceRegister
         - WorkforceRecord

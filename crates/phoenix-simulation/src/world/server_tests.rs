@@ -245,69 +245,6 @@ fn one_layer_map(path: &str, flag: &str) -> WorldLayerMap {
     map
 }
 
-#[test]
-fn layered_flag_chain_walks_loader_path_innermost_first() {
-    let mut base = crate::world::flags::FlagStore::default();
-    base.set_flag("base_flag");
-    let mut inner = WorldRuntime {
-        loader_path: Some("assets/worlds/outer.toml".into()),
-        ..Default::default()
-    };
-    inner.flags.set_flag("inner_flag");
-    let mut outer = WorldRuntime::default();
-    outer.flags.set_flag("outer_flag");
-    let mut map = WorldLayerMap::default();
-    map.0.insert("assets/worlds/inner.toml".into(), inner);
-    map.0.insert("assets/worlds/outer.toml".into(), outer);
-
-    // The store-only walk (`layered_flag_chain`) — the shape every AI
-    // host reads through `entity_flag_chain`.
-    let flags = layered_flag_chain(Some("assets/worlds/inner.toml"), &base, Some(&map));
-    // Innermost-first: an unprefixed name reads the origin layer; each
-    // `parent:` steps one entry outward — the reader's own scope first,
-    // never a flattened union.
-    assert!(crate::world::flags::flag_in_chain(&flags, "inner_flag"));
-    assert!(!crate::world::flags::flag_in_chain(&flags, "outer_flag"));
-    assert!(crate::world::flags::flag_in_chain(
-        &flags,
-        "parent:outer_flag"
-    ));
-    assert!(crate::world::flags::flag_in_chain(
-        &flags,
-        "parent:parent:base_flag"
-    ));
-
-    // The with-paths wrapper (`layered_flag_chain_with_paths`) —
-    // `tick_trigger_pipeline`'s own shape — carries the identical store
-    // chain plus the layer-path chain climbing to the base world.
-    let (flags2, layers) =
-        layered_flag_chain_with_paths(Some("assets/worlds/inner.toml"), &base, Some(&map));
-    assert_eq!(
-        layers,
-        vec![
-            Some("assets/worlds/inner.toml".to_string()),
-            Some("assets/worlds/outer.toml".to_string()),
-            None
-        ],
-        "the layer-path chain climbs loader_path to the base world"
-    );
-    assert!(crate::world::flags::flag_in_chain(&flags2, "inner_flag"));
-}
-
-#[test]
-fn layered_flag_chain_from_the_base_world_is_the_base_store_alone() {
-    let mut base = crate::world::flags::FlagStore::default();
-    base.set_flag("base_flag");
-    let flags = layered_flag_chain(None, &base, None);
-    assert_eq!(flags.len(), 1);
-    assert!(crate::world::flags::flag_in_chain(&flags, "base_flag"));
-
-    let (flags2, layers) = layered_flag_chain_with_paths(None, &base, None);
-    assert_eq!(layers, vec![None]);
-    assert_eq!(flags2.len(), 1);
-    assert!(crate::world::flags::flag_in_chain(&flags2, "base_flag"));
-}
-
 /// The AI-host entry point: a ship carrying an `EntityOriginLayer`
 /// component is anchored at that layer, exactly as a trigger authored
 /// there; a ship with no component is anchored at the base.
@@ -7268,51 +7205,6 @@ fn unloading_a_layer_releases_the_gm_pauses_on_its_own_events() {
     // And an unload that contributed nothing takes nothing.
     assert_eq!(remove_layer_triggers(&mut runtime, "never_loaded.toml"), 0);
     assert_eq!(runtime.paused_gm_events.len(), 1);
-}
-
-/// The scoping rule a scripted flag write resolves through (issue #1045), over
-/// the one function that decides it.
-#[test]
-fn a_scripted_flag_write_resolves_against_its_handlers_own_layer() {
-    fn write(name: &str) -> ActionCmd {
-        ActionCmd::MutateFlag {
-            target_layer: None,
-            name: name.to_string(),
-            mutation: crate::world::dispatch::FlagMutation::Set,
-        }
-    }
-    // A live map holding one directly-loaded layer, so `parent:` has a real chain
-    // to walk: `[Some("l1.toml"), None]`, terminating at the base world.
-    let mut layers = WorldLayerMap::default();
-    layers.0.insert("l1.toml".into(), WorldRuntime::default());
-    let scoped = |name: &str, origin: Option<&str>| -> (bool, Option<String>, String) {
-        let mut cmd = write(name);
-        let kept = scope_scripted_flag_write(&mut cmd, "test", origin, Some(&layers));
-        match cmd {
-            ActionCmd::MutateFlag {
-                target_layer, name, ..
-            } => (kept, target_layer, name),
-            _ => unreachable!(),
-        }
-    };
-
-    // A base-world handler is untouched — every shipped world's behaviour.
-    assert_eq!(scoped("armed", None), (true, None, "armed".to_string()));
-    // A layer handler writes its OWN scope, which is where its conditions look.
-    assert_eq!(
-        scoped("armed", Some("l1.toml")),
-        (true, Some("l1.toml".to_string()), "armed".to_string())
-    );
-    // `parent:` remains the deliberate escape outward; with no `loader_path`
-    // recorded, one step out of a directly-loaded layer is the base world.
-    assert_eq!(
-        scoped("parent:armed", Some("l1.toml")),
-        (true, None, "armed".to_string())
-    );
-    // Walking past the root is dropped rather than written somewhere arbitrary —
-    // the same "no match" answer `resolve_layer_prefix` gives a condition.
-    assert!(!scoped("parent:armed", None).0);
-    assert!(!scoped("parent:parent:armed", Some("l1.toml")).0);
 }
 
 /// A world source that never arrives is refused, not retried forever (#1045).

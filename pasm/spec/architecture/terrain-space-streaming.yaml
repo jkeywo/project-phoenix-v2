@@ -13,7 +13,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/world/server.rs, assets/entities]
+      paths: [crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/loader.rs, crates/phoenix-simulation/src/world/server/mod.rs, assets/entities]
       tests: [cargo test, crates/phoenix-simulation/src/entities/loader_tests.rs]
 
   - component: celestial-renderer

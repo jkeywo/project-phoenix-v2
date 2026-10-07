@@ -98,7 +98,7 @@ entities:
       writers: [world-trigger-action-dispatcher]
     implementation:
       status: observed
-      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot/mod.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` gives in scenario-scripting.yaml: it carries
       # this state's persistence (`EntityState::spawn`, the restore's spawn
       # path, and the 9 → 10 `SNAPSHOT_FORMAT` bump) but is a whole-payload

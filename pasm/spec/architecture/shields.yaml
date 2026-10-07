@@ -53,7 +53,7 @@ entities:
       derived_from: [shield-arc-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
       symbols: [ShieldsCoordinationState, ShieldsCoordinationContinuationState]
 
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
@@ -177,7 +177,7 @@ entities:
       writers: [shields-recent-damage-ai]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
       symbols: [ShieldsDamageHistory, DamageRecord, ShieldsAiState]
 
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
@@ -194,6 +194,6 @@ entities:
       derived_from: [coordination-delivery-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
+      paths: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs]
       symbols: [PendingShieldsThreatBearing, receive_shields_coordination, ai_shield_focus]
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

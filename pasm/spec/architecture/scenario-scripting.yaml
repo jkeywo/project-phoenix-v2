@@ -473,7 +473,7 @@ entities:
       writers: [mission-deadline-vocabulary]
     implementation:
       status: observed
-      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed. It carries this state's
+      # `crates/phoenix-simulation/src/snapshot/mod.rs` is deliberately NOT listed. It carries this state's
       # persistence (`ScenarioState::deadlines`, and the 12 → 13 `SNAPSHOT_FORMAT`
       # bump the evidence below records), but it is a whole-payload module whose
       # own imports the scanner would attribute wholesale to this entity — see
@@ -573,7 +573,7 @@ entities:
       writers: [commitment-vocabulary]
     implementation:
       status: observed
-      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot/mod.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` omits it: it is a whole-payload module whose own
       # imports the scanner would attribute wholesale to this entity. The
       # persistence (`ScenarioState::commitments`, and the 5 → 6 `SNAPSHOT_FORMAT`
@@ -661,7 +661,7 @@ entities:
       writers: [workforce-vocabulary]
     implementation:
       status: observed
-      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot/mod.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` and `commitment-ledger-state` omit it: it is a
       # whole-payload module whose own imports the scanner would attribute
       # wholesale to this entity. The persistence (`ScenarioState::workforce`,

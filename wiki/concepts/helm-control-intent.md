@@ -2,7 +2,7 @@
 title: Helm Runtime
 type: concept
 tags: [helm, ai, impulse, boost, steering]
-sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs, tests/lockstep_six_peer.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/helm.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
+sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, tests/lockstep_six_peer.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/helm.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
 updated: 2026-09-27
 ---
 

@@ -17,7 +17,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
       symbols: [PowerState, capture_continuation, restore_continuation, ControlState, PolicyState, RecoveryHistory, capture_from, restore_into]
       tests: ["cargo test --features headless --test snapshot_resume power_continuation_", "cargo test --lib ship::continuation::tests::", "cargo test --features headless --test snapshot_resume control_continuation_", crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs, crates/phoenix-simulation/src/ship/continuation_tests.rs]
 
@@ -119,7 +119,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-sim-gameplay/src/ai/server.rs]
+      paths: [crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-sim-gameplay/src/ai/server.rs]
       symbols: [AiHighFidelity, LodTransitionTimer, AiHighFidelityComponents, AiFidelityState, ai_high_fidelity_components, has_ai_high_fidelity_components]
 
   - state: runtime-entity-projection-state
@@ -135,7 +135,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
       symbols: [TrackedEntities, TrackedEntitiesState, reconcile_runtime_entities]
 
       tests: [crates/phoenix-simulation/src/server_app/components_interior_write_access_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_publish_lifecycle_tests.rs]

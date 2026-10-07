@@ -58,7 +58,7 @@ entities:
       derived_from: [navigation-waypoint-state, system-control-source-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
       symbols: [NavClearanceIssueState, NavigationClearanceIssueState]
 
   - component: navigation-anchor-refresher
@@ -182,7 +182,7 @@ entities:
       derived_from: [coordination-delivery-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
       symbols: [HelmWaypointClearance, HelmWaypointClearanceState]
 
       tests: [crates/phoenix-simulation/src/console/helm/server_tests.rs, crates/phoenix-simulation/src/ship/components_tests.rs]

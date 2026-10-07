@@ -15,7 +15,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objective_instances.rs, crates/phoenix-simulation/src/objective_instances/control.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/ship_slots.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/gm_objective.rs, crates/phoenix-sim-world/src/objective_instances.rs]
+      paths: [crates/phoenix-simulation/src/objective_instances.rs, crates/phoenix-simulation/src/objective_instances/control.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-objective-panel.js, crates/phoenix-simulation/src/ship_slots.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/dispatch.rs, crates/phoenix-sim-world/src/world/script/effects.rs, crates/phoenix-sim-world/src/world/script/schedule.rs, crates/phoenix-simulation/src/narrative.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/gm_objective.rs, crates/phoenix-sim-world/src/objective_instances.rs]
       symbols: [ObjectiveInstanceManager, ObjectiveInstanceKey, RecipientSelector, ShipObjectiveInstanceView, AuthoredShipSlotId, ObjectiveInstanceScope, apply_instance_command, apply_instance_control]
       tests: [cargo test --features headless --test gm_objective, npx vitest run tests/client/gm-objective-panel.test.js, crates/phoenix-simulation/src/objective_instances_tests.rs, crates/phoenix-simulation/src/gm_objective_tests.rs, crates/phoenix-simulation/src/gm_action_tests.rs, crates/phoenix-simulation/src/ship_slots_tests.rs, crates/phoenix-simulation/src/server_app/world_setup_game_start_identity_tests.rs, crates/phoenix-sim-world/src/world/script/effects_tests.rs, crates/phoenix-sim-world/src/world/script/schedule_tests.rs, crates/phoenix-simulation/src/narrative_tests.rs]
 
@@ -180,7 +180,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs]
+      paths: [crates/phoenix-simulation/src/objectives.rs, crates/phoenix-simulation/src/world/server/mod.rs, crates/phoenix-simulation/src/gm_objective.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-world/src/objectives.rs]
       symbols: [ObjectiveManager, ObjectiveManagerRes, scored_pool_with_boost]
       tests: [cargo test, crates/phoenix-simulation/src/objectives_tests.rs, crates/phoenix-simulation/src/gm_objective_tests.rs]
 

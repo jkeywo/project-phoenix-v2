@@ -156,7 +156,7 @@ entities:
       writers: [world-flag-store]
     implementation:
       status: declared
-      # `crates/phoenix-simulation/src/snapshot.rs` is deliberately NOT listed, for the reason
+      # `crates/phoenix-simulation/src/snapshot/mod.rs` is deliberately NOT listed, for the reason
       # `mission-deadline-state` and `commitment-ledger-state` omit it: it is a
       # whole-payload module whose own imports the scanner would attribute
       # wholesale to this entity. The persistence is `ScenarioState`'s existing
@@ -450,7 +450,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/console/repair/external.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      paths: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/console/repair/external.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [named_dispatch_status, RepairTeams, handle_external_repair_commands, handle_recall_repair_team, free_team_indices, fold_internal_repair_namespace]
       messages: [DispatchRepairTeam, RecallRepairTeam]
       tests: [crates/phoenix-sim-gameplay/src/jobs/repair_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, tests/snapshot_resume.rs]
@@ -470,7 +470,7 @@ entities:
       replicas: [external-repair-published-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/mod.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      paths: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/mod.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs]
       symbols: [RepairActivity, TeamJobs, ShipRepairTeams]
       tests: [crates/phoenix-simulation/src/console/repair/external_server_tests.rs, tests/snapshot_resume.rs]
 
@@ -789,7 +789,7 @@ entities:
         - crates/phoenix-sim-world/src/dossier/evidence.rs
         - crates/phoenix-sim-world/src/world/script/dossier.rs
         - crates/phoenix-simulation/src/world/server/mod.rs
-        - crates/phoenix-simulation/src/snapshot.rs
+        - crates/phoenix-simulation/src/snapshot/mod.rs
       symbols:
         - EvidenceLog
         - EvidenceEntry
@@ -866,7 +866,7 @@ entities:
       paths:
         - crates/phoenix-sim-gameplay/src/science/scan.rs
         - crates/phoenix-simulation/src/science/server.rs
-        - crates/phoenix-simulation/src/snapshot.rs
+        - crates/phoenix-simulation/src/snapshot/mod.rs
       symbols:
         - ShipScanRecord
         - ScanReading
@@ -962,7 +962,7 @@ entities:
       paths:
         - crates/phoenix-sim-gameplay/src/debris/threat.rs
         - crates/phoenix-simulation/src/debris/server.rs
-        - crates/phoenix-simulation/src/snapshot.rs
+        - crates/phoenix-simulation/src/snapshot/mod.rs
       symbols:
         - DebrisThreat
         - DebrisSaveState

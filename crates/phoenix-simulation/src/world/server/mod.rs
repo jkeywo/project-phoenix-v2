@@ -100,7 +100,6 @@ pub(crate) use effects::apply_dispatch_result;
 pub(crate) use effects::apply_script_call;
 pub(crate) use effects::build_uuid_to_faction;
 pub(crate) use effects::revalidate_ai_targets_after_faction_change;
-use effects::scope_scripted_flag_write;
 pub use effects::AiEventReaders;
 pub(crate) use effects::EffectQueues;
 pub use effects::FactionDispatchParams;

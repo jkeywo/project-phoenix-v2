@@ -38,7 +38,7 @@ entities:
         - "Existing fixed-step ordering arbitrates simultaneous families: blaster emissions, delayed torpedo bursts, beam starts, immediate torpedo launches. Authored bank order and admitted command order arbitrate within each family. Paid damage bonuses remain attached to active attacks through snapshot restore and participate in the reserve hull digest."
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/snapshot.rs, gui/components/ph-strike-reserve.js]
+      paths: [crates/phoenix-sim-gameplay/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/snapshot/mod.rs, gui/components/ph-strike-reserve.js]
       tests: [cargo test --lib strike_, npx vitest run tests/client/strike-reserve.test.js, crates/phoenix-sim-gameplay/src/modifiers/strike_reserve_tests.rs]
   - decision: dynasty-backfill-strike-cycle
     core:

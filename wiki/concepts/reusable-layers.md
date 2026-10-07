@@ -145,6 +145,15 @@ application, layer lifecycle and Objective publication. Registration preserves
 one explicit schedule chain; the children do not install competing schedules.
 Cross-domain World execution tests remain at the facade.
 
+### State continuity inside Simulation
+
+`snapshot` keeps its public facade over schema, capture, artifact/version
+handling, preflight, materialization, state application and the ordered restore
+coordinator. Digest traversal remains in `sim_digest`; peer-local save scheduling
+and storage remain in `save_slots_lifecycle` and `save_slots_store`. Lockstep owns
+fleet recovery coordination and calls the same snapshot operations. Snapshot
+format and simulation-rule versions are unchanged by these moves.
+
 ## Simulation gameplay
 
 **Owner:** [`phoenix-sim-gameplay`](../../crates/phoenix-sim-gameplay/src/lib.rs).

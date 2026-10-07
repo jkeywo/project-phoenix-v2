@@ -75,7 +75,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/collision_history.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/core/collision_history.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
       symbols: [CollisionHistory, CollisionRecord]
       tests: [cargo test --features headless --lib core::collision_history, cargo test --features headless --test collision_history, crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]
 
@@ -96,7 +96,7 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/core/collision_history.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot.rs]
+      paths: [crates/phoenix-simulation/src/core/collision_history.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
       symbols: [CollisionHistory, CollisionRecord]
 
   - component: headless-telemetry-collector

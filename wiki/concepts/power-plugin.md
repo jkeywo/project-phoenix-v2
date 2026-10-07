@@ -2,7 +2,7 @@
 title: Power Runtime
 type: concept
 tags: [power, battery, brownout, modifiers, ai, semantic-actions, feedback]
-sources: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-sim-gameplay/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js, assets/entities/dynasty_player_cruiser.toml, pasm/spec/design/dynasty-balance.yaml]
+sources: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-sim-gameplay/src/modifiers/strike_reserve.rs, crates/phoenix-simulation/src/console/weapons/strike.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/stations/engineering-actions.js, gui/components/ph-power-controls.js, gui/components/ph-strike-reserve.js, gui/action-map.js, assets/entities/dynasty_player_cruiser.toml, pasm/spec/design/dynasty-balance.yaml]
 updated: 2026-09-27
 ---
 

@@ -30,7 +30,7 @@ entities:
       replicas: [ship-system-blackboards-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-simulation/src/snapshot.rs, tests/snapshot_resume.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs]
       symbols: [PowerBlackboard, PowerState, capture_continuation, restore_continuation]
       tests: [cargo test --features headless --test snapshot_resume power_continuation_, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs]
 
@@ -47,7 +47,7 @@ entities:
       derived_from: [ship-power-state]
     implementation:
       status: observed
-      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/power.rs]
+      paths: [crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/server_app/registration.rs, tests/snapshot_resume.rs, crates/phoenix-sim-gameplay/src/ship/power.rs]
       symbols: [PowerBrownoutState, PowerBrownoutContinuationState, tick_power_brownout_advisory]
 
       tests: [crates/phoenix-simulation/src/server_app/registration_physics_boundary_tests.rs]

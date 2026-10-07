@@ -1951,7 +1951,7 @@ fn identify_still_accepts_an_ordinary_peer_token() {
 #[test]
 fn welcome_projects_gms_separately_from_players_and_ship_capacity() {
     let mut sessions = SessionManager::new();
-    let gms = vec![crate::gm_roster::GmOperator {
+    let gms = vec![crate::gm::operations::roster::GmOperator {
         id: "gm-1".into(),
         name: "Morgan".into(),
         connected: true,

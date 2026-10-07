@@ -115,7 +115,7 @@ impl JsonCodec {
 /// so providers can prepare assets before a live occurrence without queuing it.
 pub fn encode_room_audio_config(
     p: &crate::audio_config::AudioConfigPayload,
-    catalog: Option<&crate::gm_presentation::sound::LiveSoundCatalog>,
+    catalog: Option<&crate::gm::operations::presentation::sound::LiveSoundCatalog>,
 ) -> Result<String, serde_json::Error> {
     #[derive(serde::Serialize)]
     struct Payload<'a> {
@@ -174,18 +174,21 @@ pub fn is_native_gm_profile_record(json: &str) -> Option<bool> {
 /// Private host-page presentation request, not a participant message.
 pub fn decode_gm_inspector_interest(
     json: &str,
-) -> Option<Vec<crate::gm_projection::GmInspectorKind>> {
+) -> Option<Vec<crate::gm::observation::projection::GmInspectorKind>> {
     if json.len() > 256 {
         return None;
     }
     serde_json::from_str(json).ok()
 }
 
-pub fn decode_gm_console_interest(json: &str) -> Option<crate::gm_projection::GmConsoleInterest> {
+pub fn decode_gm_console_interest(
+    json: &str,
+) -> Option<crate::gm::observation::projection::GmConsoleInterest> {
     if json.len() > 1024 {
         return None;
     }
-    let request: crate::gm_projection::GmConsoleInterest = serde_json::from_str(json).ok()?;
+    let request: crate::gm::observation::projection::GmConsoleInterest =
+        serde_json::from_str(json).ok()?;
     request.valid().then_some(request)
 }
 
@@ -561,13 +564,15 @@ mod wire {
         Value::Object(value)
     }
 
-    pub(super) fn decode_gm_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
+    pub(super) fn decode_gm_request(
+        raw: &str,
+    ) -> Option<crate::gm::actions::action::GmActionRequest> {
         let value: Value = serde_json::from_str(raw).ok()?;
         let mut object = value.as_object()?.clone();
         let operator_id = object.remove("operator_id")?.as_str()?.to_owned();
         let correlation = decode(object.remove("correlation")?)?;
         if operator_id.is_empty()
-            || operator_id.chars().count() > crate::gm_roster::MAX_GM_OPERATOR_ID_CHARS
+            || operator_id.chars().count() > crate::gm::operations::roster::MAX_GM_OPERATOR_ID_CHARS
         {
             return None;
         }
@@ -629,13 +634,15 @@ mod wire {
                 rename(&mut object, "entity", "target")?;
                 let scope_id = object.remove("scope_id")?;
                 let scope = match object.get("scope")?.as_str()? {
-                    "entity" if scope_id.is_null() => crate::gm_effect::GmDirectEffectScope::Entity,
-                    "station" => crate::gm_effect::GmDirectEffectScope::Station(
+                    "entity" if scope_id.is_null() => {
+                        crate::gm::operations::effect::GmDirectEffectScope::Entity
+                    }
+                    "station" => crate::gm::operations::effect::GmDirectEffectScope::Station(
                         crate::core::messages::StationId(super::bounded_gm_target_id(
                             scope_id.as_str()?,
                         )?),
                     ),
-                    "system" => crate::gm_effect::GmDirectEffectScope::System(
+                    "system" => crate::gm::operations::effect::GmDirectEffectScope::System(
                         crate::core::messages::SystemId(super::bounded_gm_target_id(
                             scope_id.as_str()?,
                         )?),
@@ -657,31 +664,33 @@ mod wire {
             }
             _ => {}
         }
-        let action: crate::gm_action::GmAction = decode(tagged(&kind, object))?;
+        let action: crate::gm::actions::action::GmAction = decode(tagged(&kind, object))?;
         // Only these ingress families performed domain validation before sequencing.
         match &action {
-            crate::gm_action::GmAction::ObjectiveInstanceAction { .. }
-            | crate::gm_action::GmAction::ObjectiveAction { .. }
-            | crate::gm_action::GmAction::Presentation { .. }
-            | crate::gm_action::GmAction::SetContactInformation { .. }
-            | crate::gm_action::GmAction::SetNpcDoctrineChecked { .. }
-            | crate::gm_action::GmAction::SetFactionHostility { .. }
-            | crate::gm_action::GmAction::UndoGmAction { .. } => action.validate().ok()?,
-            crate::gm_action::GmAction::TransmitComms { transmission }
+            crate::gm::actions::action::GmAction::ObjectiveInstanceAction { .. }
+            | crate::gm::actions::action::GmAction::ObjectiveAction { .. }
+            | crate::gm::actions::action::GmAction::Presentation { .. }
+            | crate::gm::actions::action::GmAction::SetContactInformation { .. }
+            | crate::gm::actions::action::GmAction::SetNpcDoctrineChecked { .. }
+            | crate::gm::actions::action::GmAction::SetFactionHostility { .. }
+            | crate::gm::actions::action::GmAction::UndoGmAction { .. } => {
+                action.validate().ok()?
+            }
+            crate::gm::actions::action::GmAction::TransmitComms { transmission }
                 if !transmission.valid_shape() =>
             {
                 return None;
             }
-            crate::gm_action::GmAction::SpawnPaletteEntity {
+            crate::gm::actions::action::GmAction::SpawnPaletteEntity {
                 position_mm,
                 heading_mdeg,
                 ..
-            } if !crate::gm_spawn::placement_is_valid(*position_mm, *heading_mdeg) => {
+            } if !crate::gm::operations::spawn::placement_is_valid(*position_mm, *heading_mdeg) => {
                 return None;
             }
             _ => {}
         }
-        Some(crate::gm_action::GmActionRequest {
+        Some(crate::gm::actions::action::GmActionRequest {
             operator_id,
             correlation,
             action,
@@ -751,13 +760,13 @@ mod wire {
             MeshFrame::SlotClaim(frame) => frame.tick,
             MeshFrame::GmAction(frame) => {
                 match frame {
-                    crate::gm_action::GmActionFrame::Proposal(_) => {}
-                    crate::gm_action::GmActionFrame::Granted(_) => {
+                    crate::gm::actions::action::GmActionFrame::Proposal(_) => {}
+                    crate::gm::actions::action::GmActionFrame::Granted(_) => {
                         rename(body, "from", "requester").unwrap();
                         rename(body, "sequenced_by", "from").unwrap();
                         flatten(body, "order", &[("sequence", "sequence")]);
                     }
-                    crate::gm_action::GmActionFrame::Refused(_) => {
+                    crate::gm::actions::action::GmActionFrame::Refused(_) => {
                         rename(body, "sequenced_by", "from").unwrap();
                         body.remove("objective_instance_scope");
                         for key in "target verb lever effect_scope objective_verb objective_recipients observer".split_whitespace() {
@@ -771,8 +780,8 @@ mod wire {
                 rename(body, "id", "join_id").unwrap();
                 if matches!(
                     frame,
-                    crate::gm_join::GmJoinFrame::Pause(_)
-                        | crate::gm_join::GmJoinFrame::Committed(_)
+                    crate::gm::continuity::join::GmJoinFrame::Pause(_)
+                        | crate::gm::continuity::join::GmJoinFrame::Committed(_)
                 ) {
                     rename(body, "owner", "from").unwrap();
                     rename(body, "kind", "join_kind").unwrap();
@@ -782,13 +791,13 @@ mod wire {
                         &[("candidate", "host"), ("operator_id", "operator_id")],
                     );
                 }
-                if matches!(frame, crate::gm_join::GmJoinFrame::Pause(_)) {
+                if matches!(frame, crate::gm::continuity::join::GmJoinFrame::Pause(_)) {
                     hex(body, "transfer_id");
                 }
                 if matches!(
                     frame,
-                    crate::gm_join::GmJoinFrame::Restored { .. }
-                        | crate::gm_join::GmJoinFrame::Committed(_)
+                    crate::gm::continuity::join::GmJoinFrame::Restored { .. }
+                        | crate::gm::continuity::join::GmJoinFrame::Committed(_)
                 ) {
                     hex(body, "digest");
                 }
@@ -803,14 +812,17 @@ mod wire {
                         ("restore_sequence", "sequence"),
                     ],
                 );
-                if matches!(frame, crate::gm_restore::GmRestoreFrame::Loaded { .. }) {
+                if matches!(
+                    frame,
+                    crate::gm::continuity::restore::GmRestoreFrame::Loaded { .. }
+                ) {
                     hex(body, "digest");
                 }
                 if body.get("failure").is_some_and(Value::is_null) {
                     body.remove("failure");
                 }
                 match frame {
-                    crate::gm_restore::GmRestoreFrame::Loaded { tick, .. } => *tick,
+                    crate::gm::continuity::restore::GmRestoreFrame::Loaded { tick, .. } => *tick,
                     _ => 0,
                 }
             }
@@ -898,7 +910,7 @@ mod wire {
                                 .map(Value::String)
                                 .unwrap_or(Value::Null),
                         );
-                        let verb: Option<crate::gm_action::GmEventVerb> =
+                        let verb: Option<crate::gm::actions::action::GmEventVerb> =
                             body.get("verb").cloned().and_then(decode);
                         object.insert("verb".into(), serde_json::to_value(verb).ok()?);
                         if let Some(observer) = object.get("observer").filter(|v| !v.is_null()) {
@@ -908,16 +920,18 @@ mod wire {
                     }
                     _ => return None,
                 };
-                let frame: crate::gm_action::GmActionFrame =
+                let frame: crate::gm::actions::action::GmActionFrame =
                     decode(tagged(kind, std::mem::take(&mut object)))?;
                 match &frame {
-                    crate::gm_action::GmActionFrame::Proposal(proposal) => {
+                    crate::gm::actions::action::GmActionFrame::Proposal(proposal) => {
                         proposal.validate().ok()?
                     }
-                    crate::gm_action::GmActionFrame::Granted(grant) => grant.validate().ok()?,
-                    crate::gm_action::GmActionFrame::Refused(refusal) => {
-                        use crate::gm_action::GmActionKind::*;
-                        if !crate::gm_action::valid_comms_result_scope(
+                    crate::gm::actions::action::GmActionFrame::Granted(grant) => {
+                        grant.validate().ok()?
+                    }
+                    crate::gm::actions::action::GmActionFrame::Refused(refusal) => {
+                        use crate::gm::actions::action::GmActionKind::*;
+                        if !crate::gm::actions::action::valid_comms_result_scope(
                             refusal.action_kind,
                             refusal.comms_recipients.as_deref(),
                         ) || matches!(
@@ -1000,7 +1014,7 @@ mod wire {
                     "settle" => {
                         let mut object =
                             project(body, "from restore_origin restore_sequence commit", "")?;
-                        let failure: Option<crate::gm_restore::GmRestoreFailure> =
+                        let failure: Option<crate::gm::continuity::restore::GmRestoreFailure> =
                             body.get("failure").cloned().and_then(decode);
                         object.insert("failure".into(), serde_json::to_value(failure).ok()?);
                         ("Settle", object)
@@ -1140,23 +1154,26 @@ pub fn decode_fleet_roster(raw: &str) -> Option<(crate::lockstep::FleetRoster, O
 ///
 /// The accepted wire shape is exactly an array of
 /// `{ id, name, connected, ready }`
-/// rows. [`crate::gm_roster::GmOperator`]'s `deny_unknown_fields` prevents a
+/// rows. [`crate::gm::operations::roster::GmOperator`]'s `deny_unknown_fields` prevents a
 /// private peer id, reconnect credential or authority flag from crossing this
-/// boundary unnoticed; [`crate::gm_roster::GmRoster::try_new`] applies the
+/// boundary unnoticed; [`crate::gm::operations::roster::GmRoster::try_new`] applies the
 /// bounded, unique and deterministic roster contract.
-pub fn decode_gm_roster(raw: &str) -> Option<crate::gm_roster::GmRoster> {
-    let operators: Vec<crate::gm_roster::GmOperator> = serde_json::from_str(raw).ok()?;
-    crate::gm_roster::GmRoster::try_new(operators).ok()
+pub fn decode_gm_roster(raw: &str) -> Option<crate::gm::operations::roster::GmRoster> {
+    let operators: Vec<crate::gm::operations::roster::GmOperator> =
+        serde_json::from_str(raw).ok()?;
+    crate::gm::operations::roster::GmRoster::try_new(operators).ok()
 }
 
 /// Encode the local peer's own bound GM operator row for the host page.
 ///
 /// The read-back half of the standalone binding
-/// ([`crate::gm_solo::local_gm_operator`]): the page must not fabricate the id
+/// ([`crate::gm::continuity::solo::local_gm_operator`]): the page must not fabricate the id
 /// its actions are attributed to, so it reads the exact row the simulation
 /// bound. Same `{ id, name, connected, ready }` shape the page sends the other
 /// way through [`decode_gm_roster`]; `""` means this peer may not act.
-pub fn encode_local_gm_operator(operator: Option<&crate::gm_roster::GmOperator>) -> String {
+pub fn encode_local_gm_operator(
+    operator: Option<&crate::gm::operations::roster::GmOperator>,
+) -> String {
     operator
         .and_then(|operator| serde_json::to_string(operator).ok())
         .unwrap_or_default()
@@ -1165,7 +1182,7 @@ pub fn encode_local_gm_operator(operator: Option<&crate::gm_roster::GmOperator>)
 /// Decode the one privileged browser-GM action ingress (issue #1292).
 /// Unknown fields are refused so this narrow route cannot accidentally become
 /// a generic host mutation surface.
-pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm_action::GmActionRequest> {
+pub fn decode_gm_action_request(raw: &str) -> Option<crate::gm::actions::action::GmActionRequest> {
     wire::decode_gm_request(raw)
 }
 
@@ -1185,8 +1202,11 @@ fn bounded_gm_target_id(value: &str) -> Option<String> {
 
 pub fn canonical_system_command(
     payload: &crate::core::messages::SystemControlPayload,
-) -> Option<crate::gm_puppet::CanonicalSystemCommandPayload> {
-    crate::gm_puppet::CanonicalSystemCommandPayload::new(serde_json::to_string(payload).ok()?).ok()
+) -> Option<crate::gm::operations::puppet::CanonicalSystemCommandPayload> {
+    crate::gm::operations::puppet::CanonicalSystemCommandPayload::new(
+        serde_json::to_string(payload).ok()?,
+    )
+    .ok()
 }
 
 pub fn decode_canonical_system_command(

@@ -815,16 +815,16 @@ pub(crate) fn apply_dispatch_result(
                 commands.queue(move |world: &mut World| {
                     use bevy::ecs::system::RunSystemOnce;
                     let _ = world.run_system_once_with(
-                        crate::gm_presentation::apply_scenario_command,
+                        crate::gm::operations::presentation::apply_scenario_command,
                         (ship, cue),
                     );
                 });
             }
             ActionCmd::SetContactInformation { observer, change } => {
                 commands.queue(move |world: &mut World| {
-                    if let Err(reason) =
-                        crate::gm_information::apply_scenario_command(world, &observer, &change)
-                    {
+                    if let Err(reason) = crate::gm::operations::information::apply_scenario_command(
+                        world, &observer, &change,
+                    ) {
                         bevy::log::warn!("Contact information action refused: {reason}");
                     }
                 });
@@ -832,14 +832,16 @@ pub(crate) fn apply_dispatch_result(
             ActionCmd::SetNpcDoctrine { uuid, id } => {
                 commands.queue(move |world: &mut World| {
                     use bevy::ecs::system::RunSystemOnce;
-                    let _ = world
-                        .run_system_once_with(crate::gm_npc::apply_scenario_command, (uuid, id));
+                    let _ = world.run_system_once_with(
+                        crate::gm::operations::npc::apply_scenario_command,
+                        (uuid, id),
+                    );
                 });
             }
             cmd @ (ActionCmd::AddObjective { .. }
             | ActionCmd::CompleteObjective { .. }
             | ActionCmd::FailObjective { .. }) => {
-                crate::gm_objective::apply_command(
+                crate::gm::operations::objective::apply_command(
                     &mut objectives.0,
                     cmd,
                     balance_events.as_deref_mut(),
@@ -1392,9 +1394,12 @@ pub(crate) fn apply_dispatch_result(
                         // an accepted GM removal armed this uuid. Every ordinary
                         // scripted or combat destruction gets `None` here and
                         // pays for no capture walk.
-                        let capture = crate::gm_despawn_undo::capture_before_removal(world, ent);
-                        let cleared = crate::gm_despawn::remove_entity(world, ent);
-                        crate::gm_despawn_undo::record_capture(world, capture, cleared);
+                        let capture =
+                            crate::gm::operations::despawn_undo::capture_before_removal(world, ent);
+                        let cleared = crate::gm::operations::despawn::remove_entity(world, ent);
+                        crate::gm::operations::despawn_undo::record_capture(
+                            world, capture, cleared,
+                        );
                     });
                 }
             }

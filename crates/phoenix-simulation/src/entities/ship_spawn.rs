@@ -111,7 +111,7 @@ fn insert_ship_config_and_core_bundle(
         crate::ship::state::ShipPhaserFrequency::default(),
         crate::console::navigation::NavigationWaypoint::default(),
     ));
-    cmds.insert(crate::gm_puppet::capability::NpcStationConfig(
+    cmds.insert(crate::gm::operations::puppet::capability::NpcStationConfig(
         crate::lobby::server::project_ship_client_config(config),
     ));
     power_group_seed

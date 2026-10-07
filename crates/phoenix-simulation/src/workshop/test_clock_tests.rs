@@ -37,7 +37,7 @@ fn pause_holds_every_fixed_schedule_and_each_step_advances_exactly_one_tick() {
     );
     assert!(
         app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert!(app.world().resource::<Time<Virtual>>().is_paused());
@@ -72,7 +72,7 @@ fn rates_are_finite_and_resuming_discards_queued_steps() {
     assert_eq!(app.world().resource::<TestClock>().steps, 0);
     assert!(
         !app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert_eq!(

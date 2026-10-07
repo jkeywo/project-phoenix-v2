@@ -253,7 +253,7 @@ impl NavClearanceIssueState {
     /// `None` before any has been.
     ///
     /// Read-only, and read by the GM's Station-workload advisory
-    /// ([`crate::gm_workload`]): "Navigation has told the Helm where to go" is
+    /// ([`crate::gm::observation::workload`]): "Navigation has told the Helm where to go" is
     /// exactly this frontier, and an advisory that used the waypoint's own
     /// generation instead would report a demand on the Helm for an order
     /// Navigation has not sent yet.

@@ -1,6 +1,6 @@
 use super::*;
 use crate::console_bridge::AudioCueEvent;
-use crate::gm_restore::AcceptedRestore;
+use crate::gm::continuity::restore::AcceptedRestore;
 
 fn publish_audio_lifecycle(world: &mut World) {
     advance_audio_lifecycle(world);
@@ -13,7 +13,7 @@ fn accepted_restore_and_recovery_rebase_without_cue_history_or_digest_changes() 
         .init_resource::<GmLiveRestore>()
         .init_resource::<MeshRestoreArm>()
         .add_message::<AudioCueEvent>()
-        .add_message::<crate::gm_presentation::sound::LiveSoundRequest>()
+        .add_message::<crate::gm::operations::presentation::sound::LiveSoundRequest>()
         .insert_resource(State::new(GamePhase::InProgress))
         .add_systems(Update, publish_audio_lifecycle);
     app.update();
@@ -31,14 +31,15 @@ fn accepted_restore_and_recovery_rebase_without_cue_history_or_digest_changes() 
         generation
     );
     let digest = crate::sim_digest::world_digest(app.world());
-    app.world_mut()
-        .write_message(crate::gm_presentation::sound::LiveSoundRequest {
+    app.world_mut().write_message(
+        crate::gm::operations::presentation::sound::LiveSoundRequest {
             ship: "alpha".into(),
             source: None,
-            definition: crate::gm_presentation::sound::LiveSoundCatalog::default()
+            definition: crate::gm::operations::presentation::sound::LiveSoundCatalog::default()
                 .resolve("weapons")
                 .unwrap(),
-        });
+        },
+    );
     app.world_mut()
         .resource_mut::<Messages<AudioCueEvent>>()
         .write(AudioCueEvent {
@@ -61,7 +62,7 @@ fn accepted_restore_and_recovery_rebase_without_cue_history_or_digest_changes() 
     assert!(app.world().resource::<Messages<AudioCueEvent>>().is_empty());
     assert!(app
         .world()
-        .resource::<Messages<crate::gm_presentation::sound::LiveSoundRequest>>()
+        .resource::<Messages<crate::gm::operations::presentation::sound::LiveSoundRequest>>()
         .is_empty());
     assert_eq!(crate::sim_digest::world_digest(app.world()), digest);
     // Returning to Idle ends the hold; the real driver's Restored/RolledBack
@@ -145,11 +146,11 @@ fn shared_gm_projections_follow_the_boundary_and_keep_absent_owner_baselines() {
     use crate::console_bridge::{GmAttentionChanged, GmHealthChanged};
     let mut app = App::new();
     app.init_resource::<crate::sim_tick::SimTick>()
-        .insert_resource(crate::gm_projection::BrowserGameMaster)
+        .insert_resource(crate::gm::observation::projection::BrowserGameMaster)
         .insert_resource(State::new(GamePhase::InProgress))
         .add_plugins((
-            crate::gm_health::GmHealthPlugin,
-            crate::gm_attention::GmAttentionPlugin,
+            crate::gm::observation::health::GmHealthPlugin,
+            crate::gm::observation::attention::GmAttentionPlugin,
         ));
     // The shared producers remain usable without a room adapter. A missing
     // continuation owner is an explicit, silent baseline, not a fake epoch.

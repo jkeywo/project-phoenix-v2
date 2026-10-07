@@ -344,17 +344,17 @@ fn spawn_rock(world: &mut World, uuid: &str, x: f32) {
     ));
 }
 
-fn gm_grant(operator: &str, correlation: &str) -> crate::gm_action::GmActionGrant {
+fn gm_grant(operator: &str, correlation: &str) -> crate::gm::actions::action::GmActionGrant {
     let origin = crate::command_admission::HostSlot(1);
-    crate::gm_action::GmActionGrant {
+    crate::gm::actions::action::GmActionGrant {
         from: origin,
         sequenced_by: origin,
         operator_id: operator.to_string(),
-        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        correlation: crate::gm::actions::action::GmActionId::new(correlation).unwrap(),
         recovery_generation: 0,
         apply_tick: 20,
-        order: crate::gm_action::GmActionOrder::new(origin, 1),
-        action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+        order: crate::gm::actions::action::GmActionOrder::new(origin, 1),
+        action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
     }
 }
 
@@ -362,20 +362,20 @@ fn gm_grant(operator: &str, correlation: &str) -> crate::gm_action::GmActionGran
 fn only_the_applied_gm_action_frontier_moves_the_digest() {
     let mut baseline = fold_world();
     baseline.insert_resource(SimTick(10));
-    baseline.insert_resource(crate::gm_action::SimulationPaused(false));
-    baseline.insert_resource(crate::gm_action::GmActionJournal::default());
+    baseline.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+    baseline.insert_resource(crate::gm::actions::action::GmActionJournal::default());
     let baseline_digest = world_digest(&baseline);
 
     let mut paused = fold_world();
     paused.insert_resource(SimTick(10));
-    paused.insert_resource(crate::gm_action::SimulationPaused(true));
-    paused.insert_resource(crate::gm_action::GmActionJournal::default());
+    paused.insert_resource(crate::gm::actions::action::SimulationPaused(true));
+    paused.insert_resource(crate::gm::actions::action::GmActionJournal::default());
     assert_ne!(world_digest(&paused), baseline_digest);
 
     let mut pending = fold_world();
     pending.insert_resource(SimTick(10));
-    pending.insert_resource(crate::gm_action::SimulationPaused(false));
-    let mut journal = crate::gm_action::GmActionJournal::default();
+    pending.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+    let mut journal = crate::gm::actions::action::GmActionJournal::default();
     journal.insert(gm_grant("gm-one", "future-pause")).unwrap();
     pending.insert_resource(journal);
     let pending_digest = world_digest(&pending);
@@ -386,8 +386,8 @@ fn only_the_applied_gm_action_frontier_moves_the_digest() {
 
     let mut different_attribution = fold_world();
     different_attribution.insert_resource(SimTick(10));
-    different_attribution.insert_resource(crate::gm_action::SimulationPaused(false));
-    let mut journal = crate::gm_action::GmActionJournal::default();
+    different_attribution.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+    let mut journal = crate::gm::actions::action::GmActionJournal::default();
     journal.insert(gm_grant("gm-two", "future-pause")).unwrap();
     different_attribution.insert_resource(journal);
     assert_eq!(
@@ -398,16 +398,16 @@ fn only_the_applied_gm_action_frontier_moves_the_digest() {
 
     let mut exact_boundary = fold_world();
     exact_boundary.insert_resource(SimTick(20));
-    exact_boundary.insert_resource(crate::gm_action::SimulationPaused(false));
-    let mut journal = crate::gm_action::GmActionJournal::default();
+    exact_boundary.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+    let mut journal = crate::gm::actions::action::GmActionJournal::default();
     journal.insert(gm_grant("gm-one", "future-pause")).unwrap();
     exact_boundary.insert_resource(journal);
     let exact_pending_digest = world_digest(&exact_boundary);
 
     let mut boundary_control = fold_world();
     boundary_control.insert_resource(SimTick(20));
-    boundary_control.insert_resource(crate::gm_action::SimulationPaused(false));
-    boundary_control.insert_resource(crate::gm_action::GmActionJournal::default());
+    boundary_control.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+    boundary_control.insert_resource(crate::gm::actions::action::GmActionJournal::default());
     assert_eq!(
         exact_pending_digest,
         world_digest(&boundary_control),
@@ -416,8 +416,8 @@ fn only_the_applied_gm_action_frontier_moves_the_digest() {
 
     let mut applied = fold_world();
     applied.insert_resource(SimTick(20));
-    applied.insert_resource(crate::gm_action::SimulationPaused(true));
-    let mut applied_journal = crate::gm_action::GmActionJournal::default();
+    applied.insert_resource(crate::gm::actions::action::SimulationPaused(true));
+    let mut applied_journal = crate::gm::actions::action::GmActionJournal::default();
     applied_journal
         .insert(gm_grant("gm-one", "future-pause"))
         .unwrap();
@@ -428,8 +428,8 @@ fn only_the_applied_gm_action_frontier_moves_the_digest() {
 
     let mut applied_by_other = fold_world();
     applied_by_other.insert_resource(SimTick(20));
-    applied_by_other.insert_resource(crate::gm_action::SimulationPaused(true));
-    let mut other_journal = crate::gm_action::GmActionJournal::default();
+    applied_by_other.insert_resource(crate::gm::actions::action::SimulationPaused(true));
+    let mut other_journal = crate::gm::actions::action::GmActionJournal::default();
     other_journal
         .insert(gm_grant("gm-two", "future-pause"))
         .unwrap();
@@ -447,13 +447,13 @@ fn canonical_station_puppet_membership_is_folded_independent_of_arrival_order() 
     fn world_with(operators: &[&str]) -> World {
         let mut world = fold_world();
         world.insert_resource(SimTick(20));
-        world.insert_resource(crate::gm_action::SimulationPaused(false));
-        world.insert_resource(crate::gm_action::GmActionJournal::default());
-        let target = crate::gm_puppet::StationPuppetTarget::new(
+        world.insert_resource(crate::gm::actions::action::SimulationPaused(false));
+        world.insert_resource(crate::gm::actions::action::GmActionJournal::default());
+        let target = crate::gm::operations::puppet::StationPuppetTarget::new(
             crate::command_admission::log::ShipKey("ship-player-1".into()),
             crate::core::messages::StationId("captain".into()),
         );
-        let mut puppets = crate::gm_puppet::StationPuppets::default();
+        let mut puppets = crate::gm::operations::puppet::StationPuppets::default();
         for operator in operators {
             puppets.set_operator(target.clone(), (*operator).to_string(), true);
         }
@@ -1690,7 +1690,7 @@ fn an_armed_gm_fire_moves_the_digest_and_an_empty_set_leaves_it_alone() {
 /// identity.
 #[test]
 fn an_armed_gm_placement_moves_the_digest_and_its_order_is_part_of_it() {
-    let armed = |name: &str, x_mm: i64| crate::gm_spawn::PendingGmSpawn {
+    let armed = |name: &str, x_mm: i64| crate::gm::operations::spawn::PendingGmSpawn {
         palette: "raider".into(),
         variant: None,
         name: name.into(),
@@ -2483,22 +2483,23 @@ fn insertion_order_does_not_reach_the_fold() {
 /// re-blessing.
 #[test]
 fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() {
-    let effect =
-        |sequence: u64, target: &str, amount: u32| crate::gm_effect::PendingGmDirectEffect {
+    let effect = |sequence: u64, target: &str, amount: u32| {
+        crate::gm::operations::effect::PendingGmDirectEffect {
             tick: 12,
-            order: crate::gm_action::GmActionOrder::new(
+            order: crate::gm::actions::action::GmActionOrder::new(
                 crate::command_admission::HostSlot(1),
                 sequence,
             ),
             target: target.into(),
-            scope: crate::gm_effect::GmDirectEffectScope::Entity,
-            kind: crate::gm_effect::GmDirectEffectKind::Damage,
+            scope: crate::gm::operations::effect::GmDirectEffectScope::Entity,
+            kind: crate::gm::operations::effect::GmDirectEffectKind::Damage,
             amount_milli_hp: amount,
-        };
+        }
+    };
 
     let mut world = fold_world();
     let bare = world_digest(&world);
-    world.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    world.insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
     assert_eq!(
         world_digest(&world),
         bare,
@@ -2506,7 +2507,7 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
     );
 
     world
-        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .resource_mut::<crate::gm::operations::effect::PendingGmDirectEffects>()
         .push(effect(1, "npc-1", 25_000));
     let armed = world_digest(&world);
     assert_ne!(
@@ -2517,16 +2518,16 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
     // WHAT it will do is part of it: two peers holding different amounts, or
     // aiming at different hulls, are about to fold different worlds.
     let mut other = fold_world();
-    other.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    other.insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
     other
-        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .resource_mut::<crate::gm::operations::effect::PendingGmDirectEffects>()
         .push(effect(1, "npc-1", 25_001));
     assert_ne!(armed, world_digest(&other));
 
     let mut elsewhere = fold_world();
-    elsewhere.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+    elsewhere.insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
     elsewhere
-        .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+        .resource_mut::<crate::gm::operations::effect::PendingGmDirectEffects>()
         .push(effect(1, "npc-2", 25_000));
     assert_ne!(armed, world_digest(&elsewhere));
 
@@ -2535,23 +2536,23 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
     // are about to damage different Systems, so the scope has to be part of
     // what the digest compares — otherwise a scope that diverged would surface
     // only as a hull mismatch some ticks later, with nothing naming the cause.
-    let scoped = |scope: crate::gm_effect::GmDirectEffectScope| {
+    let scoped = |scope: crate::gm::operations::effect::GmDirectEffectScope| {
         let mut world = fold_world();
-        world.insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+        world.insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
         let mut entry = effect(1, "npc-1", 25_000);
         entry.scope = scope;
         world
-            .resource_mut::<crate::gm_effect::PendingGmDirectEffects>()
+            .resource_mut::<crate::gm::operations::effect::PendingGmDirectEffects>()
             .push(entry);
         world_digest(&world)
     };
-    let helm = scoped(crate::gm_effect::GmDirectEffectScope::Station(
+    let helm = scoped(crate::gm::operations::effect::GmDirectEffectScope::Station(
         crate::core::messages::StationId("helm".into()),
     ));
-    let tactical = scoped(crate::gm_effect::GmDirectEffectScope::Station(
+    let tactical = scoped(crate::gm::operations::effect::GmDirectEffectScope::Station(
         crate::core::messages::StationId("tactical".into()),
     ));
-    let drive = scoped(crate::gm_effect::GmDirectEffectScope::System(
+    let drive = scoped(crate::gm::operations::effect::GmDirectEffectScope::System(
         crate::core::messages::SystemId("impulse-drive".into()),
     ));
     assert_ne!(armed, helm, "a Station scope is not the whole hull");
@@ -2562,7 +2563,7 @@ fn an_armed_direct_effect_moves_the_digest_and_an_empty_queue_leaves_it_alone() 
     );
     assert_eq!(
         armed,
-        scoped(crate::gm_effect::GmDirectEffectScope::Entity),
+        scoped(crate::gm::operations::effect::GmDirectEffectScope::Entity),
         "the whole-hull scope is what every pre-#1311 arm meant, so it folds \
          exactly as it did and no recorded world's digest moved"
     );

@@ -33,7 +33,7 @@ pub struct DebugOverlayEnabled(pub bool);
 /// everything that drives it must survive into a demo build where the
 /// Debug/Cheat tab is absent. Pause has its own bridge pending flag and never
 /// enters the Debug Surface catalogue.
-pub use crate::gm_action::SimulationPaused;
+pub use crate::gm::actions::action::SimulationPaused;
 
 /// Resource indicating whether the damage debug overlay is enabled.
 #[derive(Resource, Default)]
@@ -179,7 +179,7 @@ pub fn drain_client_pause(
     mut reader: MessageReader<crate::lobby::InboundMessage>,
     sessions: Res<crate::lobby::Sessions>,
     fleet: Option<Res<crate::lockstep::FleetLockstep>>,
-    native_gm: Option<Res<crate::gm_action::NativeGmAuthority>>,
+    native_gm: Option<Res<crate::gm::actions::action::NativeGmAuthority>>,
     mut paused: ResMut<SimulationPaused>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {

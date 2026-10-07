@@ -74,7 +74,7 @@ use crate::lockstep::transfer::SnapshotChunk;
 /// symptom but a divergence.
 // Revision 12 also carries the frozen Station ratings through the lobby mesh;
 // revision 11's JavaScript would discard them before Rust could seed a ship.
-// Revision 13 adds [`crate::gm_restore::GmRestoreFrame`] — the readiness,
+// Revision 13 adds [`crate::gm::continuity::restore::GmRestoreFrame`] — the readiness,
 // per-peer load report and terminal settle of a multi-peer live restore
 // (issue #1447). A revision-12 host would hold its world on the canonical
 // request, never answer the readiness ask, and be excluded as a nonresponder
@@ -109,13 +109,13 @@ pub enum MeshFrame {
     SlotClaim(SlotClaimFrame),
     /// A GM proposal or owner-sequenced terminal decision, independently
     /// deliverable while `FixedUpdate` is starved by Pause (issue #1292).
-    GmAction(crate::gm_action::GmActionFrame),
+    GmAction(crate::gm::actions::action::GmActionFrame),
     /// First-time mid-session GM pause/transfer/admission protocol (#1293).
-    GmJoin(crate::gm_join::GmJoinFrame),
+    GmJoin(crate::gm::continuity::join::GmJoinFrame),
     /// Multi-peer live-restore readiness, load reports and the terminal settle
     /// (issue #1447). Like every other running-mission frame it is minted and
     /// read only by Rust; `gui/host-mesh.js` ferries it opaquely.
-    GmRestore(crate::gm_restore::GmRestoreFrame),
+    GmRestore(crate::gm::continuity::restore::GmRestoreFrame),
 }
 
 impl MeshFrame {

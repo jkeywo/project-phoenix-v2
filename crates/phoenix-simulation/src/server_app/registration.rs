@@ -339,7 +339,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // profile. Lobby systems name the optional resource on every
             // assembled target, so its census declaration belongs at this
             // shared assembly site even though only the browser GM inserts it.
-            .declare_state::<crate::gm_projection::BrowserGameMaster>(
+            .declare_state::<crate::gm::observation::projection::BrowserGameMaster>(
                 StateClass::Derived,
                 "browser-gm-profile-marker-state",
             )
@@ -786,7 +786,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "runtime-spawn-origin-state",
             )
-            .declare_state::<crate::gm_npc::NpcDoctrineState>(
+            .declare_state::<crate::gm::operations::npc::NpcDoctrineState>(
                 StateClass::Folded,
                 "gm-npc-doctrine-state",
             )
@@ -927,7 +927,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // template, and spawn/restore reconstructs this read-only component.
         // Like SecurityTargetActions, it is authoritative content, not a
         // presentation or delta-suppression cache.
-        .declare_state::<crate::gm_information::reports::SensorsObservationConfig>(
+        .declare_state::<crate::gm::operations::information::reports::SensorsObservationConfig>(
             StateClass::DeferredFold,
             "sensors-observation-configuration-state",
         )
@@ -1096,7 +1096,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // least of all into a scenario that authored no report and has
                 // to keep its ordinary victory/defeat ending (AC5).
                 crate::mission_report::reset_mission_report,
-                crate::gm_action::reset,
+                crate::gm::actions::action::reset,
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
                 spawn_game_start_entities,

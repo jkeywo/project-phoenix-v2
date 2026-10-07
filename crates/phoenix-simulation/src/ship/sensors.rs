@@ -85,7 +85,7 @@ impl Plugin for ShipSensorsPlugin {
                     tick_sensors_threat_warning
                         .in_set(crate::sim_sets::FixedStep::TickSensorsThreatWarning)
                         .in_set(crate::sim_sets::SimSet::Input),
-                    crate::gm_information::reports::advance
+                    crate::gm::operations::information::reports::advance
                         .in_set(crate::sim_sets::FixedStep::AdvanceSensorReports)
                         .in_set(crate::sim_sets::SimSet::Publish),
                     publish_sensors_blackboard
@@ -169,11 +169,15 @@ pub fn handle_sensors_messages(
             let contact_mode = observer_uuid
                 .and_then(|observer| {
                     content.as_ref().map(|runtime| {
-                        crate::gm_contact::mode(&runtime.contact_overrides, &observer.0, uuid)
+                        crate::gm::operations::contact::mode(
+                            &runtime.contact_overrides,
+                            &observer.0,
+                            uuid,
+                        )
                     })
                 })
                 .unwrap_or_default();
-            if contact_mode == crate::gm_contact::ContactMode::Conceal {
+            if contact_mode == crate::gm::operations::contact::ContactMode::Conceal {
                 crate::command_admission::finish_action_feedback(
                     cmd,
                     &mut outbound,
@@ -219,15 +223,16 @@ pub fn handle_sensors_messages(
                         })
                     })
                 });
-            let label =
-                if contact_mode == crate::gm_contact::ContactMode::Reveal && !ordinarily_visible {
-                    "console.sensors.basic_contact".to_string()
-                } else {
-                    entity_name_q
-                        .iter()
-                        .find_map(|(u, n)| (u.0 == *uuid).then(|| n.0.clone()))
-                        .unwrap_or_else(|| uuid.clone())
-                };
+            let label = if contact_mode == crate::gm::operations::contact::ContactMode::Reveal
+                && !ordinarily_visible
+            {
+                "console.sensors.basic_contact".to_string()
+            } else {
+                entity_name_q
+                    .iter()
+                    .find_map(|(u, n)| (u.0 == *uuid).then(|| n.0.clone()))
+                    .unwrap_or_else(|| uuid.clone())
+            };
 
             let sender_origin = control_sources
                 .0
@@ -344,7 +349,7 @@ pub fn tick_sensors_frequency_hint(
         if observer_uuid
             .and_then(|observer| {
                 contact_runtime.as_ref().map(|runtime| {
-                    crate::gm_contact::mode(
+                    crate::gm::operations::contact::mode(
                         &runtime.contact_overrides,
                         &observer.0,
                         &current_target,
@@ -352,7 +357,7 @@ pub fn tick_sensors_frequency_hint(
                 })
             })
             .unwrap_or_default()
-            == crate::gm_contact::ContactMode::Conceal
+            == crate::gm::operations::contact::ContactMode::Conceal
         {
             state.last_sent_target = None;
             state.last_sent_frequency = None;
@@ -617,8 +622,11 @@ pub fn tick_sensors_threat_warning(
         let mut closest: Option<(String, f32, f32, f32)> = None; // uuid, dx, dz, dist_sq
         for (other_uuid, ox, oz, other_faction) in &candidates {
             if content.as_ref().is_some_and(|runtime| {
-                crate::gm_contact::mode(&runtime.contact_overrides, &self_uuid.0, other_uuid)
-                    == crate::gm_contact::ContactMode::Conceal
+                crate::gm::operations::contact::mode(
+                    &runtime.contact_overrides,
+                    &self_uuid.0,
+                    other_uuid,
+                ) == crate::gm::operations::contact::ContactMode::Conceal
             }) {
                 continue;
             }
@@ -740,7 +748,7 @@ pub fn publish_sensors_blackboard(
             Option<&crate::ai::server::AiProfile>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
-            Option<&crate::gm_information::reports::SensorsObservationConfig>,
+            Option<&crate::gm::operations::information::reports::SensorsObservationConfig>,
             Has<crate::lockstep::FleetSlotOf>,
         ),
         With<crate::server_app::Ship>,
@@ -801,7 +809,7 @@ pub fn publish_sensors_blackboard(
             contact_reports: uuid
                 .and_then(|id| {
                     content.as_ref().map(|runtime| {
-                        crate::gm_information::reports::projection(
+                        crate::gm::operations::information::reports::projection(
                             &runtime.contact_information.reports,
                             &id.0,
                             tick.as_ref().map_or(0, |tick| tick.0),
@@ -812,7 +820,10 @@ pub fn publish_sensors_blackboard(
             contact_ghosts: uuid
                 .and_then(|id| {
                     content.as_ref().map(|runtime| {
-                        crate::gm_information::ghost_snapshots(&runtime.contact_information, &id.0)
+                        crate::gm::operations::information::ghost_snapshots(
+                            &runtime.contact_information,
+                            &id.0,
+                        )
                     })
                 })
                 .unwrap_or_default(),
@@ -820,7 +831,7 @@ pub fn publish_sensors_blackboard(
             contact_classifications: uuid
                 .and_then(|id| {
                     content.as_ref().map(|runtime| {
-                        crate::gm_contact::classification_labels(
+                        crate::gm::operations::contact::classification_labels(
                             &runtime.contact_classifications,
                             &id.0,
                         )
@@ -831,7 +842,7 @@ pub fn publish_sensors_blackboard(
             radar_shows,
             radar_selects,
             science_target_uuid: sensors_target.and_then(|st| st.0.clone()).filter(|target| {
-                overrides.get(target) != Some(&crate::gm_contact::ContactMode::Conceal)
+                overrides.get(target) != Some(&crate::gm::operations::contact::ContactMode::Conceal)
             }),
         };
         bbs.0.insert(
@@ -899,15 +910,19 @@ pub fn publish_sensor_radar_blackboard(
         let selected_target = sensors_target.and_then(|st| st.0.clone()).filter(|target| {
             uuid.and_then(|uuid| {
                 content.as_ref().map(|content| {
-                    crate::gm_contact::mode(&content.contact_overrides, &uuid.0, target)
+                    crate::gm::operations::contact::mode(
+                        &content.contact_overrides,
+                        &uuid.0,
+                        target,
+                    )
                 })
             })
             .unwrap_or_default()
-                != crate::gm_contact::ContactMode::Conceal
+                != crate::gm::operations::contact::ContactMode::Conceal
                 && !uuid
                     .and_then(|uuid| {
                         content.as_ref().map(|content| {
-                            crate::gm_information::reports::contains(
+                            crate::gm::operations::information::reports::contains(
                                 &content.contact_information.reports,
                                 &uuid.0,
                                 target,
@@ -1421,8 +1436,11 @@ pub fn operate_sensors_ai(
                         && content
                             .as_ref()
                             .map(|runtime| {
-                                crate::gm_contact::mode(&runtime.contact_overrides, self_uuid, u)
-                                    != crate::gm_contact::ContactMode::Conceal
+                                crate::gm::operations::contact::mode(
+                                    &runtime.contact_overrides,
+                                    self_uuid,
+                                    u,
+                                ) != crate::gm::operations::contact::ContactMode::Conceal
                             })
                             .unwrap_or(true)
                 })
@@ -1504,7 +1522,7 @@ pub fn operate_sensors_ai(
             entity_uuid
                 .and_then(|observer| {
                     content.as_ref().map(|runtime| {
-                        crate::gm_contact::mode(
+                        crate::gm::operations::contact::mode(
                             &runtime.contact_overrides,
                             &observer.0,
                             &candidate.uuid,
@@ -1512,7 +1530,7 @@ pub fn operate_sensors_ai(
                     })
                 })
                 .unwrap_or_default()
-                != crate::gm_contact::ContactMode::Conceal
+                != crate::gm::operations::contact::ContactMode::Conceal
         });
         let mut selector = selector_comp.selector.clone();
         candidates.retain(|candidate| {
@@ -1525,7 +1543,7 @@ pub fn operate_sensors_ai(
             entity_uuid.and_then(|observer| content.as_ref()?.contact_overrides.get(&observer.0))
         {
             for (uuid, mode) in rows {
-                if *mode != crate::gm_contact::ContactMode::Reveal
+                if *mode != crate::gm::operations::contact::ContactMode::Reveal
                     || candidates.iter().any(|candidate| candidate.uuid == *uuid)
                 {
                     continue;

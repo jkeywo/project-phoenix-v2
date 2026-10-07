@@ -4,12 +4,14 @@ include!("outbox_access_tests.rs");
 
 fn local_gm(app: &mut App, connected: bool, ready: bool) {
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "native-gm".into(),
-            name: "GM".into(),
-            connected,
-            ready,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "native-gm".into(),
+                name: "GM".into(),
+                connected,
+                ready,
+            },
+        ])
         .unwrap(),
     );
 }
@@ -173,12 +175,14 @@ fn identify_arrives_via_inbound_message_and_welcome_is_sent_via_outbound() {
 fn identify_welcome_projects_the_separate_gm_resource() {
     let mut app = test_app();
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "gm-1".into(),
-            name: "Morgan".into(),
-            connected: true,
-            ready: false,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: false,
+            },
+        ])
         .unwrap(),
     );
     push(
@@ -541,7 +545,7 @@ fn one_station_ship_config() -> crate::ship::config::ShipConfig {
 fn browser_gm_with_a_selected_hull_still_gets_its_stations() {
     let mut app = test_app();
     app.world_mut()
-        .insert_resource(crate::gm_projection::BrowserGameMaster);
+        .insert_resource(crate::gm::observation::projection::BrowserGameMaster);
     app.world_mut()
         .insert_resource(crate::ship_plugin::PendingShipConfig(
             one_station_ship_config(),
@@ -564,7 +568,7 @@ fn browser_gm_with_a_selected_hull_still_gets_its_stations() {
 fn browser_gm_with_no_selected_hull_gets_no_stations() {
     let mut app = test_app();
     app.world_mut()
-        .insert_resource(crate::gm_projection::BrowserGameMaster);
+        .insert_resource(crate::gm::observation::projection::BrowserGameMaster);
 
     app.update();
 
@@ -962,12 +966,14 @@ fn managed_gm_only_automatic_grant_applies_without_local_crew() {
     let mut app = test_app();
     enable_managed_lobby(&mut app, true);
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "gm-1".into(),
-            name: "Morgan".into(),
-            connected: true,
-            ready: true,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: true,
+            },
+        ])
         .unwrap(),
     );
     assert!(app
@@ -1026,12 +1032,14 @@ fn managed_force_grant_is_immutable_across_a_late_gm_disconnect() {
     let mut app = test_app();
     enable_managed_lobby(&mut app, true);
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "gm-1".into(),
-            name: "Morgan".into(),
-            connected: true,
-            ready: false,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: false,
+            },
+        ])
         .unwrap(),
     );
     app.world_mut()
@@ -1048,12 +1056,14 @@ fn managed_force_grant_is_immutable_across_a_late_gm_disconnect() {
     // grant. A disconnect observed by only this peer after that decision
     // must not make it diverge from peers that already applied the grant.
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "gm-1".into(),
-            name: "Morgan".into(),
-            connected: false,
-            ready: false,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: false,
+                ready: false,
+            },
+        ])
         .unwrap(),
     );
     tick(&mut app);
@@ -1068,12 +1078,14 @@ fn managed_validation_refuses_auto_and_force() {
     let mut app = test_app();
     enable_managed_lobby(&mut app, false);
     app.insert_resource(
-        crate::gm_roster::GmRoster::try_new(vec![crate::gm_roster::GmOperator {
-            id: "gm-1".into(),
-            name: "Morgan".into(),
-            connected: true,
-            ready: true,
-        }])
+        crate::gm::operations::roster::GmRoster::try_new(vec![
+            crate::gm::operations::roster::GmOperator {
+                id: "gm-1".into(),
+                name: "Morgan".into(),
+                connected: true,
+                ready: true,
+            },
+        ])
         .unwrap(),
     );
     {

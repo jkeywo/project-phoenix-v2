@@ -3,7 +3,8 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 use bevy::prelude::*;
 use project_phoenix::headless::determinism_audit::{
-    fixed_update_census, parse_census, require_unambiguous_fixed_update, uncovered, Ambiguity,
+    fixed_update_census, migrated_symbol, parse_census, require_unambiguous_fixed_update,
+    uncovered, Ambiguity,
 };
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::sim_rng::InstallSimRng;
@@ -205,6 +206,7 @@ fn membership_rollback_precedes_pre_input_lifecycle_and_admission() {
         "phoenix_simulation::server_app::components::sim_processing_anchor",
         "phoenix_simulation::command_admission::admit_system_commands",
     ] {
+        let name = migrated_symbol(name);
         let readers: Vec<_> = graph
             .nodes
             .iter()

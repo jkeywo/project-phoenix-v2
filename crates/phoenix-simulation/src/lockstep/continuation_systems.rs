@@ -6,7 +6,7 @@ use bevy::prelude::*;
 pub struct OwnerContinuation {
     pub state: Continuation,
     pending: Option<ContinuationRequest>,
-    deferred_proposals: Vec<crate::gm_action::GmActionProposal>,
+    deferred_proposals: Vec<crate::gm::actions::action::GmActionProposal>,
 }
 impl OwnerContinuation {
     pub fn held(&self) -> bool {
@@ -103,7 +103,10 @@ pub fn enqueue_frame(
         refuse(world, "invalid-retained-frame");
         return false;
     }
-    if let super::MeshFrame::GmAction(crate::gm_action::GmActionFrame::Proposal(proposal)) = frame {
+    if let super::MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Proposal(
+        proposal,
+    )) = frame
+    {
         let mut lane = world.resource_mut::<OwnerContinuation>();
         if lane.deferred_proposals.len() >= 4096 {
             lane.state.refuse("retained-proposal-capacity");
@@ -195,7 +198,7 @@ pub fn drain_after_mesh(world: &mut World) {
                             // authorization and sequencing on the next inbox pass.
                             for proposal in lane.deferred_proposals.drain(..) {
                                 let granted = world
-                                    .get_resource::<crate::gm_action::GmActionJournal>()
+                                    .get_resource::<crate::gm::actions::action::GmActionJournal>()
                                     .is_some_and(|journal| {
                                         journal
                                             .grant_for(&proposal.operator_id, &proposal.correlation)
@@ -205,7 +208,9 @@ pub fn drain_after_mesh(world: &mut World) {
                                     let source = proposal.from;
                                     world.resource_mut::<super::MeshInbox>().push_from(
                                         super::MeshFrame::GmAction(
-                                            crate::gm_action::GmActionFrame::Proposal(proposal),
+                                            crate::gm::actions::action::GmActionFrame::Proposal(
+                                                proposal,
+                                            ),
                                         ),
                                         super::MeshOrigin::Peer(source),
                                     );

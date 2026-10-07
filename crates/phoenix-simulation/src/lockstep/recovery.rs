@@ -53,7 +53,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::command_admission::log::{CommandLog, HostSlot, LoggedCommand};
-use crate::gm_action::{GmActionGrant, GmActionJournal};
+use crate::gm::actions::action::{GmActionGrant, GmActionJournal};
 use crate::logging::LogCat;
 use crate::sim_tick::SimTick;
 use crate::world::server::BridgeWorldSource;

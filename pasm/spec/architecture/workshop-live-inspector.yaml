@@ -94,17 +94,17 @@ entities:
       runs_in: [host-browser-runtime, native-host-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/gm_entity_inspector.rs, crates/phoenix-simulation/src/gm_world_inspector.rs, crates/phoenix-simulation/src/gm_ship_inspector.rs, crates/phoenix-simulation/src/gm_region_inspector.rs, crates/phoenix-simulation/src/gm_presentation_inspector.rs, crates/phoenix-simulation/src/gm_inspector_coverage.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/inspector-session.js, gui/gm-entity-inspector-panel.js, gui/gm-world-inspector-panel.js, gui/gm-ship-inspector-panel.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/live-layout-model.js, src/native_host/panes/operator.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, server.html]
+      paths: [crates/phoenix-simulation/src/gm/observation/entity_inspector.rs, crates/phoenix-simulation/src/gm/observation/world_inspector.rs, crates/phoenix-simulation/src/gm/observation/ship_inspector.rs, crates/phoenix-simulation/src/gm/observation/region_inspector.rs, crates/phoenix-simulation/src/gm/observation/presentation_inspector.rs, crates/phoenix-simulation/src/gm/observation/inspector_coverage.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, gui/inspector-session.js, gui/gm-entity-inspector-panel.js, gui/gm-world-inspector-panel.js, gui/gm-ship-inspector-panel.js, gui/gm-region-inspector-panel.js, gui/gm-presentation-inspector-panel.js, gui/live-layout-model.js, src/native_host/panes/operator.rs, gui/gm-workspace.js, gui/gm-workspace-shell.js, server.html]
       symbols: [EntityInspectorProjection, EntityInspectorField, EntityFieldGroup, EntityInspection, EntityReadingInputs, WorldInspectorProjection, WorldInspectorField, WorldInspection, ShipInspectorProjection, RegionInspectorProjection, RegionInspectorField, RegionInspection, RegionReadingInputs, PresentationInspectorProjection, PresentationInspectorField, PresentationInspection, ShipPresentationInputs, LiveInspectorDomain, LiveInspectorCoverageEntry, LiveInspectorCoverageSources, inventory, canonical_runtime_path, fields, reading, ship_reading, catalog_reading, asset_reading, sound_reading, catalog_readings, createInspectorSession, bindInspectorNavigation, createGmEntityInspectorPanel, createGmWorldInspectorPanel, createGmShipInspectorPanel, createGmRegionInspectorPanel, createGmPresentationInspectorPanel, parseGmEntityInspectorPayload, parseGmWorldInspectorPayload, parseGmShipInspectorPayload, parseGmRegionInspectorPayload, parseGmPresentationInspectorPayload]
       tests:
         - npx vitest run tests/client/inspector-session.test.js
-        - crates/phoenix-simulation/src/gm_entity_inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_world_inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_ship_inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_region_inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_presentation_inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_inspector_coverage_tests.rs
-        - crates/phoenix-simulation/src/gm_projection_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/entity_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/world_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/ship_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/region_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/presentation_inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/inspector_coverage_tests.rs
+        - crates/phoenix-simulation/src/gm/observation/projection_tests.rs
         - src/native_host/panes/operator_tests.rs
         - cargo test --lib gm_entity_inspector
         - cargo test --lib gm_world_inspector
@@ -155,12 +155,12 @@ entities:
       coordinates: [gm-t2-directed-world-actions]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/gm_npc.rs, crates/phoenix-simulation/src/gm_npc/inspector.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/core/codec.rs, gui/gm-npc-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html, tests/gm_npc.rs]
+      paths: [crates/phoenix-simulation/src/gm/operations/npc.rs, crates/phoenix-simulation/src/gm/operations/npc/inspector.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/core/codec.rs, gui/gm-npc-panel.js, gui/gm-workspace.js, gui/native-gm-workspace.js, server.html, tests/gm_npc.rs]
       symbols: [SetNpcDoctrineChecked, apply_checked, NpcInspector, valid_revision]
       tests:
-        - crates/phoenix-simulation/src/gm_npc_tests.rs
-        - crates/phoenix-simulation/src/gm_npc/inspector_tests.rs
-        - crates/phoenix-simulation/src/gm_action_tests.rs
+        - crates/phoenix-simulation/src/gm/operations/npc_tests.rs
+        - crates/phoenix-simulation/src/gm/operations/npc/inspector_tests.rs
+        - crates/phoenix-simulation/src/gm/actions/action_tests.rs
         - crates/phoenix-simulation/src/core/codec_mesh_frame_tests.rs
         - cargo test --features headless --test gm_npc live_inspector_
         - cargo test --features host,headless --lib gm_npc::inspector

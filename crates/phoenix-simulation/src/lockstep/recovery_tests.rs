@@ -77,12 +77,12 @@ fn gm_grant(sequence: u64, apply_tick: u64) -> GmActionGrant {
         from,
         sequenced_by: HostSlot(1),
         operator_id: "gm-recovery".into(),
-        correlation: crate::gm_action::GmActionId::new(format!("gm-{sequence}"))
+        correlation: crate::gm::actions::action::GmActionId::new(format!("gm-{sequence}"))
             .expect("valid correlation"),
         recovery_generation: 0,
         apply_tick,
-        order: crate::gm_action::GmActionOrder::new(from, sequence),
-        action: crate::gm_action::GmAction::SetSessionPaused {
+        order: crate::gm::actions::action::GmActionOrder::new(from, sequence),
+        action: crate::gm::actions::action::GmAction::SetSessionPaused {
             active: sequence % 2 == 1,
         },
     }

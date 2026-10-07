@@ -89,9 +89,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-presentation/src/server/audio.rs, crates/phoenix-simulation/src/gm_projection.rs, gui/gm-local-projection.js]
+      paths: [crates/phoenix-simulation/src/console_bridge.rs, src/server/bridge.rs, crates/phoenix-presentation/src/server/viewscreen_border.rs, crates/phoenix-presentation/src/server/audio.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, gui/gm-local-projection.js]
       symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent, GmEntityProjectionChanged]
-      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js, src/server/bridge_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-presentation/src/server/audio_tests.rs, crates/phoenix-simulation/src/gm_projection_tests.rs]
+      tests: [cargo test, tests/client/gm-local-projection.test.js, tests/smoke/gm-page.spec.js, src/server/bridge_tests.rs, crates/phoenix-presentation/src/server/viewscreen_border_tests.rs, crates/phoenix-presentation/src/server/audio_tests.rs, crates/phoenix-simulation/src/gm/observation/projection_tests.rs]
 
   - state: browser-gm-profile-marker-state
     core:
@@ -105,9 +105,9 @@ entities:
       writers: [host-page-push-bridge]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/gm_projection.rs, src/server/bridge.rs, server.html]
+      paths: [crates/phoenix-simulation/src/gm/observation/projection.rs, src/server/bridge.rs, server.html]
       symbols: [BrowserGameMaster, GmProjectionPlugin]
-      tests: [cargo test, tests/smoke/gm-page.spec.js, crates/phoenix-simulation/src/gm_projection_tests.rs, src/server/bridge_tests.rs]
+      tests: [cargo test, tests/smoke/gm-page.spec.js, crates/phoenix-simulation/src/gm/observation/projection_tests.rs, src/server/bridge_tests.rs]
 
   - component: entity-targetability-contract
     core:

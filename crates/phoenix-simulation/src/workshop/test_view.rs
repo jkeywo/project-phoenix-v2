@@ -20,7 +20,7 @@
 //! So a Test observes through the ordinary builders rather than a Workshop-only
 //! substitute, and adds no command route, credential or save path to do it.
 use super::test_protocol::{TestShip, TestView};
-use crate::gm_projection::NativeGmPresentation;
+use crate::gm::observation::projection::NativeGmPresentation;
 use crate::lockstep::FleetSlotOf;
 use crate::server_app::LocalShip;
 use bevy::prelude::*;

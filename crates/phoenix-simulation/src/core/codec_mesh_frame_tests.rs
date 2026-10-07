@@ -199,16 +199,16 @@ fn a_slot_claim_frame_round_trips_through_the_shared_envelope() {
 
 #[test]
 fn an_attributed_gm_action_round_trips_through_the_shared_envelope() {
-    let frame = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
-        crate::gm_action::GmActionGrant {
+    let frame = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Granted(
+        crate::gm::actions::action::GmActionGrant {
             from: HostSlot(2),
             sequenced_by: HostSlot(1),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("pause-17").unwrap(),
+            correlation: crate::gm::actions::action::GmActionId::new("pause-17").unwrap(),
             recovery_generation: 0,
             apply_tick: 419,
-            order: crate::gm_action::GmActionOrder::new(HostSlot(2), 17),
-            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            order: crate::gm::actions::action::GmActionOrder::new(HostSlot(2), 17),
+            action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
         },
     ));
     let text = super::encode_mesh_frame(&frame).expect("encodes");
@@ -224,24 +224,24 @@ fn an_attributed_gm_action_round_trips_through_the_shared_envelope() {
 
 #[test]
 fn gm_proposals_and_canonical_refusals_round_trip_on_the_same_lane() {
-    let proposal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Proposal(
-        crate::gm_action::GmActionProposal {
+    let proposal = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Proposal(
+        crate::gm::actions::action::GmActionProposal {
             from: HostSlot(2),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("proposal-1").unwrap(),
-            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            correlation: crate::gm::actions::action::GmActionId::new("proposal-1").unwrap(),
+            action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
         },
     ));
-    let refusal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
-        crate::gm_action::GmActionRefusal {
+    let refusal = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Refused(
+        crate::gm::actions::action::GmActionRefusal {
             sequenced_by: HostSlot(1),
             requester: HostSlot(2),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("proposal-1").unwrap(),
-            action_kind: crate::gm_action::GmActionKind::SessionPause,
+            correlation: crate::gm::actions::action::GmActionId::new("proposal-1").unwrap(),
+            action_kind: crate::gm::actions::action::GmActionKind::SessionPause,
             requested_active: true,
             tick: 419,
-            reason: crate::gm_action::GmActionRefusalReason::WrongPhase,
+            reason: crate::gm::actions::action::GmActionRefusalReason::WrongPhase,
             target: None,
             verb: None,
             lever: None,
@@ -256,18 +256,18 @@ fn gm_proposals_and_canonical_refusals_round_trip_on_the_same_lane() {
     ));
     // A refused Fire crosses the same lane still naming the event it tried
     // to fire (issue #1301); every GM must read the same attributed answer.
-    let refused_fire = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
-        crate::gm_action::GmActionRefusal {
+    let refused_fire = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Refused(
+        crate::gm::actions::action::GmActionRefusal {
             sequenced_by: HostSlot(1),
             requester: HostSlot(2),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("fire-1").unwrap(),
-            action_kind: crate::gm_action::GmActionKind::EventControl,
+            correlation: crate::gm::actions::action::GmActionId::new("fire-1").unwrap(),
+            action_kind: crate::gm::actions::action::GmActionKind::EventControl,
             requested_active: true,
             tick: 419,
-            reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+            reason: crate::gm::actions::action::GmActionRefusalReason::UnknownGmEvent,
             target: Some("base-world::breach_alarm".into()),
-            verb: Some(crate::gm_action::GmEventVerb::Fire),
+            verb: Some(crate::gm::actions::action::GmEventVerb::Fire),
             lever: None,
             effect_scope: None,
             objective_verb: None,
@@ -281,19 +281,19 @@ fn gm_proposals_and_canonical_refusals_round_trip_on_the_same_lane() {
     // And a refused SKIP crosses it naming both the event and the lever
     // (issue #1304): without the lever every GM's feed would report it as a
     // refused Fire, the opposite sentence about the same button.
-    let refused_skip = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
-        crate::gm_action::GmActionRefusal {
+    let refused_skip = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Refused(
+        crate::gm::actions::action::GmActionRefusal {
             sequenced_by: HostSlot(1),
             requester: HostSlot(2),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("skip-1").unwrap(),
-            action_kind: crate::gm_action::GmActionKind::EventControl,
+            correlation: crate::gm::actions::action::GmActionId::new("skip-1").unwrap(),
+            action_kind: crate::gm::actions::action::GmActionKind::EventControl,
             requested_active: true,
             tick: 419,
-            reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+            reason: crate::gm::actions::action::GmActionRefusalReason::UnknownGmEvent,
             target: Some("base-world::breach_alarm".into()),
             verb: None,
-            lever: Some(crate::gm_event::GmEventLever::SkipNext),
+            lever: Some(crate::gm::operations::event::GmEventLever::SkipNext),
             effect_scope: None,
             objective_verb: None,
             objective_instance_scope: None,
@@ -320,18 +320,18 @@ fn arming_a_skip_uses_its_own_verb_on_the_same_exact_typed_ingress() {
         .expect("valid skip request");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::ArmGmEventSkip {
+        crate::gm::actions::action::GmAction::ArmGmEventSkip {
             event: "base-world::courier_lost".into(),
         }
     );
     assert_eq!(
         request.action.kind(),
-        crate::gm_action::GmActionKind::EventControl,
+        crate::gm::actions::action::GmActionKind::EventControl,
         "one family, three levers"
     );
     assert_eq!(
         request.action.event_lever(),
-        Some(crate::gm_event::GmEventLever::SkipNext),
+        Some(crate::gm::operations::event::GmEventLever::SkipNext),
         "and the durable result must be able to say WHICH lever"
     );
     assert_eq!(request.action.target_id(), Some("base-world::courier_lost"));
@@ -355,7 +355,7 @@ fn arming_a_skip_uses_its_own_verb_on_the_same_exact_typed_ingress() {
 
 #[test]
 fn first_time_gm_join_frames_round_trip_on_the_shared_envelope() {
-    use crate::gm_join::{
+    use crate::gm::continuity::join::{
         GmJoinApproval, GmJoinCandidate, GmJoinCommit, GmJoinFrame, GmJoinId, GmJoinKind,
         GmJoinRefusal,
     };
@@ -418,8 +418,8 @@ fn first_time_gm_join_frames_round_trip_on_the_shared_envelope() {
 /// catalogue row a GM picked is their storage key and not fleet traffic.
 #[test]
 fn live_restore_frames_round_trip_on_the_shared_envelope() {
-    use crate::gm_action::GmActionOrder;
-    use crate::gm_restore::{GmRestoreFailure, GmRestoreFrame};
+    use crate::gm::actions::action::GmActionOrder;
+    use crate::gm::continuity::restore::{GmRestoreFailure, GmRestoreFrame};
 
     let restore = GmActionOrder::new(HostSlot(3), 11);
     let frames = [
@@ -500,7 +500,7 @@ fn station_takeover_and_existing_system_commands_share_the_exact_typed_ingress()
         .expect("valid takeover request");
     assert_eq!(
         takeover.action,
-        crate::gm_action::GmAction::SetStationPuppet {
+        crate::gm::actions::action::GmAction::SetStationPuppet {
             ship: crate::command_admission::log::ShipKey("ship-1".into()),
             station: crate::core::messages::StationId("captain".into()),
             active: true,
@@ -511,7 +511,8 @@ fn station_takeover_and_existing_system_commands_share_the_exact_typed_ingress()
             r#"{"operator_id":"gm-1","correlation":"command-17","action":"issue_station_command","ship":"ship-1","station":"captain","target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}"#,
         )
         .expect("valid existing System command");
-    let crate::gm_action::GmAction::IssueStationCommand { payload, .. } = command.action else {
+    let crate::gm::actions::action::GmAction::IssueStationCommand { payload, .. } = command.action
+    else {
         panic!("decoded the wrong typed action")
     };
     assert_eq!(
@@ -548,13 +549,13 @@ fn firing_an_authored_gm_event_uses_the_same_exact_typed_ingress() {
         .expect("valid fire request");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::FireGmEvent {
+        crate::gm::actions::action::GmAction::FireGmEvent {
             event: "base-world::breach_alarm".into(),
         }
     );
     assert_eq!(
         request.action.kind(),
-        crate::gm_action::GmActionKind::EventControl
+        crate::gm::actions::action::GmActionKind::EventControl
     );
     assert_eq!(
         request.action.target_id(),
@@ -596,19 +597,19 @@ fn pausing_an_authored_gm_event_uses_the_same_exact_typed_ingress() {
         let request = super::decode_gm_action_request(raw).expect("valid pause request");
         assert_eq!(
             request.action,
-            crate::gm_action::GmAction::SetEventPaused {
+            crate::gm::actions::action::GmAction::SetEventPaused {
                 event: "base-world::breach_alarm".into(),
                 active,
             }
         );
         assert_eq!(
             request.action.kind(),
-            crate::gm_action::GmActionKind::EventControl,
+            crate::gm::actions::action::GmActionKind::EventControl,
             "Pause routes to the mission surface beside Fire"
         );
         assert_eq!(
             request.action.verb(),
-            Some(crate::gm_action::GmEventVerb::Pause),
+            Some(crate::gm::actions::action::GmEventVerb::Pause),
             "and the durable result must be able to say WHICH lever it was"
         );
         assert_eq!(request.action.target_id(), Some("base-world::breach_alarm"));
@@ -645,18 +646,18 @@ fn pausing_an_authored_gm_event_uses_the_same_exact_typed_ingress() {
 /// refused Fire of that same event.
 #[test]
 fn a_replicated_event_control_refusal_carries_its_lever() {
-    let refusal = MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(
-        crate::gm_action::GmActionRefusal {
+    let refusal = MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Refused(
+        crate::gm::actions::action::GmActionRefusal {
             sequenced_by: HostSlot(1),
             requester: HostSlot(2),
             operator_id: "gm-1".into(),
-            correlation: crate::gm_action::GmActionId::new("pause-1").unwrap(),
-            action_kind: crate::gm_action::GmActionKind::EventControl,
+            correlation: crate::gm::actions::action::GmActionId::new("pause-1").unwrap(),
+            action_kind: crate::gm::actions::action::GmActionKind::EventControl,
             requested_active: false,
             tick: 419,
-            reason: crate::gm_action::GmActionRefusalReason::UnknownGmEvent,
+            reason: crate::gm::actions::action::GmActionRefusalReason::UnknownGmEvent,
             target: Some("base-world::breach_alarm".into()),
-            verb: Some(crate::gm_action::GmEventVerb::Pause),
+            verb: Some(crate::gm::actions::action::GmEventVerb::Pause),
             lever: None,
             effect_scope: None,
             objective_verb: None,
@@ -678,7 +679,7 @@ fn a_replicated_event_control_refusal_carries_its_lever() {
     let legacy = text.replace(r#","verb":"pause""#, "");
     let legacy_value: serde_json::Value = serde_json::from_str(&legacy).unwrap();
     assert!(legacy_value["d"].get("verb").is_none(), "{legacy}");
-    let Some(MeshFrame::GmAction(crate::gm_action::GmActionFrame::Refused(decoded))) =
+    let Some(MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Refused(decoded))) =
         super::decode_mesh_frame(&legacy)
     else {
         panic!("a legacy refusal still decodes")
@@ -708,16 +709,16 @@ fn a_direct_effect_uses_the_same_exact_typed_ingress() {
         .expect("valid direct-effect request");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::ApplyDirectEffect {
+        crate::gm::actions::action::GmAction::ApplyDirectEffect {
             target: "npc-1".into(),
-            scope: crate::gm_effect::GmDirectEffectScope::Entity,
-            effect: crate::gm_effect::GmDirectEffectKind::Damage,
+            scope: crate::gm::operations::effect::GmDirectEffectScope::Entity,
+            effect: crate::gm::operations::effect::GmDirectEffectKind::Damage,
             amount_milli_hp: 25_000,
         }
     );
     assert_eq!(
         request.action.kind(),
-        crate::gm_action::GmActionKind::DirectEffect
+        crate::gm::actions::action::GmActionKind::DirectEffect
     );
     assert_eq!(
         request.action.target_id(),
@@ -731,8 +732,8 @@ fn a_direct_effect_uses_the_same_exact_typed_ingress() {
         .expect("valid heal request");
     assert!(matches!(
         heal.action,
-        crate::gm_action::GmAction::ApplyDirectEffect {
-            effect: crate::gm_effect::GmDirectEffectKind::Heal,
+        crate::gm::actions::action::GmAction::ApplyDirectEffect {
+            effect: crate::gm::operations::effect::GmDirectEffectKind::Heal,
             ..
         }
     ));
@@ -747,12 +748,12 @@ fn a_direct_effect_uses_the_same_exact_typed_ingress() {
         .expect("valid Station-scoped request");
     assert_eq!(
         station.action,
-        crate::gm_action::GmAction::ApplyDirectEffect {
+        crate::gm::actions::action::GmAction::ApplyDirectEffect {
             target: "npc-1".into(),
-            scope: crate::gm_effect::GmDirectEffectScope::Station(
+            scope: crate::gm::operations::effect::GmDirectEffectScope::Station(
                 crate::core::messages::StationId("helm".into())
             ),
-            effect: crate::gm_effect::GmDirectEffectKind::Damage,
+            effect: crate::gm::operations::effect::GmDirectEffectKind::Damage,
             amount_milli_hp: 25_000,
         }
     );
@@ -762,12 +763,12 @@ fn a_direct_effect_uses_the_same_exact_typed_ingress() {
         .expect("valid System-scoped request");
     assert_eq!(
         system.action,
-        crate::gm_action::GmAction::ApplyDirectEffect {
+        crate::gm::actions::action::GmAction::ApplyDirectEffect {
             target: "npc-1".into(),
-            scope: crate::gm_effect::GmDirectEffectScope::System(crate::core::messages::SystemId(
-                "impulse-drive".into()
-            )),
-            effect: crate::gm_effect::GmDirectEffectKind::Heal,
+            scope: crate::gm::operations::effect::GmDirectEffectScope::System(
+                crate::core::messages::SystemId("impulse-drive".into())
+            ),
+            effect: crate::gm::operations::effect::GmDirectEffectKind::Heal,
             amount_milli_hp: 4_000,
         }
     );

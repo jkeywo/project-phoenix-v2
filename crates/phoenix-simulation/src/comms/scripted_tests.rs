@@ -59,11 +59,11 @@ fn recipient_comms_app() -> App {
     let mut app = scripted_comms_app();
     // These run-scope resources are always present in a real session and are
     // explicitly restored even when empty; absence has a distinct digest.
-    app.init_resource::<crate::gm_action::SimulationPaused>()
+    app.init_resource::<crate::gm::actions::action::SimulationPaused>()
         .init_resource::<crate::core::report::MissionReport>()
-        .init_resource::<crate::gm_action::GmActionJournal>()
-        .init_resource::<crate::gm_puppet::StationPuppets>()
-        .init_resource::<crate::gm_puppet::PendingGmStationCommands>();
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::operations::puppet::StationPuppets>()
+        .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
     // The production plugin graph registers every optional capture column.
     // A small fixture must register them too: World::try_query cannot build
     // the entity snapshot query while one component type is unknown.

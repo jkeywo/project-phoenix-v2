@@ -10,14 +10,14 @@ use bevy::prelude::*;
 
 use crate::console_bridge::AudioLifecycleState;
 use crate::core::messages::GamePhase;
-use crate::gm_restore::GmLiveRestore;
+use crate::gm::continuity::restore::GmLiveRestore;
 use crate::lockstep::snapshot_relay::{MeshRestoreArm, MeshRestoreOutcome, MeshSnapshotReceiver};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Boundary {
     phase: GamePhase,
     startup: bool,
-    request: Option<crate::gm_action::GmActionOrder>,
+    request: Option<crate::gm::actions::action::GmActionOrder>,
     restoring: bool,
     mesh_armed: bool,
     mesh_outcome: Option<MeshRestoreOutcome>,
@@ -99,8 +99,9 @@ pub fn advance_audio_lifecycle(world: &mut World) -> bool {
     {
         cues.clear();
     }
-    if let Some(mut requests) =
-        world.get_resource_mut::<Messages<crate::gm_presentation::sound::LiveSoundRequest>>()
+    if let Some(mut requests) = world
+        .get_resource_mut::<Messages<crate::gm::operations::presentation::sound::LiveSoundRequest>>(
+        )
     {
         requests.clear();
     }

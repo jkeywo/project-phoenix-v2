@@ -79,7 +79,7 @@ pub struct EntityState {
     /// Runtime doctrine selections survive palette withdrawal. Absent means
     /// clear any bootstrap selection and restore its original standing doctrine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub npc_doctrine: Option<crate::gm_npc::AppliedNpcDoctrine>,
+    pub npc_doctrine: Option<crate::gm::operations::npc::AppliedNpcDoctrine>,
     /// The entity's AI LOD lifecycle — see [`AiFidelityState`].
     ///
     /// This is explicit rather than inferred from [`Self::control`]: fidelity
@@ -1410,7 +1410,7 @@ pub struct ScenarioState {
     /// order: unlike the sorted fire set, the sequence here decides which
     /// placement draws which uuid from the `WorldIdMint`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
+    pub pending_gm_spawns: Vec<crate::gm::operations::spawn::PendingGmSpawn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_gm_despawns: Vec<String>,
     /// The retained inverse data for allowed GM removals, and its two cross-tick
@@ -1430,23 +1430,23 @@ pub struct ScenarioState {
     /// resume a world whose journal reports work nothing will ever do.
     #[serde(
         default,
-        skip_serializing_if = "crate::gm_despawn_undo::GmDespawnCaptures::is_empty"
+        skip_serializing_if = "crate::gm::operations::despawn_undo::GmDespawnCaptures::is_empty"
     )]
-    pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
+    pub gm_despawn_captures: crate::gm::operations::despawn_undo::GmDespawnCaptures,
     // Historical scenarios must parse so the version gate can refuse them
     // while the save catalogue still retains their scenario/seed/tick metadata.
     #[serde(default)]
-    pub contact_overrides: crate::gm_contact::ContactOverrides,
+    pub contact_overrides: crate::gm::operations::contact::ContactOverrides,
     /// M7 interpreted contact identity, scoped to the observing player ship.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub contact_classifications: crate::gm_contact::ContactClassifications,
+    pub contact_classifications: crate::gm::operations::contact::ContactClassifications,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub presentation: crate::gm_presentation::PresentationState,
+    pub presentation: crate::gm::operations::presentation::PresentationState,
     #[serde(
         default,
-        skip_serializing_if = "crate::gm_information::ContactInformation::is_empty"
+        skip_serializing_if = "crate::gm::operations::information::ContactInformation::is_empty"
     )]
-    pub contact_information: crate::gm_information::ContactInformation,
+    pub contact_information: crate::gm::operations::information::ContactInformation,
     /// `WorldContentRuntime::paused_gm_events` (issue #1303): the
     /// layer-qualified ids of GM-operable events a Game Master has paused.
     ///
@@ -1772,22 +1772,22 @@ pub struct PhoenixSnapshot {
     /// already received for a future logical boundary and its exact applied
     /// prefix. The prefix cannot be inferred from `tick`: immediately after
     /// FixedLast advances it, a grant at that new value still awaits PreUpdate.
-    pub gm_actions: crate::gm_action::GmActionJournal,
+    pub gm_actions: crate::gm::actions::action::GmActionJournal,
     /// Station-scoped takeover membership at the captured boundary. This is
     /// stored alongside the journal so a future grant and an already-applied
     /// grant remain distinguishable across FixedLast/PreUpdate boundaries.
     #[serde(default)]
-    pub gm_puppets: crate::gm_puppet::StationPuppets,
+    pub gm_puppets: crate::gm::operations::puppet::StationPuppets,
     /// Source-stripped Station commands already accepted by the canonical GM
     /// reducer but not yet copied into this tick's `AdmittedCommands` buffer.
     #[serde(default)]
-    pub gm_station_commands: crate::gm_puppet::PendingGmStationCommands,
+    pub gm_station_commands: crate::gm::operations::puppet::PendingGmStationCommands,
     /// Direct damage/heal effects already resolved by the canonical GM reducer
     /// but not yet landed by this tick's damage phase (issue #1310). Same
     /// cross-schedule reason as `gm_station_commands`, with the durable result
     /// already claiming an exact hull amount and a lethal flag.
     #[serde(default)]
-    pub gm_direct_effects: crate::gm_effect::PendingGmDirectEffects,
+    pub gm_direct_effects: crate::gm::operations::effect::PendingGmDirectEffects,
     /// Faction hostilities a GM moved in this run, with the value each pair
     /// held before any GM touched it (issue #1442).
     ///
@@ -1801,7 +1801,7 @@ pub struct PhoenixSnapshot {
     /// The variant-order hazard does not apply: every field is a `String` or a
     /// `bool`.
     #[serde(default)]
-    pub gm_faction_overrides: crate::gm_faction::GmFactionOverrides,
+    pub gm_faction_overrides: crate::gm::operations::faction::GmFactionOverrides,
     /// How long each GM placement has stood inside a player ship's sensor
     /// range, and whether its undo latch has closed (issue #1443).
     ///
@@ -1814,7 +1814,7 @@ pub struct PhoenixSnapshot {
     /// The variant-order hazard does not apply: every field is a `String`, a
     /// `u64` or a `bool`.
     #[serde(default)]
-    pub gm_spawn_exposure: crate::gm_exposure::GmSpawnExposure,
+    pub gm_spawn_exposure: crate::gm::operations::exposure::GmSpawnExposure,
     /// How long each NPC ship has had nothing to do (issue #1435).
     ///
     /// The one piece of the GM attention queue that travels. The occurrences
@@ -1829,7 +1829,7 @@ pub struct PhoenixSnapshot {
     /// desk); a save taken by a peer with no attention queue simply carries an
     /// empty one, which is the truth about what it was watching.
     #[serde(default)]
-    pub gm_idle_npcs: crate::gm_attention::GmIdleNpcWatch,
+    pub gm_idle_npcs: crate::gm::observation::attention::GmIdleNpcWatch,
     /// How long each Station has been carrying at or above its overload count
     /// (issue #1438), in fixed simulation steps.
     ///
@@ -1846,7 +1846,7 @@ pub struct PhoenixSnapshot {
     /// the authored duration, which is a conservative and visible answer rather
     /// than a silently wrong one.
     #[serde(default)]
-    pub gm_station_workload: crate::gm_workload::GmWorkloadWatch,
+    pub gm_station_workload: crate::gm::observation::workload::GmWorkloadWatch,
     /// Exact Objective lifecycle/authored state, excluding presentation transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objective_records: Vec<crate::objectives::ObjectiveRecord>,

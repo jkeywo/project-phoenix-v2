@@ -349,7 +349,7 @@ pub(crate) fn tick_trigger_pipeline(
     // rebuilt entity finds it, rather than silently doing nothing.
     if runtime.gm_despawn_captures.has_armed_restores() {
         commands.queue(|world: &mut World| {
-            crate::gm_despawn_undo::apply_armed_restores(world);
+            crate::gm::operations::despawn_undo::apply_armed_restores(world);
         });
     }
 
@@ -410,9 +410,11 @@ pub(crate) fn tick_trigger_pipeline(
         for pending in armed {
             // The action is built (and the palette borrow released) before the
             // apply below takes `&mut runtime`.
-            let action = match crate::gm_spawn::palette_entry(&runtime.gm_palette, &pending.palette)
-            {
-                Some(entry) => crate::gm_spawn::spawn_action(&pending, entry),
+            let action = match crate::gm::operations::spawn::palette_entry(
+                &runtime.gm_palette,
+                &pending.palette,
+            ) {
+                Some(entry) => crate::gm::operations::spawn::spawn_action(&pending, entry),
                 None => {
                     bevy::log::warn!(
                         "tick_trigger_pipeline: armed GM placement names palette \
@@ -503,11 +505,11 @@ pub(crate) fn tick_trigger_pipeline(
             },
             (
                 |state| {
-                    !crate::gm_event::state_event_id(state)
+                    !crate::gm::operations::event::state_event_id(state)
                         .is_some_and(|id| runtime.paused_gm_events.contains(&id))
                 },
                 |state| {
-                    !crate::gm_event::state_event_id(state)
+                    !crate::gm::operations::event::state_event_id(state)
                         .is_some_and(|id| runtime.pending_gm_event_skips.remove(&id))
                 },
             ),
@@ -520,7 +522,7 @@ pub(crate) fn tick_trigger_pipeline(
         // `reset_trigger`, and a `when` that reads false is a moment, not an
         // answer.
         if pass == 1 && !runtime.pending_gm_event_skips.is_empty() {
-            let live = crate::gm_event::live_event_ids(&runtime.triggers);
+            let live = crate::gm::operations::event::live_event_ids(&runtime.triggers);
             runtime
                 .pending_gm_event_skips
                 .retain(|id| live.contains(id));
@@ -543,7 +545,7 @@ pub(crate) fn tick_trigger_pipeline(
             fired.extend(runtime.triggers.fire_manual(
                 &mut runtime.pending_gm_event_fires,
                 current_elapsed,
-                crate::gm_event::state_event_id,
+                crate::gm::operations::event::state_event_id,
                 |origin| {
                     layered_flag_chain(origin, &runtime.flags, world_layers.layer_map.as_deref())
                 },

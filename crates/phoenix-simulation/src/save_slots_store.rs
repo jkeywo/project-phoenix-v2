@@ -309,7 +309,7 @@ impl SaveSlotService {
     /// Public because a HELD world is already a stable capture boundary and a
     /// caller that holds it must be able to take a save without waiting for a
     /// fixed tick that the hold itself has stopped: the live restore in
-    /// `crate::gm_restore` pauses first and then captures its recovery
+    /// `crate::gm::continuity::restore` pauses first and then captures its recovery
     /// checkpoint, which the `FixedLast` scheduler could never deliver. It is
     /// the SAME write the scheduler performs — same manual/autosave routing,
     /// same display-name consumption, same outcome FIFO — so nothing about the

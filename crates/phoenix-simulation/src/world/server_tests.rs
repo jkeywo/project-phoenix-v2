@@ -1588,12 +1588,12 @@ fn gm_event_app(world_toml: &str) -> App {
     let mut app = ai_trigger_test_app();
     app.add_message::<crate::core::balance::BalanceEvent>()
         .insert_resource(crate::sim_tick::SimTick(1))
-        .insert_resource(crate::gm_action::SimulationPaused(false))
-        .init_resource::<crate::gm_action::GmActionJournal>()
-        .init_resource::<crate::gm_action::GmActionLog>()
+        .insert_resource(crate::gm::actions::action::SimulationPaused(false))
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
         .add_systems(
             Update,
-            crate::gm_action::apply_due_actions.before(collect_world_events),
+            crate::gm::actions::action::apply_due_actions.before(collect_world_events),
         );
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -1609,25 +1609,25 @@ fn fire_gm_event(app: &mut App, correlation: &str, event: &str) {
     let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     let sequence = app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .next_sequence();
-    let grant = crate::gm_action::GmActionGrant {
+    let grant = crate::gm::actions::action::GmActionGrant {
         from: crate::command_admission::log::HostSlot(1),
         sequenced_by: crate::command_admission::log::HostSlot(1),
         operator_id: "gm-1".into(),
-        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        correlation: crate::gm::actions::action::GmActionId::new(correlation).unwrap(),
         recovery_generation: 0,
         apply_tick: tick,
-        order: crate::gm_action::GmActionOrder::new(
+        order: crate::gm::actions::action::GmActionOrder::new(
             crate::command_admission::log::HostSlot(1),
             sequence,
         ),
-        action: crate::gm_action::GmAction::FireGmEvent {
+        action: crate::gm::actions::action::GmAction::FireGmEvent {
             event: event.into(),
         },
     };
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
         .insert(grant)
         .expect("canonical grant");
     app.update();
@@ -1639,26 +1639,26 @@ fn set_gm_event_paused(app: &mut App, correlation: &str, event: &str, active: bo
     let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     let sequence = app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .next_sequence();
-    let grant = crate::gm_action::GmActionGrant {
+    let grant = crate::gm::actions::action::GmActionGrant {
         from: crate::command_admission::log::HostSlot(1),
         sequenced_by: crate::command_admission::log::HostSlot(1),
         operator_id: "gm-1".into(),
-        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        correlation: crate::gm::actions::action::GmActionId::new(correlation).unwrap(),
         recovery_generation: 0,
         apply_tick: tick,
-        order: crate::gm_action::GmActionOrder::new(
+        order: crate::gm::actions::action::GmActionOrder::new(
             crate::command_admission::log::HostSlot(1),
             sequence,
         ),
-        action: crate::gm_action::GmAction::SetEventPaused {
+        action: crate::gm::actions::action::GmAction::SetEventPaused {
             event: event.into(),
             active,
         },
     };
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
         .insert(grant)
         .expect("canonical grant");
     app.update();
@@ -1669,25 +1669,25 @@ fn arm_gm_event_skip(app: &mut App, correlation: &str, event: &str) {
     let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     let sequence = app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .next_sequence();
-    let grant = crate::gm_action::GmActionGrant {
+    let grant = crate::gm::actions::action::GmActionGrant {
         from: crate::command_admission::log::HostSlot(1),
         sequenced_by: crate::command_admission::log::HostSlot(1),
         operator_id: "gm-1".into(),
-        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        correlation: crate::gm::actions::action::GmActionId::new(correlation).unwrap(),
         recovery_generation: 0,
         apply_tick: tick,
-        order: crate::gm_action::GmActionOrder::new(
+        order: crate::gm::actions::action::GmActionOrder::new(
             crate::command_admission::log::HostSlot(1),
             sequence,
         ),
-        action: crate::gm_action::GmAction::ArmGmEventSkip {
+        action: crate::gm::actions::action::GmAction::ArmGmEventSkip {
             event: event.into(),
         },
     };
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
         .insert(grant)
         .expect("canonical grant");
     app.update();
@@ -1702,9 +1702,9 @@ fn armed_skips(app: &App) -> Vec<String> {
         .collect()
 }
 
-fn gm_outcomes(app: &App) -> Vec<crate::gm_action::GmActionOutcome> {
+fn gm_outcomes(app: &App) -> Vec<crate::gm::actions::action::GmActionOutcome> {
     app.world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .applied_results()
         .iter()
         .map(|result| result.outcome)
@@ -1752,8 +1752,8 @@ fn a_gm_fire_runs_the_ordinary_handler_exactly_once() {
     assert_eq!(
         gm_outcomes(&app),
         vec![
-            crate::gm_action::GmActionOutcome::Applied,
-            crate::gm_action::GmActionOutcome::NoOp,
+            crate::gm::actions::action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::NoOp,
         ]
     );
 
@@ -1771,10 +1771,10 @@ fn a_gm_fire_runs_the_ordinary_handler_exactly_once() {
     assert_eq!(
         gm_outcomes(&app),
         vec![
-            crate::gm_action::GmActionOutcome::Applied,
-            crate::gm_action::GmActionOutcome::NoOp,
-            crate::gm_action::GmActionOutcome::Applied,
-            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::NoOp,
+            crate::gm::actions::action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
         ]
     );
 }
@@ -1826,7 +1826,7 @@ fn a_gm_fire_held_by_a_false_predicate_lands_when_the_predicate_holds() {
     }
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::Applied],
+        vec![crate::gm::actions::action::GmActionOutcome::Applied],
         "the ACTION applied; what the gate withheld is the firing"
     );
 
@@ -1892,7 +1892,7 @@ fn a_gm_fire_bypasses_an_unmet_condition_and_spends_the_automatic_occurrence() {
     }
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::Applied]
+        vec![crate::gm::actions::action::GmActionOutcome::Applied]
     );
 
     // The lifecycle is ONE latch, not two: the occurrence the GM pre-empted
@@ -1937,7 +1937,7 @@ fn an_automatic_event_that_already_fired_refuses_to_fire_again_for_a_gm() {
     );
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::NoOp]
+        vec![crate::gm::actions::action::GmActionOutcome::NoOp]
     );
 }
 
@@ -1963,7 +1963,7 @@ fn a_paused_event_evaluates_nothing_and_banks_no_missed_edge() {
     set_gm_event_paused(&mut app, "pause-1", "base-world::wipe", true);
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::Applied]
+        vec![crate::gm::actions::action::GmActionOutcome::Applied]
     );
     assert!(app
         .world()
@@ -2053,8 +2053,8 @@ fn fire_still_works_while_the_event_is_paused() {
     assert_eq!(
         gm_outcomes(&app),
         vec![
-            crate::gm_action::GmActionOutcome::Applied,
-            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
         ]
     );
 }
@@ -2069,14 +2069,14 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
     set_gm_event_paused(&mut app, "pause-1", "base-world::lockdown", true);
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::Refused]
+        vec![crate::gm::actions::action::GmActionOutcome::Refused]
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionJournal>()
+            .resource::<crate::gm::actions::action::GmActionJournal>()
             .applied_results()[0]
             .reason,
-        Some(crate::gm_action::GmActionRefusalReason::UnknownGmEvent),
+        Some(crate::gm::actions::action::GmActionRefusalReason::UnknownGmEvent),
     );
     assert!(app
         .world()
@@ -2086,7 +2086,7 @@ fn only_a_declared_pause_control_is_toggleable_and_the_projection_says_so() {
 
     set_gm_event_paused(&mut app, "pause-2", "base-world::evac", true);
     let runtime = app.world().resource::<WorldContentRuntime>();
-    let events = crate::gm_event::controllable_events(
+    let events = crate::gm::operations::event::controllable_events(
         &runtime.triggers,
         &runtime.pending_gm_event_fires,
         &runtime.paused_gm_events,
@@ -2139,8 +2139,8 @@ fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
     assert_eq!(
         gm_outcomes(&app),
         vec![
-            crate::gm_action::GmActionOutcome::Applied,
-            crate::gm_action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
+            crate::gm::actions::action::GmActionOutcome::Applied,
         ]
     );
 
@@ -2198,7 +2198,7 @@ fn an_armed_skip_spends_one_occurrence_and_runs_no_handler() {
 
     // And the once-only one is spent for good: its occurrence is gone.
     assert!(
-        crate::gm_event::controllable_events(
+        crate::gm::operations::event::controllable_events(
             &app.world().resource::<WorldContentRuntime>().triggers,
             &Default::default(),
             &Default::default(),
@@ -2321,8 +2321,8 @@ fn an_event_that_declares_no_skip_refuses_the_arm_and_runs_normally() {
     assert_eq!(
         gm_outcomes(&app),
         vec![
-            crate::gm_action::GmActionOutcome::Refused,
-            crate::gm_action::GmActionOutcome::Refused,
+            crate::gm::actions::action::GmActionOutcome::Refused,
+            crate::gm::actions::action::GmActionOutcome::Refused,
         ]
     );
     assert!(armed_skips(&app).is_empty());
@@ -2512,7 +2512,7 @@ fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
 
     let listed: Vec<String> = {
         let runtime = app.world().resource::<WorldContentRuntime>();
-        crate::gm_event::controllable_events(
+        crate::gm::operations::event::controllable_events(
             &runtime.triggers,
             &runtime.pending_gm_event_fires,
             &runtime.paused_gm_events,
@@ -2535,17 +2535,17 @@ fn an_automatic_event_without_controls_is_invisible_and_unfireable() {
     fire_gm_event(&mut app, "fire-1", "base-world::silent");
     let results = app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .applied_results()
         .to_vec();
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].outcome,
-        crate::gm_action::GmActionOutcome::Refused
+        crate::gm::actions::action::GmActionOutcome::Refused
     );
     assert_eq!(
         results[0].reason,
-        Some(crate::gm_action::GmActionRefusalReason::UnknownGmEvent)
+        Some(crate::gm::actions::action::GmActionRefusalReason::UnknownGmEvent)
     );
     assert_eq!(results[0].target.as_deref(), Some("base-world::silent"));
     assert_eq!(
@@ -2635,12 +2635,12 @@ fn gm_palette_app() -> App {
     let mut app = ai_trigger_test_app();
     app.add_message::<crate::core::balance::BalanceEvent>()
         .insert_resource(crate::sim_tick::SimTick(1))
-        .insert_resource(crate::gm_action::SimulationPaused(false))
-        .init_resource::<crate::gm_action::GmActionJournal>()
-        .init_resource::<crate::gm_action::GmActionLog>()
+        .insert_resource(crate::gm::actions::action::SimulationPaused(false))
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
         .add_systems(
             Update,
-            crate::gm_action::apply_due_actions.before(collect_world_events),
+            crate::gm::actions::action::apply_due_actions.before(collect_world_events),
         );
     app.world_mut()
         .resource_mut::<WorldContentRuntime>()
@@ -2659,20 +2659,20 @@ fn place_gm_entity(
     let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     let sequence = app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .next_sequence();
-    let grant = crate::gm_action::GmActionGrant {
+    let grant = crate::gm::actions::action::GmActionGrant {
         from: crate::command_admission::log::HostSlot(1),
         sequenced_by: crate::command_admission::log::HostSlot(1),
         operator_id: "gm-1".into(),
-        correlation: crate::gm_action::GmActionId::new(correlation).unwrap(),
+        correlation: crate::gm::actions::action::GmActionId::new(correlation).unwrap(),
         recovery_generation: 0,
         apply_tick: tick,
-        order: crate::gm_action::GmActionOrder::new(
+        order: crate::gm::actions::action::GmActionOrder::new(
             crate::command_admission::log::HostSlot(1),
             sequence,
         ),
-        action: crate::gm_action::GmAction::SpawnPaletteEntity {
+        action: crate::gm::actions::action::GmAction::SpawnPaletteEntity {
             palette: palette.into(),
             variant: None,
             position_mm,
@@ -2680,7 +2680,7 @@ fn place_gm_entity(
         },
     };
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
         .insert(grant)
         .expect("canonical grant");
     app.update();
@@ -2698,7 +2698,7 @@ fn a_gm_placement_spawns_through_the_ordinary_scenario_path() {
 
     assert_eq!(
         gm_outcomes(&app),
-        vec![crate::gm_action::GmActionOutcome::Applied]
+        vec![crate::gm::actions::action::GmActionOutcome::Applied]
     );
     {
         let runtime = app.world().resource::<WorldContentRuntime>();
@@ -2778,7 +2778,7 @@ fn an_armed_placement_whose_palette_entry_vanished_is_dropped() {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime
             .pending_gm_spawns
-            .push(crate::gm_spawn::PendingGmSpawn {
+            .push(crate::gm::operations::spawn::PendingGmSpawn {
                 palette: "retired".into(),
                 variant: None,
                 name: "retired_1".into(),

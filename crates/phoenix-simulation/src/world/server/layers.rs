@@ -931,7 +931,7 @@ pub(super) fn remove_layer_triggers(runtime: &mut WorldContentRuntime, path: &st
         .triggers
         .iter()
         .filter(|state| state.origin_layer.as_deref() == Some(path))
-        .filter_map(crate::gm_event::state_event_id)
+        .filter_map(crate::gm::operations::event::state_event_id)
         .collect();
     let removed = runtime.triggers.remove_layer(path);
     for id in removed_ids {

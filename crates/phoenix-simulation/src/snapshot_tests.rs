@@ -4,7 +4,7 @@ use super::*;
 use crate::sim_rng::InstallSimRng;
 
 use crate::command_admission::HostSlot;
-use crate::gm_action::{
+use crate::gm::actions::action::{
     GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionOrder, SimulationPaused,
 };
 
@@ -395,7 +395,7 @@ fn paused_state_and_the_future_gm_frontier_round_trip_together() {
     assert_eq!(
         resumed
             .world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()
             .len(),
         1,
@@ -540,8 +540,8 @@ fn armed_gm_placements_round_trip_in_their_canonical_order() {
             ..Default::default()
         }
     }
-    fn armed(name: &str, x_mm: i64) -> crate::gm_spawn::PendingGmSpawn {
-        crate::gm_spawn::PendingGmSpawn {
+    fn armed(name: &str, x_mm: i64) -> crate::gm::operations::spawn::PendingGmSpawn {
+        crate::gm::operations::spawn::PendingGmSpawn {
             palette: "raider".into(),
             variant: None,
             name: name.into(),
@@ -831,11 +831,11 @@ fn an_armed_gm_event_skip_round_trips_beside_an_armed_fire() {
 
 #[test]
 fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
-    let target = crate::gm_puppet::StationPuppetTarget::new(
+    let target = crate::gm::operations::puppet::StationPuppetTarget::new(
         crate::command_admission::log::ShipKey("ship-player-1".into()),
         crate::core::messages::StationId("captain".into()),
     );
-    let mut puppets = crate::gm_puppet::StationPuppets::default();
+    let mut puppets = crate::gm::operations::puppet::StationPuppets::default();
     puppets.set_operator(target.clone(), "gm-b".into(), true);
     puppets.set_operator(target.clone(), "gm-a".into(), true);
 
@@ -849,10 +849,10 @@ fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let payload = capture(app.world());
     assert_eq!(payload.gm_puppets, puppets);
     app.world_mut()
-        .insert_resource(crate::gm_puppet::StationPuppets::default());
+        .insert_resource(crate::gm::operations::puppet::StationPuppets::default());
     let order = GmActionOrder::new(HostSlot(9), 99);
-    let mut pending = crate::gm_puppet::PendingGmStationCommands::default();
-    pending.push(crate::gm_puppet::PendingGmStationCommand {
+    let mut pending = crate::gm::operations::puppet::PendingGmStationCommands::default();
+    pending.push(crate::gm::operations::puppet::PendingGmStationCommand {
         tick: 999,
         order,
         operator_id: "stale-gm".into(),
@@ -863,8 +863,8 @@ fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
         payload: crate::core::messages::SystemControlPayload::SetRedAlert { active: true },
     });
     app.world_mut().insert_resource(pending);
-    let mut activity = crate::gm_puppet::StationPuppetActivity::default();
-    activity.push(crate::gm_puppet::StationPuppetActivityEntry {
+    let mut activity = crate::gm::operations::puppet::StationPuppetActivity::default();
+    activity.push(crate::gm::operations::puppet::StationPuppetActivityEntry {
         tick: 999,
         order,
         operator_id: "stale-gm".into(),
@@ -877,28 +877,29 @@ fn station_puppet_membership_round_trips_at_the_authoritative_boundary() {
     let report = restore(app.world_mut(), &payload);
     assert!(report.is_complete(), "gaps: {:?}", report.gaps);
     assert_eq!(
-        app.world().resource::<crate::gm_puppet::StationPuppets>(),
+        app.world()
+            .resource::<crate::gm::operations::puppet::StationPuppets>(),
         &puppets
     );
     assert_eq!(capture(app.world()).gm_puppets, puppets);
     assert!(
         app.world()
-            .resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
             .entries()
             .is_empty(),
         "commands queued after the saved boundary must not leak through restore"
     );
     assert!(
         app.world()
-            .resource::<crate::gm_puppet::StationPuppetActivity>()
+            .resource::<crate::gm::operations::puppet::StationPuppetActivity>()
             .entries()
             .is_empty(),
         "presentation activity is rebuilt from the restored timeline"
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_puppet::PreviousStationPuppetTargets>(),
-        &crate::gm_puppet::PreviousStationPuppetTargets::from_puppets(&puppets)
+            .resource::<crate::gm::operations::puppet::PreviousStationPuppetTargets>(),
+        &crate::gm::operations::puppet::PreviousStationPuppetTargets::from_puppets(&puppets)
     );
 }
 
@@ -1001,15 +1002,16 @@ console = "captain-console"
         app.world_mut().insert_resource(SimulationPaused(false));
         app.world_mut().insert_resource(GmActionJournal::default());
         app.world_mut()
-            .insert_resource(crate::gm_action::GmActionLog::default());
+            .insert_resource(crate::gm::actions::action::GmActionLog::default());
         app.world_mut()
-            .insert_resource(crate::gm_puppet::StationPuppets::default());
+            .insert_resource(crate::gm::operations::puppet::StationPuppets::default());
         app.world_mut()
-            .insert_resource(crate::gm_puppet::PendingGmStationCommands::default());
+            .insert_resource(crate::gm::operations::puppet::PendingGmStationCommands::default());
+        app.world_mut().insert_resource(
+            crate::gm::operations::puppet::PendingGmStationFeedbackRoutes::default(),
+        );
         app.world_mut()
-            .insert_resource(crate::gm_puppet::PendingGmStationFeedbackRoutes::default());
-        app.world_mut()
-            .insert_resource(crate::gm_puppet::StationPuppetActivity::default());
+            .insert_resource(crate::gm::operations::puppet::StationPuppetActivity::default());
         app.world_mut().spawn((
             crate::server_app::Ship,
             // This fixture is a player ship. The canonical station capability
@@ -1028,12 +1030,13 @@ console = "captain-console"
 
     let station = StationId("captain".into());
     let ship = crate::command_admission::ShipKey("player-1".into());
-    let puppet_target = crate::gm_puppet::StationPuppetTarget::new(ship.clone(), station.clone());
+    let puppet_target =
+        crate::gm::operations::puppet::StationPuppetTarget::new(ship.clone(), station.clone());
     let mut live = bootstrap();
     live.world_mut()
-        .resource_mut::<crate::gm_puppet::StationPuppets>()
+        .resource_mut::<crate::gm::operations::puppet::StationPuppets>()
         .set_operator(puppet_target, "gm-1".into(), true);
-    let grant = crate::gm_action::GmActionGrant {
+    let grant = crate::gm::actions::action::GmActionGrant {
         from: HostSlot(1),
         sequenced_by: HostSlot(1),
         operator_id: "gm-1".into(),
@@ -1057,11 +1060,11 @@ console = "captain-console"
         .unwrap();
 
     live.world_mut()
-        .run_system_once(crate::gm_action::apply_due_actions)
+        .run_system_once(crate::gm::actions::action::apply_due_actions)
         .unwrap();
     assert_eq!(
         live.world()
-            .resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
             .entries()
             .len(),
         1,
@@ -1069,10 +1072,10 @@ console = "captain-console"
     );
     assert_eq!(
         live.world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()[0]
             .outcome,
-        crate::gm_action::GmActionOutcome::Pending,
+        crate::gm::actions::action::GmActionOutcome::Pending,
     );
     let boundary = capture(live.world());
     assert!(boundary
@@ -1096,13 +1099,13 @@ console = "captain-console"
 
     for app in [&mut live, &mut recovered] {
         app.world_mut()
-            .run_system_once(crate::gm_puppet::admit_station_puppet_commands)
+            .run_system_once(crate::gm::operations::puppet::admit_station_puppet_commands)
             .unwrap();
         app.world_mut()
             .run_system_once(crate::console::captain::handle_set_red_alert)
             .unwrap();
         app.world_mut()
-            .run_system_once(crate::gm_puppet::settle_station_puppet_feedback)
+            .run_system_once(crate::gm::operations::puppet::settle_station_puppet_feedback)
             .unwrap();
         app.world_mut().resource_mut::<SimTick>().0 += 1;
     }
@@ -1115,7 +1118,7 @@ console = "captain-console"
         );
         assert!(app
             .world()
-            .resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
             .entries()
             .is_empty());
     }
@@ -1133,7 +1136,7 @@ fn snapshot_at_an_exact_gm_boundary_preserves_the_still_unapplied_frontier() {
     live.world_mut().insert_resource(SimTick(20));
     live.world_mut().insert_resource(SimulationPaused(false));
     live.world_mut()
-        .insert_resource(crate::gm_action::GmActionLog::default());
+        .insert_resource(crate::gm::actions::action::GmActionLog::default());
     let mut journal = GmActionJournal::default();
     journal
         .insert(grant(1, 1, 20, "exact-boundary-pause", true))
@@ -1150,7 +1153,7 @@ fn snapshot_at_an_exact_gm_boundary_preserves_the_still_unapplied_frontier() {
     assert_eq!(
         resumed
             .world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()
             .len(),
         0,
@@ -1158,7 +1161,7 @@ fn snapshot_at_an_exact_gm_boundary_preserves_the_still_unapplied_frontier() {
     );
     assert!(!resumed.world().resource::<SimulationPaused>().0);
 
-    resumed.add_systems(PreUpdate, crate::gm_action::apply_due_actions);
+    resumed.add_systems(PreUpdate, crate::gm::actions::action::apply_due_actions);
     resumed.update();
     assert_eq!(
         resumed
@@ -1226,9 +1229,9 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
         app.world_mut().insert_resource(SimulationPaused(false));
         app.world_mut().insert_resource(GmActionJournal::default());
         app.world_mut()
-            .insert_resource(crate::gm_action::GmActionLog::default());
+            .insert_resource(crate::gm::actions::action::GmActionLog::default());
         app.world_mut()
-            .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+            .insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
         app.world_mut().insert_sim_rng(crate::sim_rng::SimRng::new(
             4242,
             crate::sim_rng::SeedSource::Cli,
@@ -1246,7 +1249,7 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
     let mut live = bootstrap();
     live.world_mut()
         .resource_mut::<GmActionJournal>()
-        .insert(crate::gm_action::GmActionGrant {
+        .insert(crate::gm::actions::action::GmActionGrant {
             from: HostSlot(1),
             sequenced_by: HostSlot(1),
             operator_id: "gm-1".into(),
@@ -1256,18 +1259,18 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
             order: GmActionOrder::new(HostSlot(1), 1),
             action: GmAction::ApplyDirectEffect {
                 target: "npc-1".into(),
-                scope: crate::gm_effect::GmDirectEffectScope::Entity,
-                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                scope: crate::gm::operations::effect::GmDirectEffectScope::Entity,
+                effect: crate::gm::operations::effect::GmDirectEffectKind::Damage,
                 amount_milli_hp: 40_000,
             },
         })
         .unwrap();
     live.world_mut()
-        .run_system_once(crate::gm_action::apply_due_actions)
+        .run_system_once(crate::gm::actions::action::apply_due_actions)
         .unwrap();
     assert_eq!(
         live.world()
-            .resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
             .entries()
             .len(),
         1,
@@ -1302,7 +1305,7 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
 
     for app in [&mut live, &mut recovered] {
         app.world_mut()
-            .run_system_once(crate::gm_effect::apply_gm_direct_effects)
+            .run_system_once(crate::gm::operations::effect::apply_gm_direct_effects)
             .unwrap();
     }
     for app in [&mut live, &mut recovered] {
@@ -1316,7 +1319,7 @@ fn an_armed_direct_effect_survives_capture_and_lands_once_on_both_sides() {
         );
         assert!(app
             .world()
-            .resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
             .is_empty());
     }
     assert_eq!(
@@ -1356,9 +1359,9 @@ fn an_armed_scoped_effect_restores_against_the_same_station_it_named() {
         app.world_mut().insert_resource(SimulationPaused(false));
         app.world_mut().insert_resource(GmActionJournal::default());
         app.world_mut()
-            .insert_resource(crate::gm_action::GmActionLog::default());
+            .insert_resource(crate::gm::actions::action::GmActionLog::default());
         app.world_mut()
-            .insert_resource(crate::gm_effect::PendingGmDirectEffects::default());
+            .insert_resource(crate::gm::operations::effect::PendingGmDirectEffects::default());
         app.world_mut().insert_sim_rng(crate::sim_rng::SimRng::new(
             4242,
             crate::sim_rng::SeedSource::Cli,
@@ -1416,7 +1419,7 @@ console = "tactical-console"
     let mut live = bootstrap();
     live.world_mut()
         .resource_mut::<GmActionJournal>()
-        .insert(crate::gm_action::GmActionGrant {
+        .insert(crate::gm::actions::action::GmActionGrant {
             from: HostSlot(1),
             sequenced_by: HostSlot(1),
             operator_id: "gm-1".into(),
@@ -1426,16 +1429,16 @@ console = "tactical-console"
             order: GmActionOrder::new(HostSlot(1), 1),
             action: GmAction::ApplyDirectEffect {
                 target: "npc-1".into(),
-                scope: crate::gm_effect::GmDirectEffectScope::Station(
+                scope: crate::gm::operations::effect::GmDirectEffectScope::Station(
                     crate::core::messages::StationId("helm".into()),
                 ),
-                effect: crate::gm_effect::GmDirectEffectKind::Damage,
+                effect: crate::gm::operations::effect::GmDirectEffectKind::Damage,
                 amount_milli_hp: 25_000,
             },
         })
         .unwrap();
     live.world_mut()
-        .run_system_once(crate::gm_action::apply_due_actions)
+        .run_system_once(crate::gm::actions::action::apply_due_actions)
         .unwrap();
 
     let boundary = capture(live.world());
@@ -1446,7 +1449,7 @@ console = "tactical-console"
             .iter()
             .map(|effect| effect.scope.clone())
             .collect::<Vec<_>>(),
-        vec![crate::gm_effect::GmDirectEffectScope::Station(
+        vec![crate::gm::operations::effect::GmDirectEffectScope::Station(
             crate::core::messages::StationId("helm".into())
         )],
         "the capture carries WHERE the effect lands, not only how much",
@@ -1458,9 +1461,11 @@ console = "tactical-console"
             .iter()
             .map(|result| result.effect_scope.clone())
             .collect::<Vec<_>>(),
-        vec![Some(crate::gm_effect::GmDirectEffectScope::Station(
-            crate::core::messages::StationId("helm".into())
-        ))],
+        vec![Some(
+            crate::gm::operations::effect::GmDirectEffectScope::Station(
+                crate::core::messages::StationId("helm".into())
+            )
+        )],
         "and so does the durable fact the resumed feed re-renders",
     );
 
@@ -1472,7 +1477,7 @@ console = "tactical-console"
 
     for app in [&mut live, &mut recovered] {
         app.world_mut()
-            .run_system_once(crate::gm_effect::apply_gm_direct_effects)
+            .run_system_once(crate::gm::operations::effect::apply_gm_direct_effects)
             .unwrap();
     }
     for app in [&mut live, &mut recovered] {

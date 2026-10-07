@@ -83,7 +83,7 @@ set as both ship hosts. Authored `LodBubble` entities remain anchors even in a
 GM-only world with no fleet.
 
 An active canonical NPC Station takeover also holds that NPC at full fidelity.
-`crates/phoenix-simulation/src/gm_puppet.rs` installs the complete ordinary high-fidelity bundle before
+`crates/phoenix-simulation/src/gm/operations/puppet.rs` installs the complete ordinary high-fidelity bundle before
 Admission, including when the first accepted command shares the takeover tick
 or was restored awaiting delivery. Joining an already active takeover never
 resets its intent or policy memory. After the last release, the ordinary

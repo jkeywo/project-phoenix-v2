@@ -59,7 +59,7 @@ impl Plugin for TestClockPlugin {
             .init_resource::<TestClock>()
             .init_resource::<super::test_breakpoint::TestBreakpointState>()
             .init_resource::<super::test_trace::TestTrace>()
-            .init_resource::<crate::gm_action::SimulationPaused>()
+            .init_resource::<crate::gm::actions::action::SimulationPaused>()
             .add_systems(
                 First,
                 apply_controls
@@ -82,7 +82,7 @@ pub fn apply_controls(
     mut strategy: ResMut<TimeUpdateStrategy>,
     mut virtual_time: ResMut<Time<Virtual>>,
     mut fixed_time: ResMut<Time<Fixed>>,
-    mut paused: ResMut<crate::gm_action::SimulationPaused>,
+    mut paused: ResMut<crate::gm::actions::action::SimulationPaused>,
     mut exit: MessageWriter<AppExit>,
     mut visibility: ResMut<crate::presentation_contracts::TestWindowVisibility>,
     mut requested_view: ResMut<super::test_view::TestViewState>,
@@ -157,7 +157,7 @@ pub fn finish_step(
     mut clock: ResMut<TestClock>,
     mut virtual_time: ResMut<Time<Virtual>>,
     mut fixed_time: ResMut<Time<Fixed>>,
-    mut paused: ResMut<crate::gm_action::SimulationPaused>,
+    mut paused: ResMut<crate::gm::actions::action::SimulationPaused>,
 ) {
     if clock.stepping {
         clock.stepping = false;

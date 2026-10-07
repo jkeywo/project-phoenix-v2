@@ -1590,11 +1590,15 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             observer_uuid
                 .and_then(|observer| {
                     contact_runtime.as_ref().map(|runtime| {
-                        crate::gm_contact::mode(&runtime.contact_overrides, &observer.0, target)
+                        crate::gm::operations::contact::mode(
+                            &runtime.contact_overrides,
+                            &observer.0,
+                            target,
+                        )
                     })
                 })
                 .unwrap_or_default()
-                != crate::gm_contact::ContactMode::Conceal
+                != crate::gm::operations::contact::ContactMode::Conceal
         });
         // Look up the target entity's shield frequency; fall back to 0.5,
         // mirroring `tick_sensors_frequency_hint`'s own fallback.

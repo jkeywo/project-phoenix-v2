@@ -343,7 +343,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 ship_stations: empty_ship_stations(),
                 ship_config: ShipClientConfig::default(),
                 station_ratings: HashMap::new(),
-                gms: vec![crate::gm_roster::GmOperator {
+                gms: vec![crate::gm::operations::roster::GmOperator {
                     id: "gm-1".into(),
                     name: "Morgan".into(),
                     connected: true,
@@ -358,7 +358,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
         (
             ServerMessageDiscriminants::GmRosterChanged,
             ServerMessage::GmRosterChanged {
-                gms: vec![crate::gm_roster::GmOperator {
+                gms: vec![crate::gm::operations::roster::GmOperator {
                     id: "gm-1".into(),
                     name: "Morgan".into(),
                     connected: true,
@@ -1073,7 +1073,7 @@ fn chatter_json_wire_shape_matches_js_handler() {
 
 #[test]
 fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
-    let payload = crate::gm_projection::GmEntityProjectionPayload {
+    let payload = crate::gm::observation::projection::GmEntityProjectionPayload {
         recipient_diagnostics: Vec::new(),
         world_membership: Default::default(),
         world_inspector: Default::default(),
@@ -1097,17 +1097,17 @@ fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
         contact_information: Default::default(),
         contact_classification_palette: Default::default(),
         entities: vec![
-            crate::gm_projection::GmEntityProjection {
+            crate::gm::observation::projection::GmEntityProjection {
                 removable: false,
                 entity_id: "00000000-0000-0000-0000-000000000001".into(),
                 name: "Axiom".into(),
-                kind: crate::gm_projection::GmEntityKind::PlayerShip,
+                kind: crate::gm::observation::projection::GmEntityKind::PlayerShip,
                 position: [12.0, 0.0, -8.0],
-                faction: Some(crate::gm_projection::GmEntityReference {
+                faction: Some(crate::gm::observation::projection::GmEntityReference {
                     entity_id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".into(),
                     name: "faction.alliance.display_name".into(),
                 }),
-                status: crate::gm_projection::GmEntityStatus {
+                status: crate::gm::observation::projection::GmEntityStatus {
                     hull_percent: Some(73),
                     condition_percent: None,
                     destroyed: false,
@@ -1119,7 +1119,7 @@ fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
                     // spellings of `station_id` and both of `station_name` —
                     // including the omission that keeps an unowned row's shape.
                     systems: vec![
-                        crate::gm_projection::GmSystemHullStatus {
+                        crate::gm::observation::projection::GmSystemHullStatus {
                             system_id: crate::core::messages::SystemId("impulse-drive".into()),
                             station_id: Some(crate::core::messages::StationId("helm".into())),
                             station_name: Some("station.helm.display_name".into()),
@@ -1127,7 +1127,7 @@ fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
                             current_milli_hp: 96_000,
                             max_milli_hp: 120_000,
                         },
-                        crate::gm_projection::GmSystemHullStatus {
+                        crate::gm::observation::projection::GmSystemHullStatus {
                             system_id: crate::core::messages::SystemId("core".into()),
                             station_id: None,
                             station_name: None,
@@ -1137,26 +1137,26 @@ fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
                         },
                     ],
                 },
-                current_target: Some(crate::gm_projection::GmEntityReference {
+                current_target: Some(crate::gm::observation::projection::GmEntityReference {
                     entity_id: "00000000-0000-0000-0000-000000000002".into(),
                     name: "Raider".into(),
                 }),
                 geometry: None,
-                radar: crate::gm_projection::GmRadarAppearance {
+                radar: crate::gm::observation::projection::GmRadarAppearance {
                     icon: Some("playerShip".into()),
                     colour: Some([0.2, 0.8, 1.0]),
                     size: Some(4.0),
                     region_colour: None,
                 },
             },
-            crate::gm_projection::GmEntityProjection {
+            crate::gm::observation::projection::GmEntityProjection {
                 removable: false,
                 entity_id: "00000000-0000-0000-0000-000000000003".into(),
                 name: "entity.asteroid_belt.display_name".into(),
-                kind: crate::gm_projection::GmEntityKind::AsteroidField,
+                kind: crate::gm::observation::projection::GmEntityKind::AsteroidField,
                 position: [100.0, 0.0, 200.0],
                 faction: None,
-                status: crate::gm_projection::GmEntityStatus {
+                status: crate::gm::observation::projection::GmEntityStatus {
                     hull_percent: None,
                     condition_percent: None,
                     destroyed: false,
@@ -1169,7 +1169,7 @@ fn gm_entity_projection_json_pins_the_local_host_channel_shape() {
                     inner_radius: 25.0,
                     outer_radius: 125.0,
                 }),
-                radar: crate::gm_projection::GmRadarAppearance {
+                radar: crate::gm::observation::projection::GmRadarAppearance {
                     icon: None,
                     colour: None,
                     size: None,
@@ -1191,7 +1191,7 @@ fn gm_despawn_ingress_accepts_only_one_bounded_stable_target() {
     let request = decode_gm_action_request(raw).expect("typed removal");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::DespawnEntity {
+        crate::gm::actions::action::GmAction::DespawnEntity {
             target: "npc".into()
         }
     );
@@ -1217,7 +1217,7 @@ fn gm_ship_slot_backfill_ingress_is_exact_and_bounded() {
     let request = decode_gm_action_request(raw).expect("typed slot backfill");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::BackfillShipSlot {
+        crate::gm::actions::action::GmAction::BackfillShipSlot {
             slot: "wing".into()
         }
     );
@@ -1231,14 +1231,14 @@ fn gm_ship_slot_backfill_ingress_is_exact_and_bounded() {
 
 #[test]
 fn gm_activity_feed_json_pins_the_local_host_channel_shape() {
-    use crate::gm_activity::{
+    use crate::gm::observation::activity::{
         GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityConnection,
         GmActivityConnectionRole, GmActivityConnectionState, GmActivityDamage, GmActivityDetail,
         GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityLink,
         GmActivityLinkRole, GmActivityObjective, GmActivityObjectiveStatus,
         GmActivityPublicIdentity, GmActivityRedAlert, GmActivityTrigger,
     };
-    let ship = crate::gm_projection::GmEntityReference {
+    let ship = crate::gm::observation::projection::GmEntityReference {
         entity_id: "00000000-0000-4000-8000-000000000001".into(),
         name: "entity.alliance_cruiser.display_name".into(),
     };
@@ -1326,7 +1326,7 @@ fn gm_activity_feed_json_pins_the_local_host_channel_shape() {
                     action: GmActivityAction::SetSessionPaused { active: true },
                     outcome: GmActivityActionOutcome::Refused,
                     reason: Some("wrong-phase".into()),
-                    order: Some(crate::gm_action::GmActionOrder::new(
+                    order: Some(crate::gm::actions::action::GmActionOrder::new(
                         crate::command_admission::log::HostSlot(1),
                         9,
                     )),
@@ -1350,7 +1350,7 @@ fn gm_activity_feed_json_pins_the_local_host_channel_shape() {
 /// colleague paused the session when they changed a faction relation.
 #[test]
 fn gm_activity_feed_json_pins_the_faction_and_inverse_action_shapes() {
-    use crate::gm_activity::{
+    use crate::gm::observation::activity::{
         GmActivityAction, GmActivityActionOutcome, GmActivityCategory, GmActivityDetail,
         GmActivityEntry, GmActivityFeedPayload, GmActivityGmAction, GmActivityPublicIdentity,
     };
@@ -1373,7 +1373,7 @@ fn gm_activity_feed_json_pins_the_faction_and_inverse_action_shapes() {
             action,
             outcome,
             reason: reason.map(str::to_owned),
-            order: Some(crate::gm_action::GmActionOrder::new(
+            order: Some(crate::gm::actions::action::GmActionOrder::new(
                 crate::command_admission::log::HostSlot(1),
                 9,
             )),
@@ -6164,8 +6164,8 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
     .is_none());
 
     let too_many = serde_json::to_string(
-        &(0..=crate::gm_roster::MAX_GM_OPERATORS)
-            .map(|index| crate::gm_roster::GmOperator {
+        &(0..=crate::gm::operations::roster::MAX_GM_OPERATORS)
+            .map(|index| crate::gm::operations::roster::GmOperator {
                 id: format!("gm-{index}"),
                 name: String::new(),
                 connected: true,
@@ -6203,7 +6203,7 @@ fn gm_roster_decoder_rejects_duplicates_bounds_and_private_fields() {
 #[test]
 fn gm_wire_rows_have_only_public_identity_name_presence_and_readiness() {
     let message = ServerMessage::GmRosterChanged {
-        gms: vec![crate::gm_roster::GmOperator {
+        gms: vec![crate::gm::operations::roster::GmOperator {
             id: "gm-1".into(),
             name: "Morgan".into(),
             connected: true,
@@ -6312,7 +6312,7 @@ fn gm_placement_ingress_accepts_exactly_the_palette_shape() {
     .expect("a complete placement decodes");
     assert_eq!(
         request.action,
-        crate::gm_action::GmAction::SpawnPaletteEntity {
+        crate::gm::actions::action::GmAction::SpawnPaletteEntity {
             palette: "raider".to_string(),
             variant: Some("blood_eagle".to_string()),
             position_mm: [120_500, 0, -40_250],
@@ -6328,7 +6328,7 @@ fn gm_placement_ingress_accepts_exactly_the_palette_shape() {
     .expect("a variant-free placement decodes");
     assert!(matches!(
         bare.action,
-        crate::gm_action::GmAction::SpawnPaletteEntity { variant: None, .. }
+        crate::gm::actions::action::GmAction::SpawnPaletteEntity { variant: None, .. }
     ));
 }
 
@@ -6381,7 +6381,9 @@ fn gm_placement_ingress_refuses_asset_paths_pixels_and_malformed_placements() {
 
 #[test]
 fn gm_spawn_projection_encodes_palette_ids_and_labels_only() {
-    use crate::gm_spawn::{GmPaletteOption, GmPaletteVariantOption, GmSpawnProjection};
+    use crate::gm::operations::spawn::{
+        GmPaletteOption, GmPaletteVariantOption, GmSpawnProjection,
+    };
 
     let payload = GmSpawnProjection {
         palette: vec![GmPaletteOption {
@@ -6644,11 +6646,11 @@ fn undo_of_a_removal_decodes_the_published_presence_pair_verbatim() {
     .expect("the published pair round-trips through the browser wire");
     assert_eq!(
         decoded.action,
-        crate::gm_action::GmAction::UndoGmAction {
-            original: crate::gm_action::GmActionId::new("remove-1".to_string()).unwrap(),
+        crate::gm::actions::action::GmAction::UndoGmAction {
+            original: crate::gm::actions::action::GmActionId::new("remove-1".to_string()).unwrap(),
             original_operator: "gm-alex".into(),
             original_sequence: 9,
-            expected: crate::gm_action::GmAffectedField::EntityPresence {
+            expected: crate::gm::actions::action::GmAffectedField::EntityPresence {
                 entity: "raider-7".into(),
                 before: true,
                 after: false,

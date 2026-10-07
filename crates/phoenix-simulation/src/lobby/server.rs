@@ -338,7 +338,7 @@ impl Plugin for LobbyPlugin {
             // Host/session membership, not simulation state. Like FleetRoster,
             // this says who is connected where; any later typed GM command is
             // the value that crosses into the deterministic world.
-            app.declare_state::<crate::gm_roster::GmRoster>(
+            app.declare_state::<crate::gm::operations::roster::GmRoster>(
                 StateClass::Timer,
                 "gm-operator-admission-and-presence",
             )
@@ -382,7 +382,7 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
-            .init_resource::<crate::gm_roster::GmRoster>()
+            .init_resource::<crate::gm::operations::roster::GmRoster>()
             .init_resource::<FleetManagedLobby>()
             .init_resource::<PendingStartGrants>()
             .init_resource::<StartGrantTracker>()
@@ -770,7 +770,7 @@ pub fn update_session_with_config(
     mut ship_manual: ResMut<ShipManualResource>,
     pending_ship_config: Option<Res<PendingShipConfig>>,
     selected_ship: Option<Res<SelectedShipResource>>,
-    browser_gm: Option<Res<crate::gm_projection::BrowserGameMaster>>,
+    browser_gm: Option<Res<crate::gm::observation::projection::BrowserGameMaster>>,
 ) {
     // A browser GM that owns NO SHIP has no station/manual config to build, and
     // in particular must not take the native filesystem fallback below: a joined
@@ -1084,7 +1084,7 @@ pub fn handle_identify_system(
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
     ship_manual: Res<ShipManualResource>,
-    gm_roster: Res<crate::gm_roster::GmRoster>,
+    gm_roster: Res<crate::gm::operations::roster::GmRoster>,
 ) {
     let default_stations = ShipStations::default();
     let stations = ship_stations
@@ -1154,16 +1154,16 @@ pub fn handle_set_name_system(
 /// plain parameter list over the limit.
 #[derive(SystemParam)]
 pub struct GmLobbyReset<'w> {
-    journal: Option<ResMut<'w, crate::gm_action::GmActionJournal>>,
-    log: Option<ResMut<'w, crate::gm_action::GmActionLog>>,
-    results: Option<ResMut<'w, crate::gm_action::LocalGmActionRefusals>>,
-    projection: Option<ResMut<'w, crate::gm_action::LastGmSessionProjection>>,
-    mission_projection: Option<ResMut<'w, crate::gm_event::LastGmMissionProjection>>,
-    spawn_projection: Option<ResMut<'w, crate::gm_spawn::LastGmSpawnProjection>>,
-    comms_projection: Option<ResMut<'w, crate::gm_comms::LastGmCommsProjection>>,
+    journal: Option<ResMut<'w, crate::gm::actions::action::GmActionJournal>>,
+    log: Option<ResMut<'w, crate::gm::actions::action::GmActionLog>>,
+    results: Option<ResMut<'w, crate::gm::actions::action::LocalGmActionRefusals>>,
+    projection: Option<ResMut<'w, crate::gm::actions::action::LastGmSessionProjection>>,
+    mission_projection: Option<ResMut<'w, crate::gm::operations::event::LastGmMissionProjection>>,
+    spawn_projection: Option<ResMut<'w, crate::gm::operations::spawn::LastGmSpawnProjection>>,
+    comms_projection: Option<ResMut<'w, crate::gm::operations::comms::LastGmCommsProjection>>,
     content: Option<ResMut<'w, crate::world::server::WorldContentRuntime>>,
-    direct_effects: Option<ResMut<'w, crate::gm_effect::PendingGmDirectEffects>>,
-    paused: Option<ResMut<'w, crate::gm_action::SimulationPaused>>,
+    direct_effects: Option<ResMut<'w, crate::gm::operations::effect::PendingGmDirectEffects>>,
+    paused: Option<ResMut<'w, crate::gm::actions::action::SimulationPaused>>,
 }
 
 /// Per-variant system for `ClientMessage::ReturnToLobby` (issue #734). Gated on
@@ -1545,7 +1545,7 @@ fn handle_disconnect(
 /// processed later in the same fixed tick sees `local_start_allowed == false`.
 fn enforce_fleet_managed_countdown(
     managed: Res<FleetManagedLobby>,
-    gms: Res<crate::gm_roster::GmRoster>,
+    gms: Res<crate::gm::operations::roster::GmRoster>,
     mut timer: ResMut<CountdownTimer>,
     mut outbox: ResMut<LobbyOutbox>,
 ) {
@@ -1846,14 +1846,14 @@ fn tick_countdown(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     sessions: Option<Res<Sessions>>,
-    gms: Option<Res<crate::gm_roster::GmRoster>>,
+    gms: Option<Res<crate::gm::operations::roster::GmRoster>>,
     phase: Res<State<GamePhase>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     preload: Option<Res<crate::presentation_contracts::PresentationReadiness>>,
     model_rigs: Option<Res<crate::entities::model_markers::ModelRigReadiness>>,
 ) {
     let gm_changed = gms.as_ref().is_some_and(|gms| gms.is_changed());
-    let empty_gms = crate::gm_roster::GmRoster::default();
+    let empty_gms = crate::gm::operations::roster::GmRoster::default();
     let gms = gms.as_deref().unwrap_or(&empty_gms);
     let all_ready = sessions
         .as_ref()

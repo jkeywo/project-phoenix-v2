@@ -1,0 +1,354 @@
+//! Authored GM Comms routes over the ordinary inbox and scripted dialogue path.
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::command_admission::log::ShipKey;
+use crate::comms::component::CommsHailable;
+use crate::comms::server::{CommsInboxRes, CommsRuntime};
+use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
+use crate::gm::actions::action::{
+    GmAction, GmActionJournal, GmActionKind, GmActionLog, GmActionRefusalReason,
+    LocalGmActionRefusals, LoggedGmAction,
+};
+use crate::world::config::WorldConfig;
+use crate::world::server::WorldScriptRuntime;
+
+/// Wire/journal bounds, not scenario tuning. UTF-8 bytes are counted exactly.
+pub const MAX_TEXT_BYTES: usize = 4096;
+pub const MAX_RECIPIENTS: usize = 32;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum GmCommsContent {
+    Literal { text: String },
+    ScriptedHail { hail: String },
+}
+
+/// Complete immutable operator intent, retained verbatim by the GM journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GmCommsTransmission {
+    pub sender: String,
+    pub route: String,
+    /// Strictly UUID-sorted, unique. Even Fleet captures its actual recipients.
+    pub recipients: Vec<ShipKey>,
+    pub content: GmCommsContent,
+}
+
+impl GmCommsTransmission {
+    pub fn valid_shape(&self) -> bool {
+        let id = |s: &str| !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control);
+        id(&self.sender)
+            && id(&self.route)
+            && !self.recipients.is_empty()
+            && self.recipients.len() <= MAX_RECIPIENTS
+            && self.recipients.iter().all(|ship| id(&ship.0))
+            && self.recipients.windows(2).all(|pair| pair[0].0 < pair[1].0)
+            && match &self.content {
+                GmCommsContent::Literal { text } => {
+                    !text.is_empty() && text.len() <= MAX_TEXT_BYTES
+                }
+                GmCommsContent::ScriptedHail { hail } => id(hail),
+            }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmCommsIdentity {
+    pub id: String,
+    pub name: String,
+    /// Existing Fleet ordinal distinguishes hulls sharing an authored name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fleet_slot: Option<u32>,
+}
+
+fn alive(entity: &EntityRef<'_>) -> bool {
+    entity
+        .get::<EntitySystemHull>()
+        .is_none_or(|hull| hull.0.total_current() > 0.0)
+}
+
+fn recipient(entity: &EntityRef<'_>) -> Option<GmCommsIdentity> {
+    if !entity.contains::<crate::server_app::Ship>()
+        || !entity.contains::<crate::lockstep::FleetSlotOf>()
+        || !alive(entity)
+    {
+        return None;
+    }
+    let config = entity.get::<crate::ship::components::ShipConfigComponent>()?;
+    config
+        .0
+        .system(&crate::ship::system_registry::comms_system_id())?;
+    let uuid = entity.get::<EntityUuid>()?;
+    Some(GmCommsIdentity {
+        id: uuid.0.clone(),
+        name: entity
+            .get::<EntityName>()
+            .map_or_else(|| uuid.0.clone(), |name| name.0.clone()),
+        fleet_slot: entity
+            .get::<crate::lockstep::FleetSlotOf>()
+            .map(|slot| slot.0 .0),
+    })
+}
+
+fn sender(entity: &EntityRef<'_>, route: &GmCommsRoute) -> Option<GmCommsIdentity> {
+    let uuid = entity.get::<EntityUuid>()?;
+    let name = entity.get::<EntityName>()?;
+    let comms = entity.get::<CommsHailable>()?;
+    entity.get::<crate::comms::component::CommsRange>()?;
+    if !alive(entity) || !route.senders.contains(&name.0) {
+        return None;
+    }
+    Some(GmCommsIdentity {
+        id: uuid.0.clone(),
+        name: comms.display_name.clone().unwrap_or_else(|| name.0.clone()),
+        fleet_slot: None,
+    })
+}
+
+fn hail_available(script: Option<&WorldScriptRuntime>, hail: &GmCommsHail) -> bool {
+    script.is_some_and(|script| {
+        script
+            .ast_owners
+            .get(&hail.script_path)
+            .is_some_and(|owners| owners.contains(&None))
+            && script.asts.get(&hail.script_path).is_some_and(|ast| {
+                ast.iter_functions()
+                    .any(|f| f.name == hail.root_fn && f.params.len() == 1)
+            })
+    })
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct GmCommsParams<'w, 's> {
+    world: Option<Res<'w, WorldConfig>>,
+    entities: Query<'w, 's, EntityRef<'static>>,
+    inbox: Option<ResMut<'w, CommsInboxRes>>,
+    comms: Option<Res<'w, CommsRuntime>>,
+    script: Option<ResMut<'w, WorldScriptRuntime>>,
+    mint: crate::world_id::LiveMint<'w, { crate::world_id::IdNamespace::Message as usize }>,
+    narrative: Option<ResMut<'w, Messages<crate::core::narrative::NarrativeEvent>>>,
+}
+
+impl GmCommsParams<'_, '_> {
+    /// Revalidate the complete intent before mutating anything. Partial delivery
+    /// is never a result of a stale recipient or an unsupported speaker.
+    pub fn apply(&mut self, intent: &GmCommsTransmission) -> Result<(), GmActionRefusalReason> {
+        use GmActionRefusalReason as Refusal;
+        if !intent.valid_shape() {
+            return Err(Refusal::InvalidAction);
+        }
+        let world = self.world.as_deref().ok_or(Refusal::WorldUnavailable)?;
+        let route = world
+            .gm_comms_routes
+            .iter()
+            .find(|r| r.id == intent.route)
+            .ok_or(Refusal::UnknownCommsRoute)?;
+        let mut matches = self.entities.iter().filter(|e| {
+            e.get::<EntityUuid>()
+                .is_some_and(|id| id.0 == intent.sender)
+        });
+        let entity = matches.next().ok_or(Refusal::UnavailableCommsIdentity)?;
+        if matches.next().is_some() {
+            return Err(Refusal::UnavailableCommsIdentity);
+        }
+        let identity = sender(&entity, route).ok_or(Refusal::UnavailableCommsIdentity)?;
+        let from = entity
+            .get::<EntityName>()
+            .ok_or(Refusal::UnavailableCommsIdentity)?
+            .0
+            .clone();
+        let mut available: Vec<_> = self
+            .entities
+            .iter()
+            .filter_map(|e| recipient(&e))
+            .map(|s| ShipKey(s.id))
+            .collect();
+        available.sort_by(|a, b| a.0.cmp(&b.0));
+        if available.windows(2).any(|p| p[0] == p[1])
+            || intent
+                .recipients
+                .iter()
+                .any(|ship| !available.contains(ship))
+            || (route.visibility == GmCommsVisibility::Fleet && intent.recipients != available)
+        {
+            return Err(Refusal::UnavailableCommsRecipient);
+        }
+        match &intent.content {
+            GmCommsContent::Literal { text } => {
+                let inbox = self.inbox.as_deref_mut().ok_or(Refusal::WorldUnavailable)?;
+                let comms = self.comms.as_deref().ok_or(Refusal::WorldUnavailable)?;
+                let mint = self.mint.as_deref().ok_or(Refusal::WorldUnavailable)?;
+                for ship in &intent.recipients {
+                    let id = crate::world_id::mint_live_id_with(
+                        Some(mint),
+                        crate::world_id::IdNamespace::Message,
+                    );
+                    let mut message = crate::core::messages::CommsMessage::injected(
+                        id.clone(),
+                        identity.id.clone(),
+                        identity.name.clone(),
+                        text.clone(),
+                        Default::default(),
+                        Vec::new(),
+                        id,
+                        crate::comms::server::sender_in_range_for_fleet(comms, &identity.id),
+                        crate::core::messages::CommsPriority::Routine,
+                    );
+                    message.recipient_ship = Some(ship.clone());
+                    message.literal_body = true;
+                    crate::console::comms::server::deliver_comms_message(
+                        message,
+                        inbox,
+                        self.narrative.as_deref_mut(),
+                    );
+                }
+            }
+            GmCommsContent::ScriptedHail { hail } => {
+                let hail = route
+                    .hails
+                    .iter()
+                    .find(|h| h.id == *hail)
+                    .filter(|h| hail_available(self.script.as_deref(), h))
+                    .ok_or(Refusal::UnavailableCommsHail)?;
+                let script = self
+                    .script
+                    .as_deref_mut()
+                    .ok_or(Refusal::UnavailableCommsHail)?;
+                for ship in &intent.recipients {
+                    script
+                        .pending_comms_opens
+                        .push(crate::comms::content::OpenCommsRequest {
+                            recipient_ship: Some(ship.clone()),
+                            sender_uuid: Some(identity.id.clone()),
+                            from: from.clone(),
+                            display_name: Some(identity.name.clone()),
+                            root_fn: hail.root_fn.clone(),
+                            script_path: hail.script_path.clone(),
+                            ..Default::default()
+                        });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmCommsRouteOption {
+    pub id: String,
+    pub label: String,
+    pub visibility: GmCommsVisibility,
+    pub senders: Vec<GmCommsIdentity>,
+    pub hails: Vec<GmCommsIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmCommsResult {
+    #[serde(flatten)]
+    pub result: LoggedGmAction,
+    /// Original exact intent from the attributed canonical grant, including
+    /// refused apply-time requests. Ingress failures have no accepted grant.
+    pub transmission: Option<GmCommsTransmission>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GmCommsProjection {
+    pub routes: Vec<GmCommsRouteOption>,
+    pub recipients: Vec<GmCommsIdentity>,
+    pub max_text_bytes: usize,
+    pub results: Vec<GmCommsResult>,
+}
+
+#[derive(Resource, Default)]
+pub struct LastGmCommsProjection(pub Option<GmCommsProjection>);
+
+fn unique_identities(mut rows: Vec<GmCommsIdentity>) -> Vec<GmCommsIdentity> {
+    rows.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut counts = std::collections::BTreeMap::new();
+    for row in &rows {
+        *counts.entry(row.id.clone()).or_insert(0) += 1;
+    }
+    rows.retain(|row| counts[&row.id] == 1);
+    rows
+}
+
+pub fn publish_comms_projection(
+    world: Option<Res<WorldConfig>>,
+    entities: Query<EntityRef>,
+    script: Option<Res<WorldScriptRuntime>>,
+    journal: Res<GmActionJournal>,
+    log: Res<GmActionLog>,
+    refusals: Res<LocalGmActionRefusals>,
+    mut last: ResMut<LastGmCommsProjection>,
+    mut writer: MessageWriter<GmCommsChanged>,
+) {
+    let recipients = unique_identities(entities.iter().filter_map(|e| recipient(&e)).collect());
+    let routes = world
+        .as_deref()
+        .map(|w| {
+            w.gm_comms_routes
+                .iter()
+                .map(|route| {
+                    let senders = unique_identities(
+                        entities.iter().filter_map(|e| sender(&e, route)).collect(),
+                    );
+                    GmCommsRouteOption {
+                        id: route.id.clone(),
+                        label: route.label.clone(),
+                        visibility: route.visibility,
+                        senders,
+                        hails: route
+                            .hails
+                            .iter()
+                            .filter(|h| hail_available(script.as_deref(), h))
+                            .map(|h| GmCommsIdentity {
+                                id: h.id.clone(),
+                                name: h.label.clone(),
+                                fleet_slot: None,
+                            })
+                            .collect(),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let results =
+        crate::gm::actions::action::projected_results(GmActionKind::Comms, &log, &refusals)
+            .into_iter()
+            .map(|result| {
+                let transmission = journal
+                    .grant_for(&result.operator_id, &result.correlation)
+                    .and_then(|grant| match &grant.action {
+                        GmAction::TransmitComms { transmission } => Some(transmission.clone()),
+                        _ => None,
+                    });
+                GmCommsResult {
+                    result,
+                    transmission,
+                }
+            })
+            .collect();
+    let next = GmCommsProjection {
+        routes,
+        recipients,
+        max_text_bytes: MAX_TEXT_BYTES,
+        results,
+    };
+    if last.0.as_ref() != Some(&next) {
+        last.0 = Some(next.clone());
+        writer.write(GmCommsChanged { payload: next });
+    }
+}
+
+#[cfg(test)]
+#[path = "comms_tests.rs"]
+mod tests;
+
+pub use phoenix_sim_world::gm_comms::*;
+
+/// Page-local absolute Comms Studio projection.
+#[derive(bevy::prelude::Message)]
+pub struct GmCommsChanged {
+    pub payload: crate::gm::operations::comms::GmCommsProjection,
+}

@@ -224,7 +224,7 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
         TriggerAction::Presentation { ship, cue } => {
             if let Some(uuid) = context.name_to_uuid.get(ship) {
                 let mut cue = cue.clone();
-                if let crate::gm_presentation::PresentationCue::Sound {
+                if let crate::gm::operations::presentation::PresentationCue::Sound {
                     source: Some(source),
                     ..
                 } = &mut cue
@@ -260,7 +260,7 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 out.commands.push(ActionCmd::SetContactInformation {
                     observer: observer.clone(),
                     change: match change {
-                        crate::gm_information::ContactInformationChange::SetReportPolicy {
+                        crate::gm::operations::information::ContactInformationChange::SetReportPolicy {
                             target,
                             policy,
                         } => {
@@ -273,12 +273,12 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                                     .push(format!("Contact target '{target}' is not live"));
                                 return out;
                             };
-                            crate::gm_information::ContactInformationChange::SetReportPolicy {
+                            crate::gm::operations::information::ContactInformationChange::SetReportPolicy {
                                 target: target.clone(),
                                 policy: policy.clone(),
                             }
                         }
-                        crate::gm_information::ContactInformationChange::ClearReportPolicy {
+                        crate::gm::operations::information::ContactInformationChange::ClearReportPolicy {
                             target,
                         } => {
                             let Some(target) = context
@@ -290,7 +290,7 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                                     .push(format!("Contact target '{target}' is not live"));
                                 return out;
                             };
-                            crate::gm_information::ContactInformationChange::ClearReportPolicy {
+                            crate::gm::operations::information::ContactInformationChange::ClearReportPolicy {
                                 target: target.clone(),
                             }
                         }

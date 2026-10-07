@@ -2,7 +2,7 @@
 title: Recorded Observations
 type: concept
 tags: [observations, knowledge, console, repair, sensors]
-sources: [crates/phoenix-model/src/observation.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-model/src/wire.rs, crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/gm_information/reports.rs, crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/observation-details.js, gui/console-state.js, gui/sim-state.js]
+sources: [crates/phoenix-model/src/observation.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-model/src/wire.rs, crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/gm/operations/information/reports.rs, crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/observation-details.js, gui/console-state.js, gui/sim-state.js]
 updated: 2026-10-14
 ---
 

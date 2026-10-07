@@ -154,6 +154,16 @@ and storage remain in `save_slots_lifecycle` and `save_slots_store`. Lockstep ow
 fleet recovery coordination and calls the same snapshot operations. Snapshot
 format and simulation-rule versions are unchanged by these moves.
 
+### GM ownership inside Simulation
+
+`gm::actions` owns admission, ordering and the journal; `gm::operations` owns
+live mutations; `gm::observation` owns inspectors and projections;
+`gm::continuity` owns join, checkpoint and restore integration. Each producer
+owns its typed change notification. The Console bridge re-exports and routes
+those notifications; it does not construct GM decisions. Legacy `gm_*` public
+paths remain aliases. GM restore continues to use lockstep and snapshot rather
+than introducing another recovery protocol.
+
 ## Simulation gameplay
 
 **Owner:** [`phoenix-sim-gameplay`](../../crates/phoenix-sim-gameplay/src/lib.rs).

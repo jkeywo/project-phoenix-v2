@@ -77,81 +77,24 @@ pub struct AudioLifecycleState {
 pub struct AudioCueEvent {
     pub json: String,
 }
+pub use crate::gm::observation::projection::GmEntityProjectionChanged;
 
-/// Absolute omniscient ship-map projection for the rendererless GM page.
-/// Drained only by the local Host Channel; it is intentionally not part of the
-/// peer wire.
-#[derive(Message, Clone, Debug)]
-pub struct GmEntityProjectionChanged {
-    pub payload: crate::gm_projection::GmEntityProjectionPayload,
-}
+pub use crate::gm::observation::activity::GmActivityFeedChanged;
 
-/// Absolute bounded multi-category activity for the rendererless GM page.
-/// Drained only by the local Host Channel; it never enters the peer wire.
-#[derive(Message, Clone, Debug)]
-pub struct GmActivityFeedChanged {
-    pub payload: crate::gm_activity::GmActivityFeedPayload,
-}
+pub use crate::gm::observation::projection::GmStationProjectionChanged;
 
-/// Absolute authentic-Station projection for the rendererless GM page. Like
-/// `GmEntityProjectionChanged`, this is page-local Host Channel data and never
-/// a peer protocol message.
-#[derive(Message, Clone, Debug)]
-pub struct GmStationProjectionChanged {
-    pub payload: crate::gm_projection::GmStationProjectionPayload,
-}
+pub use crate::gm::actions::action::GmSessionChanged;
 
-/// Absolute GM session state and bounded attributed result feed. Local Host
-/// Channel only; the grants themselves cross the typed host mesh.
-#[derive(Message, Clone, Debug)]
-pub struct GmSessionChanged {
-    pub payload: crate::gm_action::GmSessionProjection,
-}
+pub use crate::gm::operations::event::GmMissionChanged;
 
-/// Absolute controllable-event registry and its bounded attributed result feed
-/// for the GM mission panel (issue #1301). Local Host Channel only, like every
-/// other GM projection; the Fire grants themselves cross the typed host mesh.
-#[derive(Message, Clone, Debug)]
-pub struct GmMissionChanged {
-    pub payload: crate::gm_event::GmMissionProjection,
-}
+pub use crate::gm::operations::spawn::GmSpawnChanged;
 
-/// Absolute GM spawn palette and its bounded attributed result feed for the GM
-/// placement panel (issue #1305). Local Host Channel only, like every other GM
-/// projection; the placement grants themselves cross the typed host mesh.
-#[derive(Message, Clone, Debug)]
-pub struct GmSpawnChanged {
-    pub payload: crate::gm_spawn::GmSpawnProjection,
-}
+pub use crate::gm::operations::comms::GmCommsChanged;
 
-/// Page-local absolute Comms Studio projection.
-#[derive(bevy::prelude::Message)]
-pub struct GmCommsChanged {
-    pub payload: crate::gm_comms::GmCommsProjection,
-}
+pub use crate::gm::observation::attention::GmAttentionChanged;
 
-/// Page-local absolute Game Master attention queue (issue #1433). Like every
-/// other GM projection this is Host Channel data only: it never enters the peer
-/// wire, a snapshot or the authoritative digest.
-#[derive(bevy::prelude::Message)]
-pub struct GmAttentionChanged {
-    pub payload: crate::gm_attention::GmAttentionProjection,
-}
+pub use crate::gm::observation::health::GmHealthChanged;
 
-/// Page-local absolute Game Master technical health (issue #1437). Like every
-/// other GM projection this is Host Channel data only: it never enters the peer
-/// wire, a snapshot or the authoritative digest.
-#[derive(bevy::prelude::Message)]
-pub struct GmHealthChanged {
-    pub payload: crate::gm_health::GmHealthProjection,
-}
-
-/// Page-local Game Master Station-workload advisory (issue #1438). Host
-/// Channel data only, like every other GM projection: never a peer frame, a
-/// snapshot field or an authoritative digest fold.
-#[derive(bevy::prelude::Message)]
-pub struct GmWorkloadChanged {
-    pub payload: crate::gm_workload::GmWorkloadProjection,
-}
+pub use crate::gm::observation::workload::GmWorkloadChanged;
 
 pub use phoenix_sim_contracts::authority::LOCAL_CONSOLE_TOKEN;

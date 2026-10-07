@@ -387,22 +387,25 @@ fn crew_projection_names_only_the_local_station_takeover_and_latest_admitted_act
         Ship,
         crate::entities::spawner::EntityUuid("ship-peer".into()),
     ));
-    let local_target = crate::gm_puppet::StationPuppetTarget::new(
+    let local_target = crate::gm::operations::puppet::StationPuppetTarget::new(
         crate::command_admission::log::ShipKey("ship-local".into()),
         StationId("captain".into()),
     );
-    let peer_target = crate::gm_puppet::StationPuppetTarget::new(
+    let peer_target = crate::gm::operations::puppet::StationPuppetTarget::new(
         crate::command_admission::log::ShipKey("ship-peer".into()),
         StationId("helm".into()),
     );
-    let mut puppets = crate::gm_puppet::StationPuppets::default();
+    let mut puppets = crate::gm::operations::puppet::StationPuppets::default();
     puppets.set_operator(local_target, "gm-1".into(), true);
     puppets.set_operator(peer_target, "gm-2".into(), true);
     world.insert_resource(puppets);
-    let mut activity = crate::gm_puppet::StationPuppetActivity::default();
-    activity.push(crate::gm_puppet::StationPuppetActivityEntry {
+    let mut activity = crate::gm::operations::puppet::StationPuppetActivity::default();
+    activity.push(crate::gm::operations::puppet::StationPuppetActivityEntry {
         tick: 45,
-        order: crate::gm_action::GmActionOrder::new(crate::command_admission::HostSlot(1), 7),
+        order: crate::gm::actions::action::GmActionOrder::new(
+            crate::command_admission::HostSlot(1),
+            7,
+        ),
         operator_id: "gm-1".into(),
         ship: crate::command_admission::log::ShipKey("ship-local".into()),
         station: StationId("captain".into()),
@@ -2112,43 +2115,43 @@ fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
     app.insert_resource(crate::lockstep::FleetLockstep(
         crate::lockstep::LockstepSession::new(local, [local], 6),
     ));
-    app.init_resource::<crate::gm_action::SimulationPaused>()
-        .init_resource::<crate::gm_action::GmActionJournal>()
-        .init_resource::<crate::gm_action::GmActionLog>()
-        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
-        .init_resource::<crate::gm_action::LastGmSessionProjection>()
+    app.init_resource::<crate::gm::actions::action::SimulationPaused>()
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
+        .init_resource::<crate::gm::actions::action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm::actions::action::LastGmSessionProjection>()
         .add_systems(
             PreUpdate,
-            crate::gm_action::apply_due_actions.in_set(crate::lockstep::MeshSet),
+            crate::gm::actions::action::apply_due_actions.in_set(crate::lockstep::MeshSet),
         );
     let first_tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
-        .insert(crate::gm_action::GmActionGrant {
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
+        .insert(crate::gm::actions::action::GmActionGrant {
             from: local,
             sequenced_by: local,
             operator_id: "gm-one".into(),
-            correlation: crate::gm_action::GmActionId::new("round-one-pause").unwrap(),
+            correlation: crate::gm::actions::action::GmActionId::new("round-one-pause").unwrap(),
             recovery_generation: 0,
             apply_tick: first_tick,
-            order: crate::gm_action::GmActionOrder::new(local, 1),
-            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            order: crate::gm::actions::action::GmActionOrder::new(local, 1),
+            action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
         })
         .unwrap();
 
     app.update();
     assert!(
         app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert!(app.world().resource::<Time<Virtual>>().is_paused());
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()[0]
             .outcome,
-        crate::gm_action::GmActionOutcome::Applied,
+        crate::gm::actions::action::GmActionOutcome::Applied,
         "without ReturnToLobby the genuine typed Pause remains authoritative"
     );
     push(
@@ -2167,22 +2170,22 @@ fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
     assert_eq!(phase_of(&app), GamePhase::Lobby);
     assert!(
         !app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert!(!app.world().resource::<Time<Virtual>>().is_paused());
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .is_empty());
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionLog>()
+        .resource::<crate::gm::actions::action::GmActionLog>()
         .entries()
         .is_empty());
     assert!(app
         .world()
-        .resource::<crate::gm_action::LocalGmActionRefusals>()
+        .resource::<crate::gm::actions::action::LocalGmActionRefusals>()
         .entries()
         .is_empty());
 
@@ -2204,25 +2207,25 @@ fn host_return_to_lobby_remains_live_while_a_fleet_session_is_product_paused() {
 
     let second_tick = app.world().resource::<crate::sim_tick::SimTick>().0;
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
-        .insert(crate::gm_action::GmActionGrant {
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
+        .insert(crate::gm::actions::action::GmActionGrant {
             from: local,
             sequenced_by: local,
             operator_id: "gm-one".into(),
-            correlation: crate::gm_action::GmActionId::new("round-two-pause").unwrap(),
+            correlation: crate::gm::actions::action::GmActionId::new("round-two-pause").unwrap(),
             recovery_generation: 0,
             apply_tick: second_tick,
-            order: crate::gm_action::GmActionOrder::new(local, 1),
-            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            order: crate::gm::actions::action::GmActionOrder::new(local, 1),
+            action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
         })
         .expect("round two accepts sequence one after the run reset");
     app.update();
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()[0]
             .outcome,
-        crate::gm_action::GmActionOutcome::Applied
+        crate::gm::actions::action::GmActionOutcome::Applied
     );
 }
 
@@ -2255,18 +2258,25 @@ fn same_frame_typed_pause_and_return_cannot_repause_the_lobby() {
     app.world_mut()
         .resource_mut::<crate::lockstep::MeshInbox>()
         .push_from(
-            crate::lockstep::MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
-                crate::gm_action::GmActionGrant {
-                    from: local,
-                    sequenced_by: owner,
-                    operator_id: "gm-one".into(),
-                    correlation: crate::gm_action::GmActionId::new("same-frame-pause").unwrap(),
-                    recovery_generation: 0,
-                    apply_tick: now,
-                    order: crate::gm_action::GmActionOrder::new(local, 1),
-                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
-                },
-            )),
+            crate::lockstep::MeshFrame::GmAction(
+                crate::gm::actions::action::GmActionFrame::Granted(
+                    crate::gm::actions::action::GmActionGrant {
+                        from: local,
+                        sequenced_by: owner,
+                        operator_id: "gm-one".into(),
+                        correlation: crate::gm::actions::action::GmActionId::new(
+                            "same-frame-pause",
+                        )
+                        .unwrap(),
+                        recovery_generation: 0,
+                        apply_tick: now,
+                        order: crate::gm::actions::action::GmActionOrder::new(local, 1),
+                        action: crate::gm::actions::action::GmAction::SetSessionPaused {
+                            active: true,
+                        },
+                    },
+                ),
+            ),
             crate::lockstep::MeshOrigin::Peer(owner),
         );
     push(
@@ -2281,16 +2291,16 @@ fn same_frame_typed_pause_and_return_cannot_repause_the_lobby() {
     assert_eq!(phase_of(&app), GamePhase::Lobby);
     assert!(
         !app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .is_empty());
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionLog>()
+        .resource::<crate::gm::actions::action::GmActionLog>()
         .entries()
         .is_empty());
 }
@@ -2326,14 +2336,21 @@ fn same_frame_gm_proposal_and_return_leave_the_reset_lane_empty() {
     app.world_mut()
         .resource_mut::<crate::lockstep::MeshInbox>()
         .push_from(
-            crate::lockstep::MeshFrame::GmAction(crate::gm_action::GmActionFrame::Proposal(
-                crate::gm_action::GmActionProposal {
-                    from: gm,
-                    operator_id: "gm-one".into(),
-                    correlation: crate::gm_action::GmActionId::new("same-frame-proposal").unwrap(),
-                    action: crate::gm_action::GmAction::SetSessionPaused { active: true },
-                },
-            )),
+            crate::lockstep::MeshFrame::GmAction(
+                crate::gm::actions::action::GmActionFrame::Proposal(
+                    crate::gm::actions::action::GmActionProposal {
+                        from: gm,
+                        operator_id: "gm-one".into(),
+                        correlation: crate::gm::actions::action::GmActionId::new(
+                            "same-frame-proposal",
+                        )
+                        .unwrap(),
+                        action: crate::gm::actions::action::GmAction::SetSessionPaused {
+                            active: true,
+                        },
+                    },
+                ),
+            ),
             crate::lockstep::MeshOrigin::Peer(gm),
         );
     push(
@@ -2346,16 +2363,16 @@ fn same_frame_gm_proposal_and_return_leave_the_reset_lane_empty() {
 
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionJournal>()
+        .resource::<crate::gm::actions::action::GmActionJournal>()
         .is_empty());
     assert!(app
         .world()
-        .resource::<crate::gm_action::GmActionLog>()
+        .resource::<crate::gm::actions::action::GmActionLog>()
         .entries()
         .is_empty());
     assert!(app
         .world()
-        .resource::<crate::gm_action::LocalGmActionRefusals>()
+        .resource::<crate::gm::actions::action::LocalGmActionRefusals>()
         .entries()
         .is_empty());
     let pending = app
@@ -2423,11 +2440,14 @@ fn a_fireless_run_still_republishes_the_mission_panel_after_a_lobby_round_trip()
         last_fired_elapsed: None,
     });
     app.insert_resource(runtime)
-        .init_resource::<crate::gm_action::GmActionLog>()
-        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
-        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
+        .init_resource::<crate::gm::actions::action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm::operations::event::LastGmMissionProjection>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
-        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+        .add_systems(
+            PostUpdate,
+            crate::gm::operations::event::publish_mission_projection,
+        );
 
     app.update();
     assert_eq!(
@@ -2509,11 +2529,14 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
     runtime.pending_gm_event_fires.insert(EVENT.to_string());
     runtime.paused_gm_events.insert(EVENT.to_string());
     app.insert_resource(runtime)
-        .init_resource::<crate::gm_action::GmActionLog>()
-        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
-        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
+        .init_resource::<crate::gm::actions::action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm::operations::event::LastGmMissionProjection>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
-        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+        .add_systems(
+            PostUpdate,
+            crate::gm::operations::event::publish_mission_projection,
+        );
 
     app.update();
     assert!(
@@ -2616,11 +2639,14 @@ fn a_lobby_round_trip_disarms_a_waiting_gm_skip() {
     });
     runtime.pending_gm_event_skips.insert(EVENT.to_string());
     app.insert_resource(runtime)
-        .init_resource::<crate::gm_action::GmActionLog>()
-        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
-        .init_resource::<crate::gm_event::LastGmMissionProjection>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
+        .init_resource::<crate::gm::actions::action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm::operations::event::LastGmMissionProjection>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
-        .add_systems(PostUpdate, crate::gm_event::publish_mission_projection);
+        .add_systems(
+            PostUpdate,
+            crate::gm::operations::event::publish_mission_projection,
+        );
 
     app.update();
     assert!(

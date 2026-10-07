@@ -318,7 +318,7 @@ impl SpawnSection for BehaviourSpawn {
         if let Some(behaviour) = &config.behaviour {
             cmds.insert((
                 BehaviourSection(behaviour.clone()),
-                crate::gm_npc::NpcDoctrineState::default(),
+                crate::gm::operations::npc::NpcDoctrineState::default(),
             ));
         }
         if config.is_static_point_defence() {
@@ -402,9 +402,11 @@ struct SensorsObservationSpawn;
 impl SpawnSection for SensorsObservationSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         if let Some(sensors) = &config.sensors_console {
-            cmds.insert(crate::gm_information::reports::SensorsObservationConfig(
-                sensors.long_range_radar.clone(),
-            ));
+            cmds.insert(
+                crate::gm::operations::information::reports::SensorsObservationConfig(
+                    sensors.long_range_radar.clone(),
+                ),
+            );
         }
     }
 }

@@ -2672,14 +2672,14 @@ fn contact_report_resolves_both_observer_and_target_names_before_dispatch() {
     let fixture = Fixture::new()
         .with_entity("observer-name", "observer-uuid")
         .with_entity("target-name", "target-uuid");
-    let policy = crate::gm_information::reports::ReportPolicy {
+    let policy = crate::gm::operations::information::reports::ReportPolicy {
         delay_ticks: 12,
         position_step_mm: 500,
         hide_identity: true,
     };
     let action = TriggerAction::SetContactInformation {
         ship: "observer-name".into(),
-        change: crate::gm_information::ContactInformationChange::SetReportPolicy {
+        change: crate::gm::operations::information::ContactInformationChange::SetReportPolicy {
             target: "target-name".into(),
             policy: policy.clone(),
         },
@@ -2689,7 +2689,7 @@ fn contact_report_resolves_both_observer_and_target_names_before_dispatch() {
         out.commands,
         vec![ActionCmd::SetContactInformation {
             observer: "observer-uuid".into(),
-            change: crate::gm_information::ContactInformationChange::SetReportPolicy {
+            change: crate::gm::operations::information::ContactInformationChange::SetReportPolicy {
                 target: "target-uuid".into(),
                 policy
             }

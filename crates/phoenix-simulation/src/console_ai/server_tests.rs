@@ -3526,14 +3526,14 @@ fn concealed_contact_stops_high_fidelity_frequency_hints_until_normal() {
     app.world_mut()
         .entity_mut(source)
         .insert(crate::entities::spawner::EntityUuid("observer".into()));
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         "target-1",
-        crate::gm_contact::ContactMode::Conceal,
+        crate::gm::operations::contact::ContactMode::Conceal,
     );
     tick_with_dt(&mut app, 4.0);
     assert!(!app
@@ -3542,14 +3542,14 @@ fn concealed_contact_stops_high_fidelity_frequency_hints_until_normal() {
         .0
         .iter()
         .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         "target-1",
-        crate::gm_contact::ContactMode::Normal,
+        crate::gm::operations::contact::ContactMode::Normal,
     );
     tick_with_dt(&mut app, 4.0);
     assert!(app

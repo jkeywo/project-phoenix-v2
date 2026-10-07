@@ -208,11 +208,11 @@ pub(crate) fn build_station_puppet_snapshots(
         return Vec::new();
     };
     let puppets = world
-        .get_resource::<crate::gm_puppet::StationPuppets>()
+        .get_resource::<crate::gm::operations::puppet::StationPuppets>()
         .cloned()
         .unwrap_or_default();
     let activity = world
-        .get_resource::<crate::gm_puppet::StationPuppetActivity>()
+        .get_resource::<crate::gm::operations::puppet::StationPuppetActivity>()
         .cloned()
         .unwrap_or_default();
 

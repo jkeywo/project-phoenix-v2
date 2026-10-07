@@ -70,28 +70,30 @@ fn every_frame_round_trips() {
         // The multi-peer live-restore lane (issue #1447). Included here for
         // the same reason every other frame is: a frame that cannot survive
         // being written down cannot cross a mesh either.
-        MeshFrame::GmRestore(crate::gm_restore::GmRestoreFrame::Settle {
+        MeshFrame::GmRestore(crate::gm::continuity::restore::GmRestoreFrame::Settle {
             from: HostSlot(1),
-            restore: crate::gm_action::GmActionOrder::new(HostSlot(3), 4),
+            restore: crate::gm::actions::action::GmActionOrder::new(HostSlot(3), 4),
             commit: false,
-            failure: Some(crate::gm_restore::GmRestoreFailure::PeerDigestMismatch { peers: 1 }),
+            failure: Some(
+                crate::gm::continuity::restore::GmRestoreFailure::PeerDigestMismatch { peers: 1 },
+            ),
         }),
-        MeshFrame::GmRestore(crate::gm_restore::GmRestoreFrame::Loaded {
+        MeshFrame::GmRestore(crate::gm::continuity::restore::GmRestoreFrame::Loaded {
             from: HostSlot(2),
-            restore: crate::gm_action::GmActionOrder::new(HostSlot(3), 4),
+            restore: crate::gm::actions::action::GmActionOrder::new(HostSlot(3), 4),
             tick: 512,
             digest: 0x0bad_c0de,
         }),
-        MeshFrame::GmAction(crate::gm_action::GmActionFrame::Granted(
-            crate::gm_action::GmActionGrant {
+        MeshFrame::GmAction(crate::gm::actions::action::GmActionFrame::Granted(
+            crate::gm::actions::action::GmActionGrant {
                 from: HostSlot(2),
                 sequenced_by: HostSlot(1),
                 operator_id: "gm-1".into(),
-                correlation: crate::gm_action::GmActionId::new("pause-1").unwrap(),
+                correlation: crate::gm::actions::action::GmActionId::new("pause-1").unwrap(),
                 recovery_generation: 0,
                 apply_tick: 513,
-                order: crate::gm_action::GmActionOrder::new(HostSlot(2), 1),
-                action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                order: crate::gm::actions::action::GmActionOrder::new(HostSlot(2), 1),
+                action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
             },
         )),
     ];

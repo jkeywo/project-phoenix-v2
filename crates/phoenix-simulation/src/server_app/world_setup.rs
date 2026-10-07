@@ -433,7 +433,7 @@ pub(crate) fn spawn_game_start_entities(
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
     roster: Option<Res<crate::lockstep::FleetRoster>>,
     frozen_ship_slots: Option<Res<crate::ship_slots::FrozenShipSlots>>,
-    gm_join_bootstrap: Option<Res<crate::gm_join::GmJoinBootstrap>>,
+    gm_join_bootstrap: Option<Res<crate::gm::continuity::join::GmJoinBootstrap>>,
     fleet_session: Option<Res<crate::lockstep::FleetLockstep>>,
     resume_game_start_uuids: Option<Res<ResumeGameStartEntityUuids>>,
 ) {

@@ -52,12 +52,12 @@ fn actual_damage_systems_expose_rng_without_spurious_mint_writes() {
 #[test]
 fn actual_gm_reducer_exposes_comms_mint_and_event_local_rng_stays_read_only() {
     assert_writes::<crate::sim_rng::CollisionRng, crate::world_id::MessageMint, _>(
-        crate::gm_action::apply_due_actions,
+        crate::gm::actions::action::apply_due_actions,
         false,
         true,
     );
     assert_writes::<crate::sim_rng::CollisionRng, crate::world_id::MessageMint, _>(
-        crate::gm_effect::apply_gm_direct_effects,
+        crate::gm::operations::effect::apply_gm_direct_effects,
         false,
         false,
     );

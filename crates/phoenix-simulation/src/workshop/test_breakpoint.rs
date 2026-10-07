@@ -76,7 +76,7 @@ pub(crate) fn evaluate_breakpoint(
     mut strategy: ResMut<TimeUpdateStrategy>,
     mut virtual_time: ResMut<Time<Virtual>>,
     mut fixed_time: ResMut<Time<Fixed>>,
-    mut paused: ResMut<crate::gm_action::SimulationPaused>,
+    mut paused: ResMut<crate::gm::actions::action::SimulationPaused>,
 ) {
     let Some(breakpoint) = state.configured.as_ref() else {
         return;

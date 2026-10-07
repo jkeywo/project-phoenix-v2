@@ -104,7 +104,7 @@ fn replacing_roster_or_committing_before_replay_is_refused() {
 #[test]
 fn old_grants_ingest_before_commit_and_successor_keeps_the_journal_sequence() {
     use super::super::{FleetGm, MeshFrame, MeshInbox, MeshOrigin, TickFrame};
-    use crate::gm_action::*;
+    use crate::gm::actions::action::*;
     use bevy::ecs::system::RunSystemOnce;
     let mut app = App::new();
     super::super::register_lockstep(&mut app);

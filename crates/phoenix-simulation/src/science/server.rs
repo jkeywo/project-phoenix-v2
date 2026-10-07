@@ -321,11 +321,11 @@ pub fn tick_scans(
                     && runtime
                         .as_ref()
                         .map(|runtime| {
-                            crate::gm_contact::mode(
+                            crate::gm::operations::contact::mode(
                                 &runtime.contact_overrides,
                                 &operator_uuid,
                                 target_uuid,
-                            ) != crate::gm_contact::ContactMode::Conceal
+                            ) != crate::gm::operations::contact::ContactMode::Conceal
                         })
                         .unwrap_or(true)
             });
@@ -713,7 +713,7 @@ pub fn publish_scan_blackboard(
                     observer
                         .and_then(|observer| {
                             runtime.as_ref().map(|runtime| {
-                                crate::gm_contact::mode(
+                                crate::gm::operations::contact::mode(
                                     &runtime.contact_overrides,
                                     &observer.0,
                                     &reading.subject_uuid,
@@ -721,7 +721,7 @@ pub fn publish_scan_blackboard(
                             })
                         })
                         .unwrap_or_default()
-                        != crate::gm_contact::ContactMode::Conceal
+                        != crate::gm::operations::contact::ContactMode::Conceal
                 })
                 .map(crate::core::messages::scan_reading_snapshot_from_reading),
             refusal: record.refusal.map(|r| r.string_id().to_string()),

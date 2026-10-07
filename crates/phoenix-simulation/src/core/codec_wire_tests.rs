@@ -13,7 +13,7 @@ struct CompatibilityCase {
     encoded: Option<String>,
 }
 
-fn gm_value(request: crate::gm_action::GmActionRequest) -> Value {
+fn gm_value(request: crate::gm::actions::action::GmActionRequest) -> Value {
     serde_json::json!({"operator_id":request.operator_id, "correlation":request.correlation, "action":request.action})
 }
 

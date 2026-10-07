@@ -212,7 +212,7 @@ entities:
     implementation:
       status: declared
       paths:
-        [src/native_host/world_load.rs, tests/native_host_lobby/preparation.rs, crates/phoenix-simulation/src/gm_solo.rs, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js, crates/phoenix-simulation/src/world/materialization.rs, tests/native_host_lobby/materialization.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, src/native_host/app.rs, src/boot/mod.rs, crates/phoenix-simulation/src/delivery/serve.rs, crates/phoenix-simulation/src/delivery/args.rs, src/bin/phoenix_host.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/content_ledger.rs, gui/scenario-arbiter.js, tests/fixtures/scenario-arbiter-parity.json, crates/phoenix-sim-session/src/lobby/handler.rs]
+        [src/native_host/world_load.rs, tests/native_host_lobby/preparation.rs, crates/phoenix-simulation/src/gm/continuity/solo.rs, tests/native_host_lobby/round_return.rs, tests/client/native-retained-lobby.test.js, crates/phoenix-simulation/src/world/materialization.rs, tests/native_host_lobby/materialization.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, src/native_host/app.rs, src/boot/mod.rs, crates/phoenix-simulation/src/delivery/serve.rs, crates/phoenix-simulation/src/delivery/args.rs, src/bin/phoenix_host.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/content_ledger.rs, gui/scenario-arbiter.js, tests/fixtures/scenario-arbiter-parity.json, crates/phoenix-sim-session/src/lobby/handler.rs]
       symbols:
         [
           PreparedNativeWorldLoad,

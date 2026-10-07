@@ -50,17 +50,17 @@ impl Plugin for ShipPlugin {
         // with dozens of other entities in this plugin file.
         crate::console::helm::dispatch::register_helm_dispatch(app);
         app.init_resource::<BankConfigResource>()
-            .init_resource::<crate::gm_puppet::StationPuppets>()
-            .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
-            .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
-            .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
-            .init_resource::<crate::gm_faction::GmFactionOverrides>()
-            .init_resource::<crate::gm_exposure::GmSpawnExposure>()
-            .init_resource::<crate::gm_puppet::PendingGmStationFeedbackRoutes>()
-            .init_resource::<crate::gm_puppet::StationPuppetActivity>()
+            .init_resource::<crate::gm::operations::puppet::StationPuppets>()
+            .init_resource::<crate::gm::operations::puppet::PreviousStationPuppetTargets>()
+            .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
+            .init_resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
+            .init_resource::<crate::gm::operations::faction::GmFactionOverrides>()
+            .init_resource::<crate::gm::operations::exposure::GmSpawnExposure>()
+            .init_resource::<crate::gm::operations::puppet::PendingGmStationFeedbackRoutes>()
+            .init_resource::<crate::gm::operations::puppet::StationPuppetActivity>()
             .configure_sets(
                 FixedUpdate,
-                crate::gm_puppet::StationPuppetAdmissionSet
+                crate::gm::operations::puppet::StationPuppetAdmissionSet
                     .after(crate::command_admission::AdmissionSet)
                     .before(crate::sim_sets::SimSet::Input),
             )
@@ -89,7 +89,7 @@ impl Plugin for ShipPlugin {
                 StateClass::DeferredFold,
                 "coordination-enqueue-staging-state",
             )
-            .declare_state::<crate::gm_puppet::PendingGmStationFeedbackRoutes>(
+            .declare_state::<crate::gm::operations::puppet::PendingGmStationFeedbackRoutes>(
                 StateClass::ClearedAtFold,
                 "gm-action-state",
             )
@@ -114,11 +114,11 @@ impl Plugin for ShipPlugin {
             // the same fold an untouched run has always had — so a world that
             // never uses either surface keeps the digest it had before they
             // landed.
-            .declare_state::<crate::gm_faction::GmFactionOverrides>(
+            .declare_state::<crate::gm::operations::faction::GmFactionOverrides>(
                 StateClass::Folded,
                 "gm-t3-typed-inverse-actions",
             )
-            .declare_state::<crate::gm_exposure::GmSpawnExposure>(
+            .declare_state::<crate::gm::operations::exposure::GmSpawnExposure>(
                 StateClass::Folded,
                 "gm-t3-spawn-undo-exposure",
             );
@@ -382,10 +382,10 @@ impl Plugin for ShipPlugin {
         app.add_systems(
             FixedUpdate,
             (
-                crate::gm_puppet::prune_removed_station_puppets
+                crate::gm::operations::puppet::prune_removed_station_puppets
                     .in_set(crate::sim_sets::FixedStep::PreAdmissionPruneStationPuppets),
-                crate::gm_puppet::prepare_station_puppet_fidelity,
-                crate::gm_puppet::reconcile_station_puppet_control
+                crate::gm::operations::puppet::prepare_station_puppet_fidelity,
+                crate::gm::operations::puppet::reconcile_station_puppet_control
                     .in_set(crate::sim_sets::FixedStep::ReconcileStationPuppetControl),
             )
                 .chain()
@@ -394,8 +394,8 @@ impl Plugin for ShipPlugin {
         )
         .add_systems(
             FixedUpdate,
-            crate::gm_puppet::admit_station_puppet_commands
-                .in_set(crate::gm_puppet::StationPuppetAdmissionSet),
+            crate::gm::operations::puppet::admit_station_puppet_commands
+                .in_set(crate::gm::operations::puppet::StationPuppetAdmissionSet),
         )
         // Directed GM damage/healing lands in the ordinary damage phase (issue
         // #1310), beside beam, blaster, collision and region damage, so tiers,
@@ -403,7 +403,7 @@ impl Plugin for ShipPlugin {
         // exactly what it is: hull damage.
         .add_systems(
             FixedUpdate,
-            crate::gm_effect::apply_gm_direct_effects
+            crate::gm::operations::effect::apply_gm_direct_effects
                 .in_set(crate::sim_sets::FixedStep::ApplyGmDirectEffects)
                 .in_set(crate::sim_sets::SimSet::Damage),
         )
@@ -416,17 +416,18 @@ impl Plugin for ShipPlugin {
         // compares, so every peer must run it, GM surface or no GM surface.
         .add_systems(
             FixedLast,
-            crate::gm_exposure::observe_gm_spawn_exposure.before(crate::sim_tick::advance_sim_tick),
+            crate::gm::operations::exposure::observe_gm_spawn_exposure
+                .before(crate::sim_tick::advance_sim_tick),
         )
         .add_systems(
             FixedUpdate,
-            crate::gm_faction::revalidate_gm_faction_locks
+            crate::gm::operations::faction::revalidate_gm_faction_locks
                 .in_set(crate::sim_sets::FixedStep::RevalidateGmFactionLocks)
                 .in_set(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
             FixedUpdate,
-            crate::gm_puppet::enforce_station_puppet_control
+            crate::gm::operations::puppet::enforce_station_puppet_control
                 .in_set(crate::sim_sets::FixedStep::EnforceStationPuppetControl)
                 .in_set(crate::sim_sets::SimSet::Input)
                 .after(handle_station_rating_change)
@@ -435,9 +436,9 @@ impl Plugin for ShipPlugin {
         .add_systems(
             FixedUpdate,
             (
-                crate::gm_puppet::settle_station_puppet_feedback
+                crate::gm::operations::puppet::settle_station_puppet_feedback
                     .in_set(crate::sim_sets::FixedStep::SettleStationPuppetFeedback),
-                crate::gm_puppet::settle_removed_station_feedback
+                crate::gm::operations::puppet::settle_removed_station_feedback
                     .in_set(crate::sim_sets::FixedStep::SettleRemovedStationFeedback),
             )
                 .chain()
@@ -445,7 +446,7 @@ impl Plugin for ShipPlugin {
         )
         .add_systems(
             FixedUpdate,
-            crate::gm_puppet::prune_removed_station_puppets
+            crate::gm::operations::puppet::prune_removed_station_puppets
                 .in_set(crate::sim_sets::FixedStep::PublishPruneRemovedStationPuppets)
                 .in_set(crate::sim_sets::SimSet::Publish),
         );

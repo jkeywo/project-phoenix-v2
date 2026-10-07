@@ -146,7 +146,7 @@ pub struct WorldContentRuntime {
     /// (a second Fire of an already-armed event is a No-op, not a second run).
     ///
     /// It is genuinely cross-tick rather than a transient inter-system queue:
-    /// [`crate::gm_action::apply_due_actions`] arms it in `PreUpdate` at the
+    /// [`crate::gm::actions::action::apply_due_actions`] arms it in `PreUpdate` at the
     /// grant's exact apply tick, while a `when` predicate or a cooldown can
     /// legitimately hold the entry for many ticks before the pipeline can honour
     /// it. So, like `pending_world_events` and `pending_delayed_actions`, it
@@ -162,8 +162,8 @@ pub struct WorldContentRuntime {
     /// rather than captured or folded. A resumed world rebuilds it by replaying
     /// the same load.
     pub gm_palette: Vec<crate::world::config::GmPaletteEntry>,
-    pub gm_objective_palette: Vec<crate::gm_objective::ObjectivePaletteEntry>,
-    pub gm_npc_doctrine_palette: Vec<crate::gm_npc::NpcDoctrinePaletteEntry>,
+    pub gm_objective_palette: Vec<crate::gm::operations::objective::ObjectivePaletteEntry>,
+    pub gm_npc_doctrine_palette: Vec<crate::gm::operations::npc::NpcDoctrinePaletteEntry>,
     /// GM placements that have crossed their canonical apply boundary and are
     /// waiting for the trigger pipeline to spawn them (issue #1305).
     ///
@@ -173,7 +173,7 @@ pub struct WorldContentRuntime {
     /// cross-tick for `pending_gm_event_fires`' reason — armed in `PreUpdate`,
     /// drained in `FixedUpdate`, which a paused session never reaches — so it is
     /// snapshotted and folded.
-    pub pending_gm_spawns: Vec<crate::gm_spawn::PendingGmSpawn>,
+    pub pending_gm_spawns: Vec<crate::gm::operations::spawn::PendingGmSpawn>,
     /// Canonically ordered UUID removals accepted before the fixed pipeline.
     pub pending_gm_despawns: Vec<String>,
     /// The bounded inverse data for allowed GM removals (issue #1444), and the
@@ -185,11 +185,11 @@ pub struct WorldContentRuntime {
     /// capture is taken when the fixed pipeline destroys the entity, and an
     /// accepted inverse is armed the same way and executed by the same
     /// pipeline's command queue. Captured and folded with its siblings.
-    pub gm_despawn_captures: crate::gm_despawn_undo::GmDespawnCaptures,
-    pub contact_overrides: crate::gm_contact::ContactOverrides,
-    pub contact_classifications: crate::gm_contact::ContactClassifications,
-    pub presentation: crate::gm_presentation::PresentationState,
-    pub contact_information: crate::gm_information::ContactInformation,
+    pub gm_despawn_captures: crate::gm::operations::despawn_undo::GmDespawnCaptures,
+    pub contact_overrides: crate::gm::operations::contact::ContactOverrides,
+    pub contact_classifications: crate::gm::operations::contact::ContactClassifications,
+    pub presentation: crate::gm::operations::presentation::PresentationState,
+    pub contact_information: crate::gm::operations::information::ContactInformation,
     /// Layer-qualified ids of GM-operable events a Game Master has PAUSED
     /// (issue #1303).
     ///

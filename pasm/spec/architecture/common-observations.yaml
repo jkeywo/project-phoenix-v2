@@ -16,6 +16,6 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-model/src/observation.rs, crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/gm_information/reports.rs, crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/console/repair/reports.rs, gui/observation-details.js, gui/sim-state.js]
+      paths: [crates/phoenix-model/src/observation.rs, crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/gm/operations/information/reports.rs, crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/console/repair/reports.rs, gui/observation-details.js, gui/sim-state.js]
       symbols: [ObservationMetadata, recorded_observations, scan_reading_snapshot_from_reading, observationTickFor]
       tests: [crates/phoenix-model/src/observation_tests.rs, crates/phoenix-sim-gameplay/src/ship/console_observation_tests.rs, crates/phoenix-simulation/src/ship/console_observation_publication_tests.rs, crates/phoenix-simulation/src/console/repair/reports_tests.rs]

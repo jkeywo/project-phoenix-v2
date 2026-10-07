@@ -47,10 +47,10 @@ pub(super) fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) 
 /// point any system agrees on.
 pub fn capture(world: &World) -> PhoenixSnapshot {
     let paused = world
-        .get_resource::<crate::gm_action::SimulationPaused>()
+        .get_resource::<crate::gm::actions::action::SimulationPaused>()
         .is_some_and(|paused| paused.0);
     let gm_actions = world
-        .get_resource::<crate::gm_action::GmActionJournal>()
+        .get_resource::<crate::gm::actions::action::GmActionJournal>()
         .cloned()
         .unwrap_or_default();
     PhoenixSnapshot {
@@ -79,31 +79,31 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         paused,
         gm_actions,
         gm_puppets: world
-            .get_resource::<crate::gm_puppet::StationPuppets>()
+            .get_resource::<crate::gm::operations::puppet::StationPuppets>()
             .cloned()
             .unwrap_or_default(),
         gm_station_commands: world
-            .get_resource::<crate::gm_puppet::PendingGmStationCommands>()
+            .get_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
             .cloned()
             .unwrap_or_default(),
         gm_direct_effects: world
-            .get_resource::<crate::gm_effect::PendingGmDirectEffects>()
+            .get_resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
             .cloned()
             .unwrap_or_default(),
         gm_faction_overrides: world
-            .get_resource::<crate::gm_faction::GmFactionOverrides>()
+            .get_resource::<crate::gm::operations::faction::GmFactionOverrides>()
             .cloned()
             .unwrap_or_default(),
         gm_spawn_exposure: world
-            .get_resource::<crate::gm_exposure::GmSpawnExposure>()
+            .get_resource::<crate::gm::operations::exposure::GmSpawnExposure>()
             .cloned()
             .unwrap_or_default(),
         gm_idle_npcs: world
-            .get_resource::<crate::gm_attention::GmIdleNpcWatch>()
+            .get_resource::<crate::gm::observation::attention::GmIdleNpcWatch>()
             .cloned()
             .unwrap_or_default(),
         gm_station_workload: world
-            .get_resource::<crate::gm_workload::GmWorkloadWatch>()
+            .get_resource::<crate::gm::observation::workload::GmWorkloadWatch>()
             .cloned()
             .unwrap_or_default(),
         rng: world.get_resource::<SimRng>().map(SimRng::state),
@@ -1342,7 +1342,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                 EntityState {
                     mesh_crew: capture_mesh_crew(entity),
                     npc_doctrine: entity
-                        .get::<crate::gm_npc::NpcDoctrineState>()
+                        .get::<crate::gm::operations::npc::NpcDoctrineState>()
                         .and_then(|state| state.0.clone()),
                     ai_fidelity: context
                         .ai_fidelity

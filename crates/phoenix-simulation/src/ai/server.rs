@@ -992,7 +992,7 @@ const LOD_DWELL_SECS: f64 = 2.0;
 /// same bubble.
 fn lod_ai_ships(
     time: Res<Time>,
-    puppets: Option<Res<crate::gm_puppet::StationPuppets>>,
+    puppets: Option<Res<crate::gm::operations::puppet::StationPuppets>>,
     fleet: Query<
         (&Transform, Option<&LodBubble>),
         (With<crate::lockstep::FleetSlotOf>, With<Ship>),

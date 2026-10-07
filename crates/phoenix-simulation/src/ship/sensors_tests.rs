@@ -2811,14 +2811,14 @@ fn contact_override_ai_skips_concealed_nearest_and_accepts_basic_reveal_without_
     let far = uuid::Uuid::new_v4().to_string();
     spawn_faction_contact(&mut app, &near, 10.0, 0.0, harrow);
     spawn_faction_contact(&mut app, &far, 20.0, 0.0, harrow);
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         &near,
-        crate::gm_contact::ContactMode::Conceal,
+        crate::gm::operations::contact::ContactMode::Conceal,
     );
     tick_sensors_ai(&mut app);
     assert_eq!(get_sensors_target(&mut app).as_deref(), Some(far.as_str()));
@@ -2849,14 +2849,14 @@ fn contact_override_ai_skips_concealed_nearest_and_accepts_basic_reveal_without_
     spawn_target_at(&mut app, "revealed", 0.0, -10000.0);
     tick_sensors_ai(&mut app);
     assert_eq!(get_sensors_target(&mut app), None);
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         "revealed",
-        crate::gm_contact::ContactMode::Reveal,
+        crate::gm::operations::contact::ContactMode::Reveal,
     );
     tick_sensors_ai(&mut app);
     assert_eq!(get_sensors_target(&mut app).as_deref(), Some("revealed"));
@@ -2887,14 +2887,14 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
         .entity_mut(ship)
         .insert(crate::entities::spawner::EntityUuid("observer".into()));
     app.init_resource::<crate::world::server::WorldContentRuntime>();
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         "target",
-        crate::gm_contact::ContactMode::Conceal,
+        crate::gm::operations::contact::ContactMode::Conceal,
     );
     set_local_weapons_target(&mut app, Some("target".into()));
     tick(&mut app);
@@ -2904,14 +2904,14 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
         .0
         .iter()
         .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
-    crate::gm_contact::set(
+    crate::gm::operations::contact::set(
         &mut app
             .world_mut()
             .resource_mut::<crate::world::server::WorldContentRuntime>()
             .contact_overrides,
         "observer",
         "target",
-        crate::gm_contact::ContactMode::Normal,
+        crate::gm::operations::contact::ContactMode::Normal,
     );
     tick(&mut app);
     assert!(app

@@ -500,7 +500,9 @@ pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Op
 /// ending, captain boosts, world.
 fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, world.get_resource::<SimTick>().map_or(0, |t| t.0));
-    if let Some(mut query) = world.try_query::<(&EntityUuid, &crate::gm_npc::NpcDoctrineState)>() {
+    if let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::gm::operations::npc::NpcDoctrineState)>()
+    {
         let mut applied: Vec<_> = query
             .iter(world)
             .filter_map(|(uuid, state)| state.0.as_ref().map(|state| (&uuid.0, state)))
@@ -511,7 +513,10 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_u64(acc, applied.len() as u64);
             for (uuid, state) in applied {
                 acc = fold_str(acc, uuid);
-                acc = fold_serde(acc, &crate::gm_npc::applied_digest_fields(state));
+                acc = fold_serde(
+                    acc,
+                    &crate::gm::operations::npc::applied_digest_fields(state),
+                );
             }
         }
     }
@@ -567,11 +572,11 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     // cannot create a receipt-timing digest split between honest peers.
     // SimulationPaused stays separate because trusted solo-host pause remains a
     // valid writer.
-    acc = match world.get_resource::<crate::gm_action::SimulationPaused>() {
+    acc = match world.get_resource::<crate::gm::actions::action::SimulationPaused>() {
         Some(paused) => fold_serde(acc, paused),
         None => fold_str(acc, "simulation-paused:absent"),
     };
-    acc = match world.get_resource::<crate::gm_action::GmActionJournal>() {
+    acc = match world.get_resource::<crate::gm::actions::action::GmActionJournal>() {
         Some(journal) => fold_serde(
             acc,
             &(
@@ -585,11 +590,11 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         ),
         None => fold_str(acc, "gm-action-journal:absent"),
     };
-    acc = match world.get_resource::<crate::gm_puppet::StationPuppets>() {
+    acc = match world.get_resource::<crate::gm::operations::puppet::StationPuppets>() {
         Some(puppets) => fold_serde(acc, puppets),
         None => fold_str(acc, "gm-station-puppets:absent"),
     };
-    acc = match world.get_resource::<crate::gm_puppet::PendingGmStationCommands>() {
+    acc = match world.get_resource::<crate::gm::operations::puppet::PendingGmStationCommands>() {
         Some(commands) => fold_serde(acc, commands),
         None => fold_str(acc, "gm-station-commands:absent"),
     };
@@ -599,7 +604,7 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     // so no cross-target ledger needed re-blessing. An absent resource and an
     // empty one are deliberately the same fold, because they are the same fact.
     if let Some(effects) = world
-        .get_resource::<crate::gm_effect::PendingGmDirectEffects>()
+        .get_resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
         .filter(|effects| !effects.is_empty())
     {
         acc = fold_str(acc, "gm-direct-effects");
@@ -612,7 +617,7 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     // content, replayed by the trigger pipeline — are deliberately not recorded
     // here and so do not move any existing run.
     if let Some(overrides) = world
-        .get_resource::<crate::gm_faction::GmFactionOverrides>()
+        .get_resource::<crate::gm::operations::faction::GmFactionOverrides>()
         .filter(|overrides| !overrides.is_empty())
     {
         acc = fold_str(acc, "gm-faction-overrides");
@@ -625,7 +630,7 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     // actually placed something, for `gm-faction-overrides`' reason — a run
     // that never uses the surface keeps the digest it had before this landed.
     if let Some(exposure) = world
-        .get_resource::<crate::gm_exposure::GmSpawnExposure>()
+        .get_resource::<crate::gm::operations::exposure::GmSpawnExposure>()
         .filter(|exposure| !exposure.is_empty())
     {
         acc = fold_str(acc, "gm-spawn-exposure");

@@ -689,16 +689,16 @@ fn a_solo_gm_pause_boundary_cannot_be_skipped_by_fixed_catch_up() {
     register_lockstep(&mut app);
     app.insert_resource(FleetLockstep(LockstepSession::new(local, [local], 6)));
     app.world_mut()
-        .resource_mut::<crate::gm_action::GmActionJournal>()
-        .insert(crate::gm_action::GmActionGrant {
+        .resource_mut::<crate::gm::actions::action::GmActionJournal>()
+        .insert(crate::gm::actions::action::GmActionGrant {
             from: local,
             sequenced_by: local,
             operator_id: "solo-gm".into(),
-            correlation: crate::gm_action::GmActionId::new("catch-up-pause").unwrap(),
+            correlation: crate::gm::actions::action::GmActionId::new("catch-up-pause").unwrap(),
             recovery_generation: 0,
             apply_tick: 1,
-            order: crate::gm_action::GmActionOrder::new(local, 1),
-            action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+            order: crate::gm::actions::action::GmActionOrder::new(local, 1),
+            action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
         })
         .unwrap();
     app.world_mut()
@@ -718,7 +718,7 @@ fn a_solo_gm_pause_boundary_cannot_be_skipped_by_fixed_catch_up() {
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionJournal>()
+            .resource::<crate::gm::actions::action::GmActionJournal>()
             .applied_grants(),
         0,
         "the boundary is not misreported as applied before its next PreUpdate"
@@ -728,21 +728,21 @@ fn a_solo_gm_pause_boundary_cannot_be_skipped_by_fixed_catch_up() {
     assert_eq!(app.world().resource::<SimTick>().0, 1);
     assert!(
         app.world()
-            .resource::<crate::gm_action::SimulationPaused>()
+            .resource::<crate::gm::actions::action::SimulationPaused>()
             .0
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionJournal>()
+            .resource::<crate::gm::actions::action::GmActionJournal>()
             .applied_grants(),
         1
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_action::GmActionLog>()
+            .resource::<crate::gm::actions::action::GmActionLog>()
             .entries()[0]
             .outcome,
-        crate::gm_action::GmActionOutcome::Applied
+        crate::gm::actions::action::GmActionOutcome::Applied
     );
 }
 
@@ -829,12 +829,12 @@ fn applying_pause_consumes_the_current_frame_delta_standalone_and_in_a_fleet() {
         app.update();
 
         app.world_mut()
-            .resource_mut::<crate::gm_action::GmActionJournal>()
-            .insert(crate::gm_action::GmActionGrant {
+            .resource_mut::<crate::gm::actions::action::GmActionJournal>()
+            .insert(crate::gm::actions::action::GmActionGrant {
                 from: local,
                 sequenced_by: local,
                 operator_id: "gm".into(),
-                correlation: crate::gm_action::GmActionId::new(if fleet {
+                correlation: crate::gm::actions::action::GmActionId::new(if fleet {
                     "fleet-now-pause"
                 } else {
                     "standalone-now-pause"
@@ -842,8 +842,8 @@ fn applying_pause_consumes_the_current_frame_delta_standalone_and_in_a_fleet() {
                 .unwrap(),
                 recovery_generation: 0,
                 apply_tick: 0,
-                order: crate::gm_action::GmActionOrder::new(local, 1),
-                action: crate::gm_action::GmAction::SetSessionPaused { active: true },
+                order: crate::gm::actions::action::GmActionOrder::new(local, 1),
+                action: crate::gm::actions::action::GmAction::SetSessionPaused { active: true },
             })
             .unwrap();
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period * 5));
@@ -856,12 +856,12 @@ fn applying_pause_consumes_the_current_frame_delta_standalone_and_in_a_fleet() {
         );
         assert!(
             app.world()
-                .resource::<crate::gm_action::SimulationPaused>()
+                .resource::<crate::gm::actions::action::SimulationPaused>()
                 .0
         );
         assert_eq!(
             app.world()
-                .resource::<crate::gm_action::GmActionJournal>()
+                .resource::<crate::gm::actions::action::GmActionJournal>()
                 .applied_grants(),
             1
         );

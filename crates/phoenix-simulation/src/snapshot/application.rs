@@ -319,7 +319,9 @@ pub(super) fn restore_run_scope(
 ) {
     world.insert_resource(SimTick(snapshot.tick));
 
-    world.insert_resource(crate::gm_action::SimulationPaused(snapshot.paused));
+    world.insert_resource(crate::gm::actions::action::SimulationPaused(
+        snapshot.paused,
+    ));
     // The journal is itself folded authoritative state, so restore it exactly.
     // In particular a technical GM-join hold may make `SimulationPaused` true
     // without being a durable GM action; changing an empty journal's initial
@@ -333,19 +335,21 @@ pub(super) fn restore_run_scope(
     // bootstrap's stale projection immediately so host-channel readers cannot
     // observe pre-restore results before the next PreUpdate recomputes them.
     world.insert_resource(gm_actions.applied_log());
-    crate::gm_activity::rebase_after_restore(world);
+    crate::gm::observation::activity::rebase_after_restore(world);
     // The quiet clock counts SIMULATION ticks, and the restore above just moved
     // `SimTick` to somebody else's. Rebase it onto the restored tick so the
     // continuation neither opens on a lull that belongs to the captured session
     // nor carries the pre-restore one forward under its old identity
     // (issue #1436).
-    crate::gm_quiet::rebase_after_restore(world);
+    crate::gm::observation::quiet::rebase_after_restore(world);
     world.insert_resource(snapshot.gm_puppets.clone());
     // Rebase derived membership history to the restored authoritative set so
     // the first continuation pass cannot interpret every active target as a
     // fresh takeover or miss the next release.
     world.insert_resource(
-        crate::gm_puppet::PreviousStationPuppetTargets::from_puppets(&snapshot.gm_puppets),
+        crate::gm::operations::puppet::PreviousStationPuppetTargets::from_puppets(
+            &snapshot.gm_puppets,
+        ),
     );
     // Unlike ordinary network receipt queues, these payloads already passed
     // live Station/System admission and are part of the captured boundary.
@@ -355,7 +359,7 @@ pub(super) fn restore_run_scope(
     // any pair this run moved that the save never did. Doing this through the
     // ordinary `add_enemy`/`remove_enemy` vocabulary keeps restore and the live
     // action on one path.
-    crate::gm_faction::restore_overrides(world, &snapshot.gm_faction_overrides);
+    crate::gm::operations::faction::restore_overrides(world, &snapshot.gm_faction_overrides);
     // The exposure stopwatch and its latch (issue #1443). Inserted absolutely,
     // like every other captured authoritative resource: a placement the save
     // never made must not keep a counter this run started, and a latch the save
@@ -365,11 +369,11 @@ pub(super) fn restore_run_scope(
     // one. Inserting it on a peer with no attention queue would create a
     // resource no system maintains, which is worse than the honest absence:
     // there is nobody there to be advised.
-    if world.contains_resource::<crate::gm_attention::GmIdleNpcWatch>() {
+    if world.contains_resource::<crate::gm::observation::attention::GmIdleNpcWatch>() {
         world.insert_resource(snapshot.gm_idle_npcs.clone());
     }
     // The sustained-overload stopwatch (issue #1438), on the same terms.
-    crate::gm_workload::restore_watch(world, &snapshot.gm_station_workload);
+    crate::gm::observation::workload::restore_watch(world, &snapshot.gm_station_workload);
     if !snapshot.objective_records.is_empty()
         || world.contains_resource::<crate::world::server::ObjectiveManagerRes>()
     {
@@ -388,9 +392,9 @@ pub(super) fn restore_run_scope(
     // Consumer reply routes are transient and reconstructed from the accepted
     // pending commands above.  A pre-restore route must never settle a command
     // belonging to the new continuation.
-    world.insert_resource(crate::gm_puppet::PendingGmStationFeedbackRoutes::default());
+    world.insert_resource(crate::gm::operations::puppet::PendingGmStationFeedbackRoutes::default());
     // Activity is presentation rebuilt from the restored timeline.
-    world.insert_resource(crate::gm_puppet::StationPuppetActivity::default());
+    world.insert_resource(crate::gm::operations::puppet::StationPuppetActivity::default());
     if snapshot.paused {
         // Pausing is always safe and must take effect before this frame can enter
         // FixedUpdate. Do not symmetrically unpause here: lockstep recovery,
@@ -993,7 +997,7 @@ pub(super) fn apply_entity_state_with(
         .map(|state| state.doctrine.clone())
         .or_else(|| {
             entity_mut
-                .get::<crate::gm_npc::NpcDoctrineState>()
+                .get::<crate::gm::operations::npc::NpcDoctrineState>()
                 .and_then(|state| state.0.as_ref().map(|state| state.baseline.clone()))
         });
     if let Some(doctrine) = restored_doctrine {
@@ -1003,8 +1007,12 @@ pub(super) fn apply_entity_state_with(
             behaviour.0.doctrine = doctrine;
         }
     }
-    if entity_mut.contains::<crate::gm_npc::NpcDoctrineState>() || row.npc_doctrine.is_some() {
-        entity_mut.insert(crate::gm_npc::NpcDoctrineState(row.npc_doctrine.clone()));
+    if entity_mut.contains::<crate::gm::operations::npc::NpcDoctrineState>()
+        || row.npc_doctrine.is_some()
+    {
+        entity_mut.insert(crate::gm::operations::npc::NpcDoctrineState(
+            row.npc_doctrine.clone(),
+        ));
     }
     if let Some(p) = row.physics {
         if let Some(mut physics) = entity_mut.get_mut::<ShipPhysics>() {

@@ -293,33 +293,33 @@ pub fn register_lockstep(app: &mut App) {
             // `state_digest` folds only the durable applied prefix: receipt time
             // for an owner commit at a future/exact-next boundary is not current
             // state.
-            .declare_state::<crate::gm_action::GmActionJournal>(
+            .declare_state::<crate::gm::actions::action::GmActionJournal>(
                 StateClass::Folded,
                 "gm-action-state",
             )
             // The shared reducer registers this optional private transport
             // capability even on hosts that have no native surface installed.
-            .declare_state::<crate::gm_action::NativeGmAuthority>(
+            .declare_state::<crate::gm::actions::action::NativeGmAuthority>(
                 StateClass::Timer,
                 "native-local-gm-workspace",
             )
-            .declare_state::<crate::gm_puppet::StationPuppets>(
+            .declare_state::<crate::gm::operations::puppet::StationPuppets>(
                 StateClass::Folded,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_puppet::PreviousStationPuppetTargets>(
+            .declare_state::<crate::gm::operations::puppet::PreviousStationPuppetTargets>(
                 StateClass::Derived,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_puppet::capability::NpcStationConfig>(
+            .declare_state::<crate::gm::operations::puppet::capability::NpcStationConfig>(
                 StateClass::Derived,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_puppet::PendingGmStationCommands>(
+            .declare_state::<crate::gm::operations::puppet::PendingGmStationCommands>(
                 StateClass::Folded,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_puppet::StationPuppetActivity>(
+            .declare_state::<crate::gm::operations::puppet::StationPuppetActivity>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
@@ -328,16 +328,19 @@ pub fn register_lockstep(app: &mut App) {
             // `PendingGmStationCommands`' reason: the grant that authorised it
             // is already applied, so a peer that lost the arm across a snapshot
             // would keep a hull nobody else kept.
-            .declare_state::<crate::gm_effect::PendingGmDirectEffects>(
+            .declare_state::<crate::gm::operations::effect::PendingGmDirectEffects>(
                 StateClass::Folded,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_action::GmActionLog>(StateClass::Derived, "gm-action-state")
-            .declare_state::<crate::gm_action::LocalGmActionRefusals>(
+            .declare_state::<crate::gm::actions::action::GmActionLog>(
+                StateClass::Derived,
+                "gm-action-state",
+            )
+            .declare_state::<crate::gm::actions::action::LocalGmActionRefusals>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_action::LastGmSessionProjection>(
+            .declare_state::<crate::gm::actions::action::LastGmSessionProjection>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
@@ -346,7 +349,7 @@ pub fn register_lockstep(app: &mut App) {
             // reason: it is a de-duplication cache for a Host Channel push,
             // derived entirely from the authored trigger table and the GM
             // action log, both of which are already classified.
-            .declare_state::<crate::gm_event::LastGmMissionProjection>(
+            .declare_state::<crate::gm::operations::event::LastGmMissionProjection>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
@@ -355,11 +358,11 @@ pub fn register_lockstep(app: &mut App) {
             // exact reason: it is a de-duplication cache for a Host Channel
             // push, derived entirely from the authored palette and the GM
             // action log, both of which are already classified.
-            .declare_state::<crate::gm_comms::LastGmCommsProjection>(
+            .declare_state::<crate::gm::operations::comms::LastGmCommsProjection>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
-            .declare_state::<crate::gm_spawn::LastGmSpawnProjection>(
+            .declare_state::<crate::gm::operations::spawn::LastGmSpawnProjection>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
@@ -386,7 +389,7 @@ pub fn register_lockstep(app: &mut App) {
             // generation) lands in state that is already classified. It is
             // deliberately neither captured nor folded — a restore that
             // survived its own snapshot would re-arm itself on resume.
-            .declare_state::<crate::gm_restore::GmLiveRestore>(
+            .declare_state::<crate::gm::continuity::restore::GmLiveRestore>(
                 StateClass::Presentation,
                 "gm-action-state",
             )
@@ -397,7 +400,7 @@ pub fn register_lockstep(app: &mut App) {
             // empty everywhere else. Nothing in it is state of the world -
             // every fact a frame carries is folded into `GmLiveRestore`, which
             // is itself neither captured nor folded.
-            .declare_state::<crate::gm_restore::GmRestoreInbox>(
+            .declare_state::<crate::gm::continuity::restore::GmRestoreInbox>(
                 StateClass::ClearedAtFold,
                 "gm-action-state",
             )
@@ -411,26 +414,26 @@ pub fn register_lockstep(app: &mut App) {
         .init_resource::<MeshDiagnostics>()
         .init_resource::<MeshAgreement>()
         .init_resource::<host_loss::PendingHostLoss>()
-        .init_resource::<crate::gm_action::SimulationPaused>()
-        .init_resource::<crate::gm_action::GmActionJournal>()
-        .init_resource::<crate::gm_puppet::StationPuppets>()
-        .init_resource::<crate::gm_puppet::PendingGmStationCommands>()
-        .init_resource::<crate::gm_effect::PendingGmDirectEffects>()
-        .init_resource::<crate::gm_puppet::StationPuppetActivity>()
-        .init_resource::<crate::gm_action::GmActionLog>()
-        .init_resource::<crate::gm_action::LocalGmActionRefusals>()
+        .init_resource::<crate::gm::actions::action::SimulationPaused>()
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::operations::puppet::StationPuppets>()
+        .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
+        .init_resource::<crate::gm::operations::effect::PendingGmDirectEffects>()
+        .init_resource::<crate::gm::operations::puppet::StationPuppetActivity>()
+        .init_resource::<crate::gm::actions::action::GmActionLog>()
+        .init_resource::<crate::gm::actions::action::LocalGmActionRefusals>()
         // Peer-local live-restore orchestration (issue #1446). Deliberately NOT
         // declared to `authoritative`: it is neither captured nor folded, and
         // `publish_restore_context` only mirrors state it does not own.
-        .init_resource::<crate::gm_restore::GmLiveRestore>()
+        .init_resource::<crate::gm::continuity::restore::GmLiveRestore>()
         // The multi-peer live-restore lane (issue #1447). Peeled off the mesh
         // drain so readiness, load reports and the terminal settle stay
         // deliverable while a held world starves `FixedUpdate`.
-        .init_resource::<crate::gm_restore::GmRestoreInbox>()
-        .init_resource::<crate::gm_action::LastGmSessionProjection>()
-        .init_resource::<crate::gm_event::LastGmMissionProjection>()
-        .init_resource::<crate::gm_spawn::LastGmSpawnProjection>()
-        .init_resource::<crate::gm_comms::LastGmCommsProjection>()
+        .init_resource::<crate::gm::continuity::restore::GmRestoreInbox>()
+        .init_resource::<crate::gm::actions::action::LastGmSessionProjection>()
+        .init_resource::<crate::gm::operations::event::LastGmMissionProjection>()
+        .init_resource::<crate::gm::operations::spawn::LastGmSpawnProjection>()
+        .init_resource::<crate::gm::operations::comms::LastGmCommsProjection>()
         .add_message::<crate::console_bridge::GmCommsChanged>()
         .add_message::<crate::console_bridge::GmSessionChanged>()
         .add_message::<crate::console_bridge::GmMissionChanged>()
@@ -445,19 +448,20 @@ pub fn register_lockstep(app: &mut App) {
             (
                 apply_mesh_inbox,
                 continuation_systems::drain_after_mesh,
-                crate::gm_contact::prune,
-                crate::gm_presentation::prune,
+                crate::gm::operations::contact::prune,
+                crate::gm::operations::presentation::prune,
                 // Mirror the peer count and live seating the reducer's own
                 // parameter budget cannot reach, immediately before it reads
                 // them (issue #1446).
-                crate::gm_restore::publish_restore_context,
-                crate::gm_action::apply_due_actions.run_if(continuation_systems::not_held),
+                crate::gm::continuity::restore::publish_restore_context,
+                crate::gm::actions::action::apply_due_actions
+                    .run_if(continuation_systems::not_held),
                 // The live-restore driver (issue #1446) sits immediately after
                 // the reducer that arms it and before the barrier, for the same
                 // reason #1118's does: it needs the freshest canonical state,
                 // and a world it is about to overwrite must not have run this
                 // frame's fixed steps first.
-                crate::gm_restore::drive_live_restore,
+                crate::gm::continuity::restore::drive_live_restore,
                 recovery::drive_recovery,
                 slot_recovery::drive_slot_recovery,
                 gate_lockstep_ticks,
@@ -468,8 +472,8 @@ pub fn register_lockstep(app: &mut App) {
         .add_systems(
             FixedLast,
             (
-                crate::gm_contact::prune,
-                crate::gm_presentation::prune,
+                crate::gm::operations::contact::prune,
+                crate::gm::operations::presentation::prune,
                 seal_tick_frame,
             )
                 .chain()
@@ -508,13 +512,13 @@ pub fn register_lockstep(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
-                crate::gm_action::publish_session_projection,
-                crate::gm_event::publish_mission_projection,
-                crate::gm_spawn::publish_spawn_projection,
-                crate::gm_comms::publish_comms_projection,
+                crate::gm::actions::action::publish_session_projection,
+                crate::gm::operations::event::publish_mission_projection,
+                crate::gm::operations::spawn::publish_spawn_projection,
+                crate::gm::operations::comms::publish_comms_projection,
             ),
         )
-        .add_systems(Update, crate::gm_presentation::sync_views)
+        .add_systems(Update, crate::gm::operations::presentation::sync_views)
         // The host-loss Backfill flip (issue #1119). In `SimSet::Input`, at the
         // agreed tick, on the lost ship — the same phase the ordinary rating
         // change and the human-seeking resolver run in. Ordered
@@ -538,7 +542,7 @@ pub fn register_lockstep(app: &mut App) {
     // frame-driven restore that commits a fully-arrived record. Kept in its own
     // sibling so #1119's parallel work on this module does not collide with it.
     snapshot_relay::register_snapshot_relay(app);
-    crate::gm_join::register_join_driver(app);
+    crate::gm::continuity::join::register_join_driver(app);
     // Divergence recovery (issue #1118): the recovery resources and the diagnostic
     // log. The `drive_recovery` system itself is wired into the mesh chain above.
     recovery::register_recovery(app);
@@ -581,7 +585,7 @@ pub fn join_fleet(world: &mut World, roster: FleetRoster, delay: u64) -> bool {
     if !crew::roster_crew_matches_hulls(world, &roster) {
         return false;
     }
-    crate::gm_action::reset(world);
+    crate::gm::actions::action::reset(world);
     if !alone {
         // Browser pages can finish booting their lobby at different frame rates,
         // so their pre-adoption SimTicks are not a shared clock. Installing a
@@ -805,18 +809,18 @@ pub struct StartGrantAdmission<'w, 's> {
     phase: Option<Res<'w, State<crate::core::messages::GamePhase>>>,
     next_phase: Option<Res<'w, NextState<crate::core::messages::GamePhase>>>,
     managed: Option<Res<'w, crate::lobby::server::FleetManagedLobby>>,
-    gm_journal: ResMut<'w, crate::gm_action::GmActionJournal>,
-    gm_paused: Res<'w, crate::gm_action::SimulationPaused>,
-    gm_join_hold: Option<Res<'w, crate::gm_join::GmJoinPauseHold>>,
+    gm_journal: ResMut<'w, crate::gm::actions::action::GmActionJournal>,
+    gm_paused: Res<'w, crate::gm::actions::action::SimulationPaused>,
+    gm_join_hold: Option<Res<'w, crate::gm::continuity::join::GmJoinPauseHold>>,
     /// The owner's own live-restore state (issues #1446/#1447). Read only to
     /// gate what may ENTER the journal, never to decide a folded outcome.
-    gm_restore: Option<Res<'w, crate::gm_restore::GmLiveRestore>>,
+    gm_restore: Option<Res<'w, crate::gm::continuity::restore::GmLiveRestore>>,
     /// The multi-peer live-restore lane (issue #1447), peeled off the ordinary
     /// mesh drain so it stays deliverable while a held world starves
     /// `FixedUpdate` - the same argument the GM-action and join lanes make.
-    gm_restore_inbox: ResMut<'w, crate::gm_restore::GmRestoreInbox>,
-    gm_results: ResMut<'w, crate::gm_action::LocalGmActionRefusals>,
-    gm_puppets: Res<'w, crate::gm_puppet::StationPuppets>,
+    gm_restore_inbox: ResMut<'w, crate::gm::continuity::restore::GmRestoreInbox>,
+    gm_results: ResMut<'w, crate::gm::actions::action::LocalGmActionRefusals>,
+    gm_puppets: Res<'w, crate::gm::operations::puppet::StationPuppets>,
     gm_station_ships: Query<
         'w,
         's,
@@ -849,7 +853,7 @@ pub fn apply_mesh_inbox(
     mut pending_loss: ResMut<host_loss::PendingHostLoss>,
     mut pending_claims: ResMut<slot_recovery::PendingSlotClaims>,
     mut agreement: ResMut<MeshAgreement>,
-    mut join_lane: crate::gm_join::GmJoinMeshLane,
+    mut join_lane: crate::gm::continuity::join::GmJoinMeshLane,
     mut outbox: ResMut<MeshOutbox>,
     roster: Option<Res<FleetRoster>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
@@ -878,7 +882,7 @@ pub fn apply_mesh_inbox(
         join_lane
             .bootstrap
             .as_deref()
-            .map(crate::gm_join::GmJoinBootstrap::topology)
+            .map(crate::gm::continuity::join::GmJoinBootstrap::topology)
             .cloned()
     });
     let lead = authentication_roster
@@ -905,11 +909,16 @@ pub fn apply_mesh_inbox(
         // are trusted here; the former is judged by the self-observation guard in
         // the HostLoss arm below.
         let proven_candidate_report = match &frame {
-            MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Restored { from, .. })
-            | MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::RestoreBoundary { from, .. })
-            | MeshFrame::GmJoin(crate::gm_join::GmJoinFrame::Refused { from, .. }) => {
-                join_lane.runtime.active_candidate() == Some(*from)
-            }
+            MeshFrame::GmJoin(crate::gm::continuity::join::GmJoinFrame::Restored {
+                from, ..
+            })
+            | MeshFrame::GmJoin(crate::gm::continuity::join::GmJoinFrame::RestoreBoundary {
+                from,
+                ..
+            })
+            | MeshFrame::GmJoin(crate::gm::continuity::join::GmJoinFrame::Refused {
+                from, ..
+            }) => join_lane.runtime.active_candidate() == Some(*from),
             _ => false,
         };
         if origin.refuses(frame.from(), lead, is_member) && !proven_candidate_report {
@@ -1295,7 +1304,7 @@ pub fn apply_mesh_inbox(
             }
             MeshFrame::GmAction(action_frame) => {
                 if roster.as_deref().is_some_and(|roster| {
-                    crate::gm_action::validate_fleet_frame(&action_frame, roster).is_err()
+                    crate::gm::actions::action::validate_fleet_frame(&action_frame, roster).is_err()
                 }) {
                     crate::pwarn!(
                         log,
@@ -1315,7 +1324,7 @@ pub fn apply_mesh_inbox(
                         )
                     });
                 match action_frame {
-                    crate::gm_action::GmActionFrame::Proposal(proposal) => {
+                    crate::gm::actions::action::GmActionFrame::Proposal(proposal) => {
                         // A run-exit reset is authoritative for this frame. Drop
                         // every GM lane variant symmetrically once that boundary
                         // is pending so a co-arriving Proposal cannot recreate a
@@ -1355,7 +1364,7 @@ pub fn apply_mesh_inbox(
                                 .iter()
                                 .find(|(uuid, ..)| uuid.0 == ship.0)
                         });
-                        let sequenced = crate::gm_puppet::validate_station_action(
+                        let sequenced = crate::gm::operations::puppet::validate_station_action(
                             &proposal.action,
                             &proposal.operator_id,
                             &start_admission.gm_puppets,
@@ -1364,21 +1373,19 @@ pub fn apply_mesh_inbox(
                             found.and_then(|(_, _, _, hosts)| hosts),
                         )
                         .and_then(|()| {
-                            crate::gm_action::sequence_owner_proposal(
+                            crate::gm::actions::action::sequence_owner_proposal(
                                 &mut start_admission.gm_journal,
                                 &proposal,
                                 owner,
                                 now,
                                 session.ready_through(now),
                                 start_admission.gm_paused.0,
-                                start_admission
-                                    .gm_join_hold
+                                start_admission.gm_join_hold.as_deref().is_some_and(
+                                    crate::gm::continuity::join::GmJoinPauseHold::active,
+                                ) || start_admission
+                                    .gm_restore
                                     .as_deref()
-                                    .is_some_and(crate::gm_join::GmJoinPauseHold::active)
-                                    || start_admission
-                                        .gm_restore
-                                        .as_deref()
-                                        .is_some_and(|restore| restore.phase().holds_world()),
+                                    .is_some_and(|restore| restore.phase().holds_world()),
                                 start_admission
                                     .gm_restore
                                     .as_deref()
@@ -1386,21 +1393,22 @@ pub fn apply_mesh_inbox(
                             )
                         });
                         let decision = match sequenced {
-                            Ok(grant) => crate::gm_action::GmActionFrame::Granted(grant),
+                            Ok(grant) => crate::gm::actions::action::GmActionFrame::Granted(grant),
                             Err(reason) => {
                                 // Built by the shared constructor, so a remote
                                 // proposal's refusal names the same identity —
                                 // including the action's stable target — that a
                                 // locally-submitted one does.
-                                let refusal =
-                                    crate::gm_action::refusal_for(owner, &proposal, now, reason);
+                                let refusal = crate::gm::actions::action::refusal_for(
+                                    owner, &proposal, now, reason,
+                                );
                                 start_admission.gm_results.push(refusal.logged());
-                                crate::gm_action::GmActionFrame::Refused(refusal)
+                                crate::gm::actions::action::GmActionFrame::Refused(refusal)
                             }
                         };
                         outbox.push(MeshFrame::GmAction(decision));
                     }
-                    crate::gm_action::GmActionFrame::Granted(grant) => {
+                    crate::gm::actions::action::GmActionFrame::Granted(grant) => {
                         if !gm_run_active {
                             continue;
                         }
@@ -1430,7 +1438,7 @@ pub fn apply_mesh_inbox(
                         // while peers derive `NoOp` from an empty false baseline.
                         // Capture/restore can therefore preserve the exact folded
                         // journal instead of smuggling the technical hold into it.
-                        if let Err(reason) = crate::gm_action::insert_replicated_grant(
+                        if let Err(reason) = crate::gm::actions::action::insert_replicated_grant(
                             &mut start_admission.gm_journal,
                             start_admission.gm_paused.0,
                             grant,
@@ -1449,7 +1457,7 @@ pub fn apply_mesh_inbox(
                             );
                         }
                     }
-                    crate::gm_action::GmActionFrame::Refused(refusal) => {
+                    crate::gm::actions::action::GmActionFrame::Refused(refusal) => {
                         if !gm_run_active {
                             continue;
                         }
@@ -1690,7 +1698,7 @@ pub fn discard_multi_participant_overstep(
 /// in PreUpdate, so spending another catch-up step here would skip over a Pause
 /// before the reducer had any frame in which to close the clock.
 pub fn discard_gm_boundary_overstep(
-    journal: Option<Res<crate::gm_action::GmActionJournal>>,
+    journal: Option<Res<crate::gm::actions::action::GmActionJournal>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut fixed: Option<ResMut<Time<Fixed>>>,
 ) {

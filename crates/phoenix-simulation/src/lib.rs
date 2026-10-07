@@ -115,57 +115,57 @@ pub mod dossier;
 pub mod effect_queue;
 pub mod entities;
 /// Minimal peer-local authoritative projection for the rendererless GM page.
-pub mod gm_action;
-pub mod gm_activity;
-pub mod gm_attention;
+pub use gm::actions::action as gm_action;
+/// Public presentation of the canonical GM action journal (issue #1441).
+pub use gm::actions::journal as gm_journal;
 /// Named GM checkpoints and the shared live-restore candidate preflight model
 /// (issue #1445).
-pub mod gm_checkpoint;
-pub mod gm_comms;
-pub mod gm_contact;
-pub mod gm_despawn;
-pub mod gm_despawn_undo;
-/// Direct/internal GM damage and healing, applied through the ordinary damage
-/// lifecycle (issue #1310).
-pub mod gm_effect;
-/// Live inspection of instantiated entities and their AI configuration: the
-/// entities/AI domain panel of the M6 Live Inspector (issue #1489).
-pub mod gm_entity_inspector;
-pub mod gm_event;
-/// The typed, attributed GM adapter over faction hostility (issue #1442).
-pub mod gm_exposure;
-pub mod gm_faction;
-pub mod gm_health;
-pub mod gm_information;
-pub mod gm_inspector_coverage;
-pub mod gm_join;
-/// Public presentation of the canonical GM action journal (issue #1441).
-pub mod gm_journal;
-pub mod gm_npc;
-pub mod gm_objective;
-pub mod gm_presentation;
-pub mod gm_presentation_inspector;
-pub mod gm_projection;
-pub mod gm_puppet;
-/// The quiet-time advisory and the crew-activity adapter behind it (issue
-/// #1436): three existing result/command/progress sources, one Background row,
-/// no keystroke telemetry.
-pub mod gm_quiet;
-pub mod gm_region_inspector;
+pub use gm::continuity::checkpoint as gm_checkpoint;
+pub use gm::continuity::join as gm_join;
 /// Single-simulation-peer live restore (issue #1446): the typed attributed
 /// request, the recovery checkpoint, the gated load and the protocol fence,
 /// all assembled from #1118/#1119/#1445 rather than a second protocol.
-pub mod gm_restore;
-/// Crew-public Game Master identities (issue #1289), kept separate from crew
-/// sessions and the player-ship fleet roster by construction.
-pub mod gm_roster;
-pub mod gm_ship_inspector;
+pub use gm::continuity::restore as gm_restore;
 /// The standalone game master's bound identity: the one-peer roster binding and
 /// the read-back the host page reads its own admission from.
-pub mod gm_solo;
-pub mod gm_spawn;
-pub mod gm_workload;
-pub mod gm_world_inspector;
+pub use gm::continuity::solo as gm_solo;
+pub use gm::observation::activity as gm_activity;
+pub use gm::observation::attention as gm_attention;
+/// Live inspection of instantiated entities and their AI configuration: the
+/// entities/AI domain panel of the M6 Live Inspector (issue #1489).
+pub use gm::observation::entity_inspector as gm_entity_inspector;
+pub use gm::observation::health as gm_health;
+pub use gm::observation::inspector_coverage as gm_inspector_coverage;
+pub use gm::observation::presentation_inspector as gm_presentation_inspector;
+pub use gm::observation::projection as gm_projection;
+/// The quiet-time advisory and the crew-activity adapter behind it (issue
+/// #1436): three existing result/command/progress sources, one Background row,
+/// no keystroke telemetry.
+pub use gm::observation::quiet as gm_quiet;
+pub use gm::observation::region_inspector as gm_region_inspector;
+pub use gm::observation::ship_inspector as gm_ship_inspector;
+pub use gm::observation::workload as gm_workload;
+pub use gm::observation::world_inspector as gm_world_inspector;
+pub use gm::operations::comms as gm_comms;
+pub use gm::operations::contact as gm_contact;
+pub use gm::operations::despawn as gm_despawn;
+pub use gm::operations::despawn_undo as gm_despawn_undo;
+/// Direct/internal GM damage and healing, applied through the ordinary damage
+/// lifecycle (issue #1310).
+pub use gm::operations::effect as gm_effect;
+pub use gm::operations::event as gm_event;
+/// The typed, attributed GM adapter over faction hostility (issue #1442).
+pub use gm::operations::exposure as gm_exposure;
+pub use gm::operations::faction as gm_faction;
+pub use gm::operations::information as gm_information;
+pub use gm::operations::npc as gm_npc;
+pub use gm::operations::objective as gm_objective;
+pub use gm::operations::presentation as gm_presentation;
+pub use gm::operations::puppet as gm_puppet;
+/// Crew-public Game Master identities (issue #1289), kept separate from crew
+/// sessions and the player-ship fleet roster by construction.
+pub use gm::operations::roster as gm_roster;
+pub use gm::operations::spawn as gm_spawn;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;
@@ -318,3 +318,5 @@ pub(crate) mod repo_fixtures;
 pub(crate) use repo_fixtures::fs as content_fs;
 #[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "test-support"))))]
 pub(crate) use std::fs as content_fs;
+
+pub mod gm;

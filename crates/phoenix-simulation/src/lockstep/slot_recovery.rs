@@ -290,11 +290,11 @@ fn open_slot_recovery(world: &mut World, local: HostSlot, interval: u64, delay: 
             // canonical snapshot the leader transfers, so the recovering host
             // receives the same durable generation rather than deriving it from
             // browser-local connection timing. Exact duplicate opens are inert.
-            if !world.contains_resource::<crate::gm_action::GmActionJournal>() {
-                world.insert_resource(crate::gm_action::GmActionJournal::default());
+            if !world.contains_resource::<crate::gm::actions::action::GmActionJournal>() {
+                world.insert_resource(crate::gm::actions::action::GmActionJournal::default());
             }
             world
-                .resource_mut::<crate::gm_action::GmActionJournal>()
+                .resource_mut::<crate::gm::actions::action::GmActionJournal>()
                 .record_slot_recovery(slot, boundary)
                 .expect("canonical slot recoveries advance monotonically");
             // Re-admit the recovering slot to the barrier at the boundary, so it is

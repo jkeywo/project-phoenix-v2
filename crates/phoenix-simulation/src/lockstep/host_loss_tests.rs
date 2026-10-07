@@ -5,7 +5,7 @@ use bevy::{app::Update, prelude::App};
 fn gm_loss_app(
     gms: &[(HostSlot, &str)],
     lost: HostSlot,
-) -> (App, crate::gm_puppet::StationPuppetTarget) {
+) -> (App, crate::gm::operations::puppet::StationPuppetTarget) {
     let ship_slot = HostSlot(1);
     let participants = std::iter::once(ship_slot)
         .chain(gms.iter().map(|(slot, _)| *slot))
@@ -49,17 +49,17 @@ console = "helm-console"
     )
     .unwrap();
     let station = crate::core::messages::StationId("helm".into());
-    let target = crate::gm_puppet::StationPuppetTarget::new(
+    let target = crate::gm::operations::puppet::StationPuppetTarget::new(
         crate::command_admission::ShipKey("player-1".into()),
         station.clone(),
     );
-    let mut puppets = crate::gm_puppet::StationPuppets::default();
-    let mut activity = crate::gm_puppet::StationPuppetActivity::default();
+    let mut puppets = crate::gm::operations::puppet::StationPuppets::default();
+    let mut activity = crate::gm::operations::puppet::StationPuppetActivity::default();
     for (sequence, (slot, operator)) in gms.iter().enumerate() {
         puppets.set_operator(target.clone(), (*operator).into(), true);
-        activity.push(crate::gm_puppet::StationPuppetActivityEntry {
+        activity.push(crate::gm::operations::puppet::StationPuppetActivityEntry {
             tick: 6,
-            order: crate::gm_action::GmActionOrder::new(*slot, sequence as u64 + 1),
+            order: crate::gm::actions::action::GmActionOrder::new(*slot, sequence as u64 + 1),
             operator_id: (*operator).into(),
             ship: target.ship.clone(),
             station: station.clone(),
@@ -83,7 +83,7 @@ console = "helm-console"
         .insert_resource(roster)
         .insert_resource(puppets)
         .insert_resource(activity)
-        .init_resource::<crate::gm_puppet::PreviousStationPuppetTargets>()
+        .init_resource::<crate::gm::operations::puppet::PreviousStationPuppetTargets>()
         .add_systems(Update, apply_host_loss_backfill);
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -221,11 +221,11 @@ fn single_gm_loss_releases_takeover_restores_backfill_and_clears_activity() {
 
     assert!(!app
         .world()
-        .resource::<crate::gm_puppet::StationPuppets>()
+        .resource::<crate::gm::operations::puppet::StationPuppets>()
         .is_active(&target));
     assert!(app
         .world()
-        .resource::<crate::gm_puppet::StationPuppetActivity>()
+        .resource::<crate::gm::operations::puppet::StationPuppetActivity>()
         .entries()
         .is_empty());
     let sources = app
@@ -249,13 +249,13 @@ fn one_equal_gm_loss_preserves_the_surviving_takeover() {
 
     assert_eq!(
         app.world()
-            .resource::<crate::gm_puppet::StationPuppets>()
+            .resource::<crate::gm::operations::puppet::StationPuppets>()
             .operators(&target),
         &["gm-2"],
     );
     assert_eq!(
         app.world()
-            .resource::<crate::gm_puppet::StationPuppetActivity>()
+            .resource::<crate::gm::operations::puppet::StationPuppetActivity>()
             .entries()
             .iter()
             .map(|entry| entry.operator_id.as_str())
@@ -288,24 +288,28 @@ fn recovered_gm_binding_can_retake_the_backfill_station() {
         Some("gm-1"),
         "the frozen binding survives transport loss for authenticated recovery",
     );
-    let action = crate::gm_action::GmAction::SetStationPuppet {
+    let action = crate::gm::actions::action::GmAction::SetStationPuppet {
         ship: target.ship.clone(),
         station: target.station.clone(),
         active: true,
     };
     assert_eq!(
-        crate::gm_puppet::validate_station_action_in_world(app.world_mut(), &action, "gm-1",),
+        crate::gm::operations::puppet::validate_station_action_in_world(
+            app.world_mut(),
+            &action,
+            "gm-1",
+        ),
         Ok(()),
     );
     app.world_mut()
-        .resource_mut::<crate::gm_puppet::StationPuppets>()
+        .resource_mut::<crate::gm::operations::puppet::StationPuppets>()
         .set_operator(target.clone(), "gm-1".into(), true);
     app.world_mut()
-        .run_system_once(crate::gm_puppet::reconcile_station_puppet_control)
+        .run_system_once(crate::gm::operations::puppet::reconcile_station_puppet_control)
         .unwrap();
     assert!(app
         .world()
-        .resource::<crate::gm_puppet::StationPuppets>()
+        .resource::<crate::gm::operations::puppet::StationPuppets>()
         .is_operated_by(&target, "gm-1"));
     let sources = app
         .world_mut()

@@ -110,8 +110,8 @@ pub fn apply_host_loss_backfill(
         &mut crate::ship_plugin::ActiveStationRatings,
         &super::FleetSlotOf,
     )>,
-    mut puppets: Option<ResMut<crate::gm_puppet::StationPuppets>>,
-    mut activity: Option<ResMut<crate::gm_puppet::StationPuppetActivity>>,
+    mut puppets: Option<ResMut<crate::gm::operations::puppet::StationPuppets>>,
+    mut activity: Option<ResMut<crate::gm::operations::puppet::StationPuppetActivity>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     if pending.pending_len() == 0 {

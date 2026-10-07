@@ -4,6 +4,7 @@
 //! an in-memory `path -> TOML` map, so no filesystem or bridge is involved.
 
 use super::*;
+use crate::world::script::load::ScriptResolver;
 use crate::world::validate::has_error;
 
 /// A resolver that serves no sibling scripts — every test authors its scripts

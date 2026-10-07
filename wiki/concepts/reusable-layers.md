@@ -90,6 +90,23 @@ Simulation. The semantic validator retains the parsed identity and hands off
 content, assets and source archive together; browser and native adapters do not
 reconstruct an accepted pack.
 
+## Content preparation and offline authoring
+
+**Owner:** `phoenix-content-preparation`.
+
+**Responsible for:** entity/World composition validation, immutable accepted-pack
+handoff, World loading over explicit readers and Workshop source editing and
+validation. It returns prepared definitions, scripts, findings and ledger plans;
+The authoring schema includes Console feeds, composed equipment, AI state trees
+and repair-job workflows from their current Gameplay owners.
+Callers install content and apply ledger writes. Immutable overlay data remains
+in Content, shared without importing a live host.
+
+**Uses:** Gameplay, World, Contracts, Content and Model. **Used by:** Simulation's
+compatibility facades and host adapters. It has no dependency on Simulation,
+Session or Presentation. Browser fetch/cache readers and disposable Workshop
+Test clocks, tracing and providers remain in Simulation.
+
 ## Simulation composition and adapters
 
 **Owner:** [`phoenix-simulation`](../../crates/phoenix-simulation/src/lib.rs).

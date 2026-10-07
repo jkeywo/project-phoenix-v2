@@ -4974,6 +4974,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-content-preparation"
+version = "0.1.0"
+dependencies = [
+ "phoenix-content",
+ "phoenix-model",
+ "phoenix-sim-contracts",
+ "phoenix-sim-gameplay",
+ "phoenix-sim-world",
+ "serde",
+ "serde_json",
+ "toml",
+ "toml_edit 0.25.11+spec-1.1.0",
+ "uuid",
+ "vellum-script",
+]
+
+[[package]]
 name = "phoenix-grid"
 version = "0.1.0"
 dependencies = [
@@ -5157,6 +5174,7 @@ dependencies = [
  "noise",
  "parry3d",
  "phoenix-content",
+ "phoenix-content-preparation",
  "phoenix-math",
  "phoenix-model",
  "phoenix-platform",

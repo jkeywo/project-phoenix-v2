@@ -18,6 +18,7 @@ ultralight = []
 falling-skyway-sim-tests = ["headless"]
 
 [dependencies]
+phoenix-content-preparation = { path = "../phoenix-content-preparation" }
 phoenix-sim-world = { path = "../phoenix-sim-world" }
 phoenix-sim-gameplay = { path = "../phoenix-sim-gameplay" }
 phoenix-sim-session = { path = "../phoenix-sim-session" }

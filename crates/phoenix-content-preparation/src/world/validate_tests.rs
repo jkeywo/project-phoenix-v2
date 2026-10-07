@@ -881,8 +881,8 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
 "#);
     let findings = activation_findings(
         &config,
-        &crate::entities::include_resolve::HostFragmentSource,
-        &crate::entities::loader::WasmTemplateLoader,
+        &crate::entities::include_resolve::FixtureFragments,
+        &crate::entities::loader::FixtureTemplates,
     );
     assert!(
         findings
@@ -1181,7 +1181,7 @@ name = "ghost"
 "#);
     let findings = activation_findings(
         &config,
-        &crate::entities::include_resolve::HostFragmentSource,
+        &crate::entities::include_resolve::FixtureFragments,
         &patroller_templates(),
     );
     assert!(
@@ -1194,7 +1194,7 @@ name = "ghost"
     // …and stays silent through the same gate on a blind host.
     let findings = activation_findings(
         &config,
-        &crate::entities::include_resolve::HostFragmentSource,
+        &crate::entities::include_resolve::FixtureFragments,
         &blind_templates(),
     );
     assert!(
@@ -1361,7 +1361,7 @@ fn activation_findings_carries_the_unmergeable_override_error() {
     ));
     let findings = activation_findings(
         &config,
-        &crate::entities::include_resolve::HostFragmentSource,
+        &crate::entities::include_resolve::FixtureFragments,
         &patroller_templates(),
     );
     assert!(
@@ -1481,7 +1481,7 @@ fn activation_findings_carries_the_override_absent_table_warning() {
     ));
     let findings = activation_findings(
         &config,
-        &crate::entities::include_resolve::HostFragmentSource,
+        &crate::entities::include_resolve::FixtureFragments,
         &patroller_templates(),
     );
     assert!(
@@ -1503,7 +1503,7 @@ fn activation_findings_carries_the_override_absent_table_warning() {
 /// itself, not pinned here.
 #[test]
 fn evidence_and_corroborate_overrides_never_warn_override_absent_table() {
-    let loader = crate::entities::loader::WasmTemplateLoader;
+    let loader = crate::entities::loader::FixtureTemplates;
     for name in ["probe_evidence.toml", "probe_corroborate.toml"] {
         let path_str = format!("assets/worlds/{name}");
         let toml =

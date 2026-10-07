@@ -477,7 +477,7 @@ fn order_responses() -> Vec<String> {
 }
 
 fn ai_rules() -> Vec<String> {
-    vec![crate::console_ai::server::AI_RULE_TORPEDO_AUTO_FIRE.to_owned()]
+    vec![phoenix_sim_gameplay::AI_RULE_TORPEDO_AUTO_FIRE.to_owned()]
 }
 
 fn compliance_defaults() -> ComplianceDefaults {

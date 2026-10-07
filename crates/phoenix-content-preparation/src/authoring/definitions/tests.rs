@@ -648,8 +648,9 @@ fn shield_arc_rating_references_follow_runtime_ownership() {
 
 #[test]
 fn authored_cruiser_guard_passes_station_rating_reference_validation() {
-    let source = crate::entities::include_resolve::resolve_from_disk(
+    let source = crate::entities::include_resolve::resolve_template(
         "assets/entities/alliance_cruiser.toml",
+        &crate::entities::include_resolve::FixtureFragments,
     )
     .expect("the authored cruiser resolves")
     .toml;

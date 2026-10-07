@@ -50,6 +50,14 @@
         "group": "host"
       },
       {
+        "id": "phoenix-content-preparation",
+        "label": "content-preparation",
+        "path": "crates/phoenix-content-preparation",
+        "source": "crates/phoenix-content-preparation/Cargo.toml",
+        "description": "Offline entity/world composition, pack admission and Workshop authoring over explicit sources.",
+        "group": "game"
+      },
+      {
         "id": "phoenix-sim-world",
         "label": "sim-world",
         "path": "crates/phoenix-sim-world",
@@ -218,6 +226,47 @@
         "to": "phoenix-transport",
         "evidence": [
           "./Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content-preparation",
+        "to": "phoenix-model",
+        "evidence": [
+          "crates/phoenix-content-preparation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content-preparation",
+        "to": "phoenix-sim-gameplay",
+        "evidence": [
+          "crates/phoenix-content-preparation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content-preparation",
+        "to": "phoenix-sim-world",
+        "evidence": [
+          "crates/phoenix-content-preparation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content-preparation",
+        "to": "phoenix-sim-contracts",
+        "evidence": [
+          "crates/phoenix-content-preparation/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-content-preparation",
+        "to": "phoenix-content",
+        "evidence": [
+          "crates/phoenix-content-preparation/Cargo.toml: dependencies, all targets",
+          "crates/phoenix-content-preparation/Cargo.toml: dev-dependencies, all targets"
         ],
         "normal": true
       },
@@ -412,6 +461,14 @@
         "to": "phoenix-platform",
         "evidence": [
           "crates/phoenix-content/Cargo.toml: dependencies, all targets"
+        ],
+        "normal": true
+      },
+      {
+        "from": "phoenix-simulation",
+        "to": "phoenix-content-preparation",
+        "evidence": [
+          "crates/phoenix-simulation/Cargo.toml: dependencies, all targets"
         ],
         "normal": true
       },
@@ -649,7 +706,7 @@ function choose(id){selected=id;select.value=id;render();}
 function switchLanguage(next){language=next;selected='';for(const id of ['rust','javascript'])document.getElementById(id+'-tab').setAttribute('aria-selected',String(id===next));document.getElementById('graph-panel').setAttribute('aria-labelledby',next+'-tab');select.innerHTML='<option value="">Tree overview</option>'+graph().nodes.map(n=>`<option value="${n.id}">${esc(n.label)}</option>`).join('');select.value=selected;render();}
 function coordinates(width){
  if(language==='javascript')return {'browser-ui':[width*.2,100],worker:[width*.5,100],'grid-js':[width*.8,100],'session-js':[width*.32,300],'transport-js':[width*.68,480]};
- const positions={'project-phoenix':[width*.5,65],'phoenix-grid':[width*.84,65],'phoenix-presentation':[width*.5,175],'phoenix-simulation':[width*.5,285],'phoenix-sim-gameplay':[width*.18,405],'phoenix-sim-world':[width*.5,405],'phoenix-sim-session':[width*.82,405],'phoenix-sim-contracts':[width*.5,525],'phoenix-content':[width*.3,650],'phoenix-model':[width*.7,650],'phoenix-math':[width*.125,795],'phoenix-platform':[width*.375,795],'phoenix-transport':[width*.625,795],'phoenix-runtime':[width*.875,795]};
+ const positions={'project-phoenix':[width*.5,65],'phoenix-grid':[width*.84,65],'phoenix-presentation':[width*.5,175],'phoenix-simulation':[width*.5,285],'phoenix-content-preparation':[width*.16,285],'phoenix-sim-gameplay':[width*.18,405],'phoenix-sim-world':[width*.5,405],'phoenix-sim-session':[width*.82,405],'phoenix-sim-contracts':[width*.5,525],'phoenix-content':[width*.3,650],'phoenix-model':[width*.7,650],'phoenix-math':[width*.125,795],'phoenix-platform':[width*.375,795],'phoenix-transport':[width*.625,795],'phoenix-runtime':[width*.875,795]};
  const extra=graph().nodes.filter(n=>!positions[n.id]);
  extra.forEach((n,i)=>positions[n.id]=[width*(i+1)/(extra.length+1),915]);
  return positions;

@@ -17,6 +17,7 @@ const descriptions = {
   'phoenix-sim-world': 'WorldConfig, scripts, objectives, commitments, deadlines and narrative state.',
   'phoenix-sim-session': 'Crew, Station tenure, lobby decisions, connection lifecycle and fleet protocol state.',
   'phoenix-sim-contracts': 'Shared identities, tick and RNG, commands, authority, schedules and authored vocabulary.',
+  'phoenix-content-preparation': 'Offline entity/world composition, pack admission and Workshop authoring over explicit sources.',
   'phoenix-content': 'Asset preparation, archives, includes, manifests, strings and content ledger.',
   'phoenix-model': 'Shared Phoenix types, identities, messages and visual declarations.',
   'phoenix-runtime': 'Generic command ordering, continuation, digests and recovery.',

@@ -72,3 +72,6 @@ mod test_fixtures;
 pub mod console_ai {
     pub mod core;
 }
+
+/// Authored console AI rule identifier.
+pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";

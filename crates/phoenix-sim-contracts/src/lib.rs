@@ -31,3 +31,5 @@ pub mod lifecycle;
 pub mod outcome;
 
 pub mod power;
+
+pub mod inspector;

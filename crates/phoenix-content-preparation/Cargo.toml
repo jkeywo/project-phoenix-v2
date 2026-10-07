@@ -1,0 +1,19 @@
+[package]
+name = "phoenix-content-preparation"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+[dependencies]
+phoenix-model = { path = "../phoenix-model" }
+phoenix-sim-gameplay = { path = "../phoenix-sim-gameplay" }
+phoenix-sim-world = { path = "../phoenix-sim-world" }
+phoenix-sim-contracts = { path = "../phoenix-sim-contracts" }
+phoenix-content = { path = "../phoenix-content" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+toml = "1.0"
+toml_edit = "=0.25.11"
+vellum-script = { workspace = true }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+[dev-dependencies]
+phoenix-content = { path = "../phoenix-content", features = ["test-support"] }

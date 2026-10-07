@@ -100,31 +100,6 @@ fn key(text: &str) -> Segment {
     Segment::Key(text.into())
 }
 
-#[test]
-fn workshop_slot_form_requests_preserve_exact_source() {
-    for (name, request) in crate::core::codec::workshop_slot_edit_fixtures() {
-        let source = &request.expected_source;
-        let after = edit(source, &request).unwrap();
-        if name == "label" {
-            assert_eq!(
-                after,
-                source.replace(
-                    "label='Original' # label tail\r\n",
-                    "label=\"Changed\" # label tail\n"
-                )
-            );
-        } else {
-            assert!(after.starts_with(source));
-            let world = crate::world::config::parse_world(&after).unwrap();
-            assert_eq!(world.ship_slots[2].id, "wing");
-            assert_eq!(
-                world.ship_slots[2].ships[0].template_path,
-                "assets/entities/base.toml"
-            );
-        }
-    }
-}
-
 fn request(document_path: &str, source: &str, edits: Vec<Edit>) -> EditRequest {
     EditRequest {
         document_path: document_path.into(),

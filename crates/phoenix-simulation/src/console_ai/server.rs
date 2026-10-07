@@ -40,7 +40,7 @@ use bevy::prelude::*;
 use crate::command_admission::ai_emit::emit_ai_command;
 
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
-pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
+pub use phoenix_sim_gameplay::AI_RULE_TORPEDO_AUTO_FIRE;
 // `AI_RULE_AUTO_HINT` ("auto_hint") was deleted by issue #873. It gated the
 // Sensors frequency hint on whether a *human session* held the Sensors station
 // and, if so, on that holder's active rating — so a coordination fact derived

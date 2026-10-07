@@ -8,7 +8,8 @@ export const allowed = {
   'phoenix-sim-gameplay': ['phoenix-sim-contracts', 'phoenix-model', 'phoenix-content', 'phoenix-math'],
   'phoenix-sim-world': ['phoenix-sim-contracts', 'phoenix-model', 'phoenix-content', 'phoenix-math'],
   'phoenix-sim-session': ['phoenix-sim-contracts', 'phoenix-model', 'phoenix-runtime', 'phoenix-transport'],
-  'phoenix-simulation': ['phoenix-sim-contracts', 'phoenix-sim-gameplay', 'phoenix-sim-world', 'phoenix-sim-session', 'phoenix-runtime', 'phoenix-transport', 'phoenix-platform', 'phoenix-model', 'phoenix-content', 'phoenix-math'],
+  'phoenix-content-preparation': ['phoenix-sim-gameplay', 'phoenix-sim-world', 'phoenix-sim-contracts', 'phoenix-content', 'phoenix-model', 'phoenix-math', 'phoenix-platform'],
+  'phoenix-simulation': ['phoenix-content-preparation', 'phoenix-sim-contracts', 'phoenix-sim-gameplay', 'phoenix-sim-world', 'phoenix-sim-session', 'phoenix-runtime', 'phoenix-transport', 'phoenix-platform', 'phoenix-model', 'phoenix-content', 'phoenix-math'],
   'phoenix-presentation': ['phoenix-simulation', 'phoenix-model', 'phoenix-content', 'phoenix-math'],
   'phoenix-grid': ['phoenix-runtime', 'phoenix-transport', 'phoenix-platform', 'phoenix-math'],
 };

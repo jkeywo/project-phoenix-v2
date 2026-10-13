@@ -1147,13 +1147,13 @@ pub(crate) fn ai_torpedo_auto_fire(
 
         // Combat Lock from this ship's frozen viewscreen blackboard (issue
         // #829, spec §1/§3). One-tick lag accepted, including for firing.
-        let Some(target_uuid) = (match blackboards
+        let Some(target_uuid) = ship_config
             .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
-        }) else {
+            .systems
+            .iter()
+            .filter(|system| system.kind == "torpedo_tube")
+            .find_map(|system| console_combat_lock(&ship_config.0, &system.id, blackboards))
+        else {
             continue;
         };
 
@@ -1246,6 +1246,17 @@ pub(crate) fn ai_torpedo_auto_fire(
 
         let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
         for tube_id in tubes_to_fire {
+            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
+            else {
+                continue;
+            };
+            // A neighbouring tube can be controlled by another Console. A
+            // shared Station or magazine never lends it that Console's lock.
+            if console_combat_lock(&ship_config.0, &target, blackboards).as_deref()
+                != Some(target_uuid.as_str())
+            {
+                continue;
+            }
             // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
             // already resolved this tube's host readiness (loaded, in arc, target
             // locked — NOT the magazine, whose rounds are the ones left to reload
@@ -1283,10 +1294,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             }
             // Emit as an admitted command through the shared AI seam (issue
             // #846), instead of the retired `TorpedoIntents` buffer.
-            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
-            else {
-                continue;
-            };
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
@@ -1577,13 +1584,7 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
         // and the firing paths read it — never the tactical radar's live
         // selection.
-        let locked_target = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
-        };
+        let locked_target = console_combat_lock(&ship_config.0, &sensors_sid, blackboards);
 
         let locked_target = locked_target.filter(|target| {
             observer_uuid
@@ -1656,6 +1657,25 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 sender_system: sensors_sid.clone(),
             });
         }
+    }
+}
+
+/// Read the existing frozen coordination publication through this System's
+/// Console. Neither another Console's host nor another tube's permissions
+/// broaden this view. This borrows observations without touching AI memory.
+fn console_combat_lock(
+    config: &crate::ship::config::ShipConfig,
+    system: &crate::core::messages::SystemId,
+    blackboards: &crate::server_app::ShipSystemBlackboards,
+) -> Option<String> {
+    match config
+        .observations_for_system(system, &blackboards.0)
+        .get(&crate::ship::system_registry::viewscreen_system_id())
+    {
+        Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => {
+            board.combat_lock.clone()
+        }
+        _ => None,
     }
 }
 

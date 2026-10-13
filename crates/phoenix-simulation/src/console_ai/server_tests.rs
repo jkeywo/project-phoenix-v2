@@ -1137,17 +1137,73 @@ name = "Tactical"
 description = "Weapons control."
 rank = "Ltn."
 
+[[console]]
+id = "science-console"
+home_station = "sensors"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "weapons-console"
+home_station = "tactical"
+
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "sensors"
+console = "science-console"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "weapons-console"
 "#;
     crate::ship::config::ShipConfig::from_toml(toml, &["sensors", "tactical_radar"]).unwrap()
+}
+
+#[test]
+fn console_combat_lock_requires_the_reading_systems_exact_feed() {
+    let mut config = sensors_ship_config();
+    let sensors = crate::ship::system_registry::sensors_system_id();
+    let tactical = crate::ship::system_registry::tactical_radar_system_id();
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        crate::core::messages::SystemBlackboard::Viewscreen(
+            crate::core::messages::ViewscreenBlackboard {
+                combat_lock: Some("target-1".into()),
+                ..Default::default()
+            },
+        ),
+    );
+    assert_eq!(
+        console_combat_lock(&config, &sensors, &boards).as_deref(),
+        Some("target-1")
+    );
+    // Co-hosting is not a feed, even when both Console home seats match.
+    config.consoles[1].home_station = config.consoles[0].home_station.clone();
+    assert_eq!(console_combat_lock(&config, &tactical, &boards), None);
+    config.consoles[0].feeds[0].kind = phoenix_model::console::ConsoleObservationKind::Sensors;
+    assert_eq!(console_combat_lock(&config, &sensors, &boards), None);
+}
+
+#[test]
+fn frequency_hint_cannot_read_an_unbound_combat_lock() {
+    let mut app = freq_hint_test_app();
+    let source = app.world().resource::<SourceShip>().0;
+    app.world_mut()
+        .entity_mut(source)
+        .get_mut::<ShipConfigComponent>()
+        .unwrap()
+        .0
+        .consoles[0]
+        .feeds
+        .clear();
+    tick_with_dt(&mut app, 10.0);
+    assert!(
+        app.world().resource::<CoordBox>().0.is_empty(),
+        "a live target elsewhere on the ship does not grant Sensors its lock"
+    );
 }
 
 /// Adds `ShipConfigComponent` + `ActiveStationRatings` to the ship spawned

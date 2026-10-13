@@ -1,8 +1,9 @@
 @echo off
 REM =====================================================
-REM deploy-local.bat — Build server + client, serve dist/
+REM local-build-and-deploy.bat - Build server + client, serve dist/
 REM =====================================================
 setlocal enabledelayedexpansion
+cd /d "%~dp0"
 
 echo === Building server (Trunk) ===
 call trunk build --release
@@ -18,6 +19,5 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-echo === Starting dev server on http://localhost:3000 ===
-echo Press Ctrl+C to stop.
-npx serve dist -p 3000 --no-clipboard
+call "%~dp0local-deploy.bat"
+exit /b %errorlevel%

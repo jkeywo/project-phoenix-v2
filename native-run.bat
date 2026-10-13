@@ -1,9 +1,9 @@
 @echo off
 REM =====================================================
-REM run-native.bat - launch the native host (PRD #855 /
+REM native-run.bat - launch the native host (PRD #855 /
 REM issues #1121, #1326, #1328, #1353)
 REM
-REM   run-native.bat            DEFAULT: the on-screen game
+REM   native-run.bat            DEFAULT: the on-screen game
 REM                             lobby, on the viewscreen. The
 REM                             host takes crew on its OWN port,
 REM                             so phones on this network join
@@ -16,19 +16,19 @@ REM                             live routes on this landing. A
 REM                             missing .\mod-packs shelf is
 REM                             created automatically.
 REM
-REM   run-native.bat delivery   the old delivery-only host
+REM   native-run.bat delivery   the old delivery-only host
 REM                             (serves the bundle, no game
 REM                             window). This is the invocation
 REM                             the acceptance kits document -
 REM                             use it for those.
 REM
-REM   run-native.bat raw <args> pure passthrough to phoenix-host
+REM   native-run.bat raw <args> pure passthrough to phoenix-host
 REM                             with --client-dir dist plus your
 REM                             own flags (nothing added).
 REM
 REM Extras after the mode are forwarded verbatim, e.g.
-REM   run-native.bat --addr 0.0.0.0:8080
-REM   run-native.bat raw --world assets\worlds\combat_test.toml --solo
+REM   native-run.bat --addr 0.0.0.0:8080
+REM   native-run.bat raw --world assets\worlds\combat_test.toml --solo
 REM
 REM JOINING NEEDS NOTHING ELSE (issue #1353). The host mints
 REM its own join code and answers the game socket on the same
@@ -37,7 +37,7 @@ REM QR loads from this machine and dials this machine. No
 REM worker, no wrangler, no internet.
 REM
 REM For play beyond this LAN, add the cloud service yourself:
-REM   run-native.bat --rendezvous <URL> --origin <URL>
+REM   native-run.bat --rendezvous <URL> --origin <URL>
 REM Both legs then run at once; the viewscreen QR stays the LAN
 REM one (the page it opens is served from here), and the cloud
 REM code is printed in this window for anybody joining remotely.
@@ -47,33 +47,8 @@ cd /d "%~dp0"
 
 set "HOST=target\release\phoenix-host.exe"
 
-REM Build-and-run: the host build is a fast no-op when nothing changed, and the
-REM client bundle rebuild is quick, so both run every time. build.rs stages the
-REM Ultralight SDK DLLs beside the exe, so a fresh build starts cleanly.
-echo [run-native] building phoenix-host (release, --features ultralight)...
-cargo build --release --features ultralight --bin phoenix-host || (echo [ERROR] cargo build failed & exit /b 1)
-echo [run-native] building the phone-client and shared native-lobby modules...
-node scripts\build-client.mjs || (echo [ERROR] client build failed & exit /b 1)
-
-REM Backstop for the build.rs staging. `ul-next-sys` declares no `links` key, so
-REM Cargo is free to run its SDK *download* alongside our build script instead of
-REM before it; on a cold checkout build.rs can look for the DLLs a moment too
-REM early and warn instead of copying. By here the build is finished, so the SDK
-REM is certainly on disk - copy anything still missing beside the exe, or the
-REM host dies at load with a silent STATUS_DLL_NOT_FOUND.
-for /d %%d in ("target\release\build\ul-next-sys-*") do (
-    if exist "%%~fd\out\ul-sdk\bin\Ultralight.dll" (
-        for %%f in ("%%~fd\out\ul-sdk\bin\*.dll") do (
-            if not exist "target\release\%%~nxf" (
-                echo [run-native] staging %%~nxf beside the exe
-                copy /y "%%f" "target\release\" >nul
-            )
-        )
-    )
-)
-
 if not exist "%HOST%" (
-    echo [ERROR] %HOST% not found after the build.
+    echo [ERROR] %HOST% not found - run native-build-and-run.bat first.
     exit /b 1
 )
 if not exist "dist\index.html" (
@@ -121,7 +96,7 @@ REM is Up), skipping WSL/Hyper-V virtual adapters, which have no default gateway
 set "LANIP="
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$a=(Get-NetIPConfiguration).Where({$_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up'}); if($a){$a[0].IPv4Address.IPAddress}"`) do set "LANIP=%%i"
 if not defined LANIP (
-    echo [run-native] could not detect a LAN IP; falling back to 127.0.0.1
+    echo [native-run] could not detect a LAN IP; falling back to 127.0.0.1
     set "LANIP=127.0.0.1"
 )
 REM No --rendezvous is passed (issue #1353): the host IS the join service now.

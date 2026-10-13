@@ -85,6 +85,7 @@ export class ClientSimState {
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
     const systemDepths = preserveAuthorityProjection ? this.systemDepths : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
+    const consoleHosts = preserveAuthorityProjection ? this.consoleHosts : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
     const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
@@ -141,6 +142,8 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    this.consoleDefinitions = [];
+    this.consoleHosts = consoleHosts;
     /** Authoritative System id → Console Family projection, populated from
      *  Welcome ship_config.system_console_families. Every owned System has an
      *  entry; the client never infers presentation from its id spelling. */
@@ -333,6 +336,7 @@ export class ClientSimState {
         break;
       case 'SimState': {
         const snap = d.snapshot || {};
+        this.consoleHosts = Object.fromEntries((snap.console_hosts || []).filter(Boolean).map(entry => [entry.console, entry]));
         this.stationHosts = Object.fromEntries(
           (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
         );
@@ -394,6 +398,7 @@ export class ClientSimState {
         // These are the real round boundaries. Welcome is instead the
         // reconnect handshake for a peer already in the current round.
         this.stationHosts = {};
+        this.consoleHosts = {};
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};
@@ -429,6 +434,7 @@ export class ClientSimState {
         this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
+        this.consoleDefinitions = d.ship_stations?.consoles || [];
         this.systemConsoleFamilies = sc.system_console_families || {};
         this.systemKinds = sc.system_kinds || {};
         this.blackboardConsoleFamilies = sc.blackboard_console_families || {};

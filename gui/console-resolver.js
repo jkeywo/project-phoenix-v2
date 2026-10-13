@@ -1,7 +1,8 @@
+import { consoleDefinitions } from './console-topology.js';
 export function resolveConsoleUrl(shipStations, stationId) {
-  const stations = (shipStations && shipStations.stations) || [];
+  const stations = consoleDefinitions(shipStations);
   const station = stations.find(s => s.id === stationId);
-  return (station && station.console) || null;
+  return (station && station.screen) || null;
 }
 
 if (typeof window !== 'undefined') {

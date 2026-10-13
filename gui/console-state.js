@@ -1,3 +1,4 @@
+import { consoleReadState } from './console-topology.js';
 /**
  * gui/console-state.js — Pure state builder functions for HTML console iframes.
  *
@@ -2464,7 +2465,7 @@ function projectSystemFamilies(systemIds, state) {
  * @param {object} state
  */
 export function buildSystemStationConsoleState(stationId, state) {
-  const ids = state.stationSystems?.[stationId] || [];
+  const ids = state.consoleSystems?.[stationId] ?? state.stationSystems?.[stationId] ?? [];
   const systems = {};
   const idsByFamily = new Map();
   for (const id of ids) {
@@ -2506,7 +2507,7 @@ export function buildSystemStationConsoleState(stationId, state) {
  */
 function withStationDamage(consoleName, state, payload) {
   return { ...payload,
-    own_hull: aggregateStationHull(consoleName, state.consoleHull, state.stationSystems),
+    own_hull: aggregateStationHull(consoleName, state.consoleHull, state.consoleSystems || state.stationSystems),
   };
 }
 
@@ -2673,7 +2674,7 @@ function buildConsoleViewInner(consoleName, state) {
   // changed under it mid-round would have to re-render as a different
   // console. A sought system arrives as `systems[<id>]` on whichever shape
   // the station already has — see `withVisitingSystems`.
-  const owned = state.stationSystems?.[consoleName];
+  const owned = state.consoleSystems?.[consoleName] ?? state.stationSystems?.[consoleName];
   if (owned) {
     const families = [...new Set(
       owned
@@ -2712,6 +2713,19 @@ function buildConsoleViewInner(consoleName, state) {
  * @returns {object} completed view before JSON publication
  */
 export function buildConsoleView(consoleName, state) {
+  const definition = state.consoleDefinitions?.find(c => c.id === consoleName);
+  if (definition) {
+    const scoped = consoleReadState(state, definition);
+    let view = buildConsoleViewInner(consoleName, scoped);
+    view = withStationDamage(consoleName, scoped, view);
+    view = withCommandAdvice(definition.home_station, scoped, view);
+    view = withTutorialOverlay(definition.home_station, scoped, view);
+    view = withGmTakeover(definition.home_station, scoped, view);
+    return { ...view, console_id: definition.id, station_id: definition.home_station,
+      hosted_systems: definition.systems || [],
+      console_host: state.consoleHosts?.[definition.id] || null };
+  }
+  if (state.consoleDefinitions?.length) return {};
   let view = buildConsoleViewInner(consoleName, state);
   // Tutorials must see visiting Systems, advice and the Station's damage projection.
   view = withVisitingSystems(consoleName, state, view);

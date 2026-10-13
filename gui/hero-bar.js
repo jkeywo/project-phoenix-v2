@@ -77,7 +77,9 @@ export function commandStationDirectable(def, blackboards) {
  */
 export function heroBarModel({ directStation, stations, stationSystems,
   blackboards, stationHosts, stationHealth, stationImportance, stationRatings, activeStation,
-  consoleTabs, activeOverlay }) {
+  consoleTabs, activeOverlay, consoles, consoleHosts }) {
+  if (consoles?.length) return consoleHeroBarModel({ directStation, stations, consoles, consoleHosts,
+    stationRatings, stationHealth, stationImportance, activeStation, consoleTabs, activeOverlay, blackboards });
   const defs = stations || [];
   const byId = Object.fromEntries(defs.filter(Boolean).map(st => [st.id, st]));
   // A directing Station (`command_target` set — the Command auxiliary) with
@@ -463,4 +465,38 @@ if (typeof window !== 'undefined') {
   window.heroBarLabelMode = heroBarLabelMode;
   window.heroChromeSlot = heroChromeSlot;
   window.HERO_BAR_CODE_QUERY = HERO_BAR_CODE_QUERY;
+}
+
+
+/** Console tabs use instance identity; Station identity remains the occupied seat. */
+function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, stationRatings,
+  stationHealth, stationImportance, activeStation, consoleTabs, activeOverlay, blackboards }) {
+  const seats = Object.fromEntries((stations || []).map(s => [s.id, s]));
+  const placement = c => consoleHosts?.[c.id] || { host: c.human_seeking ? null : c.home_station, rating: '' };
+  const visible = consoles.filter(c => {
+    if (!c.screen) return false;
+    const commandBoards = (c.systems || []).map(id => blackboards?.[id])
+      .filter(board => typeof board?.directed_station_ai === 'boolean');
+    return commandBoards.length === 0 || commandBoards.some(isCommandBoardDirectable);
+  });
+  const hosted = directStation ? visible.filter(c => placement(c).host === directStation) : [];
+  const selectedConsole = hosted.some(c => c.id === activeStation) ? activeStation : hosted[0]?.id || null;
+  const overlays = selectedConsole === activeStation ? (consoleTabs || []).filter(t => t?.id) : [];
+  const selected = overlays.some(t => t.id === activeOverlay) ? activeOverlay : selectedConsole;
+  const tabs = hosted.map(c => {
+    const seat = seats[c.home_station] || {};
+    const health = typeof stationHealth?.[c.home_station] === 'number' ? stationHealth[c.home_station] : null;
+    const importance = stationImportance?.[c.home_station] || null;
+    return { id: c.id, kind: 'station', name: c.name || seat.name || c.id, code: c.short_code || seat.short_code || '',
+      rating: placement(c).rating || stationRatings?.[c.home_station] || '', health,
+      healthState: heroBarHealthState(health), importance, importanceState: heroBarImportanceState(importance),
+      badge: 0, selected: c.id === selected };
+  });
+  const overlayTabs = overlays.map(t => ({ ...t, kind: 'overlay', code: t.code || '', rating: '', health: null,
+    healthState: 'none', importance: null, importanceState: 'none', badge: Math.max(0, Number(t.badge) || 0), selected: t.id === selected }));
+  const index = tabs.findIndex(t => t.id === selectedConsole);
+  tabs.splice(index + 1, 0, ...overlayTabs);
+  return { selected, tabs, ownership: Object.fromEntries(visible.map(c => [c.id,
+    !placement(c).host ? 'ai' : placement(c).host === c.home_station ? 'direct' : 'visiting'])),
+    aiStations: visible.filter(c => c.human_seeking && !placement(c).host).map(c => ({ id: c.id, name: c.name || c.id })) };
 }

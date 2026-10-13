@@ -41,7 +41,7 @@
  *            every inbound push.
  *
  * @returns {{ sendAction: function(action: string, payload?: object): void }}
- *   sendAction — Outbound action dispatcher. Injects `console: name` and
+ *   sendAction — Outbound action dispatcher. Injects `console: consoleIdentity` and
  *   stringifies, then routes via the 4-way transport detection:
  *     1. iframe postMessage  (running inside client.html)
  *     2. window.ipc          (wry native host)
@@ -127,6 +127,7 @@ export function initConsole({
 }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
   // Evaluated at call-time so tests can set global.window before calling initConsole.
+  var consoleIdentity = name;
   var _root = (typeof window !== 'undefined') ? window : globalThis;
   var _actionContext = String(name || '').toLowerCase();
   var _actionContexts = new Set([
@@ -434,6 +435,7 @@ export function initConsole({
       return;
     }
     s = normalizeConsolePayload(s);
+    if (typeof s?.console_id === 'string') consoleIdentity = s.console_id;
     _latestState = s;
     const languageSwitch = _root.__languageSwitchPending === true;
     _root.__languageSwitchPending = false;
@@ -457,7 +459,7 @@ export function initConsole({
   // ── BroadcastChannel receive path (ADR-0001 §3 target 4) ───────────────
   if (_bc) {
     _bc.onmessage = function(e) {
-      if (e.data && e.data.type === 'console_state' && e.data.name === name) {
+      if (e.data && e.data.type === 'console_state' && e.data.name === consoleIdentity) {
         if (typeof _root.__updateConsole === 'function') {
           _root.__updateConsole(e.data.name, e.data.json);
         }
@@ -511,7 +513,7 @@ export function initConsole({
     _lastPostedOpen = _currentOverlay();
     _postToShell({
       type: 'console_tabs',
-      console: name,
+      console: consoleIdentity,
       open: _lastPostedOpen,
       tabs: _consoleTabs.map(function(tab) {
         return { id: tab.id, code: tab.code, name: tab.name, badge: tab.badge };
@@ -555,7 +557,7 @@ export function initConsole({
     var signature = JSON.stringify(entries);
     if (signature === _lastHullSignature) return;
     _lastHullSignature = signature;
-    _postToShell({ type: 'console_hull', console: name, entries: entries });
+    _postToShell({ type: 'console_hull', console: consoleIdentity, entries: entries });
   }
 
   // Set, not toggle (see gui/console-overlays.js). Re-renders afterwards
@@ -587,7 +589,7 @@ export function initConsole({
   // Builds the standard action envelope { action, console, ...payload },
   // stringifies it, then dispatches via the first available transport.
   function sendAction(action, payload) {
-    var env = Object.assign({ action: action, console: name }, payload || {});
+    var env = Object.assign({ action: action, console: consoleIdentity }, payload || {});
     // The input-event stamp for console latency (issue #1169). This function is
     // called synchronously from the control's own handler, so `nowMs()` here IS
     // the input event; by the time the shell sees the postMessage, the hop it

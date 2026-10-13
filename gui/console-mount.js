@@ -5,6 +5,7 @@
  * helpers remain available to standalone mount/visibility consumers.
  */
 
+import { consoleDefinitions } from './console-topology.js';
 import { iframeIdFor, planMounts } from './mount-plan.js';
 import { consoleSections } from './content-switcher.js';
 import { push, setOverlay } from './iframe-bridge.js';
@@ -94,7 +95,7 @@ export function applyConsoleVisibility(doc, activeConsole, inGame, stationIds) {
  */
 export function stationIdForSource(doc, shipStations, source, fallback) {
   if (doc && source) {
-    for (const st of (shipStations && shipStations.stations) || []) {
+    for (const st of consoleDefinitions(shipStations)) {
       const id = st && st.id;
       if (!id) continue;
       const iframe = doc.getElementById(iframeIdFor(id));
@@ -159,10 +160,18 @@ export function createConsoleMounts({
   function publishChanges(changes) {
     if (disposed) return;
     const state = readState();
-    const stationSystems = state?.stationSystems;
+    const stationSystems = state?.consoleDefinitions?.length
+      ? Object.fromEntries(state.consoleDefinitions.map(c => [c.id, c.systems || []])) : state?.stationSystems;
     const families = state?.systemConsoleFamilies;
     const blackboardFamilies = state?.blackboardConsoleFamilies;
     const always = alwaysPushConsoles(stationSystems, families);
+    if (state?.consoleDefinitions?.length) {
+      // Feeds can change independently of owned Systems.
+      for (const definition of state.consoleDefinitions) {
+        if (always.has(definition.id) || readActiveStation() === definition.id) refresh(definition.id, PUSH_CAUSE.SERVER_MESSAGE);
+      }
+      return;
+    }
     for (const stationId of dirtyConsolesFor(changes, stationSystems, families, blackboardFamilies)) {
       if (always.has(stationId) || readActiveStation() === stationId) {
         refresh(stationId, PUSH_CAUSE.SERVER_MESSAGE);
@@ -230,7 +239,7 @@ export function createConsoleMounts({
 
   function show(activeStation, inGame) {
     if (disposed) return {};
-    const stationIds = (shipStations?.stations || []).map(station => station.id).filter(Boolean);
+    const stationIds = consoleDefinitions(shipStations).map(station => station.id).filter(Boolean);
     return applyConsoleVisibility(doc, activeStation, inGame, stationIds);
   }
 

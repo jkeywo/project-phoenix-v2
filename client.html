@@ -3135,6 +3135,8 @@
           ? window.heroBarModel({
               directStation: playerStation(s),
               stations: (s.shipStations && s.shipStations.stations) || [],
+        consoles: s.shipStations?.consoles,
+        consoleHosts: window.simState?.consoleHosts,
               stationSystems: window.simState && window.simState.stationSystems,
               blackboards: window.simState && window.simState.blackboards,
               stationHosts: window.simState && window.simState.stationHosts,
@@ -3839,6 +3841,8 @@
       const model = window.heroBarModel({
         directStation: playerStation(s),
         stations: (s.shipStations && s.shipStations.stations) || [],
+        consoles: s.shipStations?.consoles,
+        consoleHosts: window.simState?.consoleHosts,
         stationSystems: window.simState && window.simState.stationSystems,
         blackboards: window.simState && window.simState.blackboards,
         stationHosts: window.simState && window.simState.stationHosts,
@@ -3903,7 +3907,7 @@
             // gesture that cleared it before the popup existed, so it has to
             // stay that as well, or the badge sticks until you leave the
             // Station and come back.
-            send('StationVisited', { station: tabId });
+            send('StationVisited', { station: uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station || tabId });
             showStationDamagePopup();
             scheduleRender();
             return;
@@ -3919,7 +3923,7 @@
           // renderStationHero returns early outside a live game, so onActivate
           // never fires in the lobby. A continuing `critical` condition is
           // immune host-side, so this cannot lower an alert.
-          send('StationVisited', { station: tabId });
+          send('StationVisited', { station: uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station || tabId });
           scheduleRender();
         },
       });
@@ -3935,7 +3939,7 @@
 
     /// The popup's input for whichever Station is selected right now.
     function stationDamagePopupState() {
-      const station = ((uiState.shipStations && uiState.shipStations.stations) || [])
+      const station = (uiState.shipStations?.consoles?.length ? uiState.shipStations.consoles : (uiState.shipStations?.stations || []))
         .find(st => st && st.id === activeConsole) || null;
       return {
         station: stationLabel(station) || activeConsole || '',
@@ -3992,6 +3996,8 @@
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
+      // Mounted frame identity, never the reusable screen's declared name.
+      action.console = window.consoleStationIdForSource?.(document, uiState.shipStations, event.source, action.console) || action.console;
       // Contextual tutorial progress (issue #916): every console action feeds
       // the client-local progress store — using a control completes its
       // `control_unused` overlays — and `tutorial_dismiss` is handled

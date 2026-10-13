@@ -15,6 +15,7 @@
  *  - gui/content-switcher.js          — derives section visibility via sectionIdFor()
  */
 
+import { consoleDefinitions } from './console-topology.js';
 import { resolveConsoleUrl } from './console-resolver.js';
 
 /**
@@ -25,7 +26,8 @@ export const SECTION_ALIAS = Object.freeze({ tactical: 'weapons' });
 
 /** DOM id base for a station id (applies the tactical → weapons alias). */
 function domBase(stationId) {
-  return SECTION_ALIAS[stationId] || stationId;
+  // The historical tactical alias must not collide with an authored weapons Console.
+  return stationId === 'weapons' ? 'console~weapons' : (SECTION_ALIAS[stationId] || stationId);
 }
 
 /** Section element id for a station id (e.g. 'helm' → 'helm-ui'). */
@@ -51,7 +53,7 @@ export function iframeIdFor(stationId) {
  *        resolvable console URL are skipped (nothing to mount).
  */
 export function planMounts(shipStations) {
-  const stations = (shipStations && shipStations.stations) || [];
+  const stations = consoleDefinitions(shipStations);
   const plan = [];
   for (const st of stations) {
     const stationId = st && st.id;

@@ -16114,6 +16114,29 @@ fn spawn_policy_blaster_npc(
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::ship_plugin::ShipConfigComponent(
+                crate::ship::config::ShipConfig::from_toml(
+                    r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons"
+rank = "Ens."
+[[console]]
+id = "tactical"
+home_station = "tactical"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+console = "tactical"
+"#,
+                    &["blaster_bank"],
+                )
+                .expect("explicit blaster Console scope"),
+            ),
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),

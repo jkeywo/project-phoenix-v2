@@ -135,19 +135,29 @@ test('overlay tabs: Tactical declares them, the bar selects them', { tag: '@core
   await expect.poll(tabIds, { timeout: 5_000 })
     .toEqual(['tactical', 'security-overlay', 'intel-overlay', 'navigation', 'comms']);
 
-  // ── An iframe reload re-posts, and the bar recovers ───────────────────────
+  // An iframe reload restores the Console's authoritatively saved working view.
   await phone.click('#station-hero-tabs [data-tab-id="intel-overlay"]');
   await expect(tactical.locator('#intel-overlay')).toHaveClass(/\bopen\b/);
+  await phone.waitForFunction(() => window.simState.consoleViews.tactical?.overlay === 'intel-overlay');
+  await tactical.locator('html').evaluate(element => { element.dataset.beforeReload = 'true'; });
   await phone.evaluate(() => {
     document.getElementById('weapons-iframe').contentWindow.location.reload();
   });
-  // The reloaded document has every panel closed, and says so by re-declaring:
-  // the tabs come back and the shell has dropped the selection it was holding.
+  // Prove this is the replacement document, not the still-open pre-reload DOM.
+  await expect(tactical.locator('html')).not.toHaveAttribute('data-before-reload', 'true');
   await expect.poll(tabIds, { timeout: 10_000 })
     .toEqual(['tactical', 'security-overlay', 'intel-overlay', 'navigation', 'comms']);
-  await expect(phone.locator('#station-hero-tabs [data-tab-id="tactical"]'))
+  // SimState replaces consoleViews on each authoritative snapshot. Require a
+  // fresh publication after reload so a transient startup selection cannot pass.
+  await phone.evaluate(() => { window.__reloadConsoleViews = window.simState.consoleViews; });
+  await phone.waitForFunction(() => window.simState.consoleViews !== window.__reloadConsoleViews
+    && window.simState.consoleViews.tactical?.overlay === 'intel-overlay');
+  await expect(phone.locator('#station-hero-tabs [data-tab-id="intel-overlay"]'))
     .toHaveAttribute('aria-selected', 'true');
-  await expect(tactical.locator('#intel-overlay')).not.toHaveClass(/\bopen\b/);
+  await expect(phone.locator('#station-hero-tabs [data-tab-id="tactical"]'))
+    .toHaveAttribute('aria-selected', 'false');
+  await expect(tactical.locator('#intel-overlay')).toHaveClass(/\bopen\b/);
+  await phone.evaluate(() => { delete window.__reloadConsoleViews; });
 
   await phone.close();
 });

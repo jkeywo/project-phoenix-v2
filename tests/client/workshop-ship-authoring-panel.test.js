@@ -10,14 +10,17 @@ id="helm"
 name="Helm"
 description="Fly"
 rank="Lt."
-console="gui/helm.html"
 [[station.rating]]
 name="Assisted"
 automated_systems=[]
 [[system]]
 id="drive"
 kind="helm_thrust"
-station="helm"
+console="flight"
+[[console]]
+id="flight"
+home_station="helm"
+screen="gui/helm.html"
 `;
 const manifest = '[pack]\nformat=1\nid="mine"\nversion="1"\nname="Mine"\n[pack.requires]\ncontent_id="phoenix-base"\ncontent_epoch=1\n';
 const draft = () => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: manifest },
@@ -55,7 +58,7 @@ describe('Workshop playable ship panel', () => {
     document.getElementById('workshop-ship-station-apply').click();
     await eventually(() => expect(changed).toHaveBeenCalledWith('assets/entities/ship.toml'));
     expect(current.read('assets/entities/ship.toml')).toContain('name="Flight"');
-    expect(current.read('assets/entities/ship.toml')).toContain('console="gui/helm.html"');
+    expect(current.read('assets/entities/ship.toml')).toContain('screen="gui/helm.html"');
     expect(runtime.validate).toHaveBeenCalledOnce();
     changed.mockClear();
     document.getElementById('workshop-ship-doctrine-id').value = 'hold';
@@ -73,4 +76,42 @@ describe('Workshop playable ship panel', () => {
     expect(current.read('assets/entities/ship.toml')).toContain('directive_anchors = ["alpha", "beta"]');
     for (const button of document.querySelectorAll('#workshop-ship-authoring button')) expect(button.type).toBe('button');
   });
+  it('edits separate Console identity, hosting and typed feeds through accepted panel actions', async () => {
+    document.body.innerHTML = '<main id="root"></main>';
+    const current = draft();
+    current.apply([{ path: 'assets/entities/ship.toml', before: source, after: source + `
+[[console]]
+id="navigation"
+home_station="helm"
+screen="gui/helm.html"
+` }]);
+    const runtime = { dependencies: async () => ({ base_files: {}, packs: [] }),
+      shipSchema: async () => ({ system_kinds: ['helm_thrust'], directive_kinds: ['None'], console_feed_kinds: ['HelmEngine', 'Sensors'], console_feed_sources: ['radar'] }),
+      validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
+    const changed = vi.fn();
+    mounted = mountWorkshopShipAuthoring({ root: document.getElementById('root'), runtime, draft: () => current,
+      busy: () => false, setBusy: vi.fn(), changed });
+    await eventually(() => expect(document.getElementById('workshop-ship-consoles').options.length).toBe(2));
+    const ownership = document.getElementById('workshop-ship-system-station');
+    expect([...ownership.options].map(row => row.value)).toEqual(['flight', 'navigation']);
+    expect(ownership.value).toBe('flight');
+    expect(document.getElementById('workshop-ship-rating-systems').options[0].value).toBe('drive');
+    document.getElementById('workshop-ship-console-feed-source').value = 'radar';
+    document.getElementById('workshop-ship-console-feed-kind').value = 'Sensors';
+    document.getElementById('workshop-ship-console-feed-add').click();
+    await eventually(() => expect(changed).toHaveBeenCalledOnce());
+    expect(current.read('assets/entities/ship.toml')).toContain('[[console.feed]]');
+    expect(current.read('assets/entities/ship.toml')).toContain('source = "radar"');
+    expect(runtime.validate).toHaveBeenCalledOnce();
+    expect(document.querySelector('label[for="workshop-ship-console-feed-kind"]')).not.toBeNull();
+    changed.mockClear();
+    document.getElementById('workshop-ship-system-ai-only').checked = true;
+    document.getElementById('workshop-ship-system-apply').click();
+    await eventually(() => expect(changed).toHaveBeenCalledOnce());
+    expect(current.read('assets/entities/ship.toml')).toContain('ai_only = true');
+    expect(document.getElementById('workshop-ship-system-station').value).toBe('flight');
+    expect(document.getElementById('workshop-ship-system-ai-only').checked).toBe(true);
+
+  });
+
 });

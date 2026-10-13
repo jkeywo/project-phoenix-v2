@@ -16,11 +16,22 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const stationName = el('input', null, { id: 'workshop-ship-station-name' });
   const stationDescription = el('input', null, { id: 'workshop-ship-station-description' });
   const stationRank = el('input', null, { id: 'workshop-ship-station-rank' });
-  const stationConsole = el('input', null, { id: 'workshop-ship-station-console' });
+  const consoles = el('select', null, { id: 'workshop-ship-consoles', size: '5' });
+  const consoleId = el('input', null, { id: 'workshop-ship-console-id' });
+  const consoleName = el('input', null, { id: 'workshop-ship-console-name' });
+  const consoleHome = el('select', null, { id: 'workshop-ship-console-home' });
+  const consoleScreen = el('input', null, { id: 'workshop-ship-console-screen' });
+  const consoleSeeking = el('input', null, { id: 'workshop-ship-console-seeking', type: 'checkbox' });
+  const consoleHosts = el('input', null, { id: 'workshop-ship-console-hosts' });
+  const consoleRating = el('input', null, { id: 'workshop-ship-console-rating' });
+  const feeds = el('select', null, { id: 'workshop-ship-console-feeds', size: '4' });
+  const feedSource = el('select', null, { id: 'workshop-ship-console-feed-source' });
+  const feedKind = el('select', null, { id: 'workshop-ship-console-feed-kind' });
   const systems = el('select', null, { id: 'workshop-ship-systems', size: '6' });
   const systemId = el('input', null, { id: 'workshop-ship-system-id' });
   const systemKind = el('select', null, { id: 'workshop-ship-system-kind' });
   const systemStation = el('select', null, { id: 'workshop-ship-system-station' });
+  const systemAiOnly = el('input', null, { id: 'workshop-ship-system-ai-only', type: 'checkbox' });
   const ratings = el('select', null, { id: 'workshop-ship-ratings', size: '4' });
   const ratingName = el('input', null, { id: 'workshop-ship-rating-name' });
   const automated = el('select', null, { id: 'workshop-ship-rating-systems', size: '6', multiple: '' });
@@ -36,16 +47,27 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const button = (id, textId, operation) => { const node = el('button', textId, { id, type: 'button' });
     node.addEventListener('click', () => void apply(operation)); return node; };
   const stationAdd = button('workshop-ship-station-add', 'workshop.ship.add_station', () => ({ type: 'station-add', id: stationId.value,
-    name: stationName.value, description: stationDescription.value, rank: stationRank.value, console: stationConsole.value }));
+    name: stationName.value, description: stationDescription.value, rank: stationRank.value }));
   const stationApply = button('workshop-ship-station-apply', 'workshop.ship.apply_station', () => ({ type: 'station-update', id: stations.value,
-    fields: { name: stationName.value, description: stationDescription.value, rank: stationRank.value, console: stationConsole.value || undefined } }));
+    fields: { name: stationName.value, description: stationDescription.value, rank: stationRank.value } }));
   const stationUp = button('workshop-ship-station-up', 'workshop.ship.move_up', () => ({ type: 'station-move', id: stations.value, direction: -1 }));
   const stationDown = button('workshop-ship-station-down', 'workshop.ship.move_down', () => ({ type: 'station-move', id: stations.value, direction: 1 }));
   const stationRemove = button('workshop-ship-station-remove', 'workshop.ship.remove_station', () => ({ type: 'station-remove', id: stations.value }));
+  const consoleFields = () => ({ name: consoleName.value, home_station: consoleHome.value || undefined,
+    screen: consoleScreen.value || undefined, human_seeking: consoleSeeking.checked,
+    host_order: consoleHosts.value.split(',').map(value => value.trim()).filter(Boolean), visiting_rating: consoleRating.value || undefined });
+  const consoleAdd = button('workshop-ship-console-add', 'workshop.ship.add_console', () => ({ type: 'console-add', id: consoleId.value, fields: consoleFields() }));
+  const consoleApply = button('workshop-ship-console-apply', 'workshop.ship.apply_console', () => ({ type: 'console-update', id: consoles.value, fields: consoleFields() }));
+  const consoleUp = button('workshop-ship-console-up', 'workshop.ship.move_up', () => ({ type: 'console-move', id: consoles.value, direction: -1 }));
+  const consoleDown = button('workshop-ship-console-down', 'workshop.ship.move_down', () => ({ type: 'console-move', id: consoles.value, direction: 1 }));
+  const consoleRemove = button('workshop-ship-console-remove', 'workshop.ship.remove_console', () => ({ type: 'console-remove', id: consoles.value }));
+  const feedAdd = button('workshop-ship-console-feed-add', 'workshop.ship.add_feed', () => ({ type: 'console-feed-add', id: consoles.value, source: feedSource.value, kind: feedKind.value }));
+  const feedRemove = button('workshop-ship-console-feed-remove', 'workshop.ship.remove_feed', () => ({ type: 'console-feed-remove', id: consoles.value, index: Number(feeds.value) }));
+  const ownership = () => ({ console: systemStation.value || undefined, ai_only: systemAiOnly.checked });
   const systemAdd = button('workshop-ship-system-add', 'workshop.ship.add_system', () => ({ type: 'system-add', id: systemId.value,
-    kind: systemKind.value, station: systemStation.value }));
+    kind: systemKind.value, ...ownership() }));
   const systemApply = button('workshop-ship-system-apply', 'workshop.ship.apply_system', () => ({ type: 'system-update', id: systems.value,
-    fields: { kind: systemKind.value, station: systemStation.value || undefined, ai_only: !systemStation.value } }));
+    fields: { kind: systemKind.value, ...ownership() } }));
   const systemUp = button('workshop-ship-system-up', 'workshop.ship.move_up', () => ({ type: 'system-move', id: systems.value, direction: -1 }));
   const systemDown = button('workshop-ship-system-down', 'workshop.ship.move_down', () => ({ type: 'system-move', id: systems.value, direction: 1 }));
   const systemRemove = button('workshop-ship-system-remove', 'workshop.ship.remove_system', () => ({ type: 'system-remove', id: systems.value }));
@@ -65,10 +87,17 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   section.append(el('h2', 'workshop.ship.title'), el('p', 'workshop.ship.scope'), label(template, 'workshop.ship.template'), template,
     el('h3', 'workshop.ship.stations'), label(stations, 'workshop.ship.stations'), stations, label(stationId, 'workshop.ship.id'), stationId,
     label(stationName, 'workshop.ship.name'), stationName, label(stationDescription, 'workshop.ship.description'), stationDescription,
-    label(stationRank, 'workshop.ship.rank'), stationRank, label(stationConsole, 'workshop.ship.console'), stationConsole,
+    label(stationRank, 'workshop.ship.rank'), stationRank,
     stationAdd, stationApply, stationUp, stationDown, stationRemove,
+    el('h3', 'workshop.ship.consoles'), label(consoles, 'workshop.ship.consoles'), consoles,
+    label(consoleId, 'workshop.ship.id'), consoleId, label(consoleName, 'workshop.ship.name'), consoleName,
+    label(consoleHome, 'workshop.ship.home_station'), consoleHome, label(consoleScreen, 'workshop.ship.console'), consoleScreen,
+    label(consoleSeeking, 'workshop.ship.human_seeking'), consoleSeeking, label(consoleHosts, 'workshop.ship.host_order'), consoleHosts,
+    label(consoleRating, 'workshop.ship.visiting_rating'), consoleRating, consoleAdd, consoleApply, consoleUp, consoleDown, consoleRemove,
+    label(feeds, 'workshop.ship.feeds'), feeds, label(feedSource, 'workshop.ship.feed_source'), feedSource,
+    label(feedKind, 'workshop.ship.feed_kind'), feedKind, feedAdd, feedRemove,
     el('h3', 'workshop.ship.systems'), label(systems, 'workshop.ship.systems'), systems, label(systemId, 'workshop.ship.id'), systemId,
-    label(systemKind, 'workshop.ship.kind'), systemKind, label(systemStation, 'workshop.ship.owner'), systemStation,
+    label(systemKind, 'workshop.ship.kind'), systemKind, label(systemStation, 'workshop.ship.console_owner'), systemStation, label(systemAiOnly, 'workshop.ship.ai_only'), systemAiOnly,
     systemAdd, systemApply, systemUp, systemDown, systemRemove,
     el('h3', 'workshop.ship.ratings'), label(ratings, 'workshop.ship.ratings'), ratings, label(ratingName, 'workshop.ship.rating_name'), ratingName,
     label(automated, 'workshop.ship.automated_systems'), automated, ratingAdd, ratingApply, ratingUp, ratingDown, ratingRemove,
@@ -85,6 +114,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const option = (value, text = value) => { const node = el('option', null, { value }); node.textContent = text; return node; };
   const show = (id, refused = false, detail = '') => { status.textContent = `${t(id)}${detail ? ` ${detail}` : ''}`; status.setAttribute('role', refused ? 'alert' : 'status'); if (refused) status.focus(); };
   const selectedStation = () => inspection?.stations.find(row => row.id === stations.value);
+  const selectedConsole = () => inspection?.consoles.find(row => row.id === consoles.value);
   const selectedSystem = () => inspection?.systems.find(row => row.id === systems.value);
   const selectedRating = () => selectedStation()?.rating?.find(row => row.name === ratings.value);
   const selectedDoctrine = () => inspection?.doctrines.find(row => row.id === doctrines.value);
@@ -115,17 +145,28 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     stations.value = inspection?.stations.some(row => row.id === stationValue) ? stationValue : (inspection?.stations[0]?.id || '');
     const systemValue = systems.value; systems.replaceChildren(...(inspection?.systems || []).map(row => option(row.id, `${row.id} (${row.kind}) â€” ${row.local ? t('workshop.ship.local') : t('workshop.ship.included', { origin: row.owner })}`)));
     systems.value = inspection?.systems.some(row => row.id === systemValue) ? systemValue : (inspection?.systems[0]?.id || '');
+    const consoleValue = consoles.value;
+    consoles.replaceChildren(...(inspection?.consoles || []).map(row => option(row.id, `${row.id} — ${row.local ? t('workshop.ship.local') : t('workshop.ship.included', { origin: row.owner })}`)));
+    consoles.value = inspection?.consoles.some(row => row.id === consoleValue) ? consoleValue : (inspection?.consoles[0]?.id || '');
+    const console = selectedConsole();
+    consoleId.value = console?.id || ''; consoleName.value = console?.name || ''; consoleScreen.value = console?.screen || '';
+    consoleHome.replaceChildren(option('', t('workshop.ship.ai_only')), ...(inspection?.stations || []).map(row => option(row.id)));
+    consoleHome.value = console?.home_station || ''; consoleSeeking.checked = console?.human_seeking === true;
+    consoleHosts.value = (console?.host_order || []).join(', '); consoleRating.value = console?.visiting_rating || '';
+    feeds.replaceChildren(...(console?.feed || []).map((row, index) => option(String(index), `${row.source}: ${row.kind}`)));
+    feedSource.replaceChildren(...[...new Set([...(schema?.console_feed_sources || []), ...(inspection?.systems || []).map(row => row.id)])].map(value => option(value)));
+    feedKind.replaceChildren(...(schema?.console_feed_kinds || []).map(kind => option(kind)));
     const station = selectedStation(), system = selectedSystem();
     stationId.value = station?.id || ''; stationName.value = station?.name || ''; stationDescription.value = station?.description || '';
-    stationRank.value = station?.rank || ''; stationConsole.value = station?.console || '';
+    stationRank.value = station?.rank || '';
     systemId.value = system?.id || ''; systemKind.replaceChildren(...(schema?.system_kinds || []).map(kind => option(kind)));
     if (system?.kind) systemKind.value = system.kind;
-    systemStation.replaceChildren(option('', t('workshop.ship.ai_only')), ...(inspection?.stations || []).map(row => option(row.id)));
-    systemStation.value = system?.station || '';
+    systemStation.replaceChildren(...(inspection?.consoles || []).map(row => option(row.id)));
+    systemStation.value = system?.console || ''; systemAiOnly.checked = system?.ai_only === true;
     const ratingValue = ratings.value; ratings.replaceChildren(...(station?.rating || []).map(row => option(row.name)));
     ratings.value = (station?.rating || []).some(row => row.name === ratingValue) ? ratingValue : (station?.rating?.[0]?.name || '');
     const rating = selectedRating(); ratingName.value = rating?.name || '';
-    automated.replaceChildren(...(inspection?.systems || []).filter(row => row.station === station?.id).map(row => option(row.id)));
+    automated.replaceChildren(...(inspection?.systems || []).filter(row => inspection.consoles.find(console => console.id === row.console)?.home_station === station?.id).map(row => option(row.id)));
     for (const choice of automated.options) choice.selected = (rating?.automated_systems || []).includes(choice.value);
     const doctrineValue = doctrines.value;
     doctrines.replaceChildren(...(inspection?.doctrines || []).map(row => option(row.id,
@@ -141,6 +182,8 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     const held = busy() || !!loading || !schema, station = selectedStation(), system = selectedSystem(), rating = selectedRating(), doctrine = selectedDoctrine();
     for (const node of section.querySelectorAll('input,select,button')) node.disabled = held;
     stationApply.disabled = stationUp.disabled = stationDown.disabled = stationRemove.disabled = held || !station?.local;
+    consoleApply.disabled = consoleUp.disabled = consoleDown.disabled = consoleRemove.disabled = feedAdd.disabled = held || !selectedConsole()?.local;
+    feedRemove.disabled = held || !selectedConsole()?.local || !feeds.options.length;
     systemApply.disabled = systemUp.disabled = systemDown.disabled = systemRemove.disabled = held || !system?.local;
     ratingAdd.disabled = held || !station?.local;
     ratingApply.disabled = ratingUp.disabled = ratingDown.disabled = ratingRemove.disabled = held || !station?.local || !rating;
@@ -173,6 +216,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     });
   }
   template.addEventListener('change', inspect); stations.addEventListener('change', () => { paint(); controls(); });
+  consoles.addEventListener('change', () => { paint(); controls(); });
   systems.addEventListener('change', () => { paint(); controls(); }); ratings.addEventListener('change', () => { paint(); controls(); });
   doctrines.addEventListener('change', () => { paint(); controls(); }); doctrineKind.addEventListener('change', controls);
   function refresh() { paint(); inspect(); void load(); }

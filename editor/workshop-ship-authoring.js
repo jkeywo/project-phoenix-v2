@@ -122,22 +122,33 @@ function provenanceFinding(inspection, prefix, token, message) {
 }
 
 function verify(path, source, schema, value = parse(source)) {
-  const stations = value.station || [], systems = value.system || [];
+  const stations = value.station || [], systems = value.system || [], consoles = value.console || [];
   const stationIds = new Set(), systemIds = new Set();
   for (const station of stations) {
     if (!ident(station.id) || station.id === 'core' || stationIds.has(station.id)) throw finding(path, source, `id = ${quote(station.id)}`, 'Station ids must be unique runtime identifiers and cannot be core.');
     stationIds.add(station.id);
   }
+  const consoleIds = new Set();
+  for (const console of consoles) {
+    if (!ident(console.id) || consoleIds.has(console.id)) throw finding(path, source, quote(console.id), 'Console ids must be unique runtime identifiers.');
+    consoleIds.add(console.id);
+    if (console.home_station != null && !stationIds.has(console.home_station)) throw finding(path, source, quote(console.id), `Console ${console.id} names an unknown home Station.`);
+    for (const host of console.host_order || []) if (!stationIds.has(host)) throw finding(path, source, quote(host), `Console ${console.id} names an unknown host Station.`);
+  }
+  for (const console of consoles) for (const feed of console.feed || []) {
+    if (!systems.some(system => system.id === feed.source) && !(schema.console_feed_sources || []).includes(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
+    if (!(schema.console_feed_kinds || []).includes(feed.kind)) throw finding(path, source, quote(feed.kind), `Unknown Console feed kind: ${feed.kind}`);
+  }
+  const owner = system => consoles.find(row => row.id === system.console)?.home_station;
   for (const system of systems) {
     if (!ident(system.id) || systemIds.has(system.id)) throw finding(path, source, `id = ${quote(system.id)}`, 'System ids must be unique runtime identifiers.');
     systemIds.add(system.id);
     if (!schema.system_kinds.includes(system.kind)) throw finding(path, source, `kind = ${quote(system.kind)}`, `Unknown runtime System kind: ${system.kind}`);
-    if (system.station != null && !stationIds.has(system.station)) throw finding(path, source, `station = ${quote(system.station)}`, `System ${system.id} names an unknown Station.`);
-    if (system.station == null && !system.ai_only) throw finding(path, source, `id = ${quote(system.id)}`, `Ownerless System ${system.id} must be AI-only.`);
+    if (!consoleIds.has(system.console)) throw finding(path, source, quote(system.console), `System ${system.id} names an unknown Console.`);
   }
   for (const station of stations) for (const rating of station.rating || []) for (const reference of rating.automated_systems || []) {
     const system = systems.find(candidate => candidate.id === reference);
-    if (!system || system.station !== station.id) throw finding(path, source, quote(reference), `Rating ${rating.name} may automate only Systems owned by Station ${station.id}.`);
+    if (!system || owner(system) !== station.id) throw finding(path, source, quote(reference), `Rating ${rating.name} may automate only Systems owned by Station ${station.id}.`);
   }
   for (const doctrine of value.behaviour?.doctrine || []) if (doctrine.directive_kind != null && !schema.directive_kinds.includes(doctrine.directive_kind)) {
     throw finding(path, source, `directive_kind = ${quote(doctrine.directive_kind)}`, `Unknown runtime Directive kind: ${doctrine.directive_kind}`);
@@ -161,14 +172,14 @@ export function inspectShipAuthoring(draft, dependencies, path) {
       || field.path.startsWith(`behaviour.doctrine[id=${row.id}].`))?.owner || path;
     return { ...structuredClone(row), owner, local: localDoctrine.has(String(row.id)) };
   });
-  return { path, stations: rowsWithOwners(composition, 'station'), systems: rowsWithOwners(composition, 'system'), doctrines, composition };
+  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: rowsWithOwners(composition, 'system'), doctrines, composition };
 }
 
 export function prepareShipOperation(draft, dependencies, schema, operation) {
   const inspection = inspectShipAuthoring(draft, dependencies, operation.path);
   const before = draft.read(operation.path); let after = before;
   if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
-    description: operation.description || operation.id, rank: operation.rank || '', console: operation.console || undefined }] });
+    description: operation.description || operation.id, rank: operation.rank || '' }] });
   else if (operation.type === 'station-set' || operation.type === 'station-update') {
     const fields = operation.type === 'station-set' ? { [operation.field]: operation.value } : operation.fields;
     for (const [field, value] of Object.entries(fields)) { const block = entry(after, 'station', operation.id); if (!block) throw ownedFinding(inspection, 'station', operation.id, `Station ${operation.id} is included from another source; materialise it before editing.`);
@@ -178,8 +189,32 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   else if (operation.type === 'station-move') { const list = blocks(after, 'station', 'station'); const index = localIds(after, 'station').indexOf(operation.id);
     if (index < 0) throw ownedFinding(inspection, 'station', operation.id, `Station ${operation.id} is included from another source; materialise it before reordering it.`);
     after = move(after, list, index, operation.direction); }
+  else if (operation.type === 'console-add') after = append(after, { console: [{ id: operation.id, ...operation.fields }] });
+  else if (operation.type === 'console-update') {
+    for (const [field, value] of Object.entries(operation.fields)) {
+      const block = entry(after, 'console', operation.id);
+      if (!block) throw ownedFinding(inspection, 'console', operation.id, `Console ${operation.id} is included from another source; materialise it before editing.`);
+      after = value === undefined ? removeKey(after, block, field) : setKey(after, block, field, value);
+    }
+  } else if (operation.type === 'console-remove' || operation.type === 'console-move') {
+    const block = entry(after, 'console', operation.id);
+    if (!block) throw ownedFinding(inspection, 'console', operation.id, `Console ${operation.id} is included from another source; materialise it before editing.`);
+    after = operation.type === 'console-remove' ? remove(after, block)
+      : move(after, blocks(after, 'console', 'console'), localIds(after, 'console').indexOf(operation.id), operation.direction);
+  } else if (operation.type === 'console-feed-add' || operation.type === 'console-feed-remove') {
+    const block = entry(after, 'console', operation.id);
+    if (!block) throw ownedFinding(inspection, 'console', operation.id, `Console ${operation.id} is included from another source; materialise it before editing.`);
+    if (operation.type === 'console-feed-add') {
+      const fragment = newlineOf(after) + appendNestedTable('', 'console.feed', { source: operation.source, kind: operation.kind });
+      after = after.slice(0, block.end) + fragment + after.slice(block.end);
+    } else {
+      const relative = after.slice(block.start, block.end), feed = blocks(relative, 'console.feed', 'console')[operation.index];
+      if (!feed) throw new Error('console-feed-unavailable');
+      after = after.slice(0, block.start) + remove(relative, feed) + after.slice(block.end);
+    }
+  }
   else if (operation.type === 'system-add') after = append(after, { system: [{ id: operation.id, kind: operation.kind,
-    ...(operation.station ? { station: operation.station } : { ai_only: true }) }] });
+    console: operation.console, ai_only: operation.ai_only === true }] });
   else if (operation.type === 'system-set' || operation.type === 'system-update') {
     const fields = operation.type === 'system-set' ? { [operation.field]: operation.value } : operation.fields;
     for (const [field, value] of Object.entries(fields)) { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before editing.`);
@@ -235,6 +270,13 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     after = move(after, list, index, operation.direction);
   }
   else throw new Error('invalid-ship-operation');
+  // Composition merges keyed arrays, so duplicate local declarations must be
+  // rejected before resolution can collapse them into one effective Console.
+  const authoredConsoleIds = new Set();
+  for (const row of parse(after).console || []) {
+    if (!ident(row.id) || authoredConsoleIds.has(row.id)) throw finding(operation.path, after, quote(row.id), 'Console ids must be unique runtime identifiers.');
+    authoredConsoleIds.add(row.id);
+  }
   const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path),
     read: path => path === operation.path ? after : draft.read(path) };
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;

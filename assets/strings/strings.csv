@@ -4679,3 +4679,17 @@ station.rating.guard.name,Display name of an authored cruiser station rating,[GU
 station.rating.guided.name,Display name of an authored cruiser station rating,[GUIDED],ANGELEITET,[GUIDED],machine
 station.rating.maintenance.name,Display name of an authored cruiser station rating,[MAINTENANCE],WARTUNG,[MAINTENANCE],machine
 workshop.composition.script_edit_hint,Workshop Composition literal script reference controls,[Change literal load/unload targets here. Computed paths and other script changes use the Scripts tool. Dependency scripts remain read-only.],Literale Ziele für Laden und Entladen hier ändern. Berechnete Pfade und andere Skriptänderungen erfolgen im Werkzeug Skripte. Abhängige Skripte bleiben schreibgeschützt.,[Change literal load/unload targets here. Computed paths and other script changes use the Scripts tool. Dependency scripts remain read-only.],machine
+workshop.ship.consoles,Workshop Console authoring,Consoles,,,
+workshop.ship.add_console,Workshop Console authoring,[Add Console],,,
+workshop.ship.apply_console,Workshop Console authoring,[Apply Console],,,
+workshop.ship.remove_console,Workshop Console authoring,[Remove Console],,,
+workshop.ship.home_station,Workshop Console authoring,Home Station,,,
+workshop.ship.human_seeking,Workshop Console authoring,Human-seeking Console,,,
+workshop.ship.host_order,Workshop Console authoring,Host Stations in order (comma separated),,,
+workshop.ship.visiting_rating,Workshop Console authoring,Visiting rating,,,
+workshop.ship.feeds,Workshop Console authoring,Knowledge feeds,,,
+workshop.ship.feed_source,Workshop Console authoring,Source publication,,,
+workshop.ship.feed_kind,Workshop Console authoring,Observation kind,,,
+workshop.ship.add_feed,Workshop Console authoring,[Add feed],,,
+workshop.ship.remove_feed,Workshop Console authoring,[Remove feed],,,
+workshop.ship.console_owner,Workshop System Console ownership,Controlling Console,,,

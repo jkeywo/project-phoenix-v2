@@ -1,9 +1,7 @@
 /** Console identity is independent of its current Station and screen implementation. */
 export function consoleDefinitions(roster) {
-  if (roster?.consoles?.length) return roster.consoles.map(c => ({ ...c,
+  return (roster?.consoles || []).map(c => ({ ...c,
     name: c.name || roster.stations?.find(s => s.id === c.home_station)?.name || c.id }));
-  // Migration adapter; remove after every host publishes explicit Consoles.
-  return (roster?.stations || []).map(st => ({ ...st, home_station: st.id, screen: st.console }));
 }
 export function consoleHome(roster, id) {
   return consoleDefinitions(roster).find(c => c.id === id)?.home_station || null;
@@ -46,10 +44,13 @@ export function consoleReadState(state, definition) {
     [['Comms'], ['commsContacts', 'commsMessages', 'commsRejection']],
     [['Shields'], ['shieldFacings', 'shieldFocusedFacing']],
     [['Repair'], ['repairTeams']],
-    [['Captain'], ['objectives']],
+    [['Captain'], ['objectives', 'currentView', 'redAlert']],
   ];
   for (const [sources, fields] of channels) {
-    if (!sources.some(kind => kinds.has(kind))) for (const field of fields) delete view[field];
+    for (const field of fields) {
+      if (sources.some(kind => kinds.has(kind)) && field in state) view[field] = state[field];
+      else delete view[field];
+    }
   }
   return view;
 }

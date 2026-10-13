@@ -35,6 +35,8 @@ function projection({ operators = [], activity = [], results = [], rating = 'Bac
         station_tutorials: {},
         station_assist_gaps: {},
       },
+      consoles: [{ id: 'captain', name: 'Captain', home_station: 'captain', screen: 'gui/captain-console.html', systems: ['red-alert'], feeds: [] }],
+      console_hosts: [{ console: 'captain', host: 'captain', rating }],
       station_ratings: { captain: rating },
       control_sources: { 'red-alert': operators.length ? 'Human' : 'Ai' },
       blackboards: [['red-alert', {
@@ -116,7 +118,7 @@ describe('GM authentic Station projection', () => {
     ship.entities = [{uuid:'moving', position:[1,0,1]}, {uuid:'spawned', position:[3,0,3]}];
     ship.entity_states = [{uuid:'moving', position:[4,0,5], hull_fraction:0.4}];
     ship.objectives = [{id:'new', title:'Objective', complete:false}];
-    ship.blackboards = [];
+    ship.blackboards = [['drive-main', {kind:'Helm',data:{}}], ['nav-main', {kind:'Navigation',data:{nav_chart_range:2048}}], ['sensor-main', {kind:'Sensors',data:{radar_range:1337}}]];
     ship.ship_pose = {x:4,y:0,z:5,yaw:0.2,forward_speed:2};
     ship.stations[0].operators = ['gm-1'];
     const next = buildGmStationConsoleInput(p, ship, state);
@@ -521,9 +523,11 @@ describe('GM authentic Station projection', () => {
         helm: { Backfill: ['helm.heading'] },
       },
     };
+    ship.consoles = Object.entries(ship.ship_config.station_systems).map(([id, systems]) => ({ id, home_station: id, systems, feeds: [{source:'nav-main', kind:'Navigation'}] }));
+    ship.console_hosts = [{ console: 'helm', host: 'helm', rating: 'Backfill' }];
     ship.station_ratings = { helm: 'Backfill' };
     ship.control_sources = { 'drive-main': 'Human' };
-    ship.blackboards = [];
+    ship.blackboards = [['drive-main', {kind:'Helm',data:{}}], ['nav-main', {kind:'Navigation',data:{nav_chart_range:2048}}], ['sensor-main', {kind:'Sensors',data:{radar_range:1337}}]];
     ship.entities = [{
       uuid: 'contact-1',
       name: 'contact.name',

@@ -2726,14 +2726,7 @@ export function buildConsoleView(consoleName, state) {
       console_host: state.consoleHosts?.[definition.id] || null,
       console_view: state.consoleViews?.[definition.id] || null };
   }
-  if (state.consoleDefinitions?.length) return {};
-  let view = buildConsoleViewInner(consoleName, state);
-  // Tutorials must see visiting Systems, advice and the Station's damage projection.
-  view = withVisitingSystems(consoleName, state, view);
-  view = withCommandAdvice(consoleName, state, view);
-  view = withStationDamage(consoleName, state, view);
-  view = withTutorialOverlay(consoleName, state, view);
-  return withGmTakeover(consoleName, state, view);
+  return {};
 }
 
 if (typeof window !== 'undefined') {

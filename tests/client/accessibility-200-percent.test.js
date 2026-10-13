@@ -70,10 +70,10 @@ const repoFile = (rel) => fs.readFileSync(
 /** The Engineering/Power seat plus two neighbours, so "every console iframe"
  *  is a claim about more than one frame. */
 const SHIP = {
-  stations: [
-    { id: 'power', name: 'Power', console: 'gui/battleship/power.html' },
-    { id: 'engineering', name: 'Engineering', console: 'gui/cruiser/engineering.html' },
-    { id: 'helm', name: 'Helm', console: 'gui/battleship/helm.html' },
+  consoles: [
+    { id: 'power', name: 'Power', screen: 'gui/battleship/power.html' },
+    { id: 'engineering', name: 'Engineering', screen: 'gui/cruiser/engineering.html' },
+    { id: 'helm', name: 'Helm', screen: 'gui/battleship/helm.html' },
   ],
 };
 
@@ -89,11 +89,11 @@ function consoleHarness() {
   const dom = new JSDOM('<div id="console-container"></div>', { url: 'https://phoenix.test/' });
   const doc = dom.window.document;
   mountConsoles(doc, doc.getElementById('console-container'), SHIP);
-  applyConsoleVisibility(doc, 'power', true, SHIP.stations.map((s) => s.id));
+  applyConsoleVisibility(doc, 'power', true, SHIP.consoles.map((s) => s.id));
   // jsdom does not LOAD an iframe src, so point each at about:blank to
   // materialise the same-origin :root the shell writes onto. The mount and the
   // `.console-section iframe` discovery under test are the production ones.
-  for (const st of SHIP.stations) {
+  for (const st of SHIP.consoles) {
     doc.getElementById(`${st.id}-iframe`).setAttribute('src', 'about:blank');
   }
   return { dom, doc };
@@ -577,7 +577,7 @@ describe('the Accessibility settings surface (issue #1422)', () => {
       myToken: 'tok1',
       isDemo: () => false,
       getState: () => ({
-        stations: [], stationRatings: {},
+        consoles: [], stationRatings: {},
         accessibilityProfile: live.accessibilityProfile,
       }),
       onAccessibility: (effect, value) => {

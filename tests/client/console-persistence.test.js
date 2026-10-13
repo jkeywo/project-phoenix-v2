@@ -18,10 +18,10 @@ import { mountConsoles, applyConsoleVisibility } from '../../gui/console-mount.j
 // pinned at the router seam in client-router.test.js.
 
 const SHIP = {
-  stations: [
-    { id: 'helm', name: 'Helm', console: 'gui/battleship/helm.html' },
-    { id: 'navigation', name: 'Navigation', console: 'gui/battleship/navigation.html' },
-    { id: 'comms', name: 'Comms', console: 'gui/battleship/comms.html' },
+  consoles: [
+    { id: 'helm', name: 'Helm', screen: 'gui/battleship/helm.html' },
+    { id: 'navigation', name: 'Navigation', screen: 'gui/battleship/navigation.html' },
+    { id: 'comms', name: 'Comms', screen: 'gui/battleship/comms.html' },
   ],
 };
 
@@ -35,7 +35,7 @@ function harness() {
   const doc = dom.window.document;
   const container = doc.getElementById('console-container');
   mountConsoles(doc, container, SHIP);
-  const ids = SHIP.stations.map(st => st.id);
+  const ids = SHIP.consoles.map(st => st.id);
   return { doc, container, ids };
 }
 

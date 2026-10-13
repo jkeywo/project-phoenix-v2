@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createConsoleMounts } from '../../gui/console-mount.js';
 import { ConsoleLatencyMeter, PUSH_CAUSE } from '../../gui/console-latency.js';
 
-const SHIP = { stations: [
-  { id: 'helm', console: 'gui/battleship/helm.html' },
-  { id: 'pilot', console: 'gui/battleship/captain.html' },
-  { id: 'tactical', console: 'gui/battleship/tactical.html' },
-  { id: 'comms', console: 'gui/cruiser/comms.html' },
-  { id: 'navigation', console: 'gui/cruiser/comms.html' },
+const SHIP = { consoles: [
+  { id: 'helm', screen: 'gui/battleship/helm.html' },
+  { id: 'pilot', screen: 'gui/battleship/captain.html' },
+  { id: 'tactical', screen: 'gui/battleship/tactical.html' },
+  { id: 'comms', screen: 'gui/cruiser/comms.html' },
+  { id: 'navigation', screen: 'gui/cruiser/comms.html' },
 ] };
 const cleanups = [];
 afterEach(() => { cleanups.splice(0).forEach(fn => fn()); vi.restoreAllMocks(); });
@@ -20,10 +20,11 @@ function harness(overrides = {}) {
   const container = doc.getElementById('consoles');
   const trace = [], loads = [], payloads = [], profiles = [];
   const live = {
-    state: { epoch: 1, stationSystems: { helm: ['drive'], pilot: ['command'], tactical: ['guns'] },
+    state: { epoch: 1, consoleSystems: { helm: ['drive'], pilot: ['command'], tactical: ['guns'] },
       systemConsoleFamilies: { drive: 'helm', command: 'captain', guns: 'tactical' } },
     active: 'helm', bindings: { command: ['KeyX'] }, feedback: { vibration: false },
   };
+  live.state.consoleDefinitions = SHIP.consoles.map(c => ({ ...c, systems: live.state.consoleSystems[c.id] || [] }));
   const originalAdd = dom.window.EventTarget.prototype.addEventListener;
   vi.spyOn(dom.window.EventTarget.prototype, 'addEventListener').mockImplementation(function(type, callback, options) {
     if (this.tagName === 'IFRAME' && type === 'load') loads.push({ iframe: this, callback });
@@ -59,7 +60,7 @@ function harness(overrides = {}) {
   }
   function mount(ship = SHIP) {
     mounts.mount(ship);
-    for (const station of ship.stations) if (mounts.frame(station.id)) hooks(station.id);
+    for (const station of ship.consoles) if (mounts.frame(station.id)) hooks(station.id);
   }
   function load(station) { mounts.frame(station).dispatchEvent(new dom.window.Event('load')); }
   function declare(station, data) {
@@ -73,15 +74,15 @@ function harness(overrides = {}) {
 const dirtyAll = () => ({ changedSystems: new Set(['drive', 'command', 'guns']) });
 
 describe('parent Console lifetime', () => {
-  it('seeds each load in order and clears only that Station overlay', () => {
+  it('seeds each load in order and retains its Console overlay', () => {
     const h = harness(); h.mount();
     h.mounts.selectOverlay('helm', 'map'); h.trace.length = 0;
     h.load('helm');
     expect(h.trace).toEqual([
-      'locale:helm-iframe', 'snapshot:helm', 'ack:helm:iframe-load', 'overlay:helm:null',
+      'locale:helm-iframe', 'snapshot:helm', 'ack:helm:iframe-load',
       'accessibility:helm-iframe', 'bindings:helm', 'feedback:helm', 'gamepad',
     ]);
-    expect(h.mounts.view('helm').activeOverlay).toBeNull();
+    expect(h.mounts.view('helm').activeOverlay).toBe('map');
   });
 
   it('reloads from live state and preferences without remounting or erasing declarations', () => {
@@ -140,12 +141,12 @@ describe('parent Console lifetime', () => {
     expect(h.mounts.view('helm')).toEqual({ tabs: [], hull: [], activeOverlay: null });
   });
 
-  it('sets one overlay, closing its previous Station before opening another', () => {
+  it('retains independent overlays when switching Consoles', () => {
     const h = harness(); h.mount();
     h.mounts.selectOverlay('helm', 'map');
     h.mounts.selectOverlay('navigation', 'chart');
     h.mounts.selectOverlay(null, null);
-    expect(h.trace).toEqual(['overlay:helm:map', 'overlay:helm:null', 'overlay:navigation:chart', 'overlay:navigation:null']);
+    expect(h.trace).toEqual(['overlay:helm:map', 'overlay:navigation:chart']);
   });
 
   it('publishes host changes only to active or always-push Stations using authoritative families', () => {
@@ -198,8 +199,8 @@ describe('parent Console lifetime', () => {
   it('fans current bindings and feedback to inactive frames, skipping the whole operation without a registry', () => {
     const h = harness(); h.mount();
     h.mounts.refreshBindings();
-    expect(h.profiles.filter(row => row.kind === 'bindings').map(row => row.station)).toEqual(SHIP.stations.map(row => row.id));
-    expect(h.profiles.filter(row => row.kind === 'feedback')).toHaveLength(SHIP.stations.length);
+    expect(h.profiles.filter(row => row.kind === 'bindings').map(row => row.station)).toEqual(SHIP.consoles.map(row => row.id));
+    expect(h.profiles.filter(row => row.kind === 'feedback')).toHaveLength(SHIP.consoles.length);
     h.trace.length = 0; h.profiles.length = 0; h.live.bindings = null;
     h.mounts.refreshBindings();
     expect(h.trace).toEqual([]); expect(h.profiles).toEqual([]);
@@ -237,7 +238,7 @@ describe('parent Console lifetime', () => {
     expect(h.mounts.view('helm').activeOverlay).toBe('replacement-overlay');
     h.load('helm');
     expect(h.payloads[0].iframe).toBe(h.mounts.frame('helm'));
-    expect(h.mounts.view('helm').activeOverlay).toBeNull();
+    expect(h.mounts.view('helm').activeOverlay).toBe('replacement-overlay');
   });
 
   it('disposes owned nodes and listeners, preserves other container children, and rejects late work', () => {

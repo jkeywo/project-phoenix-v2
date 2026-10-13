@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import cases from '../fixtures/console-payloads.json';
+import historicalCases from '../fixtures/console-payloads.json';
+const cases = historicalCases.map(row => ({ ...row, state: { ...row.state, consoleDefinitions: Object.entries(row.state.stationSystems).map(([id, systems]) => ({ id, home_station: id, systems, feeds: [{source:'orders',kind:'Command'}, ...(id === 'pilot' ? [{source:'flight',kind:'Helm'}] : [])] })) } }));
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildConsoleView, withVisitingSystems } from '../../gui/console-state.js';
 import { evaluateTrigger, LEGACY_TUTORIAL_PROGRESS_KEY } from '../../gui/tutorial-state.js';
@@ -24,7 +25,19 @@ describe('console object construction and JSON publication', () => {
       const table = getTable();
       setTable(new Map(['fixture.title', 'fixture.text', 'console.radar.tactical_target', 'console.radar.science_target'].map(id => [id, id])));
       try {
-        expect(JSON.parse(window.buildConsoleState(row.station, structuredClone(row.state)))).toStrictEqual(row.expected);
+        const actual = JSON.parse(window.buildConsoleState(row.station, structuredClone(row.state)));
+        expect(actual).toMatchObject({ console_id: row.station, hosted_systems: row.state.stationSystems[row.station],
+          own_hull: row.expected.own_hull, gm_takeover: row.expected.gm_takeover });
+        const expected = structuredClone(row.expected);
+        if (row.name === 'visiting') {
+          // A visiting radio is now its own Console, never spliced into Helm.
+          delete expected.systems;
+          delete expected.system_families.radio;
+          expected.hosted_systems = ['thrust', 'steer'];
+          expected.tutorial = null;
+        }
+        expect(actual).toStrictEqual({ ...expected,
+          console_id: row.station, station_id: row.station, console_host: null, console_view: null });
       } finally { setTable(table); }
     });
   }
@@ -35,8 +48,8 @@ describe('console object construction and JSON publication', () => {
     buildConsoleView('engineering', state);
     expect(first).toStrictEqual(snapshot);
     expect(state).toStrictEqual(cases[2].state);
-    expect(first.systems.thrust).toBe(first.systems.steer);
-    expect(first.system_families).toMatchObject({ thrust: 'helm', steer: 'helm', radio: 'comms' });
+    expect(first.hosted_systems).toEqual(['thrust', 'steer']);
+    expect(first.system_families).not.toHaveProperty('radio');
   });
   it('copies existing composite maps before adding visitors', () => {
     const state = structuredClone(cases[2].state);
@@ -59,14 +72,14 @@ describe('console object construction and JSON publication', () => {
     expect(view.own_hull).toBeTruthy();
     expect(view.gm_takeover.operator_id).toBe('gm-fixture');
     state.stationTutorials.pilot = cases[2].state.stationTutorials.pilot;
-    expect(buildConsoleView('pilot', state).tutorial.active.id).toBe('visitor');
+    expect(buildConsoleView('pilot', state).tutorial).toBeNull();
     state.stationTutorials.pilot = [{ id: 'damage', trigger: { kind: 'state', path: 'own_hull', op: 'truthy' } }];
     expect(buildConsoleView('pilot', state).tutorial.active.id).toBe('damage');
     expect(buildConsoleView('engineering', state)).not.toHaveProperty('command_advice');
   });
   it('retains pre-Welcome window JSON contracts', () => {
     expect(window.buildConsoleStateInner('helm', {})).toBe('{}');
-    expect(JSON.parse(window.buildConsoleState('helm', {}))).toMatchObject({ hosted_systems: [], tutorial: null, gm_takeover: null });
+    expect(JSON.parse(window.buildConsoleState('helm', {}))).toEqual({});
   });
   for (const storage of [null, { getItem() { throw new Error('unavailable'); }, setItem() { throw new Error('unavailable'); } }]) {
     it(`keeps in-memory tutorial progress with ${storage ? 'throwing' : 'absent'} storage`, () => {
@@ -78,19 +91,19 @@ describe('console object construction and JSON publication', () => {
   }
   it('continues when accessing storage throws', () => {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('privacy'); } });
-    expect(JSON.parse(window.buildConsoleState('pilot', structuredClone(cases[2].state))).tutorial.active.id).toBe('visitor');
+    expect(JSON.parse(window.buildConsoleState('pilot', structuredClone(cases[2].state))).tutorial).toBeNull();
   });
   it('migrates legacy progress only through the full adapter', () => {
     localStorage.setItem(LEGACY_TUTORIAL_PROGRESS_KEY, JSON.stringify({ dismissed: { 'pilot/visitor': true }, used: {} }));
     const state = structuredClone(cases[2].state);
-    expect(buildConsoleView('pilot', state).tutorial.active.id).toBe('visitor');
+    expect(buildConsoleView('pilot', state).tutorial).toBeNull();
     expect(state.tutorialProgress.dismissed).toEqual({});
     expect(JSON.parse(window.buildConsoleState('pilot', state)).tutorial).toBeNull();
     expect(state.tutorialProgress.dismissed['fixture-hull/pilot/visitor']).toBe(true);
   });
   it('surfaces unexpected transformation errors', () => {
     const error = new Error('broken simulation view');
-    const state = { blackboards: new Proxy({}, { ownKeys() { throw error; } }) };
+    const state = { consoleDefinitions: [{id:'pilot',systems:[]}], blackboards: new Proxy({}, { ownKeys() { throw error; } }) };
     expect(() => buildConsoleView('pilot', state)).toThrow(error);
     expect(() => window.buildConsoleState('pilot', state)).toThrow(error);
   });

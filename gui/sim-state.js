@@ -196,6 +196,8 @@ export class ClientSimState {
     // Presentation continuation belongs to the received board, never the
     // canonical board or a different, potentially reordered snapshot.
     this.blackboardPresentation = {};
+    this.consoleScopeGeneration = null;
+    this.consoleScopeTick = null;
     this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
@@ -658,11 +660,35 @@ export class ClientSimState {
       case 'BlackboardUpdate': {
         let captainChanged = false;
         let accepted = false;
+        const scope = Array.isArray(d.console_scope) ? new Set(d.console_scope) : null;
+        const generation = Number.isSafeInteger(d.presentation_generation)
+          && d.presentation_generation >= 0 ? d.presentation_generation : null;
+        if (!scope && this.consoleScopeGeneration !== null) break;
+        if (scope) {
+          const tick = Number.isSafeInteger(d.console_scope_tick) && d.console_scope_tick >= 0
+            ? d.console_scope_tick : null;
+          // Scoped authority is ordered by the host's existing continuation and tick.
+          if (generation === null || tick === null) break;
+          const latestGeneration = Math.max(this.consoleScopeGeneration ?? -1,
+            ...Object.values(this.blackboardPresentation).filter(Number.isSafeInteger));
+          if (generation < latestGeneration || (generation === this.consoleScopeGeneration && tick < this.consoleScopeTick)) break;
+          this.consoleScopeGeneration = generation;
+          this.consoleScopeTick = tick;
+          for (const systemId of Object.keys(this.blackboards)) {
+            if (scope.has(systemId)) continue;
+            if (this.blackboardKinds[systemId] === 'Captain') captainChanged = true;
+            if (this.blackboardKinds[systemId] === 'Navigation') this.navigationWaypoint = null;
+            delete this.blackboards[systemId];
+            delete this.blackboardKinds[systemId];
+            delete this.blackboardPresentation[systemId];
+            changes.changedBlackboards.add(systemId);
+            accepted = true;
+          }
+        }
         for (const [systemId, bb] of (d.updates || [])) {
+          if (scope && !scope.has(systemId)) continue;
           // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
           if (bb && bb.kind && bb.data) {
-            const generation = Number.isSafeInteger(d.presentation_generation)
-              && d.presentation_generation >= 0 ? d.presentation_generation : null;
             const previousGeneration = this.blackboardPresentation[systemId];
             if (generation !== null && previousGeneration != null && generation < previousGeneration) continue;
             accepted = true;

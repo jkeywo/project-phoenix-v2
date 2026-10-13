@@ -40,10 +40,10 @@ describe('sectionIdFor / iframeIdFor — canonical scheme', () => {
 
 describe('planMounts', () => {
   const shipStations = {
-    stations: [
-      { id: 'captain', name: 'Captain', console: 'gui/battleship/captain.html' },
-      { id: 'tactical', name: 'Tactical', console: 'gui/battleship/tactical.html' },
-      { id: 'helm', name: 'Helm', console: 'gui/battleship/helm.html' },
+    consoles: [
+      { id: 'captain', name: 'Captain', screen: 'gui/battleship/captain.html' },
+      { id: 'tactical', name: 'Tactical', screen: 'gui/battleship/tactical.html' },
+      { id: 'helm', name: 'Helm', screen: 'gui/battleship/helm.html' },
     ],
   };
 
@@ -69,8 +69,8 @@ describe('planMounts', () => {
 
   it('skips stations with no console URL (nothing to mount)', () => {
     const plan = planMounts({
-      stations: [
-        { id: 'captain', console: 'gui/battleship/captain.html' },
+      consoles: [
+        { id: 'captain', screen: 'gui/battleship/captain.html' },
         { id: 'ghost' },
       ],
     });
@@ -79,14 +79,14 @@ describe('planMounts', () => {
 
   it('skips stations with no id', () => {
     const plan = planMounts({
-      stations: [{ name: 'anonymous', console: 'x.html' }],
+      consoles: [{ name: 'anonymous', screen: 'x.html' }],
     });
     expect(plan).toEqual([]);
   });
 
   it('unknown station ids mount via the canonical scheme (no registry gate)', () => {
     const plan = planMounts({
-      stations: [{ id: 'astrometrics', console: 'gui/x/astrometrics.html' }],
+      consoles: [{ id: 'astrometrics', screen: 'gui/x/astrometrics.html' }],
     });
     expect(plan[0].sectionId).toBe('astrometrics-ui');
     expect(plan[0].iframeId).toBe('astrometrics-iframe');

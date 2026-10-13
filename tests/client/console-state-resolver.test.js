@@ -223,23 +223,24 @@ describe('Dock tracer and visiting Systems', () => {
       .toMatchObject({ system_id: 'berthing-clamps', range: 275, available: true });
   });
 
-  it('adds a visiting arbitrary System under its actual id and metadata', () => {
+  it('keeps a visiting Console independent from the co-hosted bridge Console', () => {
     const state = {
-      stationSystems: { bridge: ['bridge-core'], remote: ['far-comms-array'] },
+      consoleDefinitions: [{ id: 'bridge', home_station: 'bridge', systems: ['bridge-core'] }, { id: 'remote', home_station: null, systems: ['far-comms-array'] }],
+      consoleHosts: { remote: { host: 'bridge', rating: 'Std' } },
       systemConsoleFamilies: { 'bridge-core': 'captain', 'far-comms-array': 'comms' },
       blackboards: { 'far-comms-array': { host_station: 'bridge', messages: [] } },
       blackboardKinds: { 'far-comms-array': 'Comms' },
     };
     const payload = JSON.parse(window.buildConsoleState('bridge', state));
-    expect(payload.systems).toHaveProperty('far-comms-array');
-    expect(payload.system_families['far-comms-array']).toBe('comms');
-    expect(payload.hosted_systems).toEqual(['bridge-core', 'far-comms-array']);
+    expect(payload.hosted_systems).toEqual(['bridge-core']);
+    expect(JSON.parse(window.buildConsoleState('remote', state)).hosted_systems).toEqual(['far-comms-array']);
   });
 });
 
 describe('station hull normalization', () => {
   it('uses the actual Station ownership for the top-level aggregate', () => {
     const state = {
+      consoleDefinitions: [{ id: 'pilot', home_station: 'pilot', systems: ['odd-blaster-id', 'odd-engine-id'] }],
       stationSystems: { pilot: ['odd-blaster-id', 'odd-engine-id'] },
       systemConsoleFamilies: { 'odd-blaster-id': 'tactical', 'odd-engine-id': 'helm' },
       consoleHull: [{ system_id: 'odd-blaster-id', current: 6, max_hp: 12 }],

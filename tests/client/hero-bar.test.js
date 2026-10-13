@@ -6,9 +6,22 @@ import { parse as parseToml } from 'smol-toml';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HERO_BAR_CODE_QUERY, heroBarHealthState, heroBarImportanceState, heroBarKeyTarget,
-  heroBarLabelMode, heroBarModel, heroChromeSlot, renderHeroBarDom,
+  heroBarLabelMode, heroBarModel as explicitHeroBarModel, heroChromeSlot, renderHeroBarDom,
 } from '../../gui/hero-bar.js';
 import { reconcileActiveConsole } from '../../gui/lobby-state.js';
+
+// Compact explicit Console fixtures for the existing presentation matrix.
+function heroBarModel(options) {
+  const definitions = (options.stations || []).map(st => ({ ...st,
+    home_station: Object.hasOwn(st, 'home_station') ? st.home_station : st.id, screen: st.screen || st.console || 'gui/test-console.html',
+    systems: options.stationSystems?.[st.id] || (st.command_target ? ['command'] : []) }));
+  const hosts = Object.fromEntries(definitions.map(c => {
+    const board = (c.systems || []).map(id => options.blackboards?.[id]).find(b => b?.host_station !== undefined);
+    return [c.id, options.stationHosts?.[c.id] || { host: c.id === options.directStation ? c.id : c.human_seeking ? board?.host_station || null : c.home_station,
+      rating: board?.station_rating || (c.human_seeking ? c.visiting_rating : options.stationRatings?.[c.id]) || '' }];
+  }));
+  return explicitHeroBarModel({ ...options, consoles: definitions, consoleHosts: hosts });
+}
 
 const stations = [
   { id: 'helm', name: 'Helm' },
@@ -950,14 +963,14 @@ describe("the cruiser's Command tab (issue #1387)", () => {
         'utf8',
       ),
     );
-    return (toml.station || []).map(st => ({
+    return (toml.console || []).map(st => ({
       id: st.id,
       name: st.name,
       short_code: st.short_code,
-      console: st.console,
+      screen: st.screen,
+      home_station: st.home_station || null,
       human_seeking: st.human_seeking === true,
       visiting_rating: st.visiting_rating,
-      auxiliary: st.auxiliary === true,
       command_target: st.command_target ?? null,
     }));
   }
@@ -969,9 +982,9 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     expect(command).toBeTruthy();
     expect(command).toMatchObject({
       short_code: 'CMD',
-      console: 'gui/command-console.html',
+      screen: 'gui/command-console.html',
       human_seeking: true,
-      auxiliary: true,
+      home_station: null,
       visiting_rating: 'Std',
       command_target: 'tactical',
     });
@@ -999,7 +1012,7 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     expect(model.ownership.command).toBe('visiting');
     // Selecting the tab is what opens the shared Command document; the tab's
     // id is the key the shell mounts that iframe under.
-    expect(cruiserStations().find(st => st.id === 'command').console)
+    expect(cruiserStations().find(st => st.id === 'command').screen)
       .toBe('gui/command-console.html');
   });
 

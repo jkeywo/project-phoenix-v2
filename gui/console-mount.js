@@ -9,7 +9,7 @@ import { consoleDefinitions } from './console-topology.js';
 import { iframeIdFor, planMounts } from './mount-plan.js';
 import { consoleSections } from './content-switcher.js';
 import { push, setOverlay } from './iframe-bridge.js';
-import { alwaysPushConsoles, dirtyConsolesFor } from './dirty-consoles.js';
+import { alwaysPushConsoles } from './dirty-consoles.js';
 import { PUSH_CAUSE } from './console-latency.js';
 
 /**
@@ -161,22 +161,12 @@ export function createConsoleMounts({
   function publishChanges(changes) {
     if (disposed) return;
     const state = readState();
-    const stationSystems = state?.consoleDefinitions?.length
-      ? Object.fromEntries(state.consoleDefinitions.map(c => [c.id, c.systems || []])) : state?.stationSystems;
-    const families = state?.systemConsoleFamilies;
-    const blackboardFamilies = state?.blackboardConsoleFamilies;
-    const always = alwaysPushConsoles(stationSystems, families);
-    if (state?.consoleDefinitions?.length) {
-      // Feeds can change independently of owned Systems.
-      for (const definition of state.consoleDefinitions) {
-        if (always.has(definition.id) || readActiveStation() === definition.id) refresh(definition.id, PUSH_CAUSE.SERVER_MESSAGE);
-      }
-      return;
-    }
-    for (const stationId of dirtyConsolesFor(changes, stationSystems, families, blackboardFamilies)) {
-      if (always.has(stationId) || readActiveStation() === stationId) {
-        refresh(stationId, PUSH_CAUSE.SERVER_MESSAGE);
-      }
+    const definitions = state?.consoleDefinitions || [];
+    const systems = Object.fromEntries(definitions.map(c => [c.id, c.systems || []]));
+    const always = alwaysPushConsoles(systems, state?.systemConsoleFamilies);
+    // Explicit feeds may change independently of the Console's owned Systems.
+    for (const definition of definitions) {
+      if (always.has(definition.id) || readActiveStation() === definition.id) refresh(definition.id, PUSH_CAUSE.SERVER_MESSAGE);
     }
   }
 
@@ -200,12 +190,8 @@ export function createConsoleMounts({
 
   function selectOverlay(stationId, overlayId) {
     if (disposed) return;
-    const previous = selectedOverlay;
     selectedOverlay = { console: overlayId ? stationId : null, id: overlayId || null };
-    if (shipStations?.consoles?.length && stationId) consoleOverlays.set(stationId, overlayId || null);
-    if (!shipStations?.consoles?.length && previous.console && previous.console !== selectedOverlay.console) {
-      setOverlay(frame(previous.console), null);
-    }
+    if (stationId) consoleOverlays.set(stationId, overlayId || null);
     if (stationId) setOverlay(frame(stationId), overlayId || null);
   }
 
@@ -230,7 +216,6 @@ export function createConsoleMounts({
         if (disposed || generation !== currentGeneration || mounted.get(stationId) !== record) return;
         installLocale(iframe);
         refresh(stationId, PUSH_CAUSE.IFRAME_LOAD);
-        if (selectedOverlay.console === stationId) selectOverlay(null, null);
         applyAccessibility(iframe);
         publishBindings(iframe);
       };
@@ -249,8 +234,7 @@ export function createConsoleMounts({
     return {
       tabs: tabs.get(stationId) || [],
       hull: hull.get(stationId) || [],
-      activeOverlay: shipStations?.consoles?.length ? (consoleOverlays.get(stationId) || null)
-        : (selectedOverlay.console === stationId ? selectedOverlay.id : null),
+      activeOverlay: consoleOverlays.get(stationId) || null,
     };
   }
 
@@ -272,7 +256,7 @@ export function createConsoleMounts({
     if (data.type === 'console_tabs') {
       tabs.set(stationId, Array.isArray(data.tabs) ? data.tabs : []);
       const open = data.open || null;
-      if (shipStations?.consoles?.length) consoleOverlays.set(stationId, open);
+      consoleOverlays.set(stationId, open);
       if (open) selectedOverlay = { console: stationId, id: open };
       else if (selectedOverlay.console === stationId) selectedOverlay = { console: null, id: null };
     } else hull.set(stationId, Array.isArray(data.entries) ? data.entries : []);

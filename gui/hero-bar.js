@@ -1,15 +1,5 @@
 /** Shared complete-Station Hero Bar model (issue #1097). */
 
-function legacyPlacement(station, stationSystems, blackboards) {
-  const boards = (stationSystems?.[station.id] || []).map(id => blackboards?.[id]);
-  const board = boards.find(value => value?.host_station != null) || boards.find(Boolean);
-  return board ? {
-    station: station.id,
-    host: board.host_station || null,
-    rating: board.station_rating || station.visiting_rating || '',
-  } : null;
-}
-
 /**
  * Whether a `Command`-kind blackboard reports a directable target — the one
  * fact both the hero bar (this file) and the captain's visiting-system
@@ -22,37 +12,6 @@ function legacyPlacement(station, stationSystems, blackboards) {
  */
 export function isCommandBoardDirectable(board) {
   return !!board && board.directed_station_ai === true;
-}
-
-/**
- * Whether a directing Station (one authoring `command_target`, e.g. the
- * Command auxiliary, issues #1107/#1387) currently has anything to direct.
- *
- * `src/console/command/server.rs::station_is_ai_controlled` only lets Command
- * direct a Station that is AI-controlled — a human-held target only gets
- * advisory text, never a binding order. So the rule agreed with John is:
- * hide the tab whenever every Station it can direct is human-controlled
- * (today's single `command_target` means simply "hide when the directed
- * Station is not AI").
- *
- * Ducktyped the same way `legacyPlacement` above and
- * `gui/console-state.js`'s `blackboardOfKind`/`commandAdviceFor` find their
- * board: no SystemId spelling or Console Family convention, just the
- * discriminating `directed_station_ai` field every `Command`-kind blackboard
- * carries. `system_registry.rs` guarantees at most one Command instance per
- * hull, so scanning all of `blackboards` for the first match is exact, not a
- * heuristic.
- *
- * @param {{command_target?: (string|null)}|null} def
- * @param {Object<string, object>|null} blackboards keyed by system id, the
- *   same map `heroBarModel` already receives
- * @returns {boolean}
- */
-export function commandStationDirectable(def, blackboards) {
-  if (!def?.command_target) return false;
-  const board = Object.values(blackboards || {})
-    .find(value => value && typeof value.directed_station_ai === 'boolean');
-  return isCommandBoardDirectable(board);
 }
 
 /**
@@ -78,105 +37,8 @@ export function commandStationDirectable(def, blackboards) {
 export function heroBarModel({ directStation, stations, stationSystems,
   blackboards, stationHosts, stationHealth, stationImportance, stationRatings, activeStation,
   consoleTabs, activeOverlay, consoles, consoleHosts }) {
-  if (consoles?.length) return consoleHeroBarModel({ directStation, stations, consoles, consoleHosts,
+  return consoleHeroBarModel({ directStation, stations, consoles: consoles || [], consoleHosts,
     stationRatings, stationHealth, stationImportance, activeStation, consoleTabs, activeOverlay, blackboards });
-  const defs = stations || [];
-  const byId = Object.fromEntries(defs.filter(Boolean).map(st => [st.id, st]));
-  // A directing Station (`command_target` set — the Command auxiliary) with
-  // nothing to direct right now is dropped everywhere below: from the tab
-  // strip, from ownership, and from the AI-status line. It is not merely
-  // undirectable, it has no reason to exist on this frame's bar at all.
-  const hiddenDirectingIds = new Set(
-    defs.filter(st => st?.command_target && !commandStationDirectable(st, blackboards))
-      .map(st => st.id),
-  );
-  const humanSeekingDefs = defs.filter(st => st?.human_seeking && !hiddenDirectingIds.has(st.id));
-  const placements = Object.fromEntries(humanSeekingDefs.map(st => [
-    st.id,
-    stationHosts?.[st.id] || legacyPlacement(st, stationSystems, blackboards),
-  ]));
-  const visiting = directStation ? humanSeekingDefs
-    .filter(st => st.id !== directStation)
-    .filter(st => placements[st.id]?.host === directStation) : [];
-  // An overlay tab without a direct Station has no console to open it in.
-  const overlays = directStation
-    ? (Array.isArray(consoleTabs) ? consoleTabs : []).filter(tab => tab && tab.id)
-    : [];
-  const overlayIds = overlays.map(tab => tab.id);
-  const stationIds = directStation ? [directStation, ...visiting.map(st => st.id)] : [];
-  const tabIds = directStation
-    ? [directStation, ...overlayIds, ...visiting.map(st => st.id)]
-    : [];
-  const openOverlay = overlayIds.includes(activeOverlay) ? activeOverlay : null;
-  const selected = openOverlay
-    || (stationIds.includes(activeStation) ? activeStation : (stationIds[0] || null));
-  const ownership = {};
-  for (const st of humanSeekingDefs) {
-    const host = placements[st.id]?.host || null;
-    ownership[st.id] = host === st.id ? 'direct' : (host ? 'visiting' : 'ai');
-  }
-  if (directStation) ownership[directStation] = 'direct';
-  const overlayById = Object.fromEntries(overlays.map(tab => [tab.id, tab]));
-  return {
-    selected,
-    tabs: tabIds.map(id => {
-      // An overlay tab is built here rather than folded into the Station
-      // branch below: every field that branch derives — rating, health,
-      // importance, ownership — is a fact about a Station, and inventing a
-      // neutral value for each one inside that code would read as though an
-      // overlay were a Station with nothing wrong with it.
-      const overlay = overlayById[id];
-      if (overlay) {
-        return {
-          id,
-          kind: 'overlay',
-          name: overlay.name || id,
-          code: typeof overlay.code === 'string' ? overlay.code : '',
-          rating: '',
-          health: null,
-          healthState: heroBarHealthState(null),
-          importance: null,
-          importanceState: heroBarImportanceState(null),
-          // How many things the surface has that the seat has not seen. Zero
-          // (or absent) draws nothing at all — a badge reading "0" is a badge
-          // that never goes away.
-          badge: Number.isFinite(overlay.badge) ? Math.max(0, Math.trunc(overlay.badge)) : 0,
-          selected: id === selected,
-        };
-      }
-      const st = byId[id] || { id, name: id };
-      const rating = id !== directStation
-        ? (placements[id]?.rating || st.visiting_rating || stationRatings?.[id] || '')
-        : (stationRatings?.[id] || '');
-      // Authoritative host figure (issue #1100). A number is the summed hull
-      // fraction; `null` — explicit no-damage-model, or simply absent because
-      // the Station owns no damageable capacity — is the neutral state. Never
-      // derived from blackboards/stationSystems: AC #3 forbids inferring a
-      // Station's health from the recipient-scoped damage rows a client holds.
-      const rawHealth = stationHealth ? stationHealth[id] : undefined;
-      const health = typeof rawHealth === 'number' ? rawHealth : null;
-      // Authoritative host importance figure (issue #1101), kept SEPARATE from
-      // health: a one-off `unread` event and a continuing `critical` condition,
-      // each with its own lifecycle. Absent (Station resolved / never marked) is
-      // the neutral state. Never derived from health or blackboards.
-      const importance = (stationImportance && stationImportance[id]) || null;
-      // The hull's authored abbreviation (`[[station]] short_code`), already on
-      // the wire inside `shipStations.stations`. Carried verbatim — never
-      // derived by truncating the name, which would invent a label the hull did
-      // not author and would differ between hulls that share a Station id.
-      // Empty when the hull authored none; `renderHeroBarDom` falls back to the
-      // full name rather than showing a blank tab.
-      const code = typeof st.short_code === 'string' ? st.short_code : '';
-      return { id, kind: 'station', name: st.name || id, code, rating, health,
-        healthState: heroBarHealthState(health), importance,
-        importanceState: heroBarImportanceState(importance), badge: 0,
-        selected: id === selected };
-    }),
-    ownership,
-    aiStations: humanSeekingDefs
-      .filter(st => ownership[st.id] === 'ai')
-      .map(st => ({ id: st.id, name: st.name || st.id })),
-  };
 }
 
 /**
@@ -446,6 +308,7 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
     if (childAtIndex !== button) tabsEl.insertBefore(button, childAtIndex || null);
   }
   const selected = model.tabs.find(tab => tab.id === model.selected) || model.tabs[0];
+  if (!selected) { textIfChanged(titleEl, ''); propertyIfChanged(ratingEl, 'hidden', true); textIfChanged(aiEl, ''); propertyIfChanged(aiEl, 'hidden', true); return; }
   textIfChanged(titleEl, selected.name);
   propertyIfChanged(ratingEl, 'hidden', !selected.rating);
   textIfChanged(ratingEl, selected.rating
@@ -458,7 +321,6 @@ export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
 
 if (typeof window !== 'undefined') {
   window.heroBarModel = heroBarModel;
-  window.commandStationDirectable = commandStationDirectable;
   window.isCommandBoardDirectable = isCommandBoardDirectable;
   window.heroBarKeyTarget = heroBarKeyTarget;
   window.renderHeroBarDom = renderHeroBarDom;
@@ -477,11 +339,12 @@ function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, 
     if (!c.screen) return false;
     const commandBoards = (c.systems || []).map(id => blackboards?.[id])
       .filter(board => typeof board?.directed_station_ai === 'boolean');
-    return commandBoards.length === 0 || commandBoards.some(isCommandBoardDirectable);
+    return c.command_target ? commandBoards.some(isCommandBoardDirectable)
+      : commandBoards.length === 0 || commandBoards.some(isCommandBoardDirectable);
   });
   const hosted = directStation ? visible.filter(c => placement(c).host === directStation) : [];
   const selectedConsole = hosted.some(c => c.id === activeStation) ? activeStation : hosted[0]?.id || null;
-  const overlays = selectedConsole === activeStation ? (consoleTabs || []).filter(t => t?.id) : [];
+  const overlays = selectedConsole && selectedConsole === activeStation ? (consoleTabs || []).filter(t => t?.id) : [];
   const selected = overlays.some(t => t.id === activeOverlay) ? activeOverlay : selectedConsole;
   const tabs = hosted.map(c => {
     const seat = seats[c.home_station] || {};

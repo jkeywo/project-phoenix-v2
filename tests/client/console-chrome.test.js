@@ -216,7 +216,7 @@ describe('the shell owns the damage popup the footers used to', () => {
     // the popup branch has to send it too; without this the badge sticks until
     // the player switches Station and comes back.
     const branch = alreadySelectedBranch();
-    expect(branch).toMatch(/send\('StationVisited', \{ station: tabId \}\);/);
+    expect(branch).toMatch(/send\('StationVisited', \{ station: visitedStation \}\);/);
     expect(branch).toMatch(/scheduleRender\(\);/);
   });
 
@@ -239,13 +239,13 @@ describe('two Stations sharing one console document (issue #1374)', () => {
     const toml = parseToml(
       fs.readFileSync(path.join(REPO_ROOT, 'assets/entities/alliance_cruiser.toml'), 'utf8'),
     );
-    return (toml.station || []).map(st => ({ id: st.id, console: st.console }));
+    return (toml.console || []).map(c => ({ id: c.id, screen: c.screen }));
   }
 
   it('the cruiser really does mount one document at two Stations', () => {
     // A guard on the fixture: without a genuine collision the test below would
     // pass over nothing.
-    const shared = cruiserStations().filter(st => st.console === 'gui/cruiser/comms.html');
+    const shared = cruiserStations().filter(st => st.screen === 'gui/cruiser/comms.html');
     expect(shared.map(st => st.id).sort()).toEqual(['comms', 'navigation']);
   });
 
@@ -257,7 +257,7 @@ describe('two Stations sharing one console document (issue #1374)', () => {
     // overwrite the Comms seat's and the NAV tab's popup is never populated.
     const dom = new JSDOM('<div id="console-container"></div>', { url: 'https://phoenix.test/' });
     const doc = dom.window.document;
-    const shipStations = { stations: cruiserStations() };
+    const shipStations = { consoles: cruiserStations() };
     mountConsoles(doc, doc.getElementById('console-container'), shipStations);
 
     const commsWindow = doc.getElementById('comms-iframe').contentWindow;
@@ -271,7 +271,7 @@ describe('two Stations sharing one console document (issue #1374)', () => {
     // The paths with no iframe behind them (the native host, BroadcastChannel).
     const dom = new JSDOM('<div id="console-container"></div>', { url: 'https://phoenix.test/' });
     const doc = dom.window.document;
-    const shipStations = { stations: cruiserStations() };
+    const shipStations = { consoles: cruiserStations() };
     mountConsoles(doc, doc.getElementById('console-container'), shipStations);
     expect(stationIdForSource(doc, shipStations, null, 'helm')).toBe('helm');
     expect(stationIdForSource(doc, shipStations, dom.window, 'helm')).toBe('helm');

@@ -3907,8 +3907,7 @@
             // gesture that cleared it before the popup existed, so it has to
             // stay that as well, or the badge sticks until you leave the
             // Station and come back.
-            const visitedStation = uiState.shipStations?.consoles?.length
-              ? uiState.shipStations.consoles.find(c => c.id === tabId)?.home_station : tabId;
+            const visitedStation = uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station;
             if (visitedStation) send('StationVisited', { station: visitedStation });
             showStationDamagePopup();
             scheduleRender();
@@ -3925,8 +3924,7 @@
           // renderStationHero returns early outside a live game, so onActivate
           // never fires in the lobby. A continuing `critical` condition is
           // immune host-side, so this cannot lower an alert.
-          const visitedStation = uiState.shipStations?.consoles?.length
-            ? uiState.shipStations.consoles.find(c => c.id === tabId)?.home_station : tabId;
+          const visitedStation = uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station;
           if (visitedStation) send('StationVisited', { station: visitedStation });
           scheduleRender();
         },
@@ -3943,7 +3941,7 @@
 
     /// The popup's input for whichever Station is selected right now.
     function stationDamagePopupState() {
-      const station = (uiState.shipStations?.consoles?.length ? uiState.shipStations.consoles : (uiState.shipStations?.stations || []))
+      const station = (uiState.shipStations?.consoles || [])
         .find(st => st && st.id === activeConsole) || null;
       return {
         station: stationLabel(station) || activeConsole || '',

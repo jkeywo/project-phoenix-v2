@@ -22,10 +22,10 @@ import {
 } from '../../gui/accessibility-profile.js';
 
 const SHIP = {
-  stations: [
-    { id: 'helm', name: 'Helm', console: 'gui/battleship/helm.html' },
-    { id: 'navigation', name: 'Navigation', console: 'gui/battleship/navigation.html' },
-    { id: 'comms', name: 'Comms', console: 'gui/battleship/comms.html' },
+  consoles: [
+    { id: 'helm', name: 'Helm', screen: 'gui/battleship/helm.html' },
+    { id: 'navigation', name: 'Navigation', screen: 'gui/battleship/navigation.html' },
+    { id: 'comms', name: 'Comms', screen: 'gui/battleship/comms.html' },
   ],
 };
 
@@ -33,7 +33,7 @@ function harness() {
   const dom = new JSDOM('<div id="console-container"></div>', { url: 'https://phoenix.test/' });
   const doc = dom.window.document;
   mountConsoles(doc, doc.getElementById('console-container'), SHIP);
-  const ids = SHIP.stations.map((st) => st.id);
+  const ids = SHIP.consoles.map((st) => st.id);
   // Make helm the active console, exactly as the tab switch does in production.
   applyConsoleVisibility(doc, 'helm', true, ids);
   // JSDOM does not LOAD an iframe's src, so a mounted console's contentDocument
@@ -42,7 +42,7 @@ function harness() {
   // :root, standing in for it. The mount + `.console-section iframe` discovery
   // seam under test is still the real one — only the document JSDOM refuses to
   // load is supplied here.
-  for (const st of SHIP.stations) {
+  for (const st of SHIP.consoles) {
     doc.getElementById(`${st.id}-iframe`).setAttribute('src', 'about:blank');
   }
   return { dom, doc, ids };

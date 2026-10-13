@@ -130,3 +130,66 @@ it('shows the current hosting Station takeover on a detached Console', () => {
     systemConsoleFamilies: { drive: 'helm' } };
   expect(buildConsoleView('left', state).gm_takeover).toEqual(takeover);
 });
+
+it('revokes removed Console publications before updates and clears derived navigation state', () => {
+  const state = new ClientSimState();
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:4,updates:[
+    ['nav',{kind:'Navigation',data:{navigation_waypoint:{x:7,z:8}}}], ['guns',{kind:'Weapons',data:{target:'enemy'}}]
+  ]}});
+  const change = state.apply({type:'BlackboardUpdate',data:{presentation_generation:4,console_scope_tick:10,console_scope:['guns'],updates:[
+    ['nav',{kind:'Navigation',data:{navigation_waypoint:{x:9,z:9}}}]
+  ]}});
+  expect(state.blackboards.nav).toBeUndefined();
+  expect(state.blackboardKinds.nav).toBeUndefined();
+  expect(state.blackboardPresentation.nav).toBeUndefined();
+  expect(state.navigationWaypoint).toBeNull();
+  expect(change.changedBlackboards.has('nav')).toBe(true);
+  expect(state.blackboards.guns.target).toBe('enemy');
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:4,console_scope_tick:11,console_scope:[],updates:[]}});
+  expect(state.blackboards).toEqual({});
+});
+
+it('does not invent Consoles or controls from an obsolete Station-only roster', () => {
+  expect(planMounts({stations:[{id:'helm',console:'gui/helm.html'}]})).toEqual([]);
+  expect(buildConsoleView('helm', {stationSystems:{helm:['drive']},systemConsoleFamilies:{drive:'helm'}})).toEqual({});
+  expect(heroBarModel({directStation:'helm',stations:[{id:'helm'}],activeStation:'helm'}).tabs).toEqual([]);
+});
+
+it('projects permitted getter-backed view and alert facts without leaking them to another Console', () => {
+  const state = new ClientSimState();
+  state.apply({type:'BlackboardUpdate',data:{updates:[['captain',{kind:'Captain',data:{red_alert:true,view_mode:{kind:'HelmRadar'}}}]]}});
+  const bound = consoleReadState(state, {id:'left',systems:[],feeds:[{source:'captain',kind:'Captain'}]});
+  expect(bound.currentView).toBe('HelmRadar');
+  expect(bound.redAlert).toBe(true);
+  const isolated = consoleReadState(state, {id:'right',systems:[],feeds:[]});
+  expect(isolated.currentView).toBeUndefined();
+  expect(isolated.redAlert).toBeUndefined();
+});
+
+it('refuses stale-generation scope changes before pruning newer observations, including an empty scope', () => {
+  const state = new ClientSimState();
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:5,updates:[['nav',{kind:'Navigation',data:{navigation_waypoint:{x:7,z:8}}}]]}});
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:4,console_scope_tick:99,console_scope:[],updates:[]}});
+  expect(state.blackboards.nav).toBeDefined();
+  expect(state.navigationWaypoint).toEqual({x:7,z:8});
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:6,console_scope_tick:0,console_scope:[],updates:[]}});
+  state.apply({type:'BlackboardUpdate',data:{presentation_generation:5,console_scope_tick:100,console_scope:['nav'],updates:[['nav',{kind:'Navigation',data:{navigation_waypoint:{x:9,z:9}}}]]}});
+  expect(state.blackboards).toEqual({});
+  expect(state.navigationWaypoint).toBeNull();
+});
+
+it('orders scopes by host tick within a continuation and rejects unscoped updates after scoped authority', () => {
+  const state = new ClientSimState();
+  const publish = (generation, tick, scope, value) => state.apply({type:'BlackboardUpdate',data:{
+    presentation_generation:generation,console_scope_tick:tick,console_scope:scope,
+    updates:[['nav',{kind:'Navigation',data:{navigation_waypoint:value}}]]}});
+  publish(3,20,['nav'],{x:2,z:2});
+  publish(3,19,[],null);
+  expect(state.navigationWaypoint).toEqual({x:2,z:2});
+  publish(3,21,[],null);
+  publish(3,20,['nav'],{x:9,z:9});
+  state.apply({type:'BlackboardUpdate',data:{updates:[['nav',{kind:'Navigation',data:{navigation_waypoint:{x:8,z:8}}}]]}});
+  expect(state.blackboards).toEqual({});
+  publish(4,0,['nav'],{x:1,z:1});
+  expect(state.navigationWaypoint).toEqual({x:1,z:1});
+});

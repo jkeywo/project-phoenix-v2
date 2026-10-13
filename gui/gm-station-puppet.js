@@ -490,12 +490,11 @@ export function createGmStationPuppet({
       renderActivity();
       return;
     }
-    const definitions = selectedRow.ship.consoles;
-    const available = definitions?.length ? definitions.filter(c => {
+    const available = (selectedRow.ship.consoles || []).filter(c => {
       const host = selectedRow.ship.console_hosts?.find(h => h.console === c.id);
       return c.screen && (host?.host ? host.host === selectedRow.station.station_id
         : c.home_station === selectedRow.station.station_id);
-    }) : [{ id: selectedRow.station.station_id, name: selectedRow.station.name, screen: selectedRow.station.console }];
+    });
     selectedConsole = available.find(c => c.id === selectedConsoleId) || available[0] || null;
     selectedConsoleId = selectedConsole?.id || null;
     consoleSelect.replaceChildren(...available.map(c => {

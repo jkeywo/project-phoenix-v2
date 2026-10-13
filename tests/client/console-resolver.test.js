@@ -2,36 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { resolveConsoleUrl } from '../../gui/console-resolver.js';
 
 const CRUISER_STATIONS = {
-  stations: [
-    { id: 'captain', name: 'Captain', console: 'gui/cruiser/captain.html' },
-    { id: 'helm', name: 'Helm', console: 'gui/cruiser/helm.html' },
-    { id: 'tactical', name: 'Tactical', console: 'gui/cruiser/tactical.html' },
-    { id: 'science', name: 'Science', console: 'gui/cruiser/science.html' },
-    { id: 'engineering', name: 'Engineering', console: 'gui/cruiser/engineering.html' },
-    { id: 'comms', name: 'Comms', console: 'gui/cruiser/comms.html' },
+  consoles: [
+    { id: 'captain', name: 'Captain', screen: 'gui/cruiser/captain.html' },
+    { id: 'helm', name: 'Helm', screen: 'gui/cruiser/helm.html' },
+    { id: 'tactical', name: 'Tactical', screen: 'gui/cruiser/tactical.html' },
+    { id: 'science', name: 'Science', screen: 'gui/cruiser/science.html' },
+    { id: 'engineering', name: 'Engineering', screen: 'gui/cruiser/engineering.html' },
+    { id: 'comms', name: 'Comms', screen: 'gui/cruiser/comms.html' },
   ],
 };
 
 const DESTROYER_STATIONS = {
-  stations: [
-    { id: 'captain', name: 'Captain', console: 'gui/destroyer/captain.html' },
-    { id: 'helm', name: 'Helm', console: 'gui/destroyer/helm.html' },
-    { id: 'tactical', name: 'Tactical', console: 'gui/destroyer/tactical.html' },
-    { id: 'engineering', name: 'Engineering', console: 'gui/destroyer/engineering.html' },
+  consoles: [
+    { id: 'captain', name: 'Captain', screen: 'gui/destroyer/captain.html' },
+    { id: 'helm', name: 'Helm', screen: 'gui/destroyer/helm.html' },
+    { id: 'tactical', name: 'Tactical', screen: 'gui/destroyer/tactical.html' },
+    { id: 'engineering', name: 'Engineering', screen: 'gui/destroyer/engineering.html' },
   ],
 };
 
 const BATTLESHIP_STATIONS = {
-  stations: [
-    { id: 'captain', name: 'Captain', console: 'gui/battleship/captain.html' },
-    { id: 'helm', name: 'Helm', console: 'gui/battleship/helm.html' },
-    { id: 'tactical', name: 'Tactical', console: 'gui/battleship/tactical.html' },
-    { id: 'repair', name: 'Repair', console: 'gui/battleship/repair.html' },
-    { id: 'sensors', name: 'Sensors', console: 'gui/battleship/sensors.html' },
-    { id: 'shields', name: 'Shields', console: 'gui/battleship/shields.html' },
-    { id: 'navigation', name: 'Navigation', console: 'gui/battleship/navigation.html' },
-    { id: 'power', name: 'Power', console: 'gui/battleship/power.html' },
-    { id: 'comms', name: 'Comms', console: 'gui/battleship/comms.html' },
+  consoles: [
+    { id: 'captain', name: 'Captain', screen: 'gui/battleship/captain.html' },
+    { id: 'helm', name: 'Helm', screen: 'gui/battleship/helm.html' },
+    { id: 'tactical', name: 'Tactical', screen: 'gui/battleship/tactical.html' },
+    { id: 'repair', name: 'Repair', screen: 'gui/battleship/repair.html' },
+    { id: 'sensors', name: 'Sensors', screen: 'gui/battleship/sensors.html' },
+    { id: 'shields', name: 'Shields', screen: 'gui/battleship/shields.html' },
+    { id: 'navigation', name: 'Navigation', screen: 'gui/battleship/navigation.html' },
+    { id: 'power', name: 'Power', screen: 'gui/battleship/power.html' },
+    { id: 'comms', name: 'Comms', screen: 'gui/battleship/comms.html' },
   ],
 };
 
@@ -47,7 +47,7 @@ describe('resolveConsoleUrl', () => {
   });
 
   it('returns null when shipStations has no matching station', () => {
-    expect(resolveConsoleUrl({ stations: [] }, 'tactical')).toBe(null);
+    expect(resolveConsoleUrl({ consoles: [] }, 'tactical')).toBe(null);
   });
 
   it('returns null when shipStations is null', () => {
@@ -55,18 +55,18 @@ describe('resolveConsoleUrl', () => {
   });
 
   it('returns null when station has no console field', () => {
-    const noConsole = { stations: [{ id: 'test', name: 'Test' }] };
+    const noConsole = { consoles: [{ id: 'test', name: 'Test' }] };
     expect(resolveConsoleUrl(noConsole, 'test')).toBe(null);
   });
 });
 
 describe('resolveConsoleUrl - Cruiser', () => {
   it('CRUISER_STATIONS has exactly 6 stations', () => {
-    expect(CRUISER_STATIONS.stations).toHaveLength(6);
+    expect(CRUISER_STATIONS.consoles).toHaveLength(6);
   });
 
   it('CRUISER_STATIONS station ids are the expected six', () => {
-    const ids = CRUISER_STATIONS.stations.map(s => s.id).sort();
+    const ids = CRUISER_STATIONS.consoles.map(s => s.id).sort();
     expect(ids).toEqual(['captain', 'comms', 'engineering', 'helm', 'science', 'tactical']);
   });
 
@@ -82,11 +82,11 @@ describe('resolveConsoleUrl - Cruiser', () => {
 
 describe('resolveConsoleUrl - Destroyer', () => {
   it('DESTROYER_STATIONS has exactly 4 stations', () => {
-    expect(DESTROYER_STATIONS.stations).toHaveLength(4);
+    expect(DESTROYER_STATIONS.consoles).toHaveLength(4);
   });
 
   it('DESTROYER_STATIONS station ids are the expected four', () => {
-    const ids = DESTROYER_STATIONS.stations.map(s => s.id).sort();
+    const ids = DESTROYER_STATIONS.consoles.map(s => s.id).sort();
     expect(ids).toEqual(['captain', 'engineering', 'helm', 'tactical']);
   });
 
@@ -104,11 +104,11 @@ describe('resolveConsoleUrl - Destroyer', () => {
 
 describe('resolveConsoleUrl - Battleship', () => {
   it('BATTLESHIP_STATIONS has exactly 9 stations', () => {
-    expect(BATTLESHIP_STATIONS.stations).toHaveLength(9);
+    expect(BATTLESHIP_STATIONS.consoles).toHaveLength(9);
   });
 
   it('BATTLESHIP_STATIONS station ids are the expected nine', () => {
-    const ids = BATTLESHIP_STATIONS.stations.map(s => s.id).sort();
+    const ids = BATTLESHIP_STATIONS.consoles.map(s => s.id).sort();
     expect(ids).toEqual(['captain', 'comms', 'helm', 'navigation', 'power', 'repair', 'sensors', 'shields', 'tactical']);
   });
 

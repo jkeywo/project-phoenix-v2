@@ -36,7 +36,9 @@
       "completion": "Explicit Console identities and bindings preserve existing screens, joining, ratings, human seeking, Backfill and reconnect.",
       "evidence": [
         "pasm/spec/design/console-ownership.yaml",
-        "docs/acceptance/1562-explicit-consoles.md"
+        "docs/acceptance/1562-explicit-consoles.md",
+        "docs/gameplay-redesign/implementation/console-validation.json",
+        "docs/gameplay-redesign/implementation/console-baseline.json"
       ]
     },
     {

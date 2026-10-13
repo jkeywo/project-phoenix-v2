@@ -1,0 +1,772 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "revision": "23b43ec0b69f006a2267d5d809031206ccd23c3c",
+  "runtimeSourceSha256": "564a475a1d97a114f84d4ccad78999528800cdb07f6a11fa75ec8612be19030f",
+  "runtimeSourceClean": true,
+  "repositoryDirty": true,
+  "profile": "measure",
+  "features": [
+    "default",
+    "headless",
+    "server"
+  ],
+  "executableSha256": "49e4956c3d901ee0ee90df66c9a9338312718f423b122addf17b234819fa6f58",
+  "hardware": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logicalCpus": 24,
+    "totalMemoryBytes": 68112736256
+  },
+  "scope": "Headless same-machine diagnostic; no browser/native rendering, real-network or human workload acceptance.",
+  "referenceHull": "assets/entities/alliance_cruiser.toml",
+  "checks": [
+    {
+      "name": "combat_test byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc"
+    },
+    {
+      "name": "combat_test replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "combat_test performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:7873b6ad0df69a5b"
+    },
+    {
+      "name": "falling_skyway byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833"
+    },
+    {
+      "name": "falling_skyway replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "falling_skyway performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:4a07d23baa4cf57c"
+    }
+  ],
+  "baseline_revision": "8d8143e9899747591cde4ee6c292e3c89859bf8d",
+  "comparisons": [
+    {
+      "world": "assets/worlds/combat_test.toml",
+      "unchanged_gameplay_fields": [
+        "ticks",
+        "sim_seconds",
+        "final_phase",
+        "outcome",
+        "entity_count",
+        "ship",
+        "damage_by_ship",
+        "narrative",
+        "ai_doctrine",
+        "scenario",
+        "objective_instances",
+        "sides"
+      ],
+      "changed_gameplay_fields": {
+        "station_activity": {
+          "before": {
+            "schema_version": 1,
+            "bucket_ticks": 900,
+            "bucket_secs": 15.0,
+            "buckets": [
+              {
+                "start_tick": 0,
+                "stations": [
+                  {
+                    "station": "captain",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 1347,
+                    "offline": 0
+                  },
+                  {
+                    "station": "navigation",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "tactical",
+                    "human": 0,
+                    "ai": 5,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 900,
+                "stations": [
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 1887,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 1800,
+                "stations": [
+                  {
+                    "station": "captain",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "command",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 3,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 3855,
+                    "offline": 0
+                  },
+                  {
+                    "station": "science",
+                    "human": 0,
+                    "ai": 3,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 2700,
+                "stations": [
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 7,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 4050,
+                    "offline": 0
+                  },
+                  {
+                    "station": "navigation",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "science",
+                    "human": 0,
+                    "ai": 31,
+                    "offline": 0
+                  },
+                  {
+                    "station": "tactical",
+                    "human": 0,
+                    "ai": 6,
+                    "offline": 0
+                  }
+                ]
+              }
+            ]
+          },
+          "after": {
+            "schema_version": 1,
+            "bucket_ticks": 900,
+            "bucket_secs": 15.0,
+            "buckets": [
+              {
+                "start_tick": 0,
+                "stations": [
+                  {
+                    "station": "captain",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 1347,
+                    "offline": 0
+                  },
+                  {
+                    "station": "tactical",
+                    "human": 0,
+                    "ai": 5,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 900,
+                "stations": [
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 1887,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 1800,
+                "stations": [
+                  {
+                    "station": "captain",
+                    "human": 0,
+                    "ai": 1,
+                    "offline": 0
+                  },
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 3,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 3855,
+                    "offline": 0
+                  },
+                  {
+                    "station": "science",
+                    "human": 0,
+                    "ai": 3,
+                    "offline": 0
+                  }
+                ]
+              },
+              {
+                "start_tick": 2700,
+                "stations": [
+                  {
+                    "station": "engineering",
+                    "human": 0,
+                    "ai": 7,
+                    "offline": 0
+                  },
+                  {
+                    "station": "helm",
+                    "human": 0,
+                    "ai": 4050,
+                    "offline": 0
+                  },
+                  {
+                    "station": "science",
+                    "human": 0,
+                    "ai": 31,
+                    "offline": 0
+                  },
+                  {
+                    "station": "tactical",
+                    "human": 0,
+                    "ai": 6,
+                    "offline": 0
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "message_counts": {
+        "before": {
+          "AsteroidSpawned": 443,
+          "BeamStarted": 1,
+          "BlackboardUpdate": 3599,
+          "DebugState": 1,
+          "EntitySpawned": 4,
+          "GameStarted": 1,
+          "ModifierAdded": 16,
+          "ObjectiveSummary": 2,
+          "SimState": 599,
+          "TargetLock": 6,
+          "WorldSetup": 1
+        },
+        "after": {
+          "AsteroidSpawned": 443,
+          "BeamStarted": 1,
+          "BlackboardUpdate": 3599,
+          "DebugState": 1,
+          "EntitySpawned": 4,
+          "GameStarted": 1,
+          "ModifierAdded": 16,
+          "ObjectiveSummary": 2,
+          "SimState": 599,
+          "TargetLock": 6,
+          "WorldSetup": 1
+        }
+      },
+      "before_tick_millis": {
+        "p50_range": [
+          1.2242,
+          1.3278
+        ],
+        "p95_range": [
+          1.7912,
+          1.9430999999999998
+        ],
+        "repetitions": [
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.3040776431384433,
+            "p50": 1.2242,
+            "p95": 1.7912,
+            "p99": 2.5151000000000003,
+            "max": 4.5487,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.3854993335352945,
+            "p50": 1.3267000000000002,
+            "p95": 1.89,
+            "p99": 2.6513999999999998,
+            "max": 5.564699999999999,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.3925381399575882,
+            "p50": 1.3278,
+            "p95": 1.9430999999999998,
+            "p99": 2.4334000000000002,
+            "max": 4.4337,
+            "over16_67": 0
+          }
+        ]
+      },
+      "after_tick_millis": {
+        "p50_range": [
+          1.4607999999999999,
+          1.5690000000000002
+        ],
+        "p95_range": [
+          2.0296,
+          2.2363
+        ],
+        "repetitions": [
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.6394663132384089,
+            "p50": 1.5690000000000002,
+            "p95": 2.2363,
+            "p99": 2.6528,
+            "max": 4.950699999999999,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.511404210845201,
+            "p50": 1.4607999999999999,
+            "p95": 2.0296,
+            "p99": 2.3502,
+            "max": 5.9935,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.5383172674946979,
+            "p50": 1.4630999999999998,
+            "p95": 2.2058,
+            "p99": 2.9123,
+            "max": 4.1538,
+            "over16_67": 0
+          }
+        ]
+      }
+    },
+    {
+      "world": "assets/worlds/falling_skyway.toml",
+      "unchanged_gameplay_fields": [
+        "ticks",
+        "sim_seconds",
+        "final_phase",
+        "outcome",
+        "entity_count",
+        "ship",
+        "damage_by_ship",
+        "narrative",
+        "ai_doctrine",
+        "station_activity",
+        "scenario",
+        "objective_instances",
+        "sides"
+      ],
+      "changed_gameplay_fields": {},
+      "message_counts": {
+        "before": {
+          "BlackboardUpdate": 248,
+          "DebugState": 1,
+          "EntityDespawned": 1,
+          "EntitySpawned": 1,
+          "GameStarted": 1,
+          "ModifierAdded": 7,
+          "ObjectiveSummary": 3,
+          "SimState": 599,
+          "WorldSetup": 1
+        },
+        "after": {
+          "BlackboardUpdate": 248,
+          "DebugState": 1,
+          "EntityDespawned": 1,
+          "EntitySpawned": 1,
+          "GameStarted": 1,
+          "ModifierAdded": 7,
+          "ObjectiveSummary": 3,
+          "SimState": 599,
+          "WorldSetup": 1
+        }
+      },
+      "before_tick_millis": {
+        "p50_range": [
+          1.1569,
+          1.166
+        ],
+        "p95_range": [
+          1.5525,
+          1.5579
+        ],
+        "repetitions": [
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.1986310209027586,
+            "p50": 1.166,
+            "p95": 1.5565,
+            "p99": 1.7691000000000001,
+            "max": 3.1591,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.1918526507119056,
+            "p50": 1.1569,
+            "p95": 1.5579,
+            "p99": 1.7953000000000001,
+            "max": 4.409800000000001,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.1919604968191475,
+            "p50": 1.1589,
+            "p95": 1.5525,
+            "p99": 1.8102,
+            "max": 3.9489,
+            "over16_67": 0
+          }
+        ]
+      },
+      "after_tick_millis": {
+        "p50_range": [
+          1.3462,
+          1.3673
+        ],
+        "p95_range": [
+          1.8165,
+          1.9768
+        ],
+        "repetitions": [
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.4284804301726717,
+            "p50": 1.3673,
+            "p95": 1.9768,
+            "p99": 2.4901,
+            "max": 6.6819,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.404244865192364,
+            "p50": 1.3462,
+            "p95": 1.9047999999999998,
+            "p99": 2.2378,
+            "max": 6.4226,
+            "over16_67": 0
+          },
+          {
+            "unit": "millis",
+            "excludedSamples": 300,
+            "count": 3301,
+            "mean": 1.3924399878824611,
+            "p50": 1.3466,
+            "p95": 1.8165,
+            "p99": 2.0837,
+            "max": 5.1111,
+            "over16_67": 0
+          }
+        ]
+      }
+    }
+  ],
+  "balance": {
+    "status": "passed",
+    "config": "scripts/balance-runs.cruiser.toml",
+    "configSha256": "c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae",
+    "totals": {
+      "runs": 20,
+      "wins": 20,
+      "losses": 0,
+      "draws": 0,
+      "timeouts": 0,
+      "reported": 0,
+      "failures": 0
+    },
+    "thresholds": [
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_ttk_median",
+        "limit": 10,
+        "actual": 4.7833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_damage_margin",
+        "limit": 100,
+        "actual": 163,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 13.8167,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 283.8,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_ttk_median",
+        "limit": 20,
+        "actual": 8.5833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 310.2,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 15.7,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_damage_margin",
+        "limit": 25,
+        "actual": 47.241599999999984,
+        "pass": true
+      }
+    ],
+    "matchups": [
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "total": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "failures": 0,
+        "ttk": {
+          "min": 4.7833,
+          "median": 4.7833,
+          "max": 4.7833,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 163,
+          "count": 5
+        },
+        "same_gameplay_metrics_as_baseline": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "total": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "failures": 0,
+        "ttk": {
+          "min": 10.9667,
+          "median": 13.8167,
+          "max": 14.1333,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 283.8,
+          "count": 5
+        },
+        "same_gameplay_metrics_as_baseline": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "total": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "failures": 0,
+        "ttk": {
+          "min": 8.1833,
+          "median": 8.5833,
+          "max": 12,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 310.2,
+          "count": 5
+        },
+        "same_gameplay_metrics_as_baseline": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "total": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "failures": 0,
+        "ttk": {
+          "min": 14.5,
+          "median": 15.7,
+          "max": 19.2833,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 47.241599999999984,
+          "count": 5
+        },
+        "same_gameplay_metrics_as_baseline": true
+      }
+    ]
+  },
+  "interpretation": {
+    "activity_change": "Combat Test loses two Navigation and one Command AI entries from the Station chart: these are detached human-seeking Consoles with no current Station host in the all-Backfill run. Commands still execute and Console/System activity is not invented as claimable Station activity. All remaining Station counters match.",
+    "performance": "Same-machine headless diagnostic shows higher tick cost; no performance budgets or balance thresholds changed. Broad phase increases and extra publication aggregation are observed, not a proven attribution of all cost.",
+    "limitations": "Bounded 60-second automated scenarios; no whole-mission, physical phone, native rendering, real-network or human workload acceptance."
+  }
+}

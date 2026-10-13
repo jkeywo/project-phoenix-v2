@@ -99,7 +99,9 @@ current runtime understanding; they are updated only when runtime changes.
 
 ## Increment 1 — explicit Consoles
 
-Implementation is under verification. The adopted contracts are in
+Implementation and automated verification are complete; physical/device and
+human-workload acceptance remain pending. See the [validation receipt](console-validation.json)
+and [baseline comparison](console-baseline.md). The adopted contracts are in
 `pasm/spec/design/console-ownership.yaml`; the current ownership model is indexed
 by [Console](../../../wiki/entities/console.md). Record playable browser/native
 results in [the acceptance record](../../acceptance/1562-explicit-consoles.md).

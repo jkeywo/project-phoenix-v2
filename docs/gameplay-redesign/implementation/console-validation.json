@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "dbd4d162",
+  "browser_acceptance_revision": "23b43ec0",
+  "scope": "Increment 1 automated integration, browser and baseline evidence. Physical phone, native multi-monitor and human workload acceptance remain pending.",
+  "checks": [
+    {
+      "name": "JavaScript suite",
+      "command": "npx vitest run --maxWorkers=4",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-vitest-5.log",
+      "raw_sha256": "81d2b9fd2c9666b0443fb6fc09e5c21f050bcef93372ab75b164812e67c0de6a",
+      "passed_tests": 8660,
+      "tested_revision": "dbd4d162"
+    },
+    {
+      "name": "Renderer-independent simulation",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/simulation-owner-8.log",
+      "raw_sha256": "8f6cac992d039f3ecef00195912a30ffa8c1a52c826ea4b5ce5a087f1e446ba1",
+      "passed_tests": 4657,
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "Console browser journeys",
+      "command": "PHOENIX_SMOKE_PORT=3110 npx --no-install playwright test --project=chromium console-tabs.spec.js console-ownership-increment.spec.js",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/browser-console-pass.log",
+      "raw_sha256": "384a0c6dfff9577c37180db570e71bda81ec1147e0debba9da4c4e18c78138a7",
+      "passed_tests": 7,
+      "tested_revision": "23b43ec0"
+    },
+    {
+      "name": "Workshop browser journeys",
+      "command": "npx --no-install playwright test --project=render workshop-consoles.render.spec.js workshop-entity.render.spec.js",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/browser-workshop.log",
+      "raw_sha256": "842e684ea06714d3fc1360d56733231216ee17e0321a101dbef3bc653814c087",
+      "passed_tests": 2,
+      "tested_revision": "4033e7f6"
+    },
+    {
+      "name": "Strict strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-strings-2.log",
+      "raw_sha256": "349419bf5624280cbf0821798abc593d2184628c318cb62fe6964bc4cd3a6e66",
+      "tested_revision": "23b43ec0"
+    },
+    {
+      "name": "Layer boundaries",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-layers-2.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92",
+      "tested_revision": "23b43ec0"
+    },
+    {
+      "name": "Generated debug surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "Generated live layouts",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-live-layout.log",
+      "raw_sha256": "ef333e72e97222c05b42f23092009704ada7d72ac4009fc92aae908b69e6a6f4",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "LODs",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "LOD captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "PASM validation",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/pasm-validate.log",
+      "raw_sha256": "d9520ef07e89c1089d879a7e8c0fb0c524d07592c7e6ecd22d855234f042e029",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "PASM dependency scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/pasm-scan.log",
+      "raw_sha256": "b629ef76eae64e5c67175fce62b7bbd179bbf2f5fc0b83455ebc058f59918870",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "PASM traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/pasm-traceability.log",
+      "raw_sha256": "e88271314fcd31e6481b4d04500f978023bb399e44b717292ab07e0a9acfbf34",
+      "tested_revision": "9b671984",
+      "revision_note": "Checked on the working tree committed as this revision; later changes to unrelated inputs are covered by integrated gates."
+    },
+    {
+      "name": "Integrated native suite",
+      "command": "PHOENIX_AMBIGUITY_BASE_REF=8d8143e9899747591cde4ee6c292e3c89859bf8d cargo test --workspace --features headless --no-fail-fast",
+      "tested_revision": "23b43ec0",
+      "result": "passed",
+      "passed_tests": 9046,
+      "failed_tests": 0,
+      "ignored_tests": 102,
+      "test_binaries_including_doctests": 141,
+      "raw_log": ".phoenix/console-redesign-resume/final-workspace-3.log",
+      "raw_sha256": "c0746e81af0dd3962646f68e16bc80e0d4739acad0cb3d79f86a385d8373a525",
+      "note": "Run outside Windows sandbox after temporary-profile permission failures; ignored counts include parent-driven child tests and separately opt-in scenarios."
+    },
+    {
+      "name": "Rust formatting",
+      "command": "cargo fmt -- --check",
+      "tested_revision": "23b43ec0",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-fmt-2.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "Clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "tested_revision": "23b43ec0",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/final-clippy-5.log",
+      "raw_sha256": "47d9eb2f43c126a3a62710c9043736a875537e6b3da5d8918424c790aa33cb3d"
+    },
+    {
+      "name": "Baseline repeat/replay/performance",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-13-console-measure --profile measure",
+      "tested_revision": "23b43ec0b69f006a2267d5d809031206ccd23c3c",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/console-baseline.log",
+      "raw_sha256": "219123ded220eca2318f6faecfd8ad9a20bc6b6103b3120271ccd902b76c82d6",
+      "details": "console-baseline.json"
+    },
+    {
+      "name": "Ratified Cruiser balance",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture .phoenix/redesign-baseline/2026-10-13-console-measure/summary.json --out .phoenix/redesign-baseline/2026-10-13-console-cruiser",
+      "tested_revision": "23b43ec0b69f006a2267d5d809031206ccd23c3c",
+      "result": "passed",
+      "raw_log": ".phoenix/console-redesign-resume/console-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa",
+      "details": "console-baseline.json"
+    }
+  ],
+  "manual_acceptance": "pending",
+  "compatibility": {
+    "protocol": 5,
+    "snapshot_format": 37,
+    "simulation_rules": "0.9"
+  },
+  "evidence_reuse": "Earlier owner/static checks remain evidence only for unchanged relevant inputs. The final native suite and final JavaScript suite establish integrated results separately.",
+  "wiki_lint": {
+    "result": "passed",
+    "scope": "12 affected committed pages: source paths and line bounds; wiki index links resolve; unrelated modifier-coordination draft excluded."
+  }
+}

@@ -52,7 +52,9 @@
       "evidence": [
         "pasm/spec/design/system-composition.yaml",
         "docs/gameplay-redesign/implementation/increment-2.md",
-        "docs/acceptance/1562-composable-systems.md"
+        "docs/acceptance/1562-composable-systems.md",
+        "docs/gameplay-redesign/implementation/composition-validation.json",
+        "docs/gameplay-redesign/implementation/composition-baseline.md"
       ]
     },
     {

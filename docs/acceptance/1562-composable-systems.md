@@ -27,10 +27,31 @@ incomplete compositions cannot enter Preview/Test.
 
 ## Evidence
 
-Automated and browser results are being collected. No playable exit is claimed
-until the integrated checks and browser journeys pass. Review covered model,
-Dock runtime/continuation, Workshop composition, status privacy and accessibility;
-findings were corrected before final checks.
+Runtime commit `efac36b7`. [Validation receipts](../gameplay-redesign/implementation/composition-validation.json)
+record 9,060 passing native tests (102 ignored), 8,688 passing JavaScript tests,
+Clippy, formatting, layer boundaries, generated surfaces, strict strings, LODs,
+PASM and wiki checks. Renderer-independent digest tests pass (59).
+
+Four browser cases pass: no-Dock hull, real Cruiser docking, live Engineering
+power loss/recovery in the open status popup, and Destroyer/Cruiser Umbilical
+transfer. Keyboard opening, Escape and focus return pass. The rendered Workshop
+journey passes invalid composition rejection, component/channel editing,
+undo/redo, export/reload and disposable Test. Browser transport uses the existing
+shim; it does not prove remote-network operation.
+
+Visual inspection corrected literal names and Close button styling and verified
+the resulting popup at 844×390 and 1280×720. The phone-sized check is limited to
+status/dialog usability. Existing client connection diagnostics overlap the
+landscape phone Dock button; real Dock operation was checked at desktop size.
+This unresolved layout issue prevents a full phone acceptance claim.
+
+Independent review covered model, Dock runtime/continuation, Workshop composition,
+status privacy/accessibility and final browser fixtures; findings were corrected.
+[Gameplay comparison](../gameplay-redesign/implementation/composition-baseline.md)
+passes: both full bounded reports match Increment 1 exactly; replay/continuation
+agree; the Cruiser wins 20/20 and passes all 16 unchanged thresholds. Automated
+evidence is complete. Physical/device acceptance remains open, so this does not
+close the milestone or start Increment 3.
 
 ## Human/device acceptance
 

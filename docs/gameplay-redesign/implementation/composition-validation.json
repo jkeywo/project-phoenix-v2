@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "efac36b7a0a721a30feccab26cf2f7764a763ef1",
+  "baseline_revision": "da7ff5c8",
+  "revision_note": "Integrated working tree committed as runtime_revision. Later smoke fixture-only changes do not change runtime; final JS suite includes the label/theme fix.",
+  "checks": [
+    {
+      "name": "Native workspace",
+      "command": "cargo test --workspace --features headless",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-workspace.log",
+      "raw_sha256": "ebbbf66191ea78573759504cb1409f8d3cfb3c7d811992872ff32ce473b038ba",
+      "passed_tests": 9060
+    },
+    {
+      "name": "JavaScript",
+      "command": "npx vitest run --maxWorkers=4",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-vitest-4.log",
+      "raw_sha256": "7010c93c9e15997418b03dd201118ec1890b2f5d4609e81239568afdb3151fb7",
+      "passed_tests": 8688
+    },
+    {
+      "name": "Clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-clippy.log",
+      "raw_sha256": "a1b3ad4162445e635939d1b3c578cf34378665581c2d71ebd1e85da53cdd8332"
+    },
+    {
+      "name": "Formatting",
+      "command": "cargo fmt -- --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-fmt.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "Independent digest",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features sim_digest",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-independent-digest.log",
+      "raw_sha256": "168cad9fb5fe47a864ce7b748dad00d9aec154fe99143098beaa482d37cfa39c",
+      "passed_tests": 59
+    },
+    {
+      "name": "Layer dependency tree",
+      "command": "node scripts/check-layers.mjs --dependency-tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-layers.log",
+      "raw_sha256": "cd9eaf91f97f04e7ba6d7df6b11b5268aeb649251fa07e0834ff8c7600ed8cbe"
+    },
+    {
+      "name": "Layers",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-layers.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92"
+    },
+    {
+      "name": "Debug surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91"
+    },
+    {
+      "name": "Live layout",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-live-layout.log",
+      "raw_sha256": "34ef7544924539191478ed4c5e9d9a2635b9f8783719c514f4fd7cfb49965f7e"
+    },
+    {
+      "name": "Strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-strings.log",
+      "raw_sha256": "7c323b64f67775a7146ac7b4156ba9cd9db2fd65b707e190b117ee9c2c4f9a2f"
+    },
+    {
+      "name": "LODs",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45"
+    },
+    {
+      "name": "LOD captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7"
+    },
+    {
+      "name": "PASM validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-pasm-validate-3.log",
+      "raw_sha256": "b9da9329839294f43cfa7cfd0800a1a163e2dfe56f49af5417ac3eed62945e47"
+    },
+    {
+      "name": "PASM scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-pasm-scan-3.log",
+      "raw_sha256": "72e58288261e04211fb1d95f729aea363bd6e5302fb3c8ba88ab70e7abd426ac"
+    },
+    {
+      "name": "PASM traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-final-pasm-traceability-3.log",
+      "raw_sha256": "cabe3a596b1d1b7328a1e9b0c4c42021fefad4cf34f007c3228c9fb6eb24dd8a"
+    },
+    {
+      "name": "WASM build",
+      "command": "trunk build",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-wasm.log",
+      "raw_sha256": "724e09fd7fa84769f7e4b5df8068e8dc5366ab94058c36ba5207b5203dec52c3"
+    },
+    {
+      "name": "Phone client",
+      "command": "node scripts/build-client.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-client-build-2.log",
+      "raw_sha256": "5cb63d044bd7e827673af63d2e8ce5153b84d1b76c873b2a1a3b144780be43fd"
+    },
+    {
+      "name": "Workshop browser",
+      "command": "PHOENIX_SMOKE_PORT=3137 npx --no-install playwright test workshop-consoles.render.spec.js --project=render",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-browser-workshop-2.log",
+      "raw_sha256": "66229fdef5a830227693ac818d0e3614ee20234a256acceda0bdbcec79fef08d",
+      "passed_tests": 1
+    },
+    {
+      "name": "Wiki lint",
+      "command": "SCHEMA source-path/index and affected-page reconciliation",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-wiki-lint.log",
+      "raw_sha256": "8cddf70a91008b9dabc42926df3ffa0172377430099c116ad99cfa9513dc08ee"
+    },
+    {
+      "name": "Dock/status/transfer browser",
+      "command": "PHOENIX_SMOKE_PORT=3141 npx --no-install playwright test helm-dock.spec.js operations-dock-umbilical.spec.js --project=chromium",
+      "result": "passed",
+      "passed_tests": 4,
+      "raw_log": ".phoenix/increment-2-browser-dock-final.log",
+      "raw_sha256": "bbe27ef651e06fd9b637ba8a2d274c41e04870acb79d5b74da01e0e6733379fa"
+    },
+    {
+      "name": "Gameplay, determinism and performance",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-14-composition-measure --profile measure",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-baseline.log",
+      "raw_sha256": "9625567ae4c7c3f32e33ef43ada4b26dd31b5afe26983646915acd35921e0d28"
+    },
+    {
+      "name": "Ratified Cruiser matrix",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture .phoenix/redesign-baseline/2026-10-14-composition-measure/summary.json --out .phoenix/redesign-baseline/2026-10-14-composition-cruiser",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-2-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa"
+    }
+  ],
+  "limitations": [
+    "Physical phones, native multi-monitor and human workload acceptance pending.",
+    "Landscape phone: existing connection diagnostics overlap Dock; status popup checked separately from desktop operation.",
+    "Browser transport is the existing shim; these checks do not establish real remote-network acceptance."
+  ],
+  "review": "Independent model/runtime/Workshop/status reviews passed; identified findings corrected.",
+  "visual_inspection": {
+    "phone": ".phoenix/increment-2-phone-status.png",
+    "desktop_live_details": ".phoenix/increment-2-live-status.png",
+    "result": "Labels, shared theme, readable popup and focus indicator verified. Phone Dock operation remains limited by existing diagnostics overlap."
+  },
+  "native_configuration_note": "Full workspace headless: 9060 passed, 102 ignored, 141 groups. Renderer-independent suite initially passed 4660 with two intentional digest-golden failures; after reviewing/updating the canonical fold, all 59 independent digest tests and the full native suite passed.",
+  "corrected_validation_failures": [
+    "Missing separate stamped phone bundle: built via build-client.mjs.",
+    "Status literal names and Close theme: corrected, independent review and full JS suite passed.",
+    "Workshop build manifest and strict payload fixtures: corrected during integration.",
+    "Dock browser fixtures: dismiss tutorial cards, use shipped System definition instead of replacement instance array, and ready up after mid-mission Station claim.",
+    "Workshop export assertion normalizes textarea CRLF while actual export preserves authored EOL."
+  ]
+}

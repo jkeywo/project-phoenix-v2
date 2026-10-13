@@ -121,3 +121,7 @@ See the [implementation contract](increment-2.md), adopted
 first consumer of typed component composition and shared command channels;
 common status is a derived Console-scoped observation. This increment leaves
 state trees, resource redesign and component damage in their scheduled steps.
+
+Increment 2 runtime is committed as `efac36b7`. [Automated receipts](composition-validation.json)
+and [gameplay comparison](composition-baseline.md) pass; physical/device acceptance
+and the recorded landscape-phone overlap remain open. Increment 3 has not started.

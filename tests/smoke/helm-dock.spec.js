@@ -269,8 +269,8 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
   await wire.page.waitForFunction(token => window.__messages.some(message =>
     message.type === 'StationAssigned' && message.data.token === token
       && message.data.station_id === 'engineering'), wire.token);
-  await wire.page.waitForFunction(() => window.__messages.filter(message => message.type === 'SimState')
-    .at(-1)?.data.snapshot.control_sources['power-reactor'] === 'Human');
+  await wire.send('SetReady', { ready: true });
+  // Claiming mid-mission clears readiness; ready up to take control from Backfill.
   await wire.page.waitForFunction(() => typeof window.__messages.filter(message => message.type === 'PowerState')
     .at(-1)?.data.helm === 'number');
   const previousPower = await wire.page.evaluate(() => window.__messages.filter(message => message.type === 'PowerState').at(-1).data.helm);
@@ -279,8 +279,8 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
   await equipment.locator('summary').click();
   await dockIndicator.click();
   await setPower(1);
-  await helm.waitForFunction(() => window.simState.systemStatus.dock?.reasons
-    .some(reason => reason.code === 'unpowered'));
+  await expect.poll(() => wire.page.evaluate(() => window.__messages.filter(message => message.type === 'PowerState').at(-1)?.data.helm), { timeout: 10000 }).toBe(1);
+  await expect.poll(() => helm.evaluate(() => window.simState.systemStatus.dock), { timeout: 10000 }).toMatchObject({ reasons: expect.arrayContaining([expect.objectContaining({ code: 'unpowered' })]) });
   await expect(details).toContainText(ts('system.status.reason.unpowered'));
   await setPower(previousPower);
   await helm.waitForFunction(() => window.simState.systemStatus.dock?.availability === 'normal');

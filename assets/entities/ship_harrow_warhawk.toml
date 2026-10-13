@@ -728,7 +728,6 @@ name = "Captain"
 description = "entity.ship_harrow_warhawk.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/battleship/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -740,7 +739,6 @@ name = "Helm"
 description = "entity.ship_harrow_warhawk.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/battleship/helm.html"
 
 [[station.rating]]
 name = "Std"
@@ -752,7 +750,6 @@ name = "Tactical"
 description = "entity.ship_harrow_warhawk.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
-console = "gui/battleship/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -764,7 +761,6 @@ name = "Engineering"
 description = "entity.ship_harrow_warhawk.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/battleship/power.html"
 
 [[station.rating]]
 name = "Std"
@@ -778,7 +774,7 @@ automated_systems = []
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704), owned by
 # the Helm seat.
@@ -794,17 +790,17 @@ station = "captain"
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "helm"
+console = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "helm"
+console = "helm"
 
 # Boost drive axis (issue #801), declared for hull-uniformity with the player
 # ships: every helm axis is a declared system on every hull. No AI drives
@@ -813,12 +809,12 @@ station = "helm"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "helm"
+console = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "helm"
+console = "helm"
 
 # The Tactical radar (issue #871) — the system every player hull declares and no
 # NPC hull did, which is what blocked #887 from routing AI target selection
@@ -826,7 +822,7 @@ station = "helm"
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical"
 
 # Fine Tactical systems (issue #512): port + starboard phaser banks. (The
 # torpedo tubes and their magazine arrived with #793 and are declared below,
@@ -834,7 +830,7 @@ station = "tactical"
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
 # One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
@@ -842,12 +838,12 @@ station = "tactical"
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 
 # The bow artillery piece (issue #792), following the `blaster-<bank_id>`
 # convention (underscores folded to hyphens). Without this entry the bank is
@@ -855,7 +851,7 @@ station = "tactical"
 [[system]]
 id = "blaster-bow-artillery"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical"
 
 # The close-defence launchers (issue #793): one per tube, following the
 # `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
@@ -868,29 +864,29 @@ station = "tactical"
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
 # NPCs have no `[power_groups.*]` block so `power_group` is omitted.
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "engineering"
+console = "engineering"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "engineering"
+console = "engineering"
 
 # Captain — raise Red Alert while the ship has been in combat within
 # `combat_window_secs`, otherwise stand down. The window is a named parameter so
@@ -1135,3 +1131,144 @@ channel = "weapons"
 when = "fact(battery_pct) >= param(min_reserve_baseline)"
 verb = "set_power_group_allocation"
 level = 2
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+name = "Captain"
+screen = "gui/battleship/captain.html"
+home_station = "captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "helm"
+name = "Helm"
+screen = "gui/battleship/helm.html"
+home_station = "helm"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "tactical"
+name = "Tactical"
+screen = "gui/battleship/tactical.html"
+home_station = "tactical"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "phaser-port"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "phaser-starboard"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+[[console.feed]]
+source = "torpedo-tube-aft"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "engineering"
+name = "Engineering"
+screen = "gui/battleship/power.html"
+home_station = "engineering"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

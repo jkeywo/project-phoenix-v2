@@ -102,7 +102,6 @@ name = "Captain"
 description = "entity.ship_requiem_courier.station.captain.description"
 rank = "Cmdr."
 short_code = "CPT"
-console = "gui/courier/captain.html"
 
 [[station.rating]]
 name = "Std"
@@ -114,7 +113,6 @@ name = "Tactical"
 description = "entity.ship_requiem_courier.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/courier/tactical.html"
 
 [[station.rating]]
 name = "Std"
@@ -128,7 +126,7 @@ automated_systems = []
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704). Owned by
 # Tactical, mirroring `alliance_courier.toml`'s pilot-and-gunner seat.
@@ -144,17 +142,17 @@ station = "captain"
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "tactical"
+console = "tactical"
 
 # Boost drive axis (issue #801), declared for hull-uniformity with the player
 # ships: every helm axis is a declared system on every hull. No AI drives
@@ -163,12 +161,12 @@ station = "tactical"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "tactical"
+console = "tactical"
 
 # The Tactical radar (issue #871) — the system every player hull declares and no
 # NPC hull did, which is what blocked #887 from routing AI target selection
@@ -177,7 +175,7 @@ station = "tactical"
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical"
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
 # NPCs have no `[power_groups.*]` block so `power_group` is omitted. Owned by
@@ -185,12 +183,12 @@ station = "tactical"
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "captain"
+console = "captain"
 
 # ── AI target selectors (PRD #774 US7, issue #885b) ───────────────────────────
 #
@@ -765,3 +763,72 @@ channel = "comms_respond"
 when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
 verb = "respond_to_message"
 response_index = 0
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+name = "Captain"
+screen = "gui/courier/captain.html"
+home_station = "captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "tactical"
+name = "Tactical"
+screen = "gui/courier/tactical.html"
+home_station = "tactical"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

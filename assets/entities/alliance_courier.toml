@@ -515,7 +515,6 @@ name = "Captain"
 description = "entity.alliance_courier.station.captain.description"
 rank = "Cmdr."
 short_code = "CPT"
-console = "gui/courier/captain.html"
 manual_overview = "The courier is a two-seat runabout and you are its commander. You fly the ship and run the bridge: set the viewscreen, call Red Alert, plot your course, and manage sensors and shields. On a small crew you wear several hats, so keep the picture in your head and lean on the ship's AI for anything you can't reach."
 
 [[station.rating]]
@@ -528,7 +527,6 @@ name = "Tactical"
 description = "entity.alliance_courier.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/courier/tactical.html"
 manual_overview = "You run the courier's weapons. Lock a target on the tactical radar and fire the blaster bank as your arc comes to bear. The courier trades a heavy weapons suite for speed, so pick your shots, use the pilot's manoeuvres to keep your arc on target, and don't get drawn into a slugging match."
 
 [[station.rating]]
@@ -540,7 +538,7 @@ automated_systems = []
 [[system]]
 id = "captain"
 kind = "captain"
-station = "captain"
+console = "captain"
 
 # The wire target of set_view is `viewscreen`, but authorisation resolves
 # through source_system_for_view_mode to `captain` for both Camera and
@@ -548,22 +546,22 @@ station = "captain"
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "tactical"
+console = "tactical"
 
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
-station = "tactical"
+console = "tactical"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
@@ -573,37 +571,37 @@ station = "tactical"
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
@@ -613,13 +611,13 @@ power_group = "helm"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "tactical"
+console = "tactical"
 power_group = "helm"
 
 # tactical_radar is one of the kinds ShipConfig::weapons_station() uses to
@@ -627,47 +625,45 @@ power_group = "helm"
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "captain"
-human_seeking = true
+console = "navigation-service"
 
 [[system]]
 id = "comms"
 kind = "comms"
-station = "captain"
-human_seeking = true
+console = "comms-service"
 
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "captain"
+console = "captain"
 power_group = "shields"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "captain"
+console = "captain"
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's
@@ -1200,3 +1196,182 @@ response_index = 0
 [ai_profile]
 aggression = 0.5
 sensor_range = 200.0
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+name = "Captain"
+screen = "gui/courier/captain.html"
+home_station = "captain"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "shield-arc-aft"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-fore"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shields"
+kind = "Shields"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "tactical"
+name = "Tactical"
+screen = "gui/courier/tactical.html"
+home_station = "tactical"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-engine-port"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-engine-starboard"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "scan"
+kind = "Scan"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "navigation-service"
+name = "navigation"
+home_station = "captain"
+screen = "gui/battleship/navigation.html"
+human_seeking = true
+host_order = [ "captain", "tactical" ]
+visiting_rating = "Std"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "comms-service"
+name = "comms"
+home_station = "captain"
+screen = "gui/battleship/comms.html"
+human_seeking = true
+host_order = [ "captain", "tactical" ]
+visiting_rating = "Std"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

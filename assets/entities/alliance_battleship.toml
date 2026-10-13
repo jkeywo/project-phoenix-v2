@@ -877,7 +877,6 @@ name = "Captain"
 description = "entity.alliance_battleship.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/battleship/captain.html"
 manual_overview = "You command a capital ship with a full nine-seat bridge crew. Set the viewscreen, call Red Alert, and coordinate the whole crew through a sustained engagement. The battleship is slow but overwhelming — your job is to keep every station pulling in the same direction. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
@@ -894,7 +893,6 @@ name = "Helm"
 description = "entity.alliance_battleship.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/battleship/helm.html"
 manual_overview = "You fly a heavy warship. It is slow to turn and slow to stop, so plan your manoeuvres well ahead: throttle and steering set your line, lateral thrust helps bring the broadside arcs to bear, and impulse gives you a measured burst. Anticipate where Tactical needs the guns pointed and get there early."
 
 [[station.rating]]
@@ -907,7 +905,6 @@ name = "Tactical"
 description = "entity.alliance_battleship.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/battleship/tactical.html"
 manual_overview = "You run the battleship's formidable weapons suite: fore and aft phasers, a heavy forward blaster, and a six-tube torpedo battery. Lock targets, manage tube loading and volley patterns, and match phaser frequency to enemy shields. There is a lot of firepower to conduct here — prioritise threats and keep the volume of fire up. Simplified rating auto-fires the phaser banks."
 
 [[station.rating]]
@@ -924,7 +921,6 @@ name = "Repair"
 description = "entity.alliance_battleship.station.repair.description"
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/battleship/repair.html"
 manual_overview = "You lead damage control. Dispatch repair teams to damaged systems by priority and watch the ship-wide hull picture. On a capital ship there is always something to fix under sustained fire, so triage hard: keep the guns, the drives, and the shields alive before the cosmetic damage."
 
 [[station.rating]]
@@ -937,7 +933,6 @@ name = "Sensors"
 description = "entity.alliance_battleship.station.sensors.description"
 rank = "Ens."
 short_code = "SCI"
-console = "gui/battleship/sensors.html"
 manual_overview = "You are the ship's eyes. Sweep the long-range radar, identify and classify contacts, and feed target designations to Tactical so the guns are always working the right threat. On a big ship in a big fight, your early warning is what keeps the crew ahead of the enemy."
 
 [[station.rating]]
@@ -950,7 +945,6 @@ name = "Shields"
 description = "entity.alliance_battleship.station.shields.description"
 rank = "Ens."
 short_code = "SHD"
-console = "gui/battleship/shields.html"
 manual_overview = "You run the shield grid, a dedicated station on a ship this size. Focus an arc to reinforce it against the bearing of incoming fire, watch each facing's HP and regeneration, and rotate focus as the enemy shifts their aim. The generated Shields section below reads this ship's actual arc strength and regen rate."
 
 [[station.rating]]
@@ -963,7 +957,6 @@ name = "Navigation"
 description = "entity.alliance_battleship.station.navigation.description"
 rank = "Ens."
 short_code = "NAV"
-console = "gui/battleship/navigation.html"
 manual_overview = "You plot the ship's course. Set waypoints on the system chart for the Helm to follow and clear them onto new headings as the mission develops. A battleship handles slowly, so give the Helm plenty of warning and think several moves ahead of the current position."
 
 [[station.rating]]
@@ -976,7 +969,6 @@ name = "Power"
 description = "entity.alliance_battleship.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
-console = "gui/battleship/power.html"
 manual_overview = "You manage the reactor. Allocate power between helm, weapons, and shields to match the tactical situation, and watch the battery reserve during heavy weapons fire. On a capital ship the demands are constant and competing — read the battle and shift power to wherever the crew needs it most."
 
 [[station.rating]]
@@ -989,7 +981,6 @@ name = "Comms"
 description = "entity.alliance_battleship.station.comms.description"
 rank = "Ens."
 short_code = "COM"
-console = "gui/battleship/comms.html"
 manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. On a capital ship you are the link between the bridge and everyone else in the sector — stay on top of the message queue and flag anything urgent."
 
 [[station.rating]]
@@ -1001,17 +992,17 @@ automated_systems = []
 [[system]]
 id = "captain"
 kind = "captain"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
@@ -1024,43 +1015,43 @@ station = "captain"
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
@@ -1069,13 +1060,13 @@ power_group = "weapons"
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
@@ -1085,7 +1076,7 @@ power_group = "helm"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 # Declared in #704. The deleted `operate_helm_ai` monolith drove this hull's
@@ -1100,106 +1091,104 @@ power_group = "helm"
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "phaser-aft"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-port"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-starboard"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-centre"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-aft-port"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-aft-starboard"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "blaster-heavy-fore"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "repair"
+console = "repair"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "sensors"
+console = "sensors"
 
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
-station = "sensors"
+console = "sensors"
 
 # shields-system auto-generates shield-arc-* systems from [[shield_arc]] blocks above
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "shields"
+console = "shields"
 power_group = "shields"
 
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
-human_seeking = true
+console = "navigation"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "power"
+console = "power"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "power"
+console = "power"
 
 [[system]]
 id = "comms"
 kind = "comms"
-station = "comms"
-human_seeking = true
+console = "comms"
 
 [cinematic_camera]
 position = [0, 12, 22]
@@ -1451,3 +1440,336 @@ artillery_hold_range = 45.0
 [ai_profile]
 aggression = 0.7
 sensor_range = 400.0
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+name = "Captain"
+screen = "gui/battleship/captain.html"
+home_station = "captain"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "helm"
+name = "Helm"
+screen = "gui/battleship/helm.html"
+home_station = "helm"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-engine-port"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-engine-starboard"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "tactical"
+name = "Tactical"
+screen = "gui/battleship/tactical.html"
+home_station = "tactical"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "phaser-aft"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "phaser-fore"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+[[console.feed]]
+source = "torpedo-tube-aft-port"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-aft-starboard"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore-centre"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore-port"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore-starboard"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "repair"
+name = "Repair"
+screen = "gui/battleship/repair.html"
+home_station = "repair"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "sensors"
+name = "Sensors"
+screen = "gui/battleship/sensors.html"
+home_station = "sensors"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "scan"
+kind = "Scan"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "shields"
+name = "Shields"
+screen = "gui/battleship/shields.html"
+home_station = "shields"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "shield-arc-aft"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-fore"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-omni"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-port"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-starboard"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shields"
+kind = "Shields"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "navigation"
+name = "Navigation"
+screen = "gui/battleship/navigation.html"
+home_station = "navigation"
+human_seeking = true
+host_order = [ "navigation", "captain", "helm", "tactical", "repair", "sensors", "shields", "power", "comms" ]
+visiting_rating = "Std"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "power"
+name = "Power"
+screen = "gui/battleship/power.html"
+home_station = "power"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "comms"
+name = "Comms"
+screen = "gui/battleship/comms.html"
+home_station = "comms"
+human_seeking = true
+host_order = [ "comms", "captain", "helm", "tactical", "repair", "sensors", "shields", "navigation", "power" ]
+visiting_rating = "Std"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

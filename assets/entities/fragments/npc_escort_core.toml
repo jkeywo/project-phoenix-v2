@@ -66,26 +66,160 @@ maintain_range = 40.0
 # policy above drives is synthesised by `EntityConfig::from_toml` for any hull
 # with a `[behaviour]` block, so it is deliberately not listed here.
 [[system]]
+console = "ai-helm-thrust"
 id = "helm-thrust"
 kind = "helm_thrust"
 ai_only = true
 
 [[system]]
+console = "ai-helm-steering"
 id = "helm-steering"
 kind = "helm_steering"
 ai_only = true
 
 [[system]]
+console = "ai-helm-impulse"
 id = "helm-impulse"
 kind = "helm_impulse"
 ai_only = true
 
 [[system]]
+console = "ai-power-reactor"
 id = "power-reactor"
 kind = "power_reactor"
 ai_only = true
 
 [[system]]
+console = "ai-power-battery"
 id = "power-battery"
 kind = "power_battery"
 ai_only = true
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "ai-helm-thrust"
+name = "helm-thrust"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-helm-steering"
+name = "helm-steering"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-helm-impulse"
+name = "helm-impulse"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-power-reactor"
+name = "power-reactor"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-power-battery"
+name = "power-battery"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

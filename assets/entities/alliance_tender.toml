@@ -95,27 +95,32 @@ target_speed  = 0.0
 
 # Per-axis helm — a flyable hull.
 [[system]]
+console = "ai-helm-thrust"
 id = "helm-thrust"
 kind = "helm_thrust"
 ai_only = true
 
 [[system]]
+console = "ai-helm-steering"
 id = "helm-steering"
 kind = "helm_steering"
 ai_only = true
 
 [[system]]
+console = "ai-helm-impulse"
 id = "helm-impulse"
 kind = "helm_impulse"
 ai_only = true
 
 # Fine power (reactor + battery).
 [[system]]
+console = "ai-power-reactor"
 id = "power-reactor"
 kind = "power_reactor"
 ai_only = true
 
 [[system]]
+console = "ai-power-battery"
 id = "power-battery"
 kind = "power_battery"
 ai_only = true
@@ -129,12 +134,14 @@ ai_only = true
 # beside them for the resupply systems. It rests at its seeded level 2, at or
 # above each `min_power_level`.
 [[system]]
+console = "ai-dock"
 id = "dock"
 kind = "dock"
 ai_only = true
 power_group = "ops"
 
 [[system]]
+console = "ai-umbilical"
 id = "umbilical"
 kind = "umbilical"
 ai_only = true
@@ -248,3 +255,156 @@ max_hp = 20
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "ai-helm-thrust"
+name = "helm-thrust"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-helm-steering"
+name = "helm-steering"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-helm-impulse"
+name = "helm-impulse"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-power-reactor"
+name = "power-reactor"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-power-battery"
+name = "power-battery"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-dock"
+name = "dock"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-umbilical"
+name = "umbilical"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

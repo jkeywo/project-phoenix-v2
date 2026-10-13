@@ -75,7 +75,7 @@ automated_systems = []
 [[system]]
 id = "dock"
 kind = "dock"
-station = "helm"
+console = "helm"
 power_group = "dock"
 
 # ── The dock terms ───────────────────────────────────────────────────────────
@@ -91,3 +91,17 @@ approach_speed = 60.0
 mate_tolerance = 4.0
 undock_clear_distance = 120.0
 min_power_level = 2
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "helm"
+name = "Helm"
+home_station = "helm"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

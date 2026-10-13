@@ -115,7 +115,7 @@ automated_systems = []
 [[system]]
 id = "dock"
 kind = "dock"
-station = "helm"
+console = "helm"
 power_group = "dock"
 
 # ── The umbilical system ─────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ power_group = "dock"
 [[system]]
 id = "umbilical"
 kind = "umbilical"
-station = "engineering"
+console = "engineering"
 power_group = "umbilical"
 
 # ── The dock terms ───────────────────────────────────────────────────────────
@@ -147,3 +147,30 @@ capacity = "reserve_fuel"
 rate = 20.0
 direction = "deliver"
 min_power_level = 2
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "helm"
+name = "Helm"
+home_station = "helm"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "engineering"
+name = "Engineering"
+home_station = "engineering"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

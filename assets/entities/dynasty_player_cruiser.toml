@@ -43,19 +43,11 @@ _remove = true
 id = "comms"
 _remove = true
 [[station]]
-id = "navigation"
-_remove = true
-[[station]]
-id = "command"
-_remove = true
-
-[[station]]
 id = "command"
 name = "Command"
 description = "entity.dynasty_player_cruiser.station.command.description"
 rank = "Cmdr."
 short_code = "CMD"
-console = "gui/dynasty-cruiser/command.html"
 manual_overview = "dynasty.onboarding.command.role"
 [[station.rating]]
 name = "Std"
@@ -93,7 +85,6 @@ name = "Helm"
 description = "entity.dynasty_player_cruiser.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/dynasty-cruiser/helm.html"
 manual_overview = "dynasty.onboarding.helm.role"
 [[station.rating]]
 name = "Std"
@@ -131,7 +122,6 @@ name = "Gunnery"
 description = "entity.dynasty_player_cruiser.station.gunnery.description"
 rank = "Ltn."
 short_code = "GUN"
-console = "gui/dynasty-cruiser/gunnery.html"
 manual_overview = "dynasty.onboarding.gunnery.role"
 [[station.rating]]
 name = "Std"
@@ -193,7 +183,6 @@ name = "Sensors"
 description = "entity.dynasty_player_cruiser.station.sensors.description"
 rank = "Ltn."
 short_code = "SNS"
-console = "gui/dynasty-cruiser/sensors.html"
 manual_overview = "dynasty.onboarding.sensors.role"
 [[station.rating]]
 name = "Std"
@@ -231,7 +220,6 @@ name = "Power"
 description = "entity.dynasty_player_cruiser.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
-console = "gui/dynasty-cruiser/power.html"
 manual_overview = "dynasty.onboarding.power.role"
 [[station.rating]]
 name = "Std"
@@ -285,7 +273,6 @@ name = "Damage Control"
 description = "entity.dynasty_player_cruiser.station.damage_control.description"
 rank = "Ltn."
 short_code = "DCO"
-console = "gui/dynasty-cruiser/damage-control.html"
 manual_overview = "dynasty.onboarding.damage_control.role"
 [[station.rating]]
 name = "Std"
@@ -322,113 +309,113 @@ trigger = { kind = "first_visit" }
 # first six-seat bridge has no stance controls or command target.
 [[system]]
 id = "captain"
-station = "command"
+console = "command"
 [[system]]
 id = "command"
 _remove = true
 [[system]]
 id = "red-alert"
-station = "command"
+console = "command"
 [[system]]
 id = "comms"
-station = "command"
+console = "comms-service"
 [[system]]
 id = "viewscreen"
-station = "command"
+console = "command"
 [[system]]
 id = "security"
-station = "command"
+console = "command"
 
 # Helm: movement and Navigation.
 [[system]]
 id = "helm-thrust"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-steering"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-joystick"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-engine-port"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-engine-starboard"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-radar"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-impulse"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-boost"
-station = "helm"
+console = "helm"
 [[system]]
 id = "helm-lateral-thrust"
-station = "helm"
+console = "helm"
 [[system]]
 id = "navigation"
-station = "helm"
+console = "helm"
 [[system]]
 id = "dock"
-station = "helm"
+console = "helm"
 
 # Gunnery: every weapon and its targeting radar.
 [[system]]
 id = "tactical-radar"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "phaser-control"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "phaser-fore"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "phaser-aft"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "torpedo-magazine"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "torpedo-tube-fore-port"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "torpedo-tube-fore-starboard"
-station = "gunnery"
+console = "gunnery"
 [[system]]
 id = "torpedo-tube-aft"
-station = "gunnery"
+console = "gunnery"
 
 # Sensors: detection and scanning only.
 [[system]]
 id = "sensors"
-station = "sensors"
+console = "sensors"
 [[system]]
 id = "sensor-radar"
-station = "sensors"
+console = "sensors"
 
 # Power: energy generation and allocation only.
 [[system]]
 id = "power-reactor"
-station = "power"
+console = "power"
 [[system]]
 id = "power-battery"
-station = "power"
+console = "power"
 
 # Damage Control: shields, repair, and recovery/coupling gear.
 [[system]]
 id = "shields-system"
-station = "damage-control"
+console = "damage-control"
 [[system]]
 id = "repair"
-station = "damage-control"
+console = "damage-control"
 [[system]]
 id = "tractor"
-station = "damage-control"
+console = "damage-control"
 [[system]]
 id = "umbilical"
-station = "damage-control"
+console = "damage-control"
 
 # Charging is a fourth explicit allocation competing for the SAME eight pips.
 # Unallocated generation is not captured. Turning charging to zero holds charge.
@@ -698,3 +685,333 @@ yields_to_arc_requests = false
   priority = 10
   to = "approach"
   when = "fact(strike_boost_enabled) > 0 and fact(posture) >= param(press_posture) and fact(target_valid) > 0"
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+_remove = true
+
+[[console]]
+id = "helm"
+_remove = true
+
+[[console]]
+id = "tactical"
+_remove = true
+
+[[console]]
+id = "science"
+_remove = true
+
+[[console]]
+id = "engineering"
+_remove = true
+
+[[console]]
+id = "comms"
+_remove = true
+
+[[console]]
+id = "navigation"
+_remove = true
+
+[[console]]
+id = "command"
+_remove = true
+
+[[console]]
+id = "command"
+name = "Command"
+screen = "gui/dynasty-cruiser/command.html"
+home_station = "command"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "security"
+kind = "Security"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "helm"
+name = "Helm"
+screen = "gui/dynasty-cruiser/helm.html"
+home_station = "helm"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-engine-port"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-engine-starboard"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "gunnery"
+name = "Gunnery"
+screen = "gui/dynasty-cruiser/gunnery.html"
+home_station = "gunnery"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "phaser-aft"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "phaser-fore"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+[[console.feed]]
+source = "torpedo-tube-aft"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore-port"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore-starboard"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "sensors"
+name = "Sensors"
+screen = "gui/dynasty-cruiser/sensors.html"
+home_station = "sensors"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "scan"
+kind = "Scan"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "power"
+name = "Power"
+screen = "gui/dynasty-cruiser/power.html"
+home_station = "power"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "damage-control"
+name = "Damage Control"
+screen = "gui/dynasty-cruiser/damage-control.html"
+home_station = "damage-control"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "shield-arc-aft"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-fore"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-port"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-starboard"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shields"
+kind = "Shields"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "comms-service"
+name = "comms"
+home_station = "command"
+screen = "gui/battleship/comms.html"
+human_seeking = true
+host_order = [ "command", "helm", "gunnery", "sensors", "power", "damage-control" ]
+visiting_rating = "Std"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

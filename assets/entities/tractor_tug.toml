@@ -82,7 +82,7 @@ automated_systems = []
 [[system]]
 id = "tractor"
 kind = "tractor"
-station = "engineering"
+console = "engineering"
 power_group = "tractor"
 
 # ── The coupling terms ───────────────────────────────────────────────────────
@@ -106,3 +106,17 @@ min_power_level = 2
 [tractor.tow_load]
 half_penalty_mass = 10000.0
 max_penalty = 0.8
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "engineering"
+name = "Engineering"
+home_station = "engineering"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

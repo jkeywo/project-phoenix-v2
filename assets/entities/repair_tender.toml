@@ -74,7 +74,7 @@ automated_systems = []
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineering"
+console = "engineering"
 
 # A single damage entry so the tender carries a non-empty hull; nothing in the
 # probe damages it — the "own repairs slow" trade is proved through the team
@@ -85,3 +85,17 @@ max_hp = 100
 damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.15
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "engineering"
+name = "Engineering"
+home_station = "engineering"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

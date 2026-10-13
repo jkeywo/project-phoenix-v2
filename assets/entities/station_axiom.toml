@@ -43,11 +43,13 @@ radius = 250.0
 # replacing them.
 
 [[system]]
+console = "ai-tactical-radar"
 id = "tactical-radar"
 kind = "tactical_radar"
 ai_only = true
 
 [[system]]
+console = "ai-phaser-defence"
 id = "phaser-defence"
 kind = "phaser_bank"
 ai_only = true
@@ -181,3 +183,72 @@ range = 800
 # `EntityName`, which for a world-declared `[[entity]]` is its `name` reference
 # id — the SAME string the deleted `[[comms]] from` supplied.
 hailable = true
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "ai-tactical-radar"
+name = "tactical-radar"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "ai-phaser-defence"
+name = "phaser-defence"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "phaser-defence"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

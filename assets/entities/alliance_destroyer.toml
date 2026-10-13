@@ -894,7 +894,6 @@ name = "Captain"
 description = "entity.alliance_destroyer.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/destroyer/captain.html"
 manual_overview = "You command the destroyer. Set the viewscreen, call Red Alert, and direct a four-seat crew through the fight. The destroyer is built to hit hard and turn fast, so keep Helm and Tactical coordinated and call your shots early. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
@@ -962,7 +961,6 @@ name = "Helm"
 description = "entity.alliance_destroyer.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/destroyer/helm.html"
 manual_overview = "You fly the destroyer — a fast, agile hull that rewards aggressive flying. Throttle and steering set your line; lateral thrust slides you across a target's arc; boost and impulse close or break range in a hurry. Keep the omni phaser on target for Tactical. When the mission calls for a transfer, dock with a structure or tender so Engineering can run the umbilical across. Simplified rating lets the AI hold lateral thrust."
 
 [[station.rating]]
@@ -1037,7 +1035,6 @@ name = "Tactical"
 description = "entity.alliance_destroyer.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
-console = "gui/destroyer/tactical.html"
 manual_overview = "You run the destroyer's weapons: an omni phaser, port and starboard blasters, and a torpedo tube. Lock your target, manage torpedo loading and volley size, and match phaser frequency to break enemy shields. With guns on multiple arcs, work with the Helm to keep something on target at all times. Simplified rating lets the AI auto-fire the omni phaser."
 
 [[station.rating]]
@@ -1137,64 +1134,11 @@ anchor = "torpedo-controls"
 trigger = { kind = "control_unused", control = "fire_torpedo" }
 
 [[station]]
-id = "navigation"
-name = "Navigation"
-description = "entity.alliance_destroyer.station.navigation.description"
-rank = "Ltn."
-short_code = "NAV"
-console = "gui/battleship/navigation.html"
-auxiliary = true
-human_seeking = true
-host_order = ["tactical", "engineering", "captain"]
-visiting_rating = "Simplified"
-# [ai] Navigation is now a hosted-tab-only auxiliary station: it has no dedicated
-# claimable lobby seat (`auxiliary = true`), but stays `human_seeking` and
-# appears as a Hero Bar tab, resolving a host from these compatible direct seats
-# in authored order. An active Helm alone therefore leaves it on ordinary AI
-# rather than turning compatibility into an implicit all-crew fallback.
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
-[[station.rating]]
-name = "Simplified"
-automated_systems = ["navigation"]
-
-[[station]]
-id = "comms"
-name = "Comms"
-description = "entity.alliance_destroyer.station.comms.description"
-rank = "Ens."
-short_code = "COM"
-console = "gui/battleship/comms.html"
-manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. Stay on top of the message queue and flag anything urgent."
-auxiliary = true
-human_seeking = true
-host_order = ["tactical", "engineering", "captain", "helm"]
-visiting_rating = "Std"
-# [ai] Comms is now a hosted-tab-only auxiliary station: no dedicated claimable
-# lobby seat (`auxiliary = true`), but still `human_seeking` and shown as a Hero
-# Bar tab, resolving a host from these directly-held seats in authored order.
-# `navigation` was dropped from this chain: it is itself an auxiliary
-# human_seeking (visiting) station now, never directly held, so a visiting
-# station cannot host another visiting station and the resolver skips it anyway.
-# Comms carries only one authored rating everywhere it is declared on any hull —
-# there is no Simplified/automated tier for it — so its visiting rating is the
-# same full interface a direct holder gets. Unlike Navigation, a visiting host
-# is never handed a reduced Comms surface.
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
-[[station]]
 id = "engineering"
 name = "Engineering"
 description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/destroyer/engineering.html"
 manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. Weapons is the one group you may switch off entirely: take it to LVL 0 and the guns go COLD, which is how this ship shows restraint without standing down from Red Alert — and anyone with sensors on you can see it. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
@@ -1259,28 +1203,10 @@ trigger = { kind = "state", path = "systems.repair.overall_hull.pct", op = "lt",
 # directed station in its alert-neutral stance. Command directs the `tactical`
 # station (`command_target`), listing that station's authored stance catalogue
 # above only while Tactical is AI-controlled.
-[[station]]
-id = "command"
-name = "Command"
-description = "entity.alliance_destroyer.station.command.description"
-rank = "Cpt."
-short_code = "CMD"
-console = "gui/command-console.html"
-manual_overview = "You direct the ship's AI-run stations without operating their systems yourself. When Tactical is on the AI, Command lists it here and lets you set its stance — weapons free, hold fire, or leave it to follow the alert level. The stance tells Tactical's AI what posture to hold; it never fires the guns for you."
-auxiliary = true
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Std"
-command_target = "tactical"
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
 [[system]]
 id = "captain"
 kind = "captain"
-station = "captain"
+console = "captain"
 
 # The Command capability system (issue #1107): the admitted target for
 # `SetStationStance`. Owned by the auxiliary Command station, so the seek host
@@ -1289,27 +1215,27 @@ station = "captain"
 [[system]]
 id = "command"
 kind = "command"
-station = "command"
+console = "command"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
-station = "captain"
+console = "captain"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
@@ -1323,43 +1249,43 @@ station = "captain"
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
@@ -1368,13 +1294,13 @@ power_group = "weapons"
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
@@ -1384,49 +1310,49 @@ power_group = "helm"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
 id = "phaser-omni"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "blaster-port"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "blaster-starboard"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 # Navigation and Comms are both complete human-seeking Stations (issue #984,
@@ -1452,33 +1378,33 @@ power_group = "weapons"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
 
 [[system]]
 id = "comms"
 kind = "comms"
-station = "comms"
+console = "comms"
 
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "engineering"
+console = "engineering"
 power_group = "shields"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "engineering"
+console = "engineering"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "engineering"
+console = "engineering"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineering"
+console = "engineering"
 
 # ── Coupling systems (issue #1164 S11a) ──────────────────────────────────────
 #
@@ -1504,19 +1430,19 @@ station = "engineering"
 [[system]]
 id = "tractor"
 kind = "tractor"
-station = "engineering"
+console = "engineering"
 power_group = "helm"
 
 [[system]]
 id = "umbilical"
 kind = "umbilical"
-station = "engineering"
+console = "engineering"
 power_group = "helm"
 
 [[system]]
 id = "dock"
 kind = "dock"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 # The rescue transporter (issue #1348) — Engineering-owned, on the `helm` group
@@ -1528,7 +1454,7 @@ power_group = "helm"
 [[system]]
 id = "transporter"
 kind = "transporter"
-station = "engineering"
+console = "engineering"
 power_group = "helm"
 
 # ── Security (issue #1346) ───────────────────────────────────────────────────
@@ -1551,7 +1477,7 @@ power_group = "helm"
 [[system]]
 id = "security"
 kind = "security"
-station = "tactical"
+console = "tactical"
 
 # ── Reference grid ───────────────────────────────────────────────────────────
 #
@@ -1940,3 +1866,349 @@ min_power_level = 2
 range = 500.0
 seconds_per_civilian = 2.0
 min_power_level = 2
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "captain"
+name = "Captain"
+screen = "gui/destroyer/captain.html"
+home_station = "captain"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "scan"
+kind = "Scan"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "helm"
+name = "Helm"
+screen = "gui/destroyer/helm.html"
+home_station = "helm"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-engine-port"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-engine-starboard"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "tactical"
+name = "Tactical"
+screen = "gui/destroyer/tactical.html"
+home_station = "tactical"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "phaser-omni"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "security"
+kind = "Security"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+[[console.feed]]
+source = "torpedo-tube-aft"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "torpedo-tube-fore"
+kind = "TorpedoTube"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "navigation"
+name = "Navigation"
+screen = "gui/battleship/navigation.html"
+human_seeking = true
+host_order = [ "tactical", "engineering", "captain" ]
+visiting_rating = "Simplified"
+description = "entity.alliance_destroyer.station.navigation.description"
+short_code = "NAV"
+
+[[console.rating]]
+name = "Std"
+automated_systems = []
+
+[[console.rating]]
+name = "Simplified"
+automated_systems = [ "navigation" ]
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "comms"
+name = "Comms"
+screen = "gui/battleship/comms.html"
+human_seeking = true
+host_order = [ "tactical", "engineering", "captain", "helm" ]
+visiting_rating = "Std"
+description = "entity.alliance_destroyer.station.comms.description"
+short_code = "COM"
+manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. Stay on top of the message queue and flag anything urgent."
+
+[[console.rating]]
+name = "Std"
+automated_systems = []
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "engineering"
+name = "Engineering"
+screen = "gui/destroyer/engineering.html"
+home_station = "engineering"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "shield-arc-aft"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shield-arc-fore"
+kind = "ShieldArc"
+
+[[console.feed]]
+source = "shields"
+kind = "Shields"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "transporter"
+kind = "Transporter"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "command"
+name = "Command"
+screen = "gui/command-console.html"
+human_seeking = true
+host_order = [ "captain" ]
+visiting_rating = "Std"
+description = "entity.alliance_destroyer.station.command.description"
+short_code = "CMD"
+manual_overview = "You direct the ship's AI-run stations without operating their systems yourself. When Tactical is on the AI, Command lists it here and lets you set its stance — weapons free, hold fire, or leave it to follow the alert level. The stance tells Tactical's AI what posture to hold; it never fires the guns for you."
+command_target = "tactical"
+
+[[console.rating]]
+name = "Std"
+automated_systems = []
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

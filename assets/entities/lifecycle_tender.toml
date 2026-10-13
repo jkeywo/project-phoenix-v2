@@ -92,13 +92,13 @@ automated_systems = []
 [[system]]
 id = "tractor"
 kind = "tractor"
-station = "engineering"
+console = "engineering"
 power_group = "tractor"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "engineering"
+console = "engineering"
 power_group = "survey"
 
 # ── The coupling terms ───────────────────────────────────────────────────────
@@ -131,3 +131,49 @@ label = "entity.lifecycle_tender.scan.band.coarse.label"
 max_range = 400.0
 condition_step = 0.25
 report_capacities = false
+
+# Explicit control surfaces and permitted observation publications.
+[[console]]
+id = "engineering"
+name = "Engineering"
+home_station = "engineering"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "scan"
+kind = "Scan"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"

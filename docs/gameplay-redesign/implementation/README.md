@@ -108,3 +108,16 @@ results in [the acceptance record](../../acceptance/1562-explicit-consoles.md).
 Passing owner tests alone does not close the increment. The ledger remains
 `in_progress` until continuation, authoring, gameplay comparison and the
 playable exit are verified.
+
+## Increment 2 — composable Systems and common status
+
+The user explicitly authorised continuing with increment 2 while increment 1's
+physical/device acceptance remains pending. The ledger records that instruction
+as an advance authorisation; it does not mark the outstanding checks complete.
+
+See the [implementation contract](increment-2.md), adopted
+`pasm/spec/design/system-composition.yaml`, and
+[acceptance record](../../acceptance/1562-composable-systems.md). Dock is the
+first consumer of typed component composition and shared command channels;
+common status is a derived Console-scoped observation. This increment leaves
+state trees, resource redesign and component damage in their scheduled steps.

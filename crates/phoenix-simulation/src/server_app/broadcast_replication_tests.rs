@@ -74,24 +74,24 @@ id = "detached"
 id = "unmodeled"
 [[system]]
 id = "a"
-kind = "dock"
+kind = "fixture"
 console = "flight"
 [[system]]
 id = "b"
-kind = "dock"
+kind = "fixture"
 console = "drive"
 [[system]]
 id = "c"
-kind = "dock"
+kind = "fixture"
 console = "detached"
 ai_only = true
 [[system]]
 id = "d"
-kind = "dock"
+kind = "fixture"
 console = "detached"
 ai_only = true
 "#,
-        &["dock"],
+        &["fixture"],
     )
     .unwrap();
     let mut hull = crate::ship::damage::SystemHull::from_config(&[

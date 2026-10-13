@@ -46,7 +46,7 @@ async function applied(page, id) {
   await expect(byId(page, id)).toBeEnabled();
 }
 
-test('Workshop authors Console identity, feeds and ownership through real validation, history, reload and Test',
+test('Workshop authors Consoles and Dock components through real validation, history, reload and Test',
   { tag: '@core' }, async ({ page }, testInfo) => {
     test.setTimeout(300_000);
     const errors = [];
@@ -88,6 +88,37 @@ test('Workshop authors Console identity, feeds and ownership through real valida
     await byId(page, 'console-feed-kind').selectOption('Viewscreen');
     await applied(page, 'console-feed-add');
     await expect(byId(page, 'console-feeds')).toContainText('viewscreen: Viewscreen');
+    // Component edits use the same accepted-source gate. A missing power input
+    // must be rejected without changing source; intermediate palette edits stay
+    // in the form until a complete composition is applied.
+    const beforeComponents = await sourceOf(page);
+    const originalDock = parse(beforeComponents).system.find(row => row.id === 'dock');
+    await revealWorkshopPanel(page, 'composition');
+    await byId(page, 'systems').selectOption('dock');
+    const components = page.locator('#workshop-component-list');
+    await components.selectOption(String(originalDock.component.findIndex(row => row.kind === 'power_input')));
+    await page.locator('#workshop-component-remove').click();
+    await page.locator('#workshop-component-apply').click();
+    await expect(byId(page, 'status')).toHaveAttribute('role', 'alert');
+    expect(await sourceOf(page)).toBe(beforeComponents);
+    await revealWorkshopPanel(page, 'composition');
+    await page.locator('#workshop-component-reset').click();
+    await page.locator('#workshop-component-channels input[aria-label="boolean"]').fill('hold');
+    await page.locator('#workshop-component-channels input[aria-label="entity_target"]').fill('berth');
+    await components.selectOption(String(originalDock.component.findIndex(row => row.kind === 'dock_mating')));
+    await page.locator('#workshop-component-field-config-range').fill('201');
+    await page.locator('#workshop-component-up').click();
+    await page.locator('#workshop-component-apply').click();
+    await expect(byId(page, 'status')).toHaveText(ts('workshop.ship.applied'));
+    const afterComponents = await sourceOf(page);
+    const composedDock = parse(afterComponents).system.find(row => row.id === 'dock');
+    expect(composedDock.component[0]).toMatchObject({ kind: 'dock_mating', enabled_channel: 'hold', target_channel: 'berth', config: { range: 201 } });
+    expect(composedDock.channel).toEqual([{ name: 'hold', kind: 'boolean' }, { name: 'berth', kind: 'entity_target' }]);
+    await page.locator('#workshop-undo').click();
+    await expect.poll(() => sourceOf(page)).toBe(beforeComponents);
+    await page.locator('#workshop-redo').click();
+    await expect.poll(() => sourceOf(page)).toBe(afterComponents);
+
     const beforeOwnership = await sourceOf(page);
     await revealWorkshopPanel(page, 'composition');
     await byId(page, 'systems').selectOption('dock');
@@ -110,7 +141,8 @@ test('Workshop authors Console identity, feeds and ownership through real valida
     const download = page.waitForEvent('download');
     await page.locator('#workshop-export').click();
     const bytes = new Uint8Array(readFileSync(await (await download).path()));
-    expect(readStoreZip(bytes)[HULL]).toBe(edited);
+    // Textareas normalise CRLF on read; export preserves the authored file EOLs.
+    expect(readStoreZip(bytes)[HULL].replace(/\r\n/g, '\n')).toBe(edited);
     await expect(page.locator('#workshop-dirty')).toHaveText(ts('workshop.saved'));
     await importPack(page, bytes);
     expect(await sourceOf(page)).toBe(edited);

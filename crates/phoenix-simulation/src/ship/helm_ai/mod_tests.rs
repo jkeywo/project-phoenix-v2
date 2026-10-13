@@ -3744,6 +3744,8 @@ fn vertical_thrust_ai_app(
             .0
             .systems
             .push(crate::ship::config::SystemInstanceConfig {
+                components: Vec::new(),
+                channels: Vec::new(),
                 id: crate::ship::system_registry::vertical_thrust_system_id(),
                 kind: crate::ship::system_registry::VERTICAL_THRUST_KIND.into(),
                 console,

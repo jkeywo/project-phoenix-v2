@@ -643,7 +643,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// is refused rather than reconstructed differently.
 /// `37` - explicit Console ownership and working-view continuation. Earlier
 /// saves cannot describe which Console owns a System or its shared work context.
-pub const SNAPSHOT_FORMAT: u32 = 37;
+/// `38` - composed Dock command channels and mechanical undock clearance.
+/// Older intent state cannot be restored into authored channel bindings.
+pub const SNAPSHOT_FORMAT: u32 = 38;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -719,7 +721,8 @@ pub const SNAPSHOT_FORMAT: u32 = 37;
 /// "0.9" — explicit Console ownership and knowledge scopes determine control
 /// and individual System AI inputs. Older saves lack the ownership and working
 /// view state needed to continue under these rules.
-pub const SIMULATION_RULES: &str = "0.9";
+/// "0.10" - Dock composition and complete intent/clearance digest coverage.
+pub const SIMULATION_RULES: &str = "0.10";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -1002,22 +1005,10 @@ pub struct EntityState {
     /// writing a same-content-digest save to disagree with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tractor: Option<crate::tractor::TractorSaveState>,
-    /// The ship's dock control state (issue #1159) — whether a dock is engaged,
-    /// whether the two hulls are mated, and which berth is held.
-    ///
-    /// A **projection**, not the whole [`crate::dock::DockControl`] component, for
-    /// `tractor`'s reason: the authored Dock System id, `[dock]` terms and
-    /// resolved power group ride the component and are re-derived from the
-    /// template on spawn, so writing them into a save would put content into the
-    /// one artefact `content_digest` is answerable for. What travels is the pair the fold
-    /// cannot recover — the engage/dock state and the docked target — which
-    /// [`fold_dock_namespace`](crate::sim_digest) folds and which a resume would
-    /// otherwise drop, restoring two mated hulls as adrift.
-    ///
-    /// Did not bump [`SNAPSHOT_FORMAT`] for `tractor`'s reason: a world gains
-    /// docking by its hull TOML gaining a `[dock]` table (and a `kind = "dock"`
-    /// system), and `EntityConfig` sets `deny_unknown_fields`, so a build that
-    /// predates this vocabulary refuses the template outright.
+    /// Canonical Dock channels, mechanical mating state and undock clearance.
+    /// Authored component tuning, channel bindings and power-group references
+    /// are reconstructed from content on spawn. Every active Dock carries this
+    /// state, including idle intent; format 38 refuses older incomplete state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockSaveState>,
     /// The ship's external repair-dispatch state (issues #1161, #1386) — which
@@ -3805,12 +3796,10 @@ fn capture_tractors(entity: EntityRef<'_>) -> Option<crate::tractor::TractorSave
 
 /// The dock control states, captured directly from its entity — see
 /// [`EntityState::dock`]. Only hulls that authored a `kind = "dock"` system carry
-/// one, so most worlds capture an empty list. An idle control (engaging nothing,
-/// docked to nothing) captures nothing, the same reading `fold_dock_namespace`
-/// takes.
+/// one. Idle controls retain their authored channel keys and default values,
+/// matching the complete intent folded by `fold_dock_namespace`.
 fn capture_docks(entity: EntityRef<'_>) -> Option<crate::dock::DockSaveState> {
-    let state = entity.get::<crate::dock::DockControl>()?.save_state();
-    (state != crate::dock::DockSaveState::default()).then_some(state)
+    Some(entity.get::<crate::dock::DockControl>()?.save_state())
 }
 
 /// The external repair-dispatch states, captured directly from its entity

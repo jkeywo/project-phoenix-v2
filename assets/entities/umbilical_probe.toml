@@ -6,7 +6,7 @@
 # stations on one ship — a helm-owned `[[system]] kind = "dock"` with its own
 # `[power_groups.dock]`, and an engineering-owned `[[system]] kind = "umbilical"`
 # with its own `[power_groups.umbilical]` — each with a damage entry so it can be
-# knocked out, the `[dock]` and `[umbilical]` terms, dock markers from the shared
+# knocked out, the Dock component and `[umbilical]` terms, dock markers from the shared
 # `dock_probe` rig variant, and an `[infrastructure]` ledger carrying the
 # transferable `reserve_fuel` capacity it delivers across the dock.
 #
@@ -122,6 +122,34 @@ power_group = "dock"
 # First-class, engineering-owned, power-grouped: the admitted target for
 # StartTransfer / StopTransfer, admission-gated exactly like any other
 # station-owned system.
+
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+
+[[system.component]]
+id = "power"
+kind = "power_input"
+
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+
+[system.component.config]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
+
 [[system]]
 id = "umbilical"
 kind = "umbilical"
@@ -129,13 +157,6 @@ console = "engineering"
 power_group = "umbilical"
 
 # ── The dock terms ───────────────────────────────────────────────────────────
-[dock]
-range = 200.0
-engage_distance = 400.0
-approach_speed = 60.0
-mate_tolerance = 4.0
-undock_clear_distance = 120.0
-min_power_level = 2
 
 # ── The umbilical terms ──────────────────────────────────────────────────────
 # All authored (AGENTS.md rule 11): the capacity id both docked ends must carry,

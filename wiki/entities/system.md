@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
-sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml, crates/phoenix-sim-gameplay/src/ship/composition.rs, crates/phoenix-simulation/src/server_app/system_status.rs, gui/components/ph-system-status.js]
 updated: 2026-10-13
 ---
 
@@ -60,6 +60,35 @@ remain publication keys for composed observations; machinery commands target
 Systems such as `helm-steering`, `tactical-radar` and `phaser-control`.
 Coordination uses explicit `Station`, `Console` or `Ship` addresses. Queued
 Console messages resolve the current host at delivery.
+
+## Supported composition
+
+Dock is the first composed System. Its typed `dock_mating` component binds a
+`power_input` component and shared boolean engagement/entity-target channels.
+Component IDs and channel names are local to the owning System. The existing
+Dock/Undock admission and individual AI write the same canonical intent;
+components do not introduce another controller or command authority.
+
+`crates/phoenix-sim-gameplay/src/ship/composition.rs` owns the supported palette
+and validates references before spawn. Active tuning lives in the component;
+passive berths retain their endpoint declaration. Current docking supports one
+active Dock System per entity. Other System kinds retain their existing shape.
+`crates/phoenix-simulation/src/dock/server.rs` carries mating and undocking
+clearance separately from intent, with both persisted and included in digests.
+
+## Common status
+
+`crates/phoenix-simulation/src/server_app/system_status.rs` derives status from
+current System damage, control-source availability and Dock hardware/power.
+It publishes observations, not another authoritative machinery store. Detailed
+rows follow the owning Console's current host; co-hosted tabs still filter to
+that Console. Shared Repair feeds retain their existing damage-only scope.
+
+`gui/components/ph-system-status.js` mounts through Console core, including GM
+Station operation. It lists owned equipment with green, amber, red or unknown
+indicators and a live details popup; delegated equipment is grouped into an
+inspectable summary. Idle equipment and a missing nearby docking target are
+not failures. EMP/heat conditions are not fabricated ahead of their mechanisms.
 
 ## Console Family
 

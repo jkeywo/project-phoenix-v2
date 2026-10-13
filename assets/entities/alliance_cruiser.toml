@@ -432,7 +432,7 @@ range = 400.0
 # attaches the component off this table alone — so authoring it here is the whole
 # capability.
 #
-# Both numbers are the destroyer's verbatim, for `[dock]`/`[tractor]`/
+# Both numbers are the destroyer's verbatim, for Dock/`[tractor]`/
 # `[umbilical]`'s reason: a shared reach and a shared rate are what let one
 # authored casualty be helped by either hull without per-hull tuning, and a
 # bigger hull does not make a repair party walk further or work faster. The
@@ -1681,7 +1681,7 @@ console = "engineering"
 # the seat that flies the ship is the seat that presses Dock. `kind = "dock"`
 # is what maps it onto the Helm Console Family (`ship::system_registry`) and
 # what makes `DockControl` appear at spawn; the approach terms it runs under are
-# the `[dock]` table at the foot of this file, and the plates it mates on are
+# the Dock mating component below, and the plates it mates on are
 # authored in the rig sidecar (`assets/models/alliance_cruiser_recreated.model.toml`).
 #
 # On the `helm` power group at the table's `min_power_level = 2`, exactly as the
@@ -1719,6 +1719,34 @@ power_group = "helm"
 # Helm below level 2 takes the tow and the transfer down with the drive and the
 # clamps together. Neither is listed in any rating's `automated_systems` — an
 # unmanned Engineering runs power and repair, it does not tow on its own.
+
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+
+[[system.component]]
+id = "power"
+kind = "power_input"
+
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+
+[system.component.config]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
+
 [[system]]
 id = "tractor"
 kind = "tractor"
@@ -2220,42 +2248,17 @@ weak_shield_flip_dwell_secs = 4.0
 aggression = 0.8
 sensor_range = 350.0
 
-# ── Dock terms (issue #1388) ─────────────────────────────────────────────────
-#
-# The approach terms the `[[system]] kind = "dock"` above runs under. The table's
-# PRESENCE is also the opt-in that makes this hull dockable at all: it, and only
-# it, triggers the one spawn-time read of the rig sidecar for `dock`-prefixed
-# markers (`entities::spawner`'s `DockSpawn`), so a hull that authors no `[dock]`
-# reads no sidecar and its world's `content_digest` is unchanged.
-#
-# The values are the shipped fleet dock vocabulary verbatim
-# (`alliance_destroyer.toml`, `alliance_tender.toml`, `dock_probe`): the reach the
-# control appears within and a held dock parts past, the close-in engage distance,
-# the low approach speed, the mate tolerance, how far undock backs clear, and the
-# lowest powered rung. Deliberately IDENTICAL to the destroyer's rather than
-# scaled to this bigger hull — a berth is a berth, and a shared reach is what lets
-# one authored structure be dockable by either hull without per-hull tuning. The
-# dock MARKERS themselves are authored in the rig sidecar
-# (`assets/models/alliance_cruiser_recreated.model.toml`), not here. [ai] Unratified.
-[dock]
-range = 200.0
-engage_distance = 400.0
-approach_speed = 60.0
-mate_tolerance = 4.0
-undock_clear_distance = 120.0
-min_power_level = 2
-
 # ── Tractor terms (issue #1390) ──────────────────────────────────────────────
 #
 # The coupling terms the `[[system]] kind = "tractor"` above runs under: how far
 # the beam reaches, where the held load rides relative to the operator, and the
-# lowest powered rung. Like `[dock]`, the table's PRESENCE is the opt-in — a hull
+# lowest powered rung. The table's PRESENCE is the opt-in — a hull
 # that authors no `[tractor]` spawns no `TractorBeam` and its consoles are
 # unchanged.
 #
 # `range = 500` and `coupling_offset = [0, 0, -90]` are the destroyer's values
 # verbatim, and deliberately so rather than scaled to this bigger hull, for the
-# reason `[dock]` above gives: a shared reach is what lets one authored hulk be
+# reason the Dock component uses fleet tuning: a shared reach is what lets one authored hulk be
 # towable by either hull without per-hull tuning. The offset is not a hull
 # dimension either way — 90 units astern is dozens of hull radii on both hulls
 # (this rig's `[collider] radius = 1.5`), far enough that nothing about the

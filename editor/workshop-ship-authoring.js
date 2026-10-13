@@ -1,3 +1,4 @@
+import { writeSystemComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -223,7 +224,12 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     if (dependent) throw finding(operation.path, before, quote(operation.rating), `Console ${dependent.id} uses rating ${operation.rating}; choose another visiting rating before removing it.`);
   }
 
-  if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
+  if (operation.type === 'system-composition-set') {
+    const system = inspection.systems.find(row => row.id === operation.id);
+    if (!system?.local) throw new Error('Materialise the containing System before editing its components.');
+    after = writeSystemComposition(before, operation.id, operation, system);
+  }
+  else if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
     description: operation.description || operation.id, rank: operation.rank || '' }] });
   else if (operation.type === 'station-set' || operation.type === 'station-update') {
     const fields = operation.type === 'station-set' ? { [operation.field]: operation.value } : operation.fields;
@@ -260,7 +266,9 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     }
   }
   else if (operation.type === 'system-add') after = append(after, { system: [{ id: operation.id, kind: operation.kind,
-    console: operation.console, ai_only: operation.ai_only === true }] });
+    console: operation.console, ai_only: operation.ai_only === true,
+    ...(operation.power_group ? { power_group: operation.power_group } : {}),
+    ...(operation.components ? { component: operation.components, channel: operation.channels || [] } : {}) }] });
   else if (operation.type === 'system-set' || operation.type === 'system-update') {
     const fields = operation.type === 'system-set' ? { [operation.field]: operation.value } : operation.fields;
     for (const [field, value] of Object.entries(fields)) { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before editing.`);
@@ -343,6 +351,14 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path),
     read: path => path === operation.path ? after : draft.read(path) };
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;
+  if (operation.type === 'system-composition-set') {
+    const resolved = effectiveValue.system.find(row => row.id === operation.id);
+    for (const [key, identity, desired] of [['component', 'id', operation.components], ['channel', 'name', operation.channels]]) {
+      if (JSON.stringify((resolved[key] || []).map(row => row[identity])) !== JSON.stringify((desired || []).map(row => row[identity]))) {
+        throw new Error('Inherited composition order is defined by its source include; edit that source to reorder it.');
+      }
+    }
+  }
   verify(operation.path, after, schema, effectiveValue);
   return { inspection, changes: [{ path: operation.path, before, after }] };
 }

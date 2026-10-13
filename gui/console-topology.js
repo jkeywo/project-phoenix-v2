@@ -25,6 +25,22 @@ export function consoleReadState(state, definition) {
     }
   }
   view.consoleHull = (state.consoleHull || []).filter(row => visibleHull.has(row.system_id));
+  // Status details have their own disclosure boundary: a radar feed never grants internal condition knowledge.
+  view.systemStatus = Object.fromEntries(Object.entries(state.systemStatus || {})
+    .filter(([id]) => (definition.systems || []).includes(id)));
+  // Repair feeds already disclose damage rows. Preserve those observations
+  // without adding private power/operating causes or granting equipment control.
+  for (const [source, board] of Object.entries(view.blackboards)) {
+    if (view.blackboardKinds[source] !== 'Repair') continue;
+    for (const row of board.system_hull || []) {
+      if (view.systemStatus[row.system_id]) continue;
+      const reason = { Damaged: 'damaged', Disabled: 'disabled', Destroyed: 'destroyed' }[row.tier];
+      view.systemStatus[row.system_id] = { display_name: row.display_name || row.system_id,
+        availability: row.tier === 'Operational' ? 'normal' : row.tier === 'Damaged' ? 'degraded'
+          : ['Disabled', 'Destroyed'].includes(row.tier) ? 'unavailable' : 'unknown',
+        reasons: reason ? [{ code: reason }] : [], delegated: false };
+    }
+  }
   const hosting = state.consoleHosts?.[definition.id];
   const rating = hosting?.rating || (definition.home_station ? state.stationRatings?.[definition.home_station] : definition.visiting_rating);
   // Legacy family builders read their automation fallback under family keys.

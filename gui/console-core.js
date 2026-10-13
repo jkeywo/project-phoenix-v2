@@ -1,3 +1,4 @@
+import { mountSystemStatus } from './components/ph-system-status.js';
 import { createConsoleViewSession } from './console-working-view.js';
 /**
  * gui/console-core.js — Shared console runtime for HTML console panels.
@@ -428,6 +429,8 @@ export function initConsole({
     _tutorialEl.state = (s && s.tutorial) || null;
   }
 
+  let systemStatusWidget = null;
+
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   const workingView = createConsoleViewSession({
     send: view => { if (_latestState?.console_id) sendAction('set_console_view', { view }); },
@@ -459,6 +462,10 @@ export function initConsole({
     if (languageSwitch && typeof document !== 'undefined') {
       preserveConsoleEditContext(document, () => render(s));
     } else render(s);
+    if (Array.isArray(s.system_status) && typeof document !== 'undefined' && document.body?.append) {
+      systemStatusWidget ||= mountSystemStatus(document);
+      systemStatusWidget.update(s.system_status);
+    } else systemStatusWidget?.update([]);
     if (s.console_id) workingView.receive(s.console_view, s.console_host?.host || null);
     _updateGmTakeover(s);
     _updateTutorialOverlay(s);
@@ -751,6 +758,7 @@ export function initConsole({
     sendAction: sendAction,
     semanticActions: _semanticActions,
     disposeSemanticActions: function() {
+      systemStatusWidget?.dispose();
       if (typeof document !== 'undefined') document.removeEventListener('console-view-change', onWorkingViewChange);
       if (_semanticKeyHandler && typeof document !== 'undefined'
           && document.removeEventListener) {

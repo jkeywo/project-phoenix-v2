@@ -78,6 +78,35 @@ kind = "Viewscreen"
 id = "dock"
 kind = "dock"
 console = "operations"
+power_group = "dock"
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+
+[[system.component]]
+id = "power"
+kind = "power_input"
+
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+
+[system.component.config]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
+[power_groups.dock]
+label = "Dock"
 "#,
             &["dock"],
         )
@@ -104,7 +133,7 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
     );
     let mut dock = control();
     dock.docked = true;
-    dock.engaged = false;
+    dock.set_engaged(false);
     dock.available_target = Some("berth".into());
     let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
     blackboards.0.insert(
@@ -188,26 +217,29 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
 #[test]
 fn save_state_carries_engage_dock_and_target_only() {
     let mut c = control();
-    c.engaged = true;
+    c.set_engaged(true);
     c.docked = true;
-    c.docking_target = Some("berth-1".into());
+    c.set_docking_target(Some("berth-1".into()));
     c.last_refusal = Some(DockRefusal::OutOfRange);
     let save = c.save_state();
-    assert!(save.engaged);
+    assert!(save.channels.boolean("enabled"));
     assert!(save.docked);
-    assert_eq!(save.docking_target.as_deref(), Some("berth-1"));
+    assert_eq!(save.channels.target("target"), Some("berth-1"));
 }
 
 #[test]
-fn an_idle_control_saves_as_default() {
-    assert_eq!(control().save_state(), DockSaveState::default());
+fn an_idle_control_saves_declared_channels() {
+    let save = control().save_state();
+    assert!(!save.channels.boolean("enabled"));
+    assert_eq!(save.channels.target("target"), None);
+    assert_eq!(save.channels.0.len(), 2);
 }
 
 #[test]
 fn docked_partner_is_only_the_target_while_docked() {
     let mut c = control();
-    c.docking_target = Some("berth-1".into());
-    c.engaged = true;
+    c.set_docking_target(Some("berth-1".into()));
+    c.set_engaged(true);
     assert_eq!(c.docked_partner(), None, "approaching is not yet docked");
     c.docked = true;
     assert_eq!(c.docked_partner(), Some("berth-1"));
@@ -237,8 +269,11 @@ fn authored_instance_id_is_the_consumed_command_target() {
     app.update();
 
     let dock = app.world().entity(entity).get::<DockControl>().unwrap();
-    assert!(dock.engaged, "the authored Dock SystemId must be consumed");
-    assert_eq!(dock.docking_target.as_deref(), Some("berth-1"));
+    assert!(
+        dock.engaged(),
+        "the authored Dock SystemId must be consumed"
+    );
+    assert_eq!(dock.docking_target(), Some("berth-1"));
 }
 
 #[test]
@@ -289,7 +324,7 @@ fn undock_reports_one_applied_or_refused_terminal_outcome() {
         app.add_message::<OutboundMessage>()
             .add_systems(Update, handle_dock_commands);
         let mut dock = control();
-        dock.engaged = engaged;
+        dock.set_engaged(engaged);
         app.world_mut().spawn((
             dock,
             Transform::default(),
@@ -428,11 +463,11 @@ fn engage_world() -> (App, Entity) {
             EntityUuid(OPERATOR.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
             own_marker(),
-            DockControl {
-                engaged: true,
-                docked: false,
-                docking_target: Some(TARGET.into()),
-                ..control_with_id_config(DOCK_SYSTEM_ID, unpowered_config())
+            {
+                let mut dock = control_with_id_config(DOCK_SYSTEM_ID, unpowered_config());
+                dock.set_engaged(true);
+                dock.set_docking_target(Some(TARGET.into()));
+                dock
             },
             crate::core::messages::AdmittedCommands::default(),
         ))
@@ -560,7 +595,7 @@ fn a_dock_refused_before_it_mates_still_opens_and_closes_one_activation() {
             .entity(operator)
             .get::<DockControl>()
             .unwrap()
-            .engaged,
+            .engaged(),
         "a refused engage drops the intent with the (never-formed) mate"
     );
 }
@@ -592,5 +627,123 @@ fn a_mate_that_drifts_out_of_range_ends_the_standing_activation() {
             reason: TaskTerminalReason::OutOfRange,
         }],
         "the standing activation closes; nothing new opens for a hold that was already live"
+    );
+}
+
+#[test]
+fn composed_channels_drive_existing_commands_and_survive_restore() {
+    let mut system: crate::ship::config::SystemInstanceConfig = toml::from_str(
+        r#"
+        id = "custom-clamps"
+        kind = "dock"
+        power_group = "dock"
+    "#,
+    )
+    .unwrap();
+    system.channels = vec![
+        CommandChannelConfig {
+            name: "hold".into(),
+            kind: CommandChannelKind::Boolean,
+        },
+        CommandChannelConfig {
+            name: "berth".into(),
+            kind: CommandChannelKind::EntityTarget,
+        },
+    ];
+    system.components = vec![
+        phoenix_sim_gameplay::ship::composition::SystemComponentConfig::PowerInput {
+            id: "supply".into(),
+        },
+        phoenix_sim_gameplay::ship::composition::SystemComponentConfig::DockMating {
+            id: "mating".into(),
+            enabled_channel: "hold".into(),
+            target_channel: "berth".into(),
+            power_input: "supply".into(),
+            config: config(),
+        },
+    ];
+    let mut control = DockControl::from_system(&system);
+    control
+        .channels
+        .set("hold", CommandChannelValue::Boolean(true))
+        .unwrap();
+    control
+        .channels
+        .set(
+            "berth",
+            CommandChannelValue::EntityTarget(Some("berth-1".into())),
+        )
+        .unwrap();
+    assert!(control.engaged());
+    assert_eq!(control.docking_target(), Some("berth-1"));
+    control.docked = true;
+    let encoded = serde_json::to_string(&control.save_state()).unwrap();
+    let save = serde_json::from_str(&encoded).unwrap();
+    let mut restored = DockControl::from_system(&system);
+    restored.restore(&save);
+    assert_eq!(restored.docked_partner(), Some("berth-1"));
+    assert_eq!(restored.channels, control.channels);
+    restored.set_engaged(false);
+    restored.set_docking_target(None);
+    assert!(!restored.channels.boolean("hold"));
+    assert_eq!(restored.channels.target("berth"), None);
+}
+
+#[test]
+fn resumed_clearance_finishes_the_same_manoeuvre() {
+    let mut original = control();
+    original.undock_target = Some(Vec3::new(0.0, 0.0, 120.0));
+    let mut restored = control();
+    restored.restore(
+        &serde_json::from_str(&serde_json::to_string(&original.save_state()).unwrap()).unwrap(),
+    );
+    assert_eq!(restored.undock_target, original.undock_target);
+    let pose = Pose {
+        translation: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+    };
+    let expected = decide_dock(
+        Entity::PLACEHOLDER,
+        "ship",
+        &original,
+        pose,
+        &[],
+        2,
+        false,
+        &[],
+        1.0,
+    );
+    let actual = decide_dock(
+        Entity::PLACEHOLDER,
+        "ship",
+        &restored,
+        pose,
+        &[],
+        2,
+        false,
+        &[],
+        1.0,
+    );
+    assert_eq!(actual.undock_target, expected.undock_target);
+    assert_eq!(actual.new_pose, expected.new_pose);
+    assert!(actual.new_pose.is_some());
+}
+
+#[test]
+fn availability_uses_current_conditions_not_historical_refusal() {
+    let mut dock = control();
+    dock.last_refusal = Some(DockRefusal::OutOfRange);
+    assert_eq!(dock.availability_refusal(2, false, true), None);
+    assert_eq!(
+        dock.availability_refusal(1, false, true),
+        Some(DockRefusal::Unpowered)
+    );
+    assert_eq!(
+        dock.availability_refusal(2, true, true),
+        Some(DockRefusal::Disabled)
+    );
+    assert_eq!(
+        dock.availability_refusal(2, false, false),
+        Some(DockRefusal::NoDockMarkers)
     );
 }

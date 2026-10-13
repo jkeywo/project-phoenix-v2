@@ -4699,3 +4699,30 @@ workshop.ship.command_target,Workshop Console metadata,Command target Station,Zi
 workshop.ship.no_command_target,Workshop Console metadata,No command target,Kein Befehlsziel,No command target,machine
 workshop.ship.rating_scope,Workshop Console metadata,Rating owner,Rating-Eigentümer,Rating owner,machine
 workshop.ship.no_home_station,Workshop detached Console option,No home Station,Keine Heimatstation,No home Station,machine
+workshop.ship.component.title,Workshop System composition,System components,Systemkomponenten,System components,machine
+workshop.ship.component.draft,Workshop System composition,Changes stay in this form until Apply composition validates and saves them.,"Änderungen bleiben in diesem Formular, bis die Zusammensetzung geprüft und gespeichert wird.",Changes stay in this form until Apply composition validates and saves them.,machine
+workshop.ship.component.id,Workshop System composition,Component ID,Komponenten-ID,Component ID,machine
+workshop.ship.component.kind,Workshop System composition,Component kind,Komponententyp,Component kind,machine
+workshop.ship.component.apply,Workshop System composition,Apply composition,Zusammensetzung anwenden,Apply composition,machine
+workshop.ship.component.add,Workshop System composition,Add component,Komponente hinzufügen,Add component,machine
+workshop.ship.component.remove,Workshop System composition,Remove component,Komponente entfernen,Remove component,machine
+workshop.ship.component.up,Workshop System composition,Move component up,Komponente nach oben,Move component up,machine
+workshop.ship.component.down,Workshop System composition,Move component down,Komponente nach unten,Move component down,machine
+workshop.ship.component.reset,Workshop System composition,Reset composition draft,Entwurf zurücksetzen,Reset composition draft,machine
+workshop.ship.component.channels,Workshop System composition,Command channels,Befehlskanäle,Command channels,machine
+workshop.ship.component.materialise,Workshop System composition,Explicitly materialise inherited composition,Geerbte Zusammensetzung ausdrücklich lokal übernehmen,Explicitly materialise inherited composition,machine
+workshop.ship.component.power_group,Workshop System composition,Power group,Leistungsgruppe,Power group,machine
+system.status.equipment,Shared System status UI,Equipment,Ausrüstung,Equipment,machine
+system.status.details,Shared System status UI,System details,Systemdetails,System details,machine
+system.status.close,Shared System status UI,Close,Schließen,Close,machine
+system.status.normal,Shared System status UI,Operational,Betriebsbereit,Operational,machine
+system.status.degraded,Shared System status UI,Degraded,Beeinträchtigt,Degraded,machine
+system.status.unavailable,Shared System status UI,Unavailable,Nicht verfügbar,Unavailable,machine
+system.status.unknown,Shared System status UI,Status unknown,Status unbekannt,Status unknown,machine
+system.status.delegated,Shared System status UI,AI equipment: {count}; affected: {affected},KI-Ausrüstung: {count}; beeinträchtigt: {affected},AI equipment: {count}; affected: {affected},machine
+system.status.reason.damaged,Shared System status UI,Damaged,Beschädigt,Damaged,machine
+system.status.reason.disabled,Shared System status UI,Disabled by damage,Durch Schaden deaktiviert,Disabled by damage,machine
+system.status.reason.destroyed,Shared System status UI,Destroyed,Zerstört,Destroyed,machine
+system.status.reason.offline,Shared System status UI,Offline,Offline,Offline,machine
+system.status.reason.unpowered,Shared System status UI,Insufficient power,Unzureichende Energie,Insufficient power,machine
+system.status.reason.no_dock_markers,Shared System status UI,No docking attachment points,Keine Andockpunkte,No docking attachment points,machine

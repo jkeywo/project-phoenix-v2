@@ -55,6 +55,8 @@ const COMPOSE_KEYED_ARRAYS = {
   'station.rating': 'name',
   'console.rating': 'name',
   system: 'id',
+  'system.component': 'id',
+  'system.channel': 'name',
   'torpedoes.tubes': 'id',
   'weapons_console.blaster_banks': 'id',
   'weapons_console.phaser_banks': 'id',

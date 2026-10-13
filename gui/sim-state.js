@@ -146,6 +146,7 @@ export class ClientSimState {
     this.consoleDefinitions = [];
     this.consoleHosts = consoleHosts;
     this.consoleViews = consoleViews;
+    this.systemStatus = {};
     /** Authoritative System id → Console Family projection, populated from
      *  Welcome ship_config.system_console_families. Every owned System has an
      *  entry; the client never infers presentation from its id spelling. */
@@ -343,6 +344,7 @@ export class ClientSimState {
         const snap = d.snapshot || {};
         this.consoleHosts = Object.fromEntries((snap.console_hosts || []).filter(Boolean).map(entry => [entry.console, entry]));
         this.consoleViews = snap.console_views || {};
+        this.systemStatus = snap.system_status || {};
         // Authoritative per-Station health (issue #1100). `health` is omitted on
         // the wire for the neutral no-damage-model state, so a missing value
         // becomes an explicit `null` the Hero Bar renders as that neutral cue.
@@ -406,6 +408,7 @@ export class ClientSimState {
         // reconnect handshake for a peer already in the current round.
         this.consoleHosts = {};
         this.consoleViews = {};
+        this.systemStatus = {};
         this.consoleImportance = {};
         this.stationHealth = {};
         this.consoleHealth = {};

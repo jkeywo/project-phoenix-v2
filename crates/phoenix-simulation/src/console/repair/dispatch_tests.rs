@@ -5,6 +5,8 @@ use crate::ship::damage::SystemHull;
 
 fn system(id: &str, station: Option<&str>) -> SystemInstanceConfig {
     SystemInstanceConfig {
+        components: Vec::new(),
+        channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId(
             station.unwrap_or("uncrewed").into(),
         )),

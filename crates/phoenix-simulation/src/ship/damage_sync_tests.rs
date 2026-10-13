@@ -619,6 +619,8 @@ fn weapon_system_destruction_emits_tier_crossed_and_disarmed_for_a_non_local_shi
         .0
         .systems
         .push(crate::ship::config::SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId(
                 "damage-test-background".into(),
             )),
@@ -829,6 +831,8 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
         .0
         .systems
         .push(crate::ship::config::SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: sid.clone(),
             kind: "generic".into(),
@@ -857,6 +861,8 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
             .0
             .systems
             .push(crate::ship::config::SystemInstanceConfig {
+                components: Vec::new(),
+                channels: Vec::new(),
                 console: Some(phoenix_model::identity::ConsoleId(station.into())),
                 id,
                 kind: kind.into(),

@@ -26,7 +26,7 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1477,6 +1477,9 @@ impl Default for ShipClientConfig {
 /// has migrated to `SystemBlackboard` (issue #570); only world entity snapshots
 /// remain here so the client can track NPC/asteroid positions and hull.
 pub struct SimSnapshot {
+    /// Observed detail, filtered to each recipient's Console knowledge.
+    #[serde(default)]
+    pub system_status: BTreeMap<SystemId, crate::system_status::SystemStatus>,
     #[serde(default)]
     pub console_views: BTreeMap<ConsoleId, crate::console::ConsoleWorkingView>,
     #[serde(default)]

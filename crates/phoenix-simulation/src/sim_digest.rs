@@ -2039,35 +2039,19 @@ fn fold_tractor_namespace(world: &World, acc: u64) -> u64 {
     )
 }
 
-/// Every ship DOCKED to another hull (issue #1159), in [`FoldKey`] order, in its
-/// own namespace.
-///
-/// # What is folded, and why it has to be
-///
-/// The docked relationship — the docker's key and the uuid of the hull it is
-/// mated to — for every ship actually docked. This is a relationship between two
-/// hulls that nothing else in the digest records: while a mid-approach docker's
-/// divergence shows in its own folded position, the DOCKED FACT (which two hulls
-/// are joined) is authoritative state the umbilical (#1160) gates on, and a host
-/// that thought two hulls were mated when they were not disagrees about what the
-/// umbilical may bridge. The authored `[dock]` terms are content, which
-/// `content_digest` answers for, and the approach/undock motion is already caught
-/// by the ship's folded position, so neither is folded here.
-///
-/// The empty-walk affordance is [`fold_tractor_namespace`]'s, and does the same
-/// real work: a hull that authored a `[dock]` table and is NOT docked folds
-/// NOTHING — not even a row — so a shipped hull can gain docking without moving
-/// any committed world's digest. The moment one ship is docked the row count is
-/// in the accumulator like everyone else's.
+/// Canonical Dock channels and mechanical state, including approach intent and
+/// clearance after undocking. Rows follow entity identity; channels are a BTreeMap.
 fn fold_dock_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
         acc,
         "dock-namespace",
-        |control: &DockControl| control.docked_partner().map(str::to_string),
-        |mut acc, target| {
-            acc = fold_str(acc, &target);
-            acc
+        |control: &DockControl| Some((control.system_id.0.as_str(), control.save_state())),
+        |mut acc, (system, state)| {
+            acc = fold_str(acc, system);
+            acc = fold_serde(acc, &state.channels);
+            acc = fold_u64(acc, u64::from(state.docked));
+            fold_optional_triple(acc, state.undock_target)
         },
     )
 }

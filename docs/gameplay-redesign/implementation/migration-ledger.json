@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 1,
+  "current_increment": 2,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -44,12 +44,16 @@
     {
       "id": 2,
       "title": "Composable Systems and common status",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         1
       ],
       "completion": "Dock proves supported component composition and generic commands; common status/details covers manual, passive and delegated equipment.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/system-composition.yaml",
+        "docs/gameplay-redesign/implementation/increment-2.md",
+        "docs/acceptance/1562-composable-systems.md"
+      ]
     },
     {
       "id": 3,
@@ -2629,5 +2633,15 @@
   "tracker": {
     "issue": 1562,
     "url": "https://github.com/jkeywo/project-phoenix-v2/issues/1562"
-  }
+  },
+  "advance_authorizations": [
+    {
+      "from_increment": 1,
+      "to_increment": 2,
+      "date": "2026-10-13",
+      "user_instruction": "continue with incriment 2",
+      "pending_acceptance": "Physical phone/native multi-monitor and human workload acceptance remains pending; automated Increment 1 evidence is recorded.",
+      "evidence": "docs/acceptance/1562-explicit-consoles.md"
+    }
+  ]
 }

@@ -1,0 +1,33 @@
+entities:
+  - decision: composed-system-command-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Composed System Command Boundary
+      summary: "Increment 2 introduces supported typed mechanism components with System-local component identities and shared typed command channels. A composed System retains one Console owner, SystemId admission target and ordinary individual AI. Components read shared intent and do not gain independent controllers. Dock is the first migrated consumer; existing Dock/Undock controls and gameplay remain equivalent."
+      rationale:
+        - "User-approved incremental redesign and instruction to continue increment 2; architecture AD03-AD05."
+  - decision: composed-dock-migration
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Dock Composition Migration
+      summary: "Active Dock tuning belongs to its typed docking component, with an explicit power-input component binding. Passive docking endpoints and rig markers remain available independently of an active Dock System. Existing command semantics retain nearest-target latching and clearance manoeuvres. Shared channels replace duplicated operational intent; component state retains actual mating and travel state. Persisted channels and state participate in snapshot, restore and digests."
+      rationale:
+        - "[ai] Concrete increment 2 implementation specification preserving current docking behaviour and passive berths. No resource redesign or component damage is introduced."
+  - decision: common-system-status-presentation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Common System Status Presentation
+      summary: "A shared read-only System status projection reports known current availability and reasons: normal green, degraded amber, unavailable red, and unknown when evidence is absent. Multiple simultaneous reasons use a multiple-status indicator and an inspectable details popup. Passive owned equipment remains listed; fully delegated equipment is hidden from the routine list with an inspectable aggregate summary. Console knowledge boundaries apply, and viewing status grants no control. Historical refusal, idle and absence of a target are not equipment failure."
+      rationale:
+        - "Architecture AD08 and AD20; user-approved increment 2. EMP, overheating and component conditions are displayed only when supported authoritative mechanisms report them."
+  - decision: supported-component-authoring
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Supported Component Authoring
+      summary: "Workshop exposes supported component kinds, typed fields and channel bindings through its existing document/history/validation/preview/Test workflow. Component identity is scoped within its System, with include inheritance merged by component id. Unsupported composition, duplicate ids, incompatible bindings and competing active Dock tuning are rejected before spawn. No arbitrary Workshop code or unused universal component framework is introduced."
+      rationale:
+        - "[ai] Increment 2 delivery contract applying AD13 and existing authoring workflows."

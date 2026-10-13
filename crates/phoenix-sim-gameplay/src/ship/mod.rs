@@ -34,3 +34,5 @@ pub mod shields;
 pub mod sensors;
 
 pub mod helm_planner;
+
+pub mod composition;

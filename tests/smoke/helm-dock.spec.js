@@ -53,6 +53,7 @@ import {
   expectFixtureWorld,
 } from './fixtures';
 import { ts } from './strings';
+import { dismissTutorialCards } from './dock-helpers';
 
 // A hull that authors no dock, as the player ship. The Alliance battleship is
 // the shipped hull with no `[dock]` table and no `kind = "dock"` system, so it
@@ -192,6 +193,7 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
 
   // The real client page, claiming Helm the way a player does.
   const helm = await context.newPage();
+  await helm.setViewportSize({ width: 844, height: 390 });
   const helmErrors = [];
   helm.on('pageerror', error => helmErrors.push(error.message));
   await helm.goto(`/client/#${hostId}`, { waitUntil: 'domcontentloaded' });
@@ -213,6 +215,36 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
   await expect(helmFrame.locator('#dock-status'))
     .toContainText(ts('console.dock.available'));
 
+  // Common status uses the same actual Dock System and its saved Console ownership.
+  await helm.waitForFunction(() => window.simState.systemStatus.dock?.availability === 'normal');
+  const equipment = helmFrame.locator('.system-status-strip');
+  await expect(equipment).not.toHaveAttribute('open', '');
+  // On a landscape phone the collapsed Equipment affordance must not intercept
+  // the real docking control. Check the hit target, then exercise Dock below.
+  await dockBtn.scrollIntoViewIfNeeded();
+  expect(await dockBtn.evaluate(button => {
+    const box = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit === button || button.contains(hit);
+  })).toBe(true);
+  await equipment.locator('summary').click();
+  const dockIndicator = equipment.locator('[data-system-id="dock"]');
+  await expect(dockIndicator.locator('[data-availability="normal"]')).toBeVisible();
+  await dockIndicator.focus();
+  await dockIndicator.press('Enter');
+  const details = helmFrame.locator('.system-status-dialog');
+  await expect(details).toBeVisible();
+  await expect(details).toContainText(ts('system.status.normal'));
+  await helm.screenshot({ path: test.info().outputPath('dock-status-phone.png') });
+  await details.locator('button').press('Escape');
+  await expect(details).toBeHidden();
+  await expect(dockIndicator).toBeFocused();
+  await dismissTutorialCards(helm, '#helm-iframe');
+  await equipment.locator('summary').click();
+  // Exercise Dock at desktop size: existing client diagnostics overlap its
+  // phone-sized control. The phone status/dialog check above remains separate.
+  await helm.setViewportSize({ width: 1280, height: 720 });
+
   // ── Pressing it mates the two hulls ────────────────────────────────────────
   // Re-pressed until the mate forms: the manoeuvre takes several ticks and a
   // throttled headless server may drop the first press. A repeat while the
@@ -230,6 +262,32 @@ test('cruiser helm shows the Dock control in range and docks with a berth', asyn
   await expect(dockBtn).toHaveText(ts('console.dock.undock'));
   await expect(helmFrame.locator('#dock-status'))
     .toContainText(ts('console.dock.docked'));
+
+  // An actual Engineering operator cuts the current Helm supply. Status must
+  // update without another Dock attempt, and recover despite the old refusal.
+  await wire.send('SelectStation', { station: 'Engineering' });
+  await wire.page.waitForFunction(token => window.__messages.some(message =>
+    message.type === 'StationAssigned' && message.data.token === token
+      && message.data.station_id === 'engineering'), wire.token);
+  await wire.page.waitForFunction(() => window.__messages.filter(message => message.type === 'SimState')
+    .at(-1)?.data.snapshot.control_sources['power-reactor'] === 'Human');
+  await wire.page.waitForFunction(() => typeof window.__messages.filter(message => message.type === 'PowerState')
+    .at(-1)?.data.helm === 'number');
+  const previousPower = await wire.page.evaluate(() => window.__messages.filter(message => message.type === 'PowerState').at(-1).data.helm);
+  const setPower = level => wire.send('ControlSystem', { target: 'power-reactor',
+    payload: { type: 'SetPowerGroupAllocation', data: { group: 'helm', level } } });
+  await equipment.locator('summary').click();
+  await dockIndicator.click();
+  await setPower(1);
+  await helm.waitForFunction(() => window.simState.systemStatus.dock?.reasons
+    .some(reason => reason.code === 'unpowered'));
+  await expect(details).toContainText(ts('system.status.reason.unpowered'));
+  await setPower(previousPower);
+  await helm.waitForFunction(() => window.simState.systemStatus.dock?.availability === 'normal');
+  await expect(details).not.toContainText(ts('system.status.reason.unpowered'));
+  await expect(details).toContainText(ts('system.status.normal'));
+  await helm.screenshot({ path: test.info().outputPath('dock-status-live.png') });
+  await details.locator('button').press('Escape');
 
   expect(serverCrashes, `server errors: ${serverCrashes.join('; ')}`).toEqual([]);
 

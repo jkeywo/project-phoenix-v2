@@ -439,9 +439,9 @@ fn shared_removal_releases_support_partners_without_a_local_ship() {
         .unwrap(),
         PowerGroupId("utility".into()),
     );
-    dock.engaged = true;
+    dock.set_engaged(true);
     dock.docked = true;
-    dock.docking_target = Some("partner".into());
+    dock.set_docking_target(Some("partner".into()));
     dock.available_target = Some("partner".into());
     let mut umbilical = phoenix::umbilical::TransferUmbilical::new(
         serde_json::from_value(serde_json::json!({
@@ -461,9 +461,9 @@ fn shared_removal_releases_support_partners_without_a_local_ship() {
     assert!(!tractor.engaged && tractor.coupled_target.is_none());
     let dock = world.get::<phoenix::dock::DockControl>(observer).unwrap();
     assert!(
-        !dock.engaged
+        !dock.engaged()
             && !dock.docked
-            && dock.docking_target.is_none()
+            && dock.docking_target().is_none()
             && dock.available_target.is_none()
     );
     let umbilical = world

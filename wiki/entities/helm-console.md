@@ -3,7 +3,7 @@ title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
 sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
-updated: 2026-09-06
+updated: 2026-10-13
 ---
 
 # Helm Console
@@ -59,16 +59,18 @@ payload carries a dock view that is available, engaged or docked, so a Helm with
 no dock system renders nothing extra. The Alliance destroyer and the Alliance
 cruiser author one; the battleship does not.
 
-Two things have to be authored together for the control to work. The `[dock]`
-table gives the approach terms — the reach the control appears within, the
-engage distance, the approach speed, the mate tolerance, how far Undock backs
-clear, and the lowest powered rung — and its presence alone is what makes a hull
-dockable. The dock PLATES are markers in the hull's model rig sidecar whose names
-begin with `dock`; a hull whose rig declares none can never mate, and validation
-cannot catch that because it never opens a model file (the guard is the shipped
-content walk in `crates/phoenix-simulation/src/entities/config_tests.rs`). Spawn reads both: `[dock]` plus
-markers gives `DockMarkers` (dockable), and the `kind = "dock"` System on top of
-them gives `DockControl` (an active docker).
+Active Dock authors a `dock_mating` component with approach terms and a
+`power_input` component bound through the System's existing power group. Typed
+boolean engagement and entity-target channels hold its shared command intent.
+The rig sidecar supplies `dock`-prefixed mating plates; the shipped-content walk
+in `crates/phoenix-simulation/src/entities/config_tests.rs` verifies those plates.
+Spawn resolves the composition and markers into `DockControl` and `DockMarkers`.
+Passive berths retain a top-level `[dock]` endpoint declaration without an active
+System; active Systems reject that competing legacy tuning table.
+
+The shared Equipment display also lists Dock when it has no nearby target.
+Current damage, insufficient power and missing rig markers produce status
+reasons; absence of a target does not mean the equipment has failed.
 
 The one button toggles Dock and Undock through the `helm.dock` semantic action,
 so a human sends exactly the admitted command a dock AI sends; the adapter reads

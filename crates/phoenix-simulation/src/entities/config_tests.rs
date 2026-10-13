@@ -643,7 +643,13 @@ fn every_dock_authoring_hull_declares_dock_markers_in_its_rig() {
             .replace('\\', "/");
         let cfg = crate::entities::include_resolve::load_entity_config(&key)
             .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
-        if cfg.dock.is_none() {
+        if cfg.dock.is_none()
+            && !cfg.ship_config.as_ref().is_some_and(|sc| {
+                sc.systems
+                    .iter()
+                    .any(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
+            })
+        {
             continue;
         }
         dockable += 1;
@@ -653,7 +659,7 @@ fn every_dock_authoring_hull_declares_dock_markers_in_its_rig() {
             .as_ref()
             .and_then(|m| m.model.as_deref())
             .unwrap_or_else(|| {
-                panic!("{key} authors a [dock] table, so it must author a [mesh] model whose rig carries its dock plates")
+                panic!("{key} authors docking, so it must author a [mesh] model whose rig carries its dock plates")
             });
         let variant = cfg.mesh.as_ref().and_then(|m| m.variant.as_deref());
         let rig = crate::entities::model_markers::resolve_sidecar_rig(model, variant)
@@ -661,7 +667,7 @@ fn every_dock_authoring_hull_declares_dock_markers_in_its_rig() {
         let markers = crate::dock::resolve_dock_markers(&rig);
         assert!(
             !markers.is_empty(),
-            "{key} authors a [dock] table but its rig ({model}, variant {variant:?}) \
+            "{key} authors docking but its rig ({model}, variant {variant:?}) \
              declares no `dock`-prefixed markers — nothing can ever mate with it"
         );
 

@@ -601,20 +601,13 @@ struct DockSpawn;
 
 impl SpawnSection for DockSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
-        // Docking (issue #1159) — a hull opts into docking with a `[dock]` table.
-        // Its presence, and ONLY its presence, triggers the one spawn-time read of
-        // the model rig sidecar for `dock`-prefixed markers, so a world whose hulls
-        // author no `[dock]` reads no sidecar here and its `content_digest` is
-        // unchanged. Two components come out of it:
-        //
-        //   * `DockMarkers` — the dock markers resolved from the rig sidecar into the
-        //     hull's own frame — on any hull with a `[dock]` table AND dock markers.
-        //     This is what makes a hull DOCKABLE (a passive berth needs only this).
-        //   * `DockControl` — the live dock control — additionally on a hull whose
-        //     `[[system]] kind = "dock"` gives the dock a power group and a station,
-        //     making it an ACTIVE docker. `EntityConfig` validation already paired
-        //     the two, so the resolve below cannot silently drop the control.
-        if let Some(dock) = &config.dock {
+        let active = config.ship_config.as_ref().and_then(|ship| {
+            ship.systems
+                .iter()
+                .find(|system| system.kind == crate::ship::system_registry::DOCK_KIND)
+        });
+        // Passive berths opt in with [dock]; active mating components imply markers.
+        if config.dock.is_some() || active.is_some() {
             if let Some(mesh) = &config.mesh {
                 if let Some(model) = mesh.model.as_deref() {
                     if let Some(rig) = crate::entities::model_markers::resolve_sidecar_rig(
@@ -628,21 +621,8 @@ impl SpawnSection for DockSpawn {
                     }
                 }
             }
-            if let Some((system_id, power_group)) = config.ship_config.as_ref().and_then(|sc| {
-                sc.systems
-                    .iter()
-                    .find(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
-                    .and_then(|s| {
-                        s.power_group
-                            .clone()
-                            .map(|power_group| (s.id.clone(), power_group))
-                    })
-            }) {
-                cmds.insert(crate::dock::DockControl::new(
-                    system_id,
-                    dock.clone(),
-                    power_group,
-                ));
+            if let Some(system) = active {
+                cmds.insert(crate::dock::DockControl::from_system(system));
             }
         }
     }

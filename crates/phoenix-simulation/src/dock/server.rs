@@ -25,6 +25,10 @@
 use crate::ai::standing_operation::OperationFacts;
 use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
+use phoenix_sim_gameplay::ship::composition::{
+    dock_composition, CommandChannelConfig, CommandChannelKind, CommandChannelValue,
+    SystemCommandChannels,
+};
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
@@ -74,12 +78,8 @@ impl DockMarkers {
 /// One ship's active dock control (issue #1159): the authored dock terms, the
 /// power group it draws from, and the live engage/dock state.
 ///
-/// Inserted at spawn only on a hull that authored a `[dock]` table AND a
-/// `kind = "dock"` `[[system]]`. A hull with neither carries no component and is
-/// byte-identical to one built before this existed (AGENTS.md rule 11). A hull
-/// that authors a `[dock]` table but no dock system is DOCKABLE (it carries
-/// [`DockMarkers`]) but not an active docker — it can be mated with, it just has
-/// no control of its own.
+/// Inserted from one validated Dock mating component and its power input.
+/// Passive berths carry only DockMarkers, without active command channels.
 ///
 /// `engaged` is the operator's INTENT to hold a dock; `docked` is whether the
 /// mate has actually formed. `docking_target` is the hull the manoeuvre is
@@ -98,16 +98,15 @@ pub struct DockControl {
     pub power_group: PowerGroupId,
     /// The operator's standing intent to hold a dock. Set true by `Dock`, false
     /// by `Undock` and by every interruption.
-    pub engaged: bool,
+    pub channels: SystemCommandChannels,
+    pub enabled_channel: String,
+    pub target_channel: String,
     /// Whether the two hulls are actually mated this tick. Only ever true while
     /// `engaged` and `docking_target` is set.
     pub docked: bool,
-    /// The hull the manoeuvre is closing on or holding, `Some(target-uuid)` while
-    /// engaged, `None` when idle or undocking.
-    pub docking_target: Option<String>,
     /// Where the ship is backing out to during an undock, `Some(clear-pose)`
-    /// until it arrives and returns to ordinary flight. Not saved and not folded
-    /// — a transient the next tick recomputes the effect of.
+    /// until it arrives and returns to ordinary flight. Saved and folded so
+    /// continuation completes the same mechanical clearance manoeuvre.
     pub undock_target: Option<Vec3>,
     /// The nearest dockable hull within the authored range this tick, resolved
     /// for the console so the contextual control can appear. A projection, not
@@ -127,12 +126,77 @@ impl DockControl {
             system_id,
             config,
             power_group,
-            engaged: false,
+            channels: SystemCommandChannels::from_definitions(&[
+                CommandChannelConfig {
+                    name: "enabled".into(),
+                    kind: CommandChannelKind::Boolean,
+                },
+                CommandChannelConfig {
+                    name: "target".into(),
+                    kind: CommandChannelKind::EntityTarget,
+                },
+            ]),
+            enabled_channel: "enabled".into(),
+            target_channel: "target".into(),
             docked: false,
-            docking_target: None,
             undock_target: None,
             available_target: None,
             last_refusal: None,
+        }
+    }
+
+    /// Construct from validated authored composition; no legacy data conversion.
+    pub fn from_system(system: &crate::ship::config::SystemInstanceConfig) -> Self {
+        let binding = dock_composition(&system.components).expect("validated Dock composition");
+        let mut control = Self::new(
+            system.id.clone(),
+            binding.config.clone(),
+            system
+                .power_group
+                .clone()
+                .expect("validated Dock power input"),
+        );
+        control.channels = SystemCommandChannels::from_definitions(&system.channels);
+        control.enabled_channel = binding.enabled_channel.into();
+        control.target_channel = binding.target_channel.into();
+        control
+    }
+
+    pub fn engaged(&self) -> bool {
+        self.channels.boolean(&self.enabled_channel)
+    }
+    pub fn docking_target(&self) -> Option<&str> {
+        self.channels.target(&self.target_channel)
+    }
+    pub fn set_engaged(&mut self, value: bool) {
+        self.channels
+            .set(&self.enabled_channel, CommandChannelValue::Boolean(value))
+            .expect("validated engagement channel");
+    }
+    pub fn set_docking_target(&mut self, value: Option<String>) {
+        self.channels
+            .set(
+                &self.target_channel,
+                CommandChannelValue::EntityTarget(value),
+            )
+            .expect("validated target channel");
+    }
+
+    /// Present hardware conditions, independent of historical action refusals.
+    pub fn availability_refusal(
+        &self,
+        power_level: u8,
+        disabled: bool,
+        has_markers: bool,
+    ) -> Option<DockRefusal> {
+        if disabled {
+            Some(DockRefusal::Disabled)
+        } else if power_level < self.config.min_power_level {
+            Some(DockRefusal::Unpowered)
+        } else if !has_markers {
+            Some(DockRefusal::NoDockMarkers)
+        } else {
+            None
         }
     }
 
@@ -141,7 +205,7 @@ impl DockControl {
     /// are docked when one's `docked_partner()` names the other.
     pub fn docked_partner(&self) -> Option<&str> {
         if self.docked {
-            self.docking_target.as_deref()
+            self.docking_target()
         } else {
             None
         }
@@ -153,9 +217,9 @@ impl DockControl {
     /// tractor leaves its coupling terms out of `TractorSaveState`.
     pub fn save_state(&self) -> DockSaveState {
         DockSaveState {
-            engaged: self.engaged,
+            channels: self.channels.clone(),
             docked: self.docked,
-            docking_target: self.docking_target.clone(),
+            undock_target: self.undock_target.map(|target| target.to_array()),
         }
     }
 
@@ -163,32 +227,24 @@ impl DockControl {
     /// onto a control that already carries its authored System identity, config
     /// and resolved power group from the fresh spawn.
     ///
-    /// The last refusal and the undock target are deliberately NOT restored: both
-    /// are projections the next `tick_dock` re-derives from the resumed world.
+    /// Availability and historical refusal are presentation projections; the
+    /// mechanical undock destination is restored with the channel intent.
     pub fn restore(&mut self, save: &DockSaveState) {
-        self.engaged = save.engaged;
+        self.channels = save.channels.clone();
         self.docked = save.docked;
-        self.docking_target = save.docking_target.clone();
-        self.undock_target = None;
+        self.undock_target = save.undock_target.map(Vec3::from_array);
         self.available_target = None;
         self.last_refusal = None;
     }
 }
 
-/// The snapshot-carried half of a [`DockControl`] (issue #1159): the engage/dock
-/// state and the docked target, and nothing else.
-///
-/// `Default` is the idle control — not engaged, not docked — which is what a hull
-/// that authored a dock and never used it captures, so a resume of such a ship
-/// restores byte-identically and folds the same number.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+/// Authoritative command intent and mechanical mating/clearance state.
+/// Channel bindings and tuning are restored from the validated entity template.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DockSaveState {
-    #[serde(default)]
-    pub engaged: bool,
-    #[serde(default)]
+    pub channels: SystemCommandChannels,
     pub docked: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub docking_target: Option<String>,
+    pub undock_target: Option<[f32; 3]>,
 }
 
 /// Registers the dock systems and its admitted-command consumer (issue #1159).
@@ -285,12 +341,12 @@ pub fn handle_dock_commands(
         let system_id = dock.system_id.0.clone();
         for cmd in admitted.for_target(&system_id) {
             let outcome = match &cmd.payload {
-                SystemControlPayload::Dock if !dock.engaged => {
+                SystemControlPayload::Dock if !dock.engaged() => {
                     match dock.available_target.clone() {
                         Some(target) => {
-                            dock.engaged = true;
+                            dock.set_engaged(true);
                             dock.docked = false;
-                            dock.docking_target = Some(target);
+                            dock.set_docking_target(Some(target));
                             dock.undock_target = None;
                             dock.last_refusal = None;
                             ActionFeedbackOutcome::Applied
@@ -306,7 +362,7 @@ pub fn handle_dock_commands(
                         }
                     }
                 }
-                SystemControlPayload::Undock if dock.engaged || dock.docked => {
+                SystemControlPayload::Undock if dock.engaged() || dock.docked => {
                     // Report the cancel BEFORE clearing intent, so a release of an
                     // idle dock (a stale-UI double tap) reports nothing at all
                     // (issue #1345). A live activation exists only once
@@ -328,9 +384,9 @@ pub fn handle_dock_commands(
                     // manoeuvre needs no further reference to the target.
                     let back = transform.rotation * Vec3::new(0.0, 0.0, 1.0); // local +Z = astern
                     let clear = transform.translation + back * dock.config.undock_clear_distance;
-                    dock.engaged = false;
+                    dock.set_engaged(false);
                     dock.docked = false;
-                    dock.docking_target = None;
+                    dock.set_docking_target(None);
                     dock.undock_target = Some(clear);
                     dock.last_refusal = None;
                     ActionFeedbackOutcome::Applied
@@ -470,14 +526,14 @@ pub fn operate_dock_ai(
         let facts = OperationFacts {
             order_present: directive_target.is_some(),
             ready,
-            active: dock.engaged || dock.docked,
+            active: dock.engaged() || dock.docked,
             owned: host_engaged,
         };
         let decision = crate::ai::standing_operation::decide(facts);
         // Dock historically tests engaged alone when starting, but both
         // engaged and docked when adopting or withdrawing (including restored state).
         let start = crate::ai::standing_operation::decide(OperationFacts {
-            active: dock.engaged,
+            active: dock.engaged(),
             ..facts
         })
         .start;
@@ -642,7 +698,7 @@ pub fn tick_dock(
         // trying (`engaged`) or holding (`docked`); an idle dock merely
         // publishing "no markers" or "nothing in range" is not an attempt and
         // opens nothing.
-        if dock.engaged || dock.docked {
+        if dock.engaged() || dock.docked {
             let work = if !dock.docked && out.docked {
                 Some(PhysicalWork::Formed {
                     target: out.docking_target.as_deref(),
@@ -650,7 +706,7 @@ pub fn tick_dock(
                 })
             } else if !out.docked {
                 out.last_refusal.map(|refusal| PhysicalWork::Refused {
-                    target: dock.docking_target.as_deref(),
+                    target: dock.docking_target(),
                     reason: terminal_reason_for(refusal),
                 })
             } else {
@@ -661,7 +717,7 @@ pub fn tick_dock(
                     hold_slot(&dock.system_id, Some(uuid)),
                     PriorActivation {
                         active: dock.docked,
-                        target: dock.docking_target.as_deref(),
+                        target: dock.docking_target(),
                     },
                     work,
                 ) {
@@ -670,9 +726,9 @@ pub fn tick_dock(
             }
         }
 
-        dock.engaged = out.engaged;
+        dock.set_engaged(out.engaged);
         dock.docked = out.docked;
-        dock.docking_target = out.docking_target;
+        dock.set_docking_target(out.docking_target);
         dock.undock_target = out.undock_target;
         dock.available_target = out.available_target;
         dock.last_refusal = out.last_refusal;
@@ -782,7 +838,7 @@ fn decide_dock(
     }
 
     // ── Idle: publish availability, no motion ─────────────────────────────────
-    if !dock.engaged {
+    if !dock.engaged() {
         // A hull that declares no dock markers can never dock, and says so the
         // moment it is idle — the console shows the reason rather than a control
         // that grips nothing.
@@ -797,16 +853,11 @@ fn decide_dock(
 
     // Hardware and power before target acquisition — most-actionable-first, the
     // tractor's check order.
-    if disabled {
-        return end(DockRefusal::Disabled);
+    if let Some(refusal) = dock.availability_refusal(power_level, disabled, !own_markers.is_empty())
+    {
+        return end(refusal);
     }
-    if power_level < cfg.min_power_level {
-        return end(DockRefusal::Unpowered);
-    }
-    if own_markers.is_empty() {
-        return end(DockRefusal::NoDockMarkers);
-    }
-    let Some(target_uuid) = dock.docking_target.clone() else {
+    let Some(target_uuid) = dock.docking_target().map(str::to_owned) else {
         return end(DockRefusal::NoTarget);
     };
     let Some(target) = candidates.iter().find(|c| c.uuid == target_uuid) else {
@@ -939,7 +990,7 @@ pub fn publish_dock_blackboard(
             available: dock.available_target.is_some() && !dock.docked,
             available_target: dock.available_target.clone(),
             available_target_name: name_of(&dock.available_target),
-            engaged: dock.engaged,
+            engaged: dock.engaged(),
             docked: dock.docked,
             docked_to: dock.docked_partner().map(|s| s.to_string()),
             docked_to_name: name_of(&dock.docked_partner().map(|s| s.to_string())),

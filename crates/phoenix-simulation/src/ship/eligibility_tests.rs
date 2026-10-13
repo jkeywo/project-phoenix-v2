@@ -27,6 +27,8 @@ fn station(id: &str, ratings: Vec<StationRatingConfig>) -> StationConfig {
 
 fn system(id: &str, kind: &str, station: &str) -> SystemInstanceConfig {
     SystemInstanceConfig {
+        components: Vec::new(),
+        channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId(station.into())),
         id: SystemId(id.into()),
         kind: kind.into(),

@@ -18,6 +18,7 @@
 
 use super::*;
 use crate::core::broadcast::sim::SimProducer;
+use crate::core::messages::SystemId;
 
 /// Stable lifecycle key for the `SimState` entity position/health delta pair.
 pub(crate) const ENTITY_STATE_REPLICATION_KEY: &str = "entity-state";
@@ -101,6 +102,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let entity_states = build_sim_state_entity_states(world);
         let station_health = build_station_health_snapshots(world);
         let console_health = build_console_health_snapshots(world);
+        let (system_status, status_owners) = build_system_status(world);
         // Fold this tick's host state (objectives + Red Alert) into the
         // authoritative importance projection before reading it, so the snapshot
         // reflects the same tick's events (issue #1101). The drain of visits runs
@@ -124,6 +126,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         crate::console::repair::visibility::push_hull_updates(world);
 
         let mut snapshot = crate::core::messages::SimSnapshot {
+            system_status,
             console_views: build_console_working_views(world),
             console_hosts: build_console_host_snapshots(world),
             entity_states,
@@ -137,6 +140,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         };
         if snapshot.console_hosts.is_empty() {
             snapshot.console_views.clear();
+            snapshot.system_status.clear();
             return vec![ServerMessage::SimState { snapshot }];
         }
         // Working context can name records unknown to other Consoles. Project
@@ -149,6 +153,14 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             .filter(|player| player.connected)
             .map(|player| {
                 let mut projected = snapshot.clone();
+                projected.system_status.retain(|id, _| {
+                    super::system_status::visible_to(
+                        id,
+                        &status_owners,
+                        &snapshot.console_hosts,
+                        player.station.as_ref(),
+                    )
+                });
                 projected.console_views.retain(|id, _| {
                     snapshot.console_hosts.iter().any(|assignment| {
                         &assignment.console == id
@@ -167,6 +179,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         world.resource_mut::<SimOutbox>().extend_snapshot(pending);
         let mut local = snapshot;
         local.console_views.clear();
+        local.system_status.clear();
         world.resource_mut::<SimOutbox>().push_snapshot((
             crate::lobby::Target::Token(crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string()),
             ServerMessage::SimState { snapshot: local },
@@ -864,4 +877,38 @@ fn console_health_from_parts(
             }
         })
         .collect()
+}
+
+fn build_system_status(
+    world: &mut World,
+) -> (
+    std::collections::BTreeMap<SystemId, phoenix_model::system_status::SystemStatus>,
+    std::collections::BTreeMap<SystemId, phoenix_model::identity::ConsoleId>,
+) {
+    let mut query = world.query_filtered::<(
+        &crate::ship::components::ShipConfigComponent,
+        &crate::ship_plugin::ShipSystemControlSources,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::dock::server::DockControl>,
+        Option<&crate::ship::power::ShipPowerSystem>,
+        Option<&crate::dock::server::DockMarkers>,
+    ), With<LocalShip>>();
+    let Some((config, sources, hull, dock, power, markers)) = query.iter(world).next() else {
+        return Default::default();
+    };
+    let status = super::system_status::project(
+        &config.0,
+        hull.map(|h| &h.0),
+        &sources.0,
+        dock,
+        power,
+        markers,
+    );
+    let owners = config
+        .0
+        .systems
+        .iter()
+        .filter_map(|s| Some((s.id.clone(), s.console.clone()?)))
+        .collect();
+    (status, owners)
 }

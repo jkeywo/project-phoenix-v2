@@ -1296,6 +1296,8 @@ fn queue_entry_retained_when_all_systems_destroyed() {
     let config = ShipConfig {
         stations: fixture_stations(&[station_id]),
         systems: vec![SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId(station_id.into())),
             id: system_id.clone(),
             kind: "helm".into(),
@@ -1387,6 +1389,8 @@ fn npc_repair_config() -> crate::ship_plugin::ShipConfigComponent {
     crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm".into()),
             kind: "helm".into(),
@@ -1905,6 +1909,8 @@ fn set_repair_target_priority_from_a_non_engineering_token_is_rejected() {
 fn two_station_config() -> crate::ship_plugin::ShipConfigComponent {
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
     let sys = |id: &str, station: &str| SystemInstanceConfig {
+        components: Vec::new(),
+        channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId(station.into())),
         id: SystemId(id.into()),
         kind: "generic".into(),
@@ -2417,6 +2423,8 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm-sys".into()),
             kind: "generic".into(),
@@ -2510,6 +2518,8 @@ fn spawn_two_ownerless_rows(
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm-sys".into()),
             kind: "generic".into(),

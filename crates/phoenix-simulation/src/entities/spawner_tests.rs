@@ -86,7 +86,22 @@ screen = "fixture.html"
 console = "flight-control-console"
         power_group = "ops"
 
-        [dock]
+        [[system.channel]]
+        name = "hold"
+        kind = "boolean"
+        [[system.channel]]
+        name = "berth"
+        kind = "entity_target"
+        [[system.component]]
+        kind = "power_input"
+        id = "supply"
+        [[system.component]]
+        kind = "dock_mating"
+        id = "clamps"
+        enabled_channel = "hold"
+        target_channel = "berth"
+        power_input = "supply"
+        [system.component.config]
         range = 200.0
         engage_distance = 400.0
         approach_speed = 60.0
@@ -107,9 +122,11 @@ console = "flight-control-console"
     let dock = app
         .world()
         .get::<crate::dock::DockControl>(entity)
-        .expect("a kind = dock System plus [dock] must spawn DockControl");
+        .expect("a composed Dock System must spawn DockControl");
     assert_eq!(dock.system_id.0, "berthing-clamps");
     assert_eq!(dock.power_group.0, "ops");
+    assert_eq!(dock.enabled_channel, "hold");
+    assert_eq!(dock.target_channel, "berth");
 }
 
 /// **AC1.** A template that authors `[infrastructure]` spawns with a live

@@ -155,6 +155,8 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
 
     let systems = vec![
         SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("bridge-orders".into()),
             kind: COMMAND_KIND.into(),
@@ -165,6 +167,8 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
             config: None,
         },
         SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("berthing-clamps".into()),
             kind: DOCK_KIND.into(),
@@ -175,6 +179,8 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
             config: None,
         },
         SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("main-drive".into()),
             kind: HELM_THRUST_KIND.into(),

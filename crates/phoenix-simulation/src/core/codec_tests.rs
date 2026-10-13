@@ -453,6 +453,15 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         host: Some(StationId("tactical".into())),
                         rating: "Std".into(),
                     }],
+                    system_status: std::collections::BTreeMap::from([(
+                        SystemId("dock".into()),
+                        phoenix_model::system_status::SystemStatus::observe(
+                            "Dock".into(),
+                            None,
+                            true,
+                            true,
+                        ),
+                    )]),
                     console_health: vec![ConsoleHealthSnapshot {
                         console: ConsoleId("navigation-display".into()),
                         health: Some(0.25),
@@ -6600,7 +6609,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     }
     // The legacy v3 catalogue remains readable under the v5 join pin;
     // explicit Console identity changed the wire vocabulary, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 5);
+    assert_eq!(PROTOCOL_VERSION, 6);
 }
 
 /// The removal inverse's ingress (issue #1444).

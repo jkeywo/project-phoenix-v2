@@ -30,12 +30,12 @@ import {
 // carries both a dock and an umbilical: the shipped Alliance Destroyer (since
 // #1159/#1160) and the Alliance Cruiser (since #1388/#1390). Each puts its hull
 // at the origin with one passive umbilical berth drawn up close alongside,
-// inside the dock range. Three overrides, all the world's own intent re-applied
+// inside the dock range. Two overrides, all the world's own intent re-applied
 // onto the picked hull (server_app::player_hull_config), never a change to the
 // shipped entity:
 //   * a reserve_fuel ledger, the source the umbilical delivers from (the destroyer
 //     authors none of its own by design — a ledger would fold into every world);
-//   * a brisk dock approach speed and umbilical rate, so the mate forms and the
+//   * a brisk umbilical rate, so once the shipped Dock mates the hulls, the
 //     capacity moves inside a throttled headless-browser run.
 const DOCK_WORLD = `
 [global]
@@ -60,7 +60,7 @@ template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
-overrides = { dock = { approach_speed = 120.0 }, umbilical = { rate = 40.0 }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
+overrides = { umbilical = { rate = 40.0 }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
 
 # The berth — a passive umbilical berth 70 units to starboard, inside the
 # destroyer's 200-unit dock range, its reserve_fuel ledger empty with headroom.
@@ -99,7 +99,7 @@ template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
-overrides = { dock = { approach_speed = 120.0 }, umbilical = { rate = 40.0 }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
+overrides = { umbilical = { rate = 40.0 }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
 
 [[entity]]
 template_path = "assets/entities/umbilical_berth.toml"

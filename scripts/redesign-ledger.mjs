@@ -28,7 +28,15 @@ for (const [i, step] of ledger.increments.entries()) {
   if (step.status === 'complete') requireCondition((step.subincrements||[]).every(s=>s.status==='complete'), `Incomplete sub-increment in ${i}`);
 }
 requireCondition(Number.isInteger(ledger.current_increment) && ledger.current_increment >= 0 && ledger.current_increment < 25, 'Invalid current increment');
-for (let i = 0; i < ledger.current_increment; i++) requireCondition(ledger.increments[i].status === 'complete', `Increment ${i} is incomplete`);
+for (const authorization of ledger.advance_authorizations || []) {
+  requireCondition(Number.isInteger(authorization.from_increment) && authorization.to_increment === authorization.from_increment + 1, 'Invalid advance authorization');
+  requireCondition(authorization.user_instruction && authorization.date && authorization.pending_acceptance, 'Advance authorization must record the instruction and outstanding acceptance');
+  requireCondition(existsSync(resolve(root, authorization.evidence || 'missing')), 'Advance authorization needs acceptance evidence');
+}
+for (let i = 0; i < ledger.current_increment; i++) {
+  const authorized = (ledger.advance_authorizations || []).some(a => a.from_increment === i && a.to_increment === i + 1);
+  requireCondition(ledger.increments[i].status === 'complete' || authorized, `Increment ${i} is incomplete`);
+}
 const seen = new Set();
 for (const feature of ledger.features) {
   requireCondition(expected.get(feature.id) === feature.title && !seen.has(feature.id), `Missing, duplicate or renamed feature ${feature.id}`);

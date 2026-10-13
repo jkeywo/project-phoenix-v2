@@ -146,6 +146,8 @@ fn active_domain_sources() -> (
         ..Default::default()
     };
     let system = SystemInstanceConfig {
+        components: Vec::new(),
+        channels: Vec::new(),
         console: Some(console.id.clone()),
         id: SystemId("engine".into()),
         kind: "helm-engine".into(),
@@ -424,6 +426,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         system_instance_schema,
         crate::ship::config::SystemInstanceConfig,
+        components,
+        channels,
         console,
         id,
         kind,
@@ -1094,9 +1098,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // number of rows.
     // Explicit Console identity, hosting, feeds and ownership replace the
     // retired Station screen/hosting and direct System ownership paths.
+    // Dock composition replaces six legacy tuning leaves with thirteen typed
+    // component/channel leaves; the other four domains remain unchanged.
     assert_eq!(
         counts,
-        [55, 71, 673, 51, 56],
+        [55, 71, 680, 51, 56],
         "update the reviewed inventory ratchet"
     );
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1115,7 +1121,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         }
     }
     assert_eq!(
-        fingerprint, 13_429_685_273_597_626_504,
+        fingerprint, 13_579_727_185_304_965_444,
         "update the reviewed inventory fingerprint"
     );
 }

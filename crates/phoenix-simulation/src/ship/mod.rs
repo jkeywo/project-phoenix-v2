@@ -42,3 +42,5 @@ pub mod test_support;
 pub mod viewscreen;
 
 pub mod console_publication;
+
+pub mod composition;

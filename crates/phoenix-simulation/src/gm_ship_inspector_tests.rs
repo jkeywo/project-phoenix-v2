@@ -29,6 +29,8 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
         ..Default::default()
     };
     let system = SystemInstanceConfig {
+        components: Vec::new(),
+        channels: Vec::new(),
         console: Some(console.id.clone()),
         id: SystemId("engine".into()),
         kind: "helm-engine".into(),

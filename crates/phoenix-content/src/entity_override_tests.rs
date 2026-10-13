@@ -517,6 +517,8 @@ fn the_two_layers_disagree_only_where_they_are_meant_to() {
         // path                         instance          compose
         ("behaviour.doctrine", Keyed("id"), Keyed("id")),
         ("system", Replace, Keyed("id")),
+        ("system.component", Replace, Keyed("id")),
+        ("system.channel", Replace, Keyed("name")),
         ("station", Replace, Keyed("id")),
         ("station.rating", Replace, Keyed("name")),
         ("shield_arc", Replace, Keyed("id")),
@@ -890,4 +892,68 @@ trigger = "safe"
         transitions[0].get("trigger").and_then(|v| v.as_str()),
         Some("safe")
     );
+}
+
+#[test]
+fn system_component_and_channel_identity_is_scoped_to_parent() {
+    let base: toml::Value = toml::from_str(
+        r#"
+[[system]]
+id = "a"
+[[system.component]]
+id = "power"
+kind = "power_input"
+[[system.component]]
+id = "mate"
+[system.component.config]
+range = 5
+approach_speed = 2
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+[[system]]
+id = "b"
+[[system.component]]
+id = "mate"
+[system.component.config]
+range = 7
+"#,
+    )
+    .unwrap();
+    let overlay: toml::Value = toml::from_str(
+        r#"
+[[system]]
+id = "a"
+[[system.component]]
+id = "power"
+_remove = true
+[[system.component]]
+id = "mate"
+[system.component.config]
+range = 9
+[[system.channel]]
+name = "enabled"
+kind = "entity_target"
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+    assert_eq!(
+        merged["system"][0]["component"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        merged["system"][0]["component"][0]["config"]["range"].as_integer(),
+        Some(9)
+    );
+    assert_eq!(
+        merged["system"][0]["component"][0]["config"]["approach_speed"].as_integer(),
+        Some(2)
+    );
+    assert_eq!(
+        merged["system"][0]["channel"][0]["kind"].as_str(),
+        Some("entity_target")
+    );
+    assert_eq!(merged["system"][1], base["system"][1]);
 }

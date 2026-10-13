@@ -310,3 +310,19 @@ describe('materialise-override (the deliberate edit-an-inherited-field decision)
     });
   });
 });
+
+
+describe('System-local component and channel identities', () => {
+  it('merges within each parent and preserves siblings while applying tombstones', () => {
+    const base = { system: [
+      { id: 'dock-a', component: [{ id: 'power', kind: 'power_input' }, { id: 'mate', config: { range: 5, approach_speed: 2 } }], channel: [{ name: 'enabled', kind: 'boolean' }] },
+      { id: 'dock-b', component: [{ id: 'mate', config: { range: 7 } }], channel: [{ name: 'enabled', kind: 'boolean' }] },
+    ] };
+    const merged = mergeComposeFragments(base, { system: [{ id: 'dock-a', component: [
+      { id: 'mate', config: { range: 9 } }, { id: 'power', _remove: true }, { id: 'replacement', kind: 'power_input' },
+    ], channel: [{ name: 'enabled', kind: 'entity_target' }, { name: 'target', kind: 'entity_target' }] }] });
+    expect(merged.system[0].component).toEqual([{ id: 'mate', config: { range: 9, approach_speed: 2 } }, { id: 'replacement', kind: 'power_input' }]);
+    expect(merged.system[0].channel).toHaveLength(2);
+    expect(merged.system[1]).toEqual(base.system[1]);
+  });
+});

@@ -54,6 +54,8 @@ fn test_ship_config() -> ShipConfig {
             })
             .collect(),
         systems: vec![SystemInstanceConfig {
+            components: Vec::new(),
+            channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("background".into())),
             id: SystemId("dummy".into()),
             kind: "dummy".into(),

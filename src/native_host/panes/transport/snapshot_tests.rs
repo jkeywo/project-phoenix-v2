@@ -54,6 +54,7 @@ fn snapshot(entity_states: Vec<EntityStateSnapshot>) -> SimSnapshot {
         console_views: Default::default(),
         entity_states,
         station_health: Vec::new(),
+        system_status: Default::default(),
         console_health: Vec::new(),
         station_importance: Vec::new(),
         console_importance: Vec::new(),
@@ -157,6 +158,10 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
             console: phoenix_model::messages::ConsoleId("detached".into()),
             health: Some(0.25),
         });
+    first.system_status.insert(
+        phoenix_model::messages::SystemId("dock".into()),
+        phoenix_model::system_status::SystemStatus::observe("Dock".into(), None, true, false),
+    );
     first.station_health.push(StationHealthSnapshot {
         station: StationId("helm".into()),
         health: Some(0.5),
@@ -186,7 +191,9 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
         panic!("simulation")
     };
     assert!(
-        snapshot.station_health.is_empty() && snapshot.console_health.is_empty(),
+        snapshot.station_health.is_empty()
+            && snapshot.console_health.is_empty()
+            && snapshot.system_status.is_empty(),
         "latest complete projections clear older rows"
     );
     for state in &snapshot.entity_states {

@@ -225,6 +225,7 @@ export function buildGmStationConsoleInput(projection, ship, previous = null) {
     };
   }
   state.controlSources = ship.control_sources || {};
+  state.systemStatus = ship.system_status || {};
   state.stationRatings = {...ship.station_ratings};
   state.stationPuppets = stationPuppets;
   state.tutorialProgress = tutorialProgressFor(ship.ship_id);

@@ -78,6 +78,10 @@ pub use phoenix_model::console::ConsoleRatingConfig as StationRatingConfig;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemInstanceConfig {
+    #[serde(default, rename = "component", skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<super::composition::SystemComponentConfig>,
+    #[serde(default, rename = "channel", skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<super::composition::CommandChannelConfig>,
     pub id: SystemId,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,6 +153,10 @@ pub const fn default_max_power_level() -> u8 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShipConfigError {
+    InvalidComposition {
+        system: SystemId,
+        detail: String,
+    },
     ConsoleCommandTargetUnknownStation {
         console: crate::core::messages::ConsoleId,
         target: StationId,
@@ -650,6 +658,12 @@ pub fn validate(
     let mut system_owner_by_id: HashMap<SystemId, Option<StationId>> = HashMap::new();
 
     for system in &config.systems {
+        super::composition::validate_composition(system).map_err(|detail| {
+            ShipConfigError::InvalidComposition {
+                system: system.id.clone(),
+                detail,
+            }
+        })?;
         if system.id.0.trim().is_empty() {
             return Err(ShipConfigError::EmptySystemId);
         }

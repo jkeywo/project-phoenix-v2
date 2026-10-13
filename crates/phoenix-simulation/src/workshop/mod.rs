@@ -119,7 +119,15 @@ pub struct WorkshopShipSchema {
     pub console_instance_publication_kinds:
         std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind>,
     pub system_kinds: Vec<String>,
+    pub component_fields: std::collections::BTreeMap<String, Vec<WorkshopComponentField>>,
+    pub channel_kinds: Vec<String>,
     pub directive_kinds: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WorkshopComponentField {
+    pub name: String,
+    pub kind: String,
 }
 
 pub fn ship_schema() -> WorkshopShipSchema {
@@ -139,6 +147,32 @@ pub fn ship_schema() -> WorkshopShipSchema {
             .iter()
             .map(|name| (*name).to_owned())
             .collect(),
+        component_fields: [
+            ("power_input".into(), Vec::new()),
+            (
+                "dock_mating".into(),
+                [
+                    ("enabled_channel", "boolean_channel"),
+                    ("target_channel", "entity_target_channel"),
+                    ("power_input", "power_input_component"),
+                    ("config.range", "number"),
+                    ("config.engage_distance", "number"),
+                    ("config.approach_speed", "number"),
+                    ("config.mate_tolerance", "number"),
+                    ("config.undock_clear_distance", "number"),
+                    ("config.min_power_level", "integer"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        channel_kinds: vec!["boolean".into(), "entity_target".into()],
         system_kinds,
         directive_kinds: crate::objectives::directive::DirectiveKind::ALL
             .into_iter()

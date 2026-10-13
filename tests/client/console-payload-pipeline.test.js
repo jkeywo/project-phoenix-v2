@@ -37,7 +37,15 @@ describe('console object construction and JSON publication', () => {
           expected.tutorial = null;
         }
         expect(actual).toStrictEqual({ ...expected,
-          console_id: row.station, station_id: row.station, console_host: null, console_view: null });
+          console_id: row.station, station_id: row.station, console_host: null, console_view: null,
+          observed_system_status: {},
+          system_status: row.name === 'composite' ? [
+            { system_id: 'reactor', display_name: 'reactor', availability: 'unknown', reasons: [], delegated: true },
+            { system_id: 'repair', display_name: 'repair', availability: 'unknown', reasons: [], delegated: false },
+          ] : [
+            { system_id: 'thrust', display_name: 'thrust', availability: 'unknown', reasons: [], delegated: false },
+            { system_id: 'steer', display_name: 'steer', availability: 'unknown', reasons: [], delegated: false },
+          ] });
       } finally { setTable(table); }
     });
   }

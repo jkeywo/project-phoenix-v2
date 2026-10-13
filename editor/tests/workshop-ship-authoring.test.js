@@ -166,3 +166,26 @@ describe('Workshop playable ship exact-source transactions', () => {
 });
 
 function operationPath() { return 'assets/entities/ship.toml'; }
+
+
+it('creates and updates a complete composition through one accepted history entry', async () => {
+  const draft = pack();
+  const composedSchema = { ...schema, system_kinds: [...schema.system_kinds, 'dock'] };
+  const runtime = { dependencies: async () => dependencies, shipSchema: async () => composedSchema,
+    validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
+  const components = [{ id: 'power', kind: 'power_input' }, { id: 'mate', kind: 'dock_mating', enabled_channel: 'engage', target_channel: 'berth', power_input: 'power',
+    config: { range: 100, engage_distance: 200, approach_speed: 10, mate_tolerance: 2, undock_clear_distance: 20, min_power_level: 1 } }];
+  const channels = [{ name: 'engage', kind: 'boolean' }, { name: 'berth', kind: 'entity_target' }];
+  await applyShipOperation({ draft, runtime, operation: op({ type: 'system-add', id: 'clamps', kind: 'dock', console: 'flight-screen', power_group: 'helm', components, channels }) });
+  const created = draft.read(operationPath());
+  expect(parse(created).system.at(-1)).toMatchObject({ component: components, channel: channels, power_group: 'helm' });
+  const changed = structuredClone(components); changed[1].config.range = 150;
+  await applyShipOperation({ draft, runtime, operation: op({ type: 'system-composition-set', id: 'clamps', components: changed, channels }) });
+  const edited = draft.read(operationPath());
+  expect(parse(edited).system.at(-1).component[1].config.range).toBe(150);
+  draft.undo(); expect(draft.read(operationPath())).toBe(created);
+  draft.redo(); expect(draft.read(operationPath())).toBe(edited);
+  runtime.validate.mockResolvedValueOnce({ accepted: false, findings: [{ severity: 'error', category: 'composition', file: operationPath(), message: 'missing Dock power input' }] });
+  await expect(applyShipOperation({ draft, runtime, operation: op({ type: 'system-composition-set', id: 'clamps', components: [changed[1]], channels }) })).rejects.toThrow();
+  expect(draft.read(operationPath())).toBe(edited);
+});

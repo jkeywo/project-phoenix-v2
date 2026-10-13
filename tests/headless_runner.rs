@@ -23645,7 +23645,7 @@ fn redock(app: &mut App) {
     run(app, 140);
     let dock = dock_control_of(app);
     assert!(
-        dock.docked && dock.docking_target.is_some(),
+        dock.docked && dock.docking_target().is_some(),
         "precondition: the two hulls should be mated, got {dock:?}"
     );
 }
@@ -23705,7 +23705,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
         dock.docked,
         "the manoeuvre mated the two hulls, got {dock:?}"
     );
-    assert_eq!(dock.docking_target.as_deref(), Some(berth.as_str()));
+    assert_eq!(dock.docking_target(), Some(berth.as_str()));
     assert_eq!(
         dock.docked_partner(),
         Some(berth.as_str()),
@@ -23725,7 +23725,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     run(&mut app, 160);
     let dock = dock_control_of(&mut app);
     assert!(
-        !dock.docked && !dock.engaged && dock.docking_target.is_none(),
+        !dock.docked && !dock.engaged() && dock.docking_target().is_none(),
         "undock ended the mate, got {dock:?}"
     );
     let cleared = dock_operator_pos(&mut app);
@@ -23740,7 +23740,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     run(&mut app, 3);
     let dock = dock_control_of(&mut app);
     assert!(
-        !dock.docked && !dock.engaged,
+        !dock.docked && !dock.engaged(),
         "drifting apart ended the dock"
     );
     assert_eq!(dock.last_refusal, Some(DockRefusal::OutOfRange));
@@ -23750,7 +23750,10 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     cut_dock_power(&mut app);
     run(&mut app, 3);
     let dock = dock_control_of(&mut app);
-    assert!(!dock.docked && !dock.engaged, "losing power ended the dock");
+    assert!(
+        !dock.docked && !dock.engaged(),
+        "losing power ended the dock"
+    );
     assert_eq!(dock.last_refusal, Some(DockRefusal::Unpowered));
 
     // ── Interruption 3: the dock is knocked out to Disabled ──────────────────
@@ -23760,7 +23763,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     run(&mut app, 3);
     let dock = dock_control_of(&mut app);
     assert!(
-        !dock.docked && !dock.engaged,
+        !dock.docked && !dock.engaged(),
         "a disabled dock ended the mate"
     );
     assert_eq!(dock.last_refusal, Some(DockRefusal::Disabled));
@@ -23773,7 +23776,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     run(&mut app, 3);
     let dock = dock_control_of(&mut app);
     assert!(
-        !dock.docked && !dock.engaged,
+        !dock.docked && !dock.engaged(),
         "a destroyed berth ended the mate"
     );
     assert_eq!(dock.last_refusal, Some(DockRefusal::TargetLost));
@@ -23796,7 +23799,7 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
     project_phoenix::snapshot::restore(app.world_mut(), &snap);
     let dock = dock_control_of(&mut app);
     assert!(
-        dock.docked && dock.docking_target.as_deref() == Some(berth.as_str()),
+        dock.docked && dock.docking_target() == Some(berth.as_str()),
         "the docked relationship survived the snapshot resume, got {dock:?}"
     );
     assert_eq!(
@@ -24439,7 +24442,7 @@ fn umbilical_redock(app: &mut App) {
     run(app, 160);
     let dock = umbilical_dock_of(app);
     assert!(
-        dock.docked && dock.docking_target.is_some(),
+        dock.docked && dock.docking_target().is_some(),
         "precondition: the two hulls should be mated, got {dock:?}"
     );
 }
@@ -25326,7 +25329,7 @@ fn every_new_operations_systems_state_is_present_in_the_digest() {
             .get_mut::<project_phoenix::dock::DockControl>(op)
             .expect("the destroyer carries a DockControl");
         dock.docked = true;
-        dock.docking_target = Some(depot.clone());
+        dock.set_docking_target(Some(depot.clone()));
     }
     let d_dock = state_digest(&app);
     assert_ne!(
@@ -25339,7 +25342,7 @@ fn every_new_operations_systems_state_is_present_in_the_digest() {
             .get_mut::<project_phoenix::dock::DockControl>(op)
             .unwrap();
         dock.docked = false;
-        dock.docking_target = None;
+        dock.set_docking_target(None);
     }
     assert_eq!(
         state_digest(&app),

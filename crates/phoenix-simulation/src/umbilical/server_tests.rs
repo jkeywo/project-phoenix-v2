@@ -69,9 +69,9 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
         },
         PowerGroupId("dock".into()),
     );
-    dock.engaged = true;
+    dock.set_engaged(true);
     dock.docked = true;
-    dock.docking_target = Some("partner-1".into());
+    dock.set_docking_target(Some("partner-1".into()));
     let power_config = crate::modifiers::power_system::PowerConfig::default();
     let power = ShipPowerSystem(
         crate::modifiers::power_system::PowerSystem::from_authored_groups(
@@ -245,7 +245,7 @@ fn dock(docked_to: Option<&str>) -> DockControl {
     );
     if let Some(target) = docked_to {
         d.docked = true;
-        d.docking_target = Some(target.into());
+        d.set_docking_target(Some(target.into()));
     }
     d
 }

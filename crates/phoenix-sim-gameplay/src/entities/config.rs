@@ -148,15 +148,10 @@ pub struct EntityConfig {
     /// exactly as #1156 held it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_response: Option<crate::tractor::HeldResponseConfig>,
-    /// The dock terms (issue #1159) — range, engage distance, approach speed,
-    /// mate tolerance, undock clearance and minimum power level. Its presence
-    /// opts a hull into docking: it can be docked WITH (its dock markers are read
-    /// from the rig sidecar into a `DockMarkers` component), and, when paired with
-    /// a `[[system]] kind = "dock"` block, it can actively dock. A hull that
-    /// authors no `[dock]` table carries no dock markers and no `DockControl`, can
-    /// neither dock nor be docked with, and is unchanged in every way — which is
-    /// why the shipped destroyer is untouched by this slice and the probe fields
-    /// dedicated hulls.
+    /// Passive dock endpoint declaration. Active Dock Systems instead own a
+    /// dock_mating component and power input; either declaration loads rig dock
+    /// markers. Combining this passive table with an active Dock System is
+    /// rejected so tuning has one authoritative source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockConfig>,
     /// The transfer-umbilical terms (issue #1160) — the capacity id it moves, the
@@ -542,6 +537,8 @@ impl EntityConfig {
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        components: Vec::new(),
+                        channels: Vec::new(),
                         console: shields_console.clone(),
                         id: sid,
                         kind: crate::ship::system_registry::SHIELD_ARC_KIND.into(),
@@ -590,6 +587,8 @@ impl EntityConfig {
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        components: Vec::new(),
+                        channels: Vec::new(),
                         console: Some(console_id),
                         id: crate::core::messages::SystemId(
                             crate::ship::system_registry::RED_ALERT_SYSTEM_ID.into(),
@@ -791,33 +790,24 @@ impl EntityConfig {
             held_response.validate().map_err(SerdeError::custom)?;
         }
 
-        // Validation: a [dock] table has to describe a dock that can mate (issue
-        // #1159), and a `kind = "dock"` SYSTEM has to be paired with a [dock]
-        // table for its terms. Unlike the tractor, the pairing is one-directional:
-        // a [dock] table alone makes a hull DOCKABLE (a passive berth carries its
-        // dock markers but no active control), while the system is what makes it
-        // an active docker — so a [dock] table without a dock system is allowed,
-        // but a dock system without a [dock] table (or a power group) is a control
-        // the crew can press that has no terms to run under.
+        // Passive endpoints keep their existing dock declaration. Active tuning is
+        // owned only by the System's docking component, never by both sources.
         if let Some(ref dock) = config.dock {
             dock.validate().map_err(SerdeError::custom)?;
         }
-        if let Some(system) = config.ship_config.as_ref().and_then(|sc| {
-            sc.systems
+        if let Some(sc) = &config.ship_config {
+            let docks: Vec<_> = sc
+                .systems
                 .iter()
-                .find(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
-        }) {
-            if config.dock.is_none() {
+                .filter(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
+                .collect();
+            if docks.len() > 1 {
                 return Err(SerdeError::custom(
-                    "a [[system]] kind = \"dock\" block needs a matching [dock] table to declare \
-                     its range and approach terms",
+                    "this docking implementation supports one active Dock System per entity",
                 ));
             }
-            if system.power_group.is_none() {
-                return Err(SerdeError::custom(
-                    "the [[system]] kind = \"dock\" block must declare a power_group — the dock's \
-                     power allocation is what an interruption checks",
-                ));
+            if !docks.is_empty() && config.dock.is_some() {
+                return Err(SerdeError::custom("active Dock tuning must move from [dock] to its dock_mating System component; remove the competing top-level [dock] table (increment 2 format)"));
             }
         }
 

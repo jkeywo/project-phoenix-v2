@@ -2,7 +2,7 @@
 #
 # A deliberately lean hull that exercises ONE mechanism end to end: a helm-owned
 # `[[system]] kind = "dock"`, its own `[power_groups.dock]` power group, a damage
-# entry so it can be knocked out, a `[dock]` table carrying the approach terms,
+# entry so it can be knocked out, a Dock mating component carrying the approach terms,
 # and dock markers declared in its rig sidecar (the `dock_probe` variant). It is
 # NOT a shipped combat hull and is flown in no scenario — it is the fixture
 # `assets/worlds/probe_dock.toml` puts a dock control on, kept out of
@@ -84,7 +84,29 @@ power_group = "dock"
 # within, the low approach speed, the mate tolerance, how far undock backs clear,
 # and the lowest power-group level the dock runs at. The dock MARKERS themselves
 # are authored in the rig sidecar, not here.
-[dock]
+
+# Explicit control surfaces and permitted observation publications.
+
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+
+[[system.component]]
+id = "power"
+kind = "power_input"
+
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+
+[system.component.config]
 range = 200.0
 engage_distance = 400.0
 approach_speed = 60.0
@@ -92,7 +114,6 @@ mate_tolerance = 4.0
 undock_clear_distance = 120.0
 min_power_level = 2
 
-# Explicit control surfaces and permitted observation publications.
 [[console]]
 id = "helm"
 name = "Helm"

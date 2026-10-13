@@ -284,9 +284,9 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
         if dock.available_target.as_deref() == Some(&uuid) {
             dock.available_target = None;
         }
-        if dock.docking_target.as_deref() == Some(&uuid) {
-            dock.docking_target = None;
-            dock.engaged = false;
+        if dock.docking_target() == Some(&uuid) {
+            dock.set_docking_target(None);
+            dock.set_engaged(false);
             dock.docked = false;
             dock.undock_target = None;
             if let Some(mut umbilical) = umbilical {

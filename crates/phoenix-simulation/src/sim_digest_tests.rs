@@ -78,7 +78,7 @@ fn optional_namespace_exact_fold_characterization() {
             16955860764686382231,
             16847282475859703794,
             2604905312334251123,
-            14646410959139128831,
+            2045009351732382248,
             12338065970744138158,
             11779916052664557949,
             10771667353891034293,
@@ -96,13 +96,13 @@ fn optional_namespace_exact_fold_characterization() {
             ("station-stances", 7675036808710624197),
             ("console-views", 7675036808710624197),
             ("tractor", 3412975283742167187),
-            ("dock", 14402749879927837817),
-            ("external-repair", 15591361003993366682),
-            ("umbilical", 10383317395683004966),
-            ("asteroid", 7742867957391604175),
-            ("collisions", 2207473739003605171),
-            ("security", 9442496669972521287),
-            ("internal-repair", 9442496669972521287),
+            ("dock", 196895128352095218),
+            ("external-repair", 15298784236101610809),
+            ("umbilical", 203970584908569017),
+            ("asteroid", 10848069915580109200),
+            ("collisions", 11006195783312198968),
+            ("security", 11313664663400321796),
+            ("internal-repair", 11313664663400321796),
         ]
     );
 }
@@ -645,28 +645,24 @@ fn spawn_docker(world: &mut World, uuid: &str, docked_to: Option<&str>) {
         crate::core::messages::PowerGroupId("dock".into()),
     );
     if let Some(target) = docked_to {
-        control.engaged = true;
+        control.set_engaged(true);
         control.docked = true;
-        control.docking_target = Some(target.to_string());
+        control.set_docking_target(Some(target.to_string()));
     }
     world.spawn((EntityUuid(uuid.to_string()), control));
 }
 
-/// **Issue #1159.** A world with nobody docked folds to exactly the number it
-/// did before the namespace existed — and so does a hull that authored a dock
-/// and is not docked. Only a real MATE moves it, and which two hulls are
-/// joined is what moves it, because that relationship is folded nowhere else.
+/// Dock presence, command intent and the actual partner are all authoritative.
 #[test]
-fn only_a_docked_ship_moves_the_digest_and_the_partner_is_what_moves_it() {
+fn dock_channels_and_mechanical_state_move_the_digest() {
     let id = "00000000-0000-8000-8000-000000000001";
 
     let mut idle = fold_world();
     spawn_docker(&mut idle, id, None);
-    assert_eq!(
+    assert_ne!(
         fold_dock_namespace(&idle, FOLD_SEED),
         FOLD_SEED,
-        "a dock mated to nothing folds nothing — a folded row here would have moved every \
-         committed world's digest for state none of them carry"
+        "idle composed Dock still carries authoritative channels"
     );
 
     let mut docked_a = fold_world();
@@ -691,6 +687,27 @@ fn only_a_docked_ship_moves_the_digest_and_the_partner_is_what_moves_it() {
         world_digest(&docked_b),
         "…and a host that thinks the ship is docked to a different hull must fold to a \
          different number"
+    );
+    let mut approaching = fold_world();
+    spawn_docker(&mut approaching, id, Some("berth-A"));
+    let mut query = approaching.query::<&mut DockControl>();
+    query.single_mut(&mut approaching).unwrap().docked = false;
+    assert_ne!(
+        world_digest(&idle),
+        world_digest(&approaching),
+        "unmated channel intent must be folded"
+    );
+    assert_ne!(
+        world_digest(&docked_a),
+        world_digest(&approaching),
+        "mating fact is independent of intent"
+    );
+    let before = world_digest(&approaching);
+    query.single_mut(&mut approaching).unwrap().undock_target = Some(Vec3::new(1.0, 2.0, 3.0));
+    assert_ne!(
+        before,
+        world_digest(&approaching),
+        "clearance destination is authoritative"
     );
 }
 

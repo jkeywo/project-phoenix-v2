@@ -140,6 +140,34 @@ kind = "dock"
 ai_only = true
 power_group = "ops"
 
+
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+
+[[system.component]]
+id = "power"
+kind = "power_input"
+
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+
+[system.component.config]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
+
 [[system]]
 console = "ai-umbilical"
 id = "umbilical"
@@ -183,13 +211,6 @@ amount = 100
 ceiling = 100
 
 # ── The dock terms ────────────────────────────────────────────────────────────
-[dock]
-range = 200.0
-engage_distance = 400.0
-approach_speed = 60.0
-mate_tolerance = 4.0
-undock_clear_distance = 120.0
-min_power_level = 2
 
 # ── The umbilical terms (all authored — AGENTS.md rule 11) ────────────────────
 # Deliver = operator → docked partner.

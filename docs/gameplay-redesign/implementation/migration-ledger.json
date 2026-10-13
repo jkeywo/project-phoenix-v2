@@ -1,0 +1,2628 @@
+{
+  "schema_version": 1,
+  "title": "Incremental implementation of the gameplay redesign",
+  "approved_date": "2026-10-13",
+  "current_increment": 1,
+  "constraints": {
+    "serial": true,
+    "reference_hull": "assets/entities/alliance_cruiser.toml",
+    "preserve_shipped_content": true,
+    "preserve_network_architecture": true,
+    "individual_system_ai": true,
+    "knowledge_limits": true,
+    "legacy_save_pack_policy": "Version checks or explicit conversion; no unconditional backward-compatibility promise.",
+    "workshop_each_increment": true,
+    "message_capacity_tracking": false
+  },
+  "increments": [
+    {
+      "id": 0,
+      "title": "Baseline and migration ledger",
+      "status": "complete",
+      "depends_on": [],
+      "completion": "All catalogue entries mapped; current gameplay, performance and determinism evidence recorded; superseded future PASM choices identified.",
+      "evidence": [
+        "docs/gameplay-redesign/implementation/baseline.json",
+        "docs/gameplay-redesign/implementation/validation.json"
+      ]
+    },
+    {
+      "id": 1,
+      "title": "Explicit Consoles and ownership",
+      "status": "pending",
+      "depends_on": [
+        0
+      ],
+      "completion": "Explicit Console identities and bindings preserve existing screens, joining, ratings, human seeking, Backfill and reconnect.",
+      "evidence": []
+    },
+    {
+      "id": 2,
+      "title": "Composable Systems and common status",
+      "status": "pending",
+      "depends_on": [
+        1
+      ],
+      "completion": "Dock proves supported component composition and generic commands; common status/details covers manual, passive and delegated equipment.",
+      "evidence": []
+    },
+    {
+      "id": 3,
+      "title": "Reusable AI state trees",
+      "status": "pending",
+      "depends_on": [
+        2
+      ],
+      "completion": "Dock proves one bounded-knowledge System controller with supported state trees, inheritance, references and Workshop editing.",
+      "evidence": []
+    },
+    {
+      "id": 4,
+      "title": "Common observations and reports",
+      "status": "pending",
+      "depends_on": [
+        3
+      ],
+      "completion": "Existing observations retain access while gaining provenance, age, uncertainty, explicit feeds and repair reports.",
+      "evidence": []
+    },
+    {
+      "id": 5,
+      "title": "Shared jobs and team execution",
+      "status": "pending",
+      "depends_on": [
+        4
+      ],
+      "completion": "Existing repair work runs through shared job/team execution with equivalent repair outcomes and report-driven work lists.",
+      "evidence": []
+    },
+    {
+      "id": 6,
+      "title": "Stores, transfers and service links",
+      "status": "pending",
+      "depends_on": [
+        5
+      ],
+      "completion": "Existing ammunition, transfer and facility stock use shared capacities, inventories, reservations and explicit links; replenishment works.",
+      "evidence": []
+    },
+    {
+      "id": 7,
+      "title": "Shared mounts and configurable weapons",
+      "status": "pending",
+      "depends_on": [
+        6
+      ],
+      "completion": "Existing phasers, blasters and torpedoes use common mounts, barrel patterns and delivery/effect machinery with equivalent combat behaviour.",
+      "evidence": []
+    },
+    {
+      "id": 8,
+      "title": "Power, batteries, coolant and heat",
+      "status": "pending",
+      "depends_on": [
+        7
+      ],
+      "completion": "Local reserves, flow allocation, thermal state and selected flow cuts work with human/AI controls, complexity and replenishment.",
+      "evidence": []
+    },
+    {
+      "id": 9,
+      "title": "Shield energy and protection",
+      "status": "pending",
+      "depends_on": [
+        8
+      ],
+      "completion": "Shield upkeep, recharge and battery-mediated redistribution use shared resources/conditions and remain independently usable.",
+      "evidence": []
+    },
+    {
+      "id": 10,
+      "title": "Decks, compartments and internal routes",
+      "status": "pending",
+      "depends_on": [
+        9
+      ],
+      "completion": "Workshop authors layouts/materials/System placement; team travel uses shared routes and access boundaries before damage changes.",
+      "evidence": []
+    },
+    {
+      "id": 11,
+      "title": "Component damage and restoration",
+      "status": "pending",
+      "depends_on": [
+        10
+      ],
+      "completion": "Compartment penetration and component conditions land together with structural/component repair, parts use, disablement and recovery.",
+      "evidence": []
+    },
+    {
+      "id": 12,
+      "title": "Automatic logistics and production",
+      "status": "pending",
+      "depends_on": [
+        11
+      ],
+      "completion": "Stock targets, timed delivery, fabrication and surviving salvage use real stores, jobs and routes; optional harvesting stays bounded.",
+      "evidence": []
+    },
+    {
+      "id": 13,
+      "title": "Equipment fitting and refitting",
+      "status": "pending",
+      "depends_on": [
+        12
+      ],
+      "completion": "Compatible field/facility refits and favourites use actual equipment/resource/work limits and shared Workshop definitions.",
+      "evidence": []
+    },
+    {
+      "id": 14,
+      "title": "Sensing and environmental interaction",
+      "status": "pending",
+      "depends_on": [
+        13
+      ],
+      "completion": "Independent scanners, passive/history/uncertainty/correlation and shared radars use upgraded regions, signal attenuation and terrain occlusion.",
+      "evidence": []
+    },
+    {
+      "id": 15,
+      "title": "Layered combat",
+      "status": "pending",
+      "depends_on": [
+        14
+      ],
+      "completion": "Interception, longer-range missiles, broadsides, guidance, payloads and optional shield probing support multiple viable styles.",
+      "evidence": []
+    },
+    {
+      "id": 16,
+      "title": "Shared Comms channels and remote orders",
+      "status": "pending",
+      "depends_on": [
+        15
+      ],
+      "completion": "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting.",
+      "evidence": []
+    },
+    {
+      "id": 17,
+      "title": "Electronic operations",
+      "status": "pending",
+      "depends_on": [
+        16
+      ],
+      "completion": "Jamming, spoofing, protection, concealment and bounded disruption reuse mounts/signals/resources/conditions and expose known/friendly effects.",
+      "evidence": []
+    },
+    {
+      "id": 18,
+      "title": "Movement and transit extensions",
+      "status": "pending",
+      "depends_on": [
+        17
+      ],
+      "completion": "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split.",
+      "evidence": []
+    },
+    {
+      "id": 19,
+      "title": "Ordinary deployables and carried craft",
+      "status": "pending",
+      "depends_on": [
+        18
+      ],
+      "completion": "Configured entities plus deployment/sortie/recovery work support probes, turrets, decoys, fighters, shuttles and drones with ordinary autonomous/link-loss behaviour.",
+      "evidence": []
+    },
+    {
+      "id": 20,
+      "title": "Broader personnel operations",
+      "status": "pending",
+      "depends_on": [
+        19
+      ],
+      "completion": "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation.",
+      "evidence": []
+    },
+    {
+      "id": 21,
+      "title": "Facilities and systemic outside actors",
+      "status": "pending",
+      "depends_on": [
+        20
+      ],
+      "completion": "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies.",
+      "evidence": []
+    },
+    {
+      "id": 22,
+      "title": "Reusable situations and consequences",
+      "status": "pending",
+      "depends_on": [
+        21
+      ],
+      "completion": "Existing objectives/scripts gain reusable workflows and typed consequences while scenarios work and GM remains optional.",
+      "evidence": []
+    },
+    {
+      "id": 23,
+      "title": "Authored continuing modes",
+      "status": "pending",
+      "depends_on": [
+        22
+      ],
+      "completion": "Authored Patrol, then War, then Sandbox integrate transit, meaningful persistence, servicing, history and debrief.",
+      "evidence": [],
+      "subincrements": [
+        {
+          "id": "23.1",
+          "title": "Authored Patrol run",
+          "status": "pending",
+          "depends_on": [
+            "22"
+          ]
+        },
+        {
+          "id": "23.2",
+          "title": "Authored War run",
+          "status": "pending",
+          "depends_on": [
+            "23.1"
+          ]
+        },
+        {
+          "id": "23.3",
+          "title": "Authored Sandbox sector",
+          "status": "pending",
+          "depends_on": [
+            "23.2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Generation and final integration",
+      "status": "pending",
+      "depends_on": [
+        23
+      ],
+      "completion": "Generation and bounded Director follow authored examples; coarse planetary activities and catalogue/Workshop/seat-experience audits complete.",
+      "evidence": []
+    }
+  ],
+  "provisional_items": [
+    {
+      "id": "coolant-recycling",
+      "increments": [
+        8,
+        12
+      ],
+      "status": "provisional",
+      "rule": "Do not implement lossy used-coolant recycling without a later recorded selection."
+    }
+  ],
+  "superseded_future_choices": [
+    {
+      "entity": "roadmap-broken-tithe-foundation",
+      "file": "pasm/spec/roadmap/phoenix-delivery-roadmap.yaml",
+      "replacement_increment": 8,
+      "old": "Ship-wide hard battery exhaustion and primary percentage System damage.",
+      "new": "Local energy reserves, actual flow cuts, thermal/coolant constraints; component restoration follows increment 11."
+    },
+    {
+      "entity": "scan-modes-wide-focused",
+      "file": "pasm/spec/design/fields-epistemics.yaml",
+      "replacement_increment": 14,
+      "old": "One mutually exclusive wide/focused scan axis.",
+      "new": "Independent broad and focused scanner Systems with separate power demand."
+    },
+    {
+      "entity": "roadmap-narrow-season-foundation",
+      "file": "pasm/spec/roadmap/phoenix-delivery-roadmap.yaml",
+      "replacement_increment": 14,
+      "old": "On-rails orbital body motion.",
+      "new": "Static planets/moons/satellites/asteroid fields; movement does not imply orbit."
+    },
+    {
+      "entity": "roadmap-ship-customisation",
+      "file": "pasm/spec/roadmap/phoenix-delivery-roadmap.yaml",
+      "replacement_increment": 13,
+      "old": "Refitting only at starbases and battery-exhaustion fitting budget.",
+      "new": "Compatible field work and facility refits, constrained by actual resources and work; no additional abstract fitting currency."
+    }
+  ],
+  "features": [
+    {
+      "id": "G001",
+      "title": "Station ownership and authored work bundles",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        1,
+        2
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G002",
+      "title": "Per-Station complexity and ratings",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        1
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G003",
+      "title": "Whole-System AI assistants",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        3
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G004",
+      "title": "Vacant, disconnected and AFK Backfill",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        3
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G005",
+      "title": "Human-seeking consoles and visiting tabs",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        1
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G006",
+      "title": "AI stance and standing-order selection",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        3,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G007",
+      "title": "System authority and shared physical rules",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        1,
+        2
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G008",
+      "title": "Ongoing and event-driven activity budget",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G009",
+      "title": "Reserve, grace and recoverable overload",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        0
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G010",
+      "title": "Continuous listening and deliberate coordination",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G011",
+      "title": "Local expertise and distributed decision rights",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G012",
+      "title": "Spectating and post-loss participation",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G013",
+      "title": "Ready, launch, join and handover journey",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G014",
+      "title": "Personal accessibility and input assistance",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G015",
+      "title": "Tutorials, manuals and rehearsal",
+      "family": "crew",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G016",
+      "title": "Contact discovery and radar projection",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G017",
+      "title": "Detection, identification, classification and assessment",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G018",
+      "title": "Per-observer evidence and confidence",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G019",
+      "title": "Contact persistence, ageing and prediction",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G020",
+      "title": "Wide, focused and intrusive scan trade-offs",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G021",
+      "title": "Emissions, signatures and concealment",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G022",
+      "title": "Information sharing, provenance and Comms transfer",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G023",
+      "title": "Knowledge libraries and Intelligence correlation",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G024",
+      "title": "Interception, decryption and signal deception",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16,
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G025",
+      "title": "Shared Viewscreen, alerts and attention hierarchy",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        2,
+        4
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G026",
+      "title": "Mission logs and recap",
+      "family": "continuity",
+      "disposition": "migration",
+      "increments": [
+        4,
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G027",
+      "title": "Spatial geometry, movement and collision",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G028",
+      "title": "Asteroid population and destructible terrain",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        14,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G029",
+      "title": "Region hazards, interference and fog",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        14,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G030",
+      "title": "Moving fields, falloff and physical emissions",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        14,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G031",
+      "title": "Physical bodies, on-rails orbits and reference frames",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        14,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G032",
+      "title": "Relative motion and constrained holds",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G033",
+      "title": "Civilian traffic, routes and orders",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G034",
+      "title": "Traffic priority, congestion, panic and emergency authority",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G035",
+      "title": "Infrastructure condition, capacity and thresholds",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G036",
+      "title": "Infrastructure dependency and service networks",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G037",
+      "title": "Workforce, strike and disposition",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G038",
+      "title": "Actor needs, stocks and event-driven economy",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G039",
+      "title": "NPC doctrine and autonomous reactions",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        3,
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G040",
+      "title": "Factions, standing and reputation",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        16,
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G041",
+      "title": "Diplomacy, dialogue and commitments",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        16,
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G042",
+      "title": "Surrender, compliance and coercion",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        16,
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G043",
+      "title": "Allied ship orders and support",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        16,
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G044",
+      "title": "Pursuit and inter-system pressure",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        16,
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G045",
+      "title": "Anomalies, black holes and wormholes",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        14,
+        18,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G046",
+      "title": "Salvage, mining and discovery sites",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G047",
+      "title": "Coarse Orbital Mode and planetary points of interest",
+      "family": "environment",
+      "disposition": "migration",
+      "increments": [
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G048",
+      "title": "Target acquisition, Combat Lock and Science designation",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G049",
+      "title": "Arcs, range, lead and exposure",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G050",
+      "title": "Shield frequency, penetration and counterplay",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G051",
+      "title": "Incoming salvo, interception and defence saturation",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G052",
+      "title": "Broadside / close-pass combat geometry",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G053",
+      "title": "Layered engagement ranges and transitions",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G054",
+      "title": "Finite ammunition, launch commitment and fabrication",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G055",
+      "title": "Power / battery / coolant / heat economy",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G056",
+      "title": "Combat load / flux / local energy endurance",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G057",
+      "title": "Granular damage and capability loss",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G058",
+      "title": "Diagnosis, triage, team travel and restoration",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        5,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G059",
+      "title": "Fault propagation, isolation and containment",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G060",
+      "title": "Preventive maintenance and degradation",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G061",
+      "title": "Protected external operations under threat",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        5,
+        19,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G062",
+      "title": "Asymmetric hulls, factions and doctrines",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        7,
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G063",
+      "title": "Multi-bridge cooperation and competition",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G064",
+      "title": "Disabled ships, rescue and loss continuation",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        11,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G065",
+      "title": "Resource capacities, transfer and replenishment",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G066",
+      "title": "Cargo lots, trade and hazardous goods",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G067",
+      "title": "Docked repair, rearm and service permission",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G068",
+      "title": "Personnel traits, duty teams and scarce expertise",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G069",
+      "title": "Away Missions, extraction and support",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G070",
+      "title": "Boarding and internal defence",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G071",
+      "title": "Casualties, Medical and persistent recovery",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G072",
+      "title": "Sidegrade loadouts and starbase refit",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G073",
+      "title": "Typed mounts, compatibility and partitioned fit budgets",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G074",
+      "title": "Reactor profiles and sustainability forecasts",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8,
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G075",
+      "title": "Hull geometry, mass, layout and logistics topology",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        10,
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G076",
+      "title": "Crew skill, AI behaviour and officers as build choices",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        3,
+        13,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G077",
+      "title": "Loot, upgrades and roguelite unlocks",
+      "family": "continuity",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G078",
+      "title": "Ship identity, naming and attachment",
+      "family": "continuity",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G079",
+      "title": "Objectives, recipient scopes and AI directives",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G080",
+      "title": "State triggers, thresholds, deadlines and branching outcomes",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G081",
+      "title": "Scarcity, permissions and irreversible allocation",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G082",
+      "title": "Waves and reinforcement escalation",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G083",
+      "title": "Coupled causal chains / emergent problems",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G084",
+      "title": "Procedural situations / shared generator and Director",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G085",
+      "title": "Authored reusable situation libraries and repetition control",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        22,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G086",
+      "title": "Patrol / persistent multi-system run",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G087",
+      "title": "War, allies, coarse fronts and decisive finale",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G088",
+      "title": "Sandbox / player-chosen sector work",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G089",
+      "title": "Territory conquest and colony strategy",
+      "family": "scenario",
+      "disposition": "migration",
+      "increments": [
+        21,
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G090",
+      "title": "Campaign facts, branching persistence and recap",
+      "family": "continuity",
+      "disposition": "migration",
+      "increments": [
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G091",
+      "title": "Save, checkpoint and compatible resume",
+      "family": "continuity",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G092",
+      "title": "Outcomes, debrief and repeat-session learning",
+      "family": "continuity",
+      "disposition": "migration",
+      "increments": [
+        4,
+        23
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G093",
+      "title": "Workload instrumentation and playtest scenarios",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G094",
+      "title": "GM observing, puppeting and directing",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G095",
+      "title": "GM attention, history, undo and checkpoint recovery",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G096",
+      "title": "Information control and in-sim event cues",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G097",
+      "title": "Campaign continuity / advisory pacing tools",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        23,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G098",
+      "title": "Workshop, authoring, disposable Test and packs",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G099",
+      "title": "Models, views, audio and localisation",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G100",
+      "title": "External peripherals and venue show control",
+      "family": "tools",
+      "disposition": "retained",
+      "increments": [
+        0
+      ],
+      "note": "Maintain existing capability and apply cross-cutting acceptance checks to affected increments."
+    },
+    {
+      "id": "G101",
+      "title": "Difficulty, assistance and challenge tuning",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        1,
+        24
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G102",
+      "title": "Explicit research boundaries",
+      "family": "boundary",
+      "disposition": "excluded",
+      "increments": [],
+      "note": "Directly playable first-person/on-foot mode is excluded; bridge-managed teams remain increment 20."
+    },
+    {
+      "id": "G103",
+      "title": "Transcription, human-error puzzles and multi-officer rituals",
+      "family": "boundary",
+      "disposition": "excluded",
+      "increments": [],
+      "note": "Separate transcription/manual-code/pattern puzzle layer is excluded; operational communication remains."
+    },
+    {
+      "id": "G104",
+      "title": "Fitting simulator, blueprint sharing and theorycrafting",
+      "family": "tools",
+      "disposition": "migration",
+      "increments": [
+        13
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G105",
+      "title": "Search-to-engagement chain and guidance continuity",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G106",
+      "title": "Bearing triangulation / multisensor hypothesis testing",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G107",
+      "title": "Preparation, commitment and recovery windows",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        5
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G108",
+      "title": "Located resources, delivery, interception and service dependencies",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G109",
+      "title": "Reports, requests and verified versus claimed state",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        4,
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G110",
+      "title": "Manoeuvre and operation effects on readiness / faults",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G111",
+      "title": "Throughput, queues, buffers and shifting bottlenecks",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G112",
+      "title": "Autonomous outside actors and bounded competing crises",
+      "family": "world",
+      "disposition": "migration",
+      "increments": [
+        21,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G113",
+      "title": "Telegraphing intent and preventive counterplay",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "G114",
+      "title": "Persistent settings, explicit work ownership and temporary handoffs",
+      "family": "crew",
+      "disposition": "migration",
+      "increments": [
+        1,
+        2,
+        3
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S001",
+      "title": "Phasers / sustained beam banks",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S002",
+      "title": "Blasters / unguided projectile banks",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S003",
+      "title": "Guided torpedoes / missiles",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S004",
+      "title": "Magazine, tube loading and reload",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S005",
+      "title": "Weapon tuning and beam frequency",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S006",
+      "title": "Weapon-bank charge, heat and discharge",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S007",
+      "title": "Broadside batteries",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S008",
+      "title": "Point-defence cannons / PDCs",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S009",
+      "title": "Long-range kinetic guns / railguns",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S010",
+      "title": "EMP / disruption payloads",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S011",
+      "title": "Explosive / area-effect warheads",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S012",
+      "title": "Penetrating / marking payloads",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S013",
+      "title": "Persistent mines and minelayers",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S014",
+      "title": "Ammunition fabrication",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S015",
+      "title": "Fire groups and independent bank targeting",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        7,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S016",
+      "title": "Targeted subsystem attack",
+      "family": "arms",
+      "disposition": "migration",
+      "increments": [
+        11,
+        14,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S017",
+      "title": "Fighter / attack-drone launch and recovery",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S018",
+      "title": "Electronic attack / Jam",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S019",
+      "title": "Spoofing and decoy emitters",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        17,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S020",
+      "title": "Electronic hardening / ECCM",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S021",
+      "title": "Hacking / remote access / mind-control devices",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S022",
+      "title": "Shield generators and directional arcs",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        9,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S023",
+      "title": "Shield focus / redistribution",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        9,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S024",
+      "title": "Shield modulation / frequency retuning",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        9,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S025",
+      "title": "Armour, hull sections and structural protection",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        10,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S026",
+      "title": "Cloaking / concealment device",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S027",
+      "title": "Signature and emission controls",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        17
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S028",
+      "title": "Damage isolation / breakers / bypasses",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        11,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S029",
+      "title": "Fire suppression, compartment seals and venting",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        11,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S030",
+      "title": "Self-destruct interlocks",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        11,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S031",
+      "title": "Reactor / power generation",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S032",
+      "title": "Battery / energy reserve",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S033",
+      "title": "Power distribution",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S034",
+      "title": "Coolant allocation / thermal circulation",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S035",
+      "title": "Heat rejection / radiators",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S036",
+      "title": "Capacitors / weapon energy buffers",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S037",
+      "title": "Overpower / overcharge control",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S038",
+      "title": "Presets, load shedding and emergency recovery",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        8
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S039",
+      "title": "Containment / resource conduits and buffers",
+      "family": "power",
+      "disposition": "migration",
+      "increments": [
+        6,
+        8,
+        10,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S040",
+      "title": "Life support",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S041",
+      "title": "Main-drive propellant / fuel supply",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S042",
+      "title": "Repair materials and fabrication stock",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S043",
+      "title": "Internal logistics and delivery routes",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        10,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S044",
+      "title": "Main engines / thrust and reverse",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S045",
+      "title": "Steering / yaw and attitude control",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S046",
+      "title": "Lateral / vertical manoeuvring thrusters",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S047",
+      "title": "Boost / impulse burst",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S048",
+      "title": "Relative-motion assist / match, hold, intercept",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S049",
+      "title": "Docking / capture and mating apparatus",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        2,
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S050",
+      "title": "Warp drive / inter-system transit",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S051",
+      "title": "Jump drive / tactical displacement",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S052",
+      "title": "Navigation chart / waypoint planner",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S053",
+      "title": "Autopilot and formation / escort controller",
+      "family": "helm",
+      "disposition": "migration",
+      "increments": [
+        18
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S054",
+      "title": "Helm radar",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S055",
+      "title": "Tactical radar / Combat Lock",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S056",
+      "title": "Sensor radar / Science Target",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S057",
+      "title": "Wide survey / search scanner",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S058",
+      "title": "Focused scanner / structural scan",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S059",
+      "title": "Intrusive / deep scanner",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S060",
+      "title": "Passive receivers / signal analysis",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S061",
+      "title": "Probes and remote sensor network",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S062",
+      "title": "Database / Intelligence correlation tools",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S063",
+      "title": "Contact designation and information transfer",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S064",
+      "title": "Environment / resource / anomaly scanner",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        4,
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S065",
+      "title": "Hail / Comms transceiver",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S066",
+      "title": "Interception / frequency search receiver",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S067",
+      "title": "Cipher / decoding suite",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S068",
+      "title": "Dossier / commitment interface",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S069",
+      "title": "Civilian / allied order terminal",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S070",
+      "title": "Captain status / objectives dashboard",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S071",
+      "title": "Alert posture / Red Alert",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S072",
+      "title": "Command / AI stance controller",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S073",
+      "title": "Viewscreen and auxiliary display controls",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S074",
+      "title": "Mission / officer log",
+      "family": "command",
+      "disposition": "migration",
+      "increments": [
+        1,
+        4,
+        22
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S075",
+      "title": "Internal damage-control teams",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        5,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S076",
+      "title": "Diagnosis / tests / damage reports",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        5,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S077",
+      "title": "Repair execution / restoration",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        5,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S078",
+      "title": "Proactive inspection / preventive maintenance",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        5,
+        11
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S079",
+      "title": "Duty Team roster and assignments",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S080",
+      "title": "Duty Officers / expertise assignments",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S081",
+      "title": "Medical / recovery services",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S082",
+      "title": "Internal defence / boarding support",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S083",
+      "title": "Tractor beam / tow and stabilise",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        6,
+        18,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S084",
+      "title": "Umbilical / capacity transfer",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        6,
+        18,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S085",
+      "title": "External repair / field team",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S086",
+      "title": "Shuttle / carried utility craft",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S087",
+      "title": "Transporter / remote personnel deployment",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S088",
+      "title": "Away Mission Operations systems",
+      "family": "personnel",
+      "disposition": "migration",
+      "increments": [
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S089",
+      "title": "Cargo hold / bulk stores / hazardous containment",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        6,
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S090",
+      "title": "Salvage / recovery equipment",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S091",
+      "title": "Mining / harvesting tools",
+      "family": "stores",
+      "disposition": "migration",
+      "increments": [
+        12
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S092",
+      "title": "Supply / logistics drones",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S093",
+      "title": "Construction / fabrication / repair drones",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S094",
+      "title": "Remote shield / energy / repair support emitters",
+      "family": "external",
+      "disposition": "migration",
+      "increments": [
+        9,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S095",
+      "title": "Repair puzzles and reactivation workflows",
+      "family": "boundary",
+      "disposition": "excluded",
+      "increments": [],
+      "note": "Separate repair-puzzle layer is excluded; repair uses increments 5 and 11."
+    },
+    {
+      "id": "S096",
+      "title": "Fire-control radar / illuminator",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14,
+        15
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S097",
+      "title": "Bearing-only receivers / ELINT / passive thermal search",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S098",
+      "title": "Directional search array / reorienting reconnaissance suite",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S099",
+      "title": "Target-motion / firing-solution computer",
+      "family": "sensors",
+      "disposition": "migration",
+      "increments": [
+        14
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S100",
+      "title": "Escape-pod beacon, locator and recovery apparatus",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        19,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S101",
+      "title": "Remote-craft command / telemetry datalink",
+      "family": "comms",
+      "disposition": "migration",
+      "increments": [
+        16,
+        19
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    },
+    {
+      "id": "S102",
+      "title": "Compartment atmosphere / pressure control and emergency pumping",
+      "family": "protection",
+      "disposition": "migration",
+      "increments": [
+        10,
+        11,
+        20
+      ],
+      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+    }
+  ],
+  "tracker": {
+    "issue": 1562,
+    "url": "https://github.com/jkeywo/project-phoenix-v2/issues/1562"
+  }
+}

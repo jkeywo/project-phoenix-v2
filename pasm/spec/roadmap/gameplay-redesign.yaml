@@ -1,0 +1,348 @@
+entities:
+  - migration: gameplay-redesign-incremental-rollout
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Incremental Gameplay Redesign Rollout
+      summary: >-
+        Implement the user-approved 0–24 sequence one playable increment at a time.
+        Preserve shipped hulls, scenarios and tools, existing networking and individual
+        knowledge-limited System AI. Each capability includes authoring, human controls,
+        AI, deterministic state and continuation integration. Structural migration
+        preserves observable behaviour before intentional gameplay changes.
+      rationale:
+        - "Approved 2026-10-13. Older saves and external packs may require conversion or their original compatible build; incompatible state must be refused explicitly."
+        - "The canonical catalogue ledger and playable exits live in docs/gameplay-redesign/implementation/migration-ledger.json. GitHub PRD #1562 retains execution-issue status."
+        - "Future design contracts are adopted per increment; this roadmap does not claim implementation of later capabilities."
+    implementation:
+      target_paths:
+        - docs/gameplay-redesign/implementation/migration-ledger.json
+        - docs/gameplay-redesign/implementation/index.html
+        - scripts/redesign-ledger.mjs
+        - scripts/redesign-baseline.mjs
+        - scripts/redesign-balance-baseline.mjs
+
+  - component: gameplay-redesign-increment-00
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "0 — Baseline and migration ledger"
+      summary: "All catalogue entries mapped; current gameplay, performance and determinism evidence recorded; superseded future PASM choices identified."
+      rationale:
+        - "Record pre-migration evidence before changing runtime behaviour. Headless timing does not establish native/browser rendering or human acceptance."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-01
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "1 — Explicit Consoles and ownership"
+      summary: "Explicit Console identities and bindings preserve existing screens, joining, ratings, human seeking, Backfill and reconnect."
+      rationale:
+        - "Starts after increment 0 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-02
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "2 — Composable Systems and common status"
+      summary: "Dock proves supported component composition and generic commands; common status/details covers manual, passive and delegated equipment."
+      rationale:
+        - "Starts after increment 1 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-03
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "3 — Reusable AI state trees"
+      summary: "Dock proves one bounded-knowledge System controller with supported state trees, inheritance, references and Workshop editing."
+      rationale:
+        - "Starts after increment 2 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-04
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "4 — Common observations and reports"
+      summary: "Existing observations retain access while gaining provenance, age, uncertainty, explicit feeds and repair reports."
+      rationale:
+        - "Starts after increment 3 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-05
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "5 — Shared jobs and team execution"
+      summary: "Existing repair work runs through shared job/team execution with equivalent repair outcomes and report-driven work lists."
+      rationale:
+        - "Starts after increment 4 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-06
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "6 — Stores, transfers and service links"
+      summary: "Existing ammunition, transfer and facility stock use shared capacities, inventories, reservations and explicit links; replenishment works."
+      rationale:
+        - "Starts after increment 5 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-07
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "7 — Shared mounts and configurable weapons"
+      summary: "Existing phasers, blasters and torpedoes use common mounts, barrel patterns and delivery/effect machinery with equivalent combat behaviour."
+      rationale:
+        - "Starts after increment 6 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-08
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "8 — Power, batteries, coolant and heat"
+      summary: "Local reserves, flow allocation, thermal state and selected flow cuts work with human/AI controls, complexity and replenishment."
+      rationale:
+        - "Starts after increment 7 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-09
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "9 — Shield energy and protection"
+      summary: "Shield upkeep, recharge and battery-mediated redistribution use shared resources/conditions and remain independently usable."
+      rationale:
+        - "Starts after increment 8 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-10
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "10 — Decks, compartments and internal routes"
+      summary: "Workshop authors layouts/materials/System placement; team travel uses shared routes and access boundaries before damage changes."
+      rationale:
+        - "Starts after increment 9 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-11
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "11 — Component damage and restoration"
+      summary: "Compartment penetration and component conditions land together with structural/component repair, parts use, disablement and recovery."
+      rationale:
+        - "Starts after increment 10 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-12
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "12 — Automatic logistics and production"
+      summary: "Stock targets, timed delivery, fabrication and surviving salvage use real stores, jobs and routes; optional harvesting stays bounded."
+      rationale:
+        - "Starts after increment 11 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-13
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "13 — Equipment fitting and refitting"
+      summary: "Compatible field/facility refits and favourites use actual equipment/resource/work limits and shared Workshop definitions."
+      rationale:
+        - "Starts after increment 12 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-14
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "14 — Sensing and environmental interaction"
+      summary: "Independent scanners, passive/history/uncertainty/correlation and shared radars use upgraded regions, signal attenuation and terrain occlusion."
+      rationale:
+        - "Starts after increment 13 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-15
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "15 — Layered combat"
+      summary: "Interception, longer-range missiles, broadsides, guidance, payloads and optional shield probing support multiple viable styles."
+      rationale:
+        - "Starts after increment 14 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-16
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "16 — Shared Comms channels and remote orders"
+      summary: "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting."
+      rationale:
+        - "Starts after increment 15 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-17
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "17 — Electronic operations"
+      summary: "Jamming, spoofing, protection, concealment and bounded disruption reuse mounts/signals/resources/conditions and expose known/friendly effects."
+      rationale:
+        - "Starts after increment 16 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-18
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "18 — Movement and transit extensions"
+      summary: "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split."
+      rationale:
+        - "Starts after increment 17 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-19
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "19 — Ordinary deployables and carried craft"
+      summary: "Configured entities plus deployment/sortie/recovery work support probes, turrets, decoys, fighters, shuttles and drones with ordinary autonomous/link-loss behaviour."
+      rationale:
+        - "Starts after increment 18 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-20
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "20 — Broader personnel operations"
+      summary: "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation."
+      rationale:
+        - "Starts after increment 19 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-21
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "21 — Facilities and systemic outside actors"
+      summary: "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies."
+      rationale:
+        - "Starts after increment 20 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-22
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "22 — Reusable situations and consequences"
+      summary: "Existing objectives/scripts gain reusable workflows and typed consequences while scenarios work and GM remains optional."
+      rationale:
+        - "Starts after increment 21 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-23
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "23 — Authored continuing modes"
+      summary: "Authored Patrol, then War, then Sandbox integrate transit, meaningful persistence, servicing, history and debrief."
+      rationale:
+        - "Starts after increment 22 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]
+
+  - component: gameplay-redesign-increment-24
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "24 — Generation and final integration"
+      summary: "Generation and bounded Director follow authored examples; coarse planetary activities and catalogue/Workshop/seat-experience audits complete."
+      rationale:
+        - "Starts after increment 23 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gameplay-redesign-incremental-rollout]

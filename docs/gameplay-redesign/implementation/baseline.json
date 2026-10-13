@@ -1,0 +1,1667 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "revision": "8d8143e9899747591cde4ee6c292e3c89859bf8d",
+  "runtimeSourceSha256": "e8531030e215f7605762acc11528d929845ff360a3a56e3be3aa9eaf4bff9d41",
+  "runtimeSourceClean": true,
+  "repositoryDirty": true,
+  "profile": "measure",
+  "features": [
+    "default",
+    "headless",
+    "server"
+  ],
+  "executableSha256": "b05e708bfe977138fc5bf7874fe77cc940d73f3af986ea03ea4c0bd66aaab3df",
+  "hardware": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logicalCpus": 24,
+    "totalMemoryBytes": 68112736256
+  },
+  "scope": "Headless same-machine diagnostic; no browser/native rendering, real-network or human workload acceptance.",
+  "referenceHull": "assets/entities/alliance_cruiser.toml",
+  "checks": [
+    {
+      "name": "combat_test byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831"
+    },
+    {
+      "name": "combat_test replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "combat_test performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:7873b6ad0df69a5b"
+    },
+    {
+      "name": "falling_skyway byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833"
+    },
+    {
+      "name": "falling_skyway replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "falling_skyway performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:4a07d23baa4cf57c"
+    }
+  ],
+  "scenarios": [
+    {
+      "world": "assets/worlds/combat_test.toml",
+      "seed": 42,
+      "ticks": 3600,
+      "sim_seconds": 60,
+      "final_phase": "InProgress",
+      "outcome": "timeout",
+      "entity_count": 1024,
+      "ship": {
+        "name": "entity.alliance_cruiser.name",
+        "position": [
+          668.018,
+          -197.299
+        ],
+        "yaw": 0.6894,
+        "forward_speed": 11.2,
+        "hull": [
+          590,
+          590
+        ],
+        "damaged_systems": {}
+      },
+      "damage_by_ship": {
+        "00000000-0000-8000-8000-000000000007": {
+          "name_id": "entity.alliance_cruiser.name",
+          "damage_dealt": 4,
+          "damage_taken": 0,
+          "by_weapon": {
+            "fore": 4
+          },
+          "by_pair": {
+            "00000000-0000-8000-8000-000100000000": 4
+          },
+          "shield_absorbed": 0,
+          "hull_taken": 0,
+          "shots_fired": {
+            "fore": 1
+          },
+          "kills": 0,
+          "death": null,
+          "system_knockouts": [],
+          "repair_hp": 0,
+          "phase_seconds": {
+            "acquire": 6.767,
+            "orbit": 9.117,
+            "shadow": 44.067
+          }
+        },
+        "00000000-0000-8000-8000-000100000000": {
+          "name_id": "wave_1",
+          "damage_dealt": 0,
+          "damage_taken": 4,
+          "by_weapon": {},
+          "by_pair": {},
+          "shield_absorbed": 4,
+          "hull_taken": 0,
+          "shots_fired": {},
+          "kills": 0,
+          "death": null,
+          "system_knockouts": [],
+          "repair_hp": 0,
+          "phase_seconds": {
+            "acquire": 27.817
+          }
+        },
+        "00000000-0000-8000-8000-000100000001": {
+          "name_id": "wave_1_bonus",
+          "damage_dealt": 0,
+          "damage_taken": 9,
+          "by_weapon": {},
+          "by_pair": {},
+          "shield_absorbed": 9,
+          "hull_taken": 0,
+          "shots_fired": {},
+          "kills": 0,
+          "death": null,
+          "system_knockouts": [],
+          "repair_hp": 0,
+          "phase_seconds": {
+            "acquire": 22.667,
+            "inbound": 13.283
+          }
+        }
+      },
+      "message_counts": {
+        "AsteroidSpawned": 443,
+        "BeamStarted": 1,
+        "BlackboardUpdate": 3599,
+        "DebugState": 1,
+        "EntitySpawned": 4,
+        "GameStarted": 1,
+        "ModifierAdded": 16,
+        "ObjectiveSummary": 2,
+        "SimState": 599,
+        "TargetLock": 6,
+        "WorldSetup": 1
+      },
+      "activity_bucket_count": 4,
+      "report_sha256": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831"
+    },
+    {
+      "world": "assets/worlds/falling_skyway.toml",
+      "seed": 42,
+      "ticks": 3600,
+      "sim_seconds": 60,
+      "final_phase": "InProgress",
+      "outcome": "draw",
+      "entity_count": 32,
+      "ship": {
+        "name": "entity.alliance_cruiser.name",
+        "position": [
+          300,
+          420
+        ],
+        "yaw": 0,
+        "forward_speed": 0,
+        "hull": [
+          590,
+          590
+        ],
+        "damaged_systems": {}
+      },
+      "damage_by_ship": {
+        "00000000-0000-8000-8000-000000000009": {
+          "name_id": null,
+          "damage_dealt": 0,
+          "damage_taken": 60,
+          "by_weapon": {},
+          "by_pair": {},
+          "shield_absorbed": 0,
+          "hull_taken": 60,
+          "shots_fired": {},
+          "kills": 0,
+          "death": [
+            934,
+            15.5667
+          ],
+          "system_knockouts": [
+            {
+              "system_id": "captain",
+              "tier": "Destroyed",
+              "tick": 934,
+              "sim_t": 15.5667
+            }
+          ],
+          "repair_hp": 0,
+          "phase_seconds": {}
+        },
+        "00000000-0000-8000-8000-000000000012": {
+          "name_id": "entity.alliance_cruiser.name",
+          "damage_dealt": 0,
+          "damage_taken": 0,
+          "by_weapon": {},
+          "by_pair": {},
+          "shield_absorbed": 0,
+          "hull_taken": 0,
+          "shots_fired": {},
+          "kills": 0,
+          "death": null,
+          "system_knockouts": [],
+          "repair_hp": 0,
+          "phase_seconds": {
+            "shadow": 59.95
+          }
+        }
+      },
+      "message_counts": {
+        "BlackboardUpdate": 248,
+        "DebugState": 1,
+        "EntityDespawned": 1,
+        "EntitySpawned": 1,
+        "GameStarted": 1,
+        "ModifierAdded": 7,
+        "ObjectiveSummary": 3,
+        "SimState": 599,
+        "WorldSetup": 1
+      },
+      "activity_bucket_count": 4,
+      "report_sha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833"
+    }
+  ],
+  "performance": [
+    {
+      "name": "combat_test-perf-0",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 830,
+          "mean": 0.9816204813589533,
+          "p50": 0.9254000186920166,
+          "p95": 1.2755000591278076,
+          "p99": 1.5760999917984009,
+          "max": 1.8480000495910645,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.7899303611111114,
+          "p50": 0.727,
+          "p95": 1.1343,
+          "p99": 1.4951,
+          "max": 23.104699999999998,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.0908941666666669,
+          "p50": 0.08270000000000001,
+          "p95": 0.1105,
+          "p99": 0.2876,
+          "max": 2.0081,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.212317888888889,
+          "p50": 0.19540000000000002,
+          "p95": 0.2379,
+          "p99": 0.49,
+          "max": 21.0966,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.05614434565157014,
+          "p50": 0.036199999999999996,
+          "p95": 0.1402,
+          "p99": 0.182,
+          "max": 2.284,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.027037343706584997,
+          "p50": 0.025400000000000002,
+          "p95": 0.0324,
+          "p99": 0.04,
+          "max": 0.3749,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.07065229230341757,
+          "p50": 0.0696,
+          "p95": 0.12789999999999999,
+          "p99": 0.1895,
+          "max": 3.1700999999999997,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.010802750764101256,
+          "p50": 0.0099,
+          "p95": 0.0129,
+          "p99": 0.017900000000000003,
+          "max": 0.3538,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0404953876076688,
+          "p50": 0.037200000000000004,
+          "p95": 0.0449,
+          "p99": 0.0702,
+          "max": 3.0527,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.15085120866907487,
+          "p50": 0.1497,
+          "p95": 0.2829,
+          "p99": 0.4138,
+          "max": 3.1229,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.09724754098360672,
+          "p50": 0.0887,
+          "p95": 0.1252,
+          "p99": 0.2029,
+          "max": 1.3408,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.03362267296471264,
+          "p50": 0.029,
+          "p95": 0.0385,
+          "p99": 0.0575,
+          "max": 3.0477,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3040776431384433,
+          "p50": 1.2242,
+          "p95": 1.7912,
+          "p99": 2.5151000000000003,
+          "max": 4.5487,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "combat_test-perf-0.json.continuation.json",
+        "sha256": "0c7e348d788718a1e99a407cb024703089d2537e8353a1f360434062667414bb",
+        "tick": 3600,
+        "digest": "7873b6ad0df69a5b"
+      },
+      "capture": {
+        "path": "combat_test-perf-0.json",
+        "sha256": "142850b9f1eac60318445129017ff5898601b4674d1dd92bce739edfff8f3378"
+      }
+    },
+    {
+      "name": "combat_test-perf-1",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 830,
+          "mean": 1.035766990285322,
+          "p50": 1.01419997215271,
+          "p95": 1.417799949645996,
+          "p99": 1.4699000120162964,
+          "max": 1.4699000120162964,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.8293333888888874,
+          "p50": 0.7699,
+          "p95": 1.1887,
+          "p99": 1.5278,
+          "max": 23.097800000000003,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.09544061111111131,
+          "p50": 0.0877,
+          "p95": 0.12789999999999999,
+          "p99": 0.2356,
+          "max": 1.9892999999999998,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.22694625000000024,
+          "p50": 0.2092,
+          "p95": 0.2684,
+          "p99": 0.39530000000000004,
+          "max": 21.1085,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.05874209502639604,
+          "p50": 0.0384,
+          "p95": 0.1591,
+          "p99": 0.2023,
+          "max": 0.5693,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.027701333703806365,
+          "p50": 0.0259,
+          "p95": 0.0357,
+          "p99": 0.0526,
+          "max": 0.2125,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0726511253125869,
+          "p50": 0.0699,
+          "p95": 0.1418,
+          "p99": 0.2052,
+          "max": 0.4522,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.011687274242845113,
+          "p50": 0.0108,
+          "p95": 0.0156,
+          "p99": 0.0247,
+          "max": 0.2471,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.041417227007501896,
+          "p50": 0.0387,
+          "p95": 0.0511,
+          "p99": 0.0843,
+          "max": 0.3133,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.16033606557377014,
+          "p50": 0.1528,
+          "p95": 0.30469999999999997,
+          "p99": 0.40299999999999997,
+          "max": 3.0953999999999997,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.10164373437065825,
+          "p50": 0.0948,
+          "p95": 0.1419,
+          "p99": 0.19369999999999998,
+          "max": 1.2294,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.03290853014726321,
+          "p50": 0.0303,
+          "p95": 0.0436,
+          "p99": 0.0684,
+          "max": 0.3967,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3854993335352945,
+          "p50": 1.3267000000000002,
+          "p95": 1.89,
+          "p99": 2.6513999999999998,
+          "max": 5.564699999999999,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "combat_test-perf-1.json.continuation.json",
+        "sha256": "0c7e348d788718a1e99a407cb024703089d2537e8353a1f360434062667414bb",
+        "tick": 3600,
+        "digest": "7873b6ad0df69a5b"
+      },
+      "capture": {
+        "path": "combat_test-perf-1.json",
+        "sha256": "caac4ce7037eb502d87b876b430c50d5dd8aeff1b84a8aef947ee71c06bf8e5d"
+      }
+    },
+    {
+      "name": "combat_test-perf-2",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 830,
+          "mean": 1.0679980726127165,
+          "p50": 1.0406999588012695,
+          "p95": 1.3219000101089478,
+          "p99": 1.4453999996185303,
+          "max": 1.8015999794006348,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.8341463333333325,
+          "p50": 0.7694000000000001,
+          "p95": 1.2264000000000002,
+          "p99": 1.4962,
+          "max": 22.3584,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.09651050000000003,
+          "p50": 0.0881,
+          "p95": 0.1304,
+          "p99": 0.1887,
+          "max": 2.0442,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.22705008333333354,
+          "p50": 0.2102,
+          "p95": 0.2684,
+          "p99": 0.3826,
+          "max": 20.3142,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.060053709363712314,
+          "p50": 0.0392,
+          "p95": 0.16110000000000002,
+          "p99": 0.2079,
+          "max": 1.1434,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0287173103639901,
+          "p50": 0.0264,
+          "p95": 0.0368,
+          "p99": 0.047599999999999996,
+          "max": 1.0967,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.07270978049458188,
+          "p50": 0.0697,
+          "p95": 0.14550000000000002,
+          "p99": 0.19770000000000001,
+          "max": 1.1736,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.01121258682967487,
+          "p50": 0.0104,
+          "p95": 0.0157,
+          "p99": 0.022099999999999998,
+          "max": 0.0599,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.04139210891914414,
+          "p50": 0.0386,
+          "p95": 0.0516,
+          "p99": 0.0765,
+          "max": 0.2888,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.16190836343428738,
+          "p50": 0.1513,
+          "p95": 0.3271,
+          "p99": 0.4027,
+          "max": 3.1041,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.102122950819672,
+          "p50": 0.09469999999999999,
+          "p95": 0.1426,
+          "p99": 0.1813,
+          "max": 0.6734,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0326108085579329,
+          "p50": 0.0304,
+          "p95": 0.0439,
+          "p99": 0.056100000000000004,
+          "max": 1.1405,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3925381399575882,
+          "p50": 1.3278,
+          "p95": 1.9430999999999998,
+          "p99": 2.4334000000000002,
+          "max": 4.4337,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "combat_test-perf-2.json.continuation.json",
+        "sha256": "0c7e348d788718a1e99a407cb024703089d2537e8353a1f360434062667414bb",
+        "tick": 3600,
+        "digest": "7873b6ad0df69a5b"
+      },
+      "capture": {
+        "path": "combat_test-perf-2.json",
+        "sha256": "8d7c24a181b1f365a66b82d3590289aa43cc8576d92cf68bd298431d69ac2572"
+      }
+    },
+    {
+      "name": "falling_skyway-perf-0",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 782,
+          "mean": 0.8691938639144459,
+          "p50": 0.8611999750137329,
+          "p95": 1.0882999897003174,
+          "p99": 1.3529000282287598,
+          "max": 1.6124000549316406,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.8205723333333345,
+          "p50": 0.8092,
+          "p95": 1.1253000000000002,
+          "p99": 1.2727000000000002,
+          "max": 21.908,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.07107866666666648,
+          "p50": 0.06770000000000001,
+          "p95": 0.0859,
+          "p99": 0.1178,
+          "max": 0.46,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.2155941666666664,
+          "p50": 0.2009,
+          "p95": 0.24509999999999998,
+          "p99": 0.3302,
+          "max": 21.5075,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.06855923867741046,
+          "p50": 0.0461,
+          "p95": 0.1793,
+          "p99": 0.208,
+          "max": 0.4781,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.025310086135037102,
+          "p50": 0.0239,
+          "p95": 0.0282,
+          "p99": 0.032499999999999994,
+          "max": 0.3547,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0868133370380661,
+          "p50": 0.09670000000000001,
+          "p95": 0.1496,
+          "p99": 0.17200000000000001,
+          "max": 0.4309,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.012331453181439345,
+          "p50": 0.0117,
+          "p95": 0.015000000000000001,
+          "p99": 0.0188,
+          "max": 0.2415,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.057598610725201636,
+          "p50": 0.0553,
+          "p95": 0.06380000000000001,
+          "p99": 0.0969,
+          "max": 0.381,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.1467149208113364,
+          "p50": 0.1908,
+          "p95": 0.24689999999999998,
+          "p99": 0.29750000000000004,
+          "max": 0.6795,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.11698007779938889,
+          "p50": 0.1118,
+          "p95": 0.13540000000000002,
+          "p99": 0.17789999999999997,
+          "max": 0.5948,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.019740122256182057,
+          "p50": 0.0166,
+          "p95": 0.0342,
+          "p99": 0.043300000000000005,
+          "max": 0.2898,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.1986310209027586,
+          "p50": 1.166,
+          "p95": 1.5565,
+          "p99": 1.7691000000000001,
+          "max": 3.1591,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "falling_skyway-perf-0.json.continuation.json",
+        "sha256": "a9ac622503032b6ad031921f7b6d67787227cd5c591cab221e6ba71de9832e04",
+        "tick": 3600,
+        "digest": "4a07d23baa4cf57c"
+      },
+      "capture": {
+        "path": "falling_skyway-perf-0.json",
+        "sha256": "9725c91a093ad250ca112031608075051f32f97340adb219516528e431bee5b4"
+      }
+    },
+    {
+      "name": "falling_skyway-perf-1",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 782,
+          "mean": 0.8513852927995764,
+          "p50": 0.8414999842643738,
+          "p95": 1.058899998664856,
+          "p99": 1.3147000074386597,
+          "max": 1.4263999462127686,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.8143659722222206,
+          "p50": 0.8023,
+          "p95": 1.1177,
+          "p99": 1.3217,
+          "max": 21.909100000000002,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.07097763888888892,
+          "p50": 0.0671,
+          "p95": 0.0839,
+          "p99": 0.1114,
+          "max": 1.2569000000000001,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.21442402777777722,
+          "p50": 0.1982,
+          "p95": 0.245,
+          "p99": 0.42269999999999996,
+          "max": 21.5165,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.06717913309252552,
+          "p50": 0.045200000000000004,
+          "p95": 0.1775,
+          "p99": 0.20550000000000002,
+          "max": 1.1622,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0246691303139759,
+          "p50": 0.023799999999999998,
+          "p95": 0.028,
+          "p99": 0.0307,
+          "max": 0.27849999999999997,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.08756060016671295,
+          "p50": 0.0957,
+          "p95": 0.1482,
+          "p99": 0.2367,
+          "max": 1.2231,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.012159210891914473,
+          "p50": 0.0115,
+          "p95": 0.0145,
+          "p99": 0.018000000000000002,
+          "max": 0.0898,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.057122033898305224,
+          "p50": 0.054599999999999996,
+          "p95": 0.0629,
+          "p99": 0.08990000000000001,
+          "max": 0.9564,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.14507821617115882,
+          "p50": 0.1895,
+          "p95": 0.2439,
+          "p99": 0.28800000000000003,
+          "max": 2.1220000000000003,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.11568438455126426,
+          "p50": 0.1093,
+          "p95": 0.1313,
+          "p99": 0.18080000000000002,
+          "max": 2.3617999999999997,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.019658571825506895,
+          "p50": 0.0163,
+          "p95": 0.033800000000000004,
+          "p99": 0.0426,
+          "max": 0.337,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.1918526507119056,
+          "p50": 1.1569,
+          "p95": 1.5579,
+          "p99": 1.7953000000000001,
+          "max": 4.409800000000001,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "falling_skyway-perf-1.json.continuation.json",
+        "sha256": "a9ac622503032b6ad031921f7b6d67787227cd5c591cab221e6ba71de9832e04",
+        "tick": 3600,
+        "digest": "4a07d23baa4cf57c"
+      },
+      "capture": {
+        "path": "falling_skyway-perf-1.json",
+        "sha256": "02c7cecebcd670a4d1aea8f657b0ffa478b90c24e3f9a5f64422375350352f39"
+      }
+    },
+    {
+      "name": "falling_skyway-perf-2",
+      "metrics": {
+        "sim.console_ack": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 782,
+          "mean": 0.8618516641504624,
+          "p50": 0.847100019454956,
+          "p95": 1.0781999826431274,
+          "p99": 1.1862000226974487,
+          "max": 1.2451000213623047,
+          "over16_67": 0
+        },
+        "sim.fixed.elapsed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.8138134722222226,
+          "p50": 0.8005,
+          "p95": 1.1155,
+          "p99": 1.2828,
+          "max": 22.1323,
+          "over16_67": 1
+        },
+        "sim.fixed.unattributed.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.07061724999999992,
+          "p50": 0.0667,
+          "p95": 0.0839,
+          "p99": 0.1061,
+          "max": 1.9221,
+          "over16_67": 0
+        },
+        "sim.fixed.unobserved": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3600,
+          "mean": 0.21335797222222236,
+          "p50": 0.19699999999999998,
+          "p95": 0.2391,
+          "p99": 0.3205,
+          "max": 21.764200000000002,
+          "over16_67": 1
+        },
+        "sim.phase.broadcast.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.06862475687691,
+          "p50": 0.045200000000000004,
+          "p95": 0.1817,
+          "p99": 0.2172,
+          "max": 1.4805000000000001,
+          "over16_67": 0
+        },
+        "sim.phase.damage.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.024624784662406102,
+          "p50": 0.0236,
+          "p95": 0.0279,
+          "p99": 0.0307,
+          "max": 0.3544,
+          "over16_67": 0
+        },
+        "sim.phase.input.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.0859101694915253,
+          "p50": 0.0956,
+          "p95": 0.14679999999999999,
+          "p99": 0.1718,
+          "max": 0.4555,
+          "over16_67": 0
+        },
+        "sim.phase.membership.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.012192053348152373,
+          "p50": 0.011600000000000001,
+          "p95": 0.0148,
+          "p99": 0.018099999999999998,
+          "max": 0.0789,
+          "over16_67": 0
+        },
+        "sim.phase.modifiers.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.05707049180327839,
+          "p50": 0.0547,
+          "p95": 0.063,
+          "p99": 0.0759,
+          "max": 2.3346999999999998,
+          "over16_67": 0
+        },
+        "sim.phase.physics.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.14651947763267612,
+          "p50": 0.1903,
+          "p95": 0.24449999999999997,
+          "p99": 0.372,
+          "max": 1.8025,
+          "over16_67": 0
+        },
+        "sim.phase.publish.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.11527363156432345,
+          "p50": 0.1099,
+          "p95": 0.1325,
+          "p99": 0.18230000000000002,
+          "max": 1.5372999999999999,
+          "over16_67": 0
+        },
+        "sim.phase.publish_aggregate.observed": {
+          "unit": "millis",
+          "excludedSamples": 0,
+          "count": 3599,
+          "mean": 0.01977010280633515,
+          "p50": 0.0166,
+          "p95": 0.034,
+          "p99": 0.0431,
+          "max": 0.3228,
+          "over16_67": 0
+        },
+        "sim.tick": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.1919604968191475,
+          "p50": 1.1589,
+          "p95": 1.5525,
+          "p99": 1.8102,
+          "max": 3.9489,
+          "over16_67": 0
+        }
+      },
+      "continuation": {
+        "path": "falling_skyway-perf-2.json.continuation.json",
+        "sha256": "a9ac622503032b6ad031921f7b6d67787227cd5c591cab221e6ba71de9832e04",
+        "tick": 3600,
+        "digest": "4a07d23baa4cf57c"
+      },
+      "capture": {
+        "path": "falling_skyway-perf-2.json",
+        "sha256": "ce8849b6cc81f58b8e134c8e626b50d4815ae62c9242da620ae234c7bfd7671e"
+      }
+    }
+  ],
+  "cruiser_balance": {
+    "config": "scripts/balance-runs.cruiser.toml",
+    "configSha256": "c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae",
+    "profile": "measure",
+    "runs": 20,
+    "victories": 20,
+    "thresholds": [
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_ttk_median",
+        "limit": 10,
+        "actual": 4.7833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_damage_margin",
+        "limit": 100,
+        "actual": 163,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 13.8167,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 283.8,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_ttk_median",
+        "limit": 20,
+        "actual": 8.5833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 310.2,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 15.7,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_damage_margin",
+        "limit": 25,
+        "actual": 47.241599999999984,
+        "pass": true
+      }
+    ],
+    "matchups": {
+      "cruiser_vs_harrow_destroyer": {
+        "label": "cruiser_vs_harrow_destroyer",
+        "sideA": [
+          "cruiser"
+        ],
+        "sideB": [
+          "ship_harrow_destroyer"
+        ],
+        "total": 5,
+        "completed": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0,
+        "decided": 5,
+        "winRate": 1,
+        "ttk": {
+          "min": 4.7833,
+          "median": 4.7833,
+          "max": 4.7833,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 163,
+          "count": 5
+        },
+        "mandatorySetCompletion": {
+          "completed": 0,
+          "sampled": 0,
+          "rate": null,
+          "unmeasurable": {
+            "total": 5,
+            "missingScenario": 0,
+            "malformedObjectives": 0,
+            "noMandatoryObjectives": 5
+          }
+        },
+        "fallingSkywayCleanLedger": null,
+        "phases": {
+          "acquire": 0.665,
+          "inbound": 23.165,
+          "orbit": 21.165,
+          "shadow": 0.835,
+          "torpedo_run": 1.5
+        },
+        "stationActivity": {
+          "captain": {
+            "human": 0,
+            "ai": 15,
+            "offline": 0,
+            "total": 15
+          },
+          "command": {
+            "human": 0,
+            "ai": 5,
+            "offline": 0,
+            "total": 5
+          },
+          "engineering": {
+            "human": 0,
+            "ai": 60,
+            "offline": 0,
+            "total": 60
+          },
+          "helm": {
+            "human": 0,
+            "ai": 4275,
+            "offline": 0,
+            "total": 4275
+          },
+          "science": {
+            "human": 0,
+            "ai": 63,
+            "offline": 0,
+            "total": 63
+          },
+          "tactical": {
+            "human": 0,
+            "ai": 60,
+            "offline": 0,
+            "total": 60
+          }
+        },
+        "failuresDetail": []
+      },
+      "cruiser_vs_harrow_cruiser": {
+        "label": "cruiser_vs_harrow_cruiser",
+        "sideA": [
+          "cruiser"
+        ],
+        "sideB": [
+          "ship_harrow_cruiser"
+        ],
+        "total": 5,
+        "completed": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0,
+        "decided": 5,
+        "winRate": 1,
+        "ttk": {
+          "min": 10.9667,
+          "median": 13.8167,
+          "max": 14.1333,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 283.8,
+          "count": 5
+        },
+        "mandatorySetCompletion": {
+          "completed": 0,
+          "sampled": 0,
+          "rate": null,
+          "unmeasurable": {
+            "total": 5,
+            "missingScenario": 0,
+            "malformedObjectives": 0,
+            "noMandatoryObjectives": 5
+          }
+        },
+        "fallingSkywayCleanLedger": null,
+        "phases": {
+          "acquire": 0.665,
+          "orbit": 110.067,
+          "shadow": 0.835,
+          "torpedo_run": 16.166
+        },
+        "stationActivity": {
+          "captain": {
+            "human": 0,
+            "ai": 15,
+            "offline": 0,
+            "total": 15
+          },
+          "command": {
+            "human": 0,
+            "ai": 5,
+            "offline": 0,
+            "total": 5
+          },
+          "engineering": {
+            "human": 0,
+            "ai": 50,
+            "offline": 0,
+            "total": 50
+          },
+          "helm": {
+            "human": 0,
+            "ai": 11511,
+            "offline": 0,
+            "total": 11511
+          },
+          "science": {
+            "human": 0,
+            "ai": 101,
+            "offline": 0,
+            "total": 101
+          },
+          "tactical": {
+            "human": 0,
+            "ai": 87,
+            "offline": 0,
+            "total": 87
+          }
+        },
+        "failuresDetail": []
+      },
+      "cruiser_vs_harrow_patrol": {
+        "label": "cruiser_vs_harrow_patrol",
+        "sideA": [
+          "cruiser"
+        ],
+        "sideB": [
+          "ship_harrow_patrol"
+        ],
+        "total": 5,
+        "completed": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0,
+        "decided": 5,
+        "winRate": 1,
+        "ttk": {
+          "min": 8.1833,
+          "median": 8.5833,
+          "max": 12,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 310.2,
+          "count": 5
+        },
+        "mandatorySetCompletion": {
+          "completed": 0,
+          "sampled": 0,
+          "rate": null,
+          "unmeasurable": {
+            "total": 5,
+            "missingScenario": 0,
+            "malformedObjectives": 0,
+            "noMandatoryObjectives": 5
+          }
+        },
+        "fallingSkywayCleanLedger": null,
+        "phases": {
+          "acquire": 0.165,
+          "orbit": 27.665,
+          "shadow": 0.835,
+          "torpedo_run": 16.885
+        },
+        "stationActivity": {
+          "captain": {
+            "human": 0,
+            "ai": 15,
+            "offline": 0,
+            "total": 15
+          },
+          "command": {
+            "human": 0,
+            "ai": 5,
+            "offline": 0,
+            "total": 5
+          },
+          "engineering": {
+            "human": 0,
+            "ai": 56,
+            "offline": 0,
+            "total": 56
+          },
+          "helm": {
+            "human": 0,
+            "ai": 8202,
+            "offline": 0,
+            "total": 8202
+          },
+          "science": {
+            "human": 0,
+            "ai": 127,
+            "offline": 0,
+            "total": 127
+          },
+          "tactical": {
+            "human": 0,
+            "ai": 56,
+            "offline": 0,
+            "total": 56
+          }
+        },
+        "failuresDetail": []
+      },
+      "cruiser_vs_harrow_warhawk": {
+        "label": "cruiser_vs_harrow_warhawk",
+        "sideA": [
+          "cruiser"
+        ],
+        "sideB": [
+          "ship_harrow_warhawk"
+        ],
+        "total": 5,
+        "completed": 5,
+        "wins": 5,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0,
+        "decided": 5,
+        "winRate": 1,
+        "ttk": {
+          "min": 14.5,
+          "median": 15.7,
+          "max": 19.2833,
+          "count": 5
+        },
+        "damageMargin": {
+          "mean": 47.241599999999984,
+          "count": 5
+        },
+        "mandatorySetCompletion": {
+          "completed": 0,
+          "sampled": 0,
+          "rate": null,
+          "unmeasurable": {
+            "total": 5,
+            "missingScenario": 0,
+            "malformedObjectives": 0,
+            "noMandatoryObjectives": 5
+          }
+        },
+        "fallingSkywayCleanLedger": null,
+        "phases": {
+          "acquire": 0.665,
+          "hold": 81.85,
+          "orbit": 39.133,
+          "shadow": 0.835,
+          "torpedo_run": 42.283
+        },
+        "stationActivity": {
+          "captain": {
+            "human": 0,
+            "ai": 15,
+            "offline": 0,
+            "total": 15
+          },
+          "command": {
+            "human": 0,
+            "ai": 5,
+            "offline": 0,
+            "total": 5
+          },
+          "engineering": {
+            "human": 0,
+            "ai": 60,
+            "offline": 0,
+            "total": 60
+          },
+          "helm": {
+            "human": 0,
+            "ai": 14847,
+            "offline": 0,
+            "total": 14847
+          },
+          "science": {
+            "human": 0,
+            "ai": 56,
+            "offline": 0,
+            "total": 56
+          },
+          "tactical": {
+            "human": 0,
+            "ai": 106,
+            "offline": 0,
+            "total": 106
+          }
+        },
+        "failuresDetail": []
+      }
+    }
+  },
+  "raw_artifacts": {
+    "headless": ".phoenix/redesign-baseline/2026-10-13-measure",
+    "cruiser": ".phoenix/redesign-baseline/2026-10-13-cruiser"
+  },
+  "commands": [
+    "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/<new-run> --profile measure",
+    "node scripts/redesign-balance-baseline.mjs --capture <new-run>/summary.json --out .phoenix/redesign-baseline/<new-cruiser-run>"
+  ],
+  "requestedFeatures": [
+    "headless"
+  ],
+  "defaultFeatures": true
+}

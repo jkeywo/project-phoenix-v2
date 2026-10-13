@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "revision": "8d8143e9899747591cde4ee6c292e3c89859bf8d",
+  "status": "passed",
+  "scope": "Increment 0 ledger/PASM/document checks, unchanged Console client baseline, renderer-independent shipped-content checks and native continuation/probe tests. Native gameplay/timing evidence is in baseline.json.",
+  "checks": [
+    {
+      "name": "catalogue-ledger-and-generated-report",
+      "command": "node scripts/redesign-ledger.mjs --check",
+      "result": "passed",
+      "catalogue_entries": 216,
+      "increments": 25
+    },
+    {
+      "name": "roadmap-html-filters",
+      "result": "passed",
+      "cases": [
+        "216 entries",
+        "102 ship entries",
+        "ID search",
+        "increment filter",
+        "multi-term search"
+      ]
+    },
+    {
+      "name": "pasm-validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "entities": 989,
+      "findings": 534,
+      "baseline_findings": 534
+    },
+    {
+      "name": "pasm-scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "repository_files": 11844,
+      "observed_dependencies": 26640
+    },
+    {
+      "name": "pasm-traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "rows": 249
+    },
+    {
+      "name": "existing-console-client-baseline",
+      "result": "passed",
+      "passed_tests": 490,
+      "failed_tests": 0,
+      "suites": 7,
+      "raw_sha256": "aa0b07707fc3373bc2ebb8aafc2ddb3f4643658cdcc60f399c767f740be986a0",
+      "command": "npx vitest run tests/client/mount-plan.test.js tests/client/console-resolver.test.js tests/client/console-state.test.js tests/client/console-state-resolver.test.js tests/client/console-payload.test.js tests/client/console-payload-pipeline.test.js tests/client/content-switcher.test.js --reporter=json --outputFile=.phoenix/redesign-client-baseline.json"
+    },
+    {
+      "name": "shipped-content-renderer-independent",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features shipped",
+      "result": "passed",
+      "passed_tests": 58,
+      "failed_tests": 0
+    },
+    {
+      "name": "snapshot-continuation-baseline",
+      "command": "cargo test -p project-phoenix --features headless --test snapshot_resume continuation",
+      "result": "passed",
+      "passed_tests": 6,
+      "failed_tests": 0
+    },
+    {
+      "name": "native-cross-target-probe",
+      "command": "cargo test -p project-phoenix --features headless --test cross_target_probe",
+      "result": "passed",
+      "passed_tests": 6,
+      "failed_tests": 0
+    }
+  ]
+}

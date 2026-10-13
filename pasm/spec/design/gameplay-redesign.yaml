@@ -1,0 +1,49 @@
+entities:
+  - decision: redesign-compatible-incremental-migration
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Playable Incremental Migration
+      summary: "Keep shipped content and supported journeys working at each increment. Preserve the networking architecture, System-addressed admission and individual knowledge-limited System AI. Use one authoritative implementation per migrated capability; temporary definition/payload adapters have an explicit removal increment. Older saves and packs may require conversion or their compatible version."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."
+  - decision: redesign-local-energy-flow
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Local Energy Reserves and Flow-Limited Operation
+      summary: "Increment 8 replaces planned ship-wide exhaustion with power flow into local System batteries, fullness-dependent passive drain and heat from changes in local charge. Apply the selected flow-cut and recovery policies, retaining operator intent. Coolant is consumable; used-coolant recycling remains provisional. This is target design, not the current runtime."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."
+  - decision: redesign-independent-broad-focused-sensors
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Independent Broad and Focused Sensors
+      summary: "Increment 14 uses independent broad and focused scanner Systems with separate power demand. Focused enquiry does not pause broad collection. Both produce permitted observations through common evidence and Console knowledge processing. This replaces the earlier mutually exclusive scan-axis plan without claiming that current scan code has already migrated."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."
+  - decision: redesign-static-celestial-bodies
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Static Celestial Bodies
+      summary: "Planets, moons, satellites and asteroid fields remain static. Moving entities are not orbiting bodies. Terrain can obstruct appropriate sensor and Comms paths. Coarse planetary mode retains ordinary planar capital-ship controls without restoring orbital body motion."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."
+  - decision: redesign-no-message-capacity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: No Simulated Message Capacity
+      summary: "Comms conversations, sensor feeds, structured orders and receipts do not consume message-capacity pools, traffic budgets or congestion quotas. Preserve equipment, power, range, interference, terrain, channels, security and knowledge constraints. Outage-pending orders, receipts, AI reading time and finite listening/search coverage are distinct mechanisms."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."
+  - decision: redesign-compatible-field-refits
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Compatible Field and Facility Refits
+      summary: "Increment 13 allows appropriate compatible equipment changes in the field using real equipment, parts, access and work time; major refits require suitable facilities. Authored mount/interface compatibility and actual resource costs govern fitting. No additional abstract fitting currency or ordinary player room/layout editor is introduced."
+      rationale:
+        - "User-selected gameplay and architecture decisions, adopted 2026-10-13 for the approved incremental implementation sequence. Current runtime remains described by existing implemented slices until its migration lands."

@@ -59,11 +59,12 @@ entities:
 
   - decision: scan-modes-wide-focused
     core:
-      status: accepted
+      status: deprecated
       confidence: confirmed
       title: One Scan Axis — Wide Versus Focused
       summary: "Scan modes extend the existing science/scan.rs machinery with a single focus axis: wide (current behaviour, everything in range accumulates slowly) versus focused (one named subject accumulates fast, the rest pause). Fields become a new ScanSubject kind, which is how field analysis lands with no parallel scanner. The mode toggle lives on the sensors summary surface; the detail screen holds observation history, tier progress, and focus queueing."
       rationale:
+        - "2026-10-13: superseded as future design by redesign-independent-broad-focused-sensors, implemented at redesign increment 14. This historical single-axis proposal does not describe the selected redesign; current code is unchanged by the baseline increment."
         - "No active/passive emissions axis in band B: signature play belongs to band E's signature management, and pre-building its hooks would front-load an unproven system."
     game_design:
       must_not_be: [a second scanner beside science/scan.rs, toggled only from the detail screen]

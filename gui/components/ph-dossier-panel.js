@@ -66,6 +66,7 @@ export function formatValue(value) {
 export class PhDossierPanel extends PhElement {
   /** UUID of the open fact sheet, or null while the list is showing. */
   #openUuid = null;
+  #pendingRecord = null;
 
   template() {
     return `
@@ -145,11 +146,28 @@ export class PhDossierPanel extends PhElement {
 
   /** Open a subject's fact sheet by UUID; `null` returns to the list. */
   select(uuid) {
+    this.#pendingRecord = null;
+    const next = uuid || null;
+    if (next === this.#openUuid) return;
+    this.#openUuid = next;
+    this.render();
+    this.dispatchEvent(new CustomEvent('console-view-change', {
+      bubbles: true, composed: true, detail: { inspected_record: this.#openUuid },
+    }));
+  }
+
+  /** Restore a permitted record without producing another user change. */
+  applyConsoleView(uuid) {
+    this.#pendingRecord = uuid || null;
     this.#openUuid = uuid || null;
     this.render();
   }
 
   render() {
+    if (this.#pendingRecord && this.#dossiers.some(d => d.uuid === this.#pendingRecord)) {
+      this.#openUuid = this.#pendingRecord;
+      this.#pendingRecord = null;
+    }
     const body = this.shadowRoot.getElementById('body');
     body.innerHTML = '';
 

@@ -408,3 +408,20 @@ describe('cruiser comms renderStation', () => {
     expect(el('comms-auto-badge').hidden).toBe(true);
   });
 });
+
+
+it('restores a Comms thread without emitting another local choice', () => {
+  battleshipRender.resetSelection(); mount(FIXTURES.battleship);
+  const changes = [];
+  const listener = event => changes.push(event.detail);
+  document.addEventListener('console-view-change', listener);
+  try {
+    const data = { messages: [{ id: 'first', thread_id: 'alpha' }, { id: 'last', thread_id: 'beta' }], contacts: [] };
+    battleshipRender.applyConsoleView({ messages: [], contacts: [] }, 'alpha', document);
+    battleshipRender(data, document);
+    expect(el('comms-hail-list').state.selected_thread_id).toBe('alpha');
+    expect(changes).toEqual([]);
+    battleshipRender.selectThread(data, 'beta', document);
+    expect(changes).toEqual([{ comms_thread: 'beta' }]);
+  } finally { document.removeEventListener('console-view-change', listener); }
+});

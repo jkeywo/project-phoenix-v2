@@ -54,6 +54,7 @@ export class PhNavigationMap extends PhElement {
   #keyboardCursorY = Number.NaN;
   #keyboardCursorVisible = false;
 
+  #pendingConsoleView = null;
   #zoom = 1;
   #panX = 0;
   #panY = 0;
@@ -280,7 +281,14 @@ export class PhNavigationMap extends PhElement {
   }
 
   set state(val) {
+    const retained = this.#pendingConsoleView || this.consoleView();
+    const previousSelection = this.navigationSelectedUuid();
     this.#state = val;
+    if (retained) this.applyConsoleView(retained);
+    if (previousSelection && !this.navigationSelectedUuid()) {
+      this.#pendingConsoleView = null;
+      this.#dispatch('navselect', null);
+    }
     const inspect = val && val.interaction === 'inspect';
     if (inspect) {
       this.setAttribute('aria-label', t('component.entity_map.label'));
@@ -302,6 +310,47 @@ export class PhNavigationMap extends PhElement {
   }
 
   get state() { return this.#state; }
+
+  /** World-space centre survives device size and pixel-density changes. */
+  consoleView() {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) return this.#pendingConsoleView;
+    const centre = this.#placementWorldAt(this.canvas.width / 2, this.canvas.height / 2);
+    return centre ? { zoom: this.#zoom, center_x: centre.x, center_y: centre.z,
+      selected_uuid: this.navigationSelectedUuid() } : null;
+  }
+
+  /** Applying a host view is presentation only: no commands or change event. */
+  applyConsoleView(view) {
+    const next = view || { zoom: 1, center_x: 0, center_y: 0, selected_uuid: null };
+    if (![next.zoom, next.center_x, next.center_y].every(Number.isFinite)) return false;
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) {
+      this.#pendingConsoleView = next;
+      return true;
+    }
+    this.#pendingConsoleView = null;
+    this.#zoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, next.zoom));
+    const range = this.#state?.range > 0 ? this.#state.range : 50000;
+    const scale = Math.min(this.canvas.width, this.canvas.height) / 2 / range;
+    this.#panX = -next.center_x * scale * this.#zoom;
+    this.#panY = next.center_y * scale * this.#zoom;
+    this.#selectedBlip = this.#selectionCandidates().find(entry => entry.uuid === next.selected_uuid) || null;
+    if (next.selected_uuid && !this.#selectedBlip) this.#pendingConsoleView = next;
+    this.toggleAttribute('data-has-selection', !!this.#selectedBlip);
+    if (this.#selectedBlip) this.dataset.selectedEntityId = this.#selectedBlip.uuid;
+    else delete this.dataset.selectedEntityId;
+    this.#showOverlay(this.#isInspectMode() ? null : this.#selectedBlip);
+    this.#updateBar();
+    this.needsRender = true;
+    return true;
+  }
+
+  #publishConsoleView() {
+    this.#pendingConsoleView = null;
+    const navigation = this.consoleView();
+    if (navigation && !this.#isInspectMode()) this.dispatchEvent(new CustomEvent('console-view-change', {
+      bubbles: true, composed: true, detail: { navigation },
+    }));
+  }
 
   /** Current local contact identity for the Navigation semantic adapter. */
   navigationSelectedUuid() {
@@ -545,6 +594,7 @@ export class PhNavigationMap extends PhElement {
     this.#showOverlay(this.#isInspectMode() ? null : next);
     this.#updateBar();
     this.#dispatch('navselect', next);
+    this.#publishConsoleView();
     this.needsRender = true;
     return true;
   }
@@ -560,6 +610,7 @@ export class PhNavigationMap extends PhElement {
     if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return false;
     this.#panX += dx;
     this.#panY += dy;
+    this.#publishConsoleView();
     this.needsRender = true;
     return true;
   }
@@ -580,6 +631,7 @@ export class PhNavigationMap extends PhElement {
     this.#panX = x - cx - (x - cx - this.#panX) * zoomRatio;
     this.#panY = y - cy - (y - cy - this.#panY) * zoomRatio;
     this.#zoom = newZoom;
+    this.#publishConsoleView();
     this.needsRender = true;
     return true;
   }
@@ -636,8 +688,10 @@ export class PhNavigationMap extends PhElement {
     const newW = Math.round(rect.width * dpr);
     const newH = Math.round(rect.height * dpr);
     if (newW <= 0 || newH <= 0 || (this.canvas.width === newW && this.canvas.height === newH)) return false;
+    const retained = this.#pendingConsoleView || this.consoleView();
     this.canvas.width = newW;
     this.canvas.height = newH;
+    if (retained) this.applyConsoleView(retained);
     this.needsRender = true;
     return true;
   }

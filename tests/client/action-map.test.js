@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 57 expected action keys', () => {
+  it('contains exactly the supported action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -39,6 +39,7 @@ describe('ACTION_MAP', () => {
       'select_scenario',
       'select_ship_slot',
       'set_boost',
+      'set_console_view',
       'set_helm',
       'set_helm_lateral',
       'set_helm_steering',

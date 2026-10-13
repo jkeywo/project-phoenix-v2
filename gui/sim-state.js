@@ -86,6 +86,7 @@ export class ClientSimState {
     const systemDepths = preserveAuthorityProjection ? this.systemDepths : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const consoleHosts = preserveAuthorityProjection ? this.consoleHosts : {};
+    const consoleViews = preserveAuthorityProjection ? this.consoleViews : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
     const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
@@ -144,6 +145,7 @@ export class ClientSimState {
     this.stationSystems = {};
     this.consoleDefinitions = [];
     this.consoleHosts = consoleHosts;
+    this.consoleViews = consoleViews;
     /** Authoritative System id → Console Family projection, populated from
      *  Welcome ship_config.system_console_families. Every owned System has an
      *  entry; the client never infers presentation from its id spelling. */
@@ -337,6 +339,7 @@ export class ClientSimState {
       case 'SimState': {
         const snap = d.snapshot || {};
         this.consoleHosts = Object.fromEntries((snap.console_hosts || []).filter(Boolean).map(entry => [entry.console, entry]));
+        this.consoleViews = snap.console_views || {};
         this.stationHosts = Object.fromEntries(
           (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
         );
@@ -399,6 +402,7 @@ export class ClientSimState {
         // reconnect handshake for a peer already in the current round.
         this.stationHosts = {};
         this.consoleHosts = {};
+        this.consoleViews = {};
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};

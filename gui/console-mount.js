@@ -138,6 +138,7 @@ export function createConsoleMounts({
   const mounted = new Map();
   const tabs = new Map();
   const hull = new Map();
+  const consoleOverlays = new Map();
   let shipStations = null;
   let selectedOverlay = { console: null, id: null };
   let generation = 0;
@@ -201,7 +202,8 @@ export function createConsoleMounts({
     if (disposed) return;
     const previous = selectedOverlay;
     selectedOverlay = { console: overlayId ? stationId : null, id: overlayId || null };
-    if (previous.console && previous.console !== selectedOverlay.console) {
+    if (shipStations?.consoles?.length && stationId) consoleOverlays.set(stationId, overlayId || null);
+    if (!shipStations?.consoles?.length && previous.console && previous.console !== selectedOverlay.console) {
       setOverlay(frame(previous.console), null);
     }
     if (stationId) setOverlay(frame(stationId), overlayId || null);
@@ -247,7 +249,8 @@ export function createConsoleMounts({
     return {
       tabs: tabs.get(stationId) || [],
       hull: hull.get(stationId) || [],
-      activeOverlay: selectedOverlay.console === stationId ? selectedOverlay.id : null,
+      activeOverlay: shipStations?.consoles?.length ? (consoleOverlays.get(stationId) || null)
+        : (selectedOverlay.console === stationId ? selectedOverlay.id : null),
     };
   }
 
@@ -269,6 +272,7 @@ export function createConsoleMounts({
     if (data.type === 'console_tabs') {
       tabs.set(stationId, Array.isArray(data.tabs) ? data.tabs : []);
       const open = data.open || null;
+      if (shipStations?.consoles?.length) consoleOverlays.set(stationId, open);
       if (open) selectedOverlay = { console: stationId, id: open };
       else if (selectedOverlay.console === stationId) selectedOverlay = { console: null, id: null };
     } else hull.set(stationId, Array.isArray(data.entries) ? data.entries : []);
@@ -284,6 +288,7 @@ export function createConsoleMounts({
     shipStations = null;
     tabs.clear();
     hull.clear();
+    consoleOverlays.clear();
     selectedOverlay = { console: null, id: null };
   }
 

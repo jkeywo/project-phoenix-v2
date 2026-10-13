@@ -302,3 +302,17 @@ describe('PhDossierPanel', () => {
     });
   });
 });
+
+
+it('restores an inspected record after its permitted data arrives without echo', () => {
+  const el = setup(), changes = [];
+  el.addEventListener('console-view-change', event => changes.push(event.detail));
+  el.state = { dossiers: [] };
+  el.applyConsoleView(DEPOT.uuid);
+  expect(el.open).toBeNull();
+  el.state = { dossiers: [DEPOT, CLAIMANT] };
+  expect(el.open.uuid).toBe(DEPOT.uuid);
+  expect(changes).toEqual([]);
+  el.select(CLAIMANT.uuid);
+  expect(changes).toEqual([{ inspected_record: CLAIMANT.uuid }]);
+});

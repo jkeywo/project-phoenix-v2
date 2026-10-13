@@ -1,3 +1,4 @@
+import { createConsoleViewSession } from './console-working-view.js';
 /**
  * gui/console-core.js — Shared console runtime for HTML console panels.
  *
@@ -428,6 +429,21 @@ export function initConsole({
   }
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
+  const workingView = createConsoleViewSession({
+    send: view => { if (_latestState?.console_id) sendAction('set_console_view', { view }); },
+    apply: view => {
+      if (typeof document === 'undefined') return;
+      for (const panel of document.querySelectorAll('ph-dossier-panel')) panel.applyConsoleView?.(view.inspected_record);
+      for (const map of document.querySelectorAll('ph-navigation-map')) map.applyConsoleView?.(view.navigation);
+      render.applyConsoleView?.(_latestState, view.comms_thread, document);
+      _root.__setConsoleOverlay?.(view.overlay);
+    },
+  });
+  const onWorkingViewChange = event => {
+    if (_latestState?.console_id) workingView.change(event.detail || {});
+  };
+  if (typeof document !== 'undefined') document.addEventListener('console-view-change', onWorkingViewChange);
+
   _root.__updateConsole = function(consoleName, stateJson) {
     var s;
     try { s = JSON.parse(stateJson); } catch (e) {
@@ -442,6 +458,7 @@ export function initConsole({
     if (languageSwitch && typeof document !== 'undefined') {
       preserveConsoleEditContext(document, () => render(s));
     } else render(s);
+    if (s.console_id) workingView.receive(s.console_view, s.console_host?.host || null);
     _updateGmTakeover(s);
     _updateTutorialOverlay(s);
     _publishConsoleHull(s);
@@ -511,6 +528,7 @@ export function initConsole({
 
   function _postConsoleTabs() {
     _lastPostedOpen = _currentOverlay();
+    if (_latestState?.console_id) workingView.change({ overlay: _lastPostedOpen });
     _postToShell({
       type: 'console_tabs',
       console: consoleIdentity,
@@ -732,6 +750,7 @@ export function initConsole({
     sendAction: sendAction,
     semanticActions: _semanticActions,
     disposeSemanticActions: function() {
+      if (typeof document !== 'undefined') document.removeEventListener('console-view-change', onWorkingViewChange);
       if (_semanticKeyHandler && typeof document !== 'undefined'
           && document.removeEventListener) {
         document.removeEventListener('keydown', _semanticKeyHandler);

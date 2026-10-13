@@ -45,6 +45,11 @@ function controlSystemId(action, fallback) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  set_console_view: (a, send) => {
+    if (typeof a.console === 'string' && a.console && a.view) {
+      send('SetConsoleView', { console: a.console, view: a.view });
+    }
+  },
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
     if (!a.bank) return;

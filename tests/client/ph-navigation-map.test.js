@@ -1969,3 +1969,36 @@ describe('PhNavigationMap', () => {
     });
   });
 });
+
+
+describe('Navigation Console working view', () => {
+  it('round-trips world centre and selection onto a different canvas size without emitting commands', () => {
+    const h = setup();
+    h.el.state = { range: 5000, blips: [{ uuid: 'contact', world_x: 100, world_z: 200 }] };
+    const changes = vi.fn();
+    h.el.addEventListener('console-view-change', changes);
+    h.el.navigationPan({ x: 60, y: -30 });
+    h.el.navigationZoom({ factor: 2 });
+    const view = { ...h.el.consoleView(), selected_uuid: 'contact' };
+    expect(changes).toHaveBeenCalledTimes(2);
+    const target = document.createElement('ph-navigation-map');
+    document.body.appendChild(target);
+    const canvas = target.shadowRoot.querySelector('canvas');
+    canvas.width = 1600; canvas.height = 900;
+    target.state = h.el.state;
+    const restored = vi.fn(); target.addEventListener('console-view-change', restored);
+    target.applyConsoleView(view);
+    expect(target.consoleView().center_x).toBeCloseTo(view.center_x);
+    expect(target.consoleView().center_y).toBeCloseTo(view.center_y);
+    expect(target.consoleView().zoom).toBe(view.zoom);
+    expect(target.navigationSelectedUuid()).toBe('contact');
+    expect(restored).not.toHaveBeenCalled();
+  });
+  it('waits for a restored selected contact to become visible', () => {
+    const h = setup(); h.el.state = { range: 5000, blips: [] };
+    h.el.applyConsoleView({ zoom: 2, center_x: 200, center_y: 300, selected_uuid: 'later' });
+    expect(h.el.navigationSelectedUuid()).toBeNull();
+    h.el.state = { range: 5000, blips: [{ uuid: 'later', world_x: 200, world_z: 300 }] };
+    expect(h.el.navigationSelectedUuid()).toBe('later');
+  });
+});

@@ -264,3 +264,19 @@ describe('the own-Station system rows behind the bar damage popup', () => {
     expect(lastHull()).toEqual({ type: 'console_hull', console: 'tactical', entries: [] });
   });
 });
+
+
+it('applies a host working view without echo, then merges one local change through the Console instance', () => {
+  mountConsole(TACTICAL_BODY);
+  const payload = { console_id: 'science-left', console_host: { host: 'science' },
+    console_view: { inspected_record: 'known-record', overlay: 'intel-overlay', comms_thread: null, navigation: null } };
+  posted.length = 0;
+  window.__updateConsole('science-left', JSON.stringify(payload));
+  expect(posted.filter(message => message.type === 'console_action')).toEqual([]);
+  expect(lastTabs().open).toBe('intel-overlay');
+  document.dispatchEvent(new CustomEvent('console-view-change', { detail: { comms_thread: 'thread' } }));
+  const command = posted.filter(message => message.type === 'console_action').map(message => JSON.parse(message.payload));
+  expect(command).toHaveLength(1);
+  expect(command[0]).toMatchObject({ action: 'set_console_view', console: 'science-left',
+    view: { inspected_record: 'known-record', overlay: 'intel-overlay', comms_thread: 'thread', navigation: null } });
+});

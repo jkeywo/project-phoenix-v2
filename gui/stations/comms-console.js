@@ -76,6 +76,7 @@ export function makeCommsRender(variant) {
   // row component owns a competing selection and no host command is sent.
   let selectedMessageId = null;
   let selectedThreadId = null;
+  let pendingThreadId = null;
 
   const commsView = (s) => (variant.commsView ? variant.commsView(s) : s);
 
@@ -191,6 +192,10 @@ export function makeCommsRender(variant) {
     // flat `comms` family, a metadata-selected family slice for the cruiser.
     const view = commsView(s);
     const msgs = Array.isArray(view.messages) ? view.messages : [];
+    if (pendingThreadId && msgs.some(message => effectiveThreadId(message) === pendingThreadId)) {
+      selectedThreadId = pendingThreadId;
+      pendingThreadId = null;
+    }
     const contacts = Array.isArray(view.contacts) ? view.contacts : [];
     const threads = sortedThreadsFrom(msgs, contacts);
     const open = resolveOpen(msgs);
@@ -294,10 +299,12 @@ export function makeCommsRender(variant) {
     }
     if (!nextId) return false;
     const picked = messages.find((message) => message && message.id === nextId) || null;
+    pendingThreadId = null;
     selectedMessageId = nextId;
     selectedThreadId = picked ? effectiveThreadId(picked) : null;
     openThreadPanel(doc);
     renderStation(s, doc);
+    publishSelection(doc);
     return true;
   };
 
@@ -320,11 +327,29 @@ export function makeCommsRender(variant) {
     if (typeof threadId !== 'string' || !threadId) return false;
     const messages = messagesFor(s);
     if (threadMessagesFrom(messages, threadId).length === 0) return false;
+    pendingThreadId = null;
     selectedThreadId = threadId;
     selectedMessageId = null;
     openThreadPanel(doc);
     renderStation(s, doc);
+    publishSelection(doc);
     return true;
+  };
+
+  function publishSelection(doc) {
+    pendingThreadId = null;
+    const target = doc || (typeof document !== 'undefined' ? document : null);
+    const EventClass = target?.defaultView?.CustomEvent;
+    if (EventClass) target.dispatchEvent(new EventClass('console-view-change', {
+      detail: { comms_thread: selectedThreadId },
+    }));
+  }
+
+  renderStation.applyConsoleView = function applyConsoleView(s, threadId, doc) {
+    pendingThreadId = typeof threadId === 'string' ? threadId : null;
+    selectedThreadId = typeof threadId === 'string' ? threadId : null;
+    selectedMessageId = null;
+    renderStation(s, doc);
   };
 
   /** The message parameter-free Respond and Show act on: the open thread's. */
@@ -336,6 +361,7 @@ export function makeCommsRender(variant) {
   // and isolated renderer fixtures from carrying presentation state between
   // sessions without exposing the selected ids as mutable component state.
   renderStation.resetSelection = function resetSelection() {
+    pendingThreadId = null;
     selectedMessageId = null;
     selectedThreadId = null;
   };

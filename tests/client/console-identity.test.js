@@ -34,6 +34,10 @@ describe('explicit Console identity', () => {
       mounts.handleDeclaration({ source: right.contentWindow, data: { type: 'console_hull', console: 'helm', entries: ['right'] } });
       expect(mounts.view('right').hull).toEqual(['right']);
       expect(mounts.view('left').hull).toEqual([]);
+      mounts.handleDeclaration({ source: left.contentWindow, data: { type: 'console_tabs', console: 'helm', tabs: [], open: 'left-overlay' } });
+      mounts.handleDeclaration({ source: right.contentWindow, data: { type: 'console_tabs', console: 'helm', tabs: [], open: 'right-overlay' } });
+      expect(mounts.view('left').activeOverlay).toBe('left-overlay');
+      expect(mounts.view('right').activeOverlay).toBe('right-overlay');
       expect(stationIdForSource(dom.window.document, roster, right.contentWindow, 'helm')).toBe('right');
       mounts.show('right', true);
       expect(right.parentElement.className).toContain('active');

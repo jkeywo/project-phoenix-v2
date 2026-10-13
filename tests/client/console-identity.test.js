@@ -193,3 +193,19 @@ it('orders scopes by host tick within a continuation and rejects unscoped update
   publish(4,0,['nav'],{x:1,z:1});
   expect(state.navigationWaypoint).toEqual({x:1,z:1});
 });
+
+it('keeps detached and co-hosted Console attention separate and clears only authoritative snapshots', () => {
+  const state = new ClientSimState();
+  const snapshot = {console_importance:[{console:'right',unread:true,critical:true}],
+    console_hosts:[{console:'left',host:'pilot',rating:'Std'},{console:'right',host:'pilot',rating:'Std'}]};
+  state.apply({type:'SimState',data:{snapshot}});
+  const model = () => heroBarModel({directStation:'pilot',stations:[{id:'pilot'}],
+    consoles:[consoles[0],{...consoles[1],home_station:null}],consoleHosts:state.consoleHosts,
+    consoleImportance:state.consoleImportance,activeStation:'right'});
+  expect(model().tabs.find(t => t.id === 'right').importance).toEqual({unread:true,critical:true});
+  expect(model().tabs.find(t => t.id === 'left').importance).toBeNull();
+  state.apply({type:'SimState',data:{snapshot:{...snapshot,console_importance:[{console:'right',unread:false,critical:true}]}}});
+  expect(model().tabs.find(t => t.id === 'right').importance).toEqual({unread:false,critical:true});
+  state.apply({type:'SimState',data:{snapshot:{...snapshot,console_importance:[]}}});
+  expect(model().tabs.find(t => t.id === 'right').importance).toBeNull();
+});

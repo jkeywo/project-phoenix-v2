@@ -89,6 +89,7 @@ export class ClientSimState {
     const consoleViews = preserveAuthorityProjection ? this.consoleViews : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
+    const consoleImportance = preserveAuthorityProjection ? this.consoleImportance : {};
     const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
@@ -181,6 +182,7 @@ export class ClientSimState {
      * importance has resolved simply drops out of the map.
      */
     this.stationImportance = stationImportance;
+    this.consoleImportance = consoleImportance;
     /** Active GM takeover status by Station id, rebuilt from SimState. */
     this.stationPuppets = stationPuppets;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
@@ -359,6 +361,8 @@ export class ClientSimState {
           (snap.station_importance || []).filter(Boolean)
             .map(entry => [entry.station, { unread: !!entry.unread, critical: !!entry.critical }]),
         );
+        this.consoleImportance = Object.fromEntries((snap.console_importance || []).filter(Boolean)
+          .map(entry => [entry.console, { unread: !!entry.unread, critical: !!entry.critical }]));
         this.navigationWaypoint = snap.navigation_waypoint || null;
         // The host publishes the LocalShip's effective fine-System authority.
         // Missing on older protocol-compatible hosts, where the console
@@ -405,6 +409,7 @@ export class ClientSimState {
         this.stationHosts = {};
         this.consoleHosts = {};
         this.consoleViews = {};
+        this.consoleImportance = {};
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};

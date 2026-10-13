@@ -3142,6 +3142,7 @@
               stationHosts: window.simState && window.simState.stationHosts,
               stationHealth: window.simState && window.simState.stationHealth,
               stationImportance: window.simState && window.simState.stationImportance,
+        consoleImportance: window.simState && window.simState.consoleImportance,
               stationRatings: window.simState && window.simState.stationRatings,
               activeStation: activeConsole,
             }) : { tabs: mine.map(id => ({ id })), selected: mine[0] || null };
@@ -3848,6 +3849,7 @@
         stationHosts: window.simState && window.simState.stationHosts,
         stationHealth: window.simState && window.simState.stationHealth,
         stationImportance: window.simState && window.simState.stationImportance,
+        consoleImportance: window.simState && window.simState.consoleImportance,
         stationRatings: window.simState && window.simState.stationRatings,
         activeStation: activeConsole,
         // The active console's own overlay panels (issue #1373). The console
@@ -3907,8 +3909,7 @@
             // gesture that cleared it before the popup existed, so it has to
             // stay that as well, or the badge sticks until you leave the
             // Station and come back.
-            const visitedStation = uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station;
-            if (visitedStation) send('StationVisited', { station: visitedStation });
+            send('ConsoleVisited', { console: tabId });
             showStationDamagePopup();
             scheduleRender();
             return;
@@ -3924,8 +3925,7 @@
           // renderStationHero returns early outside a live game, so onActivate
           // never fires in the lobby. A continuing `critical` condition is
           // immune host-side, so this cannot lower an alert.
-          const visitedStation = uiState.shipStations?.consoles?.find(c => c.id === tabId)?.home_station;
-          if (visitedStation) send('StationVisited', { station: visitedStation });
+          send('ConsoleVisited', { console: tabId });
           scheduleRender();
         },
       });

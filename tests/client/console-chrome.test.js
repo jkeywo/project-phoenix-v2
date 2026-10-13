@@ -216,7 +216,7 @@ describe('the shell owns the damage popup the footers used to', () => {
     // the popup branch has to send it too; without this the badge sticks until
     // the player switches Station and comes back.
     const branch = alreadySelectedBranch();
-    expect(branch).toMatch(/send\('StationVisited', \{ station: visitedStation \}\);/);
+    expect(branch).toMatch(/send\('ConsoleVisited', \{ console: tabId \}\);/);
     expect(branch).toMatch(/scheduleRender\(\);/);
   });
 

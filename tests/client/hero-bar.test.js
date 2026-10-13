@@ -20,7 +20,7 @@ function heroBarModel(options) {
     return [c.id, options.stationHosts?.[c.id] || { host: c.id === options.directStation ? c.id : c.human_seeking ? board?.host_station || null : c.home_station,
       rating: board?.station_rating || (c.human_seeking ? c.visiting_rating : options.stationRatings?.[c.id]) || '' }];
   }));
-  return explicitHeroBarModel({ ...options, consoles: definitions, consoleHosts: hosts });
+  return explicitHeroBarModel({ ...options, consoles: definitions, consoleHosts: hosts, consoleImportance: options.stationImportance });
 }
 
 const stations = [

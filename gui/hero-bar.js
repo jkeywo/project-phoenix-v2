@@ -36,9 +36,9 @@ export function isCommandBoardDirectable(board) {
  */
 export function heroBarModel({ directStation, stations, stationSystems,
   blackboards, stationHosts, stationHealth, stationImportance, stationRatings, activeStation,
-  consoleTabs, activeOverlay, consoles, consoleHosts }) {
+  consoleTabs, activeOverlay, consoles, consoleHosts, consoleImportance }) {
   return consoleHeroBarModel({ directStation, stations, consoles: consoles || [], consoleHosts,
-    stationRatings, stationHealth, stationImportance, activeStation, consoleTabs, activeOverlay, blackboards });
+    stationRatings, stationHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards });
 }
 
 /**
@@ -332,7 +332,7 @@ if (typeof window !== 'undefined') {
 
 /** Console tabs use instance identity; Station identity remains the occupied seat. */
 function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, stationRatings,
-  stationHealth, stationImportance, activeStation, consoleTabs, activeOverlay, blackboards }) {
+  stationHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards }) {
   const seats = Object.fromEntries((stations || []).map(s => [s.id, s]));
   const placement = c => consoleHosts?.[c.id] || { host: c.human_seeking ? null : c.home_station, rating: '' };
   const visible = consoles.filter(c => {
@@ -349,7 +349,7 @@ function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, 
   const tabs = hosted.map(c => {
     const seat = seats[c.home_station] || {};
     const health = typeof stationHealth?.[c.home_station] === 'number' ? stationHealth[c.home_station] : null;
-    const importance = stationImportance?.[c.home_station] || null;
+    const importance = consoleImportance?.[c.id] || null;
     return { id: c.id, kind: 'station', name: c.name || seat.name || c.id, code: c.short_code || seat.short_code || '',
       rating: placement(c).rating || stationRatings?.[c.home_station] || '', health,
       healthState: heroBarHealthState(health), importance, importanceState: heroBarImportanceState(importance),

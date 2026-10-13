@@ -759,10 +759,12 @@ pub fn operate_transporter_ai(
         if !sources.0.policy_for(&transporter_system_id()).operate_ai {
             continue;
         }
-        let directive_target: Option<String> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let directive_target: Option<String> = match config.and_then(|config| {
+            config
+                .0
+                .observations_for_system(&transporter_system_id(), &blackboards.0)
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             // Rank the rescue against the tractor obligations that share the one
             // Engineering seat, then keep only a rescue winner: a higher-scored
             // Tow/Stabilise/Escort makes `rescue_directive_target` return `None`

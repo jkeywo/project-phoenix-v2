@@ -817,10 +817,12 @@ pub fn operate_external_repair_ai(
         if !sources.0.policy_for(&repair_system_id()).operate_ai {
             continue;
         }
-        let directive_target: Option<String> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let directive_target: Option<String> = match config.and_then(|config| {
+            config
+                .0
+                .observations_for_system(&repair_system_id(), &blackboards.0)
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Repair,

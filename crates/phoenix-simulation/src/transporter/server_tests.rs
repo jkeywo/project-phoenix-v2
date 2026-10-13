@@ -337,6 +337,29 @@ fn backfill_world(
     let mut entity = world.spawn((
         EntityUuid("uuid-destroyer".into()),
         ShipSystemControlSources(sources),
+        crate::ship_plugin::ShipConfigComponent(
+            crate::ship::config::ShipConfig::from_toml(
+                r#"
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "Operations"
+rank = "Ens."
+[[console]]
+id = "transport-screen"
+home_station = "engineering"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[system]]
+id = "transporter"
+kind = "transporter"
+console = "transport-screen"
+"#,
+                &["transporter"],
+            )
+            .unwrap(),
+        ),
         transporter,
         blackboards,
         AdmittedCommands(vec![]),
@@ -390,6 +413,31 @@ fn backfill_selects_and_starts_off_a_rescue_directive() {
         world.get::<TransporterAiEngaged>(operator).is_some(),
         "the host claims the seat it just engaged",
     );
+}
+
+#[test]
+fn backfill_cannot_read_a_rescue_from_an_unbound_console() {
+    let (mut world, operator) = backfill_world(
+        vec![scored(
+            "rescue",
+            5.0,
+            AiDirective::Rescue {
+                target: "uuid-lighter".into(),
+            },
+        )],
+        false,
+        false,
+    );
+    world
+        .get_mut::<crate::ship_plugin::ShipConfigComponent>(operator)
+        .unwrap()
+        .0
+        .consoles[0]
+        .feeds
+        .clear();
+    world.run_system_once(operate_transporter_ai).unwrap();
+    assert!(admitted_payloads(&mut world, operator).is_empty());
+    assert!(world.get::<TransporterAiEngaged>(operator).is_none());
 }
 
 #[test]

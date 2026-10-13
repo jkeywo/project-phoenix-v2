@@ -473,13 +473,11 @@ pub(crate) fn tick_blaster_auto_fire(
             // above takes.
             let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
                 red_alert_opt,
-                bank_sid.as_ref().is_some_and(|sid| {
-                    crate::console::weapons::system_power_group_is_cold(
-                        ship_config_opt.map(|c| &c.0),
-                        power_opt.map(|p| &p.0),
-                        sid,
-                    )
-                }),
+                crate::console::weapons::system_power_group_is_cold(
+                    ship_config_opt.map(|c| &c.0),
+                    power_opt.map(|p| &p.0),
+                    &bank_sid,
+                ),
                 stance_override,
             );
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, posture);

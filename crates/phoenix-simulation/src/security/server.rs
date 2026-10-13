@@ -948,10 +948,12 @@ pub fn operate_security_ai(
         // Every target a live `Secure` directive names, resolved to the uuid the
         // world carries — the same name→uuid resolution the external repair host
         // uses for a `FieldRepair` order.
-        let ordered_targets: Vec<String> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let ordered_targets: Vec<String> = match config.and_then(|config| {
+            config
+                .0
+                .observations_for_system(&system_id, &blackboards.0)
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             Some(SystemBlackboard::Viewscreen(vbb)) => vbb
                 .scored_objectives
                 .iter()

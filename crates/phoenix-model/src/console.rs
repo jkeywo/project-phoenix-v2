@@ -221,9 +221,7 @@ impl ConsoleConfig {
     /// Deterministic placement from direct, eligible human occupancy only.
     /// Callers must not pass hosted Console presence as Station occupancy.
     pub fn resolve_host(&self, available: impl Fn(&StationId) -> bool) -> Option<StationId> {
-        if self.screen.is_none() {
-            return None;
-        }
+        self.screen.as_ref()?;
         if let Some(home) = self.home_station.as_ref().filter(|home| available(home)) {
             return Some(home.clone());
         }

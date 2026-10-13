@@ -298,9 +298,9 @@ pub fn validate_consoles(config: &ShipConfig) -> Result<(), ShipConfigError> {
                 .iter()
                 .chain(rating.detailed_systems.iter().flatten())
                 .any(|id| {
-                    !config
+                    config
                         .system(id)
-                        .is_some_and(|system| system.console.as_ref() == Some(&console.id))
+                        .is_none_or(|system| system.console.as_ref() != Some(&console.id))
                 })
             {
                 return Err(refuse(format!(

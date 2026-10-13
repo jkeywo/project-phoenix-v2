@@ -49,7 +49,7 @@ pub fn admit_console_view_requests(
             .iter()
             .find(|assignment| assignment.console == id)
             .and_then(|assignment| assignment.host.as_ref());
-        if !host.is_some_and(|host| sessions.0.holder_for_station(host) == Some(token.as_str())) {
+        if host.is_none_or(|host| sessions.0.holder_for_station(host) != Some(token.as_str())) {
             continue;
         }
         inbound.p1().write(InboundMessage {

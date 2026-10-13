@@ -688,11 +688,15 @@ pub(super) fn check_value(
             {
                 accepts::<String>(source)
             }
-            [Key(station), Index(_), Key(key)] if station == "station" => match key.as_str() {
-                "visiting_rating" | "human_seeking" | "host_order" | "console" | "auxiliary"
-                | "command_target" => false,
-                _ => true,
-            },
+            [Key(station), Index(_), Key(key)] if station == "station" => !matches!(
+                key.as_str(),
+                "visiting_rating"
+                    | "human_seeking"
+                    | "host_order"
+                    | "console"
+                    | "auxiliary"
+                    | "command_target"
+            ),
             _ => true,
         }
     } else {

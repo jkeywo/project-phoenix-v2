@@ -481,7 +481,11 @@ fn publisher_order_child() {
         .single(app.world())
         .unwrap();
     let radar = project_phoenix::ship::system_registry::tactical_radar_system_id();
-    let sources = &app.world().get::<ShipSystemControlSources>(local).unwrap().0;
+    let sources = &app
+        .world()
+        .get::<ShipSystemControlSources>(local)
+        .unwrap()
+        .0;
     assert!(sources.policy_for(&radar).accept_human_input);
     assert!(!sources.policy_for(&radar).operate_ai);
     let mut trace = Vec::new();

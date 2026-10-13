@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'smol-toml';
 
 function source(path) {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
@@ -43,16 +44,18 @@ describe('Navigation semantic-action structural coverage', () => {
   });
 
   it('keeps all four shipped hull ownership variants attached to a Navigation-aware document', () => {
-    const battleship = source('assets/entities/alliance_battleship.toml');
-    const destroyer = source('assets/entities/alliance_destroyer.toml');
-    const cruiser = source('assets/entities/alliance_cruiser.toml');
-    const courier = source('assets/entities/alliance_courier.toml');
-
-    expect(battleship).toMatch(/id = "navigation"[\s\S]*?console = "gui\/battleship\/navigation\.html"/);
-    expect(destroyer).toMatch(/id = "navigation"[\s\S]*?console = "gui\/battleship\/navigation\.html"/);
-    expect(cruiser).toMatch(/id = "navigation"[\s\S]*?console = "gui\/cruiser\/comms\.html"/);
-    expect(courier).toMatch(/id = "navigation"[\s\S]*?station = "captain"/);
-    expect(courier).toContain('console = "gui/courier/captain.html"');
+    for (const [hull, screen, home] of [
+      ['alliance_battleship', 'gui/battleship/navigation.html', 'navigation'],
+      ['alliance_destroyer', 'gui/battleship/navigation.html', undefined],
+      ['alliance_cruiser', 'gui/cruiser/comms.html', undefined],
+      ['alliance_courier', 'gui/battleship/navigation.html', 'captain'],
+    ]) {
+      const document = parse(source(`assets/entities/${hull}.toml`));
+      const system = document.system.find(s => s.id === 'navigation' && !s._remove);
+      const console = document.console.find(c => c.id === system.console);
+      expect(console.screen, hull).toBe(screen);
+      expect(console.home_station, hull).toBe(home);
+    }
 
     const direct = source('gui/battleship/navigation.html');
     expect(direct).toContain("initConsole({ name: 'navigation'");

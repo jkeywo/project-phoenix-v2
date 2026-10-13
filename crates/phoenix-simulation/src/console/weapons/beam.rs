@@ -899,14 +899,10 @@ pub(crate) fn ai_phaser_auto_fire(
                     }
                     let bank_id = crate::ship::system_registry::phaser_bank_system_id(&b.id)?;
                     let config = ship_config_opt?;
-                    if config
+                    config
                         .0
                         .observations_for_system(&bank_id, &blackboards.0)
-                        .get(&crate::ship::system_registry::viewscreen_system_id())
-                        .is_none()
-                    {
-                        return None;
-                    }
+                        .get(&crate::ship::system_registry::viewscreen_system_id())?;
                     // Cooldown and "already burning" are the same per-bank question
                     // asked of two surfaces: a bank mid-beam must not be re-lit, but
                     // its sibling is free to fire (issue #790).

@@ -137,7 +137,7 @@ describe('authored Dynasty onboarding', () => {
     expect(depleted).toEqual({ charge: 1, enabled: false, depleted: true });
   });
 
-  it.each(stations.map(s => [s.id, s.console]))('%s retains a translated reopenable guide and valid lesson anchors', (role, file) => {
+  it.each(stations.map(s => [s.id, hull.console.find(c => c.home_station === s.id && c.id === s.id)?.screen]))('%s retains a translated reopenable guide and valid lesson anchors', (role, file) => {
     const doc = new DOMParser().parseFromString(readFileSync(file, 'utf8'), 'text/html');
     applyToDom(doc);
     const guide = doc.getElementById('role-guidance');

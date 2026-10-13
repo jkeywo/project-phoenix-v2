@@ -48,12 +48,12 @@ pub(crate) fn drain_station_visited(
     };
     for event in reader.read() {
         match &event.msg {
-            ClientMessage::ConsoleVisited { console } => {
-                if may_visit(&sessions, &event.token, &config.0, console, hosts) {
-                    importance
-                        .0
-                        .visit(&AttentionOwner::Console(console.clone()));
-                }
+            ClientMessage::ConsoleVisited { console }
+                if may_visit(&sessions, &event.token, &config.0, console, hosts) =>
+            {
+                importance
+                    .0
+                    .visit(&AttentionOwner::Console(console.clone()));
             }
             // Existing Station-addressed callers acknowledge only their authorised
             // home Consoles. Visiting a Console never acknowledges its neighbours.

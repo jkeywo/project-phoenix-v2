@@ -898,3 +898,43 @@ describe('crew-visible takeover banner', () => {
     expect(banner.hidden).toBe(true);
   });
 });
+
+
+describe('GM explicit Console identity', () => {
+  beforeEach(mount);
+  it('selects same-screen Consoles independently while retaining Station authority and rejecting the old frame', () => {
+    const send = vi.fn(() => true);
+    const listeners = new Map();
+    const builder = vi.fn(() => '{}');
+    const hostWindow = { buildConsoleState: builder, addEventListener: (t, f) => listeners.set(t, f),
+      removeEventListener: () => {}, setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window) };
+    const confirm = vi.fn(request => request.accept());
+    const controller = createGmStationPuppet({ doc: document, win: hostWindow,
+      getOperator: () => ({ id: 'gm-1' }), submitStationCommand: send, confirmAction: confirm });
+    const p = projection({ operators: ['gm-1'] });
+    p.ships[0].consoles = ['left', 'right'].map(id => ({ id, name: id, home_station: 'captain',
+      screen: 'gui/captain-console.html', systems: ['red-alert'], feeds: [] }));
+    p.ships[0].console_hosts = ['left', 'right'].map(console => ({ console, host: 'captain', rating: 'Std' }));
+    p.ships[0].console_views = { right: { overlay: 'history' } };
+    controller.update(p);
+    const oldFrame = document.getElementById('gm-station-frame');
+    const oldWindow = oldFrame.contentWindow;
+    const chooser = document.getElementById('gm-console-select');
+    expect(chooser.options).toHaveLength(2);
+    chooser.value = 'right'; chooser.dispatchEvent(new Event('change'));
+    const frame = document.getElementById('gm-station-frame');
+    expect(frame).not.toBe(oldFrame);
+    expect(frame.dataset.console).toBe('right');
+    expect(frame.dataset.station).toBe('captain');
+    frame.contentWindow.__updateConsole = vi.fn(); controller.refresh();
+    expect(builder).toHaveBeenLastCalledWith('right', expect.objectContaining({ consoleViews: p.ships[0].console_views }));
+    const view = { inspected_record: null, comms_thread: null, overlay: 'history', navigation: null };
+    const data = { type: 'console_action', payload: JSON.stringify({ action: 'set_console_view', console: 'spoofed', view }) };
+    listeners.get('message')({ source: oldWindow, data }); expect(send).not.toHaveBeenCalled();
+    listeners.get('message')({ source: frame.contentWindow, data });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ ship: 'ship-player-1', station: 'captain',
+      target: 'assign-console-view', payload: { type: 'AssignConsoleView', data: { console: 'right', view } } }));
+    expect(confirm).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+});

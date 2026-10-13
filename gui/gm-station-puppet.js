@@ -144,7 +144,7 @@ const consoleWorlds = new WeakMap();
 const liveEntityFields = ['position', 'yaw', 'hull_fraction', 'shield_fraction', 'shields', 'shield_freq'];
 export function buildGmStationConsoleInput(projection, ship, previous = null) {
   const state = previous || new ClientSimState();
-  const configuration = JSON.stringify([projection.presentation_generation, ship.ship_id, ship.ship_config]);
+  const configuration = JSON.stringify([projection.presentation_generation, ship.ship_id, ship.ship_config, ship.consoles]);
   const targets = new Set(ship.objective_targets || []);
   const metadata = projection.entities || ship.entities || [];
   const worldKey = JSON.stringify([projection.presentation_generation, projection.world_revision ?? metadata, ship.objective_targets]);
@@ -161,6 +161,7 @@ export function buildGmStationConsoleInput(projection, ship, previous = null) {
         world: { entities, scenario_title: '', scenario_description: '' },
       },
       ship_config: ship.ship_config,
+      ship_stations: { stations: ship.stations, consoles: ship.consoles || [] },
       station_ratings: ship.station_ratings || {},
     },
     });
@@ -196,6 +197,8 @@ export function buildGmStationConsoleInput(projection, ship, previous = null) {
         navigation_waypoint: ship.navigation_waypoint || null,
         control_sources: ship.control_sources || {},
         station_puppets: [],
+        console_hosts: ship.console_hosts || [],
+        console_views: ship.console_views || {},
       },
     },
   });
@@ -270,6 +273,12 @@ export function createGmStationPuppet({
   const pending = doc.getElementById('gm-station-pending');
   const panel = doc.getElementById('gm-station-controls');
   const select = doc.getElementById('gm-station-select');
+  const consoleSelect = doc.createElement('select');
+  consoleSelect.id = 'gm-console-select';
+  consoleSelect.setAttribute('aria-labelledby', 'gm-station-heading');
+  panel?.append(consoleSelect);
+  let selectedConsole = null;
+  let selectedConsoleId = null;
   const button = doc.getElementById('gm-station-toggle');
   const status = doc.getElementById('gm-station-status');
   const connection = doc.createElement('p'); connection.id = 'gm-station-connection'; connection.setAttribute('role', 'status');
@@ -433,8 +442,8 @@ export function createGmStationPuppet({
     const builder = win.buildConsoleState;
     if (typeof builder !== 'function') return false;
     applyPresentation();
-    const json = builder(selectedRow.station.station_id, consoleInput);
-    frame.contentWindow.__updateConsole(selectedRow.station.station_id, json);
+    const json = builder(selectedConsole?.id || selectedRow.station.station_id, consoleInput);
+    frame.contentWindow.__updateConsole(selectedConsole?.id || selectedRow.station.station_id, json);
     cancelLoadWatch(); loadFailed = false; loadAttempts = 0;
     const label = t(activeHere() ? 'server.gm.station.controlling' : 'server.gm.station.observing');
     if (connection.textContent !== label) connection.textContent = label;
@@ -481,6 +490,25 @@ export function createGmStationPuppet({
       renderActivity();
       return;
     }
+    const definitions = selectedRow.ship.consoles;
+    const available = definitions?.length ? definitions.filter(c => {
+      const host = selectedRow.ship.console_hosts?.find(h => h.console === c.id);
+      return c.screen && (host?.host ? host.host === selectedRow.station.station_id
+        : c.home_station === selectedRow.station.station_id);
+    }) : [{ id: selectedRow.station.station_id, name: selectedRow.station.name, screen: selectedRow.station.console }];
+    selectedConsole = available.find(c => c.id === selectedConsoleId) || available[0] || null;
+    selectedConsoleId = selectedConsole?.id || null;
+    consoleSelect.replaceChildren(...available.map(c => {
+      const option = doc.createElement('option'); option.value = c.id; option.textContent = c.name || c.id; return option;
+    }));
+    consoleSelect.value = selectedConsoleId || '';
+    consoleSelect.hidden = available.length < 2;
+    if (!selectedConsole) {
+      if (mountedKey !== null) replaceFrame(null);
+      consoleInput = null;
+      publishInterest();
+      return;
+    }
     if (pending) pending.hidden = true;
     if (panel) panel.hidden = false;
     if (select) select.value = selectedKey;
@@ -509,18 +537,20 @@ export function createGmStationPuppet({
     if (status && recovery) status.textContent = recovery;
     if (!visible) { publishInterest(); return; }
     let replaced = false;
-    if (frame && (mountedKey !== selectedKey || loadedUrl !== selectedRow.station.console)) {
+    const consoleMountKey = `${selectedKey}:${selectedConsole.id}`;
+    if (frame && (mountedKey !== consoleMountKey || loadedUrl !== selectedConsole.screen)) {
       // A new browsing context is the identity boundary. Navigating the same
       // iframe retains its WindowProxy, allowing queued messages from its old
       // document to masquerade as commands for the newly selected Ship.
-      replaceFrame(selectedKey);
+      replaceFrame(consoleMountKey);
       replaced = true;
-      loadedUrl = selectedRow.station.console;
+      loadedUrl = selectedConsole.screen;
       mountSettled = false;
       frame.dataset.station = selectedRow.station.station_id;
+      frame.dataset.console = selectedConsole.id;
       frame.dataset.ship = selectedRow.ship.ship_id;
-      frame.setAttribute('title', `${selectedRow.ship.name} — ${selectedRow.station.name}`);
-      frame.setAttribute('src', selectedRow.station.console);
+      frame.setAttribute('title', `${selectedRow.ship.name} — ${selectedConsole.name || selectedConsole.id}`);
+      frame.setAttribute('src', selectedConsole.screen);
       connection.textContent = t('server.gm.station.loading');
       watchLoad();
     }
@@ -547,6 +577,7 @@ export function createGmStationPuppet({
     replacement.removeAttribute('src');
     replacement.removeAttribute('data-ship');
     replacement.removeAttribute('data-station');
+    replacement.removeAttribute('data-console');
     frame.replaceWith(replacement);
     frame = replacement;
     mountedKey = key;
@@ -653,6 +684,7 @@ export function createGmStationPuppet({
     if (!selectedRow || !consoleInput || !hasCurrentDetail()) return false;
     const action = parsePayload(raw);
     if (!action || typeof action !== 'object') return false;
+    action.console = selectedConsole?.id || selectedRow.station.station_id;
     // The console's tutorial bookkeeping runs here exactly as it does on a
     // player client: a dismiss is recorded and shown, never forwarded; every
     // other action records the control as used and flows on unchanged.
@@ -666,6 +698,12 @@ export function createGmStationPuppet({
     if (folded.handled) return true;
     let submitted = false;
     dispatchConsoleAction(action, (type, data = {}) => {
+      const viewUpdate = type === 'SetConsoleView';
+      if (viewUpdate) {
+        type = 'ControlSystem';
+        data = { target: 'assign-console-view', payload: { type: 'AssignConsoleView',
+          data: { console: selectedConsole?.id, view: data.view } } };
+      }
       if (submitted || (type !== 'ControlSystem' && type !== 'ControlSystemCorrelated')
           || typeof data.target !== 'string' || !data.payload) return;
       const originatingCorrelation = isValidActionCorrelation(data.correlation)
@@ -706,6 +744,7 @@ export function createGmStationPuppet({
         } else if (!accepted) refuseLocal();
         return accepted;
       };
+      if (viewUpdate) { submitted = acceptCommand(); return; }
       const description = t('settings.gm.confirmation.station_command', {
         ship: targetRow.ship.name, station: targetRow.station.name,
       });
@@ -726,6 +765,8 @@ export function createGmStationPuppet({
     });
     return submitted;
   }
+
+  consoleSelect.addEventListener('change', () => { selectedConsoleId = consoleSelect.value; renderSelected(); });
 
   if (select) select.addEventListener('change', () => {
     const next = select.value; select.value = selectedKey;
@@ -768,6 +809,7 @@ export function createGmStationPuppet({
       invalidateMount();
       if (releasePending) cancelSchedule(releasePending.timer);
       win.removeEventListener('message', onMessage);
+      consoleSelect.remove();
     },
     reset() {
       if (releasePending) cancelSchedule(releasePending.timer);

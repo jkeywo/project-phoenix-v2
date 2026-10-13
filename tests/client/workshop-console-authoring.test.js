@@ -56,7 +56,7 @@ describe('Console authoring', () => {
   it.each([
     [{ type: 'console-add', id: 'flight', fields: {} }, /unique/],
     [{ type: 'console-update', id: 'flight', fields: { home_station: 'missing' } }, /home Station/],
-    [{ type: 'console-update', id: 'flight', fields: { host_order: ['missing'] } }, /host Station/],
+    [{ type: 'console-update', id: 'flight', fields: { host_order: ['missing'], human_seeking: true } }, /host Station/],
     [{ type: 'system-update', id: 'drive', fields: { console: 'missing' } }, /unknown Console/],
     [{ type: 'console-remove', id: 'flight' }, /unknown Console/],
     [{ type: 'console-feed-add', id: 'flight', source: 'missing', kind: 'Sensors' }, /feed source/],
@@ -103,4 +103,56 @@ describe('Console authoring', () => {
       operation: { path, type: 'console-update', id: 'flight', fields: { name: 'Changed' } } })).rejects.toThrow('runtime-validation-refused');
     expect(draft.read(path)).toBe(source); expect(draft.canUndo()).toBe(false);
   });
+  it('edits detached Console ratings independently from the hosting Station', () => {
+    const draft = draftOf(source + '\n[[console]]\nid="aux"\nhuman_seeking=true\nhost_order=["bridge"]\n[[system]]\nid="auxdrive"\nkind="helm_thrust"\nconsole="aux"\n');
+    draft.apply(prepare(draft, { type: 'rating-add', console: 'aux', name: 'Std' }).changes);
+    draft.apply(prepare(draft, { type: 'rating-add', console: 'aux', name: 'Simplified' }).changes);
+    draft.apply(prepare(draft, { type: 'rating-update', console: 'aux', rating: 'Simplified', name: 'Simplified', systems: ['auxdrive'] }).changes);
+    expect(parse(draft.read(path)).console.at(-1).rating[1].automated_systems).toEqual(['auxdrive']);
+    expect(parse(draft.read(path)).station[0].rating[0].automated_systems).toEqual(['drive']);
+    expect(() => prepare(draft, { type: 'rating-set-systems', console: 'aux', rating: 'Std', systems: ['drive'] })).toThrow(/owned by Console aux/);
+    draft.apply(prepare(draft, { type: 'rating-move', console: 'aux', rating: 'Simplified', direction: -1 }).changes);
+    expect(parse(draft.read(path)).console.at(-1).rating[0].name).toBe('Simplified');
+    draft.apply(prepare(draft, { type: 'rating-remove', console: 'aux', rating: 'Std' }).changes);
+    expect(parse(draft.read(path)).console.at(-1).rating).toHaveLength(1);
+  });
+  it('accepts references only to generated arcs actually authored on this hull', () => {
+    const draft = draftOf(source + '\n[[system]]\nid="shield-controller"\nkind="shields"\nconsole="flight"\n[[shield_arc]]\nid="fore"\n');
+    const withShields = { ...schema, system_kinds: [...schema.system_kinds, 'shields'], console_feed_kinds: [...schema.console_feed_kinds, 'ShieldArc'] };
+    const result = prepareShipOperation(draft, dependencies, withShields, { path, type: 'console-feed-add', id: 'flight', source: 'shield-arc-fore', kind: 'ShieldArc' });
+    expect(result.changes).toHaveLength(1);
+    expect(() => prepareShipOperation(draft, dependencies, withShields, { path, type: 'console-feed-add', id: 'flight', source: 'shield-arc-missing', kind: 'ShieldArc' })).toThrow(/feed source/);
+  });
+
+  it('edits and reorders a replacement Console without modifying its removal marker', () => {
+    const replacement = source.replace('[[console]]\nid="flight"', '[[console]]\nid="flight"\n_remove=true\n[[console]]\nid="flight"');
+    const draft = draftOf(replacement);
+    draft.apply(prepare(draft, { type: 'console-update', id: 'flight', fields: { name: 'Replacement' } }).changes);
+    expect(parse(draft.read(path)).console[0]).toEqual({ id: 'flight', _remove: true });
+    expect(parse(draft.read(path)).console[1].name).toBe('Replacement');
+    draft.apply(prepare(draft, { type: 'console-move', id: 'flight', direction: 1 }).changes);
+    expect(parse(draft.read(path)).console.map(row => row.id)).toEqual(['flight', 'navigator', 'flight']);
+    expect(parse(draft.read(path)).console[0]._remove).toBe(true);
+  });
+
+  it.each([
+    [{ type: 'console-update', id: 'flight', fields: { host_order: ['bridge', 'bridge'], human_seeking: true } }, /repeats a host/],
+    [{ type: 'console-update', id: 'flight', fields: { host_order: ['bridge'] } }, /Fixed Console/],
+    [{ type: 'console-update', id: 'flight', fields: { visiting_rating: 'Absent', human_seeking: true } }, /unknown visiting rating/],
+    [{ type: 'rating-add', console: 'flight', name: '' }, /nonempty and unique/],
+  ])('rejects invalid hosting/rating edits %j before acceptance', (operation, message) => {
+    const draft = draftOf(); expect(() => prepare(draft, operation)).toThrow(message); expect(draft.read(path)).toBe(source);
+  });
+  it('keeps visiting references in step with detached and home-Station rating renames', () => {
+    const draft = draftOf();
+    draft.apply(prepare(draft, { type: 'console-update', id: 'flight', fields: { human_seeking: true, visiting_rating: 'Assisted' } }).changes);
+    draft.apply(prepare(draft, { type: 'rating-update', station: 'bridge', rating: 'Assisted', name: 'Guided', systems: ['drive'] }).changes);
+    expect(parse(draft.read(path)).console[0].visiting_rating).toBe('Guided');
+    draft.apply(prepare(draft, { type: 'rating-add', console: 'flight', name: 'Guided' }).changes);
+    expect(() => prepare(draft, { type: 'rating-add', console: 'flight', name: 'Guided' })).toThrow(/nonempty and unique/);
+    draft.apply(prepare(draft, { type: 'rating-update', console: 'flight', rating: 'Guided', name: 'Manual', systems: [] }).changes);
+    expect(parse(draft.read(path)).console[0].visiting_rating).toBe('Manual');
+    expect(() => prepare(draft, { type: 'rating-remove', console: 'flight', rating: 'Manual' })).toThrow(/choose another visiting rating/);
+  });
+
 });

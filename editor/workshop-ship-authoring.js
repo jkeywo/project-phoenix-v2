@@ -45,7 +45,7 @@ function entry(source, name, id, key = 'id') {
     try { parsed = parse(text); } catch { continue; }
     const rows = name.split('.').reduce((value, part) => value?.[part], parsed);
     const row = Array.isArray(rows) ? rows[0] : null;
-    if (row && String(row[key]) === String(id)) return { ...block, row };
+    if (row && row._remove !== true && String(row[key]) === String(id)) return { ...block, row };
   }
   return null;
 }
@@ -121,8 +121,18 @@ function provenanceFinding(inspection, prefix, token, message) {
   return finding(owner, source, token, message);
 }
 
+function authoredAndGeneratedSystems(value) {
+  const systems = [...(value.system || [])];
+  const shields = systems.find(system => system.kind === 'shields');
+  if (shields) for (const arc of value.shield_arc || []) {
+    const id = `shield-arc-${arc.id}`;
+    if (!systems.some(system => system.id === id)) systems.push({ id, kind: 'shield_arc', console: shields.console, generated: true });
+  }
+  return systems;
+}
+
 function verify(path, source, schema, value = parse(source)) {
-  const stations = value.station || [], systems = value.system || [], consoles = value.console || [];
+  const stations = value.station || [], systems = authoredAndGeneratedSystems(value), consoles = value.console || [];
   const stationIds = new Set(), systemIds = new Set();
   for (const station of stations) {
     if (!ident(station.id) || station.id === 'core' || stationIds.has(station.id)) throw finding(path, source, `id = ${quote(station.id)}`, 'Station ids must be unique runtime identifiers and cannot be core.');
@@ -132,8 +142,24 @@ function verify(path, source, schema, value = parse(source)) {
   for (const console of consoles) {
     if (!ident(console.id) || consoleIds.has(console.id)) throw finding(path, source, quote(console.id), 'Console ids must be unique runtime identifiers.');
     consoleIds.add(console.id);
+    const names = new Set();
+    for (const rating of console.rating || []) {
+      if (typeof rating.name !== 'string' || !rating.name.trim() || names.has(rating.name)) throw finding(path, source, quote(console.id), `Console ${console.id} rating names must be nonempty and unique.`);
+      names.add(rating.name);
+    }
+    if (new Set(console.host_order || []).size !== (console.host_order || []).length) throw finding(path, source, quote(console.id), `Console ${console.id} repeats a host Station.`);
+    if (!console.human_seeking && ((console.host_order || []).length || console.visiting_rating != null)) throw finding(path, source, quote(console.id), `Fixed Console ${console.id} cannot author visiting settings.`);
+    const ratings = console.rating?.length ? console.rating : stations.find(station => station.id === console.home_station)?.rating || [];
+    if (console.visiting_rating != null && !ratings.some(rating => rating.name === console.visiting_rating)) throw finding(path, source, quote(console.visiting_rating), `Console ${console.id} has unknown visiting rating ${console.visiting_rating}; choose an existing rating before removing its current rating.`);
+
     if (console.home_station != null && !stationIds.has(console.home_station)) throw finding(path, source, quote(console.id), `Console ${console.id} names an unknown home Station.`);
     for (const host of console.host_order || []) if (!stationIds.has(host)) throw finding(path, source, quote(host), `Console ${console.id} names an unknown host Station.`);
+  }
+  for (const console of consoles) {
+    if (console.command_target != null && !stationIds.has(console.command_target)) throw finding(path, source, quote(console.command_target), `Console ${console.id} names an unknown command Station.`);
+    for (const rating of console.rating || []) for (const id of [...(rating.automated_systems || []), ...(rating.detailed_systems || [])]) {
+      if (!systems.some(system => system.id === id && system.console === console.id)) throw finding(path, source, quote(id), `Rating ${rating.name} may reference only Systems owned by Console ${console.id}.`);
+    }
   }
   for (const console of consoles) for (const feed of console.feed || []) {
     if (!systems.some(system => system.id === feed.source) && !(schema.console_feed_sources || []).includes(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
@@ -143,7 +169,7 @@ function verify(path, source, schema, value = parse(source)) {
   for (const system of systems) {
     if (!ident(system.id) || systemIds.has(system.id)) throw finding(path, source, `id = ${quote(system.id)}`, 'System ids must be unique runtime identifiers.');
     systemIds.add(system.id);
-    if (!schema.system_kinds.includes(system.kind)) throw finding(path, source, `kind = ${quote(system.kind)}`, `Unknown runtime System kind: ${system.kind}`);
+    if (!system.generated && !schema.system_kinds.includes(system.kind)) throw finding(path, source, `kind = ${quote(system.kind)}`, `Unknown runtime System kind: ${system.kind}`);
     if (!consoleIds.has(system.console)) throw finding(path, source, quote(system.console), `System ${system.id} names an unknown Console.`);
   }
   for (const station of stations) for (const rating of station.rating || []) for (const reference of rating.automated_systems || []) {
@@ -172,12 +198,20 @@ export function inspectShipAuthoring(draft, dependencies, path) {
       || field.path.startsWith(`behaviour.doctrine[id=${row.id}].`))?.owner || path;
     return { ...structuredClone(row), owner, local: localDoctrine.has(String(row.id)) };
   });
-  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: rowsWithOwners(composition, 'system'), doctrines, composition };
+  const generated = authoredAndGeneratedSystems(composition.resolved.value).filter(system => system.generated).map(system => ({ ...system, local: false, owner: path }));
+  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated], doctrines, composition };
 }
 
 export function prepareShipOperation(draft, dependencies, schema, operation) {
   const inspection = inspectShipAuthoring(draft, dependencies, operation.path);
   const before = draft.read(operation.path); let after = before;
+  const ratingSection = operation.console ? 'console' : 'station', ratingOwner = operation.console || operation.station;
+  if (operation.type === 'rating-remove') {
+    const dependent = inspection.consoles.find(console => console.visiting_rating === operation.rating
+      && (operation.console ? console.id === operation.console : console.home_station === operation.station && !(console.rating || []).length));
+    if (dependent) throw finding(operation.path, before, quote(operation.rating), `Console ${dependent.id} uses rating ${operation.rating}; choose another visiting rating before removing it.`);
+  }
+
   if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
     description: operation.description || operation.id, rank: operation.rank || '' }] });
   else if (operation.type === 'station-set' || operation.type === 'station-update') {
@@ -199,8 +233,9 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   } else if (operation.type === 'console-remove' || operation.type === 'console-move') {
     const block = entry(after, 'console', operation.id);
     if (!block) throw ownedFinding(inspection, 'console', operation.id, `Console ${operation.id} is included from another source; materialise it before editing.`);
+    const list = blocks(after, 'console', 'console').filter(row => parse(after.slice(row.start, row.end)).console[0]._remove !== true);
     after = operation.type === 'console-remove' ? remove(after, block)
-      : move(after, blocks(after, 'console', 'console'), localIds(after, 'console').indexOf(operation.id), operation.direction);
+      : move(after, list, list.findIndex(row => row.start === block.start), operation.direction);
   } else if (operation.type === 'console-feed-add' || operation.type === 'console-feed-remove') {
     const block = entry(after, 'console', operation.id);
     if (!block) throw ownedFinding(inspection, 'console', operation.id, `Console ${operation.id} is included from another source; materialise it before editing.`);
@@ -224,28 +259,28 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   else if (operation.type === 'system-move') { const list = blocks(after, 'system', 'system'); const index = localIds(after, 'system').indexOf(operation.id);
     if (index < 0) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before reordering it.`);
     after = move(after, list, index, operation.direction); }
-  else if (operation.type === 'rating-add') { const station = entry(after, 'station', operation.station); if (!station) throw ownedFinding(inspection, 'station', operation.station, `Station ${operation.station} is included from another source; materialise it before adding a rating.`);
-    const nl = newlineOf(after), fragment = `${nl}[[station.rating]]${nl}name = ${quote(operation.name)}${nl}automated_systems = []${nl}`;
+  else if (operation.type === 'rating-add') { const station = entry(after, ratingSection, ratingOwner); if (!station) throw ownedFinding(inspection, ratingSection, ratingOwner, `${ratingSection} ${ratingOwner} is included from another source; materialise it before adding a rating.`);
+    const nl = newlineOf(after), fragment = `${nl}[[${ratingSection}.rating]]${nl}name = ${quote(operation.name)}${nl}automated_systems = []${nl}`;
     after = after.slice(0, station.end) + fragment + after.slice(station.end); }
   else if (operation.type === 'rating-set-systems' || operation.type === 'rating-update' || operation.type === 'rating-remove') {
-    const station = entry(after, 'station', operation.station); if (!station) throw ownedFinding(inspection, 'station', operation.station, `Station ${operation.station} is included from another source; materialise it before editing its ratings.`);
-    const relative = after.slice(station.start, station.end), rating = entry(relative, 'station.rating', operation.rating, 'name');
-    if (!rating) throw provenanceFinding(inspection, `station[id=${operation.station}].rating[name=${operation.rating}]`, quote(operation.rating), `Rating ${operation.rating} is included from another source; materialise it before editing.`); const absolute = { ...rating, start: station.start + rating.start, body: station.start + rating.body, end: station.start + rating.end };
+    const station = entry(after, ratingSection, ratingOwner); if (!station) throw ownedFinding(inspection, ratingSection, ratingOwner, `${ratingSection} ${ratingOwner} is included from another source; materialise it before editing its ratings.`);
+    const relative = after.slice(station.start, station.end), rating = entry(relative, `${ratingSection}.rating`, operation.rating, 'name');
+    if (!rating) throw provenanceFinding(inspection, `${ratingSection}[id=${ratingOwner}].rating[name=${operation.rating}]`, quote(operation.rating), `Rating ${operation.rating} is included from another source; materialise it before editing.`); const absolute = { ...rating, start: station.start + rating.start, body: station.start + rating.body, end: station.start + rating.end };
     if (operation.type === 'rating-remove') after = remove(after, absolute);
     else {
       after = setKey(after, absolute, 'automated_systems', operation.systems);
       if (operation.type === 'rating-update' && operation.name !== operation.rating) {
-        const updatedStation = entry(after, 'station', operation.station), updatedRelative = after.slice(updatedStation.start, updatedStation.end);
-        const updatedRating = entry(updatedRelative, 'station.rating', operation.rating, 'name');
+        const updatedStation = entry(after, ratingSection, ratingOwner), updatedRelative = after.slice(updatedStation.start, updatedStation.end);
+        const updatedRating = entry(updatedRelative, `${ratingSection}.rating`, operation.rating, 'name');
         after = setKey(after, { ...updatedRating, start: updatedStation.start + updatedRating.start,
           body: updatedStation.start + updatedRating.body, end: updatedStation.start + updatedRating.end }, 'name', operation.name);
       }
     }
   } else if (operation.type === 'rating-move') {
-    const station = entry(after, 'station', operation.station); if (!station) throw ownedFinding(inspection, 'station', operation.station, `Station ${operation.station} is included from another source; materialise it before reordering ratings.`);
-    const relative = after.slice(station.start, station.end), list = blocks(relative, 'station.rating', 'station');
+    const station = entry(after, ratingSection, ratingOwner); if (!station) throw ownedFinding(inspection, ratingSection, ratingOwner, `${ratingSection} ${ratingOwner} is included from another source; materialise it before reordering ratings.`);
+    const relative = after.slice(station.start, station.end), list = blocks(relative, `${ratingSection}.rating`, ratingSection);
     const names = station.row.rating?.map(row => String(row.name)) || [], index = names.indexOf(operation.rating);
-    if (index < 0) throw provenanceFinding(inspection, `station[id=${operation.station}].rating[name=${operation.rating}]`, quote(operation.rating), `Rating ${operation.rating} is included from another source; materialise it before reordering it.`);
+    if (index < 0) throw provenanceFinding(inspection, `${ratingSection}[id=${ratingOwner}].rating[name=${operation.rating}]`, quote(operation.rating), `Rating ${operation.rating} is included from another source; materialise it before reordering it.`);
     after = after.slice(0, station.start) + move(relative, list, index, operation.direction) + after.slice(station.end);
   } else if (operation.type === 'doctrine-add') {
     const row = { id: operation.id, base_priority: operation.base_priority };
@@ -270,10 +305,27 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     after = move(after, list, index, operation.direction);
   }
   else throw new Error('invalid-ship-operation');
+  if (operation.type === 'rating-update' && operation.name !== operation.rating) {
+    for (const console of inspection.consoles) {
+      const usesCatalogue = operation.console ? console.id === operation.console
+        : console.home_station === operation.station && !(console.rating || []).length;
+      if (usesCatalogue && console.visiting_rating === operation.rating) {
+        const block = entry(after, 'console', console.id);
+        if (!block) throw ownedFinding(inspection, 'console', console.id, `Console ${console.id} is included from another source; materialise it before renaming its visiting rating.`);
+        after = setKey(after, block, 'visiting_rating', operation.name);
+      }
+    }
+  }
   // Composition merges keyed arrays, so duplicate local declarations must be
   // rejected before resolution can collapse them into one effective Console.
   const authoredConsoleIds = new Set();
   for (const row of parse(after).console || []) {
+    if (row._remove === true) continue;
+    const names = new Set();
+    for (const rating of row.rating || []) {
+      if (typeof rating.name !== 'string' || !rating.name.trim() || names.has(rating.name)) throw finding(operation.path, after, quote(row.id), `Console ${row.id} rating names must be nonempty and unique.`);
+      names.add(rating.name);
+    }
     if (!ident(row.id) || authoredConsoleIds.has(row.id)) throw finding(operation.path, after, quote(row.id), 'Console ids must be unique runtime identifiers.');
     authoredConsoleIds.add(row.id);
   }

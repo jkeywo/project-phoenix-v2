@@ -195,7 +195,8 @@ export class PhNavigationMap extends PhElement {
     this.btnSetWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#beginPick(); });
     this.btnSetSelected.addEventListener('click', (e) => { e.stopPropagation(); this.#setToSelected(); });
     this.btnClearWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#clearWaypoint(); });
-    this.initResize();
+    // Initial sizing starts in connectedCallback, after subclass private fields
+    // exist. A visible element can have nonzero bounds during template setup.
     // Defer the first frame: the arrow resolves `this.#rafLoop` when the rAF
     // fires (after construction), never synchronously here where the private
     // method does not yet exist.

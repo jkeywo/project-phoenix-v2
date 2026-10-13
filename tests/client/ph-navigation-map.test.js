@@ -186,6 +186,33 @@ function setup(opts) {
   return { el, canvas, fakeCtx, tickRaf };
 }
 
+it('constructs a visible map before starting working-view-aware sizing', () => {
+  // Browser upgrades can already have layout; jsdom's default zero bounds used
+  // to hide private-field access from the PhElement base constructor.
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    { width: 420, height: 280, left: 0, top: 0, right: 420, bottom: 280 }
+  );
+  try {
+    const NavigationMap = customElements.get('ph-navigation-map');
+    let map;
+    expect(() => { map = new NavigationMap(); }).not.toThrow();
+    document.body.append(map);
+    expect(map.canvas.width).toBe(840);
+    expect(map.canvas.height).toBe(560);
+    expect(map.resizeObserver).not.toBeNull();
+    map.applyConsoleView({ zoom: 2, center_x: 200, center_y: 300 });
+    const view = map.consoleView();
+    bounds.mockReturnValue({ width: 500, height: 320, left: 0, top: 0, right: 500, bottom: 320 });
+    roCallback();
+    expect(map.canvas.width).toBe(1000);
+    expect(map.consoleView().zoom).toBe(view.zoom);
+    expect(map.consoleView().center_x).toBeCloseTo(view.center_x);
+    expect(map.consoleView().center_y).toBeCloseTo(view.center_y);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('restores its render loop and size observer when it is moved between parents', () => {
   // Docking reparents the map (issue #1503), and there is no way to move a node
   // between parents without disconnecting it. A frozen picture afterwards would

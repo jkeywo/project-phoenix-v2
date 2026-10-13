@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createConsoleMounts } from '../../gui/console-mount.js';
@@ -147,6 +148,32 @@ describe('parent Console lifetime', () => {
     h.mounts.selectOverlay('navigation', 'chart');
     h.mounts.selectOverlay(null, null);
     expect(h.trace).toEqual(['overlay:helm:map', 'overlay:navigation:chart']);
+  });
+
+  it('the real base-tab action closes its Console overlay without clearing another Console', () => {
+    const h = harness(); h.mount(); h.live.active = 'tactical';
+    h.mounts.selectOverlay('tactical', 'security-overlay');
+    h.mounts.selectOverlay('navigation', 'chart');
+    const source = readFileSync(new URL('../../client.html', import.meta.url), 'utf8');
+    const start = source.indexOf('onActivate: (tabId, kind) => {');
+    const end = source.indexOf('\n        },', start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const callback = source.slice(start + 'onActivate: '.length, end) + '\n}';
+    const send = vi.fn(), popup = vi.fn();
+    const activate = new Function('consoleMounts', 'activeConsole', 'activeConsoleOverlay',
+      'setActiveConsole', 'send', 'showStationDamagePopup', 'scheduleRender',
+      `return (${callback});`)(h.mounts, 'tactical',
+      () => h.mounts.view('tactical').activeOverlay, vi.fn(), send, popup, vi.fn());
+    h.trace.length = 0;
+    activate('tactical', 'station');
+    expect(h.trace).toEqual(['overlay:tactical:null']);
+    expect(h.mounts.view('tactical').activeOverlay).toBeNull();
+    expect(h.mounts.view('navigation').activeOverlay).toBe('chart');
+    expect(popup).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('ConsoleVisited', { console: 'tactical' });
+    // A second tap on the now-uncovered base tab retains the damage-popup action.
+    activate('tactical', 'station');
+    expect(popup).toHaveBeenCalledOnce();
   });
 
   it('publishes host changes only to active or always-push Stations using authoritative families', () => {

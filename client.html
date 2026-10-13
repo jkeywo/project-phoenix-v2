@@ -2736,10 +2736,8 @@
         : { changed: (name || null) !== activeConsole, next: name || null };
       if (!step.changed) return;
       activeConsole = step.next;
-      // An overlay belongs to the console it is drawn inside. Leaving that
-      // console closes it — both here, so the bar stops showing it selected,
-      // and in the iframe, so the panel is not still covering the console the
-      // next time the player comes back to it.
+      // Switching visibility preserves each Console's working view. A base-tab
+      // gesture explicitly closes the destination overlay in onActivate below.
       consoleMounts?.selectOverlay(null, null);
       // The damage popup belongs to a Station too (issue #1374): it names one
       // and lists that one's systems, so it cannot outlive a switch away from
@@ -3918,7 +3916,7 @@
           // A Station tab closes whatever overlay is open, which is what
           // "selecting a station tab closes it" means even when the Station
           // selected is the one already active.
-          consoleMounts?.selectOverlay(null, null);
+          consoleMounts?.selectOverlay(tabId, null);
           setActiveConsole(tabId);
           // Tell the host this Station's tab was visited (issue #1101), so it
           // clears the one-off `unread` importance flag authoritatively through

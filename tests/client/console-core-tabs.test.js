@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
+import { initConsoleOverlays } from '../../gui/console-overlays.js';
 
 /** Every message the console posted to its (stand-in) shell. */
 let posted;
@@ -279,4 +280,28 @@ it('applies a host working view without echo, then merges one local change throu
   expect(command).toHaveLength(1);
   expect(command[0]).toMatchObject({ action: 'set_console_view', console: 'science-left',
     view: { inspected_record: 'known-record', overlay: 'intel-overlay', comms_thread: 'thread', navigation: null } });
+});
+
+it('publishes an internal Back gesture immediately and keeps it closed through a late open acknowledgement', () => {
+  mountConsole(TACTICAL_BODY.replace('</div>', '<button data-overlay-back>Back</button></div>'));
+  initConsoleOverlays(document);
+  const payload = { console_id: 'tactical', console_host: { host: 'tactical' },
+    console_view: { inspected_record: 'known-record', overlay: null, comms_thread: null, navigation: null } };
+  window.__updateConsole('tactical', JSON.stringify(payload));
+  posted.length = 0;
+  window.__setConsoleOverlay('security-overlay');
+  document.querySelector('[data-overlay-back]').click();
+  expect(document.querySelector('.overlay-panel.open')).toBeNull();
+  expect(lastTabs().open).toBeNull();
+  const commands = posted.filter(message => message.type === 'console_action')
+    .map(message => JSON.parse(message.payload));
+  expect(commands.map(command => command.view.overlay)).toEqual(['security-overlay', null]);
+  expect(commands[1].view.inspected_record).toBe('known-record');
+  window.__updateConsole('tactical', JSON.stringify({ ...payload,
+    console_view: { ...payload.console_view, overlay: 'security-overlay' } }));
+  expect(document.querySelector('.overlay-panel.open')).toBeNull();
+  expect(lastTabs().open).toBeNull();
+  window.__updateConsole('tactical', JSON.stringify(payload));
+  expect(document.querySelector('.overlay-panel.open')).toBeNull();
+  expect(posted.filter(message => message.type === 'console_action')).toHaveLength(2);
 });

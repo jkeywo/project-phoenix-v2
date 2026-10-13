@@ -135,9 +135,22 @@ export function initConsoleOverlays(doc) {
     const back = target.closest('[data-overlay-back]');
     if (back) {
       closeConsoleOverlays(root);
+      publishWorkingOverlay(root);
       return;
     }
     const toggle = target.closest('.overlay-toggle[data-overlay]');
-    if (toggle) toggleConsoleOverlay(toggle.dataset.overlay, root);
+    if (toggle) {
+      toggleConsoleOverlay(toggle.dataset.overlay, root);
+      publishWorkingOverlay(root);
+    }
   });
+}
+
+// Publish only user gestures, never programmatic snapshot application. The close
+// must enter working state before a pending open acknowledgement can arrive.
+function publishWorkingOverlay(root) {
+  const Event = root.defaultView?.CustomEvent;
+  if (Event) root.dispatchEvent(new Event('console-view-change', {
+    detail: { overlay: openConsoleOverlayId(root) },
+  }));
 }

@@ -3103,12 +3103,37 @@ test('two equal GMs puppet a human-held Station without blocking its player', { 
   const fleetCode = await ship.locator('#fleet-code').textContent();
   const gms = [];
   const gmErrors = [];
+  const gmDiagnostics = [];
   for (let index = 0; index < 2; index += 1) {
     const gm = await context.newPage();
     gmErrors.push(captureServerPageErrors(gm));
+    const messages = [];
+    gmDiagnostics.push(messages);
+    const note = value => { messages.push(value); if (messages.length > 60) messages.shift(); };
+    gm.on('console', message => {
+      if (['error', 'warning'].includes(message.type())) note(`${message.type()}: ${message.text()}`);
+    });
+    gm.on('requestfailed', request => note(`requestfailed: ${request.url()} ${request.failure()?.errorText}`));
     await gm.goto('/?scenario=assets/worlds/default.toml');
     await waitForWasmReady(gm);
-    await joinFleetAsGm(gm, fleetCode);
+    try {
+      await joinFleetAsGm(gm, fleetCode);
+    } catch (error) {
+      const pages = await Promise.all([ship, ...gms, gm].map(async (page, pageIndex) => {
+        const role = pageIndex === 0 ? 'ship' : `gm-${pageIndex}`;
+        try {
+          return await page.evaluate(role => ({
+            role, url: location.href, wasmReady: window.__wasmReady,
+            start: window.__hostGmStartState?.(), fleet: window.__hostFleetState?.(),
+            session: window.__hostGmSessionState?.(), phase: window.__saveSlotsPhase,
+            joinRequest: document.getElementById('gm-join-request')?.textContent,
+            startResult: document.getElementById('gm-start-result')?.textContent,
+          }), role);
+        } catch (failure) { return { role, evaluationError: String(failure) }; }
+      }));
+      throw new Error(`GM ${index + 1} admission failed: `
+        + JSON.stringify({ pages, errors, gmErrors, gmDiagnostics }), { cause: error });
+    }
     gms.push(gm);
   }
   for (const client of crew) await client.send('SetReady', { ready: true });

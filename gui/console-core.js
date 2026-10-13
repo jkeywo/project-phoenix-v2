@@ -441,6 +441,7 @@ export function initConsole({
   });
   const onWorkingViewChange = event => {
     if (_latestState?.console_id) workingView.change(event.detail || {});
+    if (Object.hasOwn(event.detail || {}, 'overlay')) _syncConsoleOverlay();
   };
   if (typeof document !== 'undefined') document.addEventListener('console-view-change', onWorkingViewChange);
 

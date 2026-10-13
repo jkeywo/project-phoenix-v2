@@ -122,3 +122,11 @@ it('detached Console uses its own rating and tutorial metadata, without host Sta
   expect(view.stationRatings.helm).toBe('Simplified');
   expect(view.stationTutorials.left).toEqual([tutorial]);
 });
+
+it('shows the current hosting Station takeover on a detached Console', () => {
+  const takeover = { station: 'pilot', operators: ['gm-1'] };
+  const state = { consoleDefinitions: [{ ...consoles[0], home_station: null }],
+    consoleHosts: { left: { host: 'pilot', rating: 'Std' } }, stationPuppets: { pilot: takeover },
+    systemConsoleFamilies: { drive: 'helm' } };
+  expect(buildConsoleView('left', state).gm_takeover).toEqual(takeover);
+});

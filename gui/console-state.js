@@ -2720,7 +2720,7 @@ export function buildConsoleView(consoleName, state) {
     view = withStationDamage(consoleName, scoped, view);
     view = withCommandAdvice(definition.home_station, scoped, view);
     view = withTutorialOverlay(definition.id, scoped, view);
-    view = withGmTakeover(definition.home_station, scoped, view);
+    view = withGmTakeover(state.consoleHosts?.[definition.id]?.host || definition.home_station, scoped, view);
     return { ...view, console_id: definition.id, station_id: definition.home_station,
       hosted_systems: definition.systems || [],
       console_host: state.consoleHosts?.[definition.id] || null,

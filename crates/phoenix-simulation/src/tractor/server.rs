@@ -494,10 +494,12 @@ pub fn operate_tractor_ai(
         // higher-scored `Rescue` wins the seat and `tractor_directive_target`
         // returns `None` here, so this host stands down for the transporter —
         // one pair of hands.
-        let directive_target: Option<String> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let directive_target: Option<String> = match config.and_then(|config| {
+            config
+                .0
+                .observations_for_system(&tractor_system_id(), &blackboards.0)
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Engineering,

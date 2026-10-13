@@ -421,10 +421,12 @@ pub fn operate_umbilical_ai(
         if !sources.0.policy_for(&umbilical_system_id()).operate_ai {
             continue;
         }
-        let transfer_active = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let transfer_active = match config.and_then(|config| {
+            config
+                .0
+                .observations_for_system(&umbilical_system_id(), &blackboards.0)
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
                 SystemAffinity::Engineering,

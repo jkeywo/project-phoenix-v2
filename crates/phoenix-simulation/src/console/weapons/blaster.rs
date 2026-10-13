@@ -31,6 +31,21 @@ fn blaster_combat_lock(
         _ => None,
     }
 }
+/// Decision input for one bank; machinery appliers retain the ordinary lock.
+fn blaster_ai_combat_lock(
+    config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    system: &crate::core::messages::SystemId,
+    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
+) -> Option<String> {
+    match config?
+        .0
+        .observations_for_system(system, &blackboards?.0)
+        .get(&crate::ship::system_registry::viewscreen_system_id())
+    {
+        Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.clone(),
+        _ => None,
+    }
+}
 use crate::entities::model_rig::ModelMarkers;
 use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::ship::state::ShipPhysics;
@@ -375,7 +390,16 @@ pub(crate) fn tick_blaster_auto_fire(
 
         // Target selection: the **Combat Lock** from this ship's frozen
         // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted.
-        let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
+        let Some(target_uuid) = ship_config_opt.and_then(|config| {
+            config
+                .0
+                .systems
+                .iter()
+                .filter(|system| system.kind == "blaster_bank")
+                .find_map(|system| {
+                    blaster_ai_combat_lock(Some(config), &system.id, blackboards_opt)
+                })
+        }) else {
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -399,6 +423,15 @@ pub(crate) fn tick_blaster_auto_fire(
                 {
                     continue;
                 }
+            }
+
+            let Some(bank_sid) = bank_sid else {
+                continue;
+            };
+            if blaster_ai_combat_lock(ship_config_opt, &bank_sid, blackboards_opt).as_deref()
+                != Some(target_uuid.as_str())
+            {
+                continue;
             }
 
             // Host readiness gates (AC2): availability/cooldown, range, arc.
@@ -1230,3 +1263,66 @@ pub(crate) fn handle_blaster_hits(
 }
 
 pub use phoenix_sim_gameplay::console::weapons::blaster::*;
+
+#[cfg(test)]
+mod console_knowledge_tests {
+    use super::*;
+
+    #[test]
+    fn cohosted_blaster_banks_do_not_share_an_unbound_lock() {
+        let config = crate::ship_plugin::ShipConfigComponent(
+            crate::ship::config::ShipConfig::from_toml(
+                r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons"
+rank = "Ltn."
+[[console]]
+id = "left-screen"
+home_station = "tactical"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[console]]
+id = "right-screen"
+home_station = "tactical"
+[[system]]
+id = "blaster-left"
+kind = "blaster_bank"
+console = "left-screen"
+[[system]]
+id = "blaster-right"
+kind = "blaster_bank"
+console = "right-screen"
+"#,
+                &["blaster_bank"],
+            )
+            .unwrap(),
+        );
+        let left = crate::ship::system_registry::blaster_bank_system_id("left").unwrap();
+        let right = crate::ship::system_registry::blaster_bank_system_id("right").unwrap();
+        let mut boards = crate::server_app::ShipSystemBlackboards::default();
+        boards.0.insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(crate::core::messages::ViewscreenBlackboard {
+                combat_lock: Some("contact".into()),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            blaster_ai_combat_lock(Some(&config), &left, Some(&boards)).as_deref(),
+            Some("contact")
+        );
+        assert_eq!(
+            blaster_ai_combat_lock(Some(&config), &right, Some(&boards)),
+            None
+        );
+        assert_eq!(blaster_ai_combat_lock(None, &left, Some(&boards)), None);
+        // The authoritative machinery applier still uses the existing lock.
+        assert_eq!(
+            blaster_combat_lock(Some(&boards)).as_deref(),
+            Some("contact")
+        );
+    }
+}

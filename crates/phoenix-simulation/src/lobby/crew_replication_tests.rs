@@ -31,10 +31,15 @@ default_level = 2
 min_level = 1
 max_level = 4
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "fixture.html"
+
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-console"
 power_group = "ops"
 "#;
 

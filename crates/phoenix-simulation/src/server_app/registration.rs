@@ -1226,6 +1226,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
             crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID,
         ));
+        app.register_admitted_consumer(ConsumerMatcher::undeclared_exact(
+            crate::ship::console_views::ASSIGN_CONSOLE_VIEW,
+        ));
     }
     app.add_systems(
         FixedUpdate,
@@ -1237,6 +1240,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 .in_set(crate::sim_sets::FixedStep::ReplicateLocalCrewRatings)
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::command_admission::AdmissionSet),
+            crate::ship::console_views::admit_console_view_requests
+                .in_set(crate::sim_sets::FixedStep::AdmitConsoleViewRequests)
+                .after(crate::lobby::LobbySystemSet)
+                .after(crate::lobby::crew_replication::replicate_local_crew_ratings)
+                .before(crate::command_admission::AdmissionSet),
+            crate::ship::console_views::apply_console_views
+                .in_set(crate::sim_sets::FixedStep::ApplyConsoleViews)
+                .in_set(crate::sim_sets::SimSet::Input)
+                .after(crate::command_admission::AdmissionSet),
             // Applies the admitted command on every peer's copy of the ship.
             crate::lobby::crew_replication::apply_assigned_station_rating
                 .in_set(crate::sim_sets::FixedStep::ApplyAssignedStationRating)

@@ -448,6 +448,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("infrastructure", fold_infrastructure_namespace),
     ("civilian", fold_civilian_namespace),
     ("station-stances", fold_station_stances_namespace),
+    ("console-views", fold_console_views_namespace),
     ("tractor", fold_tractor_namespace),
     ("dock", fold_dock_namespace),
     ("external-repair", fold_external_repair_namespace),
@@ -455,6 +456,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
     ("security", fold_security_namespace),
+    ("internal-repair", fold_internal_repair_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -1905,7 +1907,7 @@ fn civilian_order_destination(order: &crate::civilian::CivilianOrder) -> String 
 /// Station's weapons AI does — two hosts that disagreed about which stance a
 /// hull is under would disagree about whether that hull's guns open up. It is
 /// NOT re-derived each tick from digest-free inputs the way `HumanSeekingHosts`
-/// and `VisitingStationHosts` are (those recompute from `ShipConfig` +
+/// and `ConsoleHosts` are (those recompute from `ShipConfig` +
 /// sessions + control sources every tick and so are excluded as `derived`); a
 /// selection lands here only when a `SetStationStance` command is admitted and
 /// stays until a later order or the AI operator clears it. So a divergent
@@ -1928,6 +1930,47 @@ fn civilian_order_destination(order: &crate::civilian::CivilianOrder) -> String 
 /// the map's own iteration order is `HashMap` order, never stable across
 /// instances — so two hosts fold the same selections to the same number
 /// whatever order the entries were inserted in.
+fn fold_console_views_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "console-views-namespace",
+        |views: &crate::ship::components::ConsoleWorkingViews| {
+            (!views.0.is_empty()).then(|| views.0.clone())
+        },
+        |mut acc, views| {
+            acc = fold_u64(acc, views.len() as u64);
+            for (id, view) in views {
+                acc = fold_str(acc, &id.0);
+                acc = fold_optional_str(
+                    acc,
+                    view.inspected_record
+                        .as_ref()
+                        .map(|id| id.to_string())
+                        .as_deref(),
+                );
+                acc = fold_optional_str(acc, view.comms_thread.as_deref());
+                acc = fold_optional_str(acc, view.overlay.as_deref());
+                acc = fold_u64(acc, u64::from(view.navigation.is_some()));
+                if let Some(navigation) = view.navigation {
+                    acc = fold_f32(acc, navigation.zoom);
+                    acc = fold_f32(acc, navigation.center_x);
+                    acc = fold_f32(acc, navigation.center_y);
+                    acc = fold_optional_str(
+                        acc,
+                        navigation
+                            .selected_uuid
+                            .as_ref()
+                            .map(|id| id.to_string())
+                            .as_deref(),
+                    );
+                }
+            }
+            acc
+        },
+    )
+}
+
 fn fold_station_stances_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
@@ -2328,3 +2371,81 @@ pub use phoenix_runtime::digest::{Checkpoint, DigestLedger, Divergence};
 #[cfg(test)]
 #[path = "sim_digest_tests.rs"]
 mod tests;
+
+/// Repair commitments, requests and notification latches use independent sorted
+/// entity walks. Empty components contribute nothing; map insertion order is not state.
+fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
+    use crate::console::repair::server::{RepairRequestQueue, ShipRepairTeams};
+    use crate::core::messages::TeamSlot;
+    use crate::ship::components::RepairHumanAlerted;
+    let acc = fold_optional_namespace(
+        world,
+        acc,
+        "repair-queue",
+        |queue: &RepairRequestQueue| {
+            if queue.entries.is_empty() {
+                return None;
+            }
+            let mut entries = queue.entries.clone();
+            entries.sort_by(|a, b| a.group.cmp(&b.group));
+            Some(entries)
+        },
+        |mut acc, entries| {
+            acc = fold_u64(acc, entries.len() as u64);
+            for entry in entries {
+                acc = fold_serde(acc, &entry.group);
+                acc = fold_str(acc, &entry.station_label);
+                acc = fold_u64(acc, entry.tier as u64);
+                acc = fold_f32(acc, entry.deficit);
+            }
+            acc
+        },
+    );
+    let acc = fold_optional_namespace(
+        world,
+        acc,
+        "repair-alerts",
+        |alerted: &RepairHumanAlerted| {
+            if alerted.0.is_empty() {
+                return None;
+            }
+            let mut entries: Vec<_> = alerted
+                .0
+                .iter()
+                .map(|(group, tier)| (group.clone(), *tier))
+                .collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            Some(entries)
+        },
+        |acc, entries| fold_serde(acc, &entries),
+    );
+    fold_optional_namespace(
+        world,
+        acc,
+        "repair-teams",
+        |teams: &ShipRepairTeams| {
+            if teams
+                .0
+                .slots()
+                .iter()
+                .all(|slot| matches!(slot, TeamSlot::Idle))
+            {
+                return None;
+            }
+            let mut slots = teams.0.slots().to_vec();
+            for slot in &mut slots {
+                match slot {
+                    TeamSlot::Travelling { elapsed, .. } => {
+                        *elapsed = f32::from_bits(canon_f32(*elapsed))
+                    }
+                    TeamSlot::Returning { remaining, .. } => {
+                        *remaining = f32::from_bits(canon_f32(*remaining))
+                    }
+                    _ => {}
+                }
+            }
+            Some(slots)
+        },
+        |acc, slots| fold_serde(acc, &slots),
+    )
+}

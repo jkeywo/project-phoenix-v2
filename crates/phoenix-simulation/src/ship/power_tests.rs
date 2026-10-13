@@ -98,6 +98,18 @@ fn test_app() -> App {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         crate::server_app::ShipSystemBlackboards::default(),
+        crate::ship::components::ConsoleHosts(
+            crate::ship::components::load_ship_config_from_disk()
+                .0
+                .consoles
+                .iter()
+                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                    console: console.id.clone(),
+                    host: console.home_station.clone(),
+                    rating: "Std".into(),
+                })
+                .collect(),
+        ),
         crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -885,6 +897,18 @@ fn reactor_offline_refuses_allocation_input() {
         crate::server_app::Ship,
         crate::server_app::LocalShip,
         crate::server_app::ShipSystemBlackboards::default(),
+        crate::ship::components::ConsoleHosts(
+            crate::ship::components::load_ship_config_from_disk()
+                .0
+                .consoles
+                .iter()
+                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                    console: console.id.clone(),
+                    host: console.home_station.clone(),
+                    rating: "Std".into(),
+                })
+                .collect(),
+        ),
         crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -1373,10 +1397,15 @@ name = "Tactical"
 description = "Dummy"
 rank = "Ltn."
 
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 "#
             ),

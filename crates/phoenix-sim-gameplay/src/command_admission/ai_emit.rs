@@ -53,6 +53,7 @@ pub fn emit_ai_command(
         stations: vec![],
         systems: vec![],
         power_groups: std::collections::HashMap::new(),
+        consoles: Vec::new(),
         coordination_lag_secs: 0.0,
     };
     let config = ship_config.map(|c| &c.0).unwrap_or(&empty);

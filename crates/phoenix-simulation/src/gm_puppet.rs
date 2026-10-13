@@ -7,6 +7,7 @@
 //! more equal GM operators are present.
 
 use bevy::prelude::*;
+use phoenix_sim_gameplay::ship::rating::SystemDepthRuntime;
 use serde::{Deserialize, Serialize};
 
 use crate::command_admission::log::ShipKey;
@@ -243,6 +244,7 @@ pub fn validate_station_action(
     puppets: &StationPuppets,
     config: Option<&crate::ship::config::ShipConfig>,
     _ratings: Option<&ActiveStationRatings>,
+    hosts: Option<&crate::ship::components::ConsoleHosts>,
 ) -> Result<(), crate::gm_action::GmActionRefusalReason> {
     use crate::gm_action::{GmAction, GmActionRefusalReason};
     let station = match action {
@@ -300,11 +302,21 @@ pub fn validate_station_action(
             }
             let payload = crate::core::codec::decode_canonical_system_command(payload.as_str())
                 .ok_or(GmActionRefusalReason::InvalidAction)?;
+            if let crate::core::messages::SystemControlPayload::AssignConsoleView {
+                console,
+                view,
+            } = &payload
+            {
+                return (system.0 == crate::ship::console_views::ASSIGN_CONSOLE_VIEW
+                    && view.is_valid()
+                    && capability::station_consoles(config, hosts, station)
+                        .any(|candidate| &candidate.id == console))
+                .then_some(())
+                .ok_or(GmActionRefusalReason::SystemOutsideStation);
+            }
             let effective =
                 crate::command_admission::effective_target_for_command(config, system, &payload);
-            crate::command_admission::station_for_system(config, None, &effective)
-                .as_ref()
-                .is_some_and(|owner| owner == station)
+            system_at_station(config, hosts, station, &effective)
                 .then_some(())
                 .ok_or(GmActionRefusalReason::SystemOutsideStation)
         }
@@ -379,21 +391,24 @@ pub fn validate_station_action_in_world(
         return Ok(());
     }
     let found = {
-        let mut query = world.query_filtered::<
-            (&EntityUuid, &ShipConfigComponent, &ActiveStationRatings),
-            With<crate::server_app::Ship>,
-        >();
+        let mut query = world.query_filtered::<(
+            &EntityUuid,
+            &ShipConfigComponent,
+            &ActiveStationRatings,
+            Option<&crate::ship::components::ConsoleHosts>,
+        ), With<crate::server_app::Ship>>();
         query
             .iter(world)
             .find(|(uuid, ..)| uuid.0 == ship.0)
-            .map(|(_, config, ratings)| (config.0.clone(), ratings.clone()))
+            .map(|(_, config, ratings, hosts)| (config.0.clone(), ratings.clone(), hosts.cloned()))
     };
     validate_station_action(
         action,
         operator_id,
         &puppets,
-        found.as_ref().map(|(config, _)| config),
-        found.as_ref().map(|(_, ratings)| ratings),
+        found.as_ref().map(|(config, _, _)| config),
+        found.as_ref().map(|(_, ratings, _)| ratings),
+        found.as_ref().and_then(|(_, _, hosts)| hosts.as_ref()),
     )
 }
 
@@ -614,6 +629,79 @@ pub fn settle_removed_station_feedback(
 /// same source-stripped admitted command shape, while every AI emitter sees its
 /// ordinary `operate_ai == false` policy. Damage-offline remains additive in
 /// `ControlSourceResolver::policy_for` and is therefore not bypassed.
+fn system_at_station(
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship::components::ConsoleHosts>,
+    station: &StationId,
+    system: &crate::core::messages::SystemId,
+) -> bool {
+    config.system(system).is_some_and(|system| {
+        !system.ai_only
+            && capability::station_consoles(config, hosts, station)
+                .any(|console| system.console.as_ref() == Some(&console.id))
+    })
+}
+
+/// Remove last tick's overlay using today's ordinary ownership/rating state.
+/// Rebuilding the Console projection also clears a visitor that moved away.
+fn restore_console_control(
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship::components::ConsoleHosts>,
+    ratings: &ActiveStationRatings,
+    sources: &mut ShipSystemControlSources,
+) {
+    for console in &config.consoles {
+        let placement =
+            hosts.and_then(|hosts| hosts.0.iter().find(|entry| entry.console == console.id));
+        let rating = placement
+            .map(|entry| entry.rating.as_str())
+            .or_else(|| {
+                console
+                    .home_station
+                    .as_ref()
+                    .and_then(|home| ratings.0.get(home))
+                    .map(String::as_str)
+            })
+            .unwrap_or(crate::ship::rating::BACKFILL_RATING);
+        let unhosted = placement.is_some_and(|entry| entry.host.is_none());
+        let depths = config.console_system_depths(console, rating);
+        for system in config
+            .systems
+            .iter()
+            .filter(|system| system.console.as_ref() == Some(&console.id))
+        {
+            let source =
+                if unhosted || system.ai_only || rating == crate::ship::rating::BACKFILL_RATING {
+                    ControlSource::Ai
+                } else {
+                    depths
+                        .get(&system.id)
+                        .copied()
+                        .unwrap_or(crate::ship::rating::SystemDepth::Detailed)
+                        .control_source()
+                };
+            // set changes the controller only; damage/GM-disable latches remain.
+            sources.0.set(system.id.clone(), source);
+        }
+    }
+}
+
+fn overlay_station_control(
+    config: &crate::ship::config::ShipConfig,
+    hosts: Option<&crate::ship::components::ConsoleHosts>,
+    station: &StationId,
+    sources: &mut ShipSystemControlSources,
+) {
+    if config.station(station).is_none() {
+        return;
+    }
+    for system in &config.systems {
+        if system_at_station(config, hosts, station, &system.id) {
+            sources.0.set(system.id.clone(), ControlSource::Human);
+        }
+    }
+}
+
 pub fn reconcile_station_puppet_control(
     puppets: Res<StationPuppets>,
     mut previous: ResMut<PreviousStationPuppetTargets>,
@@ -623,51 +711,29 @@ pub fn reconcile_station_puppet_control(
             &ShipConfigComponent,
             &mut ShipSystemControlSources,
             &ActiveStationRatings,
+            Option<&crate::ship::components::ConsoleHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    let current: Vec<_> = puppets
-        .entries()
-        .iter()
-        .map(|entry| entry.target.clone())
-        .collect();
-
-    for (uuid, config, mut sources, ratings) in ships.iter_mut() {
-        for released in previous
+    let current = puppets.targets();
+    for (uuid, config, mut sources, ratings, hosts) in ships.iter_mut() {
+        if previous
             .0
             .iter()
-            .filter(|target| target.ship.0 == uuid.0 && !puppets.is_active(target))
+            .chain(current.iter())
+            .any(|target| target.ship.0 == uuid.0)
         {
-            if let Some(rating) = ratings.0.get(&released.station) {
-                crate::ship::rating::apply_rating(
-                    &config.0,
-                    &released.station,
-                    rating,
-                    &mut sources.0,
-                );
-            }
+            restore_console_control(&config.0, hosts, ratings, &mut sources);
         }
-
         for active in current.iter().filter(|target| target.ship.0 == uuid.0) {
-            // A stale/forged station id controls nothing. Target admission may
-            // refuse it earlier, but the authoritative reducer still fails
-            // closed if malformed replay data reaches this boundary.
-            if config.0.station(&active.station).is_none() {
-                continue;
-            }
-            for system in config.0.systems_for_station(&active.station) {
-                sources.0.set(system.id.clone(), ControlSource::Human);
-            }
+            overlay_station_control(&config.0, hosts, &active.station, &mut sources);
         }
     }
-
     previous.0 = current;
 }
 
-/// Re-assert the active overlay after any same-tick rating or human-seeking
-/// resolver write. Admission has already seen the pre-Admission assertion;
-/// this second pass is what keeps every later AI emitter suppressed.
+/// Re-assert after same-tick hosting/rating changes, clearing moved visitors first.
 pub fn enforce_station_puppet_control(
     puppets: Res<StationPuppets>,
     mut ships: Query<
@@ -675,22 +741,23 @@ pub fn enforce_station_puppet_control(
             &EntityUuid,
             &ShipConfigComponent,
             &mut ShipSystemControlSources,
+            &ActiveStationRatings,
+            Option<&crate::ship::components::ConsoleHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (uuid, config, mut sources) in ships.iter_mut() {
+    for (uuid, config, mut sources, ratings, hosts) in ships.iter_mut() {
+        if !puppets.operates_ship(&uuid.0) {
+            continue;
+        }
+        restore_console_control(&config.0, hosts, ratings, &mut sources);
         for entry in puppets
             .entries()
             .iter()
             .filter(|entry| entry.target.ship.0 == uuid.0)
         {
-            if config.0.station(&entry.target.station).is_none() {
-                continue;
-            }
-            for system in config.0.systems_for_station(&entry.target.station) {
-                sources.0.set(system.id.clone(), ControlSource::Human);
-            }
+            overlay_station_control(&config.0, hosts, &entry.target.station, &mut sources);
         }
     }
 }
@@ -712,6 +779,7 @@ pub fn admit_station_puppet_commands(
             &EntityUuid,
             &ShipConfigComponent,
             &mut crate::core::messages::AdmittedCommands,
+            Option<&crate::ship::components::ConsoleHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -729,7 +797,7 @@ pub fn admit_station_puppet_commands(
         }
     };
     for command in pending.take_due(now) {
-        let Some((_, config, mut admitted)) =
+        let Some((_, config, mut admitted, hosts)) =
             ships.iter_mut().find(|(uuid, ..)| uuid.0 == command.ship.0)
         else {
             refuse_delivery(
@@ -738,6 +806,30 @@ pub fn admit_station_puppet_commands(
             );
             continue;
         };
+        let owned = if let crate::core::messages::SystemControlPayload::AssignConsoleView {
+            console,
+            view,
+        } = &command.payload
+        {
+            command.target.0 == crate::ship::console_views::ASSIGN_CONSOLE_VIEW
+                && view.is_valid()
+                && capability::station_consoles(&config.0, hosts, &command.station)
+                    .any(|candidate| &candidate.id == console)
+        } else {
+            let effective = crate::command_admission::effective_target_for_command(
+                &config.0,
+                &command.target,
+                &command.payload,
+            );
+            system_at_station(&config.0, hosts, &command.station, &effective)
+        };
+        if !owned {
+            refuse_delivery(
+                command.order,
+                crate::gm_action::GmActionRefusalReason::SystemOutsideStation,
+            );
+            continue;
+        }
         let action: &'static str =
             crate::core::messages::SystemControlPayloadDiscriminants::from(&command.payload).into();
         let support = consumers.as_deref().map_or(

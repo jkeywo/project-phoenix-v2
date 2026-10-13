@@ -17,7 +17,6 @@ name = "Captain"
 description = "Captain"
 rank = "Cpt."
 short_code = "CPT"
-console = "captain"
 
 [[station.rating]]
 name = "Assisted"
@@ -33,31 +32,44 @@ name = "Helm"
 description = "Helm"
 rank = "Ltn."
 short_code = "HLM"
-console = "helm"
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "captain"
+
+[[console]]
+id = "ai-viewscreen"
+
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "helm"
+
 [[system]]
 id = "captain"
 kind = "captain"
-station = "captain"
+console = "captain-console"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-console"
 
 [[system]]
 id = "viewscreen"
+console = "ai-viewscreen"
 kind = "viewscreen"
 ai_only = true
 
 [[system]]
 id = "helm"
 kind = "helm"
-station = "helm"
+console = "helm-console"
 "#;
     const KINDS: &[&str] = &["captain", "red_alert", "viewscreen", "helm"];
     ShipConfigComponent(

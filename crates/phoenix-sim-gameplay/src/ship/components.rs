@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::core::messages::{CoordinationPayload, StationId, SystemId};
+use crate::core::messages::{CoordinationPayload, RepairGroup, StationId, SystemId};
 use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSource;
 use crate::ship::control_source::ControlSourceResolver;
@@ -67,24 +67,17 @@ impl HumanSeekingHosts {
     }
 }
 
-/// Live placements for complete human-seeking Stations (issue #1097; Comms
-/// joined Navigation on this path in #1098). Kept separate from the legacy
-/// fine-system map — which several other shipped hulls (battleship, cruiser,
-/// courier) still use for their own per-system seeks — so the two authority
-/// models cannot accidentally reinterpret keys.
+/// Derived placements; regenerated from the same crew inputs as System authority.
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct VisitingStationHosts(pub Vec<crate::ship::coordination::VisitingStationAssignment>);
+pub struct ConsoleHosts(pub Vec<phoenix_model::console::ConsoleHostSnapshot>);
 
-impl VisitingStationHosts {
-    pub fn assignment_for(
-        &self,
-        station: &StationId,
-    ) -> Option<&crate::ship::coordination::VisitingStationAssignment> {
-        self.0
-            .iter()
-            .find(|assignment| &assignment.station == station)
-    }
-}
+#[derive(Component, Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConsoleWorkingViews(
+    pub  std::collections::BTreeMap<
+        crate::core::messages::ConsoleId,
+        phoenix_model::console::ConsoleWorkingView,
+    >,
+);
 
 /// Channel-3 coordination lag queue. Holds pending coordination messages
 /// until their due time, at which point they are routed by the delivery-time
@@ -272,7 +265,7 @@ impl LastSystemTiers {
 /// (issue #682). Key: station_id. Value: the worst tier already alerted for.
 /// Prevents re-popup every tick for Operational->Damaged crossings.
 #[derive(Component, Clone, Debug, Default)]
-pub struct RepairHumanAlerted(pub std::collections::HashMap<String, DamageTier>);
+pub struct RepairHumanAlerted(pub std::collections::HashMap<RepairGroup, DamageTier>);
 
 /// Newtype resource used by the WASM bridge to pass a custom `ShipConfig`
 /// before the ship entity is spawned.  Consumed during ship spawn and then
@@ -475,6 +468,7 @@ pub use phoenix_sim_contracts::scene::HELM_AI_MAX_DT_SECS;
 /// The parsed `ShipConfig` defining stations, systems, and per-station rating
 /// tables. Populated once at startup from the embedded ship TOML.
 #[derive(Component, Clone)]
+#[require(ConsoleWorkingViews)]
 pub struct ShipConfigComponent(pub ShipConfig);
 
 impl RepairHumanAlerted {
@@ -482,16 +476,16 @@ impl RepairHumanAlerted {
     /// Disabled/Destroyed report. The latter intentionally includes repeated
     /// deliveries at the same tier: that is the pre-#1257 escalation behavior,
     /// not a worsening-only comparison.
-    pub fn accepts_popup(&mut self, station_id: &str, tier: DamageTier) -> bool {
+    pub fn accepts_popup(&mut self, group: &RepairGroup, tier: DamageTier) -> bool {
         let already = self
             .0
-            .get(station_id)
+            .get(group)
             .copied()
             .unwrap_or(DamageTier::Operational);
         if tier < DamageTier::Disabled && already != DamageTier::Operational {
             return false;
         }
-        self.0.insert(station_id.to_string(), tier);
+        self.0.insert(group.clone(), tier);
         true
     }
 }

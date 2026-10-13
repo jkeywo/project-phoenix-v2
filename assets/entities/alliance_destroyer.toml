@@ -2044,7 +2044,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "navigation"
-name = "Navigation"
+name = "station.navigation.name"
 screen = "gui/battleship/navigation.html"
 human_seeking = true
 host_order = [ "tactical", "engineering", "captain" ]
@@ -2090,7 +2090,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "comms"
-name = "Comms"
+name = "station.comms.name"
 screen = "gui/battleship/comms.html"
 human_seeking = true
 host_order = [ "tactical", "engineering", "captain", "helm" ]
@@ -2187,7 +2187,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "command"
-name = "Command"
+name = "station.command.name"
 screen = "gui/command-console.html"
 human_seeking = true
 host_order = [ "captain" ]

@@ -217,12 +217,11 @@ export function planFactionEdits({ definition, form, defaults = {} }) {
   return edits;
 }
 
-/** A station's complexity form: its visiting rating and every rung as the
+/** A station's complexity form: every rung as the
  * ids it automates and the AI rules it tunes. A rung added in the form has no
  * index yet and becomes an `append_table` on Apply. */
 export function ratingForm(station) {
-  return { visiting_rating: station?.visiting_rating ? decodeTomlString(station.visiting_rating.source) : '',
-    ratings: (station?.ratings || []).map(rating => ({ index: rating.index, name: rating.name ?? '',
+  return { ratings: (station?.ratings || []).map(rating => ({ index: rating.index, name: rating.name ?? '',
       automated_systems: (rating.automated_systems || []).map(entry => entry.id),
       ai_rules: (rating.ai_tuning || []).map(entry => entry.rule), removed: false })) };
 }
@@ -231,7 +230,7 @@ export function newRung(name) {
   return { index: null, name, automated_systems: [], ai_rules: [], removed: false };
 }
 
-/** The rung names the form would write, for the visiting-rating choices and
+/** The rung names the form would write, for
  * the duplicate check a runtime rung name must pass. */
 export function rungNames(form) {
   return (form?.ratings || []).filter(rung => !rung.removed).map(rung => String(rung.name ?? '').trim());
@@ -270,12 +269,6 @@ export function planRatingEdits({ station, stationIndex = station?.index, form }
     names.add(name);
   }
   const edits = [];
-  const current = station.visiting_rating ? decodeTomlString(station.visiting_rating.source) : '';
-  const wanted = String(form?.visiting_rating ?? '').trim();
-  if (wanted !== current) {
-    if (!wanted) edits.push({ op: 'remove', path: [...base, 'visiting_rating'] });
-    else edits.push({ op: station.visiting_rating ? 'set' : 'put', path: [...base, 'visiting_rating'], value_source: tomlBasicString(wanted) });
-  }
   for (const rung of live) {
     if (rung.index == null) continue;
     const original = (station.ratings || []).find(entry => entry.index === rung.index);

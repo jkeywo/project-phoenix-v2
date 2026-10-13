@@ -12,7 +12,7 @@
 //! lives here beyond the tiny `apply_god_mode_toggle` applier that owns
 //! [`GodMode`], and the empty `sim_processing_anchor`.
 //!
-//! Load-bearing invariant: `HumanSeekingHosts` / `VisitingStationHosts` /
+//! Load-bearing invariant: `HumanSeekingHosts` / `ConsoleHosts` /
 //! `ScenarioDetailFloor` arrive in the spawn-burst archetype transition on
 //! EVERY fleet ship — a mid-run archetype move would re-order archetype ids,
 //! and making their presence depend on which ship a host tagged `LocalShip`

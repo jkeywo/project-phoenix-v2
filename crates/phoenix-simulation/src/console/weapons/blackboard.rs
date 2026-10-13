@@ -49,7 +49,15 @@ pub(crate) fn register_weapons_replication_lifecycle(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};
     use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
 
-    app.init_resource::<LastWeaponsUpdate>()
+    app.add_systems(
+        FixedUpdate,
+        invalidate_unhosted_weapons_projection
+            .in_set(crate::sim_sets::SimSet::Broadcast)
+            .before(crate::core::broadcast::broadcaster::dispatch::<crate::core::broadcast::Sim>),
+    );
+    app.init_resource::<LastWeaponsAudience>()
+        .declare_state::<LastWeaponsAudience>(StateClass::Cache, "digest-exclusion-classes")
+        .init_resource::<LastWeaponsUpdate>()
         .init_resource::<WeaponsUpdateFirstTick>()
         .declare_state::<LastWeaponsUpdate>(StateClass::Cache, "digest-exclusion-classes")
         .declare_state::<WeaponsUpdateFirstTick>(StateClass::Cache, "digest-exclusion-classes")
@@ -74,40 +82,88 @@ type WeaponsReconnectParams<'w, 's> = (
     Query<
         'w,
         's,
-        &'static crate::ship_plugin::ShipConfigComponent,
+        (
+            &'static crate::ship_plugin::ShipConfigComponent,
+            Option<&'static crate::ship::components::ConsoleHosts>,
+        ),
         With<crate::server_app::LocalShip>,
     >,
     WeaponsProjectionInputs<'w, 's>,
 );
 
+#[derive(Resource, Default)]
+struct LastWeaponsAudience(Option<crate::lobby::Target>);
+
+// Dispatch skips producers without an audience. Observe that gap separately so
+// a Console returning to the same operator still receives a complete snapshot.
+fn invalidate_unhosted_weapons_projection(
+    sessions: Option<Res<crate::lobby::Sessions>>,
+    configs: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            Option<&crate::ship::components::ConsoleHosts>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut last: ResMut<LastWeaponsAudience>,
+    mut first: ResMut<WeaponsUpdateFirstTick>,
+) {
+    if last.0.is_none() {
+        return;
+    }
+    let config = configs.single().ok();
+    let audience = sessions.as_ref().and_then(|sessions| {
+        crate::core::broadcast::Audience::HoldingWeapons.resolve(
+            &sessions.0,
+            config.map(|(config, _)| &config.0),
+            config.and_then(|(_, hosts)| hosts),
+        )
+    });
+    if audience.is_none() {
+        last.0 = None;
+        first.0 = true;
+    }
+}
+
 fn reset_weapons_replication(world: &mut World) {
+    *world.resource_mut::<LastWeaponsAudience>() = LastWeaponsAudience::default();
     *world.resource_mut::<LastWeaponsUpdate>() = LastWeaponsUpdate::default();
     *world.resource_mut::<WeaponsUpdateFirstTick>() = WeaponsUpdateFirstTick::default();
 }
 
 /// Build the reconnecting session's current permitted Weapons projection.
 ///
-/// Ownership is resolved from the same authored `ShipConfig::weapons_station`
-/// rule as the live broadcaster's `Audience::HoldingWeapons`. The projection
+/// Ownership is resolved from current Console hosts by the same
+/// `Audience::HoldingWeapons` rule as the live broadcaster. The projection
 /// reads no delta cache and writes no cache, so one reconnect cannot perturb
 /// another client's next live update.
 fn reconnect_weapons_projection(
     requests: Res<crate::core::broadcast::ReconnectRequests>,
     sessions: Option<Res<crate::lobby::Sessions>>,
-    configs: Query<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    configs: Query<
+        (
+            &crate::ship_plugin::ShipConfigComponent,
+            Option<&crate::ship::components::ConsoleHosts>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     inputs: WeaponsProjectionInputs,
 ) -> crate::core::broadcast::ReconnectBatch {
-    let station = configs.single().ok().and_then(|c| c.0.weapons_station());
+    let config = configs.single().ok();
     requests
         .0
         .iter()
         .map(|token| {
-            let owns = station.as_ref().is_some_and(|station| {
-                sessions
-                    .as_ref()
-                    .and_then(|s| s.0.holder_for_station(station))
-                    == Some(token.as_str())
-            });
+            let owns = sessions
+                .as_ref()
+                .and_then(|session| {
+                    crate::core::broadcast::Audience::HoldingWeapons.resolve(
+                        &session.0,
+                        config.map(|(config, _)| &config.0),
+                        config.and_then(|(_, hosts)| hosts),
+                    )
+                })
+                .is_some_and(|target| target == crate::lobby::Target::Token(token.clone()));
             if owns {
                 vec![weapons_update_message(inputs.compute())]
             } else {
@@ -514,6 +570,26 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
         crate::core::broadcast::Audience::HoldingWeapons,
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
+            let audience = {
+                let mut query = world.query_filtered::<(
+                    &crate::ship_plugin::ShipConfigComponent,
+                    Option<&crate::ship::components::ConsoleHosts>,
+                ), With<crate::server_app::LocalShip>>();
+                let config = query.single(world).ok();
+                world
+                    .get_resource::<crate::lobby::Sessions>()
+                    .and_then(|sessions| {
+                        crate::core::broadcast::Audience::HoldingWeapons.resolve(
+                            &sessions.0,
+                            config.map(|(config, _)| &config.0),
+                            config.and_then(|(_, hosts)| hosts),
+                        )
+                    })
+            };
+            if world.resource::<LastWeaponsAudience>().0 != audience {
+                world.resource_mut::<LastWeaponsAudience>().0 = audience;
+                world.resource_mut::<WeaponsUpdateFirstTick>().0 = true;
+            }
             let current = compute_current_weapons_update(world);
             publish_weapons_update_if_changed(world, current)
         },

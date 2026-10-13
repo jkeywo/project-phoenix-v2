@@ -116,8 +116,6 @@ pub struct StationDefinition {
     pub id: String,
     pub name: String,
     pub line: usize,
-    pub human_seeking: bool,
-    pub visiting_rating: Option<SourceSpan>,
     pub systems: Vec<SystemReference>,
     pub ratings: Vec<RatingDefinition>,
 }
@@ -300,9 +298,23 @@ fn read_faction(
     })
 }
 
+/// Resolve authored control ownership through the Console's home Station.
+/// Detached Consoles have no Station rating owner.
+fn home_station_for_system(root: &Table, system: &Table) -> Option<String> {
+    let console_id = string_field(system, "console")?;
+    let consoles = root.get("console")?.as_array_of_tables()?;
+    let console = consoles.iter().find(|console| {
+        !console
+            .get("_remove")
+            .and_then(Item::as_bool)
+            .unwrap_or(false)
+            && string_field(*console, "id") == Some(console_id)
+    })?;
+    string_field(console, "home_station").map(str::to_owned)
+}
+
 /// The authored and synthesised shield-arc system owners of a hull, by id.
-/// `None` is an ownerless
-/// (`ai_only`) system, which no station's rung may automate.
+/// `None` means its Console has no home Station, so no Station rung owns it.
 fn system_owners(root: &Table) -> BTreeMap<String, Option<String>> {
     let mut owners = BTreeMap::new();
     if let Some(systems) = root.get("system").and_then(Item::as_array_of_tables) {
@@ -312,7 +324,7 @@ fn system_owners(root: &Table) -> BTreeMap<String, Option<String>> {
             };
             owners
                 .entry(id.to_owned())
-                .or_insert_with(|| string_field(system, "station").map(str::to_owned));
+                .or_insert_with(|| home_station_for_system(root, system));
         }
     }
     // Entity loading synthesises arc systems from shield_arc blocks. Mirror
@@ -325,21 +337,7 @@ fn system_owners(root: &Table) -> BTreeMap<String, Option<String>> {
                 string_field(*system, "kind") == Some(crate::ship::system_registry::SHIELDS_KIND)
             })
         });
-    let has_shields_station = shields_system.is_some()
-        || root
-            .get("station")
-            .and_then(Item::as_array_of_tables)
-            .is_some_and(|stations| {
-                stations
-                    .iter()
-                    .any(|station| string_field(station, "id") == Some("shields"))
-            });
-    let owner = has_shields_station.then(|| {
-        shields_system
-            .and_then(|system| string_field(system, "station"))
-            .unwrap_or("shields")
-            .to_owned()
-    });
+    let owner = shields_system.and_then(|system| home_station_for_system(root, system));
     if let Some(arcs) = root.get("shield_arc").and_then(Item::as_array_of_tables) {
         for arc in arcs.iter() {
             if let Some(id) =
@@ -366,7 +364,7 @@ fn read_hull(path: &str, origin: &str, source: &str) -> Option<HullDefinition> {
                     Some((
                         string_field(system, "id")?.to_owned(),
                         string_field(system, "kind").unwrap_or_default().to_owned(),
-                        string_field(system, "station").map(str::to_owned),
+                        home_station_for_system(root, system),
                         table_line(source, system),
                     ))
                 })
@@ -435,14 +433,6 @@ fn read_hull(path: &str, origin: &str, source: &str) -> Option<HullDefinition> {
             StationDefinition {
                 name: string_field(station, "name").unwrap_or_default().to_owned(),
                 line: table_line(source, station),
-                human_seeking: station
-                    .get("human_seeking")
-                    .and_then(Item::as_bool)
-                    .unwrap_or(false),
-                visiting_rating: station
-                    .get("visiting_rating")
-                    .and_then(Item::as_value)
-                    .and_then(|value| source_span(source, value)),
                 systems: systems
                     .iter()
                     .filter(|(_, _, owner, _)| owner.as_deref() == Some(id.as_str()))
@@ -699,8 +689,8 @@ pub(super) fn check_value(
                 accepts::<String>(source)
             }
             [Key(station), Index(_), Key(key)] if station == "station" => match key.as_str() {
-                "visiting_rating" => accepts::<String>(source),
-                "human_seeking" => accepts::<bool>(source),
+                "visiting_rating" | "human_seeking" | "host_order" | "console" | "auxiliary"
+                | "command_target" => false,
                 _ => true,
             },
             _ => true,
@@ -1008,68 +998,6 @@ fn entity_findings(
                         Some(_) => {}
                     }
                 }
-            }
-            let human_seeking = station
-                .get("human_seeking")
-                .and_then(Item::as_bool)
-                .unwrap_or(false);
-            // A visiting rating or a host order only means something on a
-            // station that seats a human; the runtime refuses the hull
-            // otherwise, so the panel says so at the line that carries it.
-            if !human_seeking {
-                let orders = station
-                    .get("host_order")
-                    .and_then(Item::as_array)
-                    .filter(|hosts| !hosts.is_empty())
-                    .map(|hosts| ("station-host-order-without-human-seeking", hosts.span()));
-                let visiting =
-                    station
-                        .get("visiting_rating")
-                        .and_then(Item::as_value)
-                        .map(|value| {
-                            (
-                                "station-visiting-rating-without-human-seeking",
-                                value.span(),
-                            )
-                        });
-                for (category, span) in orders.into_iter().chain(visiting) {
-                    findings.push(finding(
-                        category,
-                        path,
-                        span_line(source, span).or_else(|| Some(table_line(source, station))),
-                        ShipConfigError::HostOrderWithoutHumanSeeking {
-                            station: StationId(station_id.clone()),
-                        }
-                        .to_string(),
-                    ));
-                }
-            }
-            match station.get("visiting_rating").and_then(Item::as_value) {
-                Some(value) => {
-                    let visiting = value_text(source, value);
-                    if !names.contains(&visiting) {
-                        findings.push(finding(
-                            "station-unknown-visiting-rating",
-                            path,
-                            span_line(source, value.span()),
-                            ShipConfigError::UnknownVisitingRating {
-                                station: StationId(station_id.clone()),
-                                rating: visiting,
-                            }
-                            .to_string(),
-                        ));
-                    }
-                }
-                None if human_seeking => findings.push(finding(
-                    "station-missing-visiting-rating",
-                    path,
-                    Some(table_line(source, station)),
-                    ShipConfigError::MissingVisitingRating {
-                        station: StationId(station_id.clone()),
-                    }
-                    .to_string(),
-                )),
-                None => {}
             }
         }
     }

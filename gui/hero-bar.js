@@ -35,10 +35,10 @@ export function isCommandBoardDirectable(board) {
  * player is looking at is the panel, not the console behind it.
  */
 export function heroBarModel({ directStation, stations, stationSystems,
-  blackboards, stationHosts, stationHealth, stationImportance, stationRatings, activeStation,
+  blackboards, consoleHealth, stationImportance, stationRatings, activeStation,
   consoleTabs, activeOverlay, consoles, consoleHosts, consoleImportance }) {
   return consoleHeroBarModel({ directStation, stations, consoles: consoles || [], consoleHosts,
-    stationRatings, stationHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards });
+    stationRatings, consoleHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards });
 }
 
 /**
@@ -332,7 +332,7 @@ if (typeof window !== 'undefined') {
 
 /** Console tabs use instance identity; Station identity remains the occupied seat. */
 function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, stationRatings,
-  stationHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards }) {
+  consoleHealth, consoleImportance, activeStation, consoleTabs, activeOverlay, blackboards }) {
   const seats = Object.fromEntries((stations || []).map(s => [s.id, s]));
   const placement = c => consoleHosts?.[c.id] || { host: c.human_seeking ? null : c.home_station, rating: '' };
   const visible = consoles.filter(c => {
@@ -348,7 +348,7 @@ function consoleHeroBarModel({ directStation, stations, consoles, consoleHosts, 
   const selected = overlays.some(t => t.id === activeOverlay) ? activeOverlay : selectedConsole;
   const tabs = hosted.map(c => {
     const seat = seats[c.home_station] || {};
-    const health = typeof stationHealth?.[c.home_station] === 'number' ? stationHealth[c.home_station] : null;
+    const health = typeof consoleHealth?.[c.id] === 'number' ? consoleHealth[c.id] : null;
     const importance = consoleImportance?.[c.id] || null;
     return { id: c.id, kind: 'station', name: c.name || seat.name || c.id, code: c.short_code || seat.short_code || '',
       rating: placement(c).rating || stationRatings?.[c.home_station] || '', health,

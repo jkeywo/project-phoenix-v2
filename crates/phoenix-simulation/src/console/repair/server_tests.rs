@@ -64,7 +64,21 @@ fn test_app() -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
-        crate::ship::components::load_ship_config_from_disk(),
+        (
+            crate::ship::components::load_ship_config_from_disk(),
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
+        ),
         crate::ship_plugin::ShipSystemControlSources::default(),
         crate::core::messages::AdmittedCommands::default(),
         crate::ship_plugin::ActiveStationRatings::default(),
@@ -1280,19 +1294,19 @@ fn queue_entry_retained_when_all_systems_destroyed() {
     let system_id = SystemId("helm".into());
 
     let config = ShipConfig {
-        stations: vec![],
+        stations: fixture_stations(&[station_id]),
         systems: vec![SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId(station_id.into())),
             id: system_id.clone(),
             kind: "helm".into(),
-            station: Some(StationId(station_id.into())),
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         }],
         power_groups: Default::default(),
+        consoles: fixture_consoles(&[station_id]),
         coordination_lag_secs: 2.0,
     };
 
@@ -1300,7 +1314,7 @@ fn queue_entry_retained_when_all_systems_destroyed() {
 
     let mut rq = RepairRequestQueue { entries: vec![] };
     rq.entries.push(RepairQueueEntry {
-        station_id: station_id.into(),
+        group: fixture_repair_group(station_id),
         station_label: "Helm".into(),
         tier: crate::ship::damage::DamageTier::Disabled,
         deficit: 25.0,
@@ -1371,19 +1385,19 @@ fn operate_repair_ai_runs_per_entity_for_ai_controlled_ships() {
 fn npc_repair_config() -> crate::ship_plugin::ShipConfigComponent {
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
     crate::ship_plugin::ShipConfigComponent(ShipConfig {
-        stations: vec![],
+        stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm".into()),
             kind: "helm".into(),
-            station: Some(StationId("helm".into())),
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         }],
         power_groups: Default::default(),
+        consoles: fixture_consoles(&["helm"]),
         coordination_lag_secs: 2.0,
     })
 }
@@ -1453,7 +1467,7 @@ fn spawn_npc_repair(
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
-        station_id: "helm".into(),
+        group: fixture_repair_group("helm"),
         station_label: "Helm".into(),
         tier: DamageTier::Disabled,
         deficit: damage,
@@ -1891,20 +1905,20 @@ fn set_repair_target_priority_from_a_non_engineering_token_is_rejected() {
 fn two_station_config() -> crate::ship_plugin::ShipConfigComponent {
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
     let sys = |id: &str, station: &str| SystemInstanceConfig {
+        console: Some(phoenix_model::identity::ConsoleId(station.into())),
         id: SystemId(id.into()),
         kind: "generic".into(),
-        station: Some(StationId(station.into())),
         ai_only: false,
-        human_seeking: false,
-        seek_order: Vec::new(),
+
         power_group: None,
         marker: None,
         config: None,
     };
     crate::ship_plugin::ShipConfigComponent(ShipConfig {
-        stations: vec![],
+        stations: fixture_stations(&["alpha", "bravo"]),
         systems: vec![sys("alpha-sys", "alpha"), sys("bravo-sys", "bravo")],
         power_groups: Default::default(),
+        consoles: fixture_consoles(&["alpha", "bravo"]),
         coordination_lag_secs: 2.0,
     })
 }
@@ -1948,7 +1962,7 @@ fn spawn_two_station_npc(
             continue;
         }
         queue.push_or_merge(RepairQueueEntry {
-            station_id: station.into(),
+            group: fixture_repair_group(station),
             station_label: station.into(),
             tier,
             deficit: 100.0 - hp,
@@ -2385,14 +2399,14 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
-        station_id: "helm".into(),
+        group: fixture_repair_group("helm"),
         station_label: "helm".into(),
         tier: DamageTier::Disabled,
         deficit: 80.0,
     });
     // `damage_sync` files an ownerless system's request under this id.
     queue.push_or_merge(RepairQueueEntry {
-        station_id: REPAIR_CORE_BUCKET_KEY.into(),
+        group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
         tier: DamageTier::Disabled,
         deficit: 90.0,
@@ -2401,19 +2415,19 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
     // NOTE: no station named `core` — `ShipConfig` validation forbids it,
     // which is exactly why the core bucket needs its hull-side reading.
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
-        stations: vec![],
+        stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm-sys".into()),
             kind: "generic".into(),
-            station: Some(StationId("helm".into())),
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         }],
         power_groups: Default::default(),
+        consoles: fixture_consoles(&["helm"]),
         coordination_lag_secs: 2.0,
     });
 
@@ -2486,7 +2500,7 @@ fn spawn_two_ownerless_rows(
     // id, so the destroyed `science` row is reported as a `core` request.
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
-        station_id: REPAIR_CORE_BUCKET_KEY.into(),
+        group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
         tier: DamageTier::Destroyed,
         deficit: science_max,
@@ -2494,19 +2508,19 @@ fn spawn_two_ownerless_rows(
 
     // Only `helm-sys` is described; `core` and `science` are ownerless.
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
-        stations: vec![],
+        stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: SystemId("helm-sys".into()),
             kind: "generic".into(),
-            station: Some(StationId("helm".into())),
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         }],
         power_groups: Default::default(),
+        consoles: fixture_consoles(&["helm"]),
         coordination_lag_secs: 2.0,
     });
 
@@ -2537,7 +2551,11 @@ fn queue_station_ids(app: &App, entity: Entity) -> Vec<String> {
         .expect("ship must carry RepairRequestQueue")
         .entries
         .iter()
-        .map(|e| e.station_id.clone())
+        .map(|e| match &e.group {
+            crate::core::messages::RepairGroup::Station(id) => id.0.clone(),
+            crate::core::messages::RepairGroup::Core => "core".into(),
+            crate::core::messages::RepairGroup::Console(id) => format!("console:{}", id.0),
+        })
         .collect()
 }
 
@@ -2642,7 +2660,7 @@ fn a_second_team_is_not_dispatched_to_a_core_bucket_being_swept() {
 #[test]
 fn queue_severity_tie_breaks_on_smallest_station_id() {
     let entry = |station: &str| RepairQueueEntry {
-        station_id: station.into(),
+        group: fixture_repair_group(station),
         station_label: station.into(),
         tier: DamageTier::Damaged,
         deficit: 10.0,
@@ -2652,8 +2670,8 @@ fn queue_severity_tie_breaks_on_smallest_station_id() {
         for s in order {
             rq.push_or_merge(entry(s));
         }
-        assert_eq!(rq.peek().unwrap().station_id, "alpha");
-        assert_eq!(rq.pop_worst().unwrap().station_id, "alpha");
+        assert_eq!(rq.peek().unwrap().group, fixture_repair_group("alpha"));
+        assert_eq!(rq.pop_worst().unwrap().group, fixture_repair_group("alpha"));
     }
 }
 
@@ -2698,7 +2716,7 @@ fn deliver_repair_request(
             address: CoordinationAddress::Station(StationId("repair".into())),
             payload: CoordinationPayload::RepairRequest {
                 system_id: SystemId(format!("{station_id}-system")),
-                station_id: station_id.into(),
+                group: fixture_repair_group(station_id),
                 station_label: station_id.into(),
                 tier,
                 deficit,
@@ -2739,7 +2757,7 @@ fn ai_repair_deliveries_merge_in_the_repair_owned_queue() {
         .expect("fixture carries Repair's queue");
     assert_eq!(queue.len(), 1, "same-station requests remain deduplicated");
     let entry = queue.peek().expect("merged request");
-    assert_eq!(entry.station_id, "helm");
+    assert_eq!(entry.group, fixture_repair_group("helm"));
     assert_eq!(entry.tier, DamageTier::Disabled, "worst tier wins");
     assert_eq!(entry.deficit, 18.0, "largest exact deficit wins");
     assert!(
@@ -2891,7 +2909,11 @@ fn prune_retains_an_all_destroyed_station_through_the_ai_loop() {
         .unwrap()
         .entries
         .iter()
-        .map(|e| e.station_id.clone())
+        .map(|e| match &e.group {
+            crate::core::messages::RepairGroup::Station(id) => id.0.clone(),
+            crate::core::messages::RepairGroup::Core => "core".into(),
+            crate::core::messages::RepairGroup::Console(id) => format!("console:{}", id.0),
+        })
         .collect();
     assert_eq!(
         stations,
@@ -2914,7 +2936,7 @@ fn prune_retains_an_all_destroyed_station_through_the_ai_loop() {
 fn destroyed_tier_requests_are_queued_and_merged() {
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
-        station_id: "alpha".into(),
+        group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Destroyed,
         deficit: 100.0,
@@ -2923,13 +2945,13 @@ fn destroyed_tier_requests_are_queued_and_merged() {
 
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
-        station_id: "alpha".into(),
+        group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Disabled,
         deficit: 40.0,
     });
     rq.push_or_merge(RepairQueueEntry {
-        station_id: "alpha".into(),
+        group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Destroyed,
         deficit: 100.0,
@@ -3172,4 +3194,64 @@ fn repair_candidate_tracks_lock_and_range_without_creating_a_claim() {
     app.update();
     assert_eq!(read(&app).external_dispatch_candidate_name, None);
     assert_eq!(read(&app).external_dispatch_candidate_refusal, None);
+}
+
+fn fixture_stations(names: &[&str]) -> Vec<crate::ship::config::StationConfig> {
+    names
+        .iter()
+        .map(|name| {
+            toml::from_str(&format!(
+                "id = {:?}\nname = {:?}\ndescription = \"Repair fixture\"\nrank = \"Ens.\"",
+                name, name
+            ))
+            .unwrap()
+        })
+        .collect()
+}
+
+fn fixture_consoles(names: &[&str]) -> Vec<phoenix_model::console::ConsoleConfig> {
+    names
+        .iter()
+        .map(|name| phoenix_model::console::ConsoleConfig {
+            id: phoenix_model::identity::ConsoleId((*name).into()),
+            home_station: Some(StationId((*name).into())),
+            screen: Some("fixture.html".into()),
+            ..Default::default()
+        })
+        .collect()
+}
+
+fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
+    use crate::core::messages::{RepairGroup, StationId};
+    if id == "core" {
+        RepairGroup::Core
+    } else {
+        RepairGroup::Station(StationId(id.into()))
+    }
+}
+
+#[test]
+fn repair_queue_keeps_console_station_and_core_names_distinct() {
+    let mut queue = RepairRequestQueue::default();
+    let groups = [
+        RepairGroup::Core,
+        RepairGroup::Station(StationId("shared".into())),
+        RepairGroup::Console(ConsoleId("shared".into())),
+        RepairGroup::Console(ConsoleId("core".into())),
+    ];
+    for group in &groups {
+        queue.push_or_merge(RepairQueueEntry {
+            group: group.clone(),
+            station_label: "Same display name".into(),
+            tier: DamageTier::Damaged,
+            deficit: 4.0,
+        });
+    }
+    assert_eq!(queue.entries.len(), 4);
+    let keys: std::collections::BTreeSet<_> =
+        groups.iter().map(RepairGroup::selector_key).collect();
+    assert_eq!(keys.len(), 4);
+    let restored: Vec<RepairGroup> =
+        serde_json::from_str(&serde_json::to_string(&groups).unwrap()).unwrap();
+    assert_eq!(restored, groups);
 }

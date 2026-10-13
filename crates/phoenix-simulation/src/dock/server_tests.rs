@@ -70,6 +70,7 @@ rank = "Ens."
 [[console]]
 id = "operations"
 home_station = "operations"
+screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"

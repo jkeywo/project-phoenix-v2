@@ -629,7 +629,10 @@ id = "captain"
 name = "Captain"
 description = ""
 rank = ""
-console = "gui/captain-console.html"
+[[console]]
+id = "captain-screen"
+home_station = "captain"
+screen = "gui/captain-console.html"
 
 [[station]]
 id = "hidden"
@@ -640,7 +643,7 @@ rank = ""
 [[system]]
 id = "red-alert"
 kind = "captain"
-station = "captain"
+console = "captain-screen"
 "#,
         &["captain"],
     )
@@ -689,6 +692,8 @@ station = "captain"
     assert_eq!(ship.ship_id, uuid);
     assert_eq!(ship.stations.len(), 1, "no console means no interface row");
     assert_eq!(ship.stations[0].console, "gui/captain-console.html");
+    assert_eq!(ship.consoles[0].id.0, "captain-screen");
+    assert_eq!(ship.stations[0].station_id.0, "captain");
     assert_eq!(ship.stations[0].operators, ["gm-1"]);
     assert_eq!(
         ship.ship_config,
@@ -706,12 +711,15 @@ id = "helm"
 name = "Helm"
 description = ""
 rank = ""
-console = "gui/cruiser/helm.html"
+[[console]]
+id = "helm-screen"
+home_station = "helm"
+screen = "gui/cruiser/helm.html"
 
 [[system]]
 id = "drive-main"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-screen"
 "#,
         &["helm_thrust"],
     )
@@ -822,11 +830,14 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-console = "gui/navigation-console.html"
+[[console]]
+id = "navigation-screen"
+home_station = "navigation"
+screen = "gui/navigation-console.html"
 [[system]]
 id = "nav-main"
 kind = "navigation"
-station = "navigation"
+console = "navigation-screen"
 "#,
         &["navigation"],
     )

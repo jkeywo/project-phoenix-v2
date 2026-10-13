@@ -1,0 +1,42 @@
+entities:
+  - decision: explicit-console-control-ownership
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Console Control Ownership
+      summary: "Increment 1 separates claimable Stations, hosted Consoles and controlled Systems. Each System has one Console; human authority follows that Console's resolved Station host. Console identity is ship-local and distinct from StationId and SystemId. Existing System-addressed admission remains authoritative for humans, AI and GM operation."
+      rationale:
+        - "User-approved increment 1 implementation plan, 2026-10-13; architecture decisions AD01 and AD02."
+  - decision: explicit-console-knowledge-continuity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Console Knowledge and Working View Continuity
+      summary: "A Console's GUI and individual System AIs can read its same permitted typed observations. Co-hosting Consoles does not pool knowledge or grant control. Explicit feeds reuse existing publications. Console knowledge and working view survive handoff, Backfill and restore; private System AI memory and operational intent retain their existing owners. Personal accessibility remains device-local."
+      rationale:
+        - "User-approved increment 1 implementation plan, 2026-10-13; architecture decisions AD02 and AD12."
+  - decision: explicit-console-migration-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Console Migration Completion Boundary
+      summary: "Migrate shipped definitions, generated equipment, clients, Workshop and persistence together. Preserve ratings, scenario detail floors, human-seeking hosting and ordinary Backfill. Remove temporary old-definition adapters before increment 1 closes. Reject unsupported old saves/packs explicitly. Completion requires playable human/AI operation, shipped-content validation, authority/knowledge tests, continuation evidence and authoring coverage."
+      rationale:
+        - "User-approved increment 1 implementation plan, 2026-10-13. Networking, component composition and redesigned gameplay remain outside this structural migration."
+
+  - decision: explicit-console-hosted-information-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Hosted Console Information Boundary
+      summary: "A recipient receives the union of currently hosted Console projections; each screen and individual System AI reads only its own Console view. Exact hull detail follows Console ownership and explicit Repair feeds, whose contents retain the producing Console's own-equipment, true-Core and on-site restrictions. A detached Console is still an owner, never Core. Reconnect uses the same projection and handoff removes previous-host access."
+      rationale:
+        - "[ai] Required by increment 1 ownership and knowledge isolation, including Workshop reassignment."
+  - decision: explicit-console-coordination-continuity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Console Coordination Continuity
+      summary: "Coordination addressed to detached or human-seeking equipment retains Console identity while queued, resolving its current human host or ordinary AI at delivery. Fixed home Station and whole-ship addressing retain their existing meaning. Repair grouping preserves existing home-Station groups, distinguishes detached Console groups from true Core, and uses the same derived ownership mapping for reports, dispatch, sweep and pruning. No new repair rates, jobs or outcomes are introduced."
+      rationale:
+        - "[ai] Ownership migration must not discard coordination or grant Core knowledge when equipment has no home Station."

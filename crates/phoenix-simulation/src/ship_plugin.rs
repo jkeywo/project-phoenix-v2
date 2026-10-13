@@ -6,12 +6,12 @@ pub(crate) use crate::ai::cadence::ai_tick_ready;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub(crate) use crate::ship::components::OrderedCoordinationPopup;
 pub use crate::ship::components::{
-    ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationDelivery,
-    CoordinationEnqueue, CoordinationEnqueueCursor, CoordinationQueue, DeliveredCoordination,
-    DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts, ImpulseConfigResource,
-    LastHelmInput, LastSystemTiers, PendingArcBearingRequest, PendingShipConfig,
-    PendingTacticalFrequencyHint, RepairHumanAlerted, ScenarioDetailFloor, ShipConfigComponent,
-    ShipPhysicsConfigResource, ShipSystemControlSources, VisitingStationHosts, BANK_LERP_RATE,
+    ActiveStationRatings, BankConfigResource, BoostConfigResource, ConsoleHosts,
+    CoordinationDelivery, CoordinationEnqueue, CoordinationEnqueueCursor, CoordinationQueue,
+    DeliveredCoordination, DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts,
+    ImpulseConfigResource, LastHelmInput, LastSystemTiers, PendingArcBearingRequest,
+    PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted, ScenarioDetailFloor,
+    ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources, BANK_LERP_RATE,
 };
 pub(crate) use crate::ship::coordination_systems::flush_coordination_popups;
 pub(crate) use crate::ship::coordination_systems::process_coordination_lag;
@@ -97,9 +97,13 @@ impl Plugin for ShipPlugin {
                 StateClass::Derived,
                 "visiting-station-placement-state",
             )
-            .declare_state::<VisitingStationHosts>(
+            .declare_state::<ConsoleHosts>(
                 StateClass::Derived,
-                "visiting-station-placement-state",
+                "explicit-console-control-ownership",
+            )
+            .declare_state::<crate::ship::components::ConsoleWorkingViews>(
+                StateClass::Folded,
+                "explicit-console-knowledge-continuity",
             )
             .declare_state::<ScenarioDetailFloor>(StateClass::Derived, "visiting-station-resolver")
             // The two GM records `sim_digest::world_digest` folds WHOLE (issue

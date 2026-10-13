@@ -183,7 +183,30 @@ export function aggregateStationHull(stationId, consoleHull, stationSystems) {
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Object<string,string[]>} stationSystems  station id → system ids
  */
-export function repairCoreAndTargets(systemHull, stationSystems, damageableSystems) {
+function repairTypedGroups(systemHull, damageableSystems, groups) {
+  const hull = Array.isArray(systemHull) ? systemHull : [];
+  const dispatchable = new Set((damageableSystems || []).map(id => id?.system_id ?? id));
+  const targets = [];
+  let coreSystems = [];
+  for (const entry of groups) {
+    const group = entry?.group;
+    if (!group || !['Core', 'Station', 'Console'].includes(group.type)) continue;
+    const ids = new Set(entry.systems || []);
+    const visible = hull.filter(row => ids.has(row.system_id));
+    if (group.type === 'Core') coreSystems = visible;
+    if (![...ids].some(id => dispatchable.has(id))) continue;
+    const max = visible.reduce((sum, row) => sum + (row.max_hp || 0), 0);
+    const current = visible.reduce((sum, row) => sum + (row.current || 0), 0);
+    const target = group.type === 'Core' ? { type: 'Core' } : { type: group.type, data: group.data };
+    targets.push({ id: JSON.stringify(target), target,
+      label: group.type === 'Core' ? t('console.repair.core') : t(entry.label || group.data),
+      damage_pct: max > 0 ? 1 - current / max : null });
+  }
+  return { coreSystems, targets };
+}
+
+export function repairCoreAndTargets(systemHull, stationSystems, damageableSystems, repairGroups) {
+  if (Array.isArray(repairGroups)) return repairTypedGroups(systemHull, damageableSystems, repairGroups);
   const hull = Array.isArray(systemHull) ? systemHull : [];
   const stations = stationSystems || {};
 
@@ -1601,7 +1624,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
     const aggregate = bb.aggregate_hull_fraction ?? state.hullAggregate;
     const destroyed = bb.destroyed_hull_fraction ?? state.hullDestroyed;
     const { coreSystems, targets } =
-      repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems);
+      repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems, bb.repair_groups);
     return {
       teams,
       // SystemId-keyed fields (post issues #618/#619).

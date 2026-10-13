@@ -2046,10 +2046,12 @@ kind = "Viewscreen"
 id = "helm-thrust"
 kind = "helm_thrust"
 console = "operations"
+ai_only = true
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
 console = "operations"
+ai_only = true
 "#,
             &["helm_thrust", "helm_steering"],
         )
@@ -4643,10 +4645,12 @@ home_station = "helm"
 id = "helm-thrust"
 kind = "helm_thrust"
 console = "throttle"
+ai_only = true
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
 console = "steering"
+ai_only = true
 "#,
             &["helm_thrust", "helm_steering"],
         )

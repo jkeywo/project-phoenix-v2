@@ -18,23 +18,21 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
             automated_systems: vec![],
             ai_tuning: None,
         }],
-        console: None,
         manual_overview: None,
         tutorials: vec![],
-        human_seeking: false,
-        host_order: vec![],
-        visiting_rating: None,
-        auxiliary: false,
-        command_target: None,
         stances: vec![],
     };
+    let console = phoenix_model::console::ConsoleConfig {
+        id: phoenix_model::identity::ConsoleId("helm-screen".into()),
+        home_station: Some(station.id.clone()),
+        screen: Some("consoles/helm.html".into()),
+        ..Default::default()
+    };
     let system = SystemInstanceConfig {
+        console: Some(console.id.clone()),
         id: SystemId("engine".into()),
         kind: "helm-engine".into(),
-        station: Some(station.id.clone()),
         ai_only: false,
-        human_seeking: false,
-        seek_order: vec![],
         power_group: Some(PowerGroupId("engines".into())),
         marker: None,
         config: Some(toml::Value::Table(toml::Table::from_iter([(
@@ -54,6 +52,7 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
                 max_level: 4,
             },
         )]),
+        consoles: vec![console],
         coordination_lag_secs: 2.0,
     };
     let ratings = ActiveStationRatings(HashMap::from([(StationId("helm".into()), "Full".into())]));
@@ -154,6 +153,15 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
         projection.readings["ship"].values["shield_arc[fore].max_hp"],
         "not-authored"
     );
+    for retired in [
+        "station[helm].host_order",
+        "station[helm].visiting_rating",
+        "station[helm].command_target",
+        "system[engine].station",
+        "system[engine].seek_order",
+    ] {
+        assert!(!paths.contains_key(retired), "retired descriptor {retired}");
+    }
     assert_eq!(
         paths["station[helm].manual_overview"].0,
         &LiveMutability::RecreateRequired

@@ -213,6 +213,15 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             },
         ),
         (
+            ClientMessageDiscriminants::ReportConsoleEligibility,
+            ClientMessage::ReportConsoleEligibility {
+                ineligible: std::collections::BTreeMap::from([(
+                    crate::core::messages::ConsoleId("comms-screen".into()),
+                    vec!["Std".into()],
+                )]),
+            },
+        ),
+        (
             ClientMessageDiscriminants::SendCoordination,
             ClientMessage::SendCoordination {
                 address: station_address("tactical"),
@@ -250,6 +259,22 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             ClientMessageDiscriminants::StationVisited,
             ClientMessage::StationVisited {
                 station: crate::core::messages::StationId("comms".into()),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::ConsoleVisited,
+            ClientMessage::ConsoleVisited {
+                console: ConsoleId("comms-display".into()),
+            },
+        ),
+        (
+            ClientMessageDiscriminants::SetConsoleView,
+            ClientMessage::SetConsoleView {
+                console: ConsoleId("comms-display".into()),
+                view: phoenix_model::console::ConsoleWorkingView {
+                    comms_thread: Some("fleet".into()),
+                    ..Default::default()
+                },
             },
         ),
         // The two client settings-menu routes (issue #940). Both rows carry
@@ -410,6 +435,8 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessageDiscriminants::SimState,
             ServerMessage::SimState {
                 snapshot: SimSnapshot {
+                    console_views: Default::default(),
+                    console_importance: Vec::new(),
                     entity_states: vec![EntityStateSnapshot {
                         uuid: "ast-1".into(),
                         position: Some([12.0, 0.0, -5.0]),
@@ -421,10 +448,14 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         shield_freq: None,
                         warp_out_remaining_secs: None,
                     }],
-                    station_hosts: vec![StationHostSnapshot {
-                        station: StationId("navigation".into()),
+                    console_hosts: vec![phoenix_model::console::ConsoleHostSnapshot {
+                        console: ConsoleId("navigation-display".into()),
                         host: Some(StationId("tactical".into())),
                         rating: "Std".into(),
+                    }],
+                    console_health: vec![ConsoleHealthSnapshot {
+                        console: ConsoleId("navigation-display".into()),
+                        health: Some(0.25),
                     }],
                     station_health: vec![StationHealthSnapshot {
                         station: StationId("navigation".into()),
@@ -834,6 +865,8 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
         (
             ServerMessageDiscriminants::BlackboardUpdate,
             ServerMessage::BlackboardUpdate {
+                console_scope: None,
+                console_scope_tick: None,
                 presentation_generation: Some(17),
                 updates: vec![(
                     SystemId("helm".into()),
@@ -1916,7 +1949,7 @@ fn repair_request_coordination_payload_round_trips() {
         address: station_address("repair"),
         payload: CoordinationPayload::RepairRequest {
             system_id: crate::core::messages::SystemId("helm-radar".into()),
-            station_id: "helm".into(),
+            group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
             tier: crate::ship::damage::DamageTier::Damaged,
             deficit: Some(12.5),
@@ -1930,7 +1963,7 @@ fn repair_request_coordination_payload_round_trips() {
         address: station_address("repair"),
         payload: CoordinationPayload::RepairRequest {
             system_id: crate::core::messages::SystemId("helm-radar".into()),
-            station_id: "helm".into(),
+            group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
             tier: crate::ship::damage::DamageTier::Disabled,
             // The wire form of a coarsened popup: tier crosses, exact
@@ -3115,6 +3148,8 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
         refusal: None,
     });
     assert_server_roundtrip(ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(
             SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
@@ -3252,6 +3287,8 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     );
 
     let msg = ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
     };
@@ -3487,6 +3524,8 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
     }
 
     let msg = ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
     };
@@ -5198,6 +5237,7 @@ fn system_blackboard_repair_round_trips() {
     }
 
     let bb = SystemBlackboard::Repair(RepairBlackboard {
+        repair_groups: Vec::new(),
         teams: vec![],
         travel_duration_secs: 5.0,
         system_hull: vec![
@@ -5212,13 +5252,13 @@ fn system_blackboard_repair_round_trips() {
         priority_targets: vec![SystemId("core".into())],
         queue_depth: vec![
             QueueEntryPreview {
-                station_id: "core".into(),
+                group: fixture_repair_group("core"),
                 station_label: "Core".into(),
                 tier: crate::ship::damage::DamageTier::Damaged,
                 deficit: 60.0,
             },
             QueueEntryPreview {
-                station_id: "helm".into(),
+                group: fixture_repair_group("helm"),
                 station_label: "Helm".into(),
                 tier: crate::ship::damage::DamageTier::Disabled,
                 deficit: 90.0,
@@ -5231,8 +5271,14 @@ fn system_blackboard_repair_round_trips() {
 
     let json = serde_json::to_string(&bb).unwrap();
     assert!(json.contains("\"kind\":\"Repair\""), "got: {json}");
-    assert!(json.contains("\"station_id\":\"core\""), "got: {json}");
-    assert!(json.contains("\"station_id\":\"helm\""), "got: {json}");
+    assert!(
+        json.contains("\"group\":{\"type\":\"Core\"}"),
+        "got: {json}"
+    );
+    assert!(
+        json.contains("\"group\":{\"type\":\"Station\",\"data\":\"helm\"}"),
+        "got: {json}"
+    );
     assert!(
         json.contains("\"aggregate_hull_fraction\":0.75"),
         "got: {json}"
@@ -5266,6 +5312,8 @@ fn system_blackboard_repair_round_trips() {
     // sent per token (`Target::Token`), not broadcast, but the encoding is
     // the same one the resync path reuses.
     let msg = ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(SystemId("repair".into()), bb)],
     };
@@ -6550,9 +6598,9 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
             );
         }
     }
-    // The legacy v3 catalogue remains readable under the current v4 join pin;
-    // assigned-station authority changed the protocol, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 4);
+    // The legacy v3 catalogue remains readable under the v5 join pin;
+    // explicit Console identity changed the wire vocabulary, not this JSON shape.
+    assert_eq!(PROTOCOL_VERSION, 5);
 }
 
 /// The removal inverse's ingress (issue #1444).
@@ -6618,4 +6666,13 @@ fn instance_progress_and_frozen_assignment_round_trip() {
     assert_server_roundtrip(ServerMessage::ObjectiveSummary {
         objectives: vec![snapshot],
     });
+}
+
+fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
+    use crate::core::messages::{RepairGroup, StationId};
+    if id == "core" {
+        RepairGroup::Core
+    } else {
+        RepairGroup::Station(StationId(id.into()))
+    }
 }

@@ -44,7 +44,7 @@ pub struct Ship;
 /// # Why it no longer REQUIREs `HumanSeekingHosts` (issue #984, revised #1116)
 ///
 /// #984 made this marker `#[require]` `HumanSeekingHosts` /
-/// `VisitingStationHosts` / `ScenarioDetailFloor` because
+/// `ConsoleHosts` / `ScenarioDetailFloor` because
 /// `resolve_human_seeking_hosts` ran on exactly this marker and would otherwise
 /// have had to `Commands::insert` the map on its first run — a MID-RUN
 /// ARCHETYPE MOVE, which measurably moved `duel` and `rng_coverage` (proven, not

@@ -54,7 +54,7 @@ fn importance_marks_a_completed_objective_unread_then_clears_only_on_visit() {
     world
         .resource_mut::<StationImportanceRes>()
         .0
-        .visit(&core_station());
+        .visit(&crate::station_importance::AttentionOwner::Core);
     // …and a later tick re-seeing the still-Completed objective must NOT
     // resurrect it — the clear is authoritative, not optimistic.
     ingest_station_importance(&mut world);
@@ -87,7 +87,7 @@ fn importance_marks_red_alert_critical_that_survives_visit_and_clears_on_resolve
     world
         .resource_mut::<StationImportanceRes>()
         .0
-        .visit(&core_station());
+        .visit(&crate::station_importance::AttentionOwner::Core);
     ingest_station_importance(&mut world);
     assert_eq!(
         importance_of(&build_station_importance_snapshots(&mut world), "core").map(|s| s.critical),
@@ -112,6 +112,27 @@ fn importance_marks_red_alert_critical_that_survives_visit_and_clears_on_resolve
 fn live_critical_comms_drives_the_logical_comms_hero_channel_until_response() {
     let mut world = World::new();
     world.init_resource::<StationImportanceRes>();
+    let config = toml::from_str(
+        r#"
+[[station]]
+id="comms"
+name="Comms"
+description=""
+rank=""
+[[console]]
+id="radio"
+home_station="comms"
+[[system]]
+id="comms"
+kind="comms"
+console="radio"
+"#,
+    )
+    .unwrap();
+    world.spawn((
+        LocalShip,
+        crate::ship::components::ShipConfigComponent(config),
+    ));
     world.insert_resource(crate::comms::server::CommsInboxRes(
         crate::console::comms::CommsInbox::new(),
     ));
@@ -140,10 +161,9 @@ fn live_critical_comms_drives_the_logical_comms_hero_channel_until_response() {
         })
     );
 
-    world
-        .resource_mut::<StationImportanceRes>()
-        .0
-        .visit(&StationId("comms".into()));
+    world.resource_mut::<StationImportanceRes>().0.visit(
+        &crate::station_importance::AttentionOwner::Console(ConsoleId("radio".into())),
+    );
     ingest_station_importance(&mut world);
     assert_eq!(
         importance_of(&build_station_importance_snapshots(&mut world), "comms")
@@ -193,7 +213,7 @@ fn importance_carries_simultaneous_unread_and_critical_independently() {
     world
         .resource_mut::<StationImportanceRes>()
         .0
-        .visit(&core_station());
+        .visit(&crate::station_importance::AttentionOwner::Core);
     ingest_station_importance(&mut world);
     assert_eq!(
         importance_of(&build_station_importance_snapshots(&mut world), "core"),
@@ -213,7 +233,28 @@ fn station_visited_drain_clears_unread_for_a_connected_player() {
     app.init_resource::<StationImportanceRes>();
     let mut sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
     sessions.0.register("tok".into(), "Ada".into()).unwrap();
+    sessions
+        .0
+        .set_station("tok", Some(StationId("home".into())));
     app.insert_resource(sessions);
+    let config = toml::from_str(
+        r#"
+[[station]]
+id="home"
+name="Home"
+description=""
+rank=""
+[[console]]
+id="home-console"
+home_station="home"
+"#,
+    )
+    .unwrap();
+    app.world_mut().spawn((
+        LocalShip,
+        crate::ship::components::ShipConfigComponent(config),
+        crate::ship::components::ConsoleHosts::default(),
+    ));
     app.add_systems(Update, drain_station_visited);
 
     // Seed a one-off unread event on the core bucket.
@@ -221,14 +262,18 @@ fn station_visited_drain_clears_unread_for_a_connected_player() {
         .resource_mut::<StationImportanceRes>()
         .0
         .ingest(
-            vec![("rescue".into(), core_station(), ObjectiveStatus::Completed)],
+            vec![(
+                "rescue".into(),
+                crate::station_importance::AttentionOwner::Core,
+                ObjectiveStatus::Completed,
+            )],
             Vec::new(),
         );
     assert!(
         app.world()
             .resource::<StationImportanceRes>()
             .0
-            .flags_of(&core_station())
+            .flags_of(&crate::station_importance::AttentionOwner::Core)
             .unread
     );
 
@@ -246,24 +291,24 @@ fn station_visited_drain_clears_unread_for_a_connected_player() {
         !app.world()
             .resource::<StationImportanceRes>()
             .0
-            .flags_of(&core_station())
+            .flags_of(&crate::station_importance::AttentionOwner::Core)
             .unread
     );
 }
 
 #[test]
-fn station_host_projection_is_generic_for_non_navigation_stations() {
+fn console_host_projection_preserves_distinct_console_identity() {
     let mut world = World::new();
     world.spawn((
         LocalShip,
-        crate::ship_plugin::VisitingStationHosts(vec![
-            crate::ship::coordination::VisitingStationAssignment {
-                station: StationId("power".into()),
+        crate::ship_plugin::ConsoleHosts(vec![
+            phoenix_model::console::ConsoleHostSnapshot {
+                console: crate::core::messages::ConsoleId("power".into()),
                 host: Some(StationId("repair".into())),
                 rating: "Std".into(),
             },
-            crate::ship::coordination::VisitingStationAssignment {
-                station: StationId("shields".into()),
+            phoenix_model::console::ConsoleHostSnapshot {
+                console: crate::core::messages::ConsoleId("shields".into()),
                 host: None,
                 rating: crate::ship::rating::BACKFILL_RATING.into(),
             },
@@ -271,15 +316,15 @@ fn station_host_projection_is_generic_for_non_navigation_stations() {
     ));
 
     assert_eq!(
-        build_station_host_snapshots(&mut world),
+        build_console_host_snapshots(&mut world),
         vec![
-            StationHostSnapshot {
-                station: StationId("power".into()),
+            phoenix_model::console::ConsoleHostSnapshot {
+                console: crate::core::messages::ConsoleId("power".into()),
                 host: Some(StationId("repair".into())),
                 rating: "Std".into(),
             },
-            StationHostSnapshot {
-                station: StationId("shields".into()),
+            phoenix_model::console::ConsoleHostSnapshot {
+                console: crate::core::messages::ConsoleId("shields".into()),
                 host: None,
                 rating: crate::ship::rating::BACKFILL_RATING.into(),
             },
@@ -299,19 +344,17 @@ fn control_source_projection_tracks_visiting_and_ai_navigation_authority() {
     let ship = world
         .spawn((
             LocalShip,
-            crate::ship_plugin::VisitingStationHosts(vec![
-                crate::ship::coordination::VisitingStationAssignment {
-                    station: StationId("navigation".into()),
-                    host: Some(StationId("tactical".into())),
-                    rating: "Std".into(),
-                },
-            ]),
+            crate::ship_plugin::ConsoleHosts(vec![phoenix_model::console::ConsoleHostSnapshot {
+                console: crate::core::messages::ConsoleId("navigation".into()),
+                host: Some(StationId("tactical".into())),
+                rating: "Std".into(),
+            }]),
             crate::ship_plugin::ShipSystemControlSources(resolver),
         ))
         .id();
 
     assert_eq!(
-        build_station_host_snapshots(&mut world)[0].host,
+        build_console_host_snapshots(&mut world)[0].host,
         Some(StationId("tactical".into()))
     );
     assert_eq!(
@@ -406,15 +449,20 @@ name = "Tactical"
 description = "Weapons."
 rank = "Ltn."
 
+[[console]]
+id = "tactical-screen"
+home_station = "tactical"
+screen = "fixture.html"
+
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-screen"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical-screen"
 "#,
         &["phaser_bank", "tactical_radar"],
     )
@@ -440,15 +488,20 @@ name = "Pilot"
 description = "Everything."
 rank = "Ltn."
 
+[[console]]
+id = "pilot-screen"
+home_station = "pilot"
+screen = "fixture.html"
+
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
-station = "pilot"
+console = "pilot-screen"
 
 [[system]]
 id = "pilot-radar"
 kind = "tactical_radar"
-station = "pilot"
+console = "pilot-screen"
 "#,
         &["blaster_bank", "tactical_radar"],
     )
@@ -629,6 +682,23 @@ fn test_app() -> App {
             ),
         ))
         .id();
+    // This fixture skips the hosting plugin; publish its authored fixed-home
+    // placement explicitly, as the real Input resolver does before Broadcast.
+    let hosts = crate::ship::components::ConsoleHosts(
+        app.world()
+            .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+            .unwrap()
+            .0
+            .consoles
+            .iter()
+            .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                console: console.id.clone(),
+                host: console.home_station.clone(),
+                rating: "Std".into(),
+            })
+            .collect(),
+    );
+    app.world_mut().entity_mut(ship).insert(hosts);
     // Insert per-entity components (Bundle limit).
     app.world_mut().entity_mut(ship).insert((
         // What `world_setup::insert_player_core_bundle` gives every ship in the
@@ -638,7 +708,6 @@ fn test_app() -> App {
         (
             crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
             crate::ship_plugin::HumanSeekingHosts::default(),
-            crate::ship_plugin::VisitingStationHosts::default(),
             crate::ship_plugin::ScenarioDetailFloor::default(),
         ),
         ShipImpulse::default(),
@@ -736,9 +805,21 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
     .ship_config
     .expect("destroyer fixture carries ship topology");
     let composite = StationId("engineering".into());
-    for system in &mut config.systems {
-        system.station = Some(composite.clone());
+    for console in &mut config.consoles {
+        console.home_station = Some(composite.clone());
     }
+    let hosts = crate::ship::components::ConsoleHosts(
+        config
+            .consoles
+            .iter()
+            .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                console: console.id.clone(),
+                host: Some(composite.clone()),
+                rating: "Std".into(),
+            })
+            .collect(),
+    );
+    app.world_mut().entity_mut(ship).insert(hosts);
     app.world_mut()
         .entity_mut(ship)
         .insert(crate::ship_plugin::ShipConfigComponent(config));
@@ -768,26 +849,14 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
         yaw: 7.0,
         ..Default::default()
     });
+    let cached_projection = (
+        Some(3),
+        std::collections::BTreeMap::from([(SystemId("cached".into()), cached_blackboard.clone())]),
+    );
     app.world_mut()
-        .resource_mut::<LastBroadcastBlackboards>()
+        .resource_mut::<crate::ship::console_publication::LastConsolePublications>()
         .0
-        .insert(SystemId("cached".into()), cached_blackboard.clone());
-    {
-        let mut cache =
-            app.world_mut()
-                .resource_mut::<crate::console::repair::visibility::LastVisibleRepairBlackboard>();
-        cache.projections.insert(
-            "existing-client".into(),
-            RepairBlackboard {
-                travel_duration_secs: 9.0,
-                ..Default::default()
-            },
-        );
-        cache.stations.insert(
-            "existing-client".into(),
-            Some(StationId("engineering".into())),
-        );
-    }
+        .insert("existing-client".into(), cached_projection.clone());
     let cached_hull = crate::console::repair::visibility::HullProjection {
         entries: vec![SystemHullStatus {
             system_id: SystemId("cached".into()),
@@ -849,27 +918,10 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
 
     assert_eq!(
         app.world()
-            .resource::<LastBroadcastBlackboards>()
+            .resource::<crate::ship::console_publication::LastConsolePublications>()
             .0
-            .get(&SystemId("cached".into())),
-        Some(&cached_blackboard)
-    );
-    let repair_cache = app
-        .world()
-        .resource::<crate::console::repair::visibility::LastVisibleRepairBlackboard>();
-    assert_eq!(
-        repair_cache
-            .projections
-            .get("existing-client")
-            .map(|repair| repair.travel_duration_secs),
-        Some(9.0)
-    );
-    assert_eq!(
-        repair_cache
-            .stations
-            .get("existing-client")
-            .and_then(Option::as_ref),
-        Some(&StationId("engineering".into()))
+            .get("existing-client"),
+        Some(&cached_projection)
     );
     assert_eq!(
         app.world()
@@ -6154,7 +6206,7 @@ fn runtime_entity_appears_in_world_data_for_reconnect() {
 #[test]
 fn midgame_reconnect_resets_blackboard_cache() {
     let mut app = test_app();
-    start_game(&mut app);
+    start_game_with_helm(&mut app);
 
     let helm_id = SystemId("helm".into());
     let helm_bb = SystemBlackboard::Helm(HelmBlackboard {
@@ -6191,22 +6243,24 @@ fn midgame_reconnect_resets_blackboard_cache() {
     // Simulate reconnect: push Identify with same token -> Welcome emitted.
     push(
         &mut app,
-        "captain",
+        "helm",
         ClientMessage::Identify {
-            token: "captain".into(),
-            name: "Alice".into(),
+            token: "helm".into(),
+            name: "Bob".into(),
         },
     );
     let out2 = tick(&mut app);
     let out3 = tick(&mut app);
 
     let has_bb_for_helm = |out: &[OutboundMessage]| -> bool {
-        out.iter().any(|m| match &m.msg {
-            ServerMessage::BlackboardUpdate { updates, .. } => {
-                updates.iter().any(|(id, _)| id.0 == "helm")
-            }
-            _ => false,
-        })
+        out.iter()
+            .filter(|m| m.target == Target::Token("helm".into()))
+            .any(|m| match &m.msg {
+                ServerMessage::BlackboardUpdate { updates, .. } => {
+                    updates.iter().any(|(id, _)| id.0 == "helm")
+                }
+                _ => false,
+            })
     };
 
     assert!(
@@ -6217,7 +6271,7 @@ fn midgame_reconnect_resets_blackboard_cache() {
 
 /// Issue #697 made the weapons blackboard publish systems per-entity, so NPC ships now
 /// carry populated Weapons blackboards. `broadcast_blackboard_updates` reads
-/// only the `LocalShip`, and `LastBroadcastBlackboards` is a single global
+/// only the `LocalShip`, and `LastConsolePublications` is a recipient-scoped
 /// map keyed on `SystemId` alone — it structurally assumes one broadcast
 /// source. This pins that assumption: NPC blackboards must cost zero
 /// bandwidth, or they would both leak and collide with the player ship's

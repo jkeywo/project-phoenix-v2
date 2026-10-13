@@ -383,9 +383,9 @@ pub struct GmSystemControlStatus {
     pub available: bool,
 }
 
-/// One authored Station interface on a fleet/player ship. `console` is copied
-/// from `StationConfig.console`; the GM shell mounts that exact URL instead of
-/// cloning or approximating the interface.
+/// One crew seat with at least one available Console. `console` is the first
+/// eligible screen hint; explicit Console definitions and live hosts select the
+/// mounted tabs without turning auxiliary screens into claimable Stations.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct GmStationInterfaceProjection {
     pub station_id: StationId,
@@ -419,6 +419,10 @@ pub struct GmPuppetShipProjection {
     pub ship_id: String,
     pub name: String,
     pub stations: Vec<GmStationInterfaceProjection>,
+    pub consoles: Vec<phoenix_model::wire::ConsoleDef>,
+    pub console_hosts: Vec<phoenix_model::console::ConsoleHostSnapshot>,
+    pub console_views:
+        BTreeMap<phoenix_model::identity::ConsoleId, phoenix_model::console::ConsoleWorkingView>,
     /// The exact complete config ordinary players receive on `Welcome`, built
     /// by the same Rust projector. This is deliberately one wire object rather
     /// than a GM-maintained subset: authentic Station builders consume authored
@@ -913,9 +917,12 @@ fn system_statuses(
     hull.0
         .iter()
         .map(|(system_id, entry)| {
-            let station_id = config
-                .and_then(|config| config.0.system(system_id))
-                .and_then(|system| system.station.clone());
+            let station_id = config.and_then(|config| {
+                config
+                    .0
+                    .system(system_id)
+                    .and_then(|system| config.0.system_home_station(system).cloned())
+            });
             // The owner's display name comes from the same `[[station]]` block
             // `GmStationInterfaceProjection` reads, so the two GM surfaces
             // cannot disagree about what a Station is called.
@@ -1543,6 +1550,8 @@ fn publish_station_projection(
             Option<&ShipPhysics>,
             Option<&crate::console::navigation::server::NavigationWaypoint>,
             Option<&EntitySystemHull>,
+            Option<&crate::ship::components::ConsoleHosts>,
+            Option<&crate::ship::components::ConsoleWorkingViews>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1630,6 +1639,8 @@ fn publish_station_projection(
                 physics,
                 waypoint,
                 hull,
+                console_hosts,
+                console_views,
             )| {
                 let detailed = presentation.subscriptions.wants(&uuid.0);
                 // A GM-only host has no SelectedShipResource. In particular,
@@ -1677,10 +1688,14 @@ fn publish_station_projection(
                     .iter()
                     .filter_map(|station| {
                         capabilities.check(&uuid.0, &station.id).ok()?;
-                        let console = station
-                            .console
-                            .as_deref()
-                            .filter(|console| !console.is_empty())?;
+                        let console = crate::gm_puppet::capability::station_consoles(
+                            &config.0,
+                            console_hosts,
+                            &station.id,
+                        )
+                        .next()?
+                        .screen
+                        .as_deref()?;
                         let target = StationPuppetTarget::new(
                             crate::command_admission::log::ShipKey(uuid.0.clone()),
                             station.id.clone(),
@@ -1761,6 +1776,14 @@ fn publish_station_projection(
                     ship_id: uuid.0.clone(),
                     name: name.map_or_else(|| uuid.0.clone(), |name| name.0.clone()),
                     stations,
+                    consoles: crate::lobby::stations_config::stations_from_ship_config(&config.0)
+                        .consoles,
+                    console_hosts: console_hosts
+                        .map(|hosts| hosts.0.clone())
+                        .unwrap_or_default(),
+                    console_views: console_views
+                        .map(|views| views.0.clone())
+                        .unwrap_or_default(),
                     ship_config: ship_client_config,
                     station_ratings,
                     control_sources,

@@ -19,20 +19,20 @@ The current AI axes are thrust, steering, lateral thrust, vertical thrust, impul
 ## Coordination and station state
 
 The plugin registers `CoordinationEnqueue`, owns the per-ship coordination queue
-adapters, resolves human-seeking station hosts, and updates control sources when
+adapters, resolves human-seeking Console hosts, and updates control sources when
 station ratings or tenure change. `process_coordination_lag` delays explicitly
-Station- or Ship-addressed messages, preserves each producer-owned presentation
+Station-, Console- or Ship-addressed messages, preserves each producer-owned presentation
 envelope beside its typed payload, resolves live recipient policy, emits
 an ordered popup candidate or `DeliveredCoordination` for a human- or
 AI-operated Station respectively, and fans Ship delivery to eligible human
 seats in authored Station order. Owning domain receivers consume the same typed fact
 after Station delivery. Helm's receiver accepts only an AI delivery, rechecks
-the authored Station and live `helm-steering` policy, and owns arc-bearing and
+the authored coordination address and live `helm-steering` policy, and owns arc-bearing and
 waypoint-clearance state. Tactical's frequency-hint receiver lives with Weapons;
 Repair's receiver merges AI requests into its severity queue or applies its
 human escalation latch before returning the already-projected popup to the
 shared sequence-ordered outbox flush. Shields' receiver verifies its authored
-shield-arc Station and live focus capability before latching a threat bearing.
+shield-arc coordination address and live focus capability before latching a threat bearing.
 The generic router no longer reads any of those domains' private state.
 
 ## Physics ownership

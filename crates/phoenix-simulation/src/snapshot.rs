@@ -641,7 +641,9 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// deliberately absent slot from an old single-ship boot, or an untouched
 /// Objective definition from one whose named sibling already completed, so it
 /// is refused rather than reconstructed differently.
-pub const SNAPSHOT_FORMAT: u32 = 36;
+/// `37` - explicit Console ownership and working-view continuation. Earlier
+/// saves cannot describe which Console owns a System or its shared work context.
+pub const SNAPSHOT_FORMAT: u32 = 37;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -714,7 +716,10 @@ pub const SNAPSHOT_FORMAT: u32 = 36;
 /// are removed, impulse steering shares the schema default, and equipment-less
 /// ships cannot borrow weapons from a global resource. Older saves would
 /// continue under different rules despite retaining the same payload shape.
-pub const SIMULATION_RULES: &str = "0.8";
+/// "0.9" — explicit Console ownership and knowledge scopes determine control
+/// and individual System AI inputs. Older saves lack the ownership and working
+/// view state needed to continue under these rules.
+pub const SIMULATION_RULES: &str = "0.9";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -801,6 +806,12 @@ pub struct EntityState {
     /// byte-identical to a never-commanded ship and folds to the same number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub station_stances: Vec<(String, String)>,
+    /// Authoritative Console work context follows the ship through continuation.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub console_views: std::collections::BTreeMap<
+        phoenix_model::identity::ConsoleId,
+        phoenix_model::console::ConsoleWorkingView,
+    >,
     /// Live crew authority carried only into an explicitly requested mesh
     /// continuation. Standalone restore retains its fresh console policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1718,15 +1729,23 @@ pub struct RepairState {
     /// only duplicate it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub teams: Vec<TeamSlot>,
-    /// Pending requests as `(station id, label, tier, deficit)`, in the
+    /// Pending requests as `(repair group, label, tier, deficit)`, in the
     /// severity order the queue keeps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queue: Vec<(String, String, crate::ship::damage::DamageTier, f32)>,
-    /// The "this crew has already been told" latch, as `(system id, tier)`
+    pub queue: Vec<(
+        crate::core::messages::RepairGroup,
+        String,
+        crate::ship::damage::DamageTier,
+        f32,
+    )>,
+    /// The "this crew has already been told" latch, as `(repair group, tier)`
     /// sorted by id — the component is a `HashMap`, and a payload may not
     /// inherit its iteration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub alerted: Vec<(String, crate::ship::damage::DamageTier)>,
+    pub alerted: Vec<(
+        crate::core::messages::RepairGroup,
+        crate::ship::damage::DamageTier,
+    )>,
 }
 
 /// The Weapons→Helm **arc-bearing seam** (issues #677/#767), both halves of it.
@@ -3732,7 +3751,10 @@ fn repair_state(
     queue: Option<&RepairRequestQueue>,
     alerted: Option<&RepairHumanAlerted>,
 ) -> RepairState {
-    let mut alerted_rows: Vec<(String, crate::ship::damage::DamageTier)> = alerted
+    let mut alerted_rows: Vec<(
+        crate::core::messages::RepairGroup,
+        crate::ship::damage::DamageTier,
+    )> = alerted
         .map(|a| {
             a.0.iter()
                 .map(|(system, tier)| (system.clone(), *tier))
@@ -3746,14 +3768,7 @@ fn repair_state(
             .map(|q| {
                 q.entries
                     .iter()
-                    .map(|e| {
-                        (
-                            e.station_id.clone(),
-                            e.station_label.clone(),
-                            e.tier,
-                            e.deficit,
-                        )
-                    })
+                    .map(|e| (e.group.clone(), e.station_label.clone(), e.tier, e.deficit))
                     .collect()
             })
             .unwrap_or_default(),
@@ -4285,6 +4300,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     // takes, so the capture is byte-identical whatever order the map's
                     // entries were inserted in. An empty map yields an empty vec, which
                     // `skip_serializing_if` drops — a never-commanded hull carries no row.
+                    console_views: entity
+                        .get::<crate::ship::components::ConsoleWorkingViews>()
+                        .map(|views| views.0.clone())
+                        .unwrap_or_default(),
                     station_stances: stances
                         .map(|s| {
                             let mut pairs: Vec<(String, String)> =
@@ -6063,6 +6082,13 @@ fn apply_entity_state_with(
             })
             .collect();
     }
+    if !row.console_views.is_empty()
+        || entity_mut.contains::<crate::ship::components::ConsoleWorkingViews>()
+    {
+        entity_mut.insert(crate::ship::components::ConsoleWorkingViews(
+            row.console_views.clone(),
+        ));
+    }
     // Reseed the #1108 edge scratch (`LastDirectedControl`) from the restored
     // control sources. It is NOT folded into the digest (it is a pure
     // function of already-authoritative control state, classified `derived`),
@@ -6084,7 +6110,7 @@ fn apply_entity_state_with(
         let sources = entity_mut.get::<crate::ship_plugin::ShipSystemControlSources>();
         match (config, sources) {
             (Some(config), Some(sources)) => {
-                crate::console::command::server::command_station(&config.0)
+                crate::console::command::server::command_console(&config.0)
                     .and_then(|command| command.command_target.clone())
                     .map(|target| {
                         let now_ai = crate::console::command::server::station_is_ai_controlled(
@@ -6844,14 +6870,12 @@ fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState) {
         queue.entries = stored
             .queue
             .iter()
-            .map(
-                |(station_id, station_label, tier, deficit)| RepairQueueEntry {
-                    station_id: station_id.clone(),
-                    station_label: station_label.clone(),
-                    tier: *tier,
-                    deficit: *deficit,
-                },
-            )
+            .map(|(group, station_label, tier, deficit)| RepairQueueEntry {
+                group: group.clone(),
+                station_label: station_label.clone(),
+                tier: *tier,
+                deficit: *deficit,
+            })
             .collect();
     }
     if let Some(mut alerted) = entity.get_mut::<RepairHumanAlerted>() {
@@ -7769,7 +7793,7 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
         // Reseed after the mesh authority frontier replaces that policy.
         if let Some(mut last) = last {
             last.0.clear();
-            if let Some(target) = crate::console::command::server::command_station(&config.0)
+            if let Some(target) = crate::console::command::server::command_console(&config.0)
                 .and_then(|command| command.command_target.clone())
             {
                 let ai = crate::console::command::server::station_is_ai_controlled(

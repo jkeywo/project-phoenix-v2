@@ -1,30 +1,6 @@
-// Issue #1098 — Smoke test: Comms as a hosted-tab-only visiting Station on the
-// Alliance Destroyer.
-//
-// `comms.spec.js` already covers the direct-hosting message flow (hail →
-// respond → objective) against the cruiser's older Comms wiring. This spec
-// is scoped to the destroyer's Comms, which is now an AUXILIARY
-// `human_seeking` Station resolved by `host_order` (see
-// `assets/entities/alliance_destroyer.toml`'s `[[station]] id = "comms"`),
-// same as Navigation. Auxiliary means Comms has NO dedicated claimable lobby
-// seat — it is never a direct holder; it is only ever reached as a Hero Bar
-// tab hosted by a resolved seat, or AI-operated. This spec demonstrates both
-// remaining host outcomes the acceptance criteria name — visiting and
-// AI-hosted — plus the hosted-tab resolution onto a non-owning seat, via
-// `SimState.snapshot.station_hosts` (the wire projection of
-// `resolve_visiting_station`, `crates/phoenix-sim-gameplay/src/ship/coordination.rs`) plus a live
-// `CommsState`/`Hail` round trip to prove a visiting host can actually act,
-// not just get named as host. The prior "direct: a player seated on Comms is
-// its own host" case is gone: Comms is no longer a claimable seat, so its
-// first case now pins hosted-tab resolution onto a seated Captain instead.
-//
-// Navigation's equivalent migration (#1097, same host_order machinery) has
-// no smoke coverage of its own visiting/AI-hosted behavior either — nothing
-// under tests/smoke/ references `host_order` or `station_hosts` before this
-// file. This spec follows the closest existing smoke pattern instead
-// (`comms.spec.js`'s hail/respond flow and `combat-test-scenario.spec.js`'s
-// solo-captain auto-start), since there is no prior visiting-station smoke
-// spec to mirror directly.
+// Destroyer Comms is an independently identified, human-seeking Console.
+// It adds no claimable seat. These tests exercise its live placement, ordinary
+// AI fallback, and same-token reconnect through the public Console host wire.
 
 import {
   test, expect, readHostPeerId, createTestClient, waitForWasmReady,
@@ -115,12 +91,12 @@ async function waitForStation(client, timeout = 8_000) {
   );
 }
 
-/** The most recent `SimState.snapshot.station_hosts` entry for `stationId`. */
+/** The most recent `SimState.snapshot.console_hosts` entry for `stationId`. */
 async function lastCommsHost(client, stationId, timeout = 8_000) {
   await client.page.waitForFunction(
     (id) => (window.__messages || []).some(
       (m) => m.type === 'SimState'
-        && (m.data.snapshot.station_hosts || []).some((h) => h.station === id),
+        && (m.data.snapshot.console_hosts || []).some((h) => h.console === id),
     ),
     stationId,
     { timeout },
@@ -128,7 +104,7 @@ async function lastCommsHost(client, stationId, timeout = 8_000) {
   return client.page.evaluate((id) => {
     const msgs = (window.__messages || []).filter((m) => m.type === 'SimState');
     const last = msgs[msgs.length - 1];
-    return last.data.snapshot.station_hosts.find((h) => h.station === id) ?? null;
+    return last.data.snapshot.console_hosts.find((h) => h.console === id) ?? null;
   }, stationId);
 }
 
@@ -167,7 +143,7 @@ async function lastStationImportance(client, timeout = 8_000) {
 }
 
 // Issue #1100: the host publishes authoritative per-Station health station-level
-// in `SimState.snapshot.station_health`, exactly like `station_hosts`, so every
+// in `SimState.snapshot.station_health`, exactly like `console_hosts`, so every
 // client shows a Station's health from the host's own sum rather than inferring
 // it from recipient-scoped damage rows. This asserts the wire projection reaches
 // a client, covering the two states a freshly-spawned, undamaged destroyer can
@@ -260,7 +236,7 @@ test('comms — hosted tab: an unclaimable Comms resolves onto a seated Captain 
   const serverPage = await bootDestroyerServer(context);
   const hostId = await readHostPeerId(serverPage);
 
-  // Comms is auxiliary now: no dedicated seat, so a player claims a real seat
+  // Comms is a detached Console: no dedicated seat, so a player claims a real seat
   // (Captain) and Comms is reached as a Hero Bar tab. With only Captain held,
   // Comms resolves through its host_order (`["tactical", "engineering",
   // "captain", "helm"]`) past the two unheld seats to Captain — the first
@@ -273,7 +249,7 @@ test('comms — hosted tab: an unclaimable Comms resolves onto a seated Captain 
   await captain.waitForMessage('GameStarted', 10_000);
 
   const host = await lastCommsHost(captain, 'comms');
-  expect(host, 'station_hosts must carry a comms entry').not.toBeNull();
+  expect(host, 'console_hosts must carry a comms entry').not.toBeNull();
   expect(host.host).toBe('captain');
   // Comms authors only one rating everywhere it appears (no automated tier),
   // so a visiting host gets the same full "Std" surface.
@@ -303,7 +279,7 @@ test('comms — visiting: a Tactical-seated player is admitted as the resolved C
   await tactical.waitForMessage('GameStarted', 10_000);
 
   const host = await lastCommsHost(tactical, 'comms');
-  expect(host, 'station_hosts must carry a comms entry').not.toBeNull();
+  expect(host, 'console_hosts must carry a comms entry').not.toBeNull();
   expect(host.host).toBe('tactical');
   // Comms authors only one rating everywhere it appears (no automated tier),
   // so a visiting host gets the same full "Std" surface a direct holder does.
@@ -349,8 +325,8 @@ test('comms — AI-hosted: falls back to AI once every host_order seat is unheld
   // ...then releases Tactical mid-game. host_order = ["tactical",
   // "engineering", "captain", "helm"] is every crewable seat other than Comms,
   // so with Tactical released and nobody else ever having claimed a seat,
-  // every candidate in the chain is unheld and resolve_visiting_station
-  // (crates/phoenix-sim-gameplay/src/ship/coordination.rs) falls all the way through to `host: None`,
+  // every candidate in the chain is unheld and resolve_assignment
+  // (crates/phoenix-sim-gameplay/src/ship/console_ownership.rs) falls all the way through to `host: None`,
   // `rating: BACKFILL_RATING` ("Backfill") — the pure AI-operated verdict.
   await tactical.page.evaluate(() => {
     window.__messages = window.__messages.filter((m) => m.type !== 'SimState');
@@ -360,15 +336,15 @@ test('comms — AI-hosted: falls back to AI once every host_order seat is unheld
   await tactical.page.waitForFunction(
     () => (window.__messages || []).some(
       (m) => m.type === 'SimState'
-        && (m.data.snapshot.station_hosts || []).some(
-          (h) => h.station === 'comms' && h.host === undefined,
+        && (m.data.snapshot.console_hosts || []).some(
+          (h) => h.console === 'comms' && (h.host ?? null) === null,
         ),
     ),
     { timeout: 8_000 },
   );
 
   const aiHost = await lastCommsHost(tactical, 'comms');
-  expect(aiHost, 'station_hosts must still carry a comms entry once AI-operated').not.toBeNull();
+  expect(aiHost, 'console_hosts must still carry a comms entry once AI-operated').not.toBeNull();
   expect(aiHost.host ?? null).toBeNull();
   expect(aiHost.rating).toBe('Backfill');
 
@@ -380,8 +356,8 @@ async function waitForCommsHost(client, expected, timeout = 8_000) {
   await client.page.waitForFunction(
     (exp) => (window.__messages || []).some(
       (m) => m.type === 'SimState'
-        && (m.data.snapshot.station_hosts || []).some(
-          (h) => h.station === 'comms' && (h.host ?? null) === exp,
+        && (m.data.snapshot.console_hosts || []).some(
+          (h) => h.console === 'comms' && (h.host ?? null) === exp,
         ),
     ),
     expected,
@@ -389,15 +365,15 @@ async function waitForCommsHost(client, expected, timeout = 8_000) {
   );
 }
 
-// Issue #1099 AC3: a disconnect relocates a human-seeking Station to the next
+// Issue #1099 AC3: a disconnect relocates a human-seeking Console to the next
 // held seat while the vacated seat stays RECOVERABLE, and a reconnect returns
-// the same Station state to its holder — all observed through station_hosts and
+// the same Station state to its holder — all observed through console_hosts and
 // live admission, never internal state. Comms is the destroyer's auxiliary
-// human-seeking Station (host_order = ["tactical", "engineering", "captain",
+// human-seeking Console (host_order = ["tactical", "engineering", "captain",
 // "helm"]), so a Tactical holder dropping off must move Comms down that order to
 // the still-seated Captain, and a same-token reconnect must bring it back to
 // Tactical.
-test('comms — a disconnect relocates the visiting host, and a reconnect restores it', async ({ context }) => {
+test('comms — Console identity survives handoff and reconnect', { tag: '@core' }, async ({ context }) => {
   const serverPage = await bootDestroyerServer(context);
   const hostId = await readHostPeerId(serverPage);
 
@@ -413,6 +389,11 @@ test('comms — a disconnect relocates the visiting host, and a reconnect restor
   await tactical.send('SetReady', { ready: true });
   await captain.send('SetReady', { ready: true });
   await tactical.waitForMessage('GameStarted', 10_000);
+  const welcome = await tactical.waitForMessage('Welcome', 10_000);
+  const roster = welcome.data.ship_stations;
+  expect(roster.stations.map(row => row.id)).not.toContain('comms');
+  expect(roster.consoles.filter(row => row.id === 'comms')).toHaveLength(1);
+  expect(roster.consoles.find(row => row.id === 'comms').human_seeking).toBe(true);
 
   // Comms visits Tactical — the first held seat in host_order.
   let host = await lastCommsHost(tactical, 'comms');
@@ -428,16 +409,18 @@ test('comms — a disconnect relocates the visiting host, and a reconnect restor
   await tactical.close();
   await waitForCommsHost(captain, 'captain');
   host = await lastCommsHost(captain, 'comms');
+  expect(host.console).toBe('comms');
   expect(host.host, 'a disconnect relocates Comms to the next held seat').toBe('captain');
 
   // Tactical reconnects with the SAME token. Nobody claimed the seat in the
   // meantime, so it is restored and Comms returns to Tactical — the same
-  // Station state back on its holder.
+  // Console state back on its holder.
   const tacticalBack = await createTestClient(context, hostId, { token: TAC_TOKEN, name: 'Tactical' });
   await tacticalBack.waitForMessage('Welcome', 10_000);
   await waitForCommsHost(tacticalBack, 'tactical');
   host = await lastCommsHost(tacticalBack, 'comms');
-  expect(host.host, 'a reconnect returns the visiting Station to its holder').toBe('tactical');
+  expect(host.console).toBe('comms');
+  expect(host.host, 'a reconnect returns the visiting Console to its holder').toBe('tactical');
 
   // Admission follows the restored host: the reconnected Tactical token is
   // admitted as the live Comms surface, exactly as before the drop.

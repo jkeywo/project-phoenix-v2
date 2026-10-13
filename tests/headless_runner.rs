@@ -4038,7 +4038,7 @@ fn an_unmanned_npc_hull_is_fully_backfilled_on_every_station() {
             policy.operate_ai,
             "NPC system {:?} (owner {:?}, ai_only {}) must be AI-operated on an \
              unmanned hull",
-            system.id, system.station, system.ai_only
+            system.id, system.console, system.ai_only
         );
         assert!(
             !policy.accept_human_input,
@@ -4050,7 +4050,7 @@ fn an_unmanned_npc_hull_is_fully_backfilled_on_every_station() {
     // AC: `ai_only` survives only on ownerless systems. Everything a station
     // owns dropped the flag.
     for system in &config.0.systems {
-        if system.station.is_some() {
+        if config.0.system_home_station(system).is_some() {
             assert!(
                 !system.ai_only,
                 "station-owned system {:?} must not rely on ai_only",
@@ -4231,7 +4231,7 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
         // *crewable* (non-auxiliary) seats — auxiliary stations are data-authored
         // directors/hosted tabs, not seats a human can take — so a future
         // auxiliary addition must not be silently accepted here as a new seat.
-        let crewable = config.0.stations.iter().filter(|s| !s.auxiliary).count();
+        let crewable = config.0.stations.len();
         assert_eq!(
             crewable, 4,
             "the destroyer's four crewable seats must survive composition: {:?}",

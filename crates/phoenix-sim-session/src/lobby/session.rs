@@ -1,5 +1,5 @@
 use crate::lobby::start_policy::ReadinessTally;
-use phoenix_model::messages::{Player, StationId};
+use phoenix_model::messages::{ConsoleId, Player, StationId};
 use phoenix_model::wire::ShipStations;
 
 #[derive(Debug)]
@@ -68,6 +68,9 @@ pub struct SessionManager {
     /// never locked out of a seat. Cleared on `ReturnToLobby` alongside
     /// `pending_ratings`.
     eligibility: std::collections::HashMap<String, std::collections::HashSet<StationId>>,
+    /// Private anonymous Console/rating results, separate from crew-seat claims.
+    console_eligibility:
+        std::collections::HashMap<String, std::collections::BTreeMap<ConsoleId, Vec<String>>>,
     /// The station rating a player held on their directly-owned Station at the
     /// instant they entered AFK (issue #1104), token → rating name. Captured
     /// BEFORE the AFK Backfill is applied and consumed (and cleared) when the
@@ -245,12 +248,11 @@ impl SessionManager {
             .stations
             .iter()
             .filter(|station| {
-                !station.auxiliary
-                    && self.players.iter().any(|player| {
-                        player.connected
-                            && !player.spectator
-                            && player.station.as_ref() == Some(&station.id)
-                    })
+                self.players.iter().any(|player| {
+                    player.connected
+                        && !player.spectator
+                        && player.station.as_ref() == Some(&station.id)
+                })
             })
             .map(|station| {
                 let rating = self
@@ -302,10 +304,27 @@ impl SessionManager {
             .is_none_or(|ineligible| !ineligible.contains(station))
     }
 
+    pub fn set_console_eligibility(
+        &mut self,
+        token: &str,
+        ineligible: std::collections::BTreeMap<ConsoleId, Vec<String>>,
+    ) {
+        self.console_eligibility
+            .insert(token.to_string(), ineligible);
+    }
+
+    pub fn is_console_eligible(&self, token: &str, console: &ConsoleId, rating: &str) -> bool {
+        self.console_eligibility
+            .get(token)
+            .and_then(|entries| entries.get(console))
+            .is_none_or(|ratings| !ratings.iter().any(|name| name == rating))
+    }
+
     /// Clear every token's eligibility report (e.g. on `ReturnToLobby` for a
     /// fresh round), alongside `clear_all_pending_ratings`.
     pub fn clear_all_eligibility(&mut self) {
         self.eligibility.clear();
+        self.console_eligibility.clear();
     }
 
     /// Snapshot the rating a player held on their directly-owned Station just
@@ -340,7 +359,6 @@ impl SessionManager {
         ship_config
             .stations
             .iter()
-            .filter(|def| !def.auxiliary)
             .filter(|def| !held_stations.contains(&&def.id))
             .map(|def| def.id.clone())
             .collect()

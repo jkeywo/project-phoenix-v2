@@ -30,7 +30,12 @@ fn core() -> String {
         "[[system]]",
         "id = \"boost\"",
         "kind = \"helm_boost\"",
-        "station = \"captain\"",
+        "console = \"captain-console\"",
+        "",
+        "[[console]]",
+        "id = \"captain-console\"",
+        "home_station = \"captain\"",
+        "screen = \"fixture.html\"",
         "",
     ]
     .join("\n")

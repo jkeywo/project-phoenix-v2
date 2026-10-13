@@ -2571,7 +2571,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "comms"
-name = "Comms"
+name = "station.comms.name"
 screen = "gui/cruiser/comms.html"
 home_station = "comms"
 human_seeking = true
@@ -2596,7 +2596,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "navigation"
-name = "Navigation"
+name = "station.navigation.name"
 screen = "gui/cruiser/comms.html"
 human_seeking = true
 host_order = [ "comms", "captain", "helm", "tactical", "science", "engineering" ]
@@ -2639,7 +2639,7 @@ kind = "Viewscreen"
 
 [[console]]
 id = "command"
-name = "Command"
+name = "station.command.name"
 screen = "gui/command-console.html"
 human_seeking = true
 host_order = [ "captain" ]

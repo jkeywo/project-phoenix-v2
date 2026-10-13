@@ -792,14 +792,18 @@ id = "comms"
 name = "Comms"
 description = ""
 rank = ""
-console = "comms.html"
 [[station.rating]]
 name = "Std"
 automated_systems = []
+[[console]]
+id = "comms-console"
+home_station = "comms"
+screen = "comms.html"
+
 [[system]]
 id = "comms"
 kind = "comms"
-station = "comms"
+console = "comms-console"
 "#,
         &["comms"],
     )

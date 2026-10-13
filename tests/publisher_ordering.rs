@@ -5,13 +5,14 @@ mod common;
 #[path = "common/declared_order.rs"]
 mod declared_order;
 use bevy::{ecs::message::MessageCursor, prelude::*};
+use project_phoenix::ship::console_publication::LastConsolePublications;
 use project_phoenix::{
     console::repair::server::ShipRepairTeams,
     core::messages::{ClientMessage, PowerGroupId, ServerMessage, SystemBlackboard, SystemId},
     entities::spawner::{EntitySystemHull, EntityUuid},
     headless::HeadlessArgs,
     lobby::server::{InboundMessage, OutboundMessage},
-    server_app::{LastBroadcastBlackboards, LocalShip, Ship, ShipSystemBlackboards},
+    server_app::{LocalShip, Ship, ShipSystemBlackboards},
     ship::{control_source::ControlSource, power::ShipPowerSystem, shields::ShipShields},
     ship_plugin::{ShipConfigComponent, ShipSystemControlSources},
     sim_digest::world_digest,
@@ -54,10 +55,10 @@ fn observe(
 ) -> Value {
     let world = app.world();
     let cache: BTreeMap<_, _> = world
-        .resource::<LastBroadcastBlackboards>()
+        .resource::<LastConsolePublications>()
         .0
         .iter()
-        .map(|(id, value)| (id.0.clone(), value))
+        .map(|(token, value)| (token.clone(), value))
         .collect();
     let observed: Vec<_> = messages
         .read(world.resource::<Messages<OutboundMessage>>())
@@ -67,11 +68,6 @@ fn observe(
         .map(|m| json!({"target":format!("{:?}",m.target),"delivery":format!("{:?}",m.delivery),"message":m.msg}))
         .collect();
     wire.extend(observed);
-    let repair_cache = world
-        .resource::<project_phoenix::console::repair::visibility::LastVisibleRepairBlackboard>(
-    );
-    let repair_projections: BTreeMap<_, _> = repair_cache.projections.iter().collect();
-    let repair_stations: BTreeMap<_, _> = repair_cache.stations.iter().collect();
     let hull_cache: BTreeMap<_, _> = world
         .resource::<project_phoenix::console::repair::visibility::LastBroadcastHull>()
         .0
@@ -87,7 +83,6 @@ fn observe(
             "hull":world.get::<EntitySystemHull>(*ship).unwrap().0.iter()
                 .map(|(id,h)|json!({"id":id,"current":h.current,"max":h.max})).collect::<Vec<_>>()
         })).collect::<Vec<_>>(),"cache":cache,"hull_cache":hull_cache,
-        "repair_cache":{"projections":repair_projections,"stations":repair_stations},
         "payloads":payloads})
 }
 
@@ -97,37 +92,44 @@ fn assert_selected_wire(wire: &[OutboundMessage]) {
     let (mut engineering_hull, mut science_hull) = (false, false);
     for message in wire {
         match &message.msg {
-            ServerMessage::BlackboardUpdate { updates, .. } => {
+            ServerMessage::BlackboardUpdate {
+                updates,
+                console_scope,
+                console_scope_tick,
+                ..
+            } => {
+                let scope = console_scope.as_ref().expect("explicit permitted scope");
+                assert!(console_scope_tick.is_some());
+                assert_eq!(
+                    updates.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                    scope.iter().collect::<Vec<_>>(),
+                    "each emitted projection is complete"
+                );
+                if matches!(&message.target, Target::Token(token) if token == "publisher-science") {
+                    assert!(!scope.iter().any(|id| id.0 == "repair"));
+                    assert!(!updates
+                        .iter()
+                        .any(|(_, board)| matches!(board, SystemBlackboard::Repair(_))));
+                    withheld = true;
+                }
                 for (id, board) in updates {
                     match (id.0.as_str(), board, &message.target) {
-                        ("power", SystemBlackboard::Power(_), Target::All) => power = true,
-                        ("shields", SystemBlackboard::Shields(_), Target::All) => shields = true,
+                        ("power", SystemBlackboard::Power(_), Target::Token(token))
+                            if token == "publisher-engineer" =>
+                        {
+                            power = true
+                        }
+                        ("shields", SystemBlackboard::Shields(_), Target::Token(token))
+                            if token == "publisher-science" =>
+                        {
+                            shields = true
+                        }
                         ("repair", SystemBlackboard::Repair(board), Target::Token(token))
                             if token == "publisher-engineer" =>
                         {
                             repair |= !board.teams.is_empty()
                                 && !board.damageable_systems.is_empty()
                                 && board.aggregate_hull_fraction.is_some_and(|hp| hp < 1.0);
-                        }
-                        ("repair", SystemBlackboard::Repair(board), Target::Token(token))
-                            if token == "publisher-science" =>
-                        {
-                            assert!(board.teams.is_empty());
-                            assert!(board.system_hull.is_empty());
-                            assert!(board.damageable_systems.is_empty());
-                            assert!(board.priority_targets.is_empty());
-                            assert!(board.queue_depth.is_empty());
-                            assert_eq!(board.aggregate_hull_fraction, None);
-                            assert_eq!(board.destroyed_hull_fraction, None);
-                            assert_eq!(board.external_dispatch_range, None);
-                            assert_eq!(board.external_dispatch_target, None);
-                            assert_eq!(board.external_dispatch_target_name, None);
-                            assert_eq!(board.external_dispatch_candidate_name, None);
-                            assert_eq!(board.external_dispatch_candidate_refusal, None);
-                            assert_eq!(board.external_dispatch_refusal, None);
-                            assert_eq!(board.external_dispatch_team_idx, None);
-                            assert_eq!(board.external_dispatch_target_condition, None);
-                            withheld = true;
                         }
                         _ => {}
                     }
@@ -147,7 +149,7 @@ fn assert_selected_wire(wire: &[OutboundMessage]) {
     }
     assert!(
         power && shields,
-        "both selected shared publishers reached the wire"
+        "both selected publishers reached their permitted recipients"
     );
     assert!(
         repair,
@@ -155,7 +157,7 @@ fn assert_selected_wire(wire: &[OutboundMessage]) {
     );
     assert!(
         withheld,
-        "Science received the explicit empty Repair projection"
+        "Science received a complete scope excluding Repair"
     );
     assert!(
         engineering_hull && science_hull,
@@ -318,7 +320,7 @@ fn three_publishers_preserve_maps_consumers_and_wire_under_declared_order_regist
                 assert!(report["workers"].as_u64().unwrap() > 1);
                 assert_eq!(report["executor"], "MultiThreaded");
             }
-            assert_eq!(report["setup"].as_array().unwrap().len(), 6);
+            assert_eq!(report["setup"].as_array().unwrap().len(), 9);
             let observations = json!({"setup":report["setup"],"trace":report["trace"]});
             if let Some(expected) = &reference {
                 assert_eq!(&observations, expected);
@@ -413,6 +415,10 @@ fn publisher_order_child() {
     for (token, station) in [
         ("publisher-engineer", "engineering"),
         ("publisher-science", "science"),
+        // The real hosting resolver runs in this integration harness. A direct
+        // source override above does not hold Tactical across Input; use an
+        // actual operator so AI cannot replace the deliberately seeded lock.
+        ("publisher-tactical", "tactical"),
     ] {
         for msg in [
             ClientMessage::Identify {
@@ -474,6 +480,10 @@ fn publisher_order_child() {
         .query_filtered::<Entity, With<LocalShip>>()
         .single(app.world())
         .unwrap();
+    let radar = project_phoenix::ship::system_registry::tactical_radar_system_id();
+    let sources = &app.world().get::<ShipSystemControlSources>(local).unwrap().0;
+    assert!(sources.policy_for(&radar).accept_human_input);
+    assert!(!sources.policy_for(&radar).operate_ai);
     let mut trace = Vec::new();
     for phase in 0..2 {
         let before = boards(&app, local);

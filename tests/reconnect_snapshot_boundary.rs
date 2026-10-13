@@ -3,6 +3,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::{ecs::message::MessageCursor, prelude::*};
+use project_phoenix::ship::console_publication::LastConsolePublications;
 use project_phoenix::{
     console::{repair::visibility::LastBroadcastHull, weapons::blackboard::LastWeaponsUpdate},
     core::messages::{ClientMessage, DeliveryClass, ServerMessage, SystemControlPayload, SystemId},
@@ -11,7 +12,7 @@ use project_phoenix::{
         server::{InboundMessage, OutboundMessage},
         Sessions, Target,
     },
-    server_app::{LastBroadcastBlackboards, LocalShip},
+    server_app::LocalShip,
     ship::shields::ShipShields,
     sim_digest::world_digest,
     sim_rng::SimRng,
@@ -129,7 +130,7 @@ fn caches(app: &App) -> Value {
     // are existing shared delta caches, never substitute authoritative state.
     let mut blackboards: Vec<_> = app
         .world()
-        .resource::<LastBroadcastBlackboards>()
+        .resource::<LastConsolePublications>()
         .0
         .iter()
         .collect();
@@ -776,9 +777,10 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
         let viewscreen_id = project_phoenix::ship::system_registry::viewscreen_system_id();
         let previous_viewscreens = apps.each_ref().map(|app| {
             app.world()
-                .resource::<LastBroadcastBlackboards>()
+                .resource::<LastConsolePublications>()
                 .0
-                .get(&viewscreen_id)
+                .get(OTHER)
+                .and_then(|(_, boards)| boards.get(&viewscreen_id))
                 .cloned()
         });
         if frame == 0 {
@@ -830,9 +832,10 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
                 .expect("actual Viewscreen projection");
             assert_eq!(
                 world
-                    .resource::<LastBroadcastBlackboards>()
+                    .resource::<LastConsolePublications>()
                     .0
-                    .get(&viewscreen_id),
+                    .get(OTHER)
+                    .and_then(|(_, boards)| boards.get(&viewscreen_id)),
                 Some(current),
                 "the aggregate broadcaster observes this tick's Viewscreen"
             );
@@ -840,7 +843,10 @@ fn observe_prior_lock_and_live_ammo_on_reconnect() {
                 let expected = json!([viewscreen_id, current]);
                 assert!(
                     output[i].iter().any(|row| {
-                        row["target"] == "All"
+                        row["target"] == format!("{:?}", Target::Token(OTHER.into()))
+                            && row["message"]["data"]["console_scope"]
+                                .as_array()
+                                .is_some_and(|scope| scope.contains(&json!(viewscreen_id)))
                             && row["delivery"] == "Snapshot"
                             && row["message"]["type"] == "BlackboardUpdate"
                             && row["message"]["data"]["updates"]

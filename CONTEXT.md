@@ -2,10 +2,11 @@
 
 Use these names consistently. Runtime detail belongs in code/wiki; intended behavior belongs in PASM.
 
-- **Station**: an authored operable surface identified by `StationId`, owning a coherent UI and set of Systems. A primary Station may be a fixed player seat; an auxiliary Station may exist only as a hosted tab. A human-seeking Station retains its identity while being presented by another directly player-held Station.
-- **System**: a fine-grained operable capability identified by `SystemId`.
-- **Console Family**: the presentation taxonomy declared by a System-kind descriptor and projected per System instance to select client payload builders and dirty-console routing. It is separate from Station ownership and System command authority.
-- **Station Rating**: an authored station mode that selects which owned systems are AI-operated. `Backfill` operates every owned system.
+- **Station**: an authored crew seat identified by `StationId`, used for lobby tenure, complexity choice, coordination and native display assignment. It hosts one or more Consoles.
+- **Console**: a ship-local `ConsoleId` identifying a hosted screen and knowledge scope. It owns Systems and explicit observation feeds. Fixed or human-seeking placement determines its current hosting Station; a screenless Console scopes AI-only equipment.
+- **System**: a fine-grained capability identified by `SystemId`, controlled through exactly one Console. Commands continue to target the System.
+- **Console Family**: the presentation taxonomy declared by a System-kind descriptor and projected per System instance to select client payload builders and dirty-console routing. It is separate from Console identity and command authority.
+- **Station Rating**: an authored crew complexity choice. Console bindings derive per-System control depth; detached Consoles can retain their own ladder. `Backfill` supplies ordinary individual System AI.
 - **Control Source**: `Human`, `Ai`, or `Offline` authority for a system on a tick.
 - **Session**: host-owned player identity and connection record, keyed by session token.
 - **World**: authored TOML content and its layered runtime; root worlds may load supporting worlds.
@@ -13,7 +14,7 @@ Use these names consistently. Runtime detail belongs in code/wiki; intended beha
 - **Viewscreen**: the shared host display.
 - **Waypoint**: Navigation-owned shared destination.
 - **Coordination**: inter-system advisory messages; it does not bypass system authority.
-- **Coordination Address**: an explicit `Station` or whole-`Ship` destination for Coordination, distinct from the `SystemId` targeted by an admitted command.
+- **Coordination Address**: an explicit `Station`, `Console` or whole-`Ship` destination for Coordination, distinct from the `SystemId` targeted by an admitted command.
 - **PASM**: Phoenix Architecture & System Model, the repository's design and architecture record.
 - **String Table**: `assets/strings/strings.csv`, the single source of all display text, keyed by String Id; `[bracketed]` English marks unreviewed agent-drafted copy.
 - **String Id**: stable dotted key (`console.common.no_target`) that code and TOML carry instead of prose; the client resolves it at render time.

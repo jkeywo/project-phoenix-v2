@@ -7,8 +7,14 @@ use std::collections::BTreeMap;
 /// Station ids are ship-local authoring keys, not player tokens and not world
 /// entity UUIDs. They are intended to replace console bundles as the wire
 /// addressing unit for station ownership in the station/system architecture.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 pub struct StationId(pub String);
+
+/// Ship-local identity of a hosted screen and its permitted knowledge scope.
+/// A Console keeps this identity when its Station host or operator changes.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct ConsoleId(pub String);
 
 /// Maximum UTF-8 byte length of one opaque semantic-action correlation.
 ///
@@ -67,7 +73,7 @@ pub enum ActionFeedbackOutcome {
 
 /// Explicit destination for a delayed Coordination message.
 ///
-/// Coordination is addressed either to one authored crew Station or to the
+/// Coordination is addressed to an authored crew Station, a stable Console, or the
 /// whole source ship. A System id is deliberately not accepted here: Systems
 /// remain command-authority targets, while Coordination is an operator/bridge
 /// message whose recipient is resolved at delivery time.
@@ -75,6 +81,7 @@ pub enum ActionFeedbackOutcome {
 #[serde(tag = "type", content = "data")]
 pub enum CoordinationAddress {
     Station(StationId),
+    Console(ConsoleId),
     Ship,
 }
 

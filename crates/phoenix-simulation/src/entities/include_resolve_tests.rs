@@ -1560,16 +1560,8 @@ mod shipped_tree {
         let stations: Vec<&str> = ship.stations.iter().map(|s| s.id.0.as_str()).collect();
         assert_eq!(
             stations,
-            vec![
-                "captain",
-                "helm",
-                "tactical",
-                "navigation",
-                "comms",
-                "engineering",
-                "command"
-            ],
-            "seven Stations, exactly as authored — no fragment adds or removes one"
+            vec!["captain", "helm", "tactical", "engineering"],
+            "four crew seats; auxiliary Consoles do not add Stations"
         );
         let arcs: Vec<&str> = config
             .shield_arcs

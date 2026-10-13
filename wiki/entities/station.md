@@ -1,78 +1,35 @@
 ---
 title: Station
 type: entity
-tags: [station, lobby, roster, rating, ai, human-seeking]
-sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, gui/mount-plan.js, assets/entities/alliance_destroyer.toml, assets/entities/dynasty_player_cruiser.toml]
-updated: 2026-09-21
+tags: [station, lobby, roster, rating, ai]
+sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/rating_systems.rs]
+updated: 2026-10-13
 ---
 
 # Station
 
-A Station is an authored operable surface with a stable `StationId`, console,
-ratings, and owned [Systems](./system.md). A direct station is offered as a
-claimable lobby seat. An `auxiliary = true` station is mounted and resolved by
-the simulation but is not offered as a separate seat.
+A Station is an authored crew seat with a stable `StationId`, display metadata,
+ratings and optional stance catalogue. `Player.station` records its directly
+claimed tenure; native display assignments also name Stations.
 
-## Authoring and wire shape
+A Station hosts one or more [Consoles](console.md). Each Console owns its
+[Systems](system.md), its screen and its permitted observations. Detached
+human-seeking Consoles replace auxiliary hosted surfaces without adding seats.
 
-Each hull declares `[[station]]` blocks in its entity TOML. `StationConfig` in
-`crates/phoenix-sim-gameplay/src/ship/config.rs` parses and validates them. At startup,
-`stations_from_ship_config` projects the roster into `StationDef` values for
-`Welcome`, including:
+`SessionManager::holder_for_station` returns a connected direct holder.
+Disconnected players retain their Station identity for reconnect while ordinary
+Backfill operates the affected Systems. Human-seeking Console placement tries
+its direct home holder before its authored candidate Stations; a hosted tab
+never constitutes a new direct holder.
 
-- stable id and display metadata;
-- optional console URL;
-- selectable rating names;
-- human-seeking host order and visiting rating;
-- whether the station is auxiliary.
+`ActiveStationRatings` retains the crew's selected complexity. Console ratings
+can preserve a detached surface's own ladder; `console_system_depths` derives
+its owned Systems' AI, simplified or detailed modes. Hosting and ratings feed
+`ShipSystemControlSources`; damage remains an independent offline override.
+`Backfill` is runtime-only, not an authored lobby rating.
 
-The client uses the roster rather than a hardcoded station list. It derives
-mount ids and iframe URLs from the station id and authored console URL.
+`ShipStations` carries separate seat and Console definitions. The lobby claims
+seats, while the client mounts screens from the Console definitions and current
+`ConsoleHosts`. Shipped hull rosters remain authored data.
 
-## Ratings and control
-
-A station rating names the systems delegated to AI in its
-`automated_systems` list. `ActiveStationRatings` holds the live choice, and
-`ShipSystemControlSources` derives each system's human/AI operating policy.
-The directly connected holder may select only ratings authored for that
-station. `Backfill` is a runtime-only rating used for an unmanned or AFK seat;
-it is never a lobby-selectable authored rating.
-
-## Human-seeking and auxiliary stations
-
-A `human_seeking` station retains its own identity, systems, rating, and
-console while the coordination resolver chooses where to present it:
-
-1. its active direct holder, if it has one;
-2. the first compatible directly held station in its finite `host_order`;
-3. AI when no eligible human host exists.
-
-`visiting_rating` defines the baseline capability while hosted. A scenario
-detail floor may raise that capability but cannot lower it. A station that is
-itself visiting cannot host another visiting station, preventing nested or
-transitive authority. `VisitingStationHosts` publishes the resolved placement
-so the client shell mounts the hosted surface for the right player.
-
-The Alliance Destroyer demonstrates this shape with auxiliary Navigation,
-Comms, and Command stations. Their host order and ratings are hull data, not
-special cases in the lobby or client.
-
-The Dynasty player cruiser demonstrates a second kind of composition: six
-direct Stations regroup existing System families into Command, Helm, Gunnery,
-Sensors, Power, and Damage Control. The regrouping is entirely hull data;
-admission and Backfill still resolve from the authored System owners.
-
-## Occupancy
-
-`Player.station` records a direct claim. `SessionManager::holder_for_station`
-returns only a connected holder, which is the occupancy rule shared by command
-admission and human-seeking resolution. A disconnected player keeps the
-station id on their record for reconnect restoration while its systems move to
-Backfill control.
-
-## Related
-
-- [Console](./console.md)
-- [System](./system.md)
-- [Session](./session.md)
-- [Stations](../concepts/stations.md)
+See [Stations](../concepts/stations.md) for session and GM integration.

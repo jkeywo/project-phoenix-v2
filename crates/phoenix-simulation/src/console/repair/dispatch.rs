@@ -467,7 +467,36 @@ fn resolve_repair_target(
         // wildcard so a future `RepairTarget` variant still fails to compile
         // until someone decides what a repair team walks to for it.
         RepairTarget::External => None,
-        RepairTarget::Core => Some(SystemId("core".into())),
+        RepairTarget::Core => {
+            let hull = hull?;
+            let literal = SystemId("core".into());
+            let is_core = |id: &SystemId| {
+                crate::modifiers::repair_teams::repair_group(id, &ship_config.0)
+                    == crate::core::messages::RepairGroup::Core
+            };
+            if is_core(&literal) && hull.get(&literal).is_some() {
+                return Some(literal);
+            }
+            hull.iter()
+                .filter(|(id, entry)| is_core(id) && entry.current < entry.max)
+                .max_by(|(_, left), (_, right)| {
+                    (1.0 - left.current / left.max).total_cmp(&(1.0 - right.current / right.max))
+                })
+                .map(|(id, _)| id.clone())
+        }
+        RepairTarget::Console(console_id) => {
+            let hull = hull?;
+            let group = crate::core::messages::RepairGroup::Console(console_id.clone());
+            hull.iter()
+                .filter(|(id, _)| {
+                    crate::modifiers::repair_teams::repair_group(id, &ship_config.0) == group
+                })
+                .filter(|(_, entry)| entry.current < entry.max)
+                .max_by(|(_, left), (_, right)| {
+                    (1.0 - left.current / left.max).total_cmp(&(1.0 - right.current / right.max))
+                })
+                .map(|(id, _)| id.clone())
+        }
         RepairTarget::Station(station_id) => {
             let Some(hull) = hull else {
                 // No hull at all ⇒ no row can collide, and the coarse layout

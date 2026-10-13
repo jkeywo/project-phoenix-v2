@@ -94,6 +94,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("infrastructure", 16708771438897103916),
             ("civilian", 10007260259203553826),
             ("station-stances", 7675036808710624197),
+            ("console-views", 7675036808710624197),
             ("tractor", 3412975283742167187),
             ("dock", 14402749879927837817),
             ("external-repair", 15591361003993366682),
@@ -101,6 +102,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("asteroid", 7742867957391604175),
             ("collisions", 2207473739003605171),
             ("security", 9442496669972521287),
+            ("internal-repair", 9442496669972521287),
         ]
     );
 }
@@ -2647,4 +2649,141 @@ fn reactor_charge_and_allocation_move_the_digest() {
         .set_group_allocation(&crate::core::messages::PowerGroupId("helm".into()), 1)
         .unwrap();
     assert_ne!(spent, world_digest(&world));
+}
+
+#[test]
+fn console_views_fold_in_identity_order_and_detect_work_context_changes() {
+    use crate::ship::components::ConsoleWorkingViews;
+    use phoenix_model::{console::ConsoleWorkingView, identity::ConsoleId};
+    let mut world = fold_world();
+    let entity = world
+        .spawn((
+            EntityUuid("console-test-ship".into()),
+            ConsoleWorkingViews::default(),
+        ))
+        .id();
+    let empty = fold_console_views_namespace(&world, FOLD_SEED);
+    let view = ConsoleWorkingView {
+        comms_thread: Some("fleet".into()),
+        ..Default::default()
+    };
+    world
+        .get_mut::<ConsoleWorkingViews>(entity)
+        .unwrap()
+        .0
+        .insert(ConsoleId("comms".into()), view);
+    let populated = fold_console_views_namespace(&world, FOLD_SEED);
+    assert_ne!(empty, populated);
+    world
+        .get_mut::<ConsoleWorkingViews>(entity)
+        .unwrap()
+        .0
+        .get_mut(&ConsoleId("comms".into()))
+        .unwrap()
+        .comms_thread = Some("public".into());
+    assert_ne!(populated, fold_console_views_namespace(&world, FOLD_SEED));
+}
+
+#[test]
+fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order() {
+    use crate::console::repair::server::{RepairQueueEntry, RepairRequestQueue, ShipRepairTeams};
+    use crate::core::messages::{ConsoleId, RepairGroup, StationId, SystemId};
+    use crate::ship::components::RepairHumanAlerted;
+    use crate::ship::damage::DamageTier;
+    let station = RepairGroup::Station(StationId("same".into()));
+    let console = RepairGroup::Console(ConsoleId("same".into()));
+    let core_console = RepairGroup::Console(ConsoleId("core".into()));
+    let groups = [
+        station.clone(),
+        console.clone(),
+        RepairGroup::Core,
+        core_console,
+    ];
+    let digest = |groups: &[RepairGroup]| {
+        let mut world = World::new();
+        world.spawn((
+            EntityUuid("repair-ship".into()),
+            RepairRequestQueue {
+                entries: groups
+                    .iter()
+                    .map(|group| RepairQueueEntry {
+                        group: group.clone(),
+                        station_label: "same".into(),
+                        tier: DamageTier::Damaged,
+                        deficit: 1.0,
+                    })
+                    .collect(),
+            },
+            RepairHumanAlerted(
+                groups
+                    .iter()
+                    .map(|group| (group.clone(), DamageTier::Damaged))
+                    .collect(),
+            ),
+        ));
+        fold_internal_repair_namespace(&world, FOLD_SEED)
+    };
+    let distinct: std::collections::BTreeSet<_> = groups
+        .iter()
+        .map(|group| digest(std::slice::from_ref(group)))
+        .collect();
+    assert_eq!(distinct.len(), 4);
+    let mut reversed = groups.to_vec();
+    reversed.reverse();
+    assert_eq!(digest(&groups), digest(&reversed));
+    let mut world = World::new();
+    let entity = world
+        .spawn((
+            EntityUuid("repair-ship".into()),
+            ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(1)),
+        ))
+        .id();
+    let idle = fold_internal_repair_namespace(&world, FOLD_SEED);
+    world
+        .get_mut::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .dispatch(0, SystemId("detached-system".into()), "same".into());
+    let travelling = fold_internal_repair_namespace(&world, FOLD_SEED);
+    assert_ne!(idle, travelling);
+    let mut slots = world
+        .get::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .slots()
+        .to_vec();
+    if let crate::core::messages::TeamSlot::Travelling { system_id, .. } = &mut slots[0] {
+        *system_id = Some(SystemId("another-detached-system".into()));
+    } else {
+        panic!("dispatch should be travelling");
+    }
+    world
+        .get_mut::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .restore_slots(&slots);
+    assert_ne!(
+        travelling,
+        fold_internal_repair_namespace(&world, FOLD_SEED)
+    );
+    let mut alerts = World::new();
+    let entity = alerts
+        .spawn((
+            EntityUuid("repair-ship".into()),
+            RepairHumanAlerted(std::collections::HashMap::from([(
+                station.clone(),
+                DamageTier::Damaged,
+            )])),
+        ))
+        .id();
+    let station_alert = fold_internal_repair_namespace(&alerts, FOLD_SEED);
+    alerts.get_mut::<RepairHumanAlerted>(entity).unwrap().0 =
+        std::collections::HashMap::from([(console, DamageTier::Damaged)]);
+    assert_ne!(
+        station_alert,
+        fold_internal_repair_namespace(&alerts, FOLD_SEED)
+    );
+    assert!(FOLD_STAGES
+        .iter()
+        .any(|(name, _)| *name == "internal-repair"));
 }

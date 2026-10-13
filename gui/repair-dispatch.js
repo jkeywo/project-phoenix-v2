@@ -43,6 +43,13 @@ export const EXTERNAL_REPAIR_TARGET = 'external';
  * @returns {{type: 'Core'} | {type: 'External'} | {type: 'Station', data: string}}
  */
 export function repairTargetFor(target) {
+  if (target && typeof target === 'object') {
+    if (target.type === 'Core' || target.type === 'External') return { type: target.type };
+    if (['Station', 'Console'].includes(target.type) && typeof target.data === 'string' && target.data) {
+      return { type: target.type, data: target.data };
+    }
+    throw new TypeError('repair-dispatch: invalid typed repair target');
+  }
   if (typeof target !== 'string' || target.length === 0) {
     throw new TypeError('repair-dispatch: target must be a non-empty station id');
   }

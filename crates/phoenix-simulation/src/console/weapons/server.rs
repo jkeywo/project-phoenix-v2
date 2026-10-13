@@ -2245,12 +2245,12 @@ pub(crate) fn receive_tactical_coordination(
         else {
             continue;
         };
-        let crate::core::messages::CoordinationAddress::Station(addressed_station) =
-            &message.address
-        else {
-            continue;
-        };
-        if ship_config.0.weapons_station().as_ref() != Some(addressed_station)
+        if crate::ship::coordination::address_for_system(
+            &ship_config.0,
+            &crate::ship::system_registry::tactical_radar_system_id(),
+        )
+        .as_ref()
+            != Some(&message.address)
             || !shared::any_tactical_system_operates_ai(control_sources, &ship_config.0)
         {
             continue;

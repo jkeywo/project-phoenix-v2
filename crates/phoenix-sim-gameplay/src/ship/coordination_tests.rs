@@ -1,4 +1,6 @@
 use super::*;
+use crate::ship::control_source::ControlSourceResolver;
+use std::collections::HashMap;
 
 fn station_address(id: &str) -> CoordinationAddress {
     CoordinationAddress::Station(StationId(id.to_string()))
@@ -41,7 +43,7 @@ fn address_for_system_resolves_owning_station_and_never_widens_unknown_to_ship()
         ),
         config
             .system(&crate::ship::system_registry::helm_steering_system_id())
-            .and_then(|system| system.station.clone())
+            .and_then(|system| config.system_home_station(system).cloned())
             .map(CoordinationAddress::Station)
     );
     assert_eq!(
@@ -60,7 +62,7 @@ fn address_for_system_resolves_owning_station_and_never_widens_unknown_to_ship()
         .systems
         .iter()
         .find(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
-        .and_then(|system| system.station.clone())
+        .and_then(|system| config.system_home_station(system).cloned())
         .expect("the default player hull stations its shield arcs");
     assert_eq!(
         address_for_system_kind(&config, crate::ship::system_registry::SHIELD_ARC_KIND),
@@ -75,7 +77,7 @@ fn address_for_system_resolves_owning_station_and_never_widens_unknown_to_ship()
         .filter(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
         .nth(1)
         .expect("the default hull has multiple shield arcs");
-    second_arc.station = Some(StationId("helm".into()));
+    second_arc.console = Some(phoenix_model::identity::ConsoleId("helm".into()));
     assert_eq!(
         address_for_system_kind(&split_kind, crate::ship::system_registry::SHIELD_ARC_KIND),
         None,
@@ -112,7 +114,7 @@ fn shipped_hulls_resolve_coordination_from_authored_topology_not_literal_station
             ),
             config
                 .system(&crate::ship::system_registry::helm_steering_system_id())
-                .and_then(|system| system.station.clone())
+                .and_then(|system| config.system_home_station(system).cloned())
                 .map(CoordinationAddress::Station),
             "{stem}: Helm address follows authored ownership"
         );
@@ -121,7 +123,7 @@ fn shipped_hulls_resolve_coordination_from_authored_topology_not_literal_station
             .systems
             .iter()
             .find(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
-            .and_then(|system| system.station.clone());
+            .and_then(|system| config.system_home_station(system).cloned());
         assert_eq!(
             address_for_system_kind(&config, crate::ship::system_registry::SHIELD_ARC_KIND),
             shield_owner.map(CoordinationAddress::Station),
@@ -297,485 +299,6 @@ fn a_ship_with_no_human_seats_broadcasts_to_nobody() {
         seat("helm", ControlSource::Ai, None),
     ];
     assert!(broadcast_to_ship(ControlSource::Ai, &seats).is_empty());
-}
-
-// ── Human-seeking systems (issue #984) ─────────────────────────────────
-
-/// OWNER-FIRST IS LOAD-BEARING: an earlier-authored human seat must not
-/// steal the console from the system's own (later-authored) human owner.
-#[test]
-fn owner_human_wins_over_earlier_authored_human() {
-    let seats = vec![
-        seat("captain", ControlSource::Human, Some("alice")),
-        seat("comms", ControlSource::Human, Some("bob")),
-    ];
-    let owner = StationId("comms".into());
-
-    let found = seek_human_host(Some(&owner), &seats).unwrap();
-
-    assert_eq!(found.station, StationId("comms".into()));
-    assert_eq!(found.holder.as_deref(), Some("bob"));
-}
-
-/// No owner (an ownerless/NPC-style seek, or a caller that has not
-/// resolved one) falls back to the first human in authored order.
-#[test]
-fn no_owner_falls_back_to_first_authored_human() {
-    let seats = vec![
-        seat("captain", ControlSource::Ai, None),
-        seat("helm", ControlSource::Human, Some("hikaru")),
-        seat("comms", ControlSource::Human, Some("bob")),
-    ];
-
-    let found = seek_human_host(None, &seats).unwrap();
-
-    assert_eq!(found.station, StationId("helm".into()));
-}
-
-#[test]
-fn no_humans_anywhere_yields_none() {
-    let seats = vec![
-        seat("captain", ControlSource::Ai, None),
-        seat("helm", ControlSource::Ai, None),
-    ];
-    let owner = StationId("comms".into());
-
-    assert!(seek_human_host(Some(&owner), &seats).is_none());
-    assert!(seek_human_host(None, &seats).is_none());
-}
-
-/// A human-held station with nobody browser-connected is not a seek
-/// candidate — same "control source vs. connected holder" distinction
-/// `broadcast_to_ship` already draws.
-#[test]
-fn disconnected_human_seat_is_skipped() {
-    let seats = vec![
-        seat("captain", ControlSource::Human, None),
-        seat("helm", ControlSource::Human, Some("hikaru")),
-    ];
-
-    let found = seek_human_host(None, &seats).unwrap();
-
-    assert_eq!(found.station, StationId("helm".into()));
-}
-
-/// The owner seat is backfilled (AI) — not human-and-connected — so the
-/// seek continues past it to the next human in authored order.
-#[test]
-fn owner_is_ai_falls_through_to_later_human() {
-    let seats = vec![
-        seat("comms", ControlSource::Ai, Some("stale-token")),
-        seat("captain", ControlSource::Human, Some("alice")),
-    ];
-    let owner = StationId("comms".into());
-
-    let found = seek_human_host(Some(&owner), &seats).unwrap();
-
-    assert_eq!(found.station, StationId("captain".into()));
-    assert_eq!(found.holder.as_deref(), Some("alice"));
-}
-
-// ── Authored seek order (issue #984) ──────────────────────────────────
-
-/// The destroyer's shape: a bridge where the system's owner (Tactical) is
-/// empty and three other seats are crewed. The DERIVED order would hand the
-/// system to the earliest authored seat; the AUTHORED order hands it to
-/// Engineering.
-fn destroyer_bridge() -> Vec<ShipSeat> {
-    vec![
-        seat("captain", ControlSource::Human, Some("alice")),
-        seat("helm", ControlSource::Human, Some("hikaru")),
-        seat("tactical", ControlSource::Ai, None),
-        seat("engineering", ControlSource::Human, Some("scotty")),
-    ]
-}
-
-fn order(ids: &[&str]) -> Vec<StationId> {
-    ids.iter().map(|s| StationId((*s).into())).collect()
-}
-
-#[test]
-fn an_authored_order_is_walked_instead_of_the_derived_one() {
-    let seats = destroyer_bridge();
-    let owner = StationId("tactical".into());
-
-    let derived = seek_human_host(Some(&owner), &seats).unwrap();
-    assert_eq!(
-        derived.station,
-        StationId("captain".into()),
-        "the derived walk takes the earliest authored human"
-    );
-
-    let authored = seek_human_host_in(
-        Some(&owner),
-        &order(&["tactical", "engineering", "captain", "helm"]),
-        &seats,
-    )
-    .unwrap();
-    assert_eq!(
-        authored.station,
-        StationId("engineering".into()),
-        "John's ruling: Engineering is promoted ahead of the Captain"
-    );
-}
-
-/// The authored order starts at the owner, so a crewed owner still wins —
-/// the promotion only decides who gets it when Tactical is empty.
-#[test]
-fn an_authored_order_still_prefers_a_crewed_owner() {
-    let mut seats = destroyer_bridge();
-    seats[2] = seat("tactical", ControlSource::Human, Some("chang"));
-
-    let found = seek_human_host_in(
-        Some(&StationId("tactical".into())),
-        &order(&["tactical", "engineering", "captain", "helm"]),
-        &seats,
-    )
-    .unwrap();
-
-    assert_eq!(found.station, StationId("tactical".into()));
-}
-
-/// The authored walk skips non-human seats exactly as the derived one does:
-/// an order chooses among humans, it never conjures one.
-#[test]
-fn an_authored_order_with_no_humans_yields_none() {
-    let seats = vec![
-        seat("captain", ControlSource::Ai, Some("alice")),
-        seat("tactical", ControlSource::Offline, None),
-        seat("engineering", ControlSource::Human, None),
-    ];
-
-    assert!(
-        seek_human_host_in(
-            Some(&StationId("tactical".into())),
-            &order(&["tactical", "engineering", "captain"]),
-            &seats,
-        )
-        .is_none(),
-        "backfilled, offline and disconnected seats are all skipped"
-    );
-}
-
-/// THE DEFAULT IS THE OLD PATH, not a re-implementation of it. Every seat
-/// arrangement a four-station hull can be in, against every owner it can
-/// name: an empty `seek_order` must choose the identical seat.
-#[test]
-fn an_empty_seek_order_chooses_exactly_what_the_derived_walk_chooses() {
-    let stations = ["captain", "helm", "tactical", "engineering"];
-    let controls = [
-        (ControlSource::Human, Some("crew")),
-        (ControlSource::Human, None),
-        (ControlSource::Ai, Some("crew")),
-        (ControlSource::Offline, None),
-    ];
-
-    // Base 4 over 4 seats: 256 bridges, each tried against all four owners
-    // and against no owner at all.
-    for combo in 0..256u32 {
-        let seats: Vec<ShipSeat> = stations
-            .iter()
-            .enumerate()
-            .map(|(i, id)| {
-                let (control, holder) = controls[((combo >> (2 * i)) & 0b11) as usize];
-                seat(id, control, holder)
-            })
-            .collect();
-
-        let owners: Vec<Option<StationId>> = std::iter::once(None)
-            .chain(stations.iter().map(|s| Some(StationId((*s).into()))))
-            .collect();
-        for owner in &owners {
-            assert_eq!(
-                seek_human_host_in(owner.as_ref(), &[], &seats),
-                seek_human_host(owner.as_ref(), &seats),
-                "bridge {combo:#010b}, owner {owner:?}"
-            );
-        }
-    }
-}
-
-/// A name no seat answers to is stepped over, not treated as the end of the
-/// walk. `ShipConfig::validate` makes this unreachable from parsed TOML;
-/// the property is here so the pure function has no cliff for a caller that
-/// assembles the two halves by hand.
-#[test]
-fn an_authored_order_steps_over_a_station_that_is_not_seated() {
-    let seats = vec![
-        seat("captain", ControlSource::Human, Some("alice")),
-        seat("tactical", ControlSource::Ai, None),
-    ];
-
-    let found = seek_human_host_in(
-        Some(&StationId("tactical".into())),
-        &order(&["tactical", "science", "captain"]),
-        &seats,
-    )
-    .unwrap();
-
-    assert_eq!(found.station, StationId("captain".into()));
-}
-
-// ── seeking_seats (issue #984) ────────────────────────────────────────
-
-/// A hull shaped like the destroyer's Tactical seat: one station owning a
-/// mixed roster, plus a bare station whose ONLY system is human-seeking
-/// (the battleship's `comms`/`navigation` shape).
-fn seeking_config() -> crate::ship::config::ShipConfig {
-    crate::ship::config::ShipConfig::from_toml(
-        r#"
-[[station]]
-id = "captain"
-name = "Captain"
-description = "Command."
-rank = "Cpt."
-
-[[station]]
-id = "tactical"
-name = "Tactical"
-description = "Guns."
-rank = "Ltn."
-
-[[station]]
-id = "comms"
-name = "Comms"
-description = "Chatter."
-rank = "Ens."
-
-[[system]]
-id = "captain"
-kind = "captain"
-station = "captain"
-
-[[system]]
-id = "tactical-radar"
-kind = "tactical_radar"
-station = "tactical"
-
-[[system]]
-id = "navigation"
-kind = "navigation"
-station = "tactical"
-human_seeking = true
-
-[[system]]
-id = "comms"
-kind = "comms"
-station = "comms"
-human_seeking = true
-"#,
-        &["captain", "tactical_radar", "navigation", "comms"],
-    )
-    .unwrap()
-}
-
-fn ratings(pairs: &[(&str, &str)]) -> HashMap<StationId, String> {
-    pairs
-        .iter()
-        .map(|(s, r)| (StationId((*s).into()), (*r).to_string()))
-        .collect()
-}
-
-/// The fixpoint guard: a seeking system's own `ControlSource` — which this
-/// very resolution WROTE last tick — must not be readable as evidence that
-/// its host station is crewed. Here `navigation` lives on Tactical and is
-/// `Human` because the seek put it there; Tactical's real roster is
-/// backfilled, so the seat must still read `Ai`.
-#[test]
-fn a_seeking_systems_own_source_is_not_evidence_about_its_host_seat() {
-    let config = seeking_config();
-    let mut resolver = ControlSourceResolver::new();
-    resolver.set(SystemId("tactical-radar".into()), ControlSource::Ai);
-    resolver.set(SystemId("navigation".into()), ControlSource::Human);
-    resolver.set(SystemId("comms".into()), ControlSource::Human);
-
-    let seats = seeking_seats(&config, &resolver, &ratings(&[]), |_| {
-        Some("someone".to_string())
-    });
-
-    let tactical = seats
-        .iter()
-        .find(|s| s.station == StationId("tactical".into()))
-        .unwrap();
-    assert_eq!(
-        tactical.control,
-        ControlSource::Ai,
-        "only `tactical-radar` counts toward the Tactical seat; folding the \
-         seek's own write back in would latch the console to itself"
-    );
-}
-
-/// A station whose entire roster is human-seeking has no rating evidence
-/// left to reduce, so the seat is decided by its ACTIVE RATING. This is the
-/// battleship's `comms` and `navigation` stations exactly.
-#[test]
-fn a_station_owning_only_seeking_systems_is_decided_by_its_rating() {
-    let config = seeking_config();
-    let resolver = ControlSourceResolver::new();
-    let comms = StationId("comms".into());
-
-    let manned = seeking_seats(
-        &config,
-        &resolver,
-        &ratings(&[("comms", "Standard")]),
-        |_| Some("bob".to_string()),
-    );
-    assert_eq!(
-        manned.iter().find(|s| s.station == comms).unwrap().control,
-        ControlSource::Human,
-        "a rated, connected Comms officer must be able to host their own console"
-    );
-
-    let backfilled = seeking_seats(
-        &config,
-        &resolver,
-        &ratings(&[("comms", crate::ship::rating::BACKFILL_RATING)]),
-        |_| Some("bob".to_string()),
-    );
-    assert_eq!(
-        backfilled
-            .iter()
-            .find(|s| s.station == comms)
-            .unwrap()
-            .control,
-        ControlSource::Ai,
-        "an officer who asked the AI to run their station does not get the \
-         console pushed back at them"
-    );
-
-    let unrated = seeking_seats(&config, &resolver, &ratings(&[]), |_| {
-        Some("bob".to_string())
-    });
-    assert_eq!(
-        unrated.iter().find(|s| s.station == comms).unwrap().control,
-        ControlSource::Human,
-        "an explicit Backfill is the ONLY thing that reads as automation — a \
-         station with no rating recorded and a person sitting at it is a human seat"
-    );
-
-    let empty_seat = seeking_seats(&config, &resolver, &ratings(&[]), |_| None);
-    assert_eq!(
-        empty_seat
-            .iter()
-            .find(|s| s.station == comms)
-            .unwrap()
-            .control,
-        ControlSource::Offline,
-        "…and with nobody connected it is nobody's seat at all"
-    );
-}
-
-/// Issue #1104 AC3: when a directly-held seat's holder steps AFK, their
-/// Station is Backfilled — every owned System delegated to AI. `seeking_seats`
-/// must then read that seat as `Ai`, not `Human`, so a human-seeking System's
-/// seek walks past it exactly as it walks past a disconnected seat. No AFK
-/// parameter is needed here: the Backfill the AFK entry applies is precisely
-/// what excludes the seat, and this pins that it does even while the AFK
-/// player stays connected and keeps the seat.
-#[test]
-fn an_afk_backfilled_seat_is_not_offered_as_a_human_host() {
-    let config = seeking_config();
-    let mut resolver = ControlSourceResolver::new();
-    // AFK entry Backfilled the captain seat: its owned `captain` system is Ai.
-    resolver.set(SystemId("captain".into()), ControlSource::Ai);
-
-    let seats = seeking_seats(
-        &config,
-        &resolver,
-        &ratings(&[("captain", crate::ship::rating::BACKFILL_RATING)]),
-        // The AFK player is still CONNECTED and still holds the seat.
-        |station| (station.0 == "captain").then(|| "afk-captain".to_string()),
-    );
-
-    let captain = seats
-        .iter()
-        .find(|s| s.station == StationId("captain".into()))
-        .unwrap();
-    assert_eq!(
-        captain.control,
-        ControlSource::Ai,
-        "a Backfilled (AFK) seat reads Ai — a human-seeking seek skips it"
-    );
-    assert_eq!(
-        captain.holder.as_deref(),
-        Some("afk-captain"),
-        "AFK retains the seat even though it now hosts nobody"
-    );
-}
-
-#[test]
-fn a_directly_held_human_seeking_station_can_host_a_legacy_seek_without_nesting() {
-    let mut config = seeking_config();
-    let comms = config
-        .stations
-        .iter_mut()
-        .find(|station| station.id.0 == "comms")
-        .expect("fixture has a Comms Station");
-    comms.human_seeking = true;
-
-    let connected = seeking_seats(
-        &config,
-        &ControlSourceResolver::new(),
-        &ratings(&[("comms", "Standard")]),
-        |station| (station.0 == "comms").then(|| "bob".to_string()),
-    );
-    assert_eq!(
-        connected
-            .iter()
-            .find(|seat| seat.station.0 == "comms")
-            .unwrap()
-            .control,
-        ControlSource::Human,
-        "a connected direct holder is an eligible legacy-seek destination"
-    );
-
-    let visiting_only = seeking_seats(
-        &config,
-        &ControlSourceResolver::new(),
-        &ratings(&[("comms", "Standard")]),
-        |_| None,
-    );
-    assert_eq!(
-        visiting_only
-            .iter()
-            .find(|seat| seat.station.0 == "comms")
-            .unwrap()
-            .control,
-        ControlSource::Offline,
-        "presentation as a visiting tab supplies no direct Session holder and must not nest"
-    );
-
-    let delegated = seeking_seats(
-        &config,
-        &ControlSourceResolver::new(),
-        &ratings(&[("comms", crate::ship::rating::BACKFILL_RATING)]),
-        |station| (station.0 == "comms").then(|| "bob".to_string()),
-    );
-    assert_eq!(
-        delegated
-            .iter()
-            .find(|seat| seat.station.0 == "comms")
-            .unwrap()
-            .control,
-        ControlSource::Offline,
-        "an AI-operated human-seeking Station is not a human host"
-    );
-}
-
-/// Seats come back in AUTHORED station order — the property `seek_human_host`
-/// and two lockstep peers both depend on.
-#[test]
-fn seeking_seats_are_returned_in_authored_station_order() {
-    let config = seeking_config();
-    let resolver = ControlSourceResolver::new();
-    let seats = seeking_seats(&config, &resolver, &ratings(&[]), |_| None);
-    assert_eq!(
-        seats
-            .iter()
-            .map(|s| s.station.0.as_str())
-            .collect::<Vec<_>>(),
-        vec!["captain", "tactical", "comms"],
-    );
 }
 
 // ── Lag queue ─────────────────────────────────────────────────────────
@@ -1009,7 +532,25 @@ fn explicit_address_survives_the_delay_unchanged() {
 /// supplies the delayed message's addressee label.
 #[test]
 fn coordination_addressee_names_station_or_ship_from_the_explicit_address() {
-    let config = seeking_config();
+    let config = crate::ship::config::ShipConfig::from_toml(
+        r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = ""
+rank = ""
+[[console]]
+id = "navigation-screen"
+home_station = "tactical"
+screen = "fixture.html"
+[[system]]
+id = "navigation"
+kind = "navigation"
+console = "navigation-screen"
+"#,
+        &["navigation"],
+    )
+    .unwrap();
     let navigation_address = address_for_system(
         &config,
         &crate::ship::system_registry::navigation_system_id(),
@@ -1050,9 +591,6 @@ id = "power"
 name = "Power"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["shields", "repair"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Floor"
 automated_systems = []
@@ -1074,9 +612,6 @@ id = "shields"
 name = "Shields"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["sensors"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Visit"
 automated_systems = []
@@ -1093,11 +628,29 @@ automated_systems = []
 [[system]]
 id = "power-system"
 kind = "test"
-station = "power"
+console = "power"
 [[system]]
 id = "shields-system"
 kind = "test"
-station = "shields"
+console = "shields"
+
+[[console]]
+id = "power"
+home_station = "power"
+screen = "fixture.html"
+
+human_seeking = true
+host_order = ["shields", "repair"]
+visiting_rating = "Visit"
+
+[[console]]
+id = "shields"
+home_station = "shields"
+screen = "fixture.html"
+
+human_seeking = true
+host_order = ["sensors"]
+visiting_rating = "Visit"
 "#,
         &["test"],
     )
@@ -1107,9 +660,11 @@ station = "shields"
 #[test]
 fn complete_station_prefers_direct_then_ordered_fallback_then_ai() {
     let config = visiting_config();
-    let power = config.station(&StationId("power".into())).unwrap();
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
     let no_floor = std::collections::BTreeSet::new();
-    let direct = resolve_visiting_station(
+    let direct = resolve_console_for_test(
         &config,
         power,
         |id| id.0 == "power" || id.0 == "repair",
@@ -1117,7 +672,7 @@ fn complete_station_prefers_direct_then_ordered_fallback_then_ai() {
     );
     assert_eq!(direct.host, Some(StationId("power".into())));
 
-    let visiting = resolve_visiting_station(
+    let visiting = resolve_console_for_test(
         &config,
         power,
         |id| id.0 == "repair" || id.0 == "sensors",
@@ -1125,7 +680,7 @@ fn complete_station_prefers_direct_then_ordered_fallback_then_ai() {
     );
     assert_eq!(visiting.host, Some(StationId("repair".into())));
 
-    let exhausted = resolve_visiting_station(&config, power, |id| id.0 == "sensors", &no_floor);
+    let exhausted = resolve_console_for_test(&config, power, |id| id.0 == "sensors", &no_floor);
     assert_eq!(
         exhausted.host, None,
         "an unrelated human is not an implicit fallback"
@@ -1141,12 +696,14 @@ fn an_ineligible_host_is_skipped_to_the_next_eligible_one() {
     // AND eligible: the walk skips shields — first in power's host_order —
     // and lands on repair, exactly as if shields were unheld.
     let config = visiting_config();
-    let power = config.station(&StationId("power".into())).unwrap();
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
     let no_floor = std::collections::BTreeSet::new();
 
     let held = |id: &StationId| id.0 == "shields" || id.0 == "repair";
     let eligible_for_power = |id: &StationId| id.0 != "shields";
-    let assignment = resolve_visiting_station(
+    let assignment = resolve_console_for_test(
         &config,
         power,
         |id| held(id) && eligible_for_power(id),
@@ -1161,7 +718,7 @@ fn an_ineligible_host_is_skipped_to_the_next_eligible_one() {
     // With every held candidate ineligible the composed predicate is false
     // everywhere, so the walk falls through to AI exactly as it would with no
     // human host at all — reason/settings never enter the resolver.
-    let none_eligible = resolve_visiting_station(&config, power, |_id| false, &no_floor);
+    let none_eligible = resolve_console_for_test(&config, power, |_id| false, &no_floor);
     assert_eq!(none_eligible.host, None);
     assert_eq!(none_eligible.rating, crate::ship::rating::BACKFILL_RATING);
 }
@@ -1171,8 +728,10 @@ fn generic_power_repair_and_shields_sensors_chains_need_no_band_d_hull() {
     let config = visiting_config();
     let none = std::collections::BTreeSet::new();
     for (visitor, expected) in [("power", "repair"), ("shields", "sensors")] {
-        let station = config.station(&StationId(visitor.into())).unwrap();
-        let assignment = resolve_visiting_station(&config, station, |id| id.0 == expected, &none);
+        let station = config
+            .console(&crate::core::messages::ConsoleId(visitor.into()))
+            .unwrap();
+        let assignment = resolve_console_for_test(&config, station, |id| id.0 == expected, &none);
         assert_eq!(assignment.host, Some(StationId(expected.into())));
     }
 }
@@ -1180,9 +739,11 @@ fn generic_power_repair_and_shields_sensors_chains_need_no_band_d_hull() {
 #[test]
 fn scenario_floor_raises_the_authored_visiting_rating() {
     let config = visiting_config();
-    let power = config.station(&StationId("power".into())).unwrap();
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
     let floor = std::iter::once(SystemId("power-system".into())).collect();
-    let assignment = resolve_visiting_station(&config, power, |id| id.0 == "repair", &floor);
+    let assignment = resolve_console_for_test(&config, power, |id| id.0 == "repair", &floor);
     assert_eq!(assignment.rating, "Floor");
 }
 
@@ -1195,9 +756,6 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Simplified"
 [[station.rating]]
 name = "Std"
 automated_systems = []
@@ -1217,14 +775,25 @@ automated_systems = []
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
+
+[[console]]
+id = "navigation"
+home_station = "navigation"
+screen = "fixture.html"
+
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Simplified"
 "#,
         &["navigation"],
     )
     .unwrap();
-    let navigation = config.station(&StationId("navigation".into())).unwrap();
+    let navigation = config
+        .console(&crate::core::messages::ConsoleId("navigation".into()))
+        .unwrap();
     let floor = std::iter::once(SystemId("navigation".into())).collect();
-    let assignment = resolve_visiting_station(&config, navigation, |id| id.0 == "captain", &floor);
+    let assignment = resolve_console_for_test(&config, navigation, |id| id.0 == "captain", &floor);
     assert_eq!(assignment.host, Some(StationId("captain".into())));
     assert_eq!(assignment.rating, "Std");
 }
@@ -1240,9 +809,11 @@ fn impossible_scenario_floor_refuses_human_host_and_falls_back_to_ai() {
     for rating in &mut power.ratings {
         rating.automated_systems = vec![SystemId("power-system".into())];
     }
-    let power = config.station(&StationId("power".into())).unwrap();
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
     let floor = std::iter::once(SystemId("power-system".into())).collect();
-    let assignment = resolve_visiting_station(&config, power, |id| id.0 == "repair", &floor);
+    let assignment = resolve_console_for_test(&config, power, |id| id.0 == "repair", &floor);
     assert_eq!(assignment.host, None);
     assert_eq!(assignment.rating, crate::ship::rating::BACKFILL_RATING);
 }
@@ -1260,8 +831,10 @@ fn scenario_floor_vocabulary_resolves_station_families_and_system_kinds_per_hull
 #[test]
 fn directly_held_human_seeking_station_may_host_without_enabling_nesting() {
     let config = visiting_config();
-    let power = config.station(&StationId("power".into())).unwrap();
-    let directly_held = resolve_visiting_station(
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
+    let directly_held = resolve_console_for_test(
         &config,
         power,
         |id| id.0 == "shields",
@@ -1273,7 +846,7 @@ fn directly_held_human_seeking_station_may_host_without_enabling_nesting() {
         "Station type does not disqualify an active direct holder"
     );
 
-    let shields_is_only_visiting = resolve_visiting_station(
+    let shields_is_only_visiting = resolve_console_for_test(
         &config,
         power,
         |id| id.0 == "repair",
@@ -1295,12 +868,14 @@ fn directly_held_human_seeking_station_may_host_without_enabling_nesting() {
 #[test]
 fn a_disconnect_relocates_a_human_seeking_station_to_the_next_host() {
     let config = visiting_config();
-    let power = config.station(&StationId("power".into())).unwrap();
+    let power = config
+        .console(&crate::core::messages::ConsoleId("power".into()))
+        .unwrap();
     let none = std::collections::BTreeSet::new();
 
     // Shields officer seated: power visits shields' authored host order
     // — host_order = ["shields", "repair"], shields first and held.
-    let before = resolve_visiting_station(
+    let before = resolve_console_for_test(
         &config,
         power,
         |id| id.0 == "shields" || id.0 == "repair",
@@ -1312,10 +887,107 @@ fn a_disconnect_relocates_a_human_seeking_station_to_the_next_host() {
     // so the very same recompute relocates power on to `repair`, the next
     // authored host that is still held. Nothing about power's own state is
     // touched — the resolver reads the seat map and nothing else.
-    let after = resolve_visiting_station(&config, power, |id| id.0 == "repair", &none);
+    let after = resolve_console_for_test(&config, power, |id| id.0 == "repair", &none);
     assert_eq!(
         after.host,
         Some(StationId("repair".into())),
         "losing the current host relocates the visiting Station to the next authored one",
+    );
+}
+
+// Exercise the production Console resolver with no directly selected rating.
+fn resolve_console_for_test(
+    config: &crate::ship::config::ShipConfig,
+    console: &phoenix_model::console::ConsoleConfig,
+    available: impl Fn(&StationId) -> bool,
+    floor: &std::collections::BTreeSet<SystemId>,
+) -> phoenix_model::console::ConsoleHostSnapshot {
+    crate::ship::console_ownership::resolve_assignment(
+        config,
+        console,
+        available,
+        &HashMap::new(),
+        floor,
+    )
+}
+
+#[test]
+fn detached_shipped_navigation_keeps_its_localized_sender_when_addressing_helm() {
+    for hull in ["alliance_destroyer", "alliance_cruiser"] {
+        let config =
+            crate::test_fixtures::load_entity_config(&format!("assets/entities/{hull}.toml"))
+                .unwrap()
+                .ship_config
+                .unwrap();
+        let navigation = crate::ship::system_registry::navigation_system_id();
+        assert!(config
+            .console_for_system(&navigation)
+            .unwrap()
+            .home_station
+            .is_none());
+        assert_eq!(
+            system_addressee_label(&config, &navigation),
+            "station.navigation.name"
+        );
+        let address = address_for_system(
+            &config,
+            &crate::ship::system_registry::helm_steering_system_id(),
+        )
+        .unwrap();
+        assert_eq!(coordination_addressee_label(&address), "station.helm.name");
+    }
+}
+
+#[test]
+fn detached_sender_uses_authored_name_or_console_id_and_only_unowned_is_core() {
+    let mut config: crate::ship::config::ShipConfig = toml::from_str(
+        r#"
+[[console]]
+id="custom-display"
+name="custom.localized.name"
+[[system]]
+id="capability"
+kind="test"
+console="custom-display"
+"#,
+    )
+    .unwrap();
+    let id = SystemId("capability".into());
+    assert_eq!(
+        system_addressee_label(&config, &id),
+        "custom.localized.name"
+    );
+    config.consoles[0].name.clear();
+    assert_eq!(system_addressee_label(&config, &id), "custom-display");
+    config.systems[0].console = None;
+    assert_eq!(system_addressee_label(&config, &id), CHATTER_ADDRESSEE_CORE);
+    assert_eq!(
+        system_addressee_label(&config, &SystemId("missing".into())),
+        CHATTER_ADDRESSEE_CORE
+    );
+}
+
+#[test]
+fn movable_and_detached_console_addresses_survive_host_changes() {
+    let mut config = visiting_config();
+    let system = SystemId("power-system".into());
+    let owner = config.console_for_system(&system).unwrap().id.clone();
+    let expected = CoordinationAddress::Console(owner.clone());
+    assert_eq!(address_for_system(&config, &system), Some(expected.clone()));
+    let console = config
+        .consoles
+        .iter_mut()
+        .find(|console| console.id == owner)
+        .unwrap();
+    console.home_station = None;
+    assert_eq!(address_for_system(&config, &system), Some(expected.clone()));
+    assert_eq!(
+        address_for_system(&config, &SystemId("missing".into())),
+        None
+    );
+    let encoded = serde_json::to_string(&expected).unwrap();
+    assert_eq!(
+        serde_json::from_str::<CoordinationAddress>(&encoded).unwrap(),
+        expected
     );
 }

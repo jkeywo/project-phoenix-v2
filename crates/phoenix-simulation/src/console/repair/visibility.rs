@@ -7,63 +7,26 @@
 //! `use crate::modifiers::repair_teams::RepairTeams;` below, and its dependency
 //! on the authoritative damage store is `use crate::ship::damage::SystemHull;`.
 //!
-//! # Why a projection exists at all
+//! Exact health detail is projected on the host. A Console sees its owned
+//! equipment; the Repair Console also sees true Core and equipment with a team
+//! on site. An explicit Repair feed carries that producing Console's projected
+//! detail. A declared System whose Console has no home Station is still owned.
 //!
-//! Before #737 every connected client received exact per-system hull detail for
-//! the *whole* ship (`SystemHullUpdate { entries }` at `Target::All`, and
-//! `RepairBlackboard.system_hull` inside a `Target::All` `BlackboardUpdate`).
-//! Role separation was presentation-only in the client, which means the hidden
-//! rows were already on every phone. The four view states below are therefore
-//! decided **here, on the host**, and each recipient is sent only what it is
-//! entitled to see:
+//! Live and reconnect `SystemHullUpdate` use `projection_for_host`: the union
+//! of the recipient's currently hosted Console views. Each mounted client tab
+//! then narrows that union to its own view. Aggregate and destroyed fractions
+//! remain public whole-ship scalars. Hosting never changes the underlying hull.
 //!
-//! | View state | Who sees it | Rule |
-//! |---|---|---|
-//! | aggregate hull | everyone | ship-wide fraction over *every* damageable system |
-//! | destroyed share | everyone | ship-wide fraction of capacity at the `Destroyed` tier (issue #1014) |
-//! | Core detail | the Engineering holder | hull entries no station owns |
-//! | station-owner detail | that station's holder | hull entries its station owns |
-//! | on-site detail | the Engineering holder | non-Core entries with a team *on site* |
-//!
-//! "Core" is an ownerless bucket, not a flag: a hull entry whose `system_id`
-//! has no `[[system]]` declaration carrying a `station` belongs to Core. That
-//! is the same rule the client used to apply locally, lifted to the host.
-//!
-//! # Two gates, not one
-//!
-//! Filtering *rows* is only half of it. The `RepairBlackboard` also carries
-//! `queue_depth` (every damaged system's exact tier and HP deficit),
-//! `priority_targets` (exact SystemIds reachable by an on-site sweep), and
-//! `teams` (each team's destination system). Those are Engineering's working state, and
-//! fanning the blackboard out to every connected token made the row filter
-//! cosmetic wherever a system was damaged enough to be queued — which is
-//! precisely the case that matters. So there are two gates:
-//!
-//! 1. **Audience** — [`HullVisibility::may_receive_repair_blackboard`] sends the
-//!    repair blackboard to the Engineering holder alone. Everyone else is sent
-//!    an empty one, which also clears a stale copy off the phone of a player who
-//!    has just moved off Engineering.
-//! 2. **Contents** — [`HullVisibility::project_repair_blackboard`] then projects
-//!    the fields that carry exact detail, field by field and never with a
-//!    struct-update spread.
-//!
-//! The same two gates apply to `SystemHullUpdate` (which has no audience gate —
-//! every station needs its own rows) and to the reconnect resync.
-//!
-//! # One code path, two callers
-//!
-//! [`HullVisibility`] is pure and Bevy-free once constructed. Both the live
-//! broadcast ([`push_hull_updates`], [`project_repair_blackboards`]) and the
-//! reconnect resync ([`hull_update_for_token`], [`project_blackboard_for_token`])
-//! build the same struct and call the same [`HullVisibility::entries_for`], so a
-//! reconnecting client cannot be handed detail the live path withholds.
+//! The per-recipient cache only suppresses repeated presentation; it is not
+//! authoritative simulation state. Repair blackboards use the same ownership
+//! and on-site rules through `project_repair_for_console`.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    QueueEntryPreview, RepairBlackboard, ServerMessage, StationId, SystemBlackboard,
+    QueueEntryPreview, RepairBlackboard, RepairGroup, ServerMessage, StationId, SystemBlackboard,
     SystemHullStatus, SystemId,
 };
 use crate::lobby::handler::Target;
@@ -156,19 +119,17 @@ fn reconnect_hull_projection(
     if requests.0.is_empty() {
         return Vec::new();
     }
-    let visibility = inputs.visibility();
     requests
         .0
         .iter()
         .map(|token| {
-            let Some(vis) = visibility.as_ref() else {
-                return Vec::new();
-            };
             let station = inputs
                 .sessions
                 .as_ref()
                 .and_then(|s| s.0.station_for_token(token));
-            let projection = vis.projection_for(station);
+            let Some(projection) = inputs.projection_for(station) else {
+                return Vec::new();
+            };
             vec![ServerMessage::SystemHullUpdate {
                 entries: projection.entries,
                 aggregate_fraction: projection.aggregate_fraction,
@@ -190,57 +151,20 @@ pub(crate) struct HullProjectionInputs<'w, 's> {
             &'static crate::entities::spawner::EntitySystemHull,
             &'static crate::ship_plugin::ShipConfigComponent,
             Option<&'static super::server::ShipRepairTeams>,
+            Option<&'static crate::ship::components::ConsoleHosts>,
         ),
         With<crate::server_app::LocalShip>,
     >,
 }
 impl HullProjectionInputs<'_, '_> {
     pub(crate) fn visibility(&self) -> Option<HullVisibility> {
-        let (hull, config, teams) = self.hulls.iter().next()?;
+        let (hull, config, teams, _) = self.hulls.iter().next()?;
         Some(ship_hull_visibility(&hull.0, &config.0, teams))
     }
-}
-
-/// Last-sent repair blackboard projection per session token.
-///
-/// `LastBroadcastBlackboards` caches the *internal* (unprojected) blackboard
-/// and answers "did anything change at all". This answers "did **this
-/// recipient's** view change", which is the question that matters once the
-/// wire payload differs per token.
-///
-/// `stations` records which station each token held when its projection was
-/// computed. The internal blackboard is not the only input to a projection —
-/// the recipient's station is the other one — so a player moving Engineering →
-/// Helm changes what they may see without changing anything the
-/// `LastBroadcastBlackboards` diff can observe. On an idle, undamaged ship the
-/// internal blackboard may never change again, which would leave the stale core
-/// detail on that phone indefinitely. [`Self::stations_changed`] is the trigger
-/// that closes that window.
-#[derive(Resource, Default)]
-pub struct LastVisibleRepairBlackboard {
-    pub projections: HashMap<String, RepairBlackboard>,
-    pub stations: HashMap<String, Option<StationId>>,
-}
-
-impl LastVisibleRepairBlackboard {
-    /// True when any connected token holds a different station than it did when
-    /// its cached projection was computed (including a token seen for the first
-    /// time).
-    pub fn stations_changed(&self, viewers: &[(String, Option<StationId>)]) -> bool {
-        viewers
-            .iter()
-            .any(|(token, station)| self.stations.get(token) != Some(station))
-    }
-
-    /// Record the station each connected token currently holds.
-    pub fn record_stations(&mut self, viewers: &[(String, Option<StationId>)]) {
-        self.stations = viewers.iter().cloned().collect();
-    }
-
-    /// Forget everything — used when the game restarts.
-    pub fn clear(&mut self) {
-        self.projections.clear();
-        self.stations.clear();
+    pub(crate) fn projection_for(&self, station: Option<&StationId>) -> Option<HullProjection> {
+        let (hull, config, teams, hosts) = self.hulls.iter().next()?;
+        let vis = ship_hull_visibility(&hull.0, &config.0, teams);
+        Some(vis.projection_for_host(&config.0, hosts.unwrap_or(&Default::default()), station))
     }
 }
 
@@ -255,6 +179,9 @@ pub struct HullVisibility {
     entries: Vec<SystemHullStatus>,
     /// Owning station per system id; `None` means ownerless — the Core bucket.
     owner_of: HashMap<SystemId, Option<StationId>>,
+    /// Declared equipment remains owned even when its Console has no home seat.
+    console_owned: std::collections::HashSet<SystemId>,
+    group_of: HashMap<SystemId, RepairGroup>,
     /// The station that holds the `repair` system — "Engineering" in the
     /// role sense. Resolved from ship config, never assumed by name (it is
     /// `repair` on the battleship and `engineering` on cruiser/destroyer).
@@ -271,9 +198,22 @@ impl HullVisibility {
         engineering_station: Option<StationId>,
         on_site: Vec<SystemId>,
     ) -> Self {
+        let group_of = owner_of
+            .iter()
+            .map(|(id, owner)| {
+                (
+                    id.clone(),
+                    owner
+                        .clone()
+                        .map_or(RepairGroup::Core, RepairGroup::Station),
+                )
+            })
+            .collect();
         Self {
             entries,
             owner_of,
+            group_of,
+            console_owned: Default::default(),
             engineering_station,
             on_site,
         }
@@ -297,14 +237,16 @@ impl HullVisibility {
         let owner_of = entries
             .iter()
             .map(|e| {
-                let owner = config.system(&e.system_id).and_then(|s| s.station.clone());
+                let owner = config
+                    .system(&e.system_id)
+                    .and_then(|s| config.system_home_station(s).cloned());
                 (e.system_id.clone(), owner)
             })
             .collect();
 
         let engineering_station = config
             .system(&repair_system_id())
-            .and_then(|s| s.station.clone());
+            .and_then(|s| config.system_home_station(s).cloned());
 
         // `on_site_systems` is the named predicate on `RepairTeams`: only
         // `Repairing` counts. A team still `Travelling` has not arrived, and a
@@ -315,7 +257,24 @@ impl HullVisibility {
             .map(|t| t.on_site_systems().cloned().collect())
             .unwrap_or_default();
 
-        Self::new(entries, owner_of, engineering_station, on_site)
+        let mut visibility = Self::new(entries, owner_of, engineering_station, on_site);
+        visibility.group_of = visibility
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.system_id.clone(),
+                    crate::modifiers::repair_teams::repair_group(&entry.system_id, config),
+                )
+            })
+            .collect();
+        visibility.console_owned = config
+            .systems
+            .iter()
+            .filter(|system| system.console.is_some())
+            .map(|system| system.id.clone())
+            .collect();
+        visibility
     }
 
     /// Ship-wide hull fraction (0.0–1.0) across **every** damageable system.
@@ -371,7 +330,7 @@ impl HullVisibility {
     /// another station's damage rows it is not entitled to hold (issue #1100).
     /// Each entry is summed-current over summed-max across exactly that
     /// station's damageable systems; ownerless systems accumulate under the
-    /// [`CORE_BUCKET_ID`] bucket, matching [`Self::can_see_station`].
+    /// [`CORE_BUCKET_ID`] bucket, matching [`Self::can_see_group`].
     ///
     /// A station whose damageable capacity sums to zero — it owns only systems
     /// the ship declares at zero max, or (as bucketed here) none at all —
@@ -438,7 +397,74 @@ impl HullVisibility {
 
     /// True when a hull entry has no owning station — the Core bucket.
     fn is_core(&self, system_id: &SystemId) -> bool {
-        matches!(self.owner_of.get(system_id), Some(None) | None)
+        !self.console_owned.contains(system_id)
+            && matches!(self.owner_of.get(system_id), Some(None) | None)
+    }
+
+    /// Exact health belongs to a Console, independent of where it is hosted.
+    pub fn console_can_see(
+        &self,
+        config: &ShipConfig,
+        console: &crate::core::messages::ConsoleId,
+        system: &SystemId,
+    ) -> bool {
+        let Some(definition) = config.console(console) else {
+            return false;
+        };
+        if config
+            .console_for_system(system)
+            .is_some_and(|owner| &owner.id == console)
+        {
+            return true;
+        }
+        let Some(repair) = config
+            .systems
+            .iter()
+            .find(|candidate| candidate.kind == crate::ship::system_registry::REPAIR_KIND)
+        else {
+            return false;
+        };
+        let reads_repair = repair.console.as_ref() == Some(console)
+            || definition
+                .feeds
+                .iter()
+                .any(|feed| feed.kind == phoenix_model::console::ConsoleObservationKind::Repair);
+        if !reads_repair {
+            return false;
+        }
+        let producer_owns = repair.console.as_ref().is_some_and(|producer| {
+            config
+                .console_for_system(system)
+                .is_some_and(|owner| &owner.id == producer)
+        });
+        producer_owns || self.is_core(system) || self.on_site.contains(system)
+    }
+
+    /// A transport recipient receives the union of its hosted Console views.
+    /// The client applies the individual Console view again when mounting a tab.
+    pub fn projection_for_host(
+        &self,
+        config: &ShipConfig,
+        hosts: &crate::ship::components::ConsoleHosts,
+        station: Option<&StationId>,
+    ) -> HullProjection {
+        let entries = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                station.is_some()
+                    && hosts.0.iter().any(|host| {
+                        host.host.as_ref() == station
+                            && self.console_can_see(config, &host.console, &entry.system_id)
+                    })
+            })
+            .cloned()
+            .collect();
+        HullProjection {
+            entries,
+            aggregate_fraction: self.aggregate_fraction(),
+            destroyed_fraction: self.destroyed_fraction(),
+        }
     }
 
     /// True when `viewer` is the station that holds the `repair` system.
@@ -474,13 +500,10 @@ impl HullVisibility {
     /// system in it". Deliberately implemented by asking [`Self::can_see`] about
     /// each member system rather than by re-deriving the rule, so the queue
     /// preview and the hull rows cannot drift apart.
-    pub fn can_see_station(&self, viewer: Option<&StationId>, station_id: &str) -> bool {
-        self.entries.iter().any(|e| {
-            let bucket = match self.owner_of.get(&e.system_id) {
-                Some(Some(owner)) => owner.0.as_str(),
-                _ => CORE_BUCKET_ID,
-            };
-            bucket == station_id && self.can_see(viewer, &e.system_id)
+    pub fn can_see_group(&self, viewer: Option<&StationId>, group: &RepairGroup) -> bool {
+        self.entries.iter().any(|entry| {
+            self.group_of.get(&entry.system_id) == Some(group)
+                && self.can_see(viewer, &entry.system_id)
         })
     }
 
@@ -529,7 +552,7 @@ impl HullVisibility {
     /// | Field | Treatment | Why |
     /// |---|---|---|
     /// | `system_hull` | projected via [`Self::entries_for`] | exact per-system hull |
-    /// | `queue_depth` | projected via [`Self::can_see_station`] | exact tier + HP deficit, scoped to damaged systems |
+    /// | `queue_depth` | projected via [`Self::can_see_group`] | exact tier + HP deficit, scoped to damaged systems |
     /// | `aggregate_hull_fraction` | recomputed ship-wide | the one whole-ship figure everyone may have |
     /// | `destroyed_hull_fraction` | recomputed ship-wide | a second whole-ship scalar; a reduction over every system names none of them |
     /// | `damageable_systems` | whole | system ids only, no hull detail; Engineering dispatches to systems it cannot see |
@@ -551,6 +574,7 @@ impl HullVisibility {
             aggregate_hull_fraction: self.aggregate_fraction(),
             destroyed_hull_fraction: self.destroyed_fraction(),
             damageable_systems: bb.damageable_systems.clone(),
+            repair_groups: bb.repair_groups.clone(),
             priority_targets: bb
                 .priority_targets
                 .iter()
@@ -580,6 +604,50 @@ impl HullVisibility {
         }
     }
 
+    /// Projection shared by a Repair Console and Consoles explicitly bound to
+    /// its publication. Hosting changes neither team visibility nor hull detail.
+    pub fn project_repair_for_console(
+        &self,
+        config: &crate::ship::config::ShipConfig,
+        console: &phoenix_model::identity::ConsoleId,
+        raw: &RepairBlackboard,
+    ) -> RepairBlackboard {
+        let can_see = |id: &SystemId| {
+            config
+                .system(id)
+                .is_some_and(|system| system.console.as_ref() == Some(console))
+                || self.is_core(id)
+                || self.on_site.contains(id)
+        };
+        // Preserve the existing explicit field policy and replace its three
+        // detailed collections with the equivalent Console-scoped predicate.
+        let mut projected = self.project_repair_blackboard(None, raw);
+        projected.system_hull = self
+            .entries
+            .iter()
+            .filter(|entry| can_see(&entry.system_id))
+            .cloned()
+            .collect();
+        projected.priority_targets = raw
+            .priority_targets
+            .iter()
+            .filter(|id| can_see(id))
+            .cloned()
+            .collect();
+        projected.queue_depth = raw
+            .queue_depth
+            .iter()
+            .filter(|entry| {
+                self.entries.iter().any(|hull| {
+                    self.group_of.get(&hull.system_id) == Some(&entry.group)
+                        && can_see(&hull.system_id)
+                })
+            })
+            .cloned()
+            .collect();
+        projected
+    }
+
     /// The queue preview rows `viewer` is entitled to, in the order given.
     pub fn queue_entries_for(
         &self,
@@ -588,7 +656,7 @@ impl HullVisibility {
     ) -> Vec<QueueEntryPreview> {
         queue
             .iter()
-            .filter(|e| self.can_see_station(viewer, &e.station_id))
+            .filter(|e| self.can_see_group(viewer, &e.group))
             .cloned()
             .collect()
     }
@@ -607,6 +675,7 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         travel_duration_secs: bb.travel_duration_secs,
         system_hull: vec![],
         damageable_systems: vec![],
+        repair_groups: vec![],
         priority_targets: vec![],
         queue_depth: vec![],
         aggregate_hull_fraction: None,
@@ -681,18 +750,26 @@ fn viewers(world: &World) -> Vec<(String, Option<StationId>)> {
 pub fn push_hull_updates(world: &mut World) {
     use crate::server_app::SimOutbox;
 
-    let Some(vis) = hull_visibility(world) else {
-        return;
-    };
     let viewers = viewers(world);
+    let projections: Vec<_> = {
+        let mut state = bevy::ecs::system::SystemState::<HullProjectionInputs>::new(world);
+        let inputs = state.get(world);
+        viewers
+            .iter()
+            .filter_map(|(token, station)| {
+                inputs
+                    .projection_for(station.as_ref())
+                    .map(|projection| (token.clone(), projection))
+            })
+            .collect()
+    };
 
     let mut pending: Vec<(Target, ServerMessage)> = Vec::new();
     let mut next: HashMap<String, HullProjection> = HashMap::new();
     {
         let last = world.resource::<LastBroadcastHull>();
-        for (token, station) in &viewers {
-            let projection = vis.projection_for(station.as_ref());
-            if last.0.get(token) != Some(&projection) {
+        for (token, projection) in projections {
+            if last.0.get(&token) != Some(&projection) {
                 pending.push((
                     Target::Token(token.clone()),
                     ServerMessage::SystemHullUpdate {
@@ -714,81 +791,6 @@ pub fn push_hull_updates(world: &mut World) {
     }
 }
 
-/// Split a batch of changed blackboards into the unprojected ones (broadcast to
-/// all, unchanged behaviour) and per-recipient repair projections.
-///
-/// Returns the outbox entries to push. The repair blackboard is the only one
-/// carrying exact hull detail, so it is the only one fanned out per token.
-pub fn project_repair_blackboards(
-    updates: Vec<(SystemId, SystemBlackboard)>,
-    vis: Option<&HullVisibility>,
-    viewers: &[(String, Option<StationId>)],
-    last: &mut LastVisibleRepairBlackboard,
-) -> Vec<(Target, ServerMessage)> {
-    let mut out = Vec::new();
-
-    let (repair, shared): (Vec<_>, Vec<_>) = updates
-        .into_iter()
-        .partition(|(_, bb)| matches!(bb, SystemBlackboard::Repair(_)));
-
-    if !shared.is_empty() {
-        out.push((
-            Target::All,
-            ServerMessage::BlackboardUpdate {
-                updates: shared,
-                presentation_generation: None,
-            },
-        ));
-    }
-
-    for (system_id, bb) in repair {
-        let SystemBlackboard::Repair(raw) = bb else {
-            continue;
-        };
-        for (token, station) in viewers {
-            // Audience first, contents second. The repair blackboard is the
-            // Engineering console's payload — no other console reads it — and
-            // its `teams` / `queue_depth` fields describe dispatch targets and
-            // damaged-system severity, which are exactly what #737 withholds.
-            // Anyone else gets the empty blackboard so a stale copy from a
-            // previous station cannot linger on their phone.
-            let entitled = vis
-                .map(|v| v.may_receive_repair_blackboard(station.as_ref()))
-                .unwrap_or(false);
-            let projected = match (vis, entitled) {
-                (Some(v), true) => v.project_repair_blackboard(station.as_ref(), &raw),
-                // Not Engineering, or no LocalShip resolved to decide with:
-                // withhold rather than fall back to the unprojected blackboard.
-                _ => withheld_repair_blackboard(&raw),
-            };
-            if last.projections.get(token) == Some(&projected) {
-                continue;
-            }
-            last.projections.insert(token.clone(), projected.clone());
-            out.push((
-                Target::Token(token.clone()),
-                ServerMessage::BlackboardUpdate {
-                    updates: vec![(system_id.clone(), SystemBlackboard::Repair(projected))],
-                    presentation_generation: None,
-                },
-            ));
-        }
-    }
-
-    out
-}
-
-/// Drop cached projections for tokens that are no longer connected.
-pub fn prune_repair_blackboard_cache(
-    last: &mut LastVisibleRepairBlackboard,
-    viewers: &[(String, Option<StationId>)],
-) {
-    last.projections
-        .retain(|token, _| viewers.iter().any(|(t, _)| t == token));
-    last.stations
-        .retain(|token, _| viewers.iter().any(|(t, _)| t == token));
-}
-
 /// Read the connected-viewer list for the blackboard broadcaster.
 pub fn connected_viewers(world: &World) -> Vec<(String, Option<StationId>)> {
     viewers(world)
@@ -802,11 +804,11 @@ pub fn connected_viewers(world: &World) -> Vec<(String, Option<StationId>)> {
 /// reconnecting cannot be used to obtain detail the live broadcast withholds.
 /// Does not touch the delta cache — same rule as the other resync payloads.
 pub fn hull_update_for_token(world: &mut World, token: &str) -> Option<ServerMessage> {
-    let vis = hull_visibility(world)?;
     let station = world
         .get_resource::<Sessions>()
         .and_then(|s| s.0.station_for_token(token).cloned());
-    let projection = vis.projection_for(station.as_ref());
+    let mut state = bevy::ecs::system::SystemState::<HullProjectionInputs>::new(world);
+    let projection = state.get(world).projection_for(station.as_ref())?;
     Some(ServerMessage::SystemHullUpdate {
         entries: projection.entries,
         aggregate_fraction: projection.aggregate_fraction,
@@ -837,3 +839,7 @@ pub fn project_blackboard_for_token(
 #[cfg(test)]
 #[path = "visibility_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "console_visibility_tests.rs"]
+mod console_tests;

@@ -3,16 +3,23 @@ title: Information-Parity Audit
 type: concept
 tags: [ai, backfill, parity, consoles, blackboards, coordination]
 sources: [pasm/spec/DATA_DRIVEN_FINE_SYSTEM_AI.md, crates/phoenix-sim-gameplay/src/entities/ai_flag_hosts.rs, crates/phoenix-simulation/src/ai/host.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/console/captain/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-model/src/messages.rs, gui/console-state.js, gui/console-payload.js, gui/mount-plan.js]
-updated: 2026-09-07
+updated: 2026-10-13
 ---
 
 # Information-Parity Audit
 
-Backfill may derive private policy memory from facts available to the station it replaces, but it must not receive a privileged world view. The server projects authoritative facts into per-ship blackboards and typed coordination messages; both the AI host and the human console consume those same surfaces.
+Backfill may derive private policy memory from facts available to its owning Console, but it must not receive a privileged world view. The server projects authoritative facts into per-ship blackboards and typed coordination messages; both the AI host and the human console consume those same surfaces.
 
 GM contact overrides (#1309) live in `WorldContentRuntime` by observing player ship and target. Each Sensors blackboard exposes only that ship's overrides. Reveal preserves ordinary visible contacts and earned scans, adding a position-only contact only when ordinary sensors would omit it; the GM Crew Knowledge comparison must not enrich that basic contact with hull information from the raw replica. Conceal removes ordinary Sensors contacts, selected detail, scans and warnings. Comms and Objectives retain their independent authored knowledge. Normal removes the pair, while snapshot/restore preserves active pairs and lifecycle pruning removes references to vanished identities.
 
-## Station checklist
+Console scope is resolved by `ShipConfig::observations_for_system`, over existing
+publications. Explicit source-and-kind feeds grant information without control.
+Live and reconnect publications follow current Console hosting; the client
+narrows the recipient union again for each tab. Exact hull rows use the same
+Console ownership, true-Core and on-site restrictions, so cohosting cannot pool
+another Console's damage knowledge. Hosting changes preserve individual AI memory.
+
+## Capability checklist
 
 | Domain | Shared facts | Human surface | Backfill consumer |
 |---|---|---|---|
@@ -31,14 +38,15 @@ Static selection inputs such as a hull's authored power rating may be shown at s
 ## Coordination facts
 
 Cross-station requests use the typed coordination queue, carry an explicit
-`CoordinationAddress::Station` or `CoordinationAddress::Ship`, and serve the
+`CoordinationAddress::Station`, `Console` or `Ship`, and serve the
 hull's authored lag before delivery. Current payloads cover target designation,
 threat bearing, shield-frequency hints, weapon arc bearing, navigation
 clearance, repair requests, shield-facing changes, and power brownout. A human
 Station recipient receives a popup/console projection; an AI Station recipient
 reads the corresponding delivered state. Ship-addressed traffic fans out in
 authored Station order under the same live control policy. The payload never
-chooses a privileged AI-only route.
+chooses a privileged AI-only route. Console-addressed messages retain their
+identity while queued and resolve the current host at delivery.
 
 For `RepairRequest`, the lag router applies the same `HullVisibility` policy as
 the Repair console before emitting a human-popup delivery. Repair's receiver

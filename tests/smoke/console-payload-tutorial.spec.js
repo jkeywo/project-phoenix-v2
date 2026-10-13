@@ -1,16 +1,18 @@
 import { test, expect } from '@playwright/test';
 
-test('a visiting-System tutorial reaches the shipped Station through the JSON adapter', async ({ page }) => {
+test('a composed Console tutorial reaches the shipped screen through the JSON adapter', async ({ page }) => {
   await page.goto('/gui/battleship/helm.html');
   await page.waitForFunction(() => typeof window.__updateConsole === 'function');
   const payload = await page.evaluate(async () => {
     await import('/gui/console-state.js');
     const state = {
-      stationSystems: { helm: ['drive'], liaison: ['radio'] },
+      consoleDefinitions: [{ id: 'helm', home_station: 'pilot', screen: 'gui/battleship/helm.html', systems: ['drive', 'radio'], feeds: [] }],
+      consoleHosts: { helm: { host: 'pilot' } },
+      consoleSystems: { helm: ['drive', 'radio'] },
       systemConsoleFamilies: { drive: 'helm', radio: 'comms' },
       blackboardKinds: { radio: 'Comms' },
       blackboards: { radio: { host_station: 'helm' } },
-      stationTutorials: { helm: [{ id: 'visiting-radio', title: 'component.tutorial.heading', text: 'component.tutorial.dismiss', trigger: { kind: 'state', path: 'systems.radio.comms_auto', op: 'falsy' } }] },
+      stationTutorials: { pilot: [{ id: 'visiting-radio', title: 'component.tutorial.heading', text: 'component.tutorial.dismiss', trigger: { kind: 'state', path: 'systems.radio.comms_auto', op: 'falsy' } }] },
       tutorialProgress: { dismissed: {}, used: {} },
     };
     const json = window.buildConsoleState('helm', state);

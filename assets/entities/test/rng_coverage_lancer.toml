@@ -622,6 +622,7 @@ level = 2
 id = "captain"
 name = "Captain"
 home_station = "captain"
+screen = "gui/cruiser/captain.html"
 
 [[console.feed]]
 source = "viewscreen"
@@ -631,6 +632,7 @@ kind = "Viewscreen"
 id = "helm"
 name = "Helm"
 home_station = "helm"
+screen = "gui/cruiser/helm.html"
 
 [[console.feed]]
 source = "captain"
@@ -668,6 +670,7 @@ kind = "Viewscreen"
 id = "tactical"
 name = "Tactical"
 home_station = "tactical"
+screen = "gui/cruiser/tactical.html"
 
 [[console.feed]]
 source = "captain"
@@ -713,6 +716,7 @@ kind = "Viewscreen"
 id = "engineering"
 name = "Engineering"
 home_station = "engineering"
+screen = "gui/cruiser/engineering.html"
 
 [[console.feed]]
 source = "power"

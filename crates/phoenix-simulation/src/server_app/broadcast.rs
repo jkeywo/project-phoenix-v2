@@ -99,8 +99,8 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
     let broadcaster = SimBroadcaster::for_producer(SimProducer::SimState);
     broadcaster.register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
         let entity_states = build_sim_state_entity_states(world);
-        let station_hosts = build_station_host_snapshots(world);
         let station_health = build_station_health_snapshots(world);
+        let console_health = build_console_health_snapshots(world);
         // Fold this tick's host state (objectives + Red Alert) into the
         // authoritative importance projection before reading it, so the snapshot
         // reflects the same tick's events (issue #1101). The drain of visits runs
@@ -108,6 +108,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // edge, so it can never resurrect a visit-cleared unread.
         ingest_station_importance(world);
         let station_importance = build_station_importance_snapshots(world);
+        let console_importance = build_console_importance_snapshots(world);
         let control_sources = build_control_source_snapshots(world);
         let system_depths = build_system_depth_snapshots(world);
         let station_puppets = build_station_puppet_snapshots(world);
@@ -122,16 +123,55 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // `crate::console::repair::visibility`.
         crate::console::repair::visibility::push_hull_updates(world);
 
-        let snapshot = crate::core::messages::SimSnapshot {
+        let mut snapshot = crate::core::messages::SimSnapshot {
+            console_views: build_console_working_views(world),
+            console_hosts: build_console_host_snapshots(world),
             entity_states,
-            station_hosts,
             station_health,
+            console_health,
             station_importance,
+            console_importance,
             control_sources,
             system_depths,
             station_puppets,
         };
-        vec![ServerMessage::SimState { snapshot }]
+        if snapshot.console_hosts.is_empty() {
+            snapshot.console_views.clear();
+            return vec![ServerMessage::SimState { snapshot }];
+        }
+        // Working context can name records unknown to other Consoles. Project
+        // it at the host boundary, not merely in the receiving GUI.
+        let pending: Vec<_> = world
+            .resource::<crate::lobby::Sessions>()
+            .0
+            .players()
+            .iter()
+            .filter(|player| player.connected)
+            .map(|player| {
+                let mut projected = snapshot.clone();
+                projected.console_views.retain(|id, _| {
+                    snapshot.console_hosts.iter().any(|assignment| {
+                        &assignment.console == id
+                            && assignment.host.is_some()
+                            && assignment.host == player.station
+                    })
+                });
+                (
+                    crate::lobby::Target::Token(player.token.clone()),
+                    ServerMessage::SimState {
+                        snapshot: projected,
+                    },
+                )
+            })
+            .collect();
+        world.resource_mut::<SimOutbox>().extend_snapshot(pending);
+        let mut local = snapshot;
+        local.console_views.clear();
+        world.resource_mut::<SimOutbox>().push_snapshot((
+            crate::lobby::Target::Token(crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string()),
+            ServerMessage::SimState { snapshot: local },
+        ));
+        Vec::new()
     })
 }
 
@@ -246,7 +286,7 @@ pub(crate) fn build_control_source_snapshots(
 /// broadcast (issue #1100).
 ///
 /// Reads the `LocalShip`'s [`HullVisibility`] and reduces it to one scalar per
-/// owning Station via `station_fractions`. Mirrors [`build_station_host_snapshots`]:
+/// owning Station via `station_fractions`. Mirrors [`build_console_host_snapshots`]:
 /// a station-level figure that names no system, so it is safe for `Target::All`
 /// — the same privacy argument as the ship-wide aggregate. Empty before the
 /// ship spawns.
@@ -296,8 +336,8 @@ pub struct StationImportanceRes(pub crate::station_importance::StationImportance
 ///
 /// Authored-TOML importance is a deliberate future seam and is NOT built here.
 pub(crate) fn ingest_station_importance(world: &mut World) {
-    use crate::console::repair::visibility::CORE_BUCKET_ID;
-    use crate::core::messages::{StationId, SystemId};
+    use crate::core::messages::SystemId;
+    use crate::station_importance::AttentionOwner;
 
     let local_uuid = {
         let mut q =
@@ -334,27 +374,31 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
 
     // Owned as a value (not borrowing the world), so the resource can be
     // borrowed mutably below.
-    let vis = crate::console::repair::visibility::hull_visibility(world);
-    let core = StationId(CORE_BUCKET_ID.to_string());
-
-    let attributed: Vec<(String, StationId, crate::core::messages::ObjectiveStatus)> = objectives
+    let config = {
+        let mut query = world
+            .query_filtered::<&crate::ship::components::ShipConfigComponent, With<LocalShip>>();
+        query.iter(world).next().map(|config| config.0.clone())
+    };
+    let attributed: Vec<_> = objectives
         .into_iter()
         .map(|(id, targets, status)| {
-            let station = vis
+            let owner = config
                 .as_ref()
-                .and_then(|v| {
-                    targets
-                        .iter()
-                        .find_map(|t| v.owned_station(&SystemId(t.clone())))
+                .and_then(|config| {
+                    targets.iter().find_map(|target| {
+                        config
+                            .system(&SystemId(target.clone()))
+                            .and_then(|system| system.console.clone())
+                    })
                 })
-                .unwrap_or_else(|| core.clone());
-            (id, station, status)
+                .map(AttentionOwner::Console)
+                .unwrap_or(AttentionOwner::Core);
+            (id, owner, status)
         })
         .collect();
-
-    let mut critical_stations: Vec<StationId> = Vec::new();
+    let mut critical_stations = Vec::new();
     if red_alert {
-        critical_stations.push(core.clone());
+        critical_stations.push(AttentionOwner::Core);
     }
     let local_ship_uuid = {
         let mut query =
@@ -369,7 +413,16 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
                 .has_live_critical_thread_for(local_ship_uuid.as_deref())
         })
     {
-        critical_stations.push(StationId("comms".to_string()));
+        if let Some(config) = &config {
+            critical_stations.extend(
+                config
+                    .systems
+                    .iter()
+                    .filter(|system| system.kind == "comms")
+                    .filter_map(|system| system.console.clone())
+                    .map(AttentionOwner::Console),
+            );
+        }
     }
 
     if let Some(mut res) = world.get_resource_mut::<StationImportanceRes>() {
@@ -387,60 +440,69 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
 pub(crate) fn build_station_importance_snapshots(
     world: &mut World,
 ) -> Vec<crate::core::messages::StationImportanceSnapshot> {
+    let homes = {
+        let mut query = world
+            .query_filtered::<&crate::ship::components::ShipConfigComponent, With<LocalShip>>();
+        query
+            .iter(world)
+            .next()
+            .map(|config| {
+                config
+                    .0
+                    .consoles
+                    .iter()
+                    .filter_map(|console| {
+                        console
+                            .home_station
+                            .clone()
+                            .map(|station| (console.id.clone(), station))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    world
+        .get_resource::<StationImportanceRes>()
+        .map(|res| res.0.station_snapshots(&homes))
+        .unwrap_or_default()
+}
+
+pub(crate) fn build_console_importance_snapshots(
+    world: &mut World,
+) -> Vec<phoenix_model::console::ConsoleImportanceSnapshot> {
     world
         .get_resource::<StationImportanceRes>()
         .map(|res| res.0.snapshots())
         .unwrap_or_default()
 }
 
-/// Drain `ClientMessage::StationVisited` from connected phones and clear the
-/// visited Station's one-off `unread` importance flag (issue #1101 AC2).
-///
-/// Reads raw `InboundMessage` rather than `AdmittedCommands` — like the debug
-/// drains, a visit changes no simulation outcome, only a presentation-attention
-/// flag, so it never crosses command admission. The clear mutates host state
-/// only; it reaches clients solely through the next `SimState` broadcast, which
-/// is the authoritative lifecycle AC2 requires (never an optimistic client
-/// clear). A continuing `critical` condition is untouched — [`StationImportance::visit`](crate::station_importance::StationImportance::visit)
-/// clears only `unread` (AC3).
-pub(crate) fn drain_station_visited(
-    mut reader: MessageReader<crate::lobby::InboundMessage>,
-    sessions: Res<crate::lobby::Sessions>,
-    importance: Option<ResMut<StationImportanceRes>>,
-) {
-    let Some(mut importance) = importance else {
-        return;
-    };
-    for ev in reader.read() {
-        if let crate::core::messages::ClientMessage::StationVisited { station } = &ev.msg {
-            // Only a connected player's visit counts — same authority gate the
-            // debug drains apply.
-            if sessions.0.players().iter().any(|p| p.token == ev.token) {
-                importance.0.visit(station);
-            }
-        }
-    }
-}
+#[path = "console_visits.rs"]
+mod console_visits;
+pub(crate) use console_visits::drain_station_visited;
 
-pub(crate) fn build_station_host_snapshots(
+pub(crate) fn build_console_host_snapshots(
     world: &mut World,
-) -> Vec<crate::core::messages::StationHostSnapshot> {
-    let mut query =
-        world.query_filtered::<&crate::ship_plugin::VisitingStationHosts, With<LocalShip>>();
+) -> Vec<phoenix_model::console::ConsoleHostSnapshot> {
+    let mut query = world.query_filtered::<&crate::ship_plugin::ConsoleHosts, With<LocalShip>>();
     query
         .iter(world)
         .next()
-        .map(|hosts| {
-            hosts
-                .0
-                .iter()
-                .map(|assignment| crate::core::messages::StationHostSnapshot {
-                    station: assignment.station.clone(),
-                    host: assignment.host.clone(),
-                    rating: assignment.rating.clone(),
-                })
-                .collect()
-        })
+        .map(|hosts| hosts.0.clone())
+        .unwrap_or_default()
+}
+
+fn build_console_working_views(
+    world: &mut World,
+) -> std::collections::BTreeMap<
+    crate::core::messages::ConsoleId,
+    phoenix_model::console::ConsoleWorkingView,
+> {
+    let mut query =
+        world.query_filtered::<&crate::ship::components::ConsoleWorkingViews, With<LocalShip>>();
+    query
+        .iter(world)
+        .next()
+        .map(|views| views.0.clone())
         .unwrap_or_default()
 }
 
@@ -763,3 +825,43 @@ pub fn build_sim_state_entity_states(
 #[cfg(test)]
 #[path = "broadcast_replication_tests.rs"]
 mod replication_tests;
+
+/// Reduce each Console's own modeled capacity without retaining a health store.
+fn build_console_health_snapshots(
+    world: &mut World,
+) -> Vec<crate::core::messages::ConsoleHealthSnapshot> {
+    let mut query = world.query_filtered::<(
+        &crate::ship::components::ShipConfigComponent,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+    ), With<LocalShip>>();
+    query
+        .iter(world)
+        .next()
+        .map(|(config, hull)| console_health_from_parts(&config.0, hull.map(|h| &h.0)))
+        .unwrap_or_default()
+}
+
+fn console_health_from_parts(
+    config: &crate::ship::config::ShipConfig,
+    hull: Option<&crate::ship::damage::SystemHull>,
+) -> Vec<crate::core::messages::ConsoleHealthSnapshot> {
+    config
+        .consoles
+        .iter()
+        .map(|console| {
+            let (current, max) = config
+                .systems
+                .iter()
+                .filter(|system| system.console.as_ref() == Some(&console.id))
+                .filter_map(|system| hull.and_then(|h| h.get(&system.id)))
+                .filter(|entry| entry.max > 0.0)
+                .fold((0.0_f32, 0.0_f32), |(current, max), entry| {
+                    (current + entry.current, max + entry.max)
+                });
+            crate::core::messages::ConsoleHealthSnapshot {
+                console: console.id.clone(),
+                health: (max > 0.0).then(|| (current / max).clamp(0.0, 1.0)),
+            }
+        })
+        .collect()
+}

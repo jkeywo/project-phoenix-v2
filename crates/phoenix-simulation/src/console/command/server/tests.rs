@@ -17,7 +17,7 @@ const KINDS: &[&str] = &["red_alert", "command", "phaser_bank"];
 
 /// A captain, an AI-controllable proving Station ("tactical", owning a weapon
 /// so `weapons_station()` resolves to it) with a full stance catalogue, and an
-/// auxiliary Command station directing it.
+/// detached Command Console directing it.
 fn command_config() -> ShipConfig {
     ShipConfig::from_toml(
         r#"
@@ -62,36 +62,44 @@ id = "high"
 kind = "high_alert_neutral"
 high_alert = true
 
-[[station]]
-id = "command"
+[[console]]
+id = "command-screen"
 name = "Command"
 description = "Direct an AI station."
-rank = "Cpt."
-console = "gui/command-console.html"
-auxiliary = true
+screen = "gui/command-console.html"
 human_seeking = true
 host_order = ["captain"]
 visiting_rating = "Std"
 command_target = "tactical"
 
-[[station.rating]]
+[[console.rating]]
 name = "Std"
 automated_systems = []
+
+[[console]]
+id = "captain-screen"
+home_station = "captain"
+screen = "gui/battleship/captain.html"
+
+[[console]]
+id = "weapons-screen"
+home_station = "tactical"
+screen = "gui/battleship/tactical.html"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-screen"
 
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "weapons-screen"
 
 [[system]]
 id = "command"
 kind = "command"
-station = "command"
+console = "command-screen"
 "#,
         KINDS,
     )
@@ -1313,4 +1321,17 @@ fn mesh_crew_restore_keeps_human_command_from_issuing_an_ai_stance() {
             .get(&tactical()),
         Some(&true)
     );
+}
+
+#[test]
+fn detached_command_console_directs_a_station_without_becoming_a_seat() {
+    let config = command_config();
+    let console = command_console(&config).expect("detached Command Console");
+    assert_eq!(console.id.0, "command-screen");
+    assert!(console.home_station.is_none());
+    assert_eq!(console.command_target.as_ref(), Some(&tactical()));
+    assert_eq!(config.stations.len(), 2);
+    assert!(config
+        .station(&StationId("command-screen".into()))
+        .is_none());
 }

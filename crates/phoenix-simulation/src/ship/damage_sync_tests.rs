@@ -619,17 +619,25 @@ fn weapon_system_destruction_emits_tier_crossed_and_disarmed_for_a_non_local_shi
         .0
         .systems
         .push(crate::ship::config::SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId(
+                "damage-test-background".into(),
+            )),
             id: SystemId("phaser-fore".into()),
             kind: crate::ship::system_registry::PHASER_BANK_KIND.into(),
-            station: None,
-            ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+            ai_only: true,
+
             power_group: None,
             marker: None,
             config: None,
         });
 
+    config
+        .0
+        .consoles
+        .push(phoenix_model::console::ConsoleConfig {
+            id: phoenix_model::identity::ConsoleId("damage-test-background".into()),
+            ..Default::default()
+        });
     let hull =
         crate::ship::damage::SystemHull::from_config(&[(SystemId("phaser-fore".into()), 100.0)]);
     let ship = app
@@ -821,12 +829,11 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
         .0
         .systems
         .push(crate::ship::config::SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("helm".into())),
             id: sid.clone(),
             kind: "generic".into(),
-            station: Some(crate::core::messages::StationId("helm".into())),
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
@@ -850,12 +857,11 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
             .0
             .systems
             .push(crate::ship::config::SystemInstanceConfig {
+                console: Some(phoenix_model::identity::ConsoleId(station.into())),
                 id,
                 kind: kind.into(),
-                station: Some(crate::core::messages::StationId(station.into())),
                 ai_only: false,
-                human_seeking: false,
-                seek_order: Vec::new(),
+
                 power_group: None,
                 marker: None,
                 config: None,
@@ -906,7 +912,7 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
     );
     let CoordinationPayload::RepairRequest {
         system_id,
-        station_id,
+        group,
         tier,
         deficit,
         ..
@@ -916,7 +922,10 @@ fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
     };
     assert_eq!(system_id, &sid);
     assert_eq!(
-        station_id, "helm",
+        group,
+        &crate::core::messages::RepairGroup::Station(crate::core::messages::StationId(
+            "helm".into()
+        )),
         "the request must name the owning station"
     );
     assert_eq!(

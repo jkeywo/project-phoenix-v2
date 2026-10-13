@@ -949,3 +949,60 @@ pub fn shield_arc_system_id(arc_id: &str) -> Option<SystemId> {
     }
     Some(SystemId(format!("shield-arc-{}", arc_id.replace('_', "-"))))
 }
+
+/// Wire publications emitted under fixed keys by the existing domain publishers.
+/// These keys remain valid without an identically named controllable System:
+/// for example the Viewscreen publisher also runs for autonomous ships.
+/// This is the shared authoring contract, not a claim that a value is currently
+/// available. Equipment presence and runtime knowledge still govern availability.
+pub fn fixed_publication_kinds(
+) -> std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind> {
+    use phoenix_model::console::ConsoleObservationKind as Kind;
+    [
+        ("helm", Kind::Helm),
+        ("tactical", Kind::Weapons),
+        ("power", Kind::Power),
+        ("shields", Kind::Shields),
+        ("captain", Kind::Captain),
+        ("command", Kind::Command),
+        ("repair", Kind::Repair),
+        ("comms", Kind::Comms),
+        ("sensors", Kind::Sensors),
+        ("navigation", Kind::Navigation),
+        ("viewscreen", Kind::Viewscreen),
+        ("helm-engine-port", Kind::HelmEngine),
+        ("helm-engine-starboard", Kind::HelmEngine),
+        ("helm-lateral-thrust", Kind::HelmLateralThrust),
+        ("torpedo-magazine", Kind::TorpedoMagazine),
+        ("power-reactor", Kind::PowerReactor),
+        ("power-battery", Kind::PowerBattery),
+        ("tactical-radar", Kind::TacticalRadar),
+        ("sensor-radar", Kind::SensorRadar),
+        ("dossiers", Kind::Dossiers),
+        ("scan", Kind::Scan),
+        ("tractor", Kind::Tractor),
+        ("umbilical", Kind::Umbilical),
+        ("security", Kind::Security),
+        ("transporter", Kind::Transporter),
+        ("demolition", Kind::Demolition),
+    ]
+    .into_iter()
+    .map(|(key, kind)| (key.to_owned(), kind))
+    .collect()
+}
+
+/// Only these domain publishers emit observations for authored instance ids.
+/// Other kinds use the fixed channels above or publish no standalone board.
+pub fn instance_publication_kinds(
+) -> std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind> {
+    use phoenix_model::console::ConsoleObservationKind as Kind;
+    [
+        (PHASER_BANK_KIND, Kind::PhaserBank),
+        (TORPEDO_TUBE_KIND, Kind::TorpedoTube),
+        (SHIELD_ARC_KIND, Kind::ShieldArc),
+        (DOCK_KIND, Kind::Dock),
+    ]
+    .into_iter()
+    .map(|(kind, observation)| (kind.to_owned(), observation))
+    .collect()
+}

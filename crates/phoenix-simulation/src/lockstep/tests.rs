@@ -67,10 +67,15 @@ rank = ""
 [[station.rating]]
 name = "Std"
 automated_systems = []
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
 [[system]]
 id = "helm"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-console"
 "#,
         &["helm_thrust"],
     )

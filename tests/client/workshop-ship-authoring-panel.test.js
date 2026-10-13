@@ -86,7 +86,7 @@ home_station="helm"
 screen="gui/helm.html"
 ` }]);
     const runtime = { dependencies: async () => ({ base_files: {}, packs: [] }),
-      shipSchema: async () => ({ system_kinds: ['helm_thrust'], directive_kinds: ['None'], console_feed_kinds: ['HelmEngine', 'Sensors'], console_feed_sources: ['radar'] }),
+      shipSchema: async () => ({ system_kinds: ['helm_thrust'], directive_kinds: ['None'], console_feed_kinds: ['HelmEngine', 'Sensors'], console_feed_sources: ['radar'], console_publication_kinds: { radar: 'Sensors' }, console_instance_publication_kinds: {} }),
       validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
     const changed = vi.fn();
     mounted = mountWorkshopShipAuthoring({ root: document.getElementById('root'), runtime, draft: () => current,

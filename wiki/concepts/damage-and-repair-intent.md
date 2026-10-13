@@ -8,15 +8,16 @@ updated: 2026-09-08
 
 # Damage and Repair Information
 
-Damage is authoritative per fine system, but exact detail is projected by role.
+Damage is authoritative per fine system, but exact detail is projected by Console.
 `HullVisibility` is the single policy used by both live Repair publication and
 reconnect resync:
 
 - every recipient receives the ship-wide aggregate and destroyed-hull
   fractions;
-- a station holder sees exact damage for that station's systems;
-- Engineering always sees the `Core` bucket, and sees a non-Core station only
-  while one of its teams is actually `Repairing` there;
+- each Console sees exact damage for its owned Systems, independent of hosting;
+- the Repair Console sees true `Core` and other Systems only while a team is
+  actually `Repairing` that System; explicit Repair feeds carry that same view;
+- detached Console equipment is owned, so it is not classified as Core;
 - a `Travelling` or recalled/returning team reveals nothing yet;
 - `system_hull` and `queue_depth` are filtered by that policy, while the list
   of legal dispatch targets remains whole so Engineering can send a team into
@@ -34,11 +35,11 @@ coherent owner capture and transport sink under the original
 `refresh_caches_on_midgame_reconnect` logical name. Its complete access union
 prevents an ECS writer from splitting request collection, Blackboard and Hull
 observations, or delivery. Request scratch is separate from the live Hull and
-Repair caches. Normal plugin finalization seals registration.
-Scheduled privacy/order/coherence fixtures and complete advancing reconnect
-traces pass in the SDK-enabled native configuration. The real Repair/Identify
-regression covers a two-tick command delay, team travel and actual repair with
-role-filtered visibility. See [Typed reconnect projection proof](../../docs/reconnect-projection-proof.md)
+Console-publication caches. Normal plugin finalization seals registration.
+The existing Repair/Identify acceptance fixture covers a two-tick command
+delay, team travel and actual repair with projected visibility. Its
+SDK-enabled native evidence predates the explicit Console migration and must
+be renewed for that migration. See [Typed reconnect projection proof](../../docs/reconnect-projection-proof.md)
 for source binding, diagnostic-test status and remaining validation limits.
 
 ## Requests, dispatch, and repair
@@ -56,9 +57,11 @@ Engineering may dispatch a scarce team without one. Human controls and Backfill
 issue the same admitted dispatch and priority commands.
 
 Travel time is therefore also an information gate. Once on site, a team sweeps
-the damaged fine systems owned by that station; its standing ordinal priority
-and optional pinned target choose among the eligible rows. Leaving the station
-removes that local detail immediately. `gui/console-state.js` assembles the
+the damaged fine Systems in its typed `RepairGroup`: the existing home Station,
+a detached Console, or true Core. Its standing ordinal priority and optional
+pinned target choose among the eligible rows. Leaving a System removes that
+local detail immediately. Queue keys, reports, dispatch, sweeps and alert latches
+share this grouping; snapshots and digests retain the typed identities. `gui/console-state.js` assembles the
 projected state for the shared `ph-repair-teams` control.
 
 ## GM System availability

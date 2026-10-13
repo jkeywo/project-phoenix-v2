@@ -119,12 +119,11 @@ fn client_system_kind_projection_preserves_arbitrary_authored_instance_ids() {
     use crate::ship::config::SystemInstanceConfig;
 
     let system = |id: &str, kind: &str| SystemInstanceConfig {
+        console: Some(phoenix_model::identity::ConsoleId("projection".into())),
         id: SystemId(id.into()),
         kind: kind.into(),
-        station: None,
         ai_only: false,
-        human_seeking: false,
-        seek_order: vec![],
+
         power_group: None,
         marker: None,
         config: None,
@@ -227,14 +226,8 @@ fn select_station_works_during_in_progress_phase() {
                     automated_systems: vec![],
                     ai_tuning: None,
                 }],
-                console: None,
                 manual_overview: None,
                 tutorials: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
                 stances: vec![],
             },
             StationConfig {
@@ -249,19 +242,14 @@ fn select_station_works_during_in_progress_phase() {
                     automated_systems: vec![],
                     ai_tuning: None,
                 }],
-                console: None,
                 manual_overview: None,
                 tutorials: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
                 stances: vec![],
             },
         ],
         systems: vec![],
         power_groups: HashMap::new(),
+        consoles: Vec::new(),
         coordination_lag_secs: 2.0,
     };
     app.world_mut()
@@ -377,18 +365,13 @@ fn release_station_works_during_in_progress_phase() {
                 automated_systems: vec![],
                 ai_tuning: None,
             }],
-            console: None,
             manual_overview: None,
             tutorials: vec![],
-            human_seeking: false,
-            host_order: vec![],
-            visiting_rating: None,
-            auxiliary: false,
-            command_target: None,
             stances: vec![],
         }],
         systems: vec![],
         power_groups: HashMap::new(),
+        consoles: Vec::new(),
         coordination_lag_secs: 2.0,
     };
     app.world_mut()
@@ -474,14 +457,8 @@ fn selected_ship_resource_populates_ship_stations_via_update_session() {
                     automated_systems: vec![],
                     ai_tuning: None,
                 }],
-                console: None,
                 manual_overview: None,
                 tutorials: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
                 stances: vec![],
             },
             StationConfig {
@@ -496,19 +473,14 @@ fn selected_ship_resource_populates_ship_stations_via_update_session() {
                     automated_systems: vec![],
                     ai_tuning: None,
                 }],
-                console: None,
                 manual_overview: None,
                 tutorials: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
                 stances: vec![],
             },
         ],
         systems: vec![],
         power_groups: HashMap::new(),
+        consoles: Vec::new(),
         coordination_lag_secs: 2.0,
     };
     app.world_mut()
@@ -544,18 +516,13 @@ fn one_station_ship_config() -> crate::ship::config::ShipConfig {
                 automated_systems: vec![],
                 ai_tuning: None,
             }],
-            console: None,
             manual_overview: None,
             tutorials: vec![],
-            human_seeking: false,
-            host_order: vec![],
-            visiting_rating: None,
-            auxiliary: false,
-            command_target: None,
             stances: vec![],
         }],
         systems: vec![],
         power_groups: std::collections::HashMap::new(),
+        consoles: Vec::new(),
         coordination_lag_secs: 2.0,
     }
 }
@@ -699,6 +666,18 @@ fn shared_client_config_projector_preserves_complete_non_default_authored_values
         "fixture must exercise assist gaps"
     );
     assert_eq!(projected.station_assist_gaps, expected_gaps);
+    let expected_console_gaps = topology
+        .consoles
+        .iter()
+        .map(|console| {
+            (
+                console.id.clone(),
+                crate::ship::eligibility::projected_console_assist_gaps(console, topology),
+            )
+        })
+        .filter(|(_, gaps)| !gaps.is_empty())
+        .collect();
+    assert_eq!(projected.console_assist_gaps, expected_console_gaps);
     assert_eq!(projected.station_systems["helm"], projected.helm_systems);
     assert_eq!(projected.system_kinds["helm-thrust"], "helm_thrust");
 }
@@ -1491,4 +1470,35 @@ fn resolved_equipment_absence_is_preserved_in_welcome_and_manual() {
             .as_integer(),
         Some(67)
     );
+}
+
+#[test]
+fn console_eligibility_reports_replace_private_session_results() {
+    let mut app = App::new();
+    app.add_message::<InboundMessage>();
+    app.insert_resource(Sessions(crate::lobby::session::SessionManager::new()));
+    app.add_systems(Update, handle_report_station_eligibility_system);
+    let console = crate::core::messages::ConsoleId("comms-screen".into());
+    for blocked in [true, false] {
+        app.world_mut().write_message(InboundMessage {
+            token: "crew".into(),
+            msg: ClientMessage::ReportConsoleEligibility {
+                ineligible: if blocked {
+                    std::collections::BTreeMap::from([(console.clone(), vec!["Std".into()])])
+                } else {
+                    Default::default()
+                },
+            },
+        });
+        app.update();
+        let sessions = &app.world().resource::<Sessions>().0;
+        assert_eq!(
+            sessions.is_console_eligible("crew", &console, "Std"),
+            !blocked
+        );
+        assert!(sessions.is_eligible(
+            "crew",
+            &crate::core::messages::StationId("comms-screen".into())
+        ));
+    }
 }

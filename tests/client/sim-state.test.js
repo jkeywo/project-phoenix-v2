@@ -106,19 +106,19 @@ describe('apply WorldSetup / SimState', () => {
   it('clears authority and placement projections across a real new-round sequence', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      console_hosts: [{ console: 'navigation', host: 'tactical', rating: 'Std' }],
       control_sources: { navigation: 'Human' },
     } } });
 
     s.apply({ type: 'ReturnedToLobby', data: {} });
-    expect(s.stationHosts).toEqual({});
+    expect(s.consoleHosts).toEqual({});
     expect(s.controlSources).toEqual({});
 
     s.apply({ type: 'GameStarted', data: {} });
     s.apply({ type: 'WorldSetup', data: { world: {
       entities: [], scenario_title: 'Next round', scenario_description: '',
     } } });
-    expect(s.stationHosts).toEqual({});
+    expect(s.consoleHosts).toEqual({});
     expect(s.controlSources).toEqual({});
   });
 
@@ -141,14 +141,14 @@ describe('apply WorldSetup / SimState', () => {
   it('SimState stores generic complete-Station host projections by Station id', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [
-        { station: 'power', host: 'repair', rating: 'Std' },
-        { station: 'shields', host: null, rating: 'Backfill' },
+      console_hosts: [
+        { console: 'power', host: 'repair', rating: 'Std' },
+        { console: 'shields', host: null, rating: 'Backfill' },
       ],
     } } });
-    expect(s.stationHosts).toEqual({
-      power: { station: 'power', host: 'repair', rating: 'Std' },
-      shields: { station: 'shields', host: null, rating: 'Backfill' },
+    expect(s.consoleHosts).toEqual({
+      power: { console: 'power', host: 'repair', rating: 'Std' },
+      shields: { console: 'shields', host: null, rating: 'Backfill' },
     });
   });
 
@@ -506,18 +506,18 @@ describe('apply Welcome', () => {
   it('keeps authority and placement projections through an in-progress reconnect Welcome', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      console_hosts: [{ console: 'navigation', host: 'tactical', rating: 'Std' }],
       control_sources: { navigation: 'Human' },
     } } });
 
     s.apply(welcome({ entities: [], scenario_title: '', scenario_description: '' }));
-    expect(s.stationHosts).toEqual({
-      navigation: { station: 'navigation', host: 'tactical', rating: 'Std' },
+    expect(s.consoleHosts).toEqual({
+      navigation: { console: 'navigation', host: 'tactical', rating: 'Std' },
     });
     expect(s.controlSources).toEqual({ navigation: 'Human' });
 
     s.apply(welcome(null));
-    expect(s.stationHosts).toEqual({});
+    expect(s.consoleHosts).toEqual({});
     expect(s.controlSources).toEqual({});
   });
 
@@ -1026,4 +1026,15 @@ describe('console-state view aliases (#819)', () => {
       else delete globalThis.window;
     }
   });
+});
+
+it('replaces Console health independently of Station health and clears absent rows', () => {
+  const s = new ClientSimState();
+  s.apply({type:'SimState',data:{snapshot:{console_health:[{console:'detached',health:0.25},{console:'empty'}],station_health:[{station:'helm',health:1}]}}});
+  expect(s.consoleHealth).toEqual({detached:0.25,empty:null});
+  expect(s.stationHealth).toEqual({helm:1});
+  s.apply({type:'SimState',data:{snapshot:{console_health:[{console:'drive',health:1}]}}});
+  expect(s.consoleHealth).toEqual({drive:1});
+  s.reset();
+  expect(s.consoleHealth).toEqual({});
 });

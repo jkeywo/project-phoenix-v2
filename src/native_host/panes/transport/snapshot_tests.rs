@@ -16,9 +16,8 @@ use crate::core::messages::{
 use crate::entities::spawner::EntityUuid;
 use crate::lobby::{Sessions, Target};
 use crate::server_app::{
-    broadcast_blackboard_updates, build_sim_state_entity_states, LastBroadcastBlackboards,
-    LastBroadcastEntityHealth, LastBroadcastEntityPositions, LocalShip, ShipSystemBlackboards,
-    SimOutbox,
+    broadcast_blackboard_updates, build_sim_state_entity_states, LastBroadcastEntityHealth,
+    LastBroadcastEntityPositions, LocalShip, ShipSystemBlackboards, SimOutbox,
 };
 
 fn open(bus: &PaneBus, n: u8) -> PaneId {
@@ -51,10 +50,13 @@ fn decode(bus: &PaneBus, id: PaneId) -> Vec<ServerMessage> {
 
 fn snapshot(entity_states: Vec<EntityStateSnapshot>) -> SimSnapshot {
     SimSnapshot {
+        console_hosts: Vec::new(),
+        console_views: Default::default(),
         entity_states,
-        station_hosts: Vec::new(),
         station_health: Vec::new(),
+        console_health: Vec::new(),
         station_importance: Vec::new(),
+        console_importance: Vec::new(),
         control_sources: BTreeMap::new(),
         system_depths: BTreeMap::new(),
         station_puppets: Vec::new(),
@@ -67,15 +69,18 @@ fn producer_common_and_recipient_repair_deltas_both_reach_each_pane() {
     let first = open(&bus, 1);
     let second = open(&bus, 2);
     let mut sessions = Sessions(crate::lobby::session::SessionManager::new());
-    for id in [first, second] {
+    for (index, id) in [first, second].into_iter().enumerate() {
         sessions
             .0
             .register(bus.token_of(id).unwrap(), "Crew".into())
             .unwrap();
+        sessions.0.set_station(
+            &bus.token_of(id).unwrap(),
+            Some(StationId(format!("seat-{index}"))),
+        );
     }
     let mut world = World::new();
     world.insert_resource(sessions);
-    world.init_resource::<LastBroadcastBlackboards>();
     world.init_resource::<SimOutbox>();
     let helm = SystemBlackboard::Helm(HelmBlackboard {
         x: 42.0,
@@ -90,14 +95,15 @@ fn producer_common_and_recipient_repair_deltas_both_reach_each_pane() {
             ..Default::default()
         }),
     );
-    world.spawn((LocalShip, blackboards));
+    let (config, hosts) = pane_console_topology(2);
+    world.spawn((LocalShip, blackboards, config, hosts));
 
     world.run_system_once(broadcast_blackboard_updates).unwrap();
     let entries = world.resource_mut::<SimOutbox>().drain();
     assert_eq!(
         entries.len(),
         3,
-        "one common batch plus each recipient's repair projection"
+        "one permitted projection per recipient plus privileged local projection"
     );
     for entry in entries {
         send(&bus, entry.target, &entry.message, entry.delivery);
@@ -145,6 +151,12 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
 
     world.get_mut::<Transform>(contact).unwrap().translation.x = 25.0;
     let mut first = snapshot(build_sim_state_entity_states(&mut world));
+    first
+        .console_health
+        .push(phoenix_model::messages::ConsoleHealthSnapshot {
+            console: phoenix_model::messages::ConsoleId("detached".into()),
+            health: Some(0.25),
+        });
     first.station_health.push(StationHealthSnapshot {
         station: StationId("helm".into()),
         health: Some(0.5),
@@ -174,7 +186,7 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
         panic!("simulation")
     };
     assert!(
-        snapshot.station_health.is_empty(),
+        snapshot.station_health.is_empty() && snapshot.console_health.is_empty(),
         "latest complete projections clear older rows"
     );
     for state in &snapshot.entity_states {
@@ -188,6 +200,8 @@ fn producer_final_contact_movement_survives_a_later_unrelated_entity_delta() {
 
 fn helm_update(x: f32) -> ServerMessage {
     ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(
             SystemId("helm".into()),
@@ -209,9 +223,11 @@ fn new_presentation_generation_keeps_the_rebased_repair_in_the_real_pane_queue()
         .0
         .register(bus.token_of(id).unwrap(), "Crew".into())
         .unwrap();
+    sessions
+        .0
+        .set_station(&bus.token_of(id).unwrap(), Some(StationId("seat-0".into())));
     let mut app = App::new();
     app.insert_resource(sessions)
-        .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<SimOutbox>()
         .init_resource::<RoomAudioLifecycle>()
         .add_systems(Update, broadcast_blackboard_updates);
@@ -224,7 +240,8 @@ fn new_presentation_generation_keeps_the_rebased_repair_in_the_real_pane_queue()
         SystemId("repair".into()),
         SystemBlackboard::Repair(RepairBlackboard::default()),
     );
-    app.world_mut().spawn((LocalShip, boards));
+    let (config, hosts) = pane_console_topology(1);
+    app.world_mut().spawn((LocalShip, boards, config, hosts));
     for generation in [1, 2] {
         app.world_mut()
             .resource_mut::<RoomAudioLifecycle>()
@@ -240,6 +257,7 @@ fn new_presentation_generation_keeps_the_rebased_repair_in_the_real_pane_queue()
     let ServerMessage::BlackboardUpdate {
         updates,
         presentation_generation,
+        ..
     } = &messages[0]
     else {
         panic!("board")
@@ -256,6 +274,8 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
     let second = open(&bus, 2);
     let target = Target::Token(bus.token_of(first).unwrap());
     let old = ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(
             SystemId("repair".into()),
@@ -274,6 +294,8 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
         DeliveryClass::Snapshot,
     );
     let withheld = ServerMessage::BlackboardUpdate {
+        console_scope: None,
+        console_scope_tick: None,
         presentation_generation: None,
         updates: vec![(
             SystemId("repair".into()),
@@ -466,4 +488,44 @@ fn a_reopened_pane_never_merges_with_its_previous_incarnations_delta() {
     assert_ne!(old, new);
     assert!(decode(&bus, old).is_empty());
     assert_eq!(decode(&bus, new), vec![helm_update(2.0)]);
+}
+
+fn pane_console_topology(
+    count: usize,
+) -> (
+    crate::ship_plugin::ShipConfigComponent,
+    crate::ship_plugin::ConsoleHosts,
+) {
+    use crate::core::messages::ConsoleId;
+    use phoenix_model::console::{
+        ConsoleConfig, ConsoleFeed, ConsoleHostSnapshot, ConsoleObservationKind,
+    };
+    let mut config: crate::ship::config::ShipConfig = toml::from_str("").unwrap();
+    let mut hosts = Vec::new();
+    for index in 0..count {
+        let id = ConsoleId(format!("screen-{index}"));
+        config.consoles.push(ConsoleConfig {
+            id: id.clone(),
+            feeds: vec![
+                ConsoleFeed {
+                    source: SystemId("helm".into()),
+                    kind: ConsoleObservationKind::Helm,
+                },
+                ConsoleFeed {
+                    source: SystemId("repair".into()),
+                    kind: ConsoleObservationKind::Repair,
+                },
+            ],
+            ..Default::default()
+        });
+        hosts.push(ConsoleHostSnapshot {
+            console: id,
+            host: Some(StationId(format!("seat-{index}"))),
+            rating: String::new(),
+        });
+    }
+    (
+        crate::ship_plugin::ShipConfigComponent(config),
+        crate::ship_plugin::ConsoleHosts(hosts),
+    )
 }

@@ -130,23 +130,19 @@ pub fn available_ratings_for_station<'a>(
 /// [`BACKFILL_RATING`] for every station, because "NPC" is just "a stationed
 /// ship with nobody connected yet".
 ///
-/// Two passes, and the second is the one that is easy to forget:
-///
-/// 1. Every station applies its rating, which sets its owned systems to `Ai`
-///    (Backfill automates all of them) or `Human`.
-/// 2. Every `ai_only` system is set to `Ai`. Those are ownerless by
-///    construction — [`crate::ship::config::validate`] rejects an ownerless
-///    system that is not `ai_only` — so no station rating can ever reach them.
-///    They are the auto-generated ones: the per-arc `shield_arc` systems
-///    synthesised for a hull with no shields station, and the `red_alert`
-///    capability provisioned for a `[behaviour]` hull that authors none.
-///    Without this pass they would fall to `ControlSourceResolver`'s
-///    `Human` default and silently stop being AI-operated.
+/// Seed every configured System with ordinary AI first, including detached
+/// human-seeking Consoles that have no home Station. Station ratings then
+/// select the initial depth for their home Consoles; hosting resolution can
+/// subsequently place visiting Consoles. AI-only equipment remains AI-operated
+/// regardless of the selected Station rating.
 pub fn seed_boot_ratings(
     config: &ShipConfig,
     rating_for: impl Fn(&StationConfig) -> String,
 ) -> (ControlSourceResolver, HashMap<StationId, String>) {
     let mut resolver = ControlSourceResolver::new();
+    for system in &config.systems {
+        resolver.set(system.id.clone(), ControlSource::Ai);
+    }
     let mut active_ratings: HashMap<StationId, String> = HashMap::new();
     for station in &config.stations {
         let rating_name = rating_for(station);

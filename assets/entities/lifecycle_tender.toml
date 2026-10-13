@@ -137,6 +137,7 @@ report_capacities = false
 id = "engineering"
 name = "Engineering"
 home_station = "engineering"
+screen = "gui/cruiser/engineering.html"
 
 [[console.feed]]
 source = "captain"

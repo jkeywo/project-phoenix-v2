@@ -153,6 +153,7 @@ min_power_level = 2
 id = "helm"
 name = "Helm"
 home_station = "helm"
+screen = "gui/destroyer/helm.html"
 
 [[console.feed]]
 source = "dock"
@@ -166,6 +167,7 @@ kind = "Viewscreen"
 id = "engineering"
 name = "Engineering"
 home_station = "engineering"
+screen = "gui/cruiser/engineering.html"
 
 [[console.feed]]
 source = "umbilical"

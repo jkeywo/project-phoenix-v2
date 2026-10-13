@@ -1,10 +1,14 @@
 use super::*;
 
-fn sid(s: &str) -> StationId {
-    StationId(s.into())
+fn sid(s: &str) -> AttentionOwner {
+    AttentionOwner::Console(ConsoleId(s.into()))
 }
 
-fn obj(id: &str, station: &str, status: ObjectiveStatus) -> (String, StationId, ObjectiveStatus) {
+fn obj(
+    id: &str,
+    station: &str,
+    status: ObjectiveStatus,
+) -> (String, AttentionOwner, ObjectiveStatus) {
     (id.into(), sid(station), status)
 }
 
@@ -139,16 +143,43 @@ fn snapshots_are_deterministic_and_omit_resolved_stations() {
     assert_eq!(
         snaps
             .iter()
-            .map(|s| s.station.0.as_str())
+            .map(|s| s.console.0.as_str())
             .collect::<Vec<_>>(),
         vec!["comms", "core", "helm"]
     );
     assert_eq!(
-        snaps.iter().find(|s| s.station.0 == "core").unwrap(),
-        &StationImportanceSnapshot {
-            station: sid("core"),
+        snaps.iter().find(|s| s.console.0 == "core").unwrap(),
+        &ConsoleImportanceSnapshot {
+            console: ConsoleId("core".into()),
             unread: false,
             critical: true
         }
     );
+}
+
+#[test]
+fn compatibility_projection_does_not_conflate_detached_consoles_or_core() {
+    let mut importance = StationImportance::default();
+    importance.ingest(
+        vec![
+            obj("a", "left", ObjectiveStatus::Completed),
+            obj("b", "right", ObjectiveStatus::Completed),
+        ],
+        vec![AttentionOwner::Core],
+    );
+    let homes = HashMap::from([(ConsoleId("left".into()), StationId("helm".into()))]);
+    let projected = importance.station_snapshots(&homes);
+    assert_eq!(projected.len(), 2);
+    assert!(projected
+        .iter()
+        .any(|entry| entry.station.0 == "helm" && entry.unread));
+    assert!(projected
+        .iter()
+        .any(|entry| entry.station.0 == "core" && entry.critical));
+    importance.visit(&sid("left"));
+    assert!(importance.flags_of(&sid("right")).unread);
+    assert!(!importance
+        .station_snapshots(&homes)
+        .iter()
+        .any(|entry| entry.station.0 == "helm"));
 }

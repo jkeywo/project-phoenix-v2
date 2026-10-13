@@ -31,10 +31,15 @@ name = "Engineering"
 description = "Damage control."
 rank = "Ltn."
 
+[[console]]
+id = "repair-console"
+home_station = "repair"
+screen = "fixture.html"
+
 [[system]]
 id = "repair"
 kind = "repair_control"
-station = "repair"
+console = "repair-console"
 "#,
         &["repair_control"],
     )
@@ -556,20 +561,25 @@ name = "Helm"
 description = "Flight control."
 rank = "Ltn."
 
+[[console]]
+id = "repair-console"
+home_station = "repair"
+screen = "fixture.html"
+
 [[system]]
 id = "port-main-drive"
 kind = "helm_thrust"
-station = "repair"
+console = "repair-console"
 
 [[system]]
 id = "yaw-ring"
 kind = "helm_steering"
-station = "repair"
+console = "repair-console"
 
 [[system]]
 id = "translation-ring"
 kind = "lateral_thrust"
-station = "repair"
+console = "repair-console"
 "#,
         &[
             crate::ship::system_registry::HELM_THRUST_KIND,

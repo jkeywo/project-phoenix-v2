@@ -5,7 +5,7 @@ const CHILD: &str = "assets/worlds/child.toml";
 const HULL: &str = "assets/entities/hull.toml";
 const HULL_SOURCE: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+[[system]]\nid='boost'\nkind='helm_boost'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
 
 #[test]
 fn authored_test_slot_offers_and_selection_use_the_runtime_hull_allowlist() {

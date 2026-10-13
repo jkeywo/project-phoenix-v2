@@ -11,10 +11,10 @@ const C = 'cccccccc-3333-4333-8333-cccccccccccc';
 const D = 'dddddddd-4444-4444-8444-dddddddddddd';
 const MINE = 'assets/factions/mine.toml', ALLIANCE = 'assets/factions/alliance.toml', HULL = 'assets/entities/hull.toml';
 const mineSource = `# mine\r\nuuid = "${A}"\r\nname = "Mine"\r\nenemies = [\r\n    "${B}", # Alliance\r\n]\r\nbanner = "keep"\r\n`;
-const hullSource = '[[system]]\nid = "helm-lateral-thrust"\nkind = "thruster"\nstation = "helm"\n\n[[station]]\nid = "helm"\n'
-  + 'name = "Helm"\nhuman_seeking = true\nvisiting_rating = "Std"\n\n[[station.rating]]\nname = "Std"\nautomated_systems = []\n\n'
+const hullSource = '[[system]]\nid = "helm-lateral-thrust"\nkind = "thruster"\nconsole = "flight"\n\n[[station]]\nid = "helm"\n'
+  + 'name = "Helm"\ndescription = "Pilot"\nrank = "Ensign"\n\n[[station.rating]]\nname = "Std"\nautomated_systems = []\n\n'
   + '[[station.rating]]\nname = "Simplified"\nautomated_systems = ["helm-lateral-thrust", "weapons-phaser"]\n'
-  + '[station.rating.ai_tuning]\ntorpedo_auto_fire = {}\n';
+  + '[station.rating.ai_tuning]\ntorpedo_auto_fire = {}\n[[console]]\nid = "flight"\nhome_station = "helm"\nscreen = "fixture.html"\n';
 const catalog = () => ({
   factions: [
     { path: MINE, origin: 'draft', uuid: A, uuid_line: 2, name: 'Mine', name_line: 3, display_name: null, display_name_line: null,
@@ -24,13 +24,11 @@ const catalog = () => ({
     { path: 'assets/factions/pirate.toml', origin: 'pack:raiders', uuid: C, uuid_line: 1, name: 'Pirate', name_line: 2,
       display_name: null, display_name_line: null, enemies: [{ uuid: A, line: 3, name: 'Mine' }], compliance: null, unknown_keys: [] },
   ],
-  hulls: [{ path: HULL, origin: 'draft', stations: [{ id: 'helm', name: 'Helm', line: 6, human_seeking: true,
-    visiting_rating: { source: '"Std"', line: 10 }, systems: [{ id: 'helm-lateral-thrust', kind: 'thruster', line: 2 }],
+  hulls: [{ path: HULL, origin: 'draft', stations: [{ id: 'helm', name: 'Helm', line: 6, systems: [{ id: 'helm-lateral-thrust', kind: 'thruster', line: 2 }],
     ratings: [{ index: 0, name: 'Std', line: 12, automated_systems: [], ai_tuning: [] },
       { index: 1, name: 'Simplified', line: 16, automated_systems: [{ id: 'helm-lateral-thrust', line: 18, owned: true },
         { id: 'weapons-phaser', line: 18, owned: false }], ai_tuning: [{ rule: 'torpedo_auto_fire', line: 20 }] }] },
-  // A station that seats no human, authored with a visiting rating the runtime would refuse.
-  { id: 'tactical', name: 'Tactical', line: 24, human_seeking: false, visiting_rating: { source: '"Std"', line: 26 }, systems: [],
+  { id: 'tactical', name: 'Tactical', line: 24, systems: [],
     ratings: [{ index: 0, name: 'Std', line: 28, automated_systems: [], ai_tuning: [] }] }] }],
   choices: { factions: [{ uuid: A, name: 'Mine', origin: 'draft' }, { uuid: B, name: 'Alliance', origin: 'base' },
     { uuid: C, name: 'Pirate', origin: 'pack:raiders' }], order_responses: ['comply', 'refuse'], ai_rules: ['torpedo_auto_fire'] },
@@ -165,7 +163,7 @@ it('disables the forms once any text member changed and hides the panel under a 
   draft.edit(HULL, `${hullSource}# newer\n`); panel.refresh();
   expect(byId('status').textContent).toBe(t('workshop.inspector_stale'));
   for (const id of ['name', 'display-name', 'add-enemy-button', 'apply-faction', 'delete-faction', 'faction', 'hull', 'station',
-    'visiting-rating', 'apply-hull', 'new-faction', 'create']) expect(byId(id).disabled).toBe(true);
+    'apply-hull', 'new-faction', 'create']) expect(byId(id).disabled).toBe(true);
   expect(byId('refresh').disabled).toBe(false);
   byId('apply-faction').click(); byId('apply-hull').click(); byId('create').click();
   expect(runtime.edit).not.toHaveBeenCalled(); expect(runtime.newFaction).not.toHaveBeenCalled();
@@ -229,13 +227,12 @@ it('adds a rung through append_table and refuses a duplicate rung name before th
   await read();
   expect(byId('hull').value).toBe(HULL);
   expect(byId('station').value).toBe('0');
-  expect(byId('human-seeking').checked).toBe(true);
-  expect(byId('human-seeking').disabled).toBe(true);
+  expect(byId('human-seeking')).toBeNull();
+  expect(byId('visiting-rating')).toBeNull();
   byId('new-rung').value = 'Std'; byId('add-rung').click();
   expect(byId('status').textContent).toBe(t('workshop.definitions.rung_exists'));
   byId('new-rung').value = 'Expert'; byId('add-rung').click();
   expect(byId('rung-2-name').value).toBe('Expert');
-  expect([...byId('visiting-rating').options].map(option => option.value)).toEqual(['', 'Std', 'Simplified', 'Expert']);
   byId('rung-2-system-0').checked = true; change(byId('rung-2-system-0'));
   byId('apply-hull').click();
   await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(HULL));
@@ -245,7 +242,7 @@ it('adds a rung through append_table and refuses a duplicate rung name before th
   expect(draft.undo()).toBe(HULL);
 });
 
-it('clears the visiting rating with a remove and drops an unowned automated system from its checked row', async () => {
+it('drops an unowned automated system from its checked row', async () => {
   await read();
   const unowned = byId('rung-1-unowned-0');
   expect(unowned.checked).toBe(true);
@@ -257,41 +254,23 @@ it('clears the visiting rating with a remove and drops an unowned automated syst
   expect(byId('rung-0-rule-0').checked).toBe(false);
   unowned.checked = false; change(unowned);
   expect(byId('rung-1-unowned-0')).toBeNull();
-  byId('visiting-rating').value = ''; change(byId('visiting-rating'));
   byId('rung-0-rule-0').checked = true; change(byId('rung-0-rule-0'));
   byId('rung-1-remove').click();
   expect(byId('rung-1-name')).toBeNull();
   byId('apply-hull').click();
   await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(HULL));
   expect(runtime.edit.mock.calls[0][1].edits).toEqual([
-    { op: 'remove', path: ['station', 0, 'visiting_rating'] },
     { op: 'put', path: ['station', 0, 'rating', 0, 'ai_tuning', 'torpedo_auto_fire'], value_source: '{}' },
     { op: 'remove', path: ['station', 0, 'rating', 1] },
   ]);
 });
 
-it('offers a station that seats no human only the clearing of a visiting rating it already has', async () => {
+it('keeps hosting controls out of Station rating authoring', async () => {
   await read();
   byId('station').value = '1'; change(byId('station'));
-  expect(byId('human-seeking').checked).toBe(false);
-  expect([...byId('visiting-rating').options].map(option => option.value)).toEqual(['', 'Std']);
-  expect(byId('visiting-rating').disabled).toBe(false);
-  byId('visiting-rating').value = ''; change(byId('visiting-rating'));
-  byId('apply-hull').click();
-  await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(HULL));
-  expect(runtime.edit.mock.calls[0][1].edits).toEqual([{ op: 'remove', path: ['station', 1, 'visiting_rating'] }]);
-  // With nothing to clear there is nothing to choose, so the control is read-only.
-  const cleared = catalog();
-  cleared.hulls[0].stations[1].visiting_rating = null;
-  runtime.definitions.mockResolvedValueOnce(cleared);
-  byId('refresh').click();
-  await vi.waitFor(() => expect(byId('status').textContent).toBe(t('workshop.definitions.refreshed')));
-  expect(byId('station').value).toBe('1');
-  expect([...byId('visiting-rating').options].map(option => option.value)).toEqual(['']);
-  expect(byId('visiting-rating').disabled).toBe(true);
-  byId('station').value = '0'; change(byId('station'));
-  expect(byId('visiting-rating').disabled).toBe(false);
-  expect([...byId('visiting-rating').options].map(option => option.value)).toEqual(['', 'Std', 'Simplified']);
+  expect(byId('human-seeking')).toBeNull();
+  expect(byId('visiting-rating')).toBeNull();
+  expect(byId('rung-0-name').value).toBe('Std');
 });
 
 it('keeps keyboard focus inside the form after every removal', async () => {

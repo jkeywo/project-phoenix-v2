@@ -786,10 +786,15 @@ id = "helm"
 name = "Helm"
 description = "Helm"
 rank = "Pilot"
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
 [[system]]
 id = "custom-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm-console"
 "#,
         &["helm_radar"],
     )

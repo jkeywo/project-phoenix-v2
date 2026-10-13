@@ -19,29 +19,31 @@ fn station(id: &str, ratings: Vec<StationRatingConfig>) -> StationConfig {
         rank: String::new(),
         short_code: String::new(),
         ratings,
-        console: None,
         manual_overview: None,
         tutorials: vec![],
-        human_seeking: false,
-        host_order: vec![],
-        visiting_rating: None,
-        auxiliary: false,
-        command_target: None,
         stances: vec![],
     }
 }
 
 fn system(id: &str, kind: &str, station: &str) -> SystemInstanceConfig {
     SystemInstanceConfig {
+        console: Some(phoenix_model::identity::ConsoleId(station.into())),
         id: SystemId(id.into()),
         kind: kind.into(),
-        station: Some(StationId(station.into())),
         ai_only: false,
-        human_seeking: false,
-        seek_order: Vec::new(),
+
         power_group: None,
         marker: None,
         config: None,
+    }
+}
+
+fn console(station: &StationConfig) -> phoenix_model::console::ConsoleConfig {
+    phoenix_model::console::ConsoleConfig {
+        id: phoenix_model::identity::ConsoleId(station.id.0.clone()),
+        home_station: Some(station.id.clone()),
+        screen: Some("fixture.html".into()),
+        ..Default::default()
     }
 }
 
@@ -53,6 +55,7 @@ fn helm_ship(automated: &[&str]) -> (ShipConfig, StationConfig) {
         stations: vec![st.clone()],
         systems: vec![system("helm-steering", kinds::HELM_STEERING_KIND, "helm")],
         power_groups: Default::default(),
+        consoles: vec![console(&st)],
         coordination_lag_secs: 2.0,
     };
     (ship, st)
@@ -112,12 +115,15 @@ fn human_seeking_systems_never_force_manual_operation() {
     // A comms system that seeks a human (never forced on this holder) does not
     // make the seat ineligible even when the rating does not automate it.
     let st = station("captain", vec![rating("Std", &[])]);
-    let mut comms = system("comms", kinds::COMMS_KIND, "captain");
-    comms.human_seeking = true;
+    let comms = system("comms", kinds::COMMS_KIND, "captain");
+    let mut comms_console = console(&st);
+    comms_console.human_seeking = true;
+    comms_console.host_order = vec![st.id.clone()];
     let ship = ShipConfig {
         stations: vec![st.clone()],
         systems: vec![comms],
         power_groups: Default::default(),
+        consoles: vec![comms_console],
         coordination_lag_secs: 2.0,
     };
     assert!(station_eligible(
@@ -137,6 +143,7 @@ fn ai_only_systems_never_force_manual_operation() {
         stations: vec![st.clone()],
         systems: vec![radar],
         power_groups: Default::default(),
+        consoles: vec![console(&st)],
         coordination_lag_secs: 2.0,
     };
     assert!(station_eligible(
@@ -158,6 +165,7 @@ fn projection_lists_only_nonempty_rating_gaps() {
         stations: vec![st.clone()],
         systems: vec![system("helm-steering", kinds::HELM_STEERING_KIND, "helm")],
         power_groups: Default::default(),
+        consoles: vec![console(&st)],
         coordination_lag_secs: 2.0,
     };
     let gaps = projected_assist_gaps(&st, &ship);
@@ -217,23 +225,19 @@ fn every_base_playable_hull_keeps_a_compatible_seat_with_all_assists() {
         };
         // "Base playable hull" == one with at least one claimable (non-auxiliary)
         // seat. Full crew fills exactly those seats.
-        if !ship.stations.iter().any(|s| !s.auxiliary) {
+        if ship.stations.is_empty() {
             continue;
         }
         checked_hulls += 1;
 
         // The stress profile: request EVERY assist function at once (the
         // "complete supported option set" of the contract).
-        let compatible = ship
-            .stations
-            .iter()
-            .filter(|station| !station.auxiliary)
-            .any(|station| {
-                station
-                    .ratings
-                    .iter()
-                    .any(|r| station_eligible(station, &r.name, ASSIST_FUNCTIONS, ship))
-            });
+        let compatible = ship.stations.iter().any(|station| {
+            station
+                .ratings
+                .iter()
+                .any(|r| station_eligible(station, &r.name, ASSIST_FUNCTIONS, ship))
+        });
         assert!(
             compatible,
             "{stem}: no (station, rating) is eligible with all T1 assist \
@@ -251,4 +255,27 @@ fn every_base_playable_hull_keeps_a_compatible_seat_with_all_assists() {
         checked_hulls >= 9,
         "expected the walk to find every base playable hull, got {checked_hulls}"
     );
+}
+
+#[test]
+fn detached_destroyer_comms_projects_its_own_manual_assistance_gap() {
+    let ship = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .unwrap()
+    .ship_config
+    .unwrap();
+    let console = ship.console_for_system(&SystemId("comms".into())).unwrap();
+    assert!(console.home_station.is_none());
+    let gaps = projected_console_assist_gaps(console, &ship);
+    assert_eq!(gaps["Std"], vec![ASSIST_COMMS_DIALOGUE_TIMING.to_string()]);
+    let tactical = ship.station(&StationId("tactical".into())).unwrap();
+    assert!(!projected_assist_gaps(tactical, &ship)
+        .values()
+        .any(|gaps| gaps.iter().any(|gap| gap == ASSIST_COMMS_DIALOGUE_TIMING)));
+    let mut assisted = console.clone();
+    assisted.ratings[0]
+        .automated_systems
+        .push(SystemId("comms".into()));
+    assert!(projected_console_assist_gaps(&assisted, &ship).is_empty());
 }

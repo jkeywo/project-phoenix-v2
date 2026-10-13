@@ -21,6 +21,7 @@ impl ShipSpawnSeed {
                     stations: Vec::new(),
                     systems: Vec::new(),
                     power_groups: Default::default(),
+                    consoles: Vec::new(),
                     coordination_lag_secs: 0.0,
                 },
             ));

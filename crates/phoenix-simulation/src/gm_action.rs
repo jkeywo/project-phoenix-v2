@@ -3179,6 +3179,7 @@ pub fn apply_due_actions(
                 &crate::ship::components::ActiveStationRatings,
                 &mut crate::ship::components::ShipSystemControlSources,
                 Option<&crate::ship_plugin::HumanSeekingHosts>,
+                Option<&crate::ship::components::ConsoleHosts>,
             ),
             With<crate::server_app::Ship>,
         >,
@@ -3671,7 +3672,7 @@ pub fn apply_due_actions(
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::UnknownEntity),
                     ),
-                    Some((_, config, _, mut sources, _)) => {
+                    Some((_, config, _, mut sources, _, _)) => {
                         if config.0.system(system).is_none() {
                             (
                                 GmActionOutcome::Refused,
@@ -4320,14 +4321,15 @@ pub fn apply_due_actions(
                     let found = ships
                         .iter()
                         .find(|(uuid, ..)| uuid.0 == ship.0)
-                        .map(|(_, config, ratings, ..)| (config, ratings));
+                        .map(|(_, config, ratings, _, _, hosts)| (config, ratings, hosts));
                     match capability.and_then(|()| {
                         crate::gm_puppet::validate_station_action(
                             &grant.action,
                             &grant.operator_id,
                             puppets,
-                            found.map(|(config, _)| &config.0),
-                            found.map(|(_, ratings)| ratings),
+                            found.map(|(config, _, _)| &config.0),
+                            found.map(|(_, ratings, _)| ratings),
+                            found.and_then(|(_, _, hosts)| hosts),
                         )
                     }) {
                         Ok(()) => {
@@ -4365,7 +4367,7 @@ pub fn apply_due_actions(
                 } else {
                     let capability = ship_access.p1().check(&ship.0, station);
                     let ships = ship_access.p0();
-                    let Some((_, config, _, sources, hosts)) =
+                    let Some((_, config, ratings, sources, hosts, console_hosts)) =
                         ships.iter().find(|(uuid, ..)| uuid.0 == ship.0)
                     else {
                         let result = LoggedGmAction::from_grant(
@@ -4378,6 +4380,16 @@ pub fn apply_due_actions(
                             .expect("live GM result matches its canonical grant");
                         continue;
                     };
+                    let capability = capability.and_then(|()| {
+                        crate::gm_puppet::validate_station_action(
+                            &grant.action,
+                            &grant.operator_id,
+                            puppets.as_deref().expect("checked active puppet above"),
+                            Some(&config.0),
+                            Some(ratings),
+                            console_hosts,
+                        )
+                    });
                     if let Err(reason) = capability {
                         (GmActionOutcome::Refused, Some(reason))
                     } else {
@@ -4394,6 +4406,7 @@ pub fn apply_due_actions(
                                 sources,
                                 &config.0,
                                 hosts,
+                                console_hosts,
                             ) {
                                 Ok(command) => {
                                     let support = consumers.as_deref().map_or(crate::command_admission::FeedbackSupport::Unsupported, |registry| registry.feedback_support(&command.target, &command.payload, &config.0));

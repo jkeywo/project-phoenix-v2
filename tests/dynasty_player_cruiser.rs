@@ -98,10 +98,14 @@ fn dynasty_player_cruiser_has_the_agreed_six_role_authority_map() {
             "{} must remain a working Backfill-capable station",
             station.id.0
         );
-        assert!(station
-            .console
-            .as_deref()
-            .is_some_and(|path| path.starts_with("gui/dynasty-cruiser/")));
+        assert!(ship
+            .consoles
+            .iter()
+            .any(|console| console.home_station.as_ref() == Some(&station.id)
+                && console
+                    .screen
+                    .as_deref()
+                    .is_some_and(|path| path.starts_with("gui/dynasty-cruiser/"))));
         assert!(
             !station.tutorials.is_empty(),
             "{} needs role onboarding",

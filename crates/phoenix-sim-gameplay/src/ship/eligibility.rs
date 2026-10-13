@@ -92,10 +92,12 @@ fn is_gap(station: &StationConfig, required_rating: &str, func: &str, ship: &Shi
         return false;
     };
     ship.systems.iter().any(|s| {
-        s.station.as_ref() == Some(&station.id)
+        ship.system_home_station(s) == Some(&station.id)
             && s.kind == kind
             && !s.ai_only
-            && !s.human_seeking
+            && !ship
+                .console_for_system(&s.id)
+                .is_some_and(|console| console.human_seeking)
             && !rating.automated_systems.contains(&s.id)
     })
 }
@@ -150,6 +152,38 @@ pub fn projected_assist_gaps(
             .iter()
             .copied()
             .filter(|func| is_gap(station, &rating.name, func, ship))
+            .map(str::to_string)
+            .collect();
+        if !gaps.is_empty() {
+            out.insert(rating.name.clone(), gaps);
+        }
+    }
+    out
+}
+
+/// A hosted Console must be compatible in its own right, including when it seeks
+/// a human. Optional placement on a Station does not make its manual work safe
+/// for every holder. The anonymous client report evaluates every authored rating.
+pub fn projected_console_assist_gaps(
+    console: &phoenix_model::console::ConsoleConfig,
+    ship: &ShipConfig,
+) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    for rating in ship.console_ratings(console) {
+        let gaps: Vec<String> = ASSIST_FUNCTIONS
+            .iter()
+            .copied()
+            .filter(|func| {
+                let Some(kind) = assist_system_kind(func) else {
+                    return false;
+                };
+                ship.systems.iter().any(|system| {
+                    system.console.as_ref() == Some(&console.id)
+                        && system.kind == kind
+                        && !system.ai_only
+                        && !rating.automated_systems.contains(&system.id)
+                })
+            })
             .map(str::to_string)
             .collect();
         if !gaps.is_empty() {

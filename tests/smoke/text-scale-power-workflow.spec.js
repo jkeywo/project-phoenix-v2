@@ -539,8 +539,9 @@ test('Station Bar tab labels stay whole in the landscape rail at every text scal
     // carries the visiting tabs too — one tab is not a rail.
     const model = heroBarModel({
       directStation: 'power',
-      stations: stations.map((st) => ({ ...st, human_seeking: true })),
-      stationHosts: Object.fromEntries(stations.map((st) => [st.id, { host: 'power' }])),
+      stations,
+      consoles: stations.map((st) => ({ ...st, home_station: st.id, screen: 'fixture.html', human_seeking: true })),
+      consoleHosts: Object.fromEntries(stations.map((st) => [st.id, { host: 'power' }])),
       activeStation: 'power',
     });
     const mode = heroBarLabelMode(window);

@@ -88,7 +88,6 @@ pub fn test_app() -> App {
             (
                 crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
                 crate::ship_plugin::HumanSeekingHosts::default(),
-                crate::ship_plugin::VisitingStationHosts::default(),
                 crate::ship_plugin::ScenarioDetailFloor::default(),
             ),
             Transform::default(),
@@ -322,27 +321,14 @@ pub fn start_game_with_helm_and_science(app: &mut App) {
 /// per-axis gate and stand-down tests — call `set_fine_control_source`
 /// afterwards to override individual axes.
 pub fn set_helm_control_source(app: &mut App, source: ControlSource) {
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
-    for mut cs in q.iter_mut(app.world_mut()) {
-        cs.0.set(
-            crate::ship::system_registry::helm_thrust_system_id(),
-            source,
-        );
-        cs.0.set(
-            crate::ship::system_registry::helm_steering_system_id(),
-            source,
-        );
-        cs.0.set(
-            crate::ship::system_registry::helm_impulse_system_id(),
-            source,
-        );
-        cs.0.set(crate::ship::system_registry::helm_boost_system_id(), source);
-        cs.0.set(
-            crate::ship::system_registry::lateral_thrust_system_id(),
-            source,
-        );
+    for id in [
+        crate::ship::system_registry::helm_thrust_system_id(),
+        crate::ship::system_registry::helm_steering_system_id(),
+        crate::ship::system_registry::helm_impulse_system_id(),
+        crate::ship::system_registry::helm_boost_system_id(),
+        crate::ship::system_registry::lateral_thrust_system_id(),
+    ] {
+        set_fine_control_source(app, id, source);
     }
 }
 
@@ -495,6 +481,100 @@ pub fn set_fine_control_source(
         .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
     for mut cs in q.iter_mut(app.world_mut()) {
         cs.0.set(system_id.clone(), source);
+        cs.0.set_gm_disabled(system_id.clone(), source == ControlSource::Offline);
+    }
+    materialize_fixture_control_sources(app, &[system_id]);
+}
+
+/// Reflect fixture intent through ordinary Console ratings and real seat tenure.
+/// The Input hosting pass remains enabled; it must not silently undo test setup.
+/// Undeclared coarse ids stay inert resolver entries, never invented equipment.
+pub fn materialize_fixture_control_sources(
+    app: &mut App,
+    changed: &[crate::core::messages::SystemId],
+) {
+    const RATING: &str = "Fixture control";
+    let mut seats = std::collections::BTreeSet::new();
+    let mut query = app.world_mut().query_filtered::<(
+        &mut crate::ship_plugin::ShipConfigComponent,
+        &ShipSystemControlSources,
+        &mut ActiveStationRatings,
+    ), With<Ship>>();
+    for (mut config, sources, mut ratings) in query.iter_mut(app.world_mut()) {
+        let original = config.0.clone();
+        let systems = original.systems.clone();
+        for console in &mut config.0.consoles {
+            let owned: Vec<_> = systems
+                .iter()
+                .filter(|system| system.console.as_ref() == Some(&console.id))
+                .collect();
+            if !owned.iter().any(|system| changed.contains(&system.id)) || console.screen.is_none()
+            {
+                continue;
+            }
+            let host = console
+                .home_station
+                .clone()
+                .or_else(|| console.host_order.first().cloned());
+            let Some(host) = host else {
+                continue;
+            };
+            // A real human holder can delegate individual Systems in the same Console.
+            if owned.iter().any(|system| {
+                !system.ai_only
+                    && matches!(
+                        sources.0.source_for(&system.id),
+                        ControlSource::Human | ControlSource::Simplified
+                    )
+            }) {
+                seats.insert(host.clone());
+            }
+            console.ratings = vec![crate::ship::config::StationRatingConfig {
+                name: RATING.into(),
+                automated_systems: owned
+                    .iter()
+                    .filter(|system| sources.0.source_for(&system.id) == ControlSource::Ai)
+                    .map(|system| system.id.clone())
+                    .collect(),
+                detailed_systems: Some(
+                    owned
+                        .iter()
+                        .filter(|system| {
+                            sources.0.source_for(&system.id) != ControlSource::Simplified
+                        })
+                        .map(|system| system.id.clone())
+                        .collect(),
+                ),
+                ai_tuning: original
+                    .console_ratings(console)
+                    .first()
+                    .and_then(|rating| rating.ai_tuning.clone()),
+            }];
+            ratings.0.insert(host, RATING.into());
+            if console.human_seeking {
+                console.visiting_rating = Some(RATING.into());
+            }
+        }
+    }
+    // Bare receiver fixtures have no hosted configured Systems and no lobby.
+    // They retain direct policy setup without inventing session infrastructure.
+    if seats.is_empty() {
+        return;
+    }
+    let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+    for seat in seats {
+        if sessions.0.holder_for_station(&seat).is_some() {
+            continue;
+        }
+        let token = format!("fixture-control-{}", seat.0);
+        if sessions.0.reconnect(&token).is_none() {
+            sessions
+                .0
+                .register(token.clone(), token.clone())
+                .expect("fixture operator");
+        }
+        sessions.0.set_afk(&token, false);
+        sessions.0.set_station(&token, Some(seat));
     }
 }
 
@@ -675,7 +755,6 @@ pub fn test_app_with_engine_hull() -> App {
             (
                 crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
                 crate::ship_plugin::HumanSeekingHosts::default(),
-                crate::ship_plugin::VisitingStationHosts::default(),
                 crate::ship_plugin::ScenarioDetailFloor::default(),
             ),
             Transform::default(),

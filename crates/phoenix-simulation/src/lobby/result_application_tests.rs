@@ -20,10 +20,15 @@ automated_systems = []
 [[station.rating]]
 name = "Assist"
 automated_systems = ["drive"]
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
 [[system]]
 id = "drive"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-console"
 "#,
     )
     .unwrap();

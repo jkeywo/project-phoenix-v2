@@ -260,7 +260,10 @@ pub(crate) fn test_reconnect_welcomes(app: &mut App, tokens: &[&str]) {
                         players: vec![],
                         world: None,
                     },
-                    ship_stations: crate::lobby::stations_config::ShipStations { stations: vec![] },
+                    ship_stations: crate::lobby::stations_config::ShipStations {
+                        stations: vec![],
+                        consoles: vec![],
+                    },
                     ship_config: Default::default(),
                     station_ratings: Default::default(),
                     gms: vec![],

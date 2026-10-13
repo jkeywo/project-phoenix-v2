@@ -301,16 +301,20 @@ id = "helm"
 name = "Helm"
 description = ""
 rank = ""
-console = "helm.html"
 
 [[station.rating]]
 name = "Manual"
 automated_systems = []
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "helm.html"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-console"
 "#,
         &["helm_thrust"],
     )
@@ -2931,7 +2935,7 @@ fn effect_system(id: &str) -> crate::gm_effect::GmDirectEffectScope {
 ///
 /// The ship config is parsed from TOML for the reason
 /// `gm_effect::tests::ship_config` is: the ownership under test has to be
-/// the same `[[system]] station = "..."` field a shipped hull authors, read
+/// the same `[[system]] console = "..."` field a shipped hull authors, read
 /// the same way.
 ///
 /// A row with max `0.0` is authored in the config but NOT tracked by the
@@ -2974,16 +2978,22 @@ rank = "Lieutenant"
         if *max > 0.0 {
             hull.set_hp(&crate::core::messages::SystemId((*id).into()), *current);
         }
+        let home = station
+            .map(|station| format!("home_station = \"{station}\"\nscreen = \"fixture.html\"\n"))
+            .unwrap_or_default();
+        let ai_only = station.is_none();
         toml.push_str(&format!(
             r#"
+[[console]]
+id = "scope-{id}"
+{home}
 [[system]]
 id = "{id}"
+console = "scope-{id}"
 kind = "{id}"
+ai_only = {ai_only}
 "#
         ));
-        if let Some(station) = station {
-            toml.push_str(&format!("station = \"{station}\"\n"));
-        }
     }
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid(uuid.into()),

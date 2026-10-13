@@ -40,7 +40,7 @@ fn test_app() -> App {
             )
                 .chain(),
         )
-        .init_resource::<crate::server_app::LastBroadcastBlackboards>()
+        .init_resource::<crate::ship::console_publication::LastConsolePublications>()
         .init_resource::<crate::lobby::server::ShipClientConfigResource>()
         .add_plugins(NavigationPlugin)
         .add_plugins(sim_state_broadcaster())

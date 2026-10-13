@@ -395,24 +395,29 @@ impl EntityConfig {
             let has_station = table.contains_key("station");
             let has_system = table.contains_key("system");
             let has_power_groups = table.contains_key("power_groups");
-            let out = if has_station || has_system || has_power_groups {
-                let mut ship_table = toml::value::Table::new();
-                if let Some(v) = table.get("station").cloned() {
-                    ship_table.insert("station".to_string(), v);
-                }
-                if let Some(v) = table.get("system").cloned() {
-                    ship_table.insert("system".to_string(), v);
-                }
-                if let Some(v) = table.get("power_groups").cloned() {
-                    ship_table.insert("power_groups".to_string(), v);
-                }
-                Some(toml::Value::Table(ship_table))
-            } else {
-                None
-            };
+            let out =
+                if has_station || has_system || has_power_groups || table.contains_key("console") {
+                    let mut ship_table = toml::value::Table::new();
+                    if let Some(v) = table.get("console").cloned() {
+                        ship_table.insert("console".to_string(), v);
+                    }
+                    if let Some(v) = table.get("station").cloned() {
+                        ship_table.insert("station".to_string(), v);
+                    }
+                    if let Some(v) = table.get("system").cloned() {
+                        ship_table.insert("system".to_string(), v);
+                    }
+                    if let Some(v) = table.get("power_groups").cloned() {
+                        ship_table.insert("power_groups".to_string(), v);
+                    }
+                    Some(toml::Value::Table(ship_table))
+                } else {
+                    None
+                };
             // Now strip so deny_unknown_fields doesn't reject.
             table.remove("stations");
             table.remove("station");
+            table.remove("console");
             table.remove("system");
             table.remove("power_groups");
             out
@@ -453,7 +458,7 @@ impl EntityConfig {
                 // during the initial pass. Final validation runs after
                 // shield_arc synthesis below.
                 toml::from_str::<crate::ship::config::ShipConfig>(&ship_toml_str).map_err(|e| {
-                    serde::de::Error::custom(format!("ship_config parse failed: {e}"))
+                    serde::de::Error::custom(format!("ship_config parse failed: {e}. Content requires explicit Consoles: replace system.station with system.console and define each [[console]] home_station/feeds. Use the original game version for an unconverted pack."))
                 })?
             } else {
                 // No station/system/power_groups TOML at all but we do have
@@ -464,6 +469,7 @@ impl EntityConfig {
                     stations: Vec::new(),
                     systems: Vec::new(),
                     power_groups: std::collections::HashMap::new(),
+                    consoles: Vec::new(),
                     coordination_lag_secs: 2.0,
                 }
             };
@@ -475,21 +481,26 @@ impl EntityConfig {
             // station with `ai_only = false`. For NPC ships (no shields
             // station and no shields system), arcs are ownerless AI-only
             // systems, matching how NPC phaser banks / power reactors work.
-            // If a kind="shields" system exists, its station assignment
-            // is used (allowing shields to live on e.g. Science).
-            let shields_station_id = crate::core::messages::StationId("shields".into());
+            // If a kind="shields" System exists, its Console owns the arcs.
+            // A seat name alone does not manufacture ownership or human controls.
             let shields_system = ship_config
                 .systems
                 .iter()
                 .find(|s| s.kind == crate::ship::system_registry::SHIELDS_KIND);
-            let has_shields_station = shields_system.is_some()
-                || ship_config
-                    .stations
-                    .iter()
-                    .any(|s| s.id == shields_station_id);
-            let effective_shields_station = shields_system
-                .and_then(|s| s.station.clone())
-                .unwrap_or(shields_station_id);
+            let mut shields_console = shields_system.and_then(|s| s.console.clone());
+            let shields_ai_only = shields_system.is_none_or(|system| system.ai_only);
+            if shields_console.is_none() {
+                let id = phoenix_model::identity::ConsoleId("generated-shields".into());
+                if ship_config.console(&id).is_none() {
+                    ship_config
+                        .consoles
+                        .push(phoenix_model::console::ConsoleConfig {
+                            id: id.clone(),
+                            ..Default::default()
+                        });
+                }
+                shields_console = Some(id);
+            }
             for arc in &config.shield_arcs {
                 let sid = crate::ship::system_registry::shield_arc_system_id(&arc.id).ok_or_else(
                     || SerdeError::custom(format!("shield_arc id {:?} is empty", arc.id)),
@@ -515,19 +526,26 @@ impl EntityConfig {
                     );
                 }
 
+                if let Some(console) = shields_console.as_ref().and_then(|id| {
+                    ship_config
+                        .consoles
+                        .iter_mut()
+                        .find(|console| &console.id == id)
+                }) {
+                    if !console.feeds.iter().any(|feed| feed.source == sid) {
+                        console.feeds.push(phoenix_model::console::ConsoleFeed {
+                            source: sid.clone(),
+                            kind: phoenix_model::console::ConsoleObservationKind::ShieldArc,
+                        });
+                    }
+                }
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        console: shields_console.clone(),
                         id: sid,
                         kind: crate::ship::system_registry::SHIELD_ARC_KIND.into(),
-                        station: if has_shields_station {
-                            Some(effective_shields_station.clone())
-                        } else {
-                            None
-                        },
-                        ai_only: !has_shields_station,
-                        human_seeking: false,
-                        seek_order: Vec::new(),
+                        ai_only: shields_ai_only,
                         // Shield arcs are governed by the shields group as a
                         // whole through ShieldRegen; they are not an extra
                         // allocatable Operations channel.
@@ -556,17 +574,28 @@ impl EntityConfig {
                     .iter()
                     .any(|s| s.kind == crate::ship::system_registry::RED_ALERT_KIND)
             {
+                let console_id = phoenix_model::identity::ConsoleId("generated-command".into());
+                if ship_config.console(&console_id).is_none() {
+                    ship_config
+                        .consoles
+                        .push(phoenix_model::console::ConsoleConfig {
+                            id: console_id.clone(),
+                            feeds: vec![phoenix_model::console::ConsoleFeed {
+                                source: crate::ship::system_registry::viewscreen_system_id(),
+                                kind: phoenix_model::console::ConsoleObservationKind::Viewscreen,
+                            }],
+                            ..Default::default()
+                        });
+                }
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        console: Some(console_id),
                         id: crate::core::messages::SystemId(
                             crate::ship::system_registry::RED_ALERT_SYSTEM_ID.into(),
                         ),
                         kind: crate::ship::system_registry::RED_ALERT_KIND.into(),
-                        station: None,
                         ai_only: true,
-                        human_seeking: false,
-                        seek_order: Vec::new(),
                         power_group: None,
                         marker: None,
                         config: None,
@@ -877,7 +906,12 @@ impl EntityConfig {
                      declare its team count, crossing times and reach",
                 ));
             }
-            if system.station.is_none() {
+            if config
+                .ship_config
+                .as_ref()
+                .and_then(|ship| ship.system_home_station(system))
+                .is_none()
+            {
                 return Err(SerdeError::custom(
                     "the [[system]] kind = \"security\" block must declare a station — Security is \
                      assigned through ship configuration, and a system nobody owns can be \
@@ -1352,6 +1386,12 @@ impl EntityConfig {
             .expect("EntityConfig always serializes to a TOML table");
 
         if let Some(ship_config) = &self.ship_config {
+            if !ship_config.consoles.is_empty() {
+                table.insert(
+                    "console".to_string(),
+                    toml::Value::try_from(&ship_config.consoles)?,
+                );
+            }
             if !ship_config.stations.is_empty() {
                 table.insert(
                     "station".to_string(),

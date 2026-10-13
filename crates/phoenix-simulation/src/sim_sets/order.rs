@@ -274,6 +274,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
         CheckDestroyedAsteroids,
         PreAdmissionPruneStationPuppets,
         ReplicateLocalCrewRatings,
+        AdmitConsoleViewRequests,
     ] {
         order.before(super::SimSet::Membership, owner);
     }

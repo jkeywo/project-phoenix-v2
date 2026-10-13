@@ -3,7 +3,7 @@ title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, networking, audience, cadence, delivery-class, snapshot, reliable]
 sources: [crates/phoenix-simulation/src/core/broadcast/, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/debug_overlay.rs]
-updated: 2026-09-08
+updated: 2026-10-13
 ---
 
 # Broadcaster Seam
@@ -21,11 +21,11 @@ messages take the direct `LobbyOutboxPlugin` path described below.
 
 - `All`, `Token`, and `AllExcept` for direct routing;
 - `Holding(StationId)` for an explicitly addressed station;
-- `HoldingSystem(SystemId)` for the live holder of the station that owns an authored system;
-- `HoldingSystemKind(String)` for a capability whose author-defined instances share one owning station;
+- `HoldingSystem(SystemId)` for the live holder of an authored System’s current Console host;
+- `HoldingSystemKind(String)` for a capability whose authored instances share one current Console host;
 - `HoldingWeapons` for the hull's projected Tactical/weapons audience.
 
-The system-derived variants require the current `ShipConfig`; they do not infer station identity from a matching string.
+The System-derived variants require `ShipConfig` and current `ConsoleHosts`. Missing or split hosting fails closed; neither a matching string nor a home Station grants authority.
 
 `Cadence` supports periodic `Hz`/`Period`, drain-on-every-tick `OnEvent`, and one-shot `Once` producers.
 
@@ -80,11 +80,11 @@ reconnecting token as Snapshot traffic and knows no message variant.
 
 The complete registry has five owners in lexical order:
 
-- `LastBroadcastBlackboards`, its live diff publisher, reset, and reconnect projector live together in `crates/phoenix-simulation/src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient `LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by `SystemId`, applies the same Repair visibility policy as live publication, and does not mutate either cache.
+- `LastConsolePublications` caches complete permitted publication scopes per recipient. Live and reconnect projections use current Console hosts and the producing Console’s Repair visibility; reconnect does not mutate another recipient’s cache.
 - `LastBroadcastEntityPositions` and `LastBroadcastEntityHealth` live beside `sim_state_broadcaster` in `crates/phoenix-simulation/src/server_app/broadcast.rs` under the reset-only `entity-state` key. `Welcome` already carries current world state, so this owner has no reconnect projector. Its explicit UUID-pruning function is called only by asteroid/runtime despawn paths; unrelated caches have no synthetic pruning hook.
 - `RepairPlugin` registers token-keyed `LastBroadcastHull` beside `push_hull_updates` under the stable `hull` key. Reconnect uses the same `HullVisibility` projection as live publication, including on-site detail, without writing the cache or perturbing another recipient's next delta.
-- `ShipShieldsPlugin` registers a cache-free reconnect projector under `shields`. It reuses the periodic publisher's current-message builder and `HoldingSystemKind("shields")` audience, so only the holder of the Station that owns the authored Shields capability receives the snapshot even when a hull chooses another instance id.
-- `WeaponsPlugin` registers both publisher caches, `LastWeaponsUpdate` and `WeaponsUpdateFirstTick`, beside `weapons_update_broadcaster` under the stable `weapons` key. Each run resets the last-value cache and rearms the first-projection latch. Reconnect uses the same authored Weapons Station ownership rule and current message builder as live publication, returns nothing for a non-holder, and neither reads nor mutates either cache.
+- `ShipShieldsPlugin` registers a cache-free reconnect projector under `shields`. It uses the same current Console-host audience as live publication, including fail-closed split hosting.
+- `WeaponsPlugin` registers `LastWeaponsUpdate`, `WeaponsUpdateFirstTick` and its audience cache under `weapons`. A host change or unhosted interval rearms publication even when machinery values are unchanged. Reconnect uses the same current-host resolver without mutating publication caches.
 
 ## Adding a producer
 

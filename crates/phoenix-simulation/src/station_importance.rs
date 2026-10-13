@@ -1,4 +1,4 @@
-//! Pure Rust host-derived per-Station importance (issue #1101).
+//! Pure Rust host-derived Console importance (issue #1101).
 //!
 //! No Bevy dependency. Owns the authoritative importance state the Hero Bar
 //! renders and the [`SimSnapshot`](crate::core::messages::SimSnapshot) carries, kept
@@ -24,8 +24,16 @@
 //! Bevy resource, an ingest pass folds objectives + Red Alert into it, and the
 //! `StationVisited` drain calls [`StationImportance::visit`].
 
-use crate::core::messages::{ObjectiveStatus, StationId, StationImportanceSnapshot};
+use crate::core::messages::{ConsoleId, ObjectiveStatus, StationId, StationImportanceSnapshot};
+use phoenix_model::console::ConsoleImportanceSnapshot;
 use std::collections::{HashMap, HashSet};
+
+/// Attention follows a Console; unassigned ship-wide events use a distinct bucket.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AttentionOwner {
+    Console(ConsoleId),
+    Core,
+}
 
 /// The two independent importance flags for one Station.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -49,7 +57,7 @@ impl ImportanceFlags {
 /// sorts on the id to keep the projected byte stream deterministic.
 #[derive(Clone, Debug, Default)]
 pub struct StationImportance {
-    flags: HashMap<StationId, ImportanceFlags>,
+    flags: HashMap<AttentionOwner, ImportanceFlags>,
     /// The last terminal status seen per objective id, so a completing/failing
     /// objective raises `unread` exactly once — the edge — and a later visit
     /// clears it for good rather than fighting a re-raise every tick.
@@ -67,8 +75,8 @@ impl StationImportance {
     /// resolved condition lowers it while a still-set `unread` is untouched.
     pub fn ingest(
         &mut self,
-        objectives: impl IntoIterator<Item = (String, StationId, ObjectiveStatus)>,
-        critical_stations: impl IntoIterator<Item = StationId>,
+        objectives: impl IntoIterator<Item = (String, AttentionOwner, ObjectiveStatus)>,
+        critical_stations: impl IntoIterator<Item = AttentionOwner>,
     ) {
         for (id, station, status) in objectives {
             let terminal = matches!(status, ObjectiveStatus::Completed | ObjectiveStatus::Failed);
@@ -89,8 +97,8 @@ impl StationImportance {
         // Level-trigger critical from the live set. Recompute across every
         // Station we track OR that is newly critical, so a lowered condition
         // actually clears rather than latching.
-        let critical: HashSet<StationId> = critical_stations.into_iter().collect();
-        let stations: Vec<StationId> = self
+        let critical: HashSet<AttentionOwner> = critical_stations.into_iter().collect();
+        let stations: Vec<AttentionOwner> = self
             .flags
             .keys()
             .cloned()
@@ -108,7 +116,7 @@ impl StationImportance {
     /// `critical` is deliberately untouched — a continuing condition survives the
     /// visit and clears only when [`ingest`](Self::ingest) stops reporting it
     /// (AC3).
-    pub fn visit(&mut self, station: &StationId) {
+    pub fn visit(&mut self, station: &AttentionOwner) {
         if let Some(flags) = self.flags.get_mut(station) {
             flags.unread = false;
         }
@@ -123,26 +131,59 @@ impl StationImportance {
 
     /// The importance flags for one Station (defaults to neutral when absent).
     /// Test-facing accessor.
-    pub fn flags_of(&self, station: &StationId) -> ImportanceFlags {
+    pub fn flags_of(&self, station: &AttentionOwner) -> ImportanceFlags {
         self.flags.get(station).copied().unwrap_or_default()
     }
 
     /// The wire projection: one entry per Station that currently carries
     /// importance, in deterministic Station order. Fully-resolved Stations are
     /// absent by construction (see [`prune`](Self::prune)).
-    pub fn snapshots(&self) -> Vec<StationImportanceSnapshot> {
-        let mut snaps: Vec<StationImportanceSnapshot> = self
+    pub fn snapshots(&self) -> Vec<ConsoleImportanceSnapshot> {
+        let mut snaps: Vec<_> = self
             .flags
             .iter()
+            .filter_map(|(owner, flags)| {
+                let AttentionOwner::Console(console) = owner else {
+                    return None;
+                };
+                flags.is_set().then(|| ConsoleImportanceSnapshot {
+                    console: console.clone(),
+                    unread: flags.unread,
+                    critical: flags.critical,
+                })
+            })
+            .collect();
+        snaps.sort_by(|a, b| a.console.0.cmp(&b.console.0));
+        snaps
+    }
+
+    /// Compatibility projection only: no second attention lifecycle is stored.
+    /// Detached Consoles never borrow the current host's Station notification.
+    pub fn station_snapshots(
+        &self,
+        homes: &HashMap<ConsoleId, StationId>,
+    ) -> Vec<StationImportanceSnapshot> {
+        let mut combined: HashMap<StationId, ImportanceFlags> = HashMap::new();
+        for (owner, flags) in &self.flags {
+            let station = match owner {
+                AttentionOwner::Core => Some(StationId("core".into())),
+                AttentionOwner::Console(console) => homes.get(console).cloned(),
+            };
+            if let Some(station) = station {
+                let aggregate = combined.entry(station).or_default();
+                aggregate.unread |= flags.unread;
+                aggregate.critical |= flags.critical;
+            }
+        }
+        let mut snaps: Vec<_> = combined
+            .into_iter()
             .filter(|(_, flags)| flags.is_set())
             .map(|(station, flags)| StationImportanceSnapshot {
-                station: station.clone(),
+                station,
                 unread: flags.unread,
                 critical: flags.critical,
             })
             .collect();
-        // `StationId` is not `Ord`; sort on the inner string so the byte stream
-        // is deterministic regardless of `HashMap` iteration order.
         snaps.sort_by(|a, b| a.station.0.cmp(&b.station.0));
         snaps
     }

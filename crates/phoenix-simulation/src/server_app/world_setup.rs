@@ -1028,7 +1028,8 @@ fn insert_fleet_metadata(
         // human-seeking systems that must resolve the same way on every host,
         // or one host's AI operates a console another host's crew is sitting at.
         .insert(crate::ship_plugin::HumanSeekingHosts::default())
-        .insert(crate::ship_plugin::VisitingStationHosts::default())
+        .insert(crate::ship_plugin::ConsoleHosts::default())
+        .insert(crate::ship::components::ConsoleWorkingViews::default())
         .insert(crate::ship_plugin::ScenarioDetailFloor::default())
         // The player ship is permanently high-fidelity (`lod_ai_ships`
         // never evaluates `LocalShip`), so it takes the marker and the

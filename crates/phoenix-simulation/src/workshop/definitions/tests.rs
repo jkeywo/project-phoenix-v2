@@ -17,7 +17,7 @@ fn rogue() -> String {
 
 fn hull() -> String {
     format!(
-        "class = \"cruiser\"\nfaction = \"{ALLIANCE}\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\nhuman_seeking = true\nvisiting_rating = \"Std\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\"red-alert\", \"phaser-fore\", \"ghost\"]\n\n[station.rating.ai_tuning]\ntorpedo_auto_fire = {{}}\n\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nstation = \"captain\"\n\n[[system]]\nid = \"phaser-fore\"\nkind = \"phaser_bank\"\nstation = \"tactical\"\n"
+        "class = \"cruiser\"\nfaction = \"{ALLIANCE}\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\ndescription = \"Command\"\nrank = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\"red-alert\", \"phaser-fore\", \"ghost\"]\n\n[station.rating.ai_tuning]\ntorpedo_auto_fire = {{}}\n\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nconsole = \"captain-console\"\n\n[[system]]\nid = \"phaser-fore\"\nkind = \"phaser_bank\"\nconsole = \"tactical-console\"\n\n[[console]]\nid = \"captain-console\"\nhome_station = \"captain\"\nscreen = \"fixture.html\"\n\n[[console]]\nid = \"tactical-console\"\nhome_station = \"tactical\"\nscreen = \"fixture.html\"\n"
     )
 }
 
@@ -196,9 +196,6 @@ fn hull_catalog_lists_stations_owned_systems_rungs_and_rules_with_lines() {
     assert_eq!(captain.id, "captain");
     assert_eq!(captain.name, "Captain");
     assert_eq!(captain.line, 4);
-    assert!(captain.human_seeking);
-    let visiting = captain.visiting_rating.as_ref().unwrap();
-    assert_eq!((visiting.source.as_str(), visiting.line), ("\"Std\"", 8));
     assert_eq!(
         captain
             .systems
@@ -238,8 +235,6 @@ fn hull_catalog_lists_stations_owned_systems_rungs_and_rules_with_lines() {
     );
     let tactical = &hull.stations[1];
     assert_eq!((tactical.id.as_str(), tactical.line), ("tactical", 21));
-    assert!(!tactical.human_seeking);
-    assert!(tactical.visiting_rating.is_none());
     assert_eq!(tactical.systems[0].id, "phaser-fore");
     assert_eq!(tactical.ratings[0].line, 25);
     assert_eq!(
@@ -325,11 +320,6 @@ fn entity_world_and_rating_findings_mirror_the_runtime_refusals_with_lines() {
             "[[station.rating]]\nname = \"Simplified\"",
             "[[station.rating]]\nname = \"Std\"",
         )
-        .replace("visiting_rating = \"Std\"", "visiting_rating = \"Expert\"")
-        .replace(
-            "id = \"tactical\"\nname = \"Tactical\"",
-            "id = \"tactical\"\nname = \"Tactical\"\nhuman_seeking = true",
-        )
         .replace(ALLIANCE, NOBODY);
     let candidate = files(&[
         (HULL_PATH, &broken_hull),
@@ -358,14 +348,6 @@ fn entity_world_and_rating_findings_mirror_the_runtime_refusals_with_lines() {
     assert_eq!(
         located(&findings, "rating-unowned-system"),
         vec![(HULL_PATH.to_owned(), Some(16))]
-    );
-    assert_eq!(
-        located(&findings, "station-unknown-visiting-rating"),
-        vec![(HULL_PATH.to_owned(), Some(8))]
-    );
-    assert_eq!(
-        located(&findings, "station-missing-visiting-rating"),
-        vec![(HULL_PATH.to_owned(), Some(21))]
     );
     assert_eq!(
         located(&findings, "world-unknown-faction"),
@@ -399,41 +381,26 @@ fn entity_world_and_rating_findings_mirror_the_runtime_refusals_with_lines() {
 }
 
 #[test]
-fn a_visiting_rating_or_host_order_without_human_seeking_is_a_finding_at_its_line() {
-    let tactical = hull().replace(
-        "id = \"tactical\"\nname = \"Tactical\"",
-        "id = \"tactical\"\nname = \"Tactical\"\nvisiting_rating = \"Std\"\nhost_order = [\"captain\"]",
-    );
-    let reported = findings(&files(&[(HULL_PATH, &tactical)]), &base().base_files);
-    assert_eq!(
-        located(&reported, "station-visiting-rating-without-human-seeking"),
-        vec![(HULL_PATH.to_owned(), Some(24))]
-    );
-    assert_eq!(
-        located(&reported, "station-host-order-without-human-seeking"),
-        vec![(HULL_PATH.to_owned(), Some(25))]
-    );
-    let refusal = reported
-        .iter()
-        .find(|finding| finding.category == "station-visiting-rating-without-human-seeking")
-        .unwrap();
-    assert_eq!(
-        refusal.message,
-        ShipConfigError::HostOrderWithoutHumanSeeking {
-            station: StationId("tactical".into()),
-        }
-        .to_string()
-    );
-    // The captain seats a human, so its own visiting rating is not reported,
-    // and the shipped hull without either key is clean.
-    assert!(reported.iter().all(
-        |finding| !finding.category.ends_with("without-human-seeking") || finding.line >= Some(24)
-    ));
-    assert!(located(
-        &findings(&files(&[(HULL_PATH, &hull())]), &base().base_files),
-        "station-visiting-rating-without-human-seeking"
-    )
-    .is_empty());
+fn station_hosting_fields_are_not_authorable() {
+    for field in [
+        "human_seeking",
+        "visiting_rating",
+        "host_order",
+        "console",
+        "auxiliary",
+        "command_target",
+    ] {
+        assert!(check_value(
+            HULL_PATH,
+            &[
+                Segment::Key("station".into()),
+                Segment::Index(0),
+                Segment::Key(field.into())
+            ],
+            "true"
+        )
+        .is_err());
+    }
 }
 
 #[test]
@@ -617,7 +584,7 @@ fn value_checks_follow_the_runtime_types() {
         &[key("station"), Index(0), key("visiting_rating")],
         "\"Std\""
     )
-    .is_ok());
+    .is_err());
     assert!(check_value(
         HULL_PATH,
         &[key("station"), Index(0), key("visiting_rating")],
@@ -650,10 +617,10 @@ fn shield_arc_rating_references_follow_runtime_ownership() {
     for (station, system, expected_owner) in [
         (
             "science",
-            "[[system]]\nid='shields'\nkind='shields'\nstation='science'\n",
+            "[[system]]\nid='shields'\nkind='shields'\nconsole='protection'\n[[console]]\nid='protection'\nhome_station='science'\nscreen='fixture.html'\n",
             Some("science"),
         ),
-        ("shields", "", Some("shields")),
+        ("shields", "", None),
         ("science", "", None),
     ] {
         let source = format!("[[station]]\nid='{station}'\n[[station.rating]]\nname='Guard'\nautomated_systems=['shield-arc-fore']\n{system}[[shield_arc]]\nid='fore'\n");
@@ -692,5 +659,20 @@ fn authored_cruiser_guard_passes_station_rating_reference_validation() {
             .iter()
             .any(|finding| finding.category.starts_with("rating-")),
         "{report:?}"
+    );
+}
+
+#[test]
+fn recreated_console_ownership_ignores_prior_inheritance_tombstone() {
+    let source = hull().replace(
+        "[[console]]\nid = \"captain-console\"",
+        "[[console]]\nid = \"captain-console\"\n_remove = true\n\n[[console]]\nid = \"captain-console\"",
+    );
+    let document = Document::parse(&source).unwrap();
+    let owners = system_owners(document.as_table());
+    assert_eq!(owners.get("red-alert"), Some(&Some("captain".to_owned())));
+    assert_eq!(
+        owners.get("phaser-fore"),
+        Some(&Some("tactical".to_owned()))
     );
 }

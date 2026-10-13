@@ -255,21 +255,6 @@ export function mountWorkshopDefinitions({ root, runtime, draft, busy, setBusy, 
       note.textContent = t('workshop.definitions.read_only_origin', { origin: current.origin });
       stationFormNode.append(note);
     }
-    // Whether the station seats a human is #1481's to author; shown, not edited.
-    const seeking = node('input', null, { type: 'checkbox', id: `${PREFIX}-human-seeking`, 'data-readonly': 'true' });
-    seeking.checked = Boolean(target.human_seeking);
-    stationFormNode.append(seeking, labelled('workshop.definitions.human_seeking', seeking));
-    // A visiting rating only means something on a station that seats a human;
-    // the runtime refuses the hull otherwise. A station that seats none offers
-    // only what it already has, so an authored one can be cleared but none set.
-    const visiting = node('select', null, { id: `${PREFIX}-visiting-rating` });
-    const names = target.human_seeking ? rungNames(form).filter(Boolean) : [];
-    const values = form.visiting_rating && !names.includes(form.visiting_rating) ? [form.visiting_rating, ...names] : names;
-    visiting.replaceChildren(option('', t('workshop.definitions.none')), ...values.map(name => option(name, name)));
-    visiting.value = form.visiting_rating;
-    if (!values.length) visiting.dataset.readonly = 'true';
-    visiting.addEventListener('change', () => { form.visiting_rating = visiting.value; });
-    stationFormNode.append(labelled('workshop.definitions.visiting_rating', visiting), visiting);
     const rungs = fieldset('workshop.definitions.rungs');
     const grid = node('div', null, { class: 'workshop-definitions-rungs' });
     const rules = catalog()?.choices?.ai_rules || [];

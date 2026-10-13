@@ -307,9 +307,9 @@ host-assigned native screens retain their console tabs without release controls.
 
 | Module | Owns |
 |---|---|
-| `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
-| `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
-| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station- or Ship-addressed Coordination popup with producer-authored presentation retained beside its typed payload |
+| `mount-plan.js` | Console-id → DOM-id naming and `planMounts(shipStations)` over explicit Console definitions; repeated screen URLs retain distinct identities |
+| `hero-bar.js` | Console tabs over `SimSnapshot.console_hosts`: Consoles hosted on the directly held Station, selected Console identity/rating/ownership, and roving keyboard focus |
+| `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, both read-only Console Family replicas from `Welcome`, and the latest explicitly Station-, Console- or Ship-addressed Coordination popup with producer-authored presentation retained beside its typed payload |
 | `reducer-result.js` | Fresh reducer results: mergeable semantic change sets plus an ordered, repeatable lifecycle/presentation effect sequence |
 | `lobby-state.js` | Lobby view-model (stations, players, equal public GM presence, ready states) and lobby-domain reducer results; GM roster updates are full replacements and never become player or Station rows |
 | `comms-state.js` | Comms inbox/contact view-model and Comms-domain reducer results |

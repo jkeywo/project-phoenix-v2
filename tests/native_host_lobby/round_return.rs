@@ -57,7 +57,6 @@ fn retained_host(deferred: bool) -> (App, LoopbackHandle, Vec<String>) {
         .resource::<ShipStations>()
         .stations
         .iter()
-        .filter(|station| !station.auxiliary)
         .take(2)
         .map(|station| station.id.0.clone())
         .collect();

@@ -3,24 +3,24 @@ title: Stations
 type: concept
 tags: [stations, lobby, ratings, authority, backfill, puppeting, human-seeking]
 sources: [crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/result_application.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/ship/rating_systems.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/gm_puppet.rs, crates/phoenix-simulation/src/gm_action.rs, gui/gm-station-puppet.js, gui/console-state.js, gui/console-core.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-09-29
+updated: 2026-10-13
 ---
 
 # Stations
 
-A station is a designer-authored crew seat. Its stable `StationId` determines tenure and coordination addressing; its station config supplies display copy, console URL, selectable ratings, and optional human-seeking behaviour. Systems are separate fine-grained nouns and name their owning station in ship TOML.
+A Station is a designer-authored crew seat. Its stable `StationId` determines
+tenure, native display assignment and coordination addressing. [Consoles](../entities/console.md)
+are separately identified screens and knowledge scopes. Each System names its
+controlling Console; the Console's current host determines human authority.
 
-## Fixed roster
+## Fixed roster and hosted screens
 
-Each hull declares a fixed `[[station]]` roster in its entity TOML. `ShipConfig` validates the station and system graph. `stations_from_ship_config` projects it into `ShipStations`, the lobby-facing resource:
-
-- `StationDef.id`, `name`, `description`, `rank`, and `short_code` describe the seat;
-- `console` selects the client panel, with a generic fallback when absent;
-- `ratings` lists lobby-selectable ratings in authored order;
-- `human_seeking`, `host_order`, `visiting_rating`, and `auxiliary` define an auxiliary station that can be hosted by another occupied seat.
-
-`ShipStations` is one `Vec<StationDef>`; a token absent from
-`StationAssignments` is unseated (or explicitly a Spectator in session state).
+Each hull declares `[[station]]`, `[[console]]` and `[[system]]` records.
+`ShipConfig` validates their references and ownership. `ShipStations` carries
+separate `StationDef` and `ConsoleDef` collections: the lobby offers seats,
+while screens, feeds and visiting rules belong to Consoles. `ConsoleHosts`
+publishes their resolved placement. A Station may host multiple tabs using the
+same screen implementation, without pooling their knowledge or adding seats.
 
 ## Tenure, ratings, and Backfill
 
@@ -65,7 +65,8 @@ rating input retains its Input schedule position and is submitted next tick.
 
 
 An active GM puppet is a temporary control overlay, not tenure. It can be added
-only while the Station is Backfill, suppresses AI only for that Station, and
+only while the Station is Backfill, suppresses AI for its currently hosted
+Consoles, and
 does not alter `Player.station`. Releasing the last GM reapplies the ordinary
 live rating; a disconnected holder therefore returns to Backfill, while a
 holder who has reconnected remains Human. The affected Station's authentic
@@ -106,7 +107,7 @@ PreUpdate-before-FixedUpdate order and is then cleaned up by the loss.
 
 ## Admission
 
-`station_for_system` in `crates/phoenix-simulation/src/command_admission/policy.rs` resolves a command target through the ship's authored `[[system]]` entry. For a `human_seeking` system, the live host map wins over the authored home station. Shield arcs resolve through their synthesised fine-system entries, with a narrow legacy fixture fallback. Unknown or ownerless systems do not acquire human authority.
+`station_for_system` in `crates/phoenix-simulation/src/command_admission/policy.rs` resolves a command through its authored System, controlling Console and current Console host. Shield arcs inherit the parent Shield System's Console during generation; generated AI-only equipment receives its own knowledge scope. There is no Station-name or shield-prefix ownership fallback. Unknown or unhosted Systems do not acquire human authority.
 
 A GM-issued Station command resolves the same payload-aware effective target
 and live availability before it reaches System consumers. Thus a Helm iframe's

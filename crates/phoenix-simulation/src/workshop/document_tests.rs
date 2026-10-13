@@ -93,7 +93,7 @@ fn faction_source() -> String {
 }
 
 fn hull_source() -> String {
-    "class = \"cruiser\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\"red-alert\"]\n\n[station.rating.ai_tuning]\ntorpedo_auto_fire = {}\n\n# ── Tactical ──\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[station]]\nid = \"helm\"\nname = \"Helm\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nstation = \"captain\"\n".into()
+    "class = \"cruiser\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\"red-alert\"]\n\n[station.rating.ai_tuning]\ntorpedo_auto_fire = {}\n\n# ── Tactical ──\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[station]]\nid = \"helm\"\nname = \"Helm\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nconsole = \"captain-console\"\n[[console]]\nid = \"captain-console\"\nhome_station = \"captain\"\nscreen = \"fixture.html\"\n".into()
 }
 
 fn key(text: &str) -> Segment {
@@ -774,7 +774,7 @@ fn crlf_documents_get_crlf_new_lines_and_keep_every_other_line() {
                     &[("name", "\"Novice\""), ("automated_systems", "[]")],
                 ),
                 put(
-                    &[key("station"), Segment::Index(1), key("visiting_rating")],
+                    &[key("station"), Segment::Index(1), key("description")],
                     "\"Std\"",
                 ),
             ],
@@ -788,7 +788,7 @@ fn crlf_documents_get_crlf_new_lines_and_keep_every_other_line() {
     assert!(
         result.contains("[[station.rating]]\r\nname = \"Novice\"\r\nautomated_systems = []\r\n")
     );
-    assert!(result.contains("name = \"Tactical\"\r\nvisiting_rating = \"Std\"\r\n"));
+    assert!(result.contains("name = \"Tactical\"\r\ndescription = \"Std\"\r\n"));
     assert_untouched_lines_survive(&source, &result, &[]);
     let mixed = hull_source().replacen('\n', "\r\n", 3);
     let result = edit(

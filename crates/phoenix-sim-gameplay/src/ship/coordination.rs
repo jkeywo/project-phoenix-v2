@@ -1,7 +1,6 @@
 pub use crate::core::messages::{CoordinationAddress, CoordinationPayload};
 use crate::core::messages::{StationId, SystemId};
-use crate::ship::control_source::{ControlSource, ControlSourceResolver, ControlTickPolicy};
-use std::collections::HashMap;
+use crate::ship::control_source::{ControlSource, ControlTickPolicy};
 
 // ── Coordination sender-label ids (issue #975) ────────────────────────────────
 //
@@ -41,12 +40,14 @@ pub const CHATTER_ADDRESSEE_SHIP: &str = "chatter.addressee.ship";
 pub fn coordination_addressee_label(address: &CoordinationAddress) -> String {
     match address {
         CoordinationAddress::Station(station) => format!("station.{}.name", station.0),
+        CoordinationAddress::Console(console) => console.0.clone(),
         CoordinationAddress::Ship => CHATTER_ADDRESSEE_SHIP.to_string(),
     }
 }
 
-/// Resolve a fine System's owning Station into an explicit Coordination
-/// address at the producer boundary.
+/// Resolve an owning Console at the producer boundary. Fixed home Consoles
+/// retain Station destinations; detached or movable Consoles retain Console
+/// identity so the current host is selected only when the message is delivered.
 ///
 /// Returning `None` for an ownerless or unknown System is deliberate. A
 /// producer that means "the whole ship" must author [`CoordinationAddress::Ship`]
@@ -55,36 +56,54 @@ pub fn address_for_system(
     config: &crate::ship::config::ShipConfig,
     system: &SystemId,
 ) -> Option<CoordinationAddress> {
-    config
-        .system(system)
-        .and_then(|entry| entry.station.clone())
-        .map(CoordinationAddress::Station)
+    let console = config.console_for_system(system)?;
+    if console.human_seeking || console.home_station.is_none() {
+        Some(CoordinationAddress::Console(console.id.clone()))
+    } else {
+        console
+            .home_station
+            .clone()
+            .map(CoordinationAddress::Station)
+    }
 }
 
-/// Resolve the single owning Station shared by every authored System of a kind.
+/// Resolve the single destination shared by every authored System of a kind.
 ///
 /// This is for multi-instance receiver families such as `shield_arc`, where no
 /// coarse System exists to stand in for the Station. A missing kind, an
-/// ownerless instance, or instances split across Stations is ambiguous and
+/// ownerless instance, or instances split across destinations is ambiguous and
 /// returns `None`; callers must never widen any of those cases to `Ship`.
 pub fn address_for_system_kind(
     config: &crate::ship::config::ShipConfig,
     kind: &str,
 ) -> Option<CoordinationAddress> {
-    config
-        .station_for_system_kind(kind)
-        .map(CoordinationAddress::Station)
+    let mut systems = config.systems.iter().filter(|system| system.kind == kind);
+    let first = address_for_system(config, &systems.next()?.id)?;
+    systems
+        .all(|system| address_for_system(config, &system.id).as_ref() == Some(&first))
+        .then_some(first)
 }
 
-/// Display label for the Station that owns an emitting System, with Core as
-/// the sender-side label for ownerless Systems.
+/// Sender identity remains attached to its owning Console across handoff.
+/// Real home Stations retain their existing labels; detached Consoles use
+/// authored display names (which may be localization keys), then their id.
+/// Only genuinely unowned or unknown Systems fall back to Core.
 pub fn system_addressee_label(
     config: &crate::ship::config::ShipConfig,
     system: &SystemId,
 ) -> String {
-    address_for_system(config, system)
-        .as_ref()
-        .map(coordination_addressee_label)
+    if let Some(address) = address_for_system(config, system) {
+        return coordination_addressee_label_for_config(config, &address);
+    }
+    config
+        .console_for_system(system)
+        .map(|console| {
+            if console.name.trim().is_empty() {
+                console.id.0.clone()
+            } else {
+                console.name.clone()
+            }
+        })
         .unwrap_or_else(|| CHATTER_ADDRESSEE_CORE.to_string())
 }
 
@@ -196,157 +215,6 @@ pub fn broadcast_to_ship(sender_origin: ControlSource, seats: &[ShipSeat]) -> Ve
         .collect()
 }
 
-// ── Human-seeking systems (issue #984) ────────────────────────────────────────
-
-/// Find the human-held seat that should host a human-seeking system (pasm
-/// decision `console-complexity-human-seeking-systems`).
-///
-/// Comms and navigation "always try to be under human control": the seek
-/// walks the ship's authored station order — the system's own authored
-/// `station` (`owner`) FIRST, then the remaining entries of `seats` in
-/// AUTHORED order (the same deterministic ordering [`broadcast_to_ship`]
-/// depends on, built by the adapter from `ShipConfig.stations`) — and returns
-/// the first seat that is both [`ControlSource::Human`] and has a connected
-/// holder. `None` means no human anywhere in the order; the caller falls back
-/// to AI control exactly as today: "the seek order only ever chooses among
-/// human-held stations: the mechanism prefers any human over the AI, it never
-/// forces a human."
-///
-/// OWNER-FIRST IS LOAD-BEARING: comms is the LAST authored station on the
-/// cruiser and battleship hulls. A naive first-human-in-authored-order scan
-/// would steal the Comms console away from the Comms officer the instant
-/// anyone else on the bridge is seated. Trying `owner` before the rest of
-/// `seats` keeps the hull's own officer at their own console.
-///
-/// A hull may override that derived order with an authored one
-/// (`SystemInstanceConfig::seek_order`); see [`seek_human_host_in`], which this
-/// function is the no-authored-order case of. The derived order is still what
-/// every hull that authors nothing gets, and the destroyer's authored order
-/// starts at the same owner for the same reason.
-///
-/// `owner` is the seeking system's own authored station (`SystemInstanceConfig::station`,
-/// resolved before calling — this function does no lookup of its own).
-/// `seats` MUST be built with the seeking system's own fine-system policy
-/// EXCLUDED from every seat's [`seat_control_source`] reduction: folding the
-/// seek's own not-yet-decided control source back into its input is a
-/// fixpoint over this function's own output, not an independent seat.
-pub fn seek_human_host<'a>(
-    owner: Option<&StationId>,
-    seats: &'a [ShipSeat],
-) -> Option<&'a ShipSeat> {
-    seek_human_host_in(owner, &[], seats)
-}
-
-fn is_human_and_connected(seat: &ShipSeat) -> bool {
-    seat.control == ControlSource::Human && seat.holder.is_some()
-}
-
-/// [`seek_human_host`] with an optional AUTHORED walk
-/// (`SystemInstanceConfig::seek_order`) in place of the derived one.
-///
-/// An EMPTY `order` is the default and delegates to the derived walk above,
-/// unchanged — not "equivalent to", the same code. That is deliberate: the
-/// promise the field makes is that a hull authoring no `seek_order` picks the
-/// same seat it picked before the field existed, and the cheapest way to keep a
-/// promise like that is to leave one path rather than to maintain two that
-/// agree.
-///
-/// A NON-EMPTY `order` is walked literally, first entry to last, and nothing
-/// else is consulted — including `owner`, which
-/// [`crate::ship::config::validate`] has already pinned to the head of the
-/// list. The seek is still only ever a choice AMONG humans: an authored order
-/// changes which human is preferred, never whether a human is required.
-///
-/// Names in `order` that no seat answers to are skipped rather than treated as
-/// misses. Validation makes that unreachable from a parsed hull; the skip
-/// exists so this pure function has no panic and no silent early stop if a
-/// caller ever assembles the two halves by hand.
-pub fn seek_human_host_in<'a>(
-    owner: Option<&StationId>,
-    order: &[StationId],
-    seats: &'a [ShipSeat],
-) -> Option<&'a ShipSeat> {
-    if !order.is_empty() {
-        return order
-            .iter()
-            .filter_map(|id| seats.iter().find(|seat| &seat.station == id))
-            .find(|seat| is_human_and_connected(seat));
-    }
-
-    if let Some(owner_id) = owner {
-        if let Some(owner_seat) = seats.iter().find(|seat| &seat.station == owner_id) {
-            if is_human_and_connected(owner_seat) {
-                return Some(owner_seat);
-            }
-        }
-    }
-
-    seats
-        .iter()
-        .filter(|seat| owner != Some(&seat.station))
-        .find(|seat| is_human_and_connected(seat))
-}
-
-/// One complete human-seeking Station's resolved placement (issue #1097).
-/// `host = None` is the ordinary Backfill/AI outcome, not a special controller.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VisitingStationAssignment {
-    pub station: StationId,
-    pub host: Option<StationId>,
-    pub rating: String,
-}
-
-/// Resolve a complete human-seeking Station without Bevy state.
-///
-/// The station's own active direct holder always wins. Otherwise only its
-/// finite authored compatibility list is walked, and a candidate is eligible
-/// only when `is_directly_held` says a player actively holds that Station.
-/// This admits a human-seeking Station in its direct state without ever using
-/// a visiting Station as another visitor's host. `scenario_detailed_systems`
-/// is the hull-resolved scenario-floor input: the visiting rating is raised to
-/// the first authored rung at or above its baseline that leaves all those
-/// owned systems human-operated.
-pub fn resolve_visiting_station(
-    config: &crate::ship::config::ShipConfig,
-    station: &crate::ship::config::StationConfig,
-    is_directly_held: impl Fn(&StationId) -> bool,
-    scenario_detailed_systems: &std::collections::BTreeSet<SystemId>,
-) -> VisitingStationAssignment {
-    debug_assert!(station.human_seeking);
-    let direct = is_directly_held(&station.id).then(|| station.id.clone());
-    let host = direct.or_else(|| {
-        station.host_order.iter().find_map(|host| {
-            config.station(host)?;
-            is_directly_held(host).then(|| host.clone())
-        })
-    });
-
-    let (host, rating) = if host.is_none() {
-        (None, crate::ship::rating::BACKFILL_RATING.to_string())
-    } else if host.as_ref() == Some(&station.id) {
-        // The adapter replaces this with the active direct rating. Keeping the
-        // pure answer authored makes it useful without an ActiveStationRatings
-        // resource and gives hand-built fixtures a deterministic result.
-        let rating = station
-            .ratings
-            .first()
-            .map(|rating| rating.name.clone())
-            .unwrap_or_default();
-        (host, rating)
-    } else {
-        match effective_visiting_rating(config, station, scenario_detailed_systems) {
-            Some(rating) => (host, rating.to_string()),
-            None => (None, crate::ship::rating::BACKFILL_RATING.to_string()),
-        }
-    };
-
-    VisitingStationAssignment {
-        station: station.id.clone(),
-        host,
-        rating,
-    }
-}
-
 /// Resolve world-authored scenario detail-floor vocabulary onto one hull.
 ///
 /// A scenario cannot name per-hull System ids because the crew chooses its hull
@@ -364,138 +232,13 @@ pub fn resolve_scenario_detail_floor(
         .filter(|system| {
             selectors.iter().any(|selector| {
                 system.kind == *selector
-                    || system
-                        .station
-                        .as_ref()
+                    || system.console.as_ref().is_some_and(|id| id.0 == *selector)
+                    || config
+                        .system_home_station(system)
                         .is_some_and(|station| station.0 == *selector)
             })
         })
         .map(|system| system.id.clone())
-        .collect()
-}
-
-fn effective_visiting_rating<'a>(
-    config: &crate::ship::config::ShipConfig,
-    station: &'a crate::ship::config::StationConfig,
-    scenario_detailed_systems: &std::collections::BTreeSet<SystemId>,
-) -> Option<&'a str> {
-    let baseline = station.visiting_rating.as_ref().and_then(|name| {
-        station
-            .ratings
-            .iter()
-            .position(|rating| &rating.name == name)
-    })?;
-    let owned_floor: std::collections::BTreeSet<&SystemId> = config
-        .systems
-        .iter()
-        .filter(|system| system.station.as_ref() == Some(&station.id))
-        .map(|system| &system.id)
-        .filter(|id| scenario_detailed_systems.contains(*id))
-        .collect();
-    // Ratings are authored most-detailed first. Start at the visiting baseline
-    // and walk TOWARD earlier, more-detailed rungs, choosing the smallest raise
-    // that satisfies every scenario-required System.
-    station.ratings[..=baseline]
-        .iter()
-        .rev()
-        .find(|rating| {
-            !rating
-                .automated_systems
-                .iter()
-                .any(|system| owned_floor.contains(system))
-        })
-        .map(|rating| rating.name.as_str())
-}
-
-/// Build the seat list every [`seek_human_host`] call on one ship runs over
-/// (issue #984).
-///
-/// Same shape as the channel-3 broadcast adapter's `ship_seats` — one entry per
-/// authored station, in AUTHORED order, each station's fine systems reduced by
-/// [`seat_control_source`] and paired with its connected holder — with two
-/// deliberate differences, both load-bearing.
-///
-/// **1. Every `human_seeking` system is dropped from every reduction**, not
-/// just the one being resolved. `seek_human_host` requires at least the seeking
-/// system's own exclusion: it writes that system's `ControlSource`, so folding
-/// last tick's answer back into this tick's input is a fixpoint over the seek's
-/// own output. Concretely, the destroyer homes `comms` on `tactical`; a seek
-/// that landed `comms` on the Captain would write `comms = Human`, and next
-/// tick the *Tactical* seat would read that write as evidence of a human and
-/// take the console back — a latch driven by nothing but the seek itself.
-/// Excluding the whole class rather than the single system costs nothing extra
-/// and buys order-independence: one seat list serves every seeking system on
-/// the hull, so the answer cannot depend on which one is resolved first (the
-/// cruiser homes BOTH `comms` and `navigation` on its `comms` station, so the
-/// two would otherwise read each other's writes).
-///
-/// **2. A station left with no systems at all by that filter is decided by its
-/// active rating and its holder**, not by the empty list's `Offline`. There is
-/// no rating evidence left to reduce, so the seat takes the source
-/// [`crate::ship::rating::apply_rating`] would have written for a hypothetical
-/// non-seeking system on that station: an explicit
-/// [`crate::ship::rating::BACKFILL_RATING`] is `Ai`; anything else — including
-/// no recorded rating — is `Human` while the station has a connected holder and
-/// `Offline` while it does not. This is not a corner case: the battleship's
-/// `comms` and `navigation` stations own EXACTLY ONE system each and it is the
-/// seeking one, so without this rule both would reduce to `Offline` and the
-/// hull's own Comms and Navigation officers could never host their own consoles
-/// — precisely the outcome `seek_human_host`'s owner-first order exists to
-/// prevent. Only an explicit `Backfill` reads as automation, because that is the
-/// only positive statement the ratings map ever makes about a seat; an officer
-/// who asks the AI to run their station does not get the console pushed back at
-/// them, and an officer whose station simply has no rating recorded is still a
-/// person sitting at a console.
-pub fn seeking_seats(
-    config: &crate::ship::config::ShipConfig,
-    resolver: &ControlSourceResolver,
-    ratings: &HashMap<StationId, String>,
-    holder_for: impl Fn(&StationId) -> Option<String>,
-) -> Vec<ShipSeat> {
-    config
-        .stations
-        .iter()
-        .map(|station| {
-            let policies: Vec<ControlTickPolicy> = config
-                .systems
-                .iter()
-                .filter(|s| s.station.as_ref() == Some(&station.id))
-                .filter(|s| !s.human_seeking)
-                .map(|s| resolver.policy_for(&s.id))
-                .collect();
-            let holder = holder_for(&station.id);
-            let control = if station.human_seeking {
-                // A complete visiting Station may host a legacy seeking System
-                // only while a connected player holds it DIRECTLY. `holder_for`
-                // is keyed by Session::station, so a Station merely presented
-                // as somebody else's visiting tab has no holder here and cannot
-                // create a visitor-on-visitor chain. Backfill is likewise not a
-                // human destination even if the direct owner remains connected.
-                let automated = ratings
-                    .get(&station.id)
-                    .is_some_and(|name| name == crate::ship::rating::BACKFILL_RATING);
-                match (automated, holder.is_some()) {
-                    (false, true) => ControlSource::Human,
-                    _ => ControlSource::Offline,
-                }
-            } else if policies.is_empty() {
-                let automated = ratings
-                    .get(&station.id)
-                    .is_some_and(|name| name == crate::ship::rating::BACKFILL_RATING);
-                match (automated, holder.is_some()) {
-                    (true, _) => ControlSource::Ai,
-                    (false, true) => ControlSource::Human,
-                    (false, false) => ControlSource::Offline,
-                }
-            } else {
-                seat_control_source(&policies)
-            };
-            ShipSeat {
-                station: station.id.clone(),
-                control,
-                holder,
-            }
-        })
         .collect()
 }
 
@@ -588,3 +331,18 @@ impl CoordinationLagQueue {
 #[cfg(test)]
 #[path = "coordination_tests.rs"]
 mod tests;
+
+/// Console destinations retain their authored identity while their host changes.
+pub fn coordination_addressee_label_for_config(
+    config: &crate::ship::config::ShipConfig,
+    address: &CoordinationAddress,
+) -> String {
+    if let CoordinationAddress::Console(id) = address {
+        if let Some(console) = config.consoles.iter().find(|console| &console.id == id) {
+            if !console.name.trim().is_empty() {
+                return console.name.clone();
+            }
+        }
+    }
+    coordination_addressee_label(address)
+}

@@ -135,6 +135,7 @@ function verify(path, source, schema, value = parse(source)) {
   const stations = value.station || [], systems = authoredAndGeneratedSystems(value), consoles = value.console || [];
   const stationIds = new Set(), systemIds = new Set();
   for (const station of stations) {
+    if (['console', 'human_seeking', 'host_order', 'visiting_rating', 'auxiliary', 'command_target'].some(key => key in station)) throw finding(path, source, quote(station.id), 'Retired Station hosting fields must move to explicit Console definitions.');
     if (!ident(station.id) || station.id === 'core' || stationIds.has(station.id)) throw finding(path, source, `id = ${quote(station.id)}`, 'Station ids must be unique runtime identifiers and cannot be core.');
     stationIds.add(station.id);
   }
@@ -161,9 +162,16 @@ function verify(path, source, schema, value = parse(source)) {
       if (!systems.some(system => system.id === id && system.console === console.id)) throw finding(path, source, quote(id), `Rating ${rating.name} may reference only Systems owned by Console ${console.id}.`);
     }
   }
+  const publications = new Map(Object.entries(schema.console_publication_kinds || {}));
+  for (const system of systems) {
+    const kind = schema.console_instance_publication_kinds?.[system.kind];
+    if (kind && publications.has(system.id) && publications.get(system.id) !== kind) throw finding(path, source, quote(system.id), `System ${system.id} conflicts with a reserved publication key.`);
+    if (kind && !publications.has(system.id)) publications.set(system.id, kind);
+  }
   for (const console of consoles) for (const feed of console.feed || []) {
-    if (!systems.some(system => system.id === feed.source) && !(schema.console_feed_sources || []).includes(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
+    if (!publications.has(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
     if (!(schema.console_feed_kinds || []).includes(feed.kind)) throw finding(path, source, quote(feed.kind), `Unknown Console feed kind: ${feed.kind}`);
+    if (publications.get(feed.source) !== feed.kind) throw finding(path, source, quote(feed.kind), `Console feed kind ${feed.kind} does not match publication ${feed.source} (${publications.get(feed.source)}).`);
   }
   const owner = system => consoles.find(row => row.id === system.console)?.home_station;
   for (const system of systems) {
@@ -171,6 +179,9 @@ function verify(path, source, schema, value = parse(source)) {
     systemIds.add(system.id);
     if (!system.generated && !schema.system_kinds.includes(system.kind)) throw finding(path, source, `kind = ${quote(system.kind)}`, `Unknown runtime System kind: ${system.kind}`);
     if (!consoleIds.has(system.console)) throw finding(path, source, quote(system.console), `System ${system.id} names an unknown Console.`);
+    const console = consoles.find(row => row.id === system.console);
+    if (!system.ai_only && !console.home_station && !(console.human_seeking && console.host_order?.length)) throw finding(path, source, quote(console.id), `Operable System ${system.id} needs a Console with a human hosting route.`);
+    if (!system.ai_only && !console.screen?.trim()) throw finding(path, source, quote(console.id), `Operable System ${system.id} needs a Console screen.`);
   }
   for (const station of stations) for (const rating of station.rating || []) for (const reference of rating.automated_systems || []) {
     const system = systems.find(candidate => candidate.id === reference);

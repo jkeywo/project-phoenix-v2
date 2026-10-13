@@ -15,10 +15,15 @@ rank = "Lt"
 name = "Summary"
 automated_systems = []
 detailed_systems = []
+[[console]]
+id = "engineer-console"
+home_station = "engineer"
+screen = "fixture.html"
+
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineer"
+console = "engineer-console"
 "#,
         &["repair"],
     )

@@ -15,6 +15,7 @@ fn topology(config: &EntityConfig) -> crate::ship::config::ShipConfig {
             stations: Vec::new(),
             systems: Vec::new(),
             power_groups: Default::default(),
+            consoles: Vec::new(),
             coordination_lag_secs: 0.0,
         })
 }

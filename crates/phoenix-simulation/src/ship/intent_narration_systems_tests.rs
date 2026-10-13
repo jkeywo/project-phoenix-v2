@@ -382,7 +382,7 @@ fn set_tactical_station_source(app: &mut App, source: ControlSource) {
         cfg.systems
             .iter()
             .filter(|s| {
-                s.station.as_ref().map(|st| st.0.as_str())
+                cfg.system_home_station(s).map(|st| st.0.as_str())
                     == Some(crate::ship::system_registry::TACTICAL_STATION_ID)
             })
             .map(|s| s.id.clone())

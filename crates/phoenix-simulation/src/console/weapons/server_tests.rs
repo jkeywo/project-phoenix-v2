@@ -56,7 +56,6 @@ name = "Tactical"
 description = "Weapons."
 rank = "Ltn."
 short_code = "TAC"
-console = "tactical"
 
 [[station.rating]]
 name = "Std"
@@ -69,52 +68,61 @@ automated_systems = []
 [station.rating.ai_tuning]
 torpedo_auto_fire = {}
 
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "tactical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-port"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-starboard"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 # Declared so `any_blaster_bank_operates_ai` (which reads the ship CONFIG, not
@@ -127,7 +135,7 @@ power_group = "weapons"
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 "#;
     crate::ship_plugin::ShipConfigComponent(
@@ -277,6 +285,18 @@ fn test_app() -> App {
             // shield-routing paths key on that rather than on which hull a host
             // projects (issue #1116).
             crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot::SOLO),
+            crate::ship::components::ConsoleHosts(
+                test_ship_config()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             test_ship_config(),
             ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -337,6 +357,42 @@ fn test_app() -> App {
 /// no `TacticalTargetSelector` ranks nothing. The ids are read off the entity's
 /// own weapon configs rather than listed, so a test that swaps in a different
 /// bank list only has to call this again.
+/// Explicit observation scope for synthetic weapon banks used by focused tests.
+/// Existing authored ownership is never replaced by this fixture helper.
+fn fixture_weapon_observations(
+    systems: &[(SystemId, &str)],
+) -> crate::ship_plugin::ShipConfigComponent {
+    let mut authored = String::from(
+        r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Fixture weapons"
+rank = "Ltn."
+[[console]]
+id = "fixture-weapons"
+home_station = "tactical"
+screen = "fixture.html"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+"#,
+    );
+    for (id, kind) in systems {
+        authored.push_str(&format!(
+            "\n[[system]]\nid = {:?}\nkind = {:?}\nconsole = \"fixture-weapons\"\n",
+            id.0, kind
+        ));
+    }
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::ShipConfig::from_toml(
+            &authored,
+            &["phaser_bank", "blaster_bank", "torpedo_tube"],
+        )
+        .expect("explicit fixture weapon ownership"),
+    )
+}
+
 pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
     use crate::entities::authored_ai_pins::{shipped_policy_toml, shipped_selector_toml};
     let bank_policy = || {
@@ -373,6 +429,37 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
         .get::<TorpedoSystemResource>()
         .map(|c| c.0.tubes.iter().map(|t| t.id.clone()).collect())
         .unwrap_or_default();
+
+    if app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .is_none()
+    {
+        let systems: Vec<_> = phaser_ids
+            .iter()
+            .map(|id| {
+                (
+                    crate::ship::system_registry::phaser_bank_system_id(id).unwrap(),
+                    "phaser_bank",
+                )
+            })
+            .chain(blaster_ids.iter().map(|id| {
+                (
+                    crate::ship::system_registry::blaster_bank_system_id(id).unwrap(),
+                    "blaster_bank",
+                )
+            }))
+            .chain(tube_ids.iter().map(|id| {
+                (
+                    crate::ship::system_registry::torpedo_tube_system_id(id).unwrap(),
+                    "torpedo_tube",
+                )
+            }))
+            .collect();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(fixture_weapon_observations(&systems));
+    }
 
     app.world_mut().entity_mut(ship).insert((
         crate::console::weapons::TacticalTargetSelector {
@@ -4794,15 +4881,24 @@ name = "Tactical"
 description = "Dummy"
 rank = "Ltn."
 
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 "#,
             &["phaser_bank"],
         )
@@ -5524,10 +5620,19 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     let npc_config = crate::ship_plugin::ShipConfigComponent(
         crate::ship::config::parse_and_validate(
             r#"
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 
 [[station]]
 id = "tactical"
@@ -6148,6 +6253,14 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
 
 /// Shared arc-request state; callers supply doctrine and weapon inventory explicitly.
 fn arc_request_ship(target_uuid: &str, sources: ShipSystemControlSources) -> impl Bundle {
+    let mut scope = crate::ship::components::load_ship_config_from_disk();
+    // This fixture adds a fore blaster absent from the Alliance fallback hull.
+    let extra = fixture_weapon_observations(&[(
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
+        "blaster_bank",
+    )]);
+    scope.0.consoles.extend(extra.0.consoles);
+    scope.0.systems.extend(extra.0.systems);
     (
         crate::server_app::Ship,
         sources,
@@ -6155,7 +6268,7 @@ fn arc_request_ship(target_uuid: &str, sources: ShipSystemControlSources) -> imp
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
-        crate::ship::components::load_ship_config_from_disk(),
+        scope,
     )
 }
 
@@ -9972,7 +10085,9 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid("harrow-cruiser".into()),
-                crate::ship::components::load_ship_config_from_disk(),
+                crate::ship_plugin::ShipConfigComponent(
+                    hull.ship_config.clone().expect("shipped cruiser ownership"),
+                ),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 ShipPhysics::default(),
@@ -10090,6 +10205,7 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
 #[cfg(test)]
 fn spawn_shipped_warhawk_battery(
     app: &mut App,
+    ship_config: &crate::ship::config::ShipConfig,
     torpedoes: &crate::entities::config::TorpedoesConfig,
     target_uuid: &str,
     loaded: &[&str],
@@ -10132,7 +10248,7 @@ fn spawn_shipped_warhawk_battery(
         .spawn((
             crate::server_app::Ship,
             EntityUuid("harrow-warhawk".into()),
-            crate::ship::components::load_ship_config_from_disk(),
+            crate::ship_plugin::ShipConfigComponent(ship_config.clone()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::ship_plugin::ActiveStationRatings::default(),
             ShipPhysics::default(),
@@ -10225,7 +10341,15 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
     // clear of the 90-degree cone's edge, so it is admitted on its merits rather
     // than by the `<=` boundary tie.
     let mut app = test_app();
-    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore"]);
+    let ship = spawn_shipped_warhawk_battery(
+        &mut app,
+        hull.ship_config
+            .as_ref()
+            .expect("shipped warhawk ownership"),
+        torpedoes,
+        "closer",
+        &["fore"],
+    );
     spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, false);
     assert_eq!(
         torpedo_launch_targets(&mut app, ship),
@@ -10239,7 +10363,15 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
     // 0.20 rad/s. `(0, +30)` is dead astern — inside the aft cone, 180 degrees off
     // the fore one.
     let mut app = test_app();
-    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    let ship = spawn_shipped_warhawk_battery(
+        &mut app,
+        hull.ship_config
+            .as_ref()
+            .expect("shipped warhawk ownership"),
+        torpedoes,
+        "closer",
+        &["fore", "aft"],
+    );
     spawn_warhawk_shield_target(&mut app, "closer", 0.0, 30.0, false);
     assert_eq!(
         torpedo_launch_targets(&mut app, ship),
@@ -10251,7 +10383,15 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
     // AC3: the striking arc is back. Both tubes are loaded and one of them is
     // bearing, and neither fires.
     let mut app = test_app();
-    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    let ship = spawn_shipped_warhawk_battery(
+        &mut app,
+        hull.ship_config
+            .as_ref()
+            .expect("shipped warhawk ownership"),
+        torpedoes,
+        "closer",
+        &["fore", "aft"],
+    );
     spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, true);
     assert_eq!(
         torpedo_launch_targets(&mut app, ship),
@@ -10265,7 +10405,15 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
     // Nothing puts it back in — the launchers never command a bearing (AC4), so
     // an abeam target is simply an opportunity that does not exist.
     let mut app = test_app();
-    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    let ship = spawn_shipped_warhawk_battery(
+        &mut app,
+        hull.ship_config
+            .as_ref()
+            .expect("shipped warhawk ownership"),
+        torpedoes,
+        "closer",
+        &["fore", "aft"],
+    );
     spawn_warhawk_shield_target(&mut app, "closer", 30.0, 0.0, false);
     assert_eq!(
         torpedo_launch_targets(&mut app, ship),
@@ -10434,7 +10582,15 @@ fn warhawk_torpedo_opportunity_never_commands_the_helm() {
         .expect("the battleship carries its bow artillery");
 
     let mut app = test_app();
-    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    let ship = spawn_shipped_warhawk_battery(
+        &mut app,
+        hull.ship_config
+            .as_ref()
+            .expect("shipped warhawk ownership"),
+        torpedoes,
+        "closer",
+        &["fore", "aft"],
+    );
     spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, false);
     // The leg the battleship is flying while its tubes take the opportunity,
     // built out of this hull's own authored numbers rather than invented ones.
@@ -12942,8 +13098,16 @@ fn ai_phaser_auto_fire_activates_when_any_bank_operates_ai() {
     // read the coarse tactical policy's `operate_ai == false` and
     // `continue`.
     const NPC_TOML: &str = r#"
+[[console]]
+id = "ai-phaser-port"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
 [[system]]
 id = "phaser-port"
+console = "ai-phaser-port"
 kind = "phaser_bank"
 ai_only = true
 "#;
@@ -14964,10 +15128,21 @@ fn spawn_policy_phaser_npc_at(
         bank_cfgs.push(cfg);
     }
 
+    let scoped_systems: Vec<_> = bank_cfgs
+        .iter()
+        .map(|bank| {
+            (
+                crate::ship::system_registry::phaser_bank_system_id(&bank.id).unwrap(),
+                "phaser_bank",
+            )
+        })
+        .collect();
+    let scope = fixture_weapon_observations(&scoped_systems);
     let npc = app
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            scope,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
@@ -15298,17 +15473,26 @@ name = "Tactical"
 description = "Dummy"
 rank = "Ltn."
 
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 # Declared on the hull, on NO power group — `power_group` omitted on purpose.
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical-console"
 "#,
             &["phaser_bank", "tactical_radar"],
         )
@@ -16125,6 +16309,7 @@ rank = "Ens."
 [[console]]
 id = "tactical"
 home_station = "tactical"
+screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"

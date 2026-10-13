@@ -1,4 +1,4 @@
-use crate::core::messages::{StationId, SystemId, TeamSlot};
+use crate::core::messages::{RepairGroup, SystemId, TeamSlot};
 use crate::ship::config::ShipConfig;
 use crate::ship::damage::{DamageTier, SystemHull};
 
@@ -392,7 +392,7 @@ impl RepairTeams {
         hull: &SystemHull,
         config: &ShipConfig,
     ) -> Option<usize> {
-        let target_group = sweep_group(target, config);
+        let target_group = repair_group(target, config);
         // Snapshot before the search: `sweep_candidates` needs the whole on-site
         // set, and the write at the end needs `self.slots` mutably.
         let occupied: Vec<SystemId> = self.on_site_systems().cloned().collect();
@@ -405,7 +405,7 @@ impl RepairTeams {
                 return None;
             };
             hull.get(current)?;
-            if sweep_group(current, config) != target_group {
+            if repair_group(current, config) != target_group {
                 return None;
             }
             sweep_candidates(current, hull, config, &occupied)
@@ -714,19 +714,20 @@ impl Default for RepairTeams {
     }
 }
 
-/// The sweep group a hull system belongs to: `Some(station)` when the ship
-/// config gives it an owning station, `None` for the ownerless `core` bucket.
-///
-/// A hull entry the config does not describe at all is ownerless, not a group of
-/// its own — the shipped example being the synthesised `core` entry, which is a
-/// `[[hull.system_hull]]` row with no `[[system]]` behind it (a station named
-/// `core` is forbidden by `ShipConfig` validation). That is the same rule
-/// `HullVisibility::can_see_station` uses to bucket a hull row for the repair
-/// console and the same one `damage_sync` uses to address a `RepairRequest`, so
-/// "the station a console tapped", "the rows Engineering can see" and "the
-/// systems a team sweeps" cannot drift apart.
-fn sweep_group(sid: &SystemId, config: &ShipConfig) -> Option<StationId> {
-    config.system(sid).and_then(|s| s.station.clone())
+/// Stable repair group: home Station, detached Console, or an unconfigured
+/// hull row in Core. Current hosting never changes where a team sweeps.
+pub fn repair_group(sid: &SystemId, config: &ShipConfig) -> RepairGroup {
+    let Some(system) = config.system(sid) else {
+        return RepairGroup::Core;
+    };
+    if let Some(station) = config.system_home_station(system) {
+        return RepairGroup::Station(station.clone());
+    }
+    system
+        .console
+        .as_ref()
+        .map(|id| RepairGroup::Console(id.clone()))
+        .unwrap_or(RepairGroup::Core)
 }
 
 /// The sweep entry point: [`next_sweep_target`], but only from a system the
@@ -740,7 +741,7 @@ fn sweep_group(sid: &SystemId, config: &ShipConfig) -> Option<StationId> {
 /// nothing to do": before issue #1013 the team bounced straight to `Returning`.
 ///
 /// Without this guard the sweep inherits that permissive `true` and then asks
-/// [`sweep_group`] which station the id belongs to — and an id the config does
+/// [`repair_group`] which station the id belongs to — and an id the config does
 /// not describe is deliberately the OWNERLESS `core` bucket, so the team would
 /// walk off its station and start repairing `core`. A dispatch that resolved to
 /// a station name must bounce exactly as it did before, so the sweep is gated on
@@ -787,7 +788,7 @@ fn occupied_systems(on_site: &[Option<SystemId>]) -> Vec<SystemId> {
 ///
 /// # Candidates
 ///
-/// Every OTHER hull system in the same [`sweep_group`] whose tier is not
+/// Every OTHER hull system in the same [`repair_group`] whose tier is not
 /// `Operational`. That predicate is deliberately the same one the AI dispatch
 /// prune uses (`console::repair::server::operate_repair_ai`), so the sweep never
 /// chases damage the dispatcher would not have sent a team for in the first
@@ -871,12 +872,12 @@ fn sweep_candidates(
     config: &ShipConfig,
     exclude: &[SystemId],
 ) -> Vec<(SystemId, String)> {
-    let group = sweep_group(current, config);
+    let group = repair_group(current, config);
     let mut candidates: Vec<(DamageTier, f32, &SystemId, &str)> = hull
         .iter()
         .filter(|(sid, _)| {
             *sid != current
-                && sweep_group(sid, config) == group
+                && repair_group(sid, config) == group
                 && !exclude.iter().any(|busy| busy == *sid)
         })
         .filter_map(|(sid, entry)| {

@@ -435,6 +435,28 @@ fn give_ship_hull(app: &mut App, entries: &[(&str, f32)]) {
 /// popup for an AI sender talking to a human target, which is the shape the
 /// leak had: an AI-run station reporting damage to a human Engineering.
 fn set_ai(app: &mut App, system_id: &SystemId) {
+    // Author delegation as well as its current projection: hosting recomputes
+    // control each tick, so changing only the derived resolver is not durable.
+    let mut configs = app
+        .world_mut()
+        .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+    for mut config in configs.iter_mut(app.world_mut()) {
+        if let Some(console) = config.0.console_for_system(system_id).cloned() {
+            let mut ratings = config.0.console_ratings(&console).to_vec();
+            for rating in &mut ratings {
+                if !rating.automated_systems.contains(system_id) {
+                    rating.automated_systems.push(system_id.clone());
+                }
+            }
+            config
+                .0
+                .consoles
+                .iter_mut()
+                .find(|candidate| candidate.id == console.id)
+                .unwrap()
+                .ratings = ratings;
+        }
+    }
     let mut q = app
         .world_mut()
         .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
@@ -1906,6 +1928,33 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
 /// delivery did with it.
 fn arm_brownout_advisory(app: &mut App, power_source: ControlSource) {
     let ship = find_ship_entity(app);
+    if power_source == ControlSource::Human {
+        let station = StationId("power".into());
+        let rating = app
+            .world()
+            .get::<ShipConfigComponent>(ship)
+            .unwrap()
+            .0
+            .station(&station)
+            .unwrap()
+            .ratings[0]
+            .name
+            .clone();
+        let mut sessions = app.world_mut().resource_mut::<Sessions>();
+        sessions
+            .0
+            .register("power-officer".into(), "Power officer".into())
+            .unwrap();
+        sessions
+            .0
+            .set_station("power-officer", Some(station.clone()));
+        app.world_mut()
+            .get_mut::<ActiveStationRatings>(ship)
+            .unwrap()
+            .0
+            .insert(station, rating);
+    }
+
     app.world_mut().entity_mut(ship).insert((
         crate::ship::power::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
         crate::ship::power::PowerBrownoutState::default(),
@@ -2114,7 +2163,7 @@ fn ai_repair_request_reaches_the_repair_owned_queue_after_generic_routing() {
         CoordinationAddress::Station(repair_station),
         CoordinationPayload::RepairRequest {
             system_id: SystemId("helm-radar".into()),
-            station_id: "helm".into(),
+            group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
             tier: DamageTier::Disabled,
             deficit: Some(37.0),
@@ -2127,7 +2176,7 @@ fn ai_repair_request_reaches_the_repair_owned_queue_after_generic_routing() {
         .get::<crate::console::repair::server::RepairRequestQueue>(ship)
         .expect("routing fixture carries Repair's queue");
     let entry = queue.peek().expect("AI Repair receives the request");
-    assert_eq!(entry.station_id, "helm");
+    assert_eq!(entry.group, fixture_repair_group("helm"));
     assert_eq!(entry.tier, DamageTier::Disabled);
     assert_eq!(entry.deficit, 37.0, "AI retains the exact sort input");
     assert_eq!(
@@ -2154,7 +2203,7 @@ fn enqueue_human_repair_request(app: &mut App) {
         repair_address,
         CoordinationPayload::RepairRequest {
             system_id: SystemId("helm-radar".into()),
-            station_id: "helm".into(),
+            group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
             tier: DamageTier::Damaged,
             deficit: Some(12.0),
@@ -2225,6 +2274,17 @@ fn repair_human_popup_stays_after_earlier_generic_and_ship_popups() {
 /// Put every system the named station owns on `source` — what claiming or
 /// vacating that seat does to the ship's control sources.
 fn set_station_systems_source(app: &mut App, station: &str, source: ControlSource) {
+    if source == ControlSource::Ai {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .get_mut::<ActiveStationRatings>(ship)
+            .unwrap()
+            .0
+            .insert(
+                StationId(station.into()),
+                crate::ship::rating::BACKFILL_RATING.into(),
+            );
+    }
     let ids: Vec<SystemId> = {
         let mut q = app
             .world_mut()
@@ -2232,7 +2292,7 @@ fn set_station_systems_source(app: &mut App, station: &str, source: ControlSourc
         let cfg = q.single(app.world()).expect("ship config").0.clone();
         cfg.systems
             .iter()
-            .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station))
+            .filter(|s| cfg.system_home_station(s).map(|st| st.0.as_str()) == Some(station))
             .map(|s| s.id.clone())
             .collect()
     };
@@ -2485,7 +2545,8 @@ fn seeking_config_app(config: crate::ship::config::ShipConfig, manned: &[&str]) 
         for system in config.systems_for_station(&sid) {
             resolver.set(system.id.clone(), ControlSource::Human);
         }
-        active.insert(sid.clone(), "Manual".to_string());
+        let rating = &config.station(&sid).expect("manned seat exists").ratings[0].name;
+        active.insert(sid.clone(), rating.clone());
         let token = format!("officer-{station}");
         let mut sessions = app.world_mut().resource_mut::<Sessions>();
         sessions
@@ -2498,6 +2559,7 @@ fn seeking_config_app(config: crate::ship::config::ShipConfig, manned: &[&str]) 
         ShipConfigComponent(config),
         ShipSystemControlSources(resolver),
         ActiveStationRatings(active),
+        crate::ship_plugin::ConsoleHosts::default(),
     ));
     app
 }
@@ -2525,17 +2587,17 @@ fn source_of(app: &mut App, system: &crate::core::messages::SystemId) -> Control
         .source_for(system)
 }
 
-fn station_assignment(
-    app: &mut App,
-    station: &crate::core::messages::StationId,
-) -> crate::ship::coordination::VisitingStationAssignment {
+fn console_assignment(app: &mut App, console: &str) -> phoenix_model::console::ConsoleHostSnapshot {
     let ship = find_ship_entity(app);
     app.world()
         .entity(ship)
-        .get::<VisitingStationHosts>()
-        .and_then(|hosts| hosts.assignment_for(station))
-        .cloned()
-        .expect("the complete visiting Station has a live assignment")
+        .get::<crate::ship_plugin::ConsoleHosts>()
+        .unwrap()
+        .0
+        .iter()
+        .find(|assignment| assignment.console.0 == console)
+        .expect("Console must have a hosting assignment")
+        .clone()
 }
 
 #[test]
@@ -2547,9 +2609,6 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Floor"
 automated_systems = []
@@ -2566,20 +2625,26 @@ rank = ""
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "navigation"
+home_station = "navigation"
+screen = "fixture.html"
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
 "#,
         &["navigation"],
     )
     .expect("the adapter fixture is valid authored hull data");
     let mut app = seeking_config_app(config, &["captain"]);
-    let navigation_station = crate::core::messages::StationId("navigation".into());
     let navigation_system = crate::core::messages::SystemId("navigation".into());
 
     tick(&mut app);
-    let baseline = station_assignment(&mut app, &navigation_station);
+    let baseline = console_assignment(&mut app, "navigation");
     assert_eq!(
         baseline.host,
         Some(crate::core::messages::StationId("captain".into()))
@@ -2605,7 +2670,7 @@ station = "navigation"
         "the production writer resolves the active world's kind selector onto this hull"
     );
 
-    let raised = station_assignment(&mut app, &navigation_station);
+    let raised = console_assignment(&mut app, "navigation");
     assert_eq!(raised.rating, "Floor");
     assert_eq!(raised.host, baseline.host);
     assert_eq!(
@@ -2631,9 +2696,6 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Floor"
 automated_systems = []
@@ -2650,23 +2712,29 @@ rank = ""
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "navigation"
+home_station = "navigation"
+screen = "fixture.html"
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
 "#,
         &["navigation"],
     )
     .expect("valid authored hull data");
     let mut app = seeking_config_app(config, &["captain"]);
-    let navigation_station = crate::core::messages::StationId("navigation".into());
     let navigation_system = crate::core::messages::SystemId("navigation".into());
 
     // Baseline: the eligible captain (default TRUE) hosts navigation and
     // operates it as a human.
     tick(&mut app);
     assert_eq!(
-        station_assignment(&mut app, &navigation_station).host,
+        console_assignment(&mut app, "navigation").host,
         Some(crate::core::messages::StationId("captain".into())),
         "baseline: the eligible captain hosts the visiting navigation station"
     );
@@ -2678,15 +2746,18 @@ station = "navigation"
     // The captain's holder now reports itself ineligible for navigation.
     {
         let mut sessions = app.world_mut().resource_mut::<Sessions>();
-        sessions.0.set_eligibility(
+        sessions.0.set_console_eligibility(
             "officer-captain",
-            std::collections::HashSet::from([navigation_station.clone()]),
+            std::collections::BTreeMap::from([(
+                crate::core::messages::ConsoleId("navigation".into()),
+                vec!["Visit".into()],
+            )]),
         );
     }
     tick(&mut app);
 
     assert_eq!(
-        station_assignment(&mut app, &navigation_station).host,
+        console_assignment(&mut app, "navigation").host,
         None,
         "an ineligible holder is skipped; the visiting station falls to AI"
     );
@@ -2706,9 +2777,6 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Floor"
 automated_systems = []
@@ -2725,22 +2793,28 @@ rank = ""
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "navigation"
+home_station = "navigation"
+screen = "fixture.html"
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
 "#,
         &["navigation"],
     )
     .expect("valid authored hull data");
     let mut app = seeking_config_app(config, &["captain"]);
-    let navigation_station = crate::core::messages::StationId("navigation".into());
     let navigation_system = crate::core::messages::SystemId("navigation".into());
 
     // Baseline: the present captain hosts navigation and operates it.
     tick(&mut app);
     assert_eq!(
-        station_assignment(&mut app, &navigation_station).host,
+        console_assignment(&mut app, "navigation").host,
         Some(crate::core::messages::StationId("captain".into())),
         "baseline: the present captain hosts the visiting navigation station"
     );
@@ -2756,7 +2830,7 @@ station = "navigation"
     }
     tick(&mut app);
     assert_eq!(
-        station_assignment(&mut app, &navigation_station).host,
+        console_assignment(&mut app, "navigation").host,
         None,
         "an AFK holder is skipped; the visiting station falls to AI"
     );
@@ -2770,7 +2844,7 @@ station = "navigation"
     }
     tick(&mut app);
     assert_eq!(
-        station_assignment(&mut app, &navigation_station).host,
+        console_assignment(&mut app, "navigation").host,
         Some(crate::core::messages::StationId("captain".into())),
         "leaving AFK re-includes the eligible visiting host on the next tick"
     );
@@ -2797,9 +2871,6 @@ id = "navigation"
 name = "Navigation"
 description = ""
 rank = ""
-human_seeking = true
-host_order = ["captain"]
-visiting_rating = "Visit"
 [[station.rating]]
 name = "Floor"
 automated_systems = []
@@ -2816,10 +2887,17 @@ rank = ""
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "navigation"
+home_station = "navigation"
+screen = "fixture.html"
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "navigation"
+console = "navigation"
 "#,
         &["navigation"],
     )
@@ -2909,9 +2987,8 @@ fn shipped_combat_test_floor_resolves_through_destroyer_hull_and_production_writ
 
     tick(&mut app);
 
-    let navigation_station = crate::core::messages::StationId("navigation".into());
     let navigation_system = crate::core::messages::SystemId("navigation".into());
-    let assignment = station_assignment(&mut app, &navigation_station);
+    let assignment = console_assignment(&mut app, "navigation");
     assert_eq!(
         assignment.host,
         Some(crate::core::messages::StationId("tactical".into()))
@@ -2926,150 +3003,91 @@ fn shipped_combat_test_floor_resolves_through_destroyer_hull_and_production_writ
     );
 }
 
-/// The `SystemId`-vs-`StationId` regression, pinned on every shipped hull.
-/// Nothing here goes near the live seek: it asserts what the four hulls
-/// AUTHOR, and that the literal the addressing used to hardcode names no
-/// station at all on two of them.
+/// Authored ownership stays explicit even when a Console has no home seat.
 #[test]
-fn every_shipped_hull_authors_seeking_comms_and_navigation_on_the_station_it_declares() {
-    for (stem, comms_station, nav_station) in SEEKING_HULLS {
+fn every_shipped_hull_authors_seeking_comms_and_navigation_on_explicit_consoles() {
+    for (stem, _, _) in SEEKING_HULLS {
         let config = hull_ship_config(stem);
-        for (system_id, expected) in [
-            (
-                crate::ship::system_registry::comms_system_id(),
-                comms_station,
-            ),
-            (
-                crate::ship::system_registry::navigation_system_id(),
-                nav_station,
-            ),
-        ] {
-            let system = config
-                .system(&system_id)
-                .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
-            if (stem == &"alliance_destroyer"
-                && (system_id.0 == "navigation" || system_id.0 == "comms"))
-                || (stem == &"alliance_cruiser" && system_id.0 == "navigation")
-            {
+        for system_id in ["comms", "navigation"] {
+            let console = config
+                .console_for_system(&SystemId(system_id.into()))
+                .expect("each capability has an owning Console");
+            assert!(
+                console.human_seeking,
+                "{stem}: {system_id} must seek a human"
+            );
+            assert!(console.screen.is_some());
+            let expected_home = match (*stem, system_id) {
+                ("alliance_destroyer", _) | ("alliance_cruiser", "navigation") => None,
+                ("alliance_courier", _) => Some("captain"),
+                (_, id) => Some(id),
+            };
+            assert_eq!(
+                console.home_station.as_ref().map(|id| id.0.as_str()),
+                expected_home
+            );
+            assert_eq!(
+                crate::command_admission::station_for_system(
+                    &config,
+                    None,
+                    &SystemId(system_id.into())
+                )
+                .as_ref()
+                .map(|id| id.0.as_str()),
+                expected_home
+            );
+            if expected_home.is_none() {
                 assert!(
-                    config
-                        .station(&crate::core::messages::StationId(system_id.0.clone()))
-                        .is_some_and(|station| station.human_seeking),
-                    "Destroyer {:?} seeks as one complete Station",
-                    system_id.0
-                );
-                assert!(
-                    !system.human_seeking,
-                    "the retired System overlay stays retired"
-                );
-            } else {
-                assert!(
-                    system.human_seeking,
-                    "{stem}: {:?} keeps legacy System seeking until migrated",
-                    system_id.0
+                    config.station(&StationId(system_id.into())).is_none(),
+                    "detached screens must not add claimable seats"
                 );
             }
-            assert_eq!(
-                crate::command_admission::station_for_system(&config, None, &system_id),
-                Some(crate::core::messages::StationId((*expected).into())),
-                "{stem}: {:?} must resolve to its authored station",
-                system_id.0
-            );
         }
-        let naive =
-            crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into());
-        if *comms_station != crate::ship::system_registry::COMMS_SYSTEM_ID {
-            assert!(
-                config.station(&naive).is_none(),
-                "{stem}: this hull homes comms on {comms_station:?} and declares NO \
-                 comms station — the old StationId(\"comms\") literal resolved to \
-                 nobody here, which is why CommsState never arrived"
+        if *stem == "alliance_courier" {
+            assert_ne!(
+                config
+                    .console_for_system(&SystemId("comms".into()))
+                    .unwrap()
+                    .id,
+                config
+                    .console_for_system(&SystemId("navigation".into()))
+                    .unwrap()
+                    .id
             );
         }
     }
 }
 
-/// The destroyer's authored `host_order` for its two complete human-seeking
-/// Stations (issue #984, #1097, #1098). Not a restatement of the TOML: it
-/// also pins that each order is a permutation of the hull's OTHER stations
-/// and that it DIFFERS from the derived one, which is the only reason to
-/// author it at all. Neither Comms nor Navigation carries a legacy
-/// `[[system]] seek_order` any more — both are complete Stations now.
 #[test]
 fn the_destroyer_authors_engineering_second_in_its_seek_order() {
     let config = hull_ship_config("alliance_destroyer");
-    let authored_stations: Vec<&str> = config.stations.iter().map(|s| s.id.0.as_str()).collect();
-    assert_eq!(
-        authored_stations,
-        vec![
-            "captain",
-            "helm",
-            "tactical",
-            "navigation",
-            "comms",
-            "engineering",
-            // The auxiliary Command station (issue #1107): mounted and
-            // resolved like any other, so it takes its authored place in the
-            // roster, but `auxiliary = true` keeps it off the lobby's seat
-            // list.
-            "command"
-        ],
-        "the [[station]] array is the lobby's row order and the broadcast \
-         router's fan-out order — the seek order does not touch it"
-    );
-
+    let seats: Vec<&str> = config.stations.iter().map(|s| s.id.0.as_str()).collect();
+    assert_eq!(seats, vec!["captain", "helm", "tactical", "engineering"]);
     let comms = config
-        .station(&crate::core::messages::StationId("comms".into()))
-        .expect("the destroyer declares a comms Station");
+        .console_for_system(&SystemId("comms".into()))
+        .unwrap();
     let order: Vec<&str> = comms.host_order.iter().map(|s| s.0.as_str()).collect();
-    assert_eq!(
-        order,
-        vec!["tactical", "engineering", "captain", "helm"],
-        "comms: Tactical owns it, then Engineering — John's ruling. Navigation \
-         was dropped now that it too is an auxiliary visiting station: a \
-         visiting station cannot host another visiting station."
-    );
-    // Every OTHER station a visiting Comms could land on is covered — but the
-    // auxiliary stations (Navigation, Comms itself, and Command, issue #1107)
-    // are not candidate hosts: a visiting station never lands on an auxiliary
-    // surface, so they are correctly absent from the order and the count.
-    let host_candidates = config
-        .stations
-        .iter()
-        .filter(|s| !s.auxiliary && s.id.0 != "comms")
-        .count();
-    assert_eq!(
-        order.len(),
-        host_candidates,
-        "comms: the order covers every OTHER non-auxiliary seat, so no \
-         reachable seat is unreachable"
-    );
+    assert_eq!(order, vec!["tactical", "engineering", "captain", "helm"]);
+    assert_eq!(order.len(), seats.len(), "every crew seat can host Comms");
+    assert!(order.iter().all(|candidate| seats.contains(candidate)));
     assert_ne!(
-        order,
-        authored_stations
-            .iter()
-            .filter(|s| **s != "comms" && **s != "command" && **s != "navigation")
-            .copied()
-            .collect::<Vec<_>>(),
-        "comms: an order identical to the authored station list would be \
-         the derived walk written out, and worth nothing"
+        order, seats,
+        "authored host priority differs from seat order"
     );
 }
-
-// ── The cruiser's Command station and Tactical stances (issue #1387) ──────
 
 /// What the cruiser AUTHORS, read off the shipped hull. The Command mechanism
 /// is entirely hull-agnostic code, so the only thing that can be wrong on a
 /// second hull is the data — which is exactly what this reads.
 #[test]
-fn the_cruiser_authors_an_auxiliary_command_station_directing_tactical() {
+fn the_cruiser_authors_a_detached_command_console_directing_tactical() {
     let config = hull_ship_config("alliance_cruiser");
 
     let command = config
-        .station(&crate::core::messages::StationId("command".into()))
-        .expect("the cruiser declares a Command Station");
+        .console_for_system(&SystemId("command".into()))
+        .expect("the cruiser declares a Command Console");
     assert!(
-        command.auxiliary,
+        command.home_station.is_none(),
         "Command is never offered as its own lobby seat"
     );
     assert!(command.human_seeking, "Command seeks a human host");
@@ -3085,14 +3103,14 @@ fn the_cruiser_authors_an_auxiliary_command_station_directing_tactical() {
         Some(crate::core::messages::StationId("tactical".into()))
     );
     assert_eq!(
-        command.console.as_deref(),
+        command.screen.as_deref(),
         Some("gui/command-console.html"),
         "Command is not a hull's own seat: every hull mounts the one shared \
          document rather than a gui/<hull>/ copy of it"
     );
     assert!(
-        command.stances.is_empty(),
-        "Command directs a catalogue, it does not author one"
+        config.station(&StationId("command".into())).is_none(),
+        "Command is a hosted Console rather than an extra crew seat"
     );
 
     let command_system = config
@@ -3100,9 +3118,9 @@ fn the_cruiser_authors_an_auxiliary_command_station_directing_tactical() {
         .expect("the cruiser declares the Command capability system");
     assert_eq!(command_system.kind, "command");
     assert_eq!(
-        command_system.station,
-        Some(crate::core::messages::StationId("command".into())),
-        "the capability system is owned by the Command Station, so its seek \
+        command_system.console,
+        Some(phoenix_model::identity::ConsoleId("command".into())),
+        "the capability system is owned by the Command Console, so its seek \
          host is authorised for stance orders like any other visiting seat"
     );
 
@@ -3208,8 +3226,7 @@ fn the_cruisers_command_station_hosts_on_a_crewed_captain_and_admits_their_stanc
     let mut app = seeking_app("alliance_cruiser", &["captain", "helm"]);
     tick(&mut app);
 
-    let command_station = crate::core::messages::StationId("command".into());
-    let assignment = station_assignment(&mut app, &command_station);
+    let assignment = console_assignment(&mut app, "command");
     assert_eq!(
         assignment.host,
         Some(crate::core::messages::StationId("captain".into())),
@@ -3308,6 +3325,16 @@ fn a_seeking_system_hosts_on_its_own_station_when_that_seat_is_crewed() {
                 nav_station,
             ),
         ] {
+            let config = hull_ship_config(stem);
+            let Some(home) = config
+                .console_for_system(&system_id)
+                .unwrap()
+                .home_station
+                .as_ref()
+            else {
+                continue; // Detached Consoles are covered by the host-order tests.
+            };
+            assert_eq!(home.0, *owner);
             let mut app = seeking_app(stem, &[owner]);
             tick(&mut app);
             assert_eq!(
@@ -3536,4 +3563,58 @@ fn only_the_live_resolved_host_can_command_complete_navigation() {
         authorized(&mut app, "officer-captain"),
         "the next authored host takes authority"
     );
+}
+
+#[test]
+fn detached_destroyer_comms_skips_an_ineligible_console_operator() {
+    let mut app = seeking_app("alliance_destroyer", &["tactical", "engineering"]);
+    let console = crate::core::messages::ConsoleId("comms".into());
+    app.world_mut()
+        .resource_mut::<Sessions>()
+        .0
+        .set_console_eligibility(
+            "officer-tactical",
+            std::collections::BTreeMap::from([(console.clone(), vec!["Std".into()])]),
+        );
+    tick(&mut app);
+    assert_eq!(
+        console_assignment(&mut app, "comms").host,
+        Some(StationId("engineering".into()))
+    );
+    assert_eq!(
+        console_assignment(&mut app, "navigation").host,
+        Some(StationId("tactical".into())),
+        "cohosted screens do not share eligibility"
+    );
+    app.world_mut()
+        .resource_mut::<Sessions>()
+        .0
+        .set_console_eligibility(
+            "officer-engineering",
+            std::collections::BTreeMap::from([(console, vec!["Std".into()])]),
+        );
+    for _ in 0..2 {
+        tick(&mut app);
+        let placement = console_assignment(&mut app, "comms");
+        assert_eq!(placement.host, None);
+        assert_eq!(placement.rating, crate::ship::rating::BACKFILL_RATING);
+    }
+    app.world_mut()
+        .resource_mut::<Sessions>()
+        .0
+        .set_console_eligibility("officer-tactical", Default::default());
+    tick(&mut app);
+    assert_eq!(
+        console_assignment(&mut app, "comms").host,
+        Some(StationId("tactical".into()))
+    );
+}
+
+fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
+    use crate::core::messages::{RepairGroup, StationId};
+    if id == "core" {
+        RepairGroup::Core
+    } else {
+        RepairGroup::Station(StationId(id.into()))
+    }
 }

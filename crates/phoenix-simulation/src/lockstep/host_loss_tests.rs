@@ -30,16 +30,20 @@ id = "helm"
 name = "Helm"
 description = ""
 rank = ""
-console = "helm.html"
 
 [[station.rating]]
 name = "Manual"
 automated_systems = []
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "helm.html"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-console"
 "#,
         &["helm_thrust"],
     )

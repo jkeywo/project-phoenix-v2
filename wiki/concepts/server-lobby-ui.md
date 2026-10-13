@@ -136,7 +136,7 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `readiness` | `ReadinessTally` | Connected non-Spectator crew and its ready subset; Station choice is irrelevant. |
 | `station_ratings` | `Vec<(StationId, String)>` | Connected non-Spectator holders' selected lobby Ratings, sorted by Station id; no participant identity or session token. |
 | `presentation_ready` | `bool` | The renderer's required assets have reached a terminal preload state; rendererless/headless peers report ready. |
-| `stations` | `Vec<StationPayload>` | One entry per claimable, non-auxiliary station. |
+| `stations` | `Vec<StationPayload>` | One entry per claimable, Station crew seat. |
 | `spectators` | `Vec<String>` | Names holding the explicit Spectator role. |
 | `gms` | `Vec<GmOperator>` | Equal GM rows (`id`, `name`, `connected`, `ready`), separate from every crew and Station count. |
 | `all_stations_filled` | `bool` | Flips ready badge to `READY TO LAUNCH`. |

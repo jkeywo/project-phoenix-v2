@@ -121,16 +121,26 @@ default_level = 2
 min_level = 1
 max_level = 4
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "fixture.html"
+
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-console"
 power_group = "ops"
 
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [system.config]
@@ -140,19 +150,19 @@ fire_arc_deg = 270
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-port"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 power_group = "weapons"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain-console"
 power_group = "ops"
 "#
 }
@@ -464,7 +474,7 @@ fn every_shipped_hull_boots_fully_ai_when_nobody_is_connected() {
                      Owner: {:?}, ai_only: {}. An unowned, non-`ai_only` system \
                      falls to the resolver's Human default and its AI host stops \
                      running.",
-                system.id, system.station, system.ai_only
+                system.id, system.console, system.ai_only
             );
             assert!(
                 !policy.accept_human_input,
@@ -537,13 +547,21 @@ fn a_manned_station_boots_on_its_own_rating_and_leaves_its_systems_human() {
 fn ownerless_ai_only_systems_are_seeded_ai_even_with_no_stations() {
     let config = crate::ship::config::parse_and_validate(
         r#"
+[[console]]
+id = "ai-shield-arc-all"
+
+[[console]]
+id = "ai-red-alert"
+
 [[system]]
 id = "shield-arc-all"
+console = "ai-shield-arc-all"
 kind = "shield_arc"
 ai_only = true
 
 [[system]]
 id = "red-alert"
+console = "ai-red-alert"
 kind = "red_alert"
 ai_only = true
 "#,
@@ -561,4 +579,42 @@ ai_only = true
             "{id} is ownerless + ai_only, so only the second pass can reach it"
         );
     }
+}
+
+#[test]
+fn detached_console_systems_boot_backfilled_beside_manned_home_consoles() {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .expect("shipped Destroyer must load")
+    .ship_config
+    .expect("Destroyer has a ship config");
+    let (resolver, _) = seed_boot_ratings(&config, |station| station.ratings[0].name.clone());
+    let mut detached_systems = 0;
+    for system in &config.systems {
+        let console = config
+            .console(system.console.as_ref().expect("System owns Console"))
+            .expect("owning Console exists");
+        if console.home_station.is_none() && !system.ai_only {
+            detached_systems += 1;
+            assert_eq!(
+                resolver.source_for(&system.id),
+                ControlSource::Ai,
+                "detached Console {} System {} must start on Backfill",
+                console.id.0,
+                system.id.0,
+            );
+        }
+    }
+    assert!(
+        detached_systems > 0,
+        "fixture must exercise detached equipment"
+    );
+    assert!(
+        config
+            .systems
+            .iter()
+            .any(|system| { resolver.source_for(&system.id) != ControlSource::Ai }),
+        "home Console ratings must still apply"
+    );
 }

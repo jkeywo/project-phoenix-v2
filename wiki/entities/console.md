@@ -1,51 +1,56 @@
 ---
 title: Console
 type: entity
-tags: [console, role, lobby, station]
-sources: [crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/lobby/stations_config.rs, crates/phoenix-simulation/src/command_admission/policy.rs, gui/mount-plan.js, gui/console-resolver.js, gui/action-map.js]
-updated: 2026-08-27
+tags: [console, knowledge, ownership, station]
+sources: [crates/phoenix-model/src/console.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/ship/console_views.rs, gui/console-topology.js, gui/console-state.js, gui/console-working-view.js, editor/workshop-ship-authoring.js]
+updated: 2026-10-13
 ---
 
 # Console
 
-A Console is the browser surface authored for a [Station](./station.md). It is
-not a server-side enum: a hull's `[[station]]` blocks declare the station id,
-display metadata, ratings, and optional `console` URL, and `Welcome` carries
-that roster to the client.
+A Console has a ship-local `ConsoleId`, an optional screen URL and a knowledge
+scope. Each System names one controlling Console. Stations remain crew seats;
+a Station can host several Consoles without gaining another claimable seat.
+A screenless Console supplies an AI-only knowledge scope.
 
-`gui/mount-plan.js` turns each mountable station into stable section and iframe
-ids (`<station>-ui` and `<station>-iframe`). Tactical retains the sole legacy
-DOM alias, `weapons-ui` / `weapons-iframe`. `gui/console-resolver.js` resolves
-the authored URL, and stations without a resolvable URL are not mounted.
+`[[console]]` authoring records its home Station, fixed or human-seeking hosting,
+ordered candidate Stations, visiting rating and typed observation feeds.
+`ShipConfig::console_for_system` is the common ownership lookup. Validation
+rejects missing System ownership rather than translating old `system.station`
+content silently.
 
-## Identity and authority
+## Hosting and authority
 
-- `StationId` identifies the operable seat or hosted surface.
-- `SystemId` identifies the fine-grained capability being controlled.
-- `Player.station` records the directly claimed lobby seat.
-- `ClientMessage::ControlSystem { target, payload }` is the common command
-  envelope used by human consoles and AI controllers.
+`resolve_human_seeking_hosts` derives `ConsoleHosts` and each owned System's
+control policy. It retains direct-holder preference, authored candidate order,
+Backfill and scenario detail requirements. Hosting changes do not reset System
+intent or individual AI memory. Human commands still address `SystemId` and
+pass ordinary admission using the Console's current host. A feed grants
+information, never control.
 
-Command admission resolves the sender's station, the target system's owner,
-the active station rating, any visiting-station host, and the game-phase rule.
-Console HTML never grants authority by hiding or showing a control.
+`ShipStations.consoles` supplies explicit screen definitions. The client mounts
+and routes tabs by Console identity, including repeated uses of the same HTML
+screen. Native display assignment and lobby tenure remain Station-based.
 
-## Composition
+## Knowledge and continuation
 
-Station rosters and console composition vary by hull. A station can own several
-systems and present them in one page; an auxiliary human-seeking station can be
-mounted as a hosted tab without becoming a separately claimable lobby seat.
-The server-supplied roster and station-host snapshot are therefore the source
-of truth. Client code must not assume a fixed number or fixed list of consoles.
+`ConsoleKnowledgeView` reads existing System publications: owned Systems plus
+explicit source-and-kind feeds. Co-hosted Consoles do not pool these views.
+`console_publication` projects permitted publications per recipient, while the
+client further filters each mounted Console. Projection caches are derived;
+there is no second authoritative observation store.
 
-To add or change a console, update the hull's station/system authoring, provide
-or reuse a panel URL, route its actions through `gui/action-map.js`, and add the
-matching server handler or system-kind policy. The mount plan needs no per-hull
-registry entry.
+`SimSnapshot.console_health` supplies the tab's health summary from the hull
+entries owned by that Console. Detached Console equipment is not folded into
+Core. Station summaries remain available for the spectator view.
 
-## Related
+`ConsoleWorkingViews` holds supported zoom, filters and inspected records by
+Console. Authorised view updates pass the existing command boundary but cannot
+operate machinery. Snapshots, restore and digests include this state; personal
+accessibility remains local to the receiving device.
+`ShipConfigComponent` requires this working-view component on NPC ships too,
+so GM-operated Consoles use the same apply/capture/restore path.
 
-- [Station](./station.md)
-- [System](./system.md)
-- [Session](./session.md)
-- [Console UI Authoring Library](../concepts/console-ui-library.md)
+Workshop edits Console composition through the existing document/history flow.
+See [Station](station.md), [System](system.md), and the implementation contracts
+in `pasm/spec/design/console-ownership.yaml`.

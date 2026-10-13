@@ -89,6 +89,8 @@ pub enum FixedStep {
     UpdateAsteroidWindow,
     PreAdmissionPruneStationPuppets,
     ReplicateLocalCrewRatings,
+    AdmitConsoleViewRequests,
+    ApplyConsoleViews,
     ReconcileStationPuppetControl,
     AdmitSystemCommands,
     AiTorpedoLoad,

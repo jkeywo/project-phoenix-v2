@@ -22,11 +22,6 @@ pub struct StationDef {
     pub rank: String,
     #[serde(default)]
     pub short_code: String,
-    /// Console root URL (e.g. "gui/captain-console.html"). Mirrors
-    /// `StationConfig.console`. When absent, the client launches a
-    /// generic fallback panel.
-    #[serde(default)]
-    pub console: Option<String>,
     /// Selectable rating names for this station, excluding the implicit
     /// `Backfill` rating (a runtime-only disconnect/unmanned state, never a
     /// lobby-selectable choice). Mirrors `StationConfig.ratings`' names, in
@@ -35,27 +30,34 @@ pub struct StationDef {
     /// complexity toggle — never hardcode station ids for this.
     #[serde(default)]
     pub ratings: Vec<String>,
-    #[serde(default)]
-    pub human_seeking: bool,
-    #[serde(default)]
-    pub host_order: Vec<StationId>,
-    #[serde(default)]
-    pub visiting_rating: Option<String>,
-    #[serde(default)]
-    pub auxiliary: bool,
-    /// The Station this one directs when it is AI-controlled (mirrors
-    /// `StationConfig.command_target`). Only the auxiliary Command station
-    /// authors this today; absent for every other Station. The client uses it
-    /// to hide the directing Station's hero-bar tab when its target is
-    /// human-held (issue tracked alongside #1107/#1387's Command work).
-    #[serde(default)]
-    pub command_target: Option<StationId>,
 }
 
 #[cfg_attr(feature = "ecs", derive(bevy_ecs::prelude::Resource))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct ShipStations {
     pub stations: Vec<StationDef>,
+    #[serde(default)]
+    pub consoles: Vec<ConsoleDef>,
+}
+
+/// Authored Console roster. Systems still receive System-addressed commands.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConsoleDef {
+    pub description: String,
+    pub short_code: String,
+    pub manual_overview: Option<String>,
+    pub tutorials: Vec<crate::messages::TutorialOverlayWire>,
+    pub command_target: Option<StationId>,
+    pub ratings: Vec<crate::console::ConsoleRatingConfig>,
+    pub id: crate::identity::ConsoleId,
+    pub name: String,
+    pub home_station: Option<StationId>,
+    pub screen: Option<String>,
+    pub human_seeking: bool,
+    pub host_order: Vec<StationId>,
+    pub visiting_rating: Option<String>,
+    pub feeds: Vec<crate::console::ConsoleFeed>,
+    pub systems: Vec<SystemId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

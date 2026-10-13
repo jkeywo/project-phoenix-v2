@@ -21,14 +21,34 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
             description: sc.description.clone(),
             rank: sc.rank.clone(),
             short_code: sc.short_code.clone(),
-            console: sc.console.clone(),
             ratings: sc.ratings.iter().map(|r| r.name.clone()).collect(),
-            human_seeking: sc.human_seeking,
-            host_order: sc.host_order.clone(),
-            visiting_rating: sc.visiting_rating.clone(),
-            auxiliary: sc.auxiliary,
-            command_target: sc.command_target.clone(),
         })
         .collect();
-    ShipStations { stations }
+    let consoles = config
+        .consoles
+        .iter()
+        .map(|console| phoenix_model::wire::ConsoleDef {
+            description: console.description.clone(),
+            short_code: console.short_code.clone(),
+            manual_overview: console.manual_overview.clone(),
+            tutorials: console.tutorials.clone(),
+            command_target: console.command_target.clone(),
+            ratings: console.ratings.clone(),
+            id: console.id.clone(),
+            name: console.name.clone(),
+            home_station: console.home_station.clone(),
+            screen: console.screen.clone(),
+            human_seeking: console.human_seeking,
+            host_order: console.host_order.clone(),
+            visiting_rating: console.visiting_rating.clone(),
+            feeds: console.feeds.clone(),
+            systems: config
+                .systems
+                .iter()
+                .filter(|system| system.console.as_ref() == Some(&console.id))
+                .map(|system| system.id.clone())
+                .collect(),
+        })
+        .collect();
+    ShipStations { stations, consoles }
 }

@@ -17,7 +17,7 @@ function heroBarModel(options) {
     systems: options.stationSystems?.[st.id] || (st.command_target ? ['command'] : []) }));
   const hosts = Object.fromEntries(definitions.map(c => {
     const board = (c.systems || []).map(id => options.blackboards?.[id]).find(b => b?.host_station !== undefined);
-    return [c.id, options.stationHosts?.[c.id] || { host: c.id === options.directStation ? c.id : c.human_seeking ? board?.host_station || null : c.home_station,
+    return [c.id, options.consoleHosts?.[c.id] || { host: c.id === options.directStation ? c.id : c.human_seeking ? board?.host_station || null : c.home_station,
       rating: board?.station_rating || (c.human_seeking ? c.visiting_rating : options.stationRatings?.[c.id]) || '' }];
   }));
   return explicitHeroBarModel({ ...options, consoles: definitions, consoleHosts: hosts, consoleImportance: options.stationImportance });
@@ -33,9 +33,9 @@ it('pins the direct Station first and keeps visitors in hull order', () => {
   const model = heroBarModel({
     directStation: 'helm', stations,
     stationSystems: { navigation: ['navigation'], comms: ['comms'] },
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Floor' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Floor' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
     stationRatings: { helm: 'Detailed' }, activeStation: 'comms',
   });
@@ -49,9 +49,9 @@ it('states direct, visiting and AI ownership independently of colour', () => {
   const model = heroBarModel({
     directStation: 'helm', stations,
     stationSystems: { navigation: ['navigation'], comms: ['comms'] },
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: null, rating: 'Backfill' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: null, rating: 'Backfill' },
     },
     stationRatings: {}, activeStation: 'helm',
   });
@@ -68,8 +68,8 @@ it('hosts a generic Power Station on Repair without a family blackboard', () => 
     ],
     stationSystems: { power: ['power-reactor', 'power-battery'] },
     blackboards: {},
-    stationHosts: {
-      power: { station: 'power', host: 'repair', rating: 'Std' },
+    consoleHosts: {
+      power: { console: 'power', host: 'repair', rating: 'Std' },
     },
     stationRatings: { repair: 'Std' },
     activeStation: 'power',
@@ -87,12 +87,12 @@ it('sources per-tab health from the authoritative host map, not damage rows', ()
     // stationSystems/blackboards are present but MUST NOT feed health (AC #3).
     stationSystems: { navigation: ['navigation'], comms: ['comms'] },
     blackboards: {},
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
     // helm damaged, navigation healthy, comms has no damage model (explicit null).
-    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    consoleHealth: { helm: 0.4, navigation: 1, comms: null },
     stationRatings: {}, activeStation: 'helm',
   });
   const byId = Object.fromEntries(model.tabs.map(tab => [tab.id, tab]));
@@ -124,13 +124,13 @@ it('classifies importance into four independent-lifecycle states', () => {
 it('sources per-tab importance from the host map, held apart from health', () => {
   const model = heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
     // helm is damaged AND has a critical condition; navigation is healthy with a
     // one-off unread event; comms has neither health damage nor importance.
-    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    consoleHealth: { helm: 0.4, navigation: 1, comms: null },
     stationImportance: {
       helm: { unread: false, critical: true },
       navigation: { unread: true, critical: false },
@@ -176,9 +176,9 @@ it('preserves the focused tab node across routine state renders', () => {
     model: heroBarModel({
       directStation: 'helm', stations,
       stationSystems: { navigation: ['navigation'], comms: ['comms'] },
-      stationHosts: {
-        navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-        comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+      consoleHosts: {
+        navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+        comms: { console: 'comms', host: 'helm', rating: 'Simple' },
       },
       stationRatings: { helm: 'Detailed' }, activeStation: 'comms',
     }),
@@ -194,9 +194,9 @@ it('preserves the focused tab node across routine state renders', () => {
     model: heroBarModel({
       directStation: 'helm', stations,
       stationSystems: { navigation: ['navigation'], comms: ['comms'] },
-      stationHosts: {
-        navigation: { station: 'navigation', host: null, rating: 'Backfill' },
-        comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+      consoleHosts: {
+        navigation: { console: 'navigation', host: null, rating: 'Backfill' },
+        comms: { console: 'comms', host: 'helm', rating: 'Simple' },
       },
       stationRatings: { helm: 'Detailed' }, activeStation: 'comms',
     }),
@@ -210,11 +210,11 @@ it('renders accessible per-tab progress bars that survive an importance alert', 
   const { elements } = heroDom();
   const build = () => heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
-    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    consoleHealth: { helm: 0.4, navigation: 1, comms: null },
     stationRatings: {}, activeStation: 'helm',
   });
   renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn() });
@@ -256,7 +256,7 @@ it('does not mutate unchanged chrome but refreshes callbacks and translated labe
   const { elements } = heroDom();
   const doc = elements.tabsEl.ownerDocument;
   const model = heroBarModel({ directStation:'helm', stations,
-    stationHealth:{helm:0.5}, stationRatings:{helm:'Detailed'}, activeStation:'helm' });
+    consoleHealth:{helm:0.5}, stationRatings:{helm:'Detailed'}, activeStation:'helm' });
   const first=vi.fn(), next=vi.fn();
   const args={...elements, model, translate};
   renderHeroBarDom({...args,onActivate:first});
@@ -280,7 +280,7 @@ it('keeps a red endpoint at zero health and shows rating without ownership text'
   const { elements } = heroDom();
   const model = heroBarModel({
     directStation: 'helm', stations,
-    stationHealth: { helm: 0 },
+    consoleHealth: { helm: 0 },
     stationRatings: { helm: 'Detailed' }, activeStation: 'helm',
   });
 
@@ -301,11 +301,11 @@ it('renders a persistent per-tab importance cue on every tab, coexisting with he
   const { elements } = heroDom();
   const model = heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
-    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    consoleHealth: { helm: 0.4, navigation: 1, comms: null },
     stationImportance: {
       helm: { unread: true, critical: true },
       navigation: { unread: false, critical: true },
@@ -339,9 +339,9 @@ it('never lets importance reorder the tabs', () => {
   const { elements } = heroDom();
   const build = importance => heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
     stationImportance: importance,
     stationRatings: {}, activeStation: 'helm',
@@ -369,7 +369,7 @@ it('reports the visited Station id to onActivate (the StationVisited contract)',
   const onActivate = vi.fn();
   const model = heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: { navigation: { station: 'navigation', host: 'helm', rating: 'Std' } },
+    consoleHosts: { navigation: { console: 'navigation', host: 'helm', rating: 'Std' } },
     stationImportance: { navigation: { unread: true, critical: false } },
     stationRatings: {}, activeStation: 'helm',
   });
@@ -387,8 +387,8 @@ it('renders a neutral empty track for a Station with no damage model', () => {
   const { elements } = heroDom();
   const model = heroBarModel({
     directStation: 'comms', stations,
-    stationHosts: {},
-    stationHealth: { comms: null },
+    consoleHosts: {},
+    consoleHealth: { comms: null },
     stationRatings: {}, activeStation: 'comms',
   });
   renderHeroBarDom({ ...elements, model, translate, onActivate: vi.fn() });
@@ -431,10 +431,10 @@ it('falls back to the direct tab when a selected visitor leaves', () => {
 // chain client.html runs on every reconcile (client.html:1651-1667).
 it('returns a visitor without stealing focus from the primary tab', () => {
   const host = h => ({
-    navigation: h ? { station: 'navigation', host: 'helm', rating: 'Std' } : null,
+    navigation: h ? { console: 'navigation', host: 'helm', rating: 'Std' } : null,
   });
   const build = (activeStation, present) => heroBarModel({
-    directStation: 'helm', stations, stationHosts: host(present),
+    directStation: 'helm', stations, consoleHosts: host(present),
     stationRatings: {}, activeStation,
   });
 
@@ -491,9 +491,9 @@ describe('short codes', () => {
   ];
   const model = () => heroBarModel({
     directStation: 'helm', stations: coded,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
     stationRatings: {}, activeStation: 'helm',
   });
@@ -609,9 +609,9 @@ describe('where the cog and help live', () => {
 
     const model = heroBarModel({
       directStation: 'helm', stations,
-      stationHosts: {
-        navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-        comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+      consoleHosts: {
+        navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+        comms: { console: 'comms', host: 'helm', rating: 'Simple' },
       },
       stationRatings: {}, activeStation: 'comms',
     });
@@ -646,11 +646,11 @@ describe('overlay tabs', () => {
 
   const build = (extra = {}) => heroBarModel({
     directStation: 'helm', stations,
-    stationHosts: {
-      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
-      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    consoleHosts: {
+      navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { console: 'comms', host: 'helm', rating: 'Simple' },
     },
-    stationHealth: { helm: 0.5 },
+    consoleHealth: { helm: 0.5 },
     stationRatings: {}, activeStation: 'helm',
     consoleTabs: overlays,
     ...extra,
@@ -879,7 +879,7 @@ describe('client.html gives the bar the shape the labels assume', () => {
 
   it('drops the title and rating on a narrow bar but keeps the AI live region', () => {
     const narrow = CLIENT_HTML.match(
-      /@media \(orientation: portrait\) and \(max-width: 599px\),[\s\S]*?\n    \}\n/,
+      /@media \(orientation: portrait\) and \(max-width: 599px\),[\s\S]*?\r?\n    \}\r?\n/,
     );
     expect(narrow, 'no narrow-bar block').not.toBeNull();
     expect(narrow[0]).toMatch(/#station-hero-title,\s*#station-hero-rating\s*\{\s*display:\s*none/);
@@ -994,12 +994,12 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     const model = heroBarModel({
       directStation: 'captain',
       stations: cruiserStations(),
-      stationHosts: {
+      consoleHosts: {
         // What the server's visiting-station resolver answers for a crewed
         // Captain: Command rides that seat, Comms and Navigation do not.
-        command: { station: 'command', host: 'captain', rating: 'Std' },
-        comms: { station: 'comms', host: null, rating: 'Backfill' },
-        navigation: { station: 'navigation', host: null, rating: 'Backfill' },
+        command: { console: 'command', host: 'captain', rating: 'Std' },
+        comms: { console: 'comms', host: null, rating: 'Backfill' },
+        navigation: { console: 'navigation', host: null, rating: 'Backfill' },
       },
       // Command has something to direct: Tactical (its `command_target`) is
       // AI-controlled, per `crates/phoenix-simulation/src/console/command/server.rs::station_is_ai_controlled`.
@@ -1020,7 +1020,7 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     const model = heroBarModel({
       directStation: 'helm',
       stations: cruiserStations(),
-      stationHosts: { command: { station: 'command', host: null, rating: 'Backfill' } },
+      consoleHosts: { command: { console: 'command', host: null, rating: 'Backfill' } },
       // Command itself runs on the ship AI here, but it still has a directable
       // target, so it stays a real (if AI-run) Station rather than vanishing.
       blackboards: { command: { directed_station_ai: true } },
@@ -1036,8 +1036,8 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     const model = heroBarModel({
       directStation: 'captain',
       stations: cruiserStations(),
-      stationHosts: {
-        command: { station: 'command', host: 'captain', rating: 'Std' },
+      consoleHosts: {
+        command: { console: 'command', host: 'captain', rating: 'Std' },
       },
       blackboards: { command: { directed_station_ai: false } },
       stationRatings: { captain: 'Std' },
@@ -1052,8 +1052,8 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     const model = heroBarModel({
       directStation: 'captain',
       stations: cruiserStations(),
-      stationHosts: {
-        command: { station: 'command', host: 'captain', rating: 'Std' },
+      consoleHosts: {
+        command: { console: 'command', host: 'captain', rating: 'Std' },
       },
       blackboards: {},
       stationRatings: { captain: 'Std' },
@@ -1066,8 +1066,8 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     const model = heroBarModel({
       directStation: 'helm',
       stations: cruiserStations(),
-      stationHosts: {
-        command: { station: 'command', host: 'captain', rating: 'Std' },
+      consoleHosts: {
+        command: { console: 'command', host: 'captain', rating: 'Std' },
       },
       blackboards: { command: { directed_station_ai: false } },
       stationRatings: { helm: 'Std' },
@@ -1080,13 +1080,13 @@ describe("the cruiser's Command tab (issue #1387)", () => {
   it('leaves a non-command visiting Station unaffected by the directability rule', () => {
     // The generic top-of-file `stations` fixture, not the cruiser's — Comms
     // there is a real seat, never a visiting Station. `navigation` authors no
-    // `command_target`, so it must stay governed purely by `stationHosts`,
+    // `command_target`, so it must stay governed purely by `consoleHosts`,
     // exactly as before this change.
     const model = heroBarModel({
       directStation: 'helm', stations,
       stationSystems: { navigation: ['navigation'] },
-      stationHosts: {
-        navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      consoleHosts: {
+        navigation: { console: 'navigation', host: 'helm', rating: 'Std' },
       },
       blackboards: {},
       stationRatings: { helm: 'Std' },
@@ -1095,4 +1095,16 @@ describe("the cruiser's Command tab (issue #1387)", () => {
     expect(model.tabs.map(tab => tab.id)).toEqual(['helm', 'navigation']);
     expect(model.ownership.navigation).toBe('visiting');
   });
+});
+
+it('keeps detached and same-seat Console health separate from Station totals', () => {
+  const consoles = ['flight', 'drive', 'detached'].map(id => ({ id, screen: 'fixture.html',
+    home_station: id === 'detached' ? null : 'helm' }));
+  const model = explicitHeroBarModel({ directStation: 'helm', stations: [{id:'helm'}], consoles,
+    consoleHosts: Object.fromEntries(consoles.map(c => [c.id, {host:'helm'}])),
+    stationHealth: {helm:1}, consoleHealth:{flight:0.25,drive:1,detached:0.5} });
+  expect(model.tabs.map(t => [t.id,t.health])).toEqual([['flight',0.25],['drive',1],['detached',0.5]]);
+  const absent = explicitHeroBarModel({ directStation:'helm', consoles, stationHealth:{helm:1},
+    consoleHosts:Object.fromEntries(consoles.map(c=>[c.id,{host:'helm'}])) });
+  expect(absent.tabs.every(t=>t.health===null)).toBe(true);
 });

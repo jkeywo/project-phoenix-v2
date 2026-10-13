@@ -16,6 +16,15 @@ export function consoleReadState(state, definition) {
   const view = { ...state, blackboards: select(state.blackboards), blackboardKinds: select(state.blackboardKinds),
     blackboardPresentation: select(state.blackboardPresentation),
     consoleSystems: { [definition.id]: definition.systems || [] } };
+  // The recipient may host several screens. Exact hull rows follow this
+  // Console's equipment and its permitted Repair publication, not that union.
+  const visibleHull = new Set(definition.systems || []);
+  for (const [source, board] of Object.entries(view.blackboards)) {
+    if (view.blackboardKinds[source] === 'Repair') {
+      for (const row of board.system_hull || []) visibleHull.add(row.system_id);
+    }
+  }
+  view.consoleHull = (state.consoleHull || []).filter(row => visibleHull.has(row.system_id));
   const hosting = state.consoleHosts?.[definition.id];
   const rating = hosting?.rating || (definition.home_station ? state.stationRatings?.[definition.home_station] : definition.visiting_rating);
   // Legacy family builders read their automation fallback under family keys.
@@ -36,7 +45,6 @@ export function consoleReadState(state, definition) {
   const channels = [
     [['Helm', 'Sensors', 'Navigation', 'TacticalRadar', 'Weapons'], ['asteroids', 'shipX', 'shipZ', 'shipYaw']],
     [['Helm'], ['forwardSpeed', 'impulseChargeProgress', 'boostEnabled', 'boostBattery', 'boostActive']],
-    [['Navigation'], ['navigationWaypoint']],
     [['Sensors'], ['sensorsTarget']],
     [['Weapons'], ['weaponsTarget', 'weaponsTargetName', 'weaponsBanks', 'weaponsTubes', 'weaponsTorpedoCount', 'weaponsPhaserMode', 'blasterBanks']],
     [['TacticalRadar'], ['weaponsBlips', 'blips']],
@@ -52,5 +60,11 @@ export function consoleReadState(state, definition) {
       else delete view[field];
     }
   }
+  // The Station cache can hold another co-hosted Console's latest waypoint.
+  // Match family selection: own Systems in authored order, then bound sources.
+  const navigationSource = [...(definition.systems || []), ...Object.keys(view.blackboards).sort()]
+    .find(id => view.blackboardKinds[id] === 'Navigation' && view.blackboards[id]);
+  if (navigationSource) view.navigationWaypoint = view.blackboards[navigationSource].navigation_waypoint ?? null;
+  else delete view.navigationWaypoint;
   return view;
 }

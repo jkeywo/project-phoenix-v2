@@ -397,7 +397,7 @@ export class PhRepairTeams extends PhElement {
           activateEngineeringAction(
             this,
             REPAIR_DISPATCH_ACTION_ID,
-            { team_idx: teamId, target: target.id },
+            { team_idx: teamId, target: target.target ?? target.id },
             'dispatch_repair_team',
           );
         });

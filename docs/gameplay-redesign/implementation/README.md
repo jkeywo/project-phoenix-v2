@@ -96,3 +96,13 @@ descriptions remain until implementation changes them.
 
 The existing GDD remains the pre-redesign comparison baseline. Wiki pages track
 current runtime understanding; they are updated only when runtime changes.
+
+## Increment 1 — explicit Consoles
+
+Implementation is under verification. The adopted contracts are in
+`pasm/spec/design/console-ownership.yaml`; the current ownership model is indexed
+by [Console](../../../wiki/entities/console.md). Record playable browser/native
+results in [the acceptance record](../../acceptance/1562-explicit-consoles.md).
+Passing owner tests alone does not close the increment. The ledger remains
+`in_progress` until continuation, authoring, gameplay comparison and the
+playable exit are verified.

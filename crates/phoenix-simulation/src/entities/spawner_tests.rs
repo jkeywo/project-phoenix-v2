@@ -75,10 +75,15 @@ fn dock_spawn_carries_the_authored_instance_id_into_runtime() {
         name = "Std"
         automated_systems = []
 
+[[console]]
+id = "flight-control-console"
+home_station = "flight-control"
+screen = "fixture.html"
+
         [[system]]
         id = "berthing-clamps"
         kind = "dock"
-        station = "flight-control"
+console = "flight-control-console"
         power_group = "ops"
 
         [dock]
@@ -1185,13 +1190,21 @@ text = "Test"
 directive_kind = "Destroy"
 base_priority = 1.0
 
+[[console]]
+id = "ai-helm-thrust"
+
+[[console]]
+id = "ai-tactical-radar"
+
 [[system]]
 id = "helm-thrust"
+console = "ai-helm-thrust"
 kind = "helm_thrust"
 ai_only = true
 
 [[system]]
 id = "tactical-radar"
+console = "ai-tactical-radar"
 kind = "tactical_radar"
 ai_only = true
 "#;

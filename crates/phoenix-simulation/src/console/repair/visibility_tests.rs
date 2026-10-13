@@ -352,7 +352,11 @@ fn queue(entries: &[(&str, f32)]) -> Vec<QueueEntryPreview> {
     entries
         .iter()
         .map(|(station, deficit)| QueueEntryPreview {
-            station_id: (*station).into(),
+            group: if *station == "core" {
+                RepairGroup::Core
+            } else {
+                RepairGroup::Station(StationId((*station).into()))
+            },
             station_label: (*station).into(),
             tier: DamageTier::Damaged,
             deficit: *deficit,
@@ -380,7 +384,11 @@ fn bb_with_queue(queue: Vec<QueueEntryPreview>) -> RepairBlackboard {
 fn queued_stations(bb: &RepairBlackboard) -> Vec<&str> {
     bb.queue_depth
         .iter()
-        .map(|e| e.station_id.as_str())
+        .map(|e| match &e.group {
+            RepairGroup::Core => "core",
+            RepairGroup::Station(id) => id.0.as_str(),
+            RepairGroup::Console(id) => id.0.as_str(),
+        })
         .collect()
 }
 
@@ -541,22 +549,40 @@ fn a_non_engineering_viewer_is_sent_the_empty_blackboard_not_a_filtered_one() {
 }
 
 #[test]
-fn a_station_change_invalidates_the_cached_projection() {
-    let mut cache = LastVisibleRepairBlackboard::default();
-    let viewers = vec![("eng".to_string(), Some(StationId("engineering".into())))];
-    assert!(
-        cache.stations_changed(&viewers),
-        "a token never seen before counts as changed"
-    );
-    cache.record_stations(&viewers);
-    assert!(!cache.stations_changed(&viewers));
-
-    let moved = vec![("eng".to_string(), Some(StationId("helm".into())))];
-    assert!(
-        cache.stations_changed(&moved),
-        "moving station must invalidate the projection even though the \
-             internal blackboard did not change"
-    );
+fn a_console_handoff_invalidates_the_cached_projection() {
+    let mut app = world_app(RepairTeams::new(1));
+    crate::server_app::register_blackboard_replication_lifecycle(&mut app);
+    app.init_resource::<crate::server_app::SimOutbox>();
+    let world = app.world_mut();
+    let entity = world
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(world)
+        .unwrap();
+    world
+        .entity_mut(entity)
+        .insert(crate::server_app::ShipSystemBlackboards(HashMap::from([(
+            SystemId("repair".into()),
+            SystemBlackboard::Repair(RepairBlackboard::default()),
+        )])));
+    crate::ship::console_publication::publish_console_blackboards(app.world_mut(), Some(0));
+    app.world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain();
+    app.world_mut()
+        .get_mut::<crate::ship::components::ConsoleHosts>(entity)
+        .unwrap()
+        .0
+        .iter_mut()
+        .find(|host| host.console.0 == "engineering-console")
+        .unwrap()
+        .host = Some(StationId("helm".into()));
+    crate::ship::console_publication::publish_console_blackboards(app.world_mut(), Some(0));
+    let cache = &app
+        .world()
+        .resource::<crate::ship::console_publication::LastConsolePublications>()
+        .0;
+    assert!(cache["eng"].1.is_empty());
+    assert!(cache["pilot"].1.contains_key(&SystemId("repair".into())));
 }
 
 // ── AC#3 / AC#4: the on-site gate driven by the real state machine ────────
@@ -689,15 +715,25 @@ name = "Engineering"
 description = "Fixing."
 rank = "Ltn."
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
+[[console]]
+id = "engineering-console"
+home_station = "engineering"
+screen = "fixture.html"
+
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm-console"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineering"
+console = "engineering-console"
 "#,
         &["helm_radar", "repair"],
     )
@@ -736,6 +772,17 @@ fn world_app_with_hp(teams: RepairTeams, hp: &[(&str, f32)]) -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         LocalShip,
+        crate::ship::components::ConsoleHosts(
+            world_ship_config()
+                .consoles
+                .iter()
+                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                    console: console.id.clone(),
+                    host: console.home_station.clone(),
+                    rating: String::new(),
+                })
+                .collect(),
+        ),
         ShipConfigComponent(world_ship_config()),
         EntitySystemHull(hull),
         super::super::server::ShipRepairTeams(teams),
@@ -1043,20 +1090,22 @@ fn scheduled_reconnect_projects_real_repair_and_hull_for_duplicate_private_reque
             let ServerMessage::BlackboardUpdate { updates, .. } = &pair[0].message else {
                 panic!("blackboards precede hull")
             };
-            let SystemBlackboard::Repair(board) = &updates[0].1 else {
-                panic!("real Repair board")
-            };
-            assert_eq!(
-                board
-                    .system_hull
-                    .iter()
-                    .any(|r| r.system_id.0 == "helm-radar"),
-                token == "eng" && arrived
-            );
-            if token != "eng" {
-                assert!(board.system_hull.is_empty());
-                assert!(board.damageable_systems.is_empty());
-                assert!(board.aggregate_hull_fraction.is_none());
+            if token == "eng" {
+                let SystemBlackboard::Repair(board) = &updates[0].1 else {
+                    panic!("Repair board")
+                };
+                assert_eq!(
+                    board
+                        .system_hull
+                        .iter()
+                        .any(|r| r.system_id.0 == "helm-radar"),
+                    arrived
+                );
+            } else {
+                assert!(
+                    updates.is_empty(),
+                    "unbound recipient has no Repair publication"
+                );
             }
             let ServerMessage::SystemHullUpdate { entries, .. } = &pair[1].message else {
                 panic!("Hull owner second")
@@ -1079,8 +1128,8 @@ fn scheduled_reconnect_projects_real_repair_and_hull_for_duplicate_private_reque
         );
         assert!(app
             .world()
-            .resource::<LastVisibleRepairBlackboard>()
-            .projections
+            .resource::<crate::ship::console_publication::LastConsolePublications>()
+            .0
             .is_empty());
         assert_eq!(
             app.world().get::<ShipSystemBlackboards>(entity).unwrap().0,
@@ -1095,77 +1144,49 @@ fn scheduled_reconnect_projects_real_repair_and_hull_for_duplicate_private_reque
 }
 
 #[test]
-fn repair_blackboard_fans_out_per_token_while_others_stay_broadcast() {
-    let v = vis(vec![]);
-    let repair_bb = SystemBlackboard::Repair(RepairBlackboard {
-        teams: vec![],
-        travel_duration_secs: 5.0,
-        system_hull: vec![
-            status("core", 40.0),
-            status("helm-radar", 60.0),
-            status("repair", 100.0),
-        ],
-        damageable_systems: vec![
-            SystemId("core".into()),
-            SystemId("helm-radar".into()),
+fn repair_blackboard_only_reaches_bound_consoles_on_live_publication() {
+    let mut app = world_app(RepairTeams::new(1));
+    crate::server_app::register_blackboard_replication_lifecycle(&mut app);
+    app.init_resource::<crate::server_app::SimOutbox>();
+    let world = app.world_mut();
+    let entity = world
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(world)
+        .unwrap();
+    world
+        .entity_mut(entity)
+        .insert(crate::server_app::ShipSystemBlackboards(HashMap::from([(
             SystemId("repair".into()),
-        ],
-        queue_depth: vec![],
-        // Non-None on input so the "pilot" assertions below genuinely
-        // exercise `withheld_repair_blackboard` overwriting to `None`
-        // rather than passing vacuously on an already-`None` input.
-        aggregate_hull_fraction: Some(0.25),
-        destroyed_hull_fraction: Some(0.25),
-        ..Default::default()
-    });
-    let viewers = vec![
-        ("eng".to_string(), Some(StationId("engineering".into()))),
-        ("pilot".to_string(), Some(StationId("helm".into()))),
-    ];
-    let mut cache = LastVisibleRepairBlackboard::default();
-    let out = project_repair_blackboards(
-        vec![(SystemId("repair".into()), repair_bb)],
-        Some(&v),
-        &viewers,
-        &mut cache,
-    );
-
-    assert!(
-        !out.iter().any(|(t, _)| matches!(t, Target::All)),
-        "a repair blackboard carrying hull detail must never go to Target::All"
-    );
-    for (target, msg) in &out {
-        let (Target::Token(token), ServerMessage::BlackboardUpdate { updates, .. }) = (target, msg)
-        else {
-            panic!("expected a token-targeted BlackboardUpdate")
+            SystemBlackboard::Repair(RepairBlackboard::default()),
+        )])));
+    crate::ship::console_publication::publish_console_blackboards(app.world_mut(), Some(0));
+    let sent = app
+        .world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain();
+    assert!(!sent.iter().any(|entry| entry.target == Target::All));
+    for entry in sent {
+        let Target::Token(token) = entry.target else {
+            panic!("targeted projection")
         };
-        let SystemBlackboard::Repair(bb) = &updates[0].1 else {
-            unreachable!()
+        let ServerMessage::BlackboardUpdate { updates, .. } = entry.message else {
+            panic!("boards")
         };
-        let rows = ids(&bb.system_hull);
-        match token.as_str() {
-            "eng" => {
-                assert_eq!(rows, vec!["core", "repair"]);
-                assert!(bb.aggregate_hull_fraction.is_some());
-                assert!(bb.destroyed_hull_fraction.is_some());
-            }
-            // Helm is not Engineering: the repair blackboard is the
-            // Engineering console's payload and nothing else renders it,
-            // so Helm receives the empty one — not a filtered one.
-            "pilot" => {
-                assert!(rows.is_empty());
-                assert!(bb.damageable_systems.is_empty());
-                assert!(bb.teams.is_empty());
-                assert!(bb.queue_depth.is_empty());
-                assert!(bb.aggregate_hull_fraction.is_none());
-                assert!(bb.destroyed_hull_fraction.is_none());
-            }
-            other => panic!("unexpected recipient {other}"),
+        if token == "eng" {
+            let SystemBlackboard::Repair(board) = &updates[0].1 else {
+                panic!("Repair")
+            };
+            assert_eq!(ids(&board.system_hull), vec!["core", "repair"]);
+        } else if token == "pilot" {
+            assert!(updates.is_empty());
         }
     }
-
-    // Unchanged projections are not re-sent.
-    assert!(cache.projections.contains_key("eng"));
+    crate::ship::console_publication::publish_console_blackboards(app.world_mut(), Some(0));
+    assert!(app
+        .world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain()
+        .is_empty());
 }
 
 #[test]

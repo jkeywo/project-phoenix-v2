@@ -339,6 +339,17 @@ export function computeIneligibleStations(profile, allStationGaps, ratingFor, st
   return out.sort();
 }
 
+/** Anonymous Console/rating rejections. Evaluate all authored ratings rather
+ * than a live host rating: Backfill or a handoff must not erase a rejection.
+ * Only opaque Console ids and rating names cross the wire, never reasons. */
+export function computeIneligibleConsoles(profile, allConsoleGaps) {
+  return Object.fromEntries(Object.entries(allConsoleGaps || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([consoleId, gaps]) => [consoleId, Object.keys(gaps || {}).sort()
+      .filter(rating => !deriveStationEligibility(profile, gaps, rating).eligible)])
+    .filter(([, ratings]) => ratings.length > 0));
+}
+
 // ── OS-default resolver (matchMedia) ─────────────────────────────────────────
 
 /**
@@ -799,4 +810,5 @@ if (typeof window !== 'undefined') {
   // Pure eligibility derivation for the inline lobby glue (issue #1103).
   window.deriveStationEligibility = deriveStationEligibility;
   window.computeIneligibleStations = computeIneligibleStations;
+  window.computeIneligibleConsoles = computeIneligibleConsoles;
 }

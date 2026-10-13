@@ -112,6 +112,12 @@ pub struct WorkshopValidation {
 /// cannot drift into offering a System or Directive spelling the build rejects.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct WorkshopShipSchema {
+    pub console_feed_kinds: Vec<String>,
+    pub console_feed_sources: Vec<String>,
+    pub console_publication_kinds:
+        std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind>,
+    pub console_instance_publication_kinds:
+        std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind>,
     pub system_kinds: Vec<String>,
     pub directive_kinds: Vec<String>,
 }
@@ -121,7 +127,18 @@ pub fn ship_schema() -> WorkshopShipSchema {
         .expect("the built-in System registry is valid");
     let mut system_kinds = registry.kinds().map(str::to_owned).collect::<Vec<_>>();
     system_kinds.sort();
+    let console_publication_kinds = crate::ship::system_registry::fixed_publication_kinds();
+    let mut console_feed_sources: Vec<_> = console_publication_kinds.keys().cloned().collect();
+    console_feed_sources.sort();
     WorkshopShipSchema {
+        console_feed_sources,
+        console_publication_kinds,
+        console_instance_publication_kinds:
+            crate::ship::system_registry::instance_publication_kinds(),
+        console_feed_kinds: phoenix_model::console::ConsoleObservationKind::NAMES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect(),
         system_kinds,
         directive_kinds: crate::objectives::directive::DirectiveKind::ALL
             .into_iter()

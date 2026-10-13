@@ -26,7 +26,7 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1036,7 +1036,7 @@ pub struct Player {
     /// Used in the per-player Ready flow replacing captain Engage.
     #[serde(default)]
     pub ready: bool,
-    /// C1: stable station ID — primary addressing unit, replaces consoles over time.
+    /// Stable crew-seat identity. System authority resolves through its Console host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub station: Option<StationId>,
     /// Last rating active for this player's station (persists across disconnect for backfill).
@@ -1318,6 +1318,9 @@ pub struct ShipClientConfig {
     /// servers that omit it decoding.
     #[serde(default)]
     pub station_assist_gaps: HashMap<String, HashMap<String, Vec<String>>>,
+    /// Hull-derived manual assistance gaps by Console and rating; never a profile.
+    #[serde(default)]
+    pub console_assist_gaps: std::collections::BTreeMap<ConsoleId, HashMap<String, Vec<String>>>,
     /// Minimum relative bearing change (radians) for Sensors to re-emit a
     /// `ThreatBearing` coordination message to Shields. Sourced from
     /// `[sensors_console] threat_bearing_epsilon_rad` in the ship TOML.
@@ -1459,6 +1462,7 @@ impl Default for ShipClientConfig {
             system_kinds: HashMap::new(),
             blackboard_console_families: HashMap::new(),
             station_assist_gaps: HashMap::new(),
+            console_assist_gaps: Default::default(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
             helm_systems: Vec::new(),
             vertical_movement_mode: default_vertical_movement_mode(),
@@ -1473,27 +1477,31 @@ impl Default for ShipClientConfig {
 /// has migrated to `SystemBlackboard` (issue #570); only world entity snapshots
 /// remain here so the client can track NPC/asteroid positions and hull.
 pub struct SimSnapshot {
+    #[serde(default)]
+    pub console_views: BTreeMap<ConsoleId, crate::console::ConsoleWorkingView>,
+    #[serde(default)]
+    pub console_importance: Vec<crate::console::ConsoleImportanceSnapshot>,
+    #[serde(default)]
+    pub console_hosts: Vec<crate::console::ConsoleHostSnapshot>,
     /// Per-tick entity state snapshots (position, yaw, hull, flags).
     #[serde(default)]
     pub entity_states: Vec<EntityStateSnapshot>,
-    /// Authoritative complete human-seeking Station placement projection.
-    /// Station-level by design: clients must not infer a complete Station's
-    /// host or effective rating from one console family's blackboard.
-    #[serde(default)]
-    pub station_hosts: Vec<StationHostSnapshot>,
     /// Authoritative per-Station hull health for the local ship, summed by the
-    /// host (issue #1100). Station-level by design, exactly like `station_hosts`:
+    /// host (issue #1100). Station-level by design, independent of Console hosting:
     /// a client must show a Station's health from this figure, never by summing
     /// the recipient-scoped damage rows it happens to hold — no client is
     /// entitled to another Station's rows to sum in the first place.
     #[serde(default)]
     pub station_health: Vec<StationHealthSnapshot>,
+    /// Derived health of each Console's owned Systems, in authored order.
+    #[serde(default)]
+    pub console_health: Vec<ConsoleHealthSnapshot>,
     /// Authoritative per-Station importance for the local ship (issue #1101).
     ///
     /// A host-derived attention stream that is deliberately kept SEPARATE from
     /// `station_health`: importance answers "does an off-screen event on this
     /// Station want the crew's eyes", not "how damaged is it". Station-level and
-    /// recipient-independent for exactly `station_hosts`' reason — the same
+    /// recipient-independent, using the same
     /// privacy argument that lets everyone hold the ship-wide aggregate.
     ///
     /// Only Stations that currently carry importance appear; a Station whose
@@ -1504,7 +1512,7 @@ pub struct SimSnapshot {
     /// Effective per-system authority for the local ship at this tick.
     ///
     /// This is the wire projection of `ShipSystemControlSources`, not a
-    /// station-rating inference: complete Stations may visit differently
+    /// station-rating inference: Consoles may visit differently
     /// named hosts while their fine Systems remain human-operated. A sorted
     /// map keeps the authoritative byte stream deterministic.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1540,18 +1548,17 @@ pub struct StationPuppetActivitySnapshot {
     pub action: String,
 }
 
-/// One complete human-seeking Station's current placement and effective rating.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StationHostSnapshot {
-    pub station: StationId,
+/// One Console's derived owned-System health. None means no modeled capacity.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConsoleHealthSnapshot {
+    pub console: ConsoleId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<StationId>,
-    pub rating: String,
+    pub health: Option<f32>,
 }
 
 /// One Station's authoritative hull health, summed by the host (issue #1100).
 ///
-/// Station-level and recipient-independent, mirroring [`StationHostSnapshot`]:
+/// Station-level and recipient-independent, mirroring Console placement:
 /// the host sums the Station's own damageable capacity, so every client renders
 /// the same figure rather than inferring it from the per-recipient rows a
 /// client holds — the whole point of #737 is that no client holds another
@@ -1566,7 +1573,7 @@ pub struct StationHealthSnapshot {
 
 /// One Station's authoritative importance, host-derived (issue #1101).
 ///
-/// Recipient-independent and station-level, mirroring [`StationHostSnapshot`]
+/// Recipient-independent and station-level, mirroring Console placement
 /// and [`StationHealthSnapshot`], but carrying an attention signal that is held
 /// strictly apart from health. The two flags have DISTINCT lifecycles and are
 /// two independent fields precisely so neither can interfere with the other:
@@ -1860,11 +1867,49 @@ pub struct WorldData {
     pub scenario_description: String,
 }
 
+/// Stable internal repair grouping, independent of current Console hosting.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(tag = "type", content = "data")]
+pub enum RepairGroup {
+    Core,
+    Station(StationId),
+    Console(ConsoleId),
+}
+
+impl RepairGroup {
+    /// Preserve the existing Station/Core ranking order while keeping detached
+    /// Console keys in a separate namespace. Station id `core` is reserved.
+    pub fn selector_key(&self) -> String {
+        match self {
+            Self::Core => "0:core".into(),
+            Self::Station(id) => format!("0:{}", id.0),
+            Self::Console(id) => format!("1:{}", id.0),
+        }
+    }
+
+    pub fn target(&self) -> RepairTarget {
+        match self {
+            Self::Core => RepairTarget::Core,
+            Self::Station(id) => RepairTarget::Station(id.clone()),
+            Self::Console(id) => RepairTarget::Console(id.clone()),
+        }
+    }
+}
+
+/// Static ownership projection used to group repair dispatch choices.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepairGroupDefinition {
+    pub group: RepairGroup,
+    pub label: String,
+    pub systems: Vec<SystemId>,
+}
+
 /// Destination for repair dispatch in the station/system architecture.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum RepairTarget {
     Station(StationId),
+    Console(ConsoleId),
     Core,
     /// **The field target off the ship** (issue #1386): whatever Tactical
     /// currently holds locked, worked by a team sent abroad.
@@ -1942,6 +1987,12 @@ pub enum SystemControlPayload {
     AssignStationRating {
         station: StationId,
         rating: String,
+    },
+    /// Host-validated Console presentation update, replicated through ordinary
+    /// admission so save/replay and fleet peers retain the same working view.
+    AssignConsoleView {
+        console: ConsoleId,
+        view: crate::console::ConsoleWorkingView,
     },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
@@ -2469,6 +2520,11 @@ pub enum ClientMessage {
     ReportStationEligibility {
         ineligible: Vec<StationId>,
     },
+    /// Anonymous incompatible Console/rating pairs. Reasons and preferences stay
+    /// on the client. Reporting all ratings avoids Backfill eligibility oscillation.
+    ReportConsoleEligibility {
+        ineligible: std::collections::BTreeMap<ConsoleId, Vec<String>>,
+    },
     /// Channel-3 coordination envelope. Carries a typed coordination payload
     /// to be queued with lag and routed at delivery time (issue #494).
     SendCoordination {
@@ -2523,6 +2579,13 @@ pub enum ClientMessage {
     /// flag, so it stays out of the command log.
     StationVisited {
         station: StationId,
+    },
+    ConsoleVisited {
+        console: ConsoleId,
+    },
+    SetConsoleView {
+        console: ConsoleId,
+        view: crate::console::ConsoleWorkingView,
     },
     /// Flip one host-page debug overlay from a connected phone's Debug/Cheat
     /// tab (issue #940).
@@ -2860,7 +2923,7 @@ pub enum CoordinationPayload {
     /// station; deriving one from `sender_label` would let the two drift.
     RepairRequest {
         system_id: SystemId,
-        station_id: String,
+        group: RepairGroup,
         station_label: String,
         tier: DamageTier,
         deficit: Option<f32>,
@@ -3499,6 +3562,11 @@ pub enum ServerMessage {
     /// Emitted only for systems whose blackboard changed since the last send.
     /// `updates` is a list of `(SystemId, SystemBlackboard)` pairs.
     BlackboardUpdate {
+        /// Complete current publication scope; receivers discard entries outside it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        console_scope: Option<Vec<SystemId>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        console_scope_tick: Option<u64>,
         updates: Vec<(SystemId, SystemBlackboard)>,
         /// Current presentation continuation, outside canonical blackboards.
         /// Private cue readers silently baseline when absent or changed.
@@ -5119,13 +5187,12 @@ pub struct PowerGroupEntry {
 /// Preview of a queued repair request for blackboard publication (issue #682).
 ///
 /// Carries exact damage numbers, so it is subject to the same #737 visibility
-/// boundary as [`RepairBlackboard::system_hull`]: `station_id` is the bucket
-/// the repair queue is keyed by (a station id, or `"core"` for the ownerless
-/// bucket) and exists so the projection can decide entitlement from the same
+/// boundary as [`RepairBlackboard::system_hull`]: `group` is the typed bucket
+/// the repair queue is keyed by (home Station, detached Console, or Core) and exists so the projection can decide entitlement from the same
 /// rule rather than parsing the display label.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct QueueEntryPreview {
-    pub station_id: String,
+    pub group: RepairGroup,
     pub station_label: String,
     pub tier: DamageTier,
     pub deficit: f32,
@@ -5135,6 +5202,8 @@ pub struct QueueEntryPreview {
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RepairBlackboard {
+    #[serde(default)]
+    pub repair_groups: Vec<RepairGroupDefinition>,
     /// Current team slot states (one entry per repair team).
     pub teams: Vec<TeamSlot>,
     /// Travel duration in seconds (from ship TOML `[repair]` block).
@@ -5357,36 +5426,10 @@ pub struct NavigationBlackboard {
     /// NPC's own Navigation blackboard has no console to render it on.
     #[serde(default)]
     pub civilians: Vec<CivilianTrafficSnapshot>,
-    /// Which station is currently hosting this system (issue #984 / pasm
-    /// `console-complexity-human-seeking-systems`), when it is `human_seeking`
-    /// and the seek found a human to host it.
-    ///
-    /// This is the ONLY way the resolved seek reaches a console, and it rides
-    /// the seeking system's own blackboard because that is where per-system
-    /// truth has lived since #570 — "which station am I on right now" is a fact
-    /// about this system, not a second station-roster surface. Every blackboard
-    /// goes out at `Target::All`, so every console learns it in the same tick,
-    /// and the blackboard diff means the button appears and disappears on a
-    /// real change rather than on a poll.
-    ///
-    /// `None` deliberately covers BOTH "this system does not seek" and "it
-    /// seeks and found nobody", because the two want the same rendering: the
-    /// console of the station that AUTHORS the system, which is exactly what
-    /// every console did before this field existed. So a hull that authors no
-    /// `human_seeking`, a host too old to send the field, and an all-AI bridge
-    /// all render identically to today, and no client needs a second field to
-    /// tell the cases apart.
-    ///
-    /// `Some(station)` is exclusive: that station's console hosts the system
-    /// and no other console does — including the authoring one, which is the
-    /// half of the feature that makes the buttons disappear when the seek moves
-    /// on.
-    ///
-    /// The key is ALWAYS written, `null` included — no `skip_serializing_if`.
-    /// The client's push router (`gui/dirty-consoles.js`) uses the key's
-    /// presence to recognise a seeking system's blackboard, and a key that
-    /// vanished on `None` would make "the seek let go of this station" the one
-    /// transition nothing could route.
+    /// Current hosting Station, projected from this System's controlling Console.
+    /// Kept on the existing Navigation publication for its screen implementation;
+    /// ConsoleHosts remains authoritative. This field grants no control authority.
+    /// The key is emitted even when unhosted so a mounted screen can clear it.
     #[serde(default)]
     pub host_station: Option<StationId>,
 }

@@ -462,8 +462,7 @@ fn local_start_assets_ready(
 }
 
 /// Build the host viewscreen lobby roster from claimable bridge seats only.
-/// Auxiliary Stations remain mounted for visiting placement, but they are not
-/// seats and therefore must not affect cards or any counts derived from them.
+/// Hosted Consoles are separate from seats and do not affect crew counts.
 struct ClaimableLobbyRoster {
     stations: Vec<StationPayload>,
     crew_count: u32,
@@ -475,7 +474,6 @@ fn claimable_lobby_roster(stations: &ShipStations, players: &[Player]) -> Claima
     let station_payloads: Vec<_> = stations
         .stations
         .iter()
-        .filter(|def| !def.auxiliary)
         .map(|def| {
             let holder = players
                 .iter()

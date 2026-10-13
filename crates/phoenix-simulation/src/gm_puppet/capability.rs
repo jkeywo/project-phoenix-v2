@@ -58,6 +58,27 @@ impl StationCapabilities<'_, '_> {
     }
 }
 
+/// Screens inspectable at this crew seat. A live placement wins over authored
+/// home; unhosted home screens remain available to begin a GM takeover. Detached
+/// visitors require an actual host. Feed bindings never add control ownership.
+pub fn station_consoles<'a>(
+    config: &'a crate::ship::config::ShipConfig,
+    hosts: Option<&'a crate::ship::components::ConsoleHosts>,
+    station: &'a StationId,
+) -> impl Iterator<Item = &'a phoenix_model::console::ConsoleConfig> {
+    config.consoles.iter().filter(move |console| {
+        let host = hosts
+            .and_then(|hosts| hosts.0.iter().find(|entry| entry.console == console.id))
+            .and_then(|entry| entry.host.as_ref())
+            .or(console.home_station.as_ref());
+        console
+            .screen
+            .as_ref()
+            .is_some_and(|screen| !screen.is_empty())
+            && host == Some(station)
+    })
+}
+
 pub fn station_capability(
     entity: &EntityRef<'_>,
     station: &StationId,
@@ -67,10 +88,19 @@ pub fn station_capability(
     let config = entity
         .get::<ShipConfigComponent>()
         .ok_or(GmActionRefusalReason::UnknownStation)?;
-    let authored = config
+    config
         .0
         .station(station)
         .ok_or(GmActionRefusalReason::UnknownStation)?;
+    let consoles = station_consoles(
+        &config.0,
+        entity.get::<crate::ship::components::ConsoleHosts>(),
+        station,
+    )
+    .collect::<Vec<_>>();
+    if consoles.is_empty() {
+        return Err(GmActionRefusalReason::SystemUnavailable);
+    }
     // Existing player Station authority is unchanged. Its ordinary host boot
     // provides the complete interface/producer graph; NPCs have a separate
     // spawn graph and therefore need the explicit audit below.
@@ -81,11 +111,6 @@ pub fn station_capability(
     // The complete normal Welcome projection comes from this NPC instance's
     // resolved spawn config, never the local player's selected hull.
     entity.get::<NpcStationConfig>().ok_or(unavailable)?;
-    let console = authored
-        .console
-        .as_deref()
-        .filter(|url| !url.is_empty())
-        .ok_or(unavailable)?;
     if !entity.contains::<crate::core::messages::AdmittedCommands>()
         || !entity.contains::<crate::ship::components::ActiveStationRatings>()
         || !entity.contains::<crate::ship::components::ShipSystemControlSources>()
@@ -96,41 +121,51 @@ pub fn station_capability(
     {
         return Err(unavailable);
     }
-    // Mixed interfaces stay closed until EVERY family they expose has the
-    // same per-ship producer and consumer fidelity. In particular Captain's
-    // camera/priority and Power's blackboards are still player-only.
-    let kinds: &[&str] = match console {
-        "gui/battleship/helm.html"
-            if entity.contains::<crate::entities::spawner::HelmConsoleSection>()
-                && entity.contains::<crate::server_app::ShipImpulse>()
-                && entity.contains::<crate::server_app::ShipBoost>()
-                && entity.contains::<crate::ship::components::LastHelmInput>() =>
-        {
-            &[
-                "helm_thrust",
-                "helm_steering",
-                "helm_impulse",
-                "helm_boost",
-                "lateral_thrust",
-                "vertical_thrust",
-            ]
-        }
-        _ => return Err(unavailable),
-    };
     let descriptors = descriptors.ok_or(unavailable)?;
     let consumers = consumers.ok_or(unavailable)?;
     let mut commandable = false;
-    for system in config.0.systems_for_station(station) {
-        if !kinds.contains(&system.kind.as_str()) || system.ai_only {
-            return Err(unavailable);
-        }
-        let descriptor = descriptors.descriptor(&system.kind).ok_or(unavailable)?;
-        if descriptor.accepts_admitted_commands() {
-            if !consumers.is_system_routed(system) {
+    // Audit each mounted Console and its owned Systems. A read-only feed to
+    // another Console's publication cannot make its equipment commandable.
+    for console in consoles {
+        let kinds: &[&str] = match console.screen.as_deref() {
+            Some("gui/battleship/helm.html")
+                if entity.contains::<crate::entities::spawner::HelmConsoleSection>()
+                    && entity.contains::<crate::server_app::ShipImpulse>()
+                    && entity.contains::<crate::server_app::ShipBoost>()
+                    && entity.contains::<crate::ship::components::LastHelmInput>() =>
+            {
+                &[
+                    "helm_thrust",
+                    "helm_steering",
+                    "helm_impulse",
+                    "helm_boost",
+                    "lateral_thrust",
+                    "vertical_thrust",
+                ]
+            }
+            _ => return Err(unavailable),
+        };
+        for system in config
+            .0
+            .systems
+            .iter()
+            .filter(|system| system.console.as_ref() == Some(&console.id))
+        {
+            if !kinds.contains(&system.kind.as_str()) || system.ai_only {
                 return Err(unavailable);
             }
-            commandable = true;
+            let descriptor = descriptors.descriptor(&system.kind).ok_or(unavailable)?;
+            if descriptor.accepts_admitted_commands() {
+                if !consumers.is_system_routed(system) {
+                    return Err(unavailable);
+                }
+                commandable = true;
+            }
         }
     }
     commandable.then_some(()).ok_or(unavailable)
 }
+
+#[cfg(test)]
+#[path = "capability_tests.rs"]
+mod tests;

@@ -62,7 +62,6 @@ id = "helm"
 name = "Helm"
 description = ""
 rank = ""
-console = "helm.html"
 
 [[station.rating]]
 name = "Manual"
@@ -77,41 +76,50 @@ id = "tactical"
 name = "Tactical"
 description = ""
 rank = ""
-console = "weapons.html"
 
 [[station.rating]]
 name = "Manual"
 automated_systems = []
 
+[[console]]
+id = "helm-screen"
+home_station = "helm"
+screen = "helm.html"
+
+[[console]]
+id = "tactical-screen"
+home_station = "tactical"
+screen = "weapons.html"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-screen"
 
 [[system]]
 id = "impulse-drive"
 kind = "helm_impulse"
-station = "helm"
+console = "helm-screen"
 
 [[system]]
 id = "phaser"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-screen"
 
 [[system]]
 id = "main-view"
 kind = "viewscreen"
-station = "tactical"
+console = "tactical-screen"
 
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm-screen"
 
 [[system]]
 id = "science-sensors"
 kind = "sensors"
-station = "tactical"
+console = "tactical-screen"
 "#,
         &[
             "helm_thrust",
@@ -620,6 +628,7 @@ fn helm_station_admission_uses_the_set_view_effective_target_and_refuses_a_forge
         &sources,
         &config,
         None,
+        None,
     )
     .expect("Radar is authored from Helm's effective target");
     assert_eq!(admitted.target, viewscreen);
@@ -634,6 +643,7 @@ fn helm_station_admission_uses_the_set_view_effective_target_and_refuses_a_forge
             },
             &sources,
             &config,
+            None,
             None,
         ),
         Err(StationCommandPolicyFailure::SystemOutsideStation),
@@ -653,7 +663,189 @@ fn helm_station_admission_uses_the_set_view_effective_target_and_refuses_a_forge
             &sources,
             &config,
             None,
+            None,
         ),
         Err(StationCommandPolicyFailure::SystemUnavailable),
+    );
+}
+
+#[test]
+fn gm_ownership_tracks_live_console_host_and_never_grants_feed_authority() {
+    use crate::core::messages::{ConsoleId, SystemControlPayload, SystemId};
+    use crate::ship::components::ConsoleHosts;
+    use phoenix_model::console::{ConsoleFeed, ConsoleHostSnapshot, ConsoleObservationKind};
+    let mut config = control_test_config();
+    let helm_console = config
+        .consoles
+        .iter_mut()
+        .find(|c| c.id.0 == "helm-screen")
+        .unwrap();
+    helm_console.home_station = None;
+    helm_console.human_seeking = true;
+    helm_console.host_order = vec![StationId("helm".into()), StationId("tactical".into())];
+    helm_console.feeds.push(ConsoleFeed {
+        source: SystemId("phaser".into()),
+        kind: ConsoleObservationKind::PhaserBank,
+    });
+    let mut hosts = ConsoleHosts(vec![ConsoleHostSnapshot {
+        console: ConsoleId("helm-screen".into()),
+        host: Some(StationId("tactical".into())),
+        rating: "Manual".into(),
+    }]);
+    let mut puppets = StationPuppets::default();
+    for station in ["helm", "tactical"] {
+        puppets.set_operator(target("ship", station), "gm".into(), true);
+    }
+    let action = |station: &str, system: &str| crate::gm_action::GmAction::IssueStationCommand {
+        ship: ShipKey("ship".into()),
+        station: StationId(station.into()),
+        target: SystemId(system.into()),
+        payload: crate::core::codec::canonical_system_command(&SystemControlPayload::SetThrust {
+            value: 0.5,
+        })
+        .unwrap(),
+    };
+    assert_eq!(
+        validate_station_action(
+            &action("tactical", "helm-thrust"),
+            "gm",
+            &puppets,
+            Some(&config),
+            None,
+            Some(&hosts)
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        validate_station_action(
+            &action("helm", "helm-thrust"),
+            "gm",
+            &puppets,
+            Some(&config),
+            None,
+            Some(&hosts)
+        ),
+        Err(crate::gm_action::GmActionRefusalReason::SystemOutsideStation)
+    );
+    hosts.0[0].host = Some(StationId("helm".into()));
+    assert_eq!(
+        validate_station_action(
+            &action("tactical", "helm-thrust"),
+            "gm",
+            &puppets,
+            Some(&config),
+            None,
+            Some(&hosts)
+        ),
+        Err(crate::gm_action::GmActionRefusalReason::SystemOutsideStation)
+    );
+    assert!(!system_at_station(
+        &config,
+        Some(&hosts),
+        &StationId("helm".into()),
+        &SystemId("phaser".into())
+    ));
+}
+
+#[test]
+fn gm_overlay_clears_moved_console_and_retains_ai_only_and_offline_policies() {
+    use crate::core::messages::{ConsoleId, SystemId};
+    use crate::ship::components::ConsoleHosts;
+    use phoenix_model::console::ConsoleHostSnapshot;
+    let mut config = control_test_config();
+    config
+        .systems
+        .iter_mut()
+        .find(|s| s.id.0 == "impulse-drive")
+        .unwrap()
+        .ai_only = true;
+    let mut hosts = ConsoleHosts(vec![ConsoleHostSnapshot {
+        console: ConsoleId("helm-screen".into()),
+        host: Some(StationId("helm".into())),
+        rating: "Assisted".into(),
+    }]);
+    let ratings = ActiveStationRatings::default();
+    let mut sources = ShipSystemControlSources::default();
+    let thrust = SystemId("helm-thrust".into());
+    sources.0.set_offline(thrust.clone(), true);
+    restore_console_control(&config, Some(&hosts), &ratings, &mut sources);
+    overlay_station_control(
+        &config,
+        Some(&hosts),
+        &StationId("helm".into()),
+        &mut sources,
+    );
+    assert_eq!(sources.0.source_for(&thrust), ControlSource::Human);
+    assert_eq!(
+        sources.0.source_for(&SystemId("impulse-drive".into())),
+        ControlSource::Ai
+    );
+    assert!(sources.0.is_offline(&thrust));
+    hosts.0[0].host = Some(StationId("tactical".into()));
+    hosts.0[0].rating = crate::ship::rating::BACKFILL_RATING.into();
+    restore_console_control(&config, Some(&hosts), &ratings, &mut sources);
+    overlay_station_control(
+        &config,
+        Some(&hosts),
+        &StationId("helm".into()),
+        &mut sources,
+    );
+    assert_eq!(sources.0.source_for(&thrust), ControlSource::Ai);
+    assert!(sources.0.is_offline(&thrust));
+}
+
+#[test]
+fn detached_read_only_console_view_uses_its_live_host_without_owned_systems() {
+    use crate::command_admission::{validate_station_command, StationCommandPolicyFailure};
+    use crate::core::messages::{ConsoleId, SystemControlPayload, SystemId};
+    use crate::ship::components::ConsoleHosts;
+    use phoenix_model::console::{
+        ConsoleConfig, ConsoleFeed, ConsoleHostSnapshot, ConsoleObservationKind, ConsoleWorkingView,
+    };
+    let mut config = control_test_config();
+    let id = ConsoleId("shared-display".into());
+    config.consoles.push(ConsoleConfig {
+        id: id.clone(),
+        screen: Some("gui/battleship/helm.html".into()),
+        human_seeking: true,
+        host_order: vec![StationId("helm".into()), StationId("tactical".into())],
+        feeds: vec![ConsoleFeed {
+            source: SystemId("helm-thrust".into()),
+            kind: ConsoleObservationKind::HelmEngine,
+        }],
+        ..Default::default()
+    });
+    let hosts = ConsoleHosts(vec![ConsoleHostSnapshot {
+        console: id.clone(),
+        host: Some(StationId("tactical".into())),
+        rating: String::new(),
+    }]);
+    let sources = ShipSystemControlSources::default();
+    let payload = SystemControlPayload::AssignConsoleView {
+        console: id,
+        view: ConsoleWorkingView::default(),
+    };
+    let address = SystemId(crate::ship::console_views::ASSIGN_CONSOLE_VIEW.into());
+    assert!(validate_station_command(
+        &StationId("tactical".into()),
+        address.clone(),
+        payload.clone(),
+        &sources,
+        &config,
+        None,
+        Some(&hosts)
+    )
+    .is_ok());
+    assert_eq!(
+        validate_station_command(
+            &StationId("helm".into()),
+            address,
+            payload,
+            &sources,
+            &config,
+            None,
+            Some(&hosts)
+        ),
+        Err(StationCommandPolicyFailure::SystemOutsideStation)
     );
 }

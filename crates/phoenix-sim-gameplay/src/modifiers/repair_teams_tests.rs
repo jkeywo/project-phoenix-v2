@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::messages::StationId;
 
 fn sid(s: &str) -> SystemId {
     SystemId(s.into())
@@ -565,23 +566,53 @@ fn destroyed_system_is_repaired_and_unlatched_by_repair_tick() {
 /// station MEMBERSHIP and nothing else in `ShipConfig` matters to the sweep.
 fn config_with(systems: &[(&str, Option<&str>)]) -> ShipConfig {
     use crate::ship::config::SystemInstanceConfig;
+    let mut consoles = Vec::new();
+    let mut stations = Vec::new();
+    for (_, station) in systems.iter().filter(|(_, station)| station.is_some()) {
+        let id = phoenix_model::identity::ConsoleId(station.unwrap_or("uncrewed").into());
+        if consoles
+            .iter()
+            .any(|console: &phoenix_model::console::ConsoleConfig| console.id == id)
+        {
+            continue;
+        }
+        let home = station.map(|name| StationId(name.into()));
+        if let Some(home) = &home {
+            stations.push(
+                toml::from_str::<crate::ship::config::StationConfig>(&format!(
+                    "id = {:?}\nname = {:?}\ndescription = \"Repair fixture\"\nrank = \"Ens.\"",
+                    home.0, home.0
+                ))
+                .unwrap(),
+            );
+        }
+        consoles.push(phoenix_model::console::ConsoleConfig {
+            id,
+            home_station: home.clone(),
+            screen: home.map(|_| "fixture.html".into()),
+            ..Default::default()
+        });
+    }
     ShipConfig {
-        stations: vec![],
+        stations,
         systems: systems
             .iter()
+            .filter(|(_, station)| station.is_some())
             .map(|(id, station)| SystemInstanceConfig {
+                console: Some(phoenix_model::identity::ConsoleId(
+                    station.unwrap_or("uncrewed").into(),
+                )),
                 id: sid(id),
                 kind: "generic".into(),
-                station: station.map(|s| StationId(s.into())),
                 ai_only: station.is_none(),
-                human_seeking: false,
-                seek_order: Vec::new(),
+
                 power_group: None,
                 marker: None,
                 config: None,
             })
             .collect(),
         power_groups: Default::default(),
+        consoles,
         coordination_lag_secs: 2.0,
     }
 }
@@ -1800,5 +1831,36 @@ fn a_committed_team_is_still_idle_in_every_readout() {
         "asking which teams are free must not MOVE any of them: the claim is a reservation the \
          readers honour, not a dispatch, which is what lets it be derived fresh from the live \
          hold every tick and released by the hold simply settling"
+    );
+}
+
+#[test]
+fn detached_console_sweep_does_not_enter_core_or_another_console() {
+    let mut config = config_with(&[
+        ("detached-a", Some("shared")),
+        ("detached-b", Some("shared")),
+        ("home-a", Some("bridge")),
+    ]);
+    config.consoles[0].home_station = None;
+    config.consoles[0].human_seeking = true;
+    config.consoles[0].host_order = vec![StationId("bridge".into())];
+    let mut hull = hull_at(&[
+        ("detached-a", 10.0, 2.0),
+        ("detached-b", 10.0, 2.0),
+        ("home-a", 10.0, 2.0),
+        ("core", 10.0, 2.0),
+    ]);
+    let mut teams = RepairTeams::new(1);
+    teams.dispatch(0, sid("detached-a"), "Detached A".into());
+    let (visited, returned) = walk_sweep(&mut teams, &mut hull, Some(&config), 400);
+    assert_eq!(visited, vec!["detached-a", "detached-b"]);
+    assert!(returned);
+    assert!(hull.is_at_max(&sid("detached-a")) && hull.is_at_max(&sid("detached-b")));
+    assert_eq!(hull.get(&sid("core")).unwrap().current, 2.0);
+    assert_eq!(hull.get(&sid("home-a")).unwrap().current, 2.0);
+    assert_eq!(repair_group(&sid("core"), &config), RepairGroup::Core);
+    assert_eq!(
+        repair_group(&sid("detached-a"), &config),
+        RepairGroup::Console(phoenix_model::identity::ConsoleId("shared".into()))
     );
 }

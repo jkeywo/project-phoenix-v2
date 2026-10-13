@@ -9,18 +9,17 @@ updated: 2026-08-31
 # Navigation Console
 
 Navigation provides the shared strategic chart and desired-destination surface.
-The selected hull authors both the Navigation station and its console URL. The
-Battleship exposes a directly claimable Navigation seat; the Cruiser and
-Destroyer author Navigation as auxiliary, human-seeking stations presented on
-an eligible holder's Hero Bar, while the Courier embeds Navigation under its
-Captain console. Their layouts consume the same authoritative Navigation state
+The selected hull authors its Console and screen URL. The Battleship hosts it
+on a directly claimable Navigation seat; the Cruiser and Destroyer use detached
+human-seeking Consoles presented on an eligible holder's Hero Bar. The Courier
+hosts its navigation-service Console on Captain. Their layouts consume the same authoritative Navigation state
 and shared `ph-navigation-map` component; there is no Rust client panel.
 
 ## Chart contents
 
 The ship entity's `[navigation_console.system_chart]` block supplies the chart range plus the `shows` and `selects` tag filters. `NavigationConsoleConfig` parses that data, the Navigation blackboard publishes it, and `buildNavigationConsoleState` turns the authoritative snapshot into the browser state used by every hull layout.
 
-The chart is overhead, north-up, and world-anchored. It draws region hulls — sphere, torus, and box, matching the viewscreen radar's shapes — beneath the blips, then uses authored radar icons and colours to plot the ship, waypoint, and contacts at their world positions. An `objective_target` region or blip gets a gold ring or outline instead of its own colour, so mission geometry reads apart from ordinary landmarks. Moon-tagged contacts ride the same blip path as any other point contact, with no chart glyph of their own. Pan and zoom are local presentation state.
+The chart is overhead, north-up, and world-anchored. It draws region hulls — sphere, torus, and box, matching the viewscreen radar's shapes — beneath the blips, then uses authored radar icons and colours to plot the ship, waypoint, and contacts at their world positions. An `objective_target` region or blip gets a gold ring or outline instead of its own colour, so mission geometry reads apart from ordinary landmarks. Moon-tagged contacts ride the same blip path as any other point contact, with no chart glyph of their own. Pan and zoom are Console working-view state and follow handoff and restore.
 
 ## Selection and waypoint placement
 

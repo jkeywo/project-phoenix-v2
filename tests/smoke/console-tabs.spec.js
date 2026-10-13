@@ -16,12 +16,12 @@ import { test, expect, createServerPage, readHostPeerId, waitForWasmReady } from
  * overlays (Intel, issue #1030; Security, issue #1346) — and, with only
  * Tactical seated, it also hosts Navigation and Comms as visiting tabs
  * (`host_order` starts with `tactical` for both), which is what makes
- * "between the direct Station and the visiting Stations" a real position
+ * "between the direct Station and the visiting Consoles" a real position
  * rather than "at the end".
  */
 
 // Minimal destroyer-hulled world, the same shape comms-visiting-station.spec.js
-// serves: this spec needs the destroyer's `[[station]]` topology, not the
+// serves: this spec needs the destroyer's Station/Console topology, not the
 // cruiser the shared default world spawns.
 const DESTROYER_WORLD = `
 [global]
@@ -74,7 +74,7 @@ test('overlay tabs: Tactical declares them, the bar selects them', { tag: '@core
     const button = (id) => document.querySelector(`#station-hero-tabs [data-tab-id="${id}"]`);
     return {
       kinds: ['tactical', 'intel-overlay', 'navigation'].map((id) => button(id).dataset.tabKind),
-      // An overlay tab names its panel; only a Station tab is a Station.
+      // An overlay tab names its panel; the historical Station tab DOM kind now carries a Console id.
       overlayAttr: button('intel-overlay').dataset.overlay,
       overlayIsNotAStation: button('intel-overlay').dataset.station === undefined,
       // Resolved through the string table, not the raw ids the console posted.

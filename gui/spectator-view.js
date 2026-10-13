@@ -22,7 +22,7 @@ import { heroBarHealthState, heroBarImportanceState } from './hero-bar.js';
  *
  * @param {{ redAlert?: boolean,
  *           hullAggregate?: number|null, hullDestroyed?: number|null,
- *           stations?: Array<{id:string,name?:string,human_seeking?:boolean}>,
+ *           stations?: Array<{id:string,name?:string}>,
  *           stationHealth?: Object<string, number|null>,
  *           stationImportance?: Object<string, {unread?:boolean,critical?:boolean}>,
  *           objectives?: Array }} [input]
@@ -34,9 +34,8 @@ export function spectatorSummaryModel(input = {}) {
     stations, stationHealth, stationImportance, objectives,
   } = input;
 
-  // Crew stations only (the same set the Hero Bar tabs), so an auxiliary or
-  // non-crew station never appears on the summary.
-  const defs = (stations || []).filter(st => st && st.human_seeking);
+  // Stations are crew seats; detached Console tabs never enter this roster.
+  const defs = (stations || []).filter(Boolean);
   const stationRows = defs.map(st => {
     // Authoritative host figure (issue #1100), never inferred from
     // recipient-scoped damage rows a spectator does not even receive.
@@ -179,8 +178,8 @@ export function renderSpectatorDom(args) {
 export function spectatorClaimModel(roster, eligibilityFn) {
   const eligFor = typeof eligibilityFn === 'function'
     ? eligibilityFn : () => ({ eligible: true, reason: null });
-  // OPEN = no connected holder. `buildStationRoster` already leaves auxiliary
-  // stations out and resolves `holder_token` only for a CONNECTED player.
+  // OPEN = no connected holder. The roster contains seats only and resolves
+  // `holder_token` only for a CONNECTED player.
   const open = (roster || []).filter(st => st && !st.holder_token);
   return open.map(st => {
     const elig = eligFor(st) || { eligible: true, reason: null };

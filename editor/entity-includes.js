@@ -48,10 +48,12 @@ export const REMOVE_KEY = '_remove';
  * `entity_override::COMPOSE_KEYED_ARRAYS` byte-for-byte; keep the two in sync.
  */
 const COMPOSE_KEYED_ARRAYS = {
+  console: 'id',
   'behaviour.doctrine': 'id',
   shield_arc: 'id',
   station: 'id',
   'station.rating': 'name',
+  'console.rating': 'name',
   system: 'id',
   'torpedoes.tubes': 'id',
   'weapons_console.blaster_banks': 'id',

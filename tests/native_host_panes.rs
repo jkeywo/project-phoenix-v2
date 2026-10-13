@@ -132,7 +132,7 @@ fn two_stations_with_systems(config: &ShipConfig) -> (String, SystemId, String, 
         if let Some(system) = config
             .systems
             .iter()
-            .find(|s| s.station.as_ref() == Some(&station.id))
+            .find(|s| config.system_home_station(s) == Some(&station.id))
         {
             owned.push((station.id.0.clone(), system.id.clone()));
         }

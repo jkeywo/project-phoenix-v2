@@ -17,7 +17,7 @@ fn hull(systems: &[(&str, f32)]) -> SystemHull {
 /// Parsed from TOML rather than built from struct literals so the
 /// ownership under test is the SAME field a shipped hull authors, read the
 /// same way — a hand-built `SystemInstanceConfig` would let this test pass
-/// while `[[system]] station = "..."` meant something else.
+/// while `[[system]] console = "..."` meant something else.
 fn ship_config(systems: &[(&str, Option<&str>)]) -> crate::ship::config::ShipConfig {
     let mut toml = String::new();
     let mut stations: Vec<&str> = systems.iter().filter_map(|(_, station)| *station).collect();
@@ -35,16 +35,22 @@ rank = "Lieutenant"
         ));
     }
     for (system, station) in systems {
+        let home = station
+            .map(|station| format!("home_station = \"{station}\"\nscreen = \"fixture.html\"\n"))
+            .unwrap_or_default();
+        let ai_only = station.is_none();
         toml.push_str(&format!(
             r#"
+[[console]]
+id = "scope-{system}"
+{home}
 [[system]]
 id = "{system}"
+console = "scope-{system}"
 kind = "{system}"
+ai_only = {ai_only}
 "#
         ));
-        if let Some(station) = station {
-            toml.push_str(&format!("station = \"{station}\"\n"));
-        }
     }
     toml::from_str(&toml).expect("a well-formed authoring fixture")
 }

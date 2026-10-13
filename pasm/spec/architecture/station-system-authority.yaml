@@ -4,12 +4,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Ship Station and System Topology
-      summary: Ship-authored station, fine-system, power-group, rating, and console topology that defines who may operate each capability. Since issue #871 every shipped hull authors it, NPC hulls included.
+      summary: Ship-authored Stations as crew seats, Consoles as hosted screens and knowledge scopes, and Systems as controlled capabilities, with ratings and power groups.
       rationale:
-        - "[ai] Station ownership is the authority source for player access; console labels alone must not grant control."
-        - "Issue #871 (3394578e) removed the last class of ship that had no topology at all. All eight NPC hulls now carry [[station]] blocks with ratings, and every previously ownerless system is re-parented to a seat. NPC is now simply A STATIONED SHIP WITH NOBODY CONNECTED YET, rather than a second kind of ship with a second seeding rule."
-        - "Issue #871 leaves ai_only for exactly the systems that are ownerless BY CONSTRUCTION — the auto-generated per-arc shield_arc systems synthesised for a hull that declares no shields station, and the red_alert capability provisioned for a [behaviour] hull that authors none. ship::config::validate rejects an ownerless system that is not ai_only, so no station rating can ever reach them; that is why the boot seeding needs a second pass (below). Of shipped NPC hulls, the auto-generated shield arc is the only thing still relying on it — every hull now authors its own red-alert provision, which is why three existing tests were re-pointed to inline fixtures rather than weakened."
-        - "DELIBERATELY NOT DONE by #871: the full nine-seat mirror. The extra seats on the player cruiser and battleship exist because those hulls declare sensors, shields, navigation, repair and comms SYSTEMS; declaring those on NPC hulls would switch on five more backfill behaviours across every Harrow and pirate hull at once. That is authored behaviour rather than structure, it unmistakably moves the balance, and it belongs with the doctrine content. Each NPC hull gets the seats its declared systems support and no more. Related: every NPC hull now declares tactical-radar, which unblocked the data prerequisite #887 needed — but it does NOT make that radar damageable, since damage needs per-system hull entries that NPC hulls author none of and adding them would change hull HP budgets."
+        - "[ai] Increment 1 resolves authority through System -> Console -> current hosting Station -> player. Feeds grant information only; cohosted Consoles do not pool knowledge."
+        - "[ai] Every System has an explicit Console, including AI-only equipment. Screenless scopes are AI-only; human-operable equipment requires a screen and hosting route. Legacy ownership fields fail with conversion guidance."
+        - "[ai] NPCs retain ordinary per-System AI and explicit Console scopes. Structural migration adds no equipment or balance change."
     architecture:
       kind: configuration-model
       authority: authoritative
@@ -18,7 +17,7 @@ entities:
     implementation:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/ship/config.rs, assets/entities]
-      symbols: [ShipConfig, StationConfig, SystemInstanceConfig]
+      symbols: [ShipConfig, StationConfig, ConsoleConfig, SystemInstanceConfig]
       tests: [cargo test]
 
   - state: ship-station-system-topology-state
@@ -40,14 +39,13 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Complete Human-Seeking Station Resolver
-      summary: Resolves a complete human-seeking Station to its active direct holder, then its finite authored compatible host order, then ordinary Backfill AI, while preserving the visiting Station's identity, rating, Systems, console and command authority.
+      title: Console Hosting Resolver
+      summary: Resolves fixed and human-seeking Consoles using home-holder preference, authored host order, eligibility and scenario floors, or ordinary Backfill.
       rationale:
-        - "[ai] Resolution is pure and station-scale: host compatibility, active direct holders and hull-resolved scenario-floor detail are explicit inputs; the Bevy adapter supplies the two live inputs, applies the result to owned System control sources, and publishes the effective visiting rating."
-        - "[ai] Host eligibility is about live placement, not Station type: an actively directly held human-seeking Station may host, while a Station currently resolved as visiting has no direct holder and cannot host another visitor, so nesting cannot create transitive authority."
-        - "[ai] Scenario floors belong to the root world and supporting-world loads reject them, so an additive layer cannot silently replace or discard the selected scenario's crew-detail contract; Combat Test authors Navigation as its first shipped floor tracer."
-        - "[ai] The host projects complete Station placement and effective rating generically in SimSnapshot, rather than asking a family blackboard such as Navigation to carry shell ownership metadata. The same snapshot projects the local ship's sorted fine-System control sources from the live resolver, so a visiting Station's manual authority cannot be overwritten on the client by its stale lobby rating."
-        - "[ai] Auxiliary vs visiting is an orthogonal, authored per-Station distinction, enforced generically rather than per-station. An `auxiliary` Station is not offered as a claimable lobby seat (the available_stations filter in lobby/session.rs drops auxiliary defs; a claim on one is a no-op in lobby/handler.rs) yet stays `human_seeking`, so it still resolves a host through this resolver and presents on the Hero Bar. An auxiliary Station is also never a candidate HOST: a visiting Station never lands on an auxiliary surface. On the Alliance Destroyer, Navigation, Comms and Command are all auxiliary human-seeking (hosted-tab-only); Command additionally names a `command_target` — see command-station-authority."
+        - "[ai] The historical entity id remains for traceability. Runtime placement is Console-scale through resolve_assignment_with_eligibility."
+        - "[ai] ConsoleHosts is the sole placement projection; HumanSeekingHosts derives per-System admission hosts. Prior hosts lose authority after reassignment."
+        - "[ai] Home or detached Console ratings preserve visiting behavior. Per-Console/per-rating eligibility and scenario floors are checked before host selection through existing agreed-tick authority."
+        - "[ai] Detached Consoles add tabs, not seats. Hosting preserves System intent, AI memory, observations and Console working views."
     architecture:
       kind: authority-policy
       authority: authoritative
@@ -57,16 +55,16 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs]
-      symbols: [resolve_visiting_station, resolve_scenario_detail_floor, write_scenario_detail_floor, VisitingStationAssignment, VisitingStationHosts, ScenarioDetailFloor]
+      paths: [crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-model/src/console.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-session/src/lobby/session.rs, crates/phoenix-simulation/src/lobby/handler.rs]
+      symbols: [resolve_assignment, resolve_assignment_with_eligibility, resolve_scenario_detail_floor, write_scenario_detail_floor, ConsoleHostSnapshot, ConsoleHosts, ScenarioDetailFloor]
       tests: [cargo test, crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/lobby/session_tests.rs]
 
   - state: visiting-station-placement-state
     core:
       status: implemented
       confidence: confirmed
-      title: Visiting Station Placement State
-      summary: Derived per-ship placement and effective rating for every complete human-seeking Station, including the explicit AI outcome after compatible hosts are exhausted.
+      title: Console Placement State
+      summary: Derived per-ship placement and effective rating for every Console, including the explicit unhosted AI outcome.
     architecture:
       classification: derived
       owner: visiting-station-resolver
@@ -74,7 +72,7 @@ entities:
     implementation:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-model/src/messages.rs, gui/sim-state.js, gui/hero-bar.js]
-      symbols: [VisitingStationHosts, StationHostSnapshot]
+      symbols: [ConsoleHosts, ConsoleHostSnapshot]
 
       tests: [crates/phoenix-simulation/src/ship/components_tests.rs, crates/phoenix-simulation/src/server_app/broadcast_replication_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs]
   - component: station-importance-tracker
@@ -216,8 +214,7 @@ entities:
       title: Station Rating Controller
       summary: Applies a station holder's selected rating and its configured automated systems to the authoritative control-source state, including a valid rating change during an active round, and seeds every freshly spawned hull's ratings and control sources through one shared boot path.
       rationale:
-        - "Issue #871 (3394578e) introduced ship::rating::seed_boot_ratings as the ONE boot path for every hull, player or NPC. It takes a per-station rating chooser: the player game-start path passes the lobby-chosen rating for a manned station and Backfill for an unmanned one, while the generic entity spawner passes Backfill for every station. The blanket loop that used to set every declared system to Ai in entities::spawner is deleted — it worked only while NPC hulls declared no stations, and once they do a system's control source has to come from its station's rating exactly as it does on a player hull, or a human taking an NPC seat could never be admitted."
-        - "seed_boot_ratings runs TWO passes and the second is load-bearing: after every station applies its rating, every ai_only system is set to Ai. Those systems are ownerless by construction, so no station rating can reach them, and without the pass they would fall to ControlSourceResolver's Human DEFAULT and silently stop being AI-operated. A hull with no stations at all still comes up fully AI for the same reason."
+        - "[ai] seed_boot_ratings seeds every System to AI, applies home-Station ratings, then reasserts ai_only. Detached Console Systems never inherit the resolver Human default."
         - "Behaviour preservation was the governing criterion for #871 and is pinned two ways: a test parses every shipped hull, runs the shared seed with nobody connected, and asserts every system comes up AI-operated and closed to human input — precisely what the old blanket loop produced — and the balance matrix is byte-identical across 192 duel runs (same win rates, same time-to-kill at every quantile, same damage margins)."
     architecture:
       kind: control-handler
@@ -325,7 +322,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: System Command Admission Policy
-      summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command, and routes every command into the target ship's own per-entity AdmittedCommands.
+      summary: Host admission checks target system identity, Console ownership and current host, availability, and control-source policy before a system handler observes a player command, and routes every command into the target ship's own per-entity AdmittedCommands.
       rationale:
         - "[ai] A client must not gain authority by naming another station's system or by bypassing a damaged, offline, or AI-controlled system."
         - "Every wire target names a declared system since #801 — there is no coarse helm or tactical target — so admission is inherently per-axis for helm commands and per-bank for tactical commands."

@@ -134,7 +134,7 @@ describe('private locale delivery to console realms', () => {
     const delivered = localiseDeliveredMessage(raw);
     preference.capture(delivered);
     const simState = new ClientSimState();
-    simState.stationHosts = { helm: 'self' };
+    simState.consoleHosts = { helm: 'self' };
     simState.apply(delivered);
     const commsState = new ClientCommsState();
     commsState.apply(delivered);
@@ -146,7 +146,7 @@ describe('private locale delivery to console realms', () => {
     expect(commsState.messages[1].body).toBe('comms.body');
     expect(commsState.selectedThreadId).toBe('msg');
     expect(commsState.version).toBeGreaterThan(1);
-    expect(simState.stationHosts).toEqual({ helm: 'self' });
+    expect(simState.consoleHosts).toEqual({ helm: 'self' });
     preference.select('en');
     preference.relocaliseRetained({ simState, commsState });
     expect(simState.objectives[0].text).toBe('Hold 2 ships');

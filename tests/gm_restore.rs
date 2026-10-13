@@ -1312,6 +1312,7 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
             if let project_phoenix::core::messages::ServerMessage::BlackboardUpdate {
                 updates,
                 presentation_generation,
+                ..
             } = &event.msg
             {
                 if updates.iter().any(|(_, board)| {

@@ -46,16 +46,28 @@ pub(super) fn merge_delta(older: &ServerMessage, newer: &ServerMessage) -> Optio
     match (older, newer) {
         (
             ServerMessage::BlackboardUpdate {
+                console_scope: old_scope,
+                console_scope_tick: old_tick,
                 updates: old,
                 presentation_generation: old_generation,
             },
             ServerMessage::BlackboardUpdate {
+                console_scope: new_scope,
+                console_scope_tick: new_tick,
                 updates: new,
                 presentation_generation: new_generation,
             },
         ) => {
             // Never stamp an old continuation's sparse board with the new
             // generation. The producer rebases all boards at the boundary.
+            if old_scope.is_some() && new_scope.is_none() {
+                return Some(older.clone());
+            }
+            if old_generation > new_generation
+                || (old_generation == new_generation && old_tick > new_tick)
+            {
+                return Some(older.clone());
+            }
             if old_generation != new_generation {
                 return Some(newer.clone());
             }
@@ -63,7 +75,12 @@ pub(super) fn merge_delta(older: &ServerMessage, newer: &ServerMessage) -> Optio
             // repair projections. Never merge fields inside a blackboard.
             let mut updates: BTreeMap<_, _> = old.iter().cloned().collect();
             updates.extend(new.iter().cloned());
+            if let Some(scope) = new_scope {
+                updates.retain(|id, _| scope.contains(id));
+            }
             Some(ServerMessage::BlackboardUpdate {
+                console_scope: new_scope.clone(),
+                console_scope_tick: *new_tick,
                 updates: updates.into_iter().collect(),
                 presentation_generation: *new_generation,
             })
@@ -119,3 +136,7 @@ fn merge_entity(old: EntityStateSnapshot, new: EntityStateSnapshot) -> EntitySta
         warp_out_remaining_secs,
     }
 }
+
+#[cfg(test)]
+#[path = "snapshot_console_tests.rs"]
+mod console_tests;

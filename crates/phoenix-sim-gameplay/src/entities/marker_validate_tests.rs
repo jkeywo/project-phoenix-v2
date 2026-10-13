@@ -335,10 +335,15 @@ name = "Helm"
 description = "Fixture station"
 rank = "Cmdr."
 
+[[console]]
+id = "Helm-console"
+home_station = "Helm"
+screen = "fixture.html"
+
 [[system]]
 id = "shields"
 kind = "shields"
-station = "Helm"
+console = "Helm-console"
 marker = "not_a_rig_marker"
 "##;
     let cfg = EntityConfig::from_toml(toml).expect("parses");

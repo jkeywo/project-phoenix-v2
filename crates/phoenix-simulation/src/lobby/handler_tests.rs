@@ -80,7 +80,9 @@ fn dispatch(
         // the SessionManager side-map by `handle_report_station_eligibility_system`,
         // not through a pure result-producing handler — so like the other
         // runtime variants it is a no-op on this dispatch path.
-        ClientMessage::ControlSystem { .. }
+        ClientMessage::ConsoleVisited { .. }
+        | ClientMessage::SetConsoleView { .. }
+        | ClientMessage::ControlSystem { .. }
         | ClientMessage::SelectCrewSpectatorTarget { .. }
         | ClientMessage::ControlSystemCorrelated { .. }
         | ClientMessage::SendCoordination { .. }
@@ -89,6 +91,7 @@ fn dispatch(
         | ClientMessage::ReleaseShipSlot
         | ClientMessage::SelectPlayerShip { .. }
         | ClientMessage::ReportStationEligibility { .. }
+        | ClientMessage::ReportConsoleEligibility { .. }
         | ClientMessage::StationVisited { .. }
         // `ToggleQrCode` (issue #1329) is not a lobby concern either: it moves
         // a panel on whichever surface is showing one, and is drained
@@ -153,10 +156,15 @@ short_code = "CPT"
 name = "Manual"
 automated_systems = []
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "fixture.html"
+
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-console"
 power_group = "ops"
 
 [power_groups.ops]
@@ -467,6 +475,7 @@ fn ship_stations() -> ShipStations {
     // Flat roster used by station-aware tests.
     // 9 stations, one console each.
     ShipStations {
+        consoles: Vec::new(),
         stations: vec![
             StationDef {
                 id: StationId("captain".into()),
@@ -474,13 +483,7 @@ fn ship_stations() -> ShipStations {
                 description: "Command the bridge.".into(),
                 rank: "Cpt.".into(),
                 short_code: "CPT".into(),
-                console: None,
                 ratings: vec!["Std".into(), "Simplified".into()],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("helm".into()),
@@ -488,13 +491,7 @@ fn ship_stations() -> ShipStations {
                 description: "Pilot the ship.".into(),
                 rank: "Ltn.".into(),
                 short_code: "HLM".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("tactical".into()),
@@ -502,13 +499,7 @@ fn ship_stations() -> ShipStations {
                 description: "Manage weapons.".into(),
                 rank: "Ltn.".into(),
                 short_code: "TAC".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("repair".into()),
@@ -516,13 +507,7 @@ fn ship_stations() -> ShipStations {
                 description: "Repair systems.".into(),
                 rank: "Ltn.".into(),
                 short_code: "ENG".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("sensors".into()),
@@ -530,13 +515,7 @@ fn ship_stations() -> ShipStations {
                 description: "Monitor sensors.".into(),
                 rank: "Ens.".into(),
                 short_code: "SCI".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("shields".into()),
@@ -544,13 +523,7 @@ fn ship_stations() -> ShipStations {
                 description: "Manage shields.".into(),
                 rank: "Ens.".into(),
                 short_code: "SHD".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("navigation".into()),
@@ -558,13 +531,7 @@ fn ship_stations() -> ShipStations {
                 description: "Plot course.".into(),
                 rank: "Ens.".into(),
                 short_code: "NAV".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("power".into()),
@@ -572,13 +539,7 @@ fn ship_stations() -> ShipStations {
                 description: "Manage power.".into(),
                 rank: "Ltn.".into(),
                 short_code: "PWR".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
             StationDef {
                 id: StationId("comms".into()),
@@ -586,13 +547,7 @@ fn ship_stations() -> ShipStations {
                 description: "Hail contacts.".into(),
                 rank: "Ens.".into(),
                 short_code: "COM".into(),
-                console: None,
                 ratings: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
             },
         ],
     }
@@ -2238,27 +2193,25 @@ fn joining_player_is_never_auto_assigned_a_station_in_lobby() {
 #[test]
 fn joining_after_all_claimable_stations_are_held_becomes_spectator_despite_auxiliary() {
     let mut stations = ship_stations();
-    stations.stations.push(StationDef {
-        id: StationId("navigation-visit".into()),
+    stations.consoles.push(phoenix_model::wire::ConsoleDef {
+        id: crate::core::messages::ConsoleId("navigation-visit".into()),
         name: "Navigation Visit".into(),
-        description: "A hosted navigation console.".into(),
-        rank: "Ens.".into(),
-        short_code: "NAV".into(),
-        console: None,
-        ratings: vec!["Std".into()],
+        description: String::new(),
+        short_code: String::new(),
+        manual_overview: None,
+        tutorials: vec![],
+        command_target: None,
+        ratings: vec![],
+        home_station: None,
+        screen: Some("fixture.html".into()),
         human_seeking: true,
         host_order: vec![StationId("comms".into())],
-        visiting_rating: Some("Std".into()),
-        auxiliary: true,
-        command_target: None,
+        visiting_rating: None,
+        feeds: vec![],
+        systems: vec![],
     });
     let mut sessions = SessionManager::new();
-    for (index, station) in stations
-        .stations
-        .iter()
-        .filter(|station| !station.auxiliary)
-        .enumerate()
-    {
+    for (index, station) in stations.stations.iter().enumerate() {
         let token = format!("crew-{index}");
         sessions.register(token.clone(), token).unwrap();
         sessions.set_station(&format!("crew-{index}"), Some(station.id.clone()));

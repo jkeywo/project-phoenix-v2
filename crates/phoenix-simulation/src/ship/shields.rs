@@ -126,13 +126,27 @@ struct ShieldsReconnect;
 type ShieldsReconnectParams<'w, 's> = (
     Res<'w, crate::core::broadcast::ReconnectRequests>,
     Option<Res<'w, crate::lobby::Sessions>>,
-    Query<'w, 's, &'static ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    Query<
+        'w,
+        's,
+        (
+            &'static ShipConfigComponent,
+            Option<&'static crate::ship::components::ConsoleHosts>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     Query<'w, 's, &'static ShipShields, With<crate::server_app::LocalShip>>,
 );
 fn reconnect_shields_projection(
     requests: Res<crate::core::broadcast::ReconnectRequests>,
     sessions: Option<Res<crate::lobby::Sessions>>,
-    configs: Query<&ShipConfigComponent, With<crate::server_app::LocalShip>>,
+    configs: Query<
+        (
+            &ShipConfigComponent,
+            Option<&crate::ship::components::ConsoleHosts>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     shields: Query<&ShipShields, With<crate::server_app::LocalShip>>,
 ) -> crate::core::broadcast::ReconnectBatch {
     let config = configs.single().ok();
@@ -142,7 +156,13 @@ fn reconnect_shields_projection(
         .map(|token| {
             let holder = sessions
                 .as_ref()
-                .and_then(|s| shields_status_audience().resolve(&s.0, config.map(|c| &c.0)))
+                .and_then(|s| {
+                    shields_status_audience().resolve(
+                        &s.0,
+                        config.map(|(c, _)| &c.0),
+                        config.and_then(|(_, hosts)| hosts),
+                    )
+                })
                 .is_some_and(|target| target == crate::lobby::Target::Token(token.clone()));
             if !holder {
                 return Vec::new();

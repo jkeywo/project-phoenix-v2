@@ -158,16 +158,18 @@ fn npc_capability_is_shared_fail_closed_and_resolves_instance_overrides() {
             "interface" => {
                 config
                     .0
-                    .stations
+                    .consoles
                     .iter_mut()
-                    .find(|s| s.id.0 == "helm")
+                    .find(|c| c.home_station.as_ref().is_some_and(|s| s.0 == "helm"))
                     .unwrap()
-                    .console = None
+                    .screen = None
             }
-            "commandable" => config
-                .0
-                .systems
-                .retain(|s| s.station.as_ref().is_none_or(|s| s.0 != "helm")),
+            "commandable" => config.0.systems.retain(|s| {
+                original
+                    .0
+                    .system_home_station(s)
+                    .is_none_or(|s| s.0 != "helm")
+            }),
             "mixed-family" => {
                 config
                     .0

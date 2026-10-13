@@ -155,34 +155,31 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
 
     let systems = vec![
         SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("bridge-orders".into()),
             kind: COMMAND_KIND.into(),
-            station: None,
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         },
         SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("berthing-clamps".into()),
             kind: DOCK_KIND.into(),
-            station: None,
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
         },
         SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("projection".into())),
             id: SystemId("main-drive".into()),
             kind: HELM_THRUST_KIND.into(),
-            station: None,
             ai_only: false,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
@@ -227,7 +224,7 @@ fn every_shipped_system_instance_projects_its_descriptor_family() {
         };
         hulls += 1;
         command_targets += ship
-            .stations
+            .consoles
             .iter()
             .filter(|station| station.command_target.is_some())
             .count();

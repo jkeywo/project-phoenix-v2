@@ -20,9 +20,11 @@ import {
   profileWithAssistance,
   deriveStationEligibility,
   computeIneligibleStations,
+  computeIneligibleConsoles,
   requestedAssistFunctions,
 } from '../../gui/accessibility-profile.js';
 import { lobbyViewModel } from '../../gui/lobby-view.js';
+import { ClientSimState } from '../../gui/sim-state.js';
 
 // A projection like the host sends on Welcome: per station → per rating → the
 // assist-functions that station forces its holder to operate manually.
@@ -182,4 +184,41 @@ describe('lobbyViewModel eligibility annotation (AC1)', () => {
     const vm = lobbyViewModel(s, 'me', null, { eligibilityFor });
     expect(vm.rows.every((r) => r.button === 'claim')).toBe(true);
   });
+});
+
+describe('Console eligibility is independent of crew seats and current hosting', () => {
+  const consoleGaps = {
+    'comms-screen': { Std: ['comms.dialogue-timing'] },
+    'other-screen-on-same-seat': { Std: ['helm.course-keeping'] },
+    'comms-deep': { Std: ['comms.dialogue-timing'], Simplified: [] },
+  };
+  it('reports only incompatible Console/rating pairs and no private reason', () => {
+    const profile = profileWithAssistance(emptyAccessibilityProfile(), 'comms.dialogue-timing', ASSIST_REQUEST);
+    const report = computeIneligibleConsoles(profile, consoleGaps);
+    expect(report).toEqual({ 'comms-deep': ['Std'], 'comms-screen': ['Std'] });
+    expect(JSON.stringify(report)).not.toContain('comms.dialogue-timing');
+    expect(deriveStationEligibility(profile, PROJECTION.helm, 'Std').eligible).toBe(true);
+  });
+  it('preserves every rating rejection across host and Backfill changes', () => {
+    const profile = requestCourseKeeping();
+    const before = computeIneligibleConsoles(profile, consoleGaps);
+    expect(computeIneligibleConsoles(profile, consoleGaps)).toEqual(before);
+    expect(before).toEqual({ 'other-screen-on-same-seat': ['Std'] });
+    expect(computeIneligibleConsoles(emptyAccessibilityProfile(), consoleGaps)).toEqual({});
+    expect(computeIneligibleConsoles(profile, undefined)).toEqual({});
+  });
+});
+
+it('Welcome carries Console gaps separately and clears them for a new hull', () => {
+  const state = new ClientSimState();
+  const gaps = { 'detached-comms': { Std: ['comms.dialogue-timing'] } };
+  const welcome = ship_config => ({ type: 'Welcome', data: {
+    state: { phase: 'Lobby', players: [], complexity: {}, world: null },
+    ship_stations: {}, ship_config,
+  } });
+  state.apply(welcome({ console_assist_gaps: gaps }));
+  expect(state.consoleAssistGaps).toEqual(gaps);
+  expect(state.stationAssistGaps).toEqual({});
+  state.apply(welcome({}));
+  expect(state.consoleAssistGaps).toEqual({});
 });

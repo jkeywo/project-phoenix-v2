@@ -16,7 +16,7 @@ const GHOST: &str = "assets/entities/ghost.toml";
 /// Test may select and a world may offer.
 const HULL_SOURCE: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+[[system]]\nid='boost'\nkind='helm_boost'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
 
 /// A pack manifest with an unknown top-level key, two roots (one in the
 /// draft, one beneath it) and a curated ship the world does not offer.

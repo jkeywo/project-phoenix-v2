@@ -5,10 +5,10 @@ use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::core::messages::ModifierSlot;
 use crate::core::messages::{
-    CoordinationPayload, QueueEntryPreview, RepairBlackboard, ServerMessage, SystemBlackboard,
-    SystemHullStatus, SystemId, TeamSlot,
+    CoordinationPayload, QueueEntryPreview, RepairBlackboard, RepairGroup, RepairGroupDefinition,
+    ServerMessage, SystemBlackboard, SystemHullStatus, SystemId, TeamSlot,
 };
-use crate::modifiers::repair_teams::RepairTeams;
+use crate::modifiers::repair_teams::{repair_group, RepairTeams};
 use crate::modifiers::ShipModifiers;
 use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
@@ -38,7 +38,7 @@ pub struct RepairRequestQueue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RepairQueueEntry {
-    pub station_id: String,
+    pub group: RepairGroup,
     pub station_label: String,
     pub tier: DamageTier,
     pub deficit: f32,
@@ -56,11 +56,7 @@ impl RepairRequestQueue {
     /// through the merge below instead of the whole call returning early and
     /// leaving a stale reading behind.
     pub fn push_or_merge(&mut self, entry: RepairQueueEntry) {
-        if let Some(existing) = self
-            .entries
-            .iter_mut()
-            .find(|e| e.station_id == entry.station_id)
-        {
+        if let Some(existing) = self.entries.iter_mut().find(|e| e.group == entry.group) {
             if entry.tier > existing.tier {
                 existing.tier = entry.tier;
             }
@@ -93,7 +89,7 @@ impl RepairRequestQueue {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             // Reversed so the SMALLEST station id is the maximum on a full tie.
-            .then_with(|| b.station_id.cmp(&a.station_id))
+            .then_with(|| b.group.selector_key().cmp(&a.group.selector_key()))
     }
 
     /// Pop the highest-severity entry (worst tier, then largest deficit, then
@@ -257,7 +253,7 @@ pub(crate) fn receive_repair_coordination(
             continue;
         }
         let CoordinationPayload::RepairRequest {
-            station_id,
+            group,
             station_label,
             tier,
             deficit,
@@ -289,7 +285,7 @@ pub(crate) fn receive_repair_coordination(
             CoordinationDelivery::Ai | CoordinationDelivery::HumanRouted => {
                 if let Some(queue) = queue.as_deref_mut() {
                     queue.push_or_merge(RepairQueueEntry {
-                        station_id: station_id.clone(),
+                        group: group.clone(),
                         station_label: station_label.clone(),
                         tier: *tier,
                         deficit: deficit.unwrap_or(0.0),
@@ -306,7 +302,7 @@ pub(crate) fn receive_repair_coordination(
                 }
                 let should_popup = alerted
                     .as_deref_mut()
-                    .map(|state| state.accepts_popup(station_id, *tier))
+                    .map(|state| state.accepts_popup(group, *tier))
                     // Preserve the old optional-component behavior used by
                     // small fixtures: without a latch there is nothing that
                     // can remember and suppress a repeat.
@@ -322,9 +318,11 @@ pub(crate) fn receive_repair_coordination(
                         payload: message.payload.clone(),
                         presentation: message.presentation.clone(),
                         sender_label: sender_label.clone(),
-                        to_label: crate::ship::coordination::coordination_addressee_label(
-                            &message.address,
-                        ),
+                        to_label:
+                            crate::ship::coordination::coordination_addressee_label_for_config(
+                                &ship_config.0,
+                                &message.address,
+                            ),
                     },
                 });
             }
@@ -528,7 +526,7 @@ pub(crate) fn publish_repair_blackboard(
                 entries
                     .iter()
                     .map(|e| QueueEntryPreview {
-                        station_id: e.station_id.clone(),
+                        group: e.group.clone(),
                         station_label: e.station_label.clone(),
                         tier: e.tier,
                         deficit: e.deficit,
@@ -604,7 +602,11 @@ pub(crate) fn publish_repair_blackboard(
         let (external_dispatch_candidate_name, external_dispatch_candidate_refusal) =
             candidate.map_or((None, None), |(name, refusal)| (Some(name), refusal));
 
+        let repair_groups = config_opt
+            .map(|config| repair_group_definitions(&config.0, &damageable_systems))
+            .unwrap_or_default();
         let bb = RepairBlackboard {
+            repair_groups,
             teams: team_slots,
             travel_duration_secs: teams.0.timings().travel_duration,
             system_hull,
@@ -640,20 +642,57 @@ pub(crate) fn publish_repair_blackboard(
 
 // ── AI controller stub ─────────────────────────────────────────────────────────
 
-pub fn all_systems_in_station_are_operational(
-    station_id: &str,
+pub fn all_systems_in_group_are_operational(
+    group: &RepairGroup,
     hull: &crate::ship::damage::SystemHull,
     config: &crate::ship::config::ShipConfig,
 ) -> bool {
-    let systems_in_station: Vec<_> = config
-        .systems
+    let mut matching = hull
         .iter()
-        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id))
+        .filter(|(id, _)| repair_group(id, config) == *group)
+        .peekable();
+    matching.peek().is_some()
+        && matching.all(|(id, _)| hull.tier_for(id) == DamageTier::Operational)
+}
+
+pub fn repair_group_label(config: &crate::ship::config::ShipConfig, group: &RepairGroup) -> String {
+    match group {
+        RepairGroup::Core => crate::ship::coordination::CHATTER_ADDRESSEE_CORE.into(),
+        RepairGroup::Station(id) => crate::ship::coordination::coordination_addressee_label(
+            &crate::core::messages::CoordinationAddress::Station(id.clone()),
+        ),
+        RepairGroup::Console(id) => config
+            .console(id)
+            .filter(|c| !c.name.is_empty())
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| id.0.clone()),
+    }
+}
+
+fn repair_group_definitions(
+    config: &crate::ship::config::ShipConfig,
+    systems: &[SystemId],
+) -> Vec<RepairGroupDefinition> {
+    let mut groups: std::collections::BTreeMap<RepairGroup, Vec<SystemId>> = Default::default();
+    for id in systems {
+        groups
+            .entry(repair_group(id, config))
+            .or_default()
+            .push(id.clone());
+    }
+    let mut result: Vec<_> = groups
+        .into_iter()
+        .map(|(group, mut systems)| {
+            systems.sort();
+            RepairGroupDefinition {
+                label: repair_group_label(config, &group),
+                group,
+                systems,
+            }
+        })
         .collect();
-    !systems_in_station.is_empty()
-        && systems_in_station
-            .iter()
-            .all(|s| hull.tier_for(&s.id) == DamageTier::Operational)
+    result.sort_by_key(|entry| entry.group.selector_key());
+    result
 }
 
 // `best_damaged_system_in_station` was removed in #830: `operate_repair_ai` now
@@ -839,29 +878,14 @@ fn committed_station_for_slot(
         }
         _ => return None,
     };
-    if system_id.0 == REPAIR_CORE_BUCKET_KEY {
-        return Some(REPAIR_CORE_BUCKET_KEY.to_string());
-    }
-    if let Some(station) = config
-        .0
-        .system(system_id)
-        .and_then(|sc| sc.station.as_ref())
-    {
-        return Some(station.0.clone());
-    }
-    // Ownerless: the config gives this id no station (either it describes no
-    // such system, or it describes one with no `station`), which is the same
-    // test `repair_teams::sweep_group` and `damage_sync` use to bucket a row.
-    // Committed to the core bucket iff the hull actually tracks the row; an
-    // untracked id is a station name, which commits to nothing.
     hull.get(system_id)
-        .map(|_| REPAIR_CORE_BUCKET_KEY.to_string())
+        .map(|_| repair_group(system_id, &config.0).selector_key())
 }
 
 /// Aggregate a station's observable hull damage: `(damage_fraction,
 /// worst_system_damage_fraction, system_count)`.
-fn station_damage_readings(
-    station_id: &str,
+fn group_damage_readings(
+    group: &RepairGroup,
     hull: &crate::ship::damage::SystemHull,
     config: &crate::ship_plugin::ShipConfigComponent,
 ) -> (f32, f32, usize) {
@@ -869,15 +893,10 @@ fn station_damage_readings(
     let mut total_current = 0.0_f32;
     let mut worst = 0.0_f32;
     let mut count = 0_usize;
-    for system in config
-        .0
-        .systems
+    for (_, entry) in hull
         .iter()
-        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id))
+        .filter(|(id, _)| repair_group(id, &config.0) == *group)
     {
-        let Some(entry) = hull.get(&system.id) else {
-            continue;
-        };
         count += 1;
         total_max += entry.max;
         total_current += entry.current;
@@ -915,36 +934,9 @@ fn request_still_open(
     hull: &crate::entities::spawner::EntitySystemHull,
     config: &crate::ship::config::ShipConfig,
 ) -> bool {
-    // The `core` bucket owns NO station in `ShipConfig` — validation actively
-    // forbids a station with that id, and `damage_sync` files EVERY ownerless
-    // system under it — so the station-owned scan below would find zero systems
-    // and prune every core request. Prune it against the hull instead, over the
-    // whole ownerless GROUP.
-    //
-    // The group, not just the `core` row: `damage_sync` addresses a request for
-    // any system the config gives no station to under this one id, and a hull may
-    // carry several such rows (the shipped `alliance_cruiser` carries `core` and
-    // `science`). Testing only the literal `core` row evicted the request
-    // whenever `core` itself was Operational, so a destroyed sibling was never
-    // dispatched for and stayed destroyed forever — nothing else in the game
-    // clears the latch. This is deliberately the same set
-    // `repair_teams::sweep_group` calls ownerless and the same `!= Operational`
-    // test `next_sweep_target` ranks by, so what the dispatcher keeps sending
-    // teams for and what an arrived team works on are one rule.
-    if entry.station_id == REPAIR_CORE_BUCKET_KEY {
-        return hull.0.iter().any(|(sid, _)| {
-            config
-                .system(sid)
-                .and_then(|s| s.station.as_ref())
-                .is_none()
-                && hull.0.tier_for(sid) != DamageTier::Operational
-        });
-    }
-    config
-        .systems
-        .iter()
-        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str()))
-        .any(|s| hull.0.tier_for(&s.id) != DamageTier::Operational)
+    hull.0.iter().any(|(id, _)| {
+        repair_group(id, config) == entry.group && hull.0.tier_for(id) != DamageTier::Operational
+    })
 }
 
 /// End a repair request when the damage it names is gone — whatever operates
@@ -1197,22 +1189,22 @@ pub fn operate_repair_ai(
         // per-station hull aggregate below is the authoritative observable
         // detail those requests are ranked BY, not an extra discovery channel.
         let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
-        sorted_entries.sort_by(|a, b| a.station_id.cmp(&b.station_id));
+        sorted_entries.sort_by_key(|entry| entry.group.selector_key());
 
         let mut readings: Vec<(String, RepairCandidateReading)> =
             Vec::with_capacity(sorted_entries.len() + 1);
         for entry in &sorted_entries {
             let (damage_fraction, worst, system_count) =
-                station_damage_readings(&entry.station_id, &hull.0, config);
+                group_damage_readings(&entry.group, &hull.0, config);
             readings.push((
-                entry.station_id.clone(),
+                entry.group.selector_key(),
                 RepairCandidateReading {
                     tier_ordinal: entry.tier as u8,
                     deficit: entry.deficit,
                     damage_fraction,
                     worst_system_damage_fraction: worst,
                     system_count,
-                    is_core: entry.station_id == REPAIR_CORE_BUCKET_KEY,
+                    is_core: entry.group == RepairGroup::Core,
                     source_repair_request: true,
                     assigned: false,
                 },
@@ -1224,7 +1216,11 @@ pub fn operate_repair_ai(
         // canonical eligibility it never independently selects — the same
         // enrich-don't-steer shape as Navigation's `chart-contacts`.
         let core_id = SystemId(REPAIR_CORE_BUCKET_KEY.to_string());
-        if let Some(core_entry) = hull.0.get(&core_id) {
+        if let Some(core_entry) = hull
+            .0
+            .get(&core_id)
+            .filter(|_| repair_group(&core_id, &config.0) == RepairGroup::Core)
+        {
             let core_fraction = if core_entry.max > 0.0 {
                 1.0 - core_entry.current / core_entry.max
             } else {
@@ -1242,7 +1238,7 @@ pub fn operate_repair_ai(
             };
             match readings
                 .iter_mut()
-                .find(|(key, _)| key == REPAIR_CORE_BUCKET_KEY)
+                .find(|(key, _)| *key == RepairGroup::Core.selector_key())
             {
                 // A repair request already named `core`: keep its REPORTED tier
                 // and deficit (the coordination-delivered reading), but take the
@@ -1260,7 +1256,7 @@ pub fn operate_repair_ai(
                     existing.system_count = core_reading.system_count;
                     existing.is_core = true;
                 }
-                None => readings.push((REPAIR_CORE_BUCKET_KEY.to_string(), core_reading)),
+                None => readings.push((RepairGroup::Core.selector_key(), core_reading)),
             }
         }
         readings.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1327,13 +1323,18 @@ pub fn operate_repair_ai(
                 break;
             };
 
-            let target = if winner == REPAIR_CORE_BUCKET_KEY {
-                crate::core::messages::RepairTarget::Core
+            let group = if winner == RepairGroup::Core.selector_key() {
+                RepairGroup::Core
             } else {
-                crate::core::messages::RepairTarget::Station(crate::core::messages::StationId(
-                    winner.clone(),
-                ))
+                let Some(entry) = sorted_entries
+                    .iter()
+                    .find(|entry| entry.group.selector_key() == winner)
+                else {
+                    continue;
+                };
+                entry.group.clone()
             };
+            let target = group.target();
             emit_ai_command(
                 entity_uuid,
                 crate::ship::system_registry::repair_system_id(),

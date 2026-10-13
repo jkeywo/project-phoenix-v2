@@ -721,6 +721,17 @@ pub(crate) fn project_ship_client_config(
             })
             .filter(|(_, gaps)| !gaps.is_empty())
             .collect();
+        next.console_assist_gaps = sc
+            .consoles
+            .iter()
+            .map(|console| {
+                (
+                    console.id.clone(),
+                    crate::ship::eligibility::projected_console_assist_gaps(console, sc),
+                )
+            })
+            .filter(|(_, gaps)| !gaps.is_empty())
+            .collect();
         // Contextual tutorial overlays (issue #916): carry every station's
         // authored `[[station.tutorial]]` blocks to the client verbatim.
         // Generic iteration — no station-specific branches; the client's
@@ -1482,12 +1493,19 @@ pub fn handle_report_station_eligibility_system(
 ) {
     let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
-        let ClientMessage::ReportStationEligibility { ineligible } = &ev.msg else {
-            continue;
-        };
-        let set: std::collections::HashSet<crate::core::messages::StationId> =
-            ineligible.iter().cloned().collect();
-        sessions.0.set_eligibility(&ev.token, set);
+        match &ev.msg {
+            ClientMessage::ReportStationEligibility { ineligible } => {
+                sessions
+                    .0
+                    .set_eligibility(&ev.token, ineligible.iter().cloned().collect());
+            }
+            ClientMessage::ReportConsoleEligibility { ineligible } => {
+                sessions
+                    .0
+                    .set_console_eligibility(&ev.token, ineligible.clone());
+            }
+            _ => {}
+        }
     }
 }
 

@@ -21,7 +21,6 @@ name = "Captain"
 description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/captain-console.html"
 manual_overview = "You command the bridge and set the ship's posture."
 
 [[station.rating]]
@@ -38,7 +37,6 @@ name = "Tactical"
 description = "Weapons and threat response."
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/tactical-console.html"
 
 [[station.rating]]
 name = "Assisted"
@@ -59,13 +57,13 @@ max_level = 4
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 power_group = "ops"
 
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 marker = "phasers_fore"
 
@@ -76,20 +74,30 @@ fire_arc_deg = 270
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "torpedo-tube-fore-port"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain"
 power_group = "ops"
+
+[[console]]
+id = "captain"
+home_station = "captain"
+screen = "gui/captain-console.html"
+
+[[console]]
+id = "tactical"
+home_station = "tactical"
+screen = "gui/tactical-console.html"
 "#
 }
 
@@ -221,12 +229,22 @@ automated_systems = []
 [[system]]
 id = "helm"
 kind = "helm"
-station = "helm"
+console = "helm"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
+
+[[console]]
+id = "helm"
+home_station = "helm"
+screen = "fixture.html"
+
+[[console]]
+id = "captain"
+home_station = "captain"
+screen = "fixture.html"
 "#
 }
 
@@ -279,7 +297,12 @@ fn system_config_parses_human_seeking_flag() {
 
     // Absent on systems that authored none (serde default).
     let red_alert = config.system(&SystemId("red-alert".into())).unwrap();
-    assert!(!red_alert.human_seeking);
+    assert!(
+        !config
+            .console_for_system(&red_alert.id)
+            .unwrap()
+            .human_seeking
+    );
 }
 
 #[test]
@@ -298,13 +321,18 @@ automated_systems = []
 [[system]]
 id = "comms"
 kind = "sensors"
-station = "captain"
+console = "captain"
+
+[[console]]
 human_seeking = true
+id = "captain"
+home_station = "captain"
+screen = "fixture.html"
 "#;
     let config = parse_ok(toml);
     assert!(
         config
-            .system(&SystemId("comms".into()))
+            .console_for_system(&SystemId("comms".into()))
             .unwrap()
             .human_seeking
     );
@@ -318,141 +346,83 @@ human_seeking = true
 
 /// Two stations and one seeking system on the first of them, so a
 /// `seek_order` is a two-name permutation and every rule has room to fail.
-fn seek_order_toml(system_block: &str) -> String {
+fn seeking_console_toml(options: &str) -> String {
     format!(
         r#"
 [[station]]
 id = "tactical"
 name = "Tactical"
-description = "Fight the ship."
-rank = "Lt. Cmdr."
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
+description = ""
+rank = ""
 [[station]]
 id = "engineering"
 name = "Engineering"
-description = "Keep it running."
-rank = "Ltn."
-
-[[station.rating]]
-name = "Std"
-automated_systems = []
-
-{system_block}
+description = ""
+rank = ""
+[[console]]
+id = "communications"
+home_station = "tactical"
+screen = "gui/comms-console.html"
+{options}
+[[system]]
+id = "comms"
+kind = "comms"
+console = "communications"
 "#
     )
 }
 
 #[test]
-fn seek_order_is_absent_by_default_and_round_trips_when_authored() {
-    // A hull that authors none keeps an empty list AND serialises without
-    // the key, so an untouched hull's TOML is byte-for-byte what it was.
-    let plain = parse_ok(&seek_order_toml(
-        "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\n",
-    ));
-    let comms = plain.system(&SystemId("comms".into())).unwrap();
-    assert!(comms.seek_order.is_empty());
-    let encoded = toml::to_string(&plain).expect("ship config should serialize");
-    assert!(
-        !encoded.contains("seek_order"),
-        "an unauthored seek_order must not appear on the way out:\n{encoded}"
-    );
-
-    let authored = parse_ok(&seek_order_toml(
-        "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"engineering\"]\n",
+fn console_host_order_round_trips_without_requiring_every_station() {
+    let config = parse_ok(&seeking_console_toml(
+        "human_seeking = true\nhost_order = [\"engineering\"]",
     ));
     assert_eq!(
-        authored
-            .system(&SystemId("comms".into()))
-            .unwrap()
-            .seek_order,
-        vec![
-            StationId("tactical".into()),
-            StationId("engineering".into())
-        ]
+        config.consoles[0].host_order,
+        vec![StationId("engineering".into())]
     );
-    let encoded = toml::to_string(&authored).expect("ship config should serialize");
-    assert_eq!(parse_ok(&encoded), authored);
+    assert_eq!(parse_ok(&toml::to_string(&config).unwrap()), config);
+    let console = &config.consoles[0];
+    assert_eq!(
+        console.resolve_host(|_| true),
+        Some(StationId("tactical".into()))
+    );
+    assert_eq!(
+        console.resolve_host(|id| id.0 == "engineering"),
+        Some(StationId("engineering".into()))
+    );
 }
 
 #[test]
-fn seek_order_rejects_a_station_this_hull_does_not_have() {
-    let err = ShipConfig::from_toml(
-        &seek_order_toml(
-            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"engineering\", \"science\"]\n",
-        ),
-        KINDS,
-    );
-    assert!(matches!(
-        err,
-        Err(ShipConfigError::SeekOrderUnknownStation { ref station, .. })
-            if station.0 == "science"
-    ));
+fn console_host_order_rejects_unknown_and_duplicate_stations() {
+    for hosts in ["[\"missing\"]", "[\"engineering\", \"engineering\"]"] {
+        assert!(ShipConfig::from_toml(
+            &seeking_console_toml(&format!("human_seeking = true\nhost_order = {hosts}")),
+            KINDS
+        )
+        .is_err());
+    }
 }
 
 #[test]
-fn seek_order_rejects_the_same_station_twice() {
-    let err = ShipConfig::from_toml(
-        &seek_order_toml(
-            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\", \"tactical\", \"engineering\"]\n",
-        ),
-        KINDS,
-    );
-    assert!(matches!(
-        err,
-        Err(ShipConfigError::SeekOrderDuplicateStation { .. })
-    ));
-}
-
-/// The list is the WHOLE walk, so a station left off is a console the seek
-/// could never reach — refused at load rather than discovered by a crew.
-#[test]
-fn seek_order_rejects_an_incomplete_walk() {
-    let err = ShipConfig::from_toml(
-        &seek_order_toml(
-            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"tactical\"]\n",
-        ),
-        KINDS,
-    );
-    assert!(matches!(
-        err,
-        Err(ShipConfigError::SeekOrderMissingStation { ref station, .. })
-            if station.0 == "engineering"
-    ));
-}
-
-/// Owner-first is the rule that keeps a hull's own officer at their own
-/// console. A complete permutation that starts anywhere else is still wrong.
-#[test]
-fn seek_order_rejects_an_order_that_does_not_start_at_the_owner() {
-    let err = ShipConfig::from_toml(
-        &seek_order_toml(
-            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nhuman_seeking = true\nseek_order = [\"engineering\", \"tactical\"]\n",
-        ),
-        KINDS,
-    );
-    assert!(matches!(
-        err,
-        Err(ShipConfigError::SeekOrderOwnerNotFirst { ref owner, ref first, .. })
-            if owner.0 == "tactical" && first.as_ref().map(|s| s.0.as_str()) == Some("engineering")
-    ));
+fn fixed_console_cannot_author_visiting_hosts() {
+    assert!(ShipConfig::from_toml(
+        &seeking_console_toml("host_order = [\"engineering\"]"),
+        KINDS
+    )
+    .is_err());
 }
 
 #[test]
-fn seek_order_rejects_a_system_that_does_not_seek() {
-    let err = ShipConfig::from_toml(
-        &seek_order_toml(
-            "[[system]]\nid = \"comms\"\nkind = \"comms\"\nstation = \"tactical\"\nseek_order = [\"tactical\", \"engineering\"]\n",
-        ),
-        KINDS,
-    );
-    assert!(matches!(
-        err,
-        Err(ShipConfigError::SeekOrderWithoutHumanSeeking { .. })
-    ));
+fn legacy_system_seek_metadata_is_explicitly_rejected() {
+    let text = seeking_console_toml("human_seeking = true");
+    for field in [
+        "human_seeking = true",
+        "seek_order = []",
+        "station = \"tactical\"",
+    ] {
+        assert!(ShipConfig::from_toml(&format!("{text}\n{field}"), KINDS).is_err());
+    }
 }
 
 #[test]
@@ -500,11 +470,8 @@ fn rejects_ownerless_without_ai_only() {
         valid_toml()
     );
 
-    assert_eq!(
-        parse_and_validate(&toml, KINDS),
-        Err(ShipConfigError::OwnerlessSystemWithoutAiOnly {
-            system: SystemId("orphan".into())
-        })
+    assert!(
+        matches!(parse_and_validate(&toml, KINDS), Err(ShipConfigError::ParseError(message)) if message.contains("has no Console"))
     );
 }
 
@@ -719,36 +686,36 @@ max_level = 4",
 fn rejects_unknown_station_owner() {
     let toml = valid_toml().replace("station = \"captain\"", "station = \"ghost\"");
 
-    assert_eq!(
-        parse_and_validate(&toml, KINDS),
-        Err(ShipConfigError::UnknownStation {
-            system: SystemId("red-alert".into()),
-            station: StationId("ghost".into())
-        })
+    assert!(
+        matches!(parse_and_validate(&toml, KINDS), Err(ShipConfigError::ParseError(message)) if message.contains("unknown Station"))
     );
 }
 
 #[test]
-fn station_config_parses_console_field() {
+fn console_config_parses_screen_field() {
     let config = parse_ok(valid_toml());
 
-    let captain = config.station(&StationId("captain".into())).unwrap();
-    assert_eq!(captain.console.as_deref(), Some("gui/captain-console.html"));
+    let captain = config
+        .console(&crate::core::messages::ConsoleId("captain".into()))
+        .unwrap();
+    assert_eq!(captain.screen.as_deref(), Some("gui/captain-console.html"));
 
-    let tactical = config.station(&StationId("tactical".into())).unwrap();
+    let tactical = config
+        .console(&crate::core::messages::ConsoleId("tactical".into()))
+        .unwrap();
     assert_eq!(
-        tactical.console.as_deref(),
+        tactical.screen.as_deref(),
         Some("gui/tactical-console.html")
     );
 }
 
 #[test]
-fn station_config_console_defaults_to_none_when_absent() {
-    let toml = valid_toml().replace("console = \"gui/captain-console.html\"\n", "");
-    let config = parse_ok(&toml);
-
-    let captain = config.station(&StationId("captain".into())).unwrap();
-    assert_eq!(captain.console, None);
+fn a_station_without_a_console_does_not_invent_a_screen() {
+    let config: ShipConfig =
+        toml::from_str("[[station]]\nid='captain'\nname='Captain'\ndescription=''\nrank=''\n")
+            .unwrap();
+    assert_eq!(config.stations.len(), 1);
+    assert!(config.consoles.is_empty());
 }
 
 #[test]
@@ -760,7 +727,6 @@ name = "Captain"
 description = "Command."
 rank = "Cpt."
 short_code = "CPT"
-console = "gui/captain-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -772,7 +738,6 @@ name = "Helm"
 description = "Pilot."
 rank = "Ltn."
 short_code = "HLM"
-console = "gui/helm-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -784,7 +749,6 @@ name = "Tactical"
 description = "Weapons."
 rank = "Ltn."
 short_code = "TAC"
-console = "gui/tactical-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -796,7 +760,6 @@ name = "Repair"
 description = "Repair."
 rank = "Ltn."
 short_code = "ENG"
-console = "gui/repair-console.html"
 
 [[station.rating]]
 name = "Std"
@@ -823,26 +786,46 @@ max_level = 4
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 power_group = "ops"
 
 [[system]]
 id = "helm"
 kind = "helm"
-station = "helm"
+console = "helm"
 power_group = "helm"
 
 [[system]]
-id = "tactical"
+id = "phaser-tactical"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
 power_group = "weapons"
 
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "captain"
+console = "captain"
 power_group = "ops"
+
+[[console]]
+id = "captain"
+home_station = "captain"
+screen = "gui/captain-console.html"
+
+[[console]]
+id = "helm"
+home_station = "helm"
+screen = "gui/helm-console.html"
+
+[[console]]
+id = "tactical"
+home_station = "tactical"
+screen = "gui/tactical-console.html"
+
+[[console]]
+id = "repair"
+home_station = "repair"
+screen = "gui/repair-console.html"
 "#;
     let config = parse_ok(toml);
 
@@ -852,25 +835,50 @@ power_group = "ops"
     for station in &config.stations {
         match station.id.0.as_str() {
             "captain" => {
-                assert_eq!(station.console.as_deref(), Some("gui/captain-console.html"));
+                assert_eq!(
+                    config
+                        .console(&crate::core::messages::ConsoleId(station.id.0.clone()))
+                        .unwrap()
+                        .screen
+                        .as_deref(),
+                    Some("gui/captain-console.html")
+                );
                 let systems: Vec<_> = config.systems_for_station(&station.id).collect();
                 assert_eq!(systems.len(), 2);
             }
             "helm" => {
-                assert_eq!(station.console.as_deref(), Some("gui/helm-console.html"));
+                assert_eq!(
+                    config
+                        .console(&crate::core::messages::ConsoleId(station.id.0.clone()))
+                        .unwrap()
+                        .screen
+                        .as_deref(),
+                    Some("gui/helm-console.html")
+                );
                 let systems: Vec<_> = config.systems_for_station(&station.id).collect();
                 assert_eq!(systems.len(), 1);
             }
             "tactical" => {
                 assert_eq!(
-                    station.console.as_deref(),
+                    config
+                        .console(&crate::core::messages::ConsoleId(station.id.0.clone()))
+                        .unwrap()
+                        .screen
+                        .as_deref(),
                     Some("gui/tactical-console.html")
                 );
                 let systems: Vec<_> = config.systems_for_station(&station.id).collect();
                 assert_eq!(systems.len(), 1);
             }
             "repair" => {
-                assert_eq!(station.console.as_deref(), Some("gui/repair-console.html"));
+                assert_eq!(
+                    config
+                        .console(&crate::core::messages::ConsoleId(station.id.0.clone()))
+                        .unwrap()
+                        .screen
+                        .as_deref(),
+                    Some("gui/repair-console.html")
+                );
                 let systems: Vec<_> = config.systems_for_station(&station.id).collect();
                 assert_eq!(systems.len(), 0);
             }
@@ -902,7 +910,12 @@ rank = "Ltn."
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical"
+
+[[console]]
+id = "tactical"
+home_station = "tactical"
+screen = "fixture.html"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.weapons_station(), Some(StationId("tactical".into())));
@@ -922,7 +935,12 @@ rank = "Ltn."
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
-station = "pilot"
+console = "pilot"
+
+[[console]]
+id = "pilot"
+home_station = "pilot"
+screen = "fixture.html"
 "#;
     let config = ShipConfig::from_toml(toml, &["blaster_bank"]).unwrap();
     assert_eq!(config.weapons_station(), Some(StationId("pilot".into())));
@@ -936,6 +954,10 @@ fn weapons_station_is_none_for_npc_shape() {
 id = "phaser-fore"
 kind = "phaser_bank"
 ai_only = true
+console = "autonomy"
+
+[[console]]
+id = "autonomy"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.weapons_station(), None);
@@ -956,7 +978,12 @@ rank = "Ltn."
 [[system]]
 id = "helm"
 kind = "helm"
-station = "tactical"
+console = "tactical"
+
+[[console]]
+id = "tactical"
+home_station = "tactical"
+screen = "fixture.html"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.weapons_station(), Some(StationId("tactical".into())));
@@ -976,7 +1003,12 @@ rank = "Ens."
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "sensors"
+console = "sensors"
+
+[[console]]
+id = "sensors"
+home_station = "sensors"
+screen = "fixture.html"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.sensors_station(), Some(StationId("sensors".into())));
@@ -990,6 +1022,10 @@ fn sensors_station_is_none_for_npc_shape() {
 id = "sensors"
 kind = "sensors"
 ai_only = true
+console = "autonomy"
+
+[[console]]
+id = "autonomy"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.sensors_station(), None);
@@ -1002,6 +1038,10 @@ fn sensors_station_is_none_when_no_sensors_system_declared() {
 id = "helm"
 kind = "helm"
 ai_only = true
+console = "autonomy"
+
+[[console]]
+id = "autonomy"
 "#;
     let config = ShipConfig::from_toml(toml, KINDS).unwrap();
     assert_eq!(config.sensors_station(), None);
@@ -1037,37 +1077,43 @@ rank = "Ltn."
 name = "Std"
 automated_systems = []
 
-[[station]]
+[[console]]
 id = "command"
 name = "Command"
 description = "Direct an AI station."
-rank = "Cpt."
-console = "gui/command-console.html"
-auxiliary = true
+screen = "gui/command-console.html"
 human_seeking = true
 host_order = ["captain"]
 visiting_rating = "Std"
 command_target = "proving"
 {command_extra}
 
-[[station.rating]]
+[[console.rating]]
 name = "Std"
 automated_systems = []
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "proving"
+console = "proving"
 
 [[system]]
 id = "command"
 kind = "command"
-station = "command"
+console = "command"
+[[console]]
+id = "captain"
+home_station = "captain"
+screen = "fixture.html"
+[[console]]
+id = "proving"
+home_station = "proving"
+screen = "fixture.html"
 "#
     )
 }
@@ -1096,8 +1142,10 @@ fn parse_command(catalogue: &str, extra: &str) -> Result<ShipConfig, ShipConfigE
 #[test]
 fn command_station_and_stance_catalogue_parse_and_round_trip() {
     let config = parse_command(FULL_CATALOGUE, "").expect("command hull parses");
-    let command = config.station(&StationId("command".into())).unwrap();
-    assert!(command.auxiliary);
+    let command = config
+        .console(&crate::core::messages::ConsoleId("command".into()))
+        .unwrap();
+    assert!(command.home_station.is_none());
     assert!(command.human_seeking);
     assert_eq!(command.host_order, vec![StationId("captain".into())]);
     assert_eq!(command.command_target, Some(StationId("proving".into())));
@@ -1132,7 +1180,7 @@ fn command_target_must_name_a_real_station() {
         .replace("command_target = \"proving\"", "command_target = \"ghost\"");
     assert!(matches!(
         ShipConfig::from_toml(&toml, STANCE_KINDS),
-        Err(ShipConfigError::CommandTargetUnknownStation { ref target, .. })
+        Err(ShipConfigError::ConsoleCommandTargetUnknownStation { ref target, .. })
             if target.0 == "ghost"
     ));
 }
@@ -1146,7 +1194,7 @@ fn command_target_must_author_a_catalogue() {
     );
     assert!(matches!(
         ShipConfig::from_toml(&toml, STANCE_KINDS),
-        Err(ShipConfigError::CommandTargetHasNoStances { ref target, .. })
+        Err(ShipConfigError::ConsoleCommandTargetHasNoStances { ref target, .. })
             if target.0 == "captain"
     ));
 }

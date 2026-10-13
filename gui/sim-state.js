@@ -84,7 +84,6 @@ export class ClientSimState {
     // projection instead of briefly falling back to the lobby rating.
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
     const systemDepths = preserveAuthorityProjection ? this.systemDepths : {};
-    const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const consoleHosts = preserveAuthorityProjection ? this.consoleHosts : {};
     const consoleViews = preserveAuthorityProjection ? this.consoleViews : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
@@ -163,8 +162,7 @@ export class ClientSimState {
      *  assist-function ids that station forces manual. From Welcome
      *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
     this.stationAssistGaps = {};
-    /** Authoritative complete human-seeking Station placements by Station id. */
-    this.stationHosts = stationHosts;
+    this.consoleAssistGaps = {};
     /**
      * Authoritative per-Station hull health by Station id (issue #1100).
      * Value is a fraction in [0,1], or `null` for the neutral "no-damage-model"
@@ -173,6 +171,7 @@ export class ClientSimState {
      * this map rather than summing recipient-scoped damage rows.
      */
     this.stationHealth = stationHealth;
+    this.consoleHealth = preserveAuthorityProjection ? (this.consoleHealth || {}) : {};
     /**
      * Authoritative per-Station importance by Station id (issue #1101).
      * Each value is `{ unread, critical }` — a one-off unread event (cleared
@@ -344,12 +343,11 @@ export class ClientSimState {
         const snap = d.snapshot || {};
         this.consoleHosts = Object.fromEntries((snap.console_hosts || []).filter(Boolean).map(entry => [entry.console, entry]));
         this.consoleViews = snap.console_views || {};
-        this.stationHosts = Object.fromEntries(
-          (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
-        );
         // Authoritative per-Station health (issue #1100). `health` is omitted on
         // the wire for the neutral no-damage-model state, so a missing value
         // becomes an explicit `null` the Hero Bar renders as that neutral cue.
+        this.consoleHealth = Object.fromEntries((snap.console_health || []).filter(Boolean)
+          .map(entry => [entry.console, typeof entry.health === 'number' ? entry.health : null]));
         this.stationHealth = Object.fromEntries(
           (snap.station_health || []).filter(Boolean)
             .map(entry => [entry.station, typeof entry.health === 'number' ? entry.health : null]),
@@ -406,11 +404,11 @@ export class ClientSimState {
       case 'GameStarted':
         // These are the real round boundaries. Welcome is instead the
         // reconnect handshake for a peer already in the current round.
-        this.stationHosts = {};
         this.consoleHosts = {};
         this.consoleViews = {};
         this.consoleImportance = {};
         this.stationHealth = {};
+        this.consoleHealth = {};
         this.stationImportance = {};
         this.controlSources = {};
         this.systemDepths = {};
@@ -454,6 +452,7 @@ export class ClientSimState {
         // config, never anyone's profile; the lobby glue runs the SAME rule as
         // the host from it. Absent on a legacy server → {} → everyone eligible.
         this.stationAssistGaps = sc.station_assist_gaps || {};
+        this.consoleAssistGaps = sc.console_assist_gaps || {};
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;

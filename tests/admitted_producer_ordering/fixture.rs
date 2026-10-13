@@ -6,7 +6,7 @@ use project_phoenix::{
         navigation::{NavigationTargetSelector, NavigationWaypoint, WaypointMode},
         repair::{RepairQueueEntry, RepairRequestQueue, RepairTargetSelector, ShipRepairTeams},
     },
-    core::messages::{StationId, SystemId, TeamSlot},
+    core::messages::{RepairGroup, StationId, SystemId, TeamSlot},
     entities::{
         config::DoctrineObjective,
         spawner::{BehaviourSection, EntitySystemHull, EntityUuid},
@@ -76,12 +76,16 @@ pub fn prepare_navigation_and_repair(
         let mut targets: Vec<_> = config
             .systems
             .iter()
-            .filter(|system| system.station.as_ref().is_some_and(|s| s.0 == "helm"))
+            .filter(|system| {
+                config
+                    .system_home_station(system)
+                    .is_some_and(|s| s.0 == "helm")
+            })
             .filter_map(|system| {
                 let row = hull.get(&system.id)?;
                 (row.max.is_finite() && row.max > 0.0).then_some((
                     system.id.clone(),
-                    system.station.clone().unwrap(),
+                    config.system_home_station(system).cloned().unwrap(),
                     row.current,
                     row.max,
                 ))
@@ -164,7 +168,7 @@ pub fn prepare_navigation_and_repair(
             .get_mut::<RepairRequestQueue>(ship)
             .unwrap()
             .push_or_merge(RepairQueueEntry {
-                station_id: repair_station.0.clone(),
+                group: RepairGroup::Station(repair_station.clone()),
                 station_label: repair_station.0.clone(),
                 tier,
                 deficit: max_hp - initial_hp,
@@ -226,11 +230,7 @@ pub fn assert_navigation_and_repair(
         );
         let config = &app.world().get::<ShipConfigComponent>(ship).unwrap().0;
         assert_eq!(
-            config
-                .system(&expected.repair_system)
-                .unwrap()
-                .station
-                .as_ref(),
+            config.system_home_station(config.system(&expected.repair_system).unwrap()),
             Some(&expected.repair_station)
         );
         let teams = &app.world().get::<ShipRepairTeams>(ship).unwrap().0;

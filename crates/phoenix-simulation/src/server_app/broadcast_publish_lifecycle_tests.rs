@@ -1,5 +1,4 @@
 use super::*;
-use crate::console::repair::visibility::{self, LastVisibleRepairBlackboard};
 use crate::core::broadcast::{
     reconnect_registered_replication, reset_registered_replication, ReplicationLifecycleRegistry,
 };
@@ -8,6 +7,7 @@ use crate::entities::spawner::EntitySystemHull;
 use crate::lobby::{Sessions, Target};
 use crate::modifiers::repair_teams::RepairTeams;
 use crate::ship::config::ShipConfig;
+use crate::ship::console_publication::LastConsolePublications;
 use crate::ship::damage::SystemHull;
 use crate::ship_plugin::ShipConfigComponent;
 
@@ -34,15 +34,31 @@ name = "Engineering"
 description = "Fixing."
 rank = "Ltn."
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console]]
+id = "engineering-console"
+home_station = "engineering"
+screen = "fixture.html"
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
-station = "helm"
+console = "helm-console"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineering"
+console = "engineering-console"
 "#,
         &["helm_radar", "repair"],
     )
@@ -78,13 +94,25 @@ station = "engineering"
     );
     blackboards
         .0
-        .insert(SystemId("z-shared".into()), helm_blackboard());
+        .insert(SystemId("helm".into()), helm_blackboard());
 
     let mut app = App::new();
     app.insert_resource(Sessions(sessions));
+    app.init_resource::<SimOutbox>();
     register_blackboard_replication_lifecycle(&mut app);
     app.world_mut().spawn((
         LocalShip,
+        crate::ship::components::ConsoleHosts(
+            config
+                .consoles
+                .iter()
+                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                    console: console.id.clone(),
+                    host: console.home_station.clone(),
+                    rating: String::new(),
+                })
+                .collect(),
+        ),
         ShipConfigComponent(config),
         EntitySystemHull(SystemHull::from_config(&[
             (SystemId("core".into()), 100.0),
@@ -98,41 +126,21 @@ station = "engineering"
 }
 
 fn live_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, SystemBlackboard)> {
-    let mut query = app
-        .world_mut()
-        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let mut current: Vec<_> = query
-        .single(app.world())
-        .expect("LocalShip Blackboards")
+    app.world_mut()
+        .resource_mut::<LastConsolePublications>()
         .0
-        .iter()
-        .map(|(id, blackboard)| (id.clone(), blackboard.clone()))
-        .collect();
-    current.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let hull_visibility = visibility::hull_visibility(app.world_mut());
-    let viewers = visibility::connected_viewers(app.world());
-    let mut last = LastVisibleRepairBlackboard::default();
-    let pending = visibility::project_repair_blackboards(
-        current,
-        hull_visibility.as_ref(),
-        &viewers,
-        &mut last,
-    );
-
-    let mut visible = Vec::new();
-    for (target, message) in pending {
-        let for_recipient = matches!(target, Target::All)
-            || matches!(&target, Target::Token(target_token) if target_token == token);
-        if !for_recipient {
-            continue;
-        }
-        if let ServerMessage::BlackboardUpdate { updates, .. } = message {
-            visible.extend(updates);
-        }
-    }
-    visible.sort_by(|a, b| a.0.cmp(&b.0));
-    visible
+        .remove(token);
+    crate::ship::console_publication::publish_console_blackboards(app.world_mut(), Some(0));
+    app.world_mut()
+        .resource_mut::<SimOutbox>()
+        .drain()
+        .into_iter()
+        .filter(|entry| entry.target == Target::Token(token.into()))
+        .flat_map(|entry| match entry.message {
+            ServerMessage::BlackboardUpdate { updates, .. } => updates,
+            _ => vec![],
+        })
+        .collect()
 }
 
 fn reconnect_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, SystemBlackboard)> {
@@ -146,25 +154,14 @@ fn reconnect_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, Sys
 }
 
 #[test]
-fn blackboard_owner_registers_reset_for_both_live_projection_caches() {
+fn blackboard_owner_resets_the_actual_recipient_projection_cache() {
     let mut app = blackboard_lifecycle_app();
-    app.world_mut()
-        .resource_mut::<LastBroadcastBlackboards>()
+    assert!(!live_updates_for_token(&mut app, "eng").is_empty());
+    assert!(!app
+        .world()
+        .resource::<LastConsolePublications>()
         .0
-        .insert(SystemId("cached".into()), helm_blackboard());
-    {
-        let mut projected = app
-            .world_mut()
-            .resource_mut::<LastVisibleRepairBlackboard>();
-        projected
-            .projections
-            .insert("eng".into(), RepairBlackboard::default());
-        projected.stations.insert(
-            "eng".into(),
-            Some(crate::core::messages::StationId("engineering".into())),
-        );
-    }
-
+        .is_empty());
     assert_eq!(
         app.world()
             .resource::<ReplicationLifecycleRegistry>()
@@ -173,15 +170,11 @@ fn blackboard_owner_registers_reset_for_both_live_projection_caches() {
         vec![BLACKBOARD_REPLICATION_KEY]
     );
     reset_registered_replication(app.world_mut());
-
     assert!(app
         .world()
-        .resource::<LastBroadcastBlackboards>()
+        .resource::<LastConsolePublications>()
         .0
         .is_empty());
-    let projected = app.world().resource::<LastVisibleRepairBlackboard>();
-    assert!(projected.projections.is_empty());
-    assert!(projected.stations.is_empty());
 }
 
 #[test]
@@ -200,23 +193,22 @@ fn reconnect_projection_matches_live_visibility_for_each_recipient() {
                 .iter()
                 .map(|(id, _)| id.0.as_str())
                 .collect::<Vec<_>>(),
-            vec!["repair", "z-shared"],
+            if token == "eng" {
+                vec!["helm", "repair"]
+            } else {
+                vec!["helm"]
+            },
             "every current permitted Blackboard must be present in stable order"
         );
     }
 
     let pilot = reconnect_updates_for_token(&mut app, "pilot");
-    let repair = pilot
-        .iter()
-        .find_map(|(_, blackboard)| match blackboard {
-            SystemBlackboard::Repair(repair) => Some(repair),
-            _ => None,
-        })
-        .expect("pilot receives the withholding Repair overwrite");
-    assert!(repair.system_hull.is_empty());
-    assert!(repair.damageable_systems.is_empty());
-    assert!(repair.aggregate_hull_fraction.is_none());
-    assert!(repair.destroyed_hull_fraction.is_none());
+    assert!(
+        !pilot
+            .iter()
+            .any(|(_, board)| matches!(board, SystemBlackboard::Repair(_))),
+        "a Console without a Repair binding must receive no Repair publication"
+    );
 }
 
 #[test]
@@ -257,6 +249,7 @@ fn presentation_rebase_republishes_unchanged_recipient_boards_and_reconnect_stam
         let ServerMessage::BlackboardUpdate {
             updates: new_rows,
             presentation_generation,
+            ..
         } = &new.message
         else {
             panic!("new-board")
@@ -273,4 +266,53 @@ fn presentation_rebase_republishes_unchanged_recipient_boards_and_reconnect_stam
             assert_eq!(presentation_generation, Some(8));
         }
     }
+}
+
+#[test]
+fn reconnect_missing_config_or_hosts_never_falls_back_to_global_boards() {
+    let mut app = blackboard_lifecycle_app();
+    let world = app.world_mut();
+    let entity = world
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(world)
+        .unwrap();
+    world
+        .entity_mut(entity)
+        .remove::<crate::ship::components::ConsoleHosts>();
+    let packets = reconnect_registered_replication(app.world_mut(), "eng");
+    assert_eq!(packets.len(), 1);
+    let ServerMessage::BlackboardUpdate {
+        console_scope,
+        updates,
+        ..
+    } = &packets[0]
+    else {
+        panic!("scope revoke")
+    };
+    assert_eq!(console_scope, &Some(vec![]));
+    assert!(updates.is_empty());
+    app.world_mut()
+        .entity_mut(entity)
+        .remove::<ShipConfigComponent>();
+    assert!(reconnect_registered_replication(app.world_mut(), "eng").is_empty());
+}
+
+#[test]
+fn privileged_local_reconnect_matches_live_raw_publication() {
+    let mut app = blackboard_lifecycle_app();
+    let token = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+    let live = live_updates_for_token(&mut app, token);
+    assert_eq!(reconnect_updates_for_token(&mut app, token), live);
+    assert_eq!(live.len(), 2);
+    let repair = live
+        .iter()
+        .find_map(|(_, board)| {
+            if let SystemBlackboard::Repair(repair) = board {
+                Some(repair)
+            } else {
+                None
+            }
+        })
+        .expect("raw Repair");
+    assert_eq!(repair.aggregate_hull_fraction, Some(0.5));
 }

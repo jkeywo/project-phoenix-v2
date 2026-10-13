@@ -824,6 +824,7 @@ pub struct StartGrantAdmission<'w, 's> {
             &'static crate::entities::spawner::EntityUuid,
             &'static crate::ship_plugin::ShipConfigComponent,
             &'static crate::ship_plugin::ActiveStationRatings,
+            Option<&'static crate::ship::components::ConsoleHosts>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1358,8 +1359,9 @@ pub fn apply_mesh_inbox(
                             &proposal.action,
                             &proposal.operator_id,
                             &start_admission.gm_puppets,
-                            found.map(|(_, config, _)| &config.0),
-                            found.map(|(_, _, ratings)| ratings),
+                            found.map(|(_, config, _, _)| &config.0),
+                            found.map(|(_, _, ratings, _)| ratings),
+                            found.and_then(|(_, _, _, hosts)| hosts),
                         )
                         .and_then(|()| {
                             crate::gm_action::sequence_owner_proposal(

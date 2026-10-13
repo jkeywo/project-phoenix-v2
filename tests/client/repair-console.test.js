@@ -104,3 +104,24 @@ describe('battleship repair renderStation', () => {
     expect(el('hull-integrity').state).toEqual({ total_pct: 1, destroyed_pct: undefined });
   });
 });
+
+import { repairCoreAndTargets } from '../../gui/console-state.js';
+import { dispatchRepairTeamPayload } from '../../gui/repair-dispatch.js';
+
+it('uses authoritative typed repair groups and keeps detached equipment out of Core', () => {
+  const rows = [
+    { system_id: 'core', max_hp: 10, current: 8 },
+    { system_id: 'detached', max_hp: 10, current: 2 },
+    { system_id: 'home', max_hp: 10, current: 6 },
+  ];
+  const { coreSystems, targets } = repairCoreAndTargets(rows, {}, rows.map(row => row.system_id), [
+    { group: { type: 'Core' }, label: 'Core', systems: ['core'] },
+    { group: { type: 'Console', data: 'shared' }, label: 'Detached', systems: ['detached'] },
+    { group: { type: 'Station', data: 'shared' }, label: 'Home', systems: ['home'] },
+  ]);
+  expect(coreSystems.map(row => row.system_id)).toEqual(['core']);
+  expect(new Set(targets.map(row => row.id)).size).toBe(3);
+  expect(targets[1].damage_pct).toBe(0.8);
+  expect(dispatchRepairTeamPayload(0, targets[1].target).data.target).toEqual({ type: 'Console', data: 'shared' });
+  expect(dispatchRepairTeamPayload(0, targets[2].target).data.target).toEqual({ type: 'Station', data: 'shared' });
+});

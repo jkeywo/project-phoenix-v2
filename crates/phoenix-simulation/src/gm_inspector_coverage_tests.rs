@@ -135,23 +135,21 @@ fn active_domain_sources() -> (
         rank: "Officer".into(),
         short_code: "H".into(),
         ratings: Vec::new(),
-        console: None,
         manual_overview: None,
         tutorials: Vec::new(),
-        human_seeking: false,
-        host_order: Vec::new(),
-        visiting_rating: None,
-        auxiliary: false,
-        command_target: None,
         stances: Vec::new(),
     };
+    let console = phoenix_model::console::ConsoleConfig {
+        id: phoenix_model::identity::ConsoleId("helm-screen".into()),
+        home_station: Some(station.id.clone()),
+        screen: Some("consoles/helm.html".into()),
+        ..Default::default()
+    };
     let system = SystemInstanceConfig {
+        console: Some(console.id.clone()),
         id: SystemId("engine".into()),
         kind: "helm-engine".into(),
-        station: Some(station.id.clone()),
         ai_only: false,
-        human_seeking: false,
-        seek_order: Vec::new(),
         power_group: Some(PowerGroupId("engines".into())),
         marker: None,
         config: None,
@@ -168,6 +166,7 @@ fn active_domain_sources() -> (
                 max_level: 4,
             },
         )]),
+        consoles: vec![console],
         coordination_lag_secs: 2.0,
     };
     let authored = EntityConfig::default();
@@ -385,6 +384,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         ship_config_schema,
         crate::ship::config::ShipConfig,
+        consoles,
         stations,
         systems,
         power_groups,
@@ -399,14 +399,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         rank,
         short_code,
         ratings,
-        console,
         manual_overview,
         tutorials,
-        human_seeking,
-        host_order,
-        visiting_rating,
-        auxiliary,
-        command_target,
         stances,
     );
     exhaustive_struct!(
@@ -430,12 +424,10 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         system_instance_schema,
         crate::ship::config::SystemInstanceConfig,
+        console,
         id,
         kind,
-        station,
         ai_only,
-        human_seeking,
-        seek_order,
         power_group,
         marker,
         config,
@@ -1100,11 +1092,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // and fingerprint. The fingerprint includes every recorded column, so
     // a classification or action-owner change cannot hide behind the same
     // number of rows.
-    // The authored star ladder adds detailed_systems[] and the torpedo
-    // auto-fire tuning flag; the remaining inventory is unchanged.
+    // Explicit Console identity, hosting, feeds and ownership replace the
+    // retired Station screen/hosting and direct System ownership paths.
     assert_eq!(
         counts,
-        [55, 71, 661, 51, 56],
+        [55, 71, 673, 51, 56],
         "update the reviewed inventory ratchet"
     );
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1123,7 +1115,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         }
     }
     assert_eq!(
-        fingerprint, 5_487_810_359_978_247_068,
+        fingerprint, 13_429_685_273_597_626_504,
         "update the reviewed inventory fingerprint"
     );
 }

@@ -76,8 +76,12 @@ fn damage_history_prunes_with_the_shared_strict_tick_window() {
 fn ownerless_npc_shield_arc_does_not_create_focus_capability() {
     let config = crate::ship::config::ShipConfig::from_toml(
         r#"
+[[console]]
+id = "ai-shield-arc-fore"
+
 [[system]]
 id = "shield-arc-fore"
+console = "ai-shield-arc-fore"
 kind = "shield_arc"
 ai_only = true
 "#,
@@ -295,6 +299,18 @@ fn test_app() -> App {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -409,7 +425,7 @@ fn shipped_hull_shields_app(
             .system(&SystemId((*system_id).into()))
             .unwrap_or_else(|| panic!("{hull_path} must declare {system_id}"));
         assert_eq!(
-            system.station.as_ref(),
+            config.system_home_station(system),
             Some(&station),
             "{system_id} must be owned by the {station_id} Station in this fixture"
         );
@@ -417,9 +433,20 @@ fn shipped_hull_shields_app(
 
     let mut app = test_app();
     let ship = ship_e(&mut app);
-    app.world_mut()
-        .entity_mut(ship)
-        .insert(crate::ship_plugin::ShipConfigComponent(config));
+    app.world_mut().entity_mut(ship).insert((
+        crate::ship::components::ConsoleHosts(
+            config
+                .consoles
+                .iter()
+                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                    console: console.id.clone(),
+                    host: console.home_station.clone(),
+                    rating: "Std".into(),
+                })
+                .collect(),
+        ),
+        crate::ship_plugin::ShipConfigComponent(config),
+    ));
     {
         let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
         sessions
@@ -620,6 +647,18 @@ fn publish_shields_blackboard_four_facings() {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -726,6 +765,18 @@ fn test_app_with_helm() -> App {
             crate::server_app::LocalShip,
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             crate::server_app::ShipSystemBlackboards::default(),
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             crate::ship::components::load_ship_config_from_disk(),
             {
                 let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
@@ -1030,6 +1081,18 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             crate::ship::components::load_ship_config_from_disk(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),
@@ -1043,6 +1106,18 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::ship::components::ConsoleHosts(
+                crate::ship::components::load_ship_config_from_disk()
+                    .0
+                    .consoles
+                    .iter()
+                    .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                        console: console.id.clone(),
+                        host: console.home_station.clone(),
+                        rating: "Std".into(),
+                    })
+                    .collect(),
+            ),
             crate::ship::components::load_ship_config_from_disk(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),

@@ -97,6 +97,7 @@ min_power_level = 2
 id = "helm"
 name = "Helm"
 home_station = "helm"
+screen = "gui/destroyer/helm.html"
 
 [[console.feed]]
 source = "dock"

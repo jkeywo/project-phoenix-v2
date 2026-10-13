@@ -225,25 +225,9 @@ pub fn detect_damage_tier_crossings(
                     // RepairRequest rather than growing the queue.
                 }
 
-                let system_config = config.0.system(system_id);
-                let (station_id, station_label) = system_config
-                    .and_then(|s| s.station.as_ref())
-                    .map(|station| {
-                        (
-                            station.0.clone(),
-                            crate::ship::coordination::coordination_addressee_label(
-                                &crate::core::messages::CoordinationAddress::Station(
-                                    station.clone(),
-                                ),
-                            ),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        (
-                            crate::console::repair::visibility::CORE_BUCKET_ID.to_string(),
-                            crate::ship::coordination::CHATTER_ADDRESSEE_CORE.to_string(),
-                        )
-                    });
+                let group = crate::modifiers::repair_teams::repair_group(system_id, &config.0);
+                let station_label =
+                    crate::console::repair::server::repair_group_label(&config.0, &group);
                 let deficit = entry.max - entry.current;
                 let sender_origin = sources.0.source_for(system_id);
 
@@ -257,7 +241,7 @@ pub fn detect_damage_tier_crossings(
                         address,
                         payload: CoordinationPayload::RepairRequest {
                             system_id: system_id.clone(),
-                            station_id,
+                            group,
                             station_label: station_label.clone(),
                             tier: current_tier,
                             // Exact on the host-internal enqueue — the AI repair
@@ -279,20 +263,12 @@ pub fn detect_damage_tier_crossings(
                 }
             } else if current_tier == DamageTier::Operational && prev_tier > DamageTier::Operational
             {
-                let system_config = config.0.system(system_id);
-                let station_id = system_config
-                    .and_then(|s| s.station.as_ref())
-                    .map(|s| s.0.clone())
-                    .unwrap_or_else(|| {
-                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
-                    });
+                let group = crate::modifiers::repair_teams::repair_group(system_id, &config.0);
                 if let Some(ref mut a) = alerted {
-                    if crate::console::repair::server::all_systems_in_station_are_operational(
-                        &station_id,
-                        hull,
-                        &config.0,
+                    if crate::console::repair::server::all_systems_in_group_are_operational(
+                        &group, hull, &config.0,
                     ) {
-                        a.0.remove(&station_id);
+                        a.0.remove(&group);
                     }
                 }
             }

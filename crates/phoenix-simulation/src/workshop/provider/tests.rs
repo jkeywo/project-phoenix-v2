@@ -1068,9 +1068,9 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
         assets::Source::Text("[global]\ntitle='Unrelated root'\n".into()),
     );
     let authored_hull = "# exact unsaved playable hull\r\nclass='lancer'\r\nname='Unsaved hull'\r\n\
-[[station]]\r\nid='flight'\r\nname='Flight'\r\ndescription='Fly'\r\nrank='Lt.'\r\nconsole='gui/custom-flight.html'\r\n\
+[[station]]\r\nid='flight'\r\nname='Flight'\r\ndescription='Fly'\r\nrank='Lt.'\r\n\
 [[station.rating]]\r\nname='Assisted'\r\nautomated_systems=['draft-drive']\r\n\
-[[system]]\r\nid='draft-drive'\r\nkind='helm_thrust'\r\nstation='flight'\r\n";
+[[system]]\r\nid='draft-drive'\r\nkind='helm_thrust'\r\nconsole='flight-screen'\r\n[[console]]\r\nid='flight-screen'\r\nhome_station='flight'\r\nscreen='gui/custom-flight.html'\r\n";
     sources.insert(
         "assets/entities/test.toml".into(),
         assets::Source::Text(authored_hull.into()),
@@ -1099,7 +1099,11 @@ fn disposable_test_freezes_validated_unsaved_sources_without_touching_the_select
     let selected_ship = selected.ship_config.unwrap();
     assert_eq!(selected_ship.stations[0].id.0, "flight");
     assert_eq!(
-        selected_ship.stations[0].console.as_deref(),
+        selected_ship
+            .console(&crate::core::messages::ConsoleId("flight-screen".into()))
+            .unwrap()
+            .screen
+            .as_deref(),
         Some("gui/custom-flight.html")
     );
     assert_eq!(
@@ -1314,7 +1318,7 @@ fn native_preview_captures_draft_only_models_and_composed_celestial_entities() {
 
 const TEST_HULL: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+[[system]]\nid='boost'\nkind='helm_boost'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
 
 #[test]
 fn workshop_slot_form_dependency_hull_survives_native_save_reload_and_test() {

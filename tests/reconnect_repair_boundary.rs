@@ -3,11 +3,9 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::{ecs::message::MessageCursor, prelude::*};
+use project_phoenix::ship::console_publication::LastConsolePublications;
 use project_phoenix::{
-    console::repair::{
-        visibility::{LastBroadcastHull, LastVisibleRepairBlackboard},
-        ShipRepairTeams,
-    },
+    console::repair::{visibility::LastBroadcastHull, ShipRepairTeams},
     core::{
         balance::BalanceEvent,
         messages::{
@@ -22,7 +20,7 @@ use project_phoenix::{
         server::{InboundMessage, OutboundMessage},
         Sessions, Target,
     },
-    server_app::{LastBroadcastBlackboards, LocalShip},
+    server_app::LocalShip,
     ship_plugin::{ActiveStationRatings, ShipSystemControlSources},
     sim_digest::world_digest,
     sim_rng::SimRng,
@@ -99,20 +97,14 @@ fn assert_human(app: &App, ship: Entity) {
 fn caches(app: &App) -> Value {
     let world = app.world();
     let mut boards: Vec<_> = world
-        .resource::<LastBroadcastBlackboards>()
+        .resource::<LastConsolePublications>()
         .0
         .iter()
         .collect();
     boards.sort_by(|a, b| a.0.cmp(b.0));
     let mut hull: Vec<_> = world.resource::<LastBroadcastHull>().0.iter().collect();
     hull.sort_by(|a, b| a.0.cmp(b.0));
-    let repair = world.resource::<LastVisibleRepairBlackboard>();
-    let mut projections: Vec<_> = repair.projections.iter().collect();
-    projections.sort_by(|a, b| a.0.cmp(b.0));
-    let mut stations: Vec<_> = repair.stations.iter().collect();
-    stations.sort_by(|a, b| a.0.cmp(b.0));
-    json!({"blackboards": boards, "hull": format!("{hull:?}"),
-        "repair": projections, "stations": stations})
+    json!({"blackboards": boards, "hull": format!("{hull:?}")})
 }
 
 fn state(app: &App, ship: Entity) -> Value {
@@ -156,15 +148,17 @@ fn helm_snapshots(messages: &[OutboundMessage]) -> Value {
                     }
             })
             .inspect(|m| {
-                if let ServerMessage::BlackboardUpdate { updates, .. } = &m.msg {
-                    for (_, board) in updates {
-                        if let SystemBlackboard::Repair(board) = board {
-                            assert!(board.teams.is_empty());
-                            assert!(board.system_hull.is_empty());
-                            assert!(board.damageable_systems.is_empty());
-                            assert!(board.aggregate_hull_fraction.is_none());
-                        }
-                    }
+                if let ServerMessage::BlackboardUpdate {
+                    updates,
+                    console_scope,
+                    ..
+                } = &m.msg
+                {
+                    let scope = console_scope.as_ref().expect("complete permitted scope");
+                    assert!(!scope.iter().any(|id| id.0 == "repair"));
+                    assert!(!updates
+                        .iter()
+                        .any(|(_, board)| matches!(board, SystemBlackboard::Repair(_))));
                 }
             })
             .cloned()
@@ -205,9 +199,24 @@ fn coherent_pair(extra: &[ServerMessage], target: &SystemId) -> bool {
         2,
         "one full blackboard + hull cohort for one real Identify"
     );
-    let ServerMessage::BlackboardUpdate { updates, .. } = &extra[0] else {
+    let ServerMessage::BlackboardUpdate {
+        updates,
+        console_scope,
+        console_scope_tick,
+        ..
+    } = &extra[0]
+    else {
         panic!("lexical blackboards owner must precede hull")
     };
+    assert!(console_scope_tick.is_some());
+    assert_eq!(
+        updates.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        console_scope
+            .as_ref()
+            .expect("complete reconnect scope")
+            .iter()
+            .collect::<Vec<_>>()
+    );
     let repair: Vec<_> = updates
         .iter()
         .filter_map(|(_, board)| match board {

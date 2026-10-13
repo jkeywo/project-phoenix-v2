@@ -355,6 +355,7 @@ kind = "Viewscreen"
 id = "transporter"
 kind = "transporter"
 console = "transport-screen"
+ai_only = true
 "#,
                 &["transporter"],
             )

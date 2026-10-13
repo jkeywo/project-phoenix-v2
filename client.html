@@ -3139,8 +3139,7 @@
         consoleHosts: window.simState?.consoleHosts,
               stationSystems: window.simState && window.simState.stationSystems,
               blackboards: window.simState && window.simState.blackboards,
-              stationHosts: window.simState && window.simState.stationHosts,
-              stationHealth: window.simState && window.simState.stationHealth,
+              consoleHealth: window.simState && window.simState.consoleHealth,
               stationImportance: window.simState && window.simState.stationImportance,
         consoleImportance: window.simState && window.simState.consoleImportance,
               stationRatings: window.simState && window.simState.stationRatings,
@@ -3429,8 +3428,6 @@
      *  the station's authored base rating. */
     function requiredRatingForStation(id, ratings) {
       const sim = window.simState;
-      const host = sim && sim.stationHosts && sim.stationHosts[id];
-      if (host && host.rating) return host.rating;
       const direct = sim && sim.stationRatings && sim.stationRatings[id];
       if (direct) return direct;
       return (ratings && ratings[0]) || '';
@@ -3472,6 +3469,11 @@
       for (const id of Object.keys(gaps)) evalStation(id, null);
       ineligible.sort();
       send('ReportStationEligibility', { ineligible });
+      if (typeof window.computeIneligibleConsoles === 'function') {
+        send('ReportConsoleEligibility', {
+          ineligible: window.computeIneligibleConsoles(profile, sim.consoleAssistGaps),
+        });
+      }
     }
 
     // Re-report whenever the private assistance profile changes (the hook is
@@ -3846,8 +3848,7 @@
         consoleHosts: window.simState?.consoleHosts,
         stationSystems: window.simState && window.simState.stationSystems,
         blackboards: window.simState && window.simState.blackboards,
-        stationHosts: window.simState && window.simState.stationHosts,
-        stationHealth: window.simState && window.simState.stationHealth,
+        consoleHealth: window.simState && window.simState.consoleHealth,
         stationImportance: window.simState && window.simState.stationImportance,
         consoleImportance: window.simState && window.simState.consoleImportance,
         stationRatings: window.simState && window.simState.stationRatings,

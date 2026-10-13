@@ -9,7 +9,6 @@ pub fn crew_matches_hull(crew: &[(StationId, String)], hull: &ShipConfig) -> boo
     crew.iter().all(|(id, rating)| {
         hull.stations.iter().any(|station| {
             station.id == *id
-                && !station.auxiliary
                 && (station.ratings.iter().any(|choice| choice.name == *rating)
                     || (station.ratings.is_empty() && rating == "Std"))
         })

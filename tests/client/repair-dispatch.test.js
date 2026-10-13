@@ -165,3 +165,11 @@ describe('repair-dispatch sends through the command gateway', () => {
     ]]);
   });
 });
+
+it('preserves typed Console targets without confusing same-name Stations or Core', () => {
+  for (const name of ['helm', 'core', 'external']) {
+    expect(dispatchRepairTeamPayload(0, { type: 'Console', data: name }).data.target)
+      .toEqual({ type: 'Console', data: name });
+  }
+  expect(() => repairTargetFor({ type: 'Console', data: '' })).toThrow(TypeError);
+});

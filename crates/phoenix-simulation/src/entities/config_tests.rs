@@ -2280,15 +2280,14 @@ width_deg = 90
     let sys = &ship_config.systems[0];
     assert_eq!(sys.id.0, "shield-arc-fore");
     assert_eq!(sys.kind, "shield_arc");
-    // No `[shields]` station on this bare ship → arc is ai_only + ownerless.
-    assert!(sys.ai_only, "ownerless arc must be ai_only");
-    assert!(sys.station.is_none());
+    // A bare ship gets a screenless Console scope and AI-only generated arcs.
+    assert!(sys.ai_only, "screenless arc must be ai_only");
+    assert!(ship_config.system_home_station(sys).is_none());
 }
 
 #[test]
-fn shield_arc_synthesises_with_shields_station_when_present() {
-    // A ship that declares a `shields` station gets arcs owned by that
-    // station with `ai_only = false`.
+fn shield_arc_inherits_the_parent_system_console() {
+    // Generated arcs inherit the authored parent System Console and AI policy.
     let toml_str = r#"
 tags = ["ship"]
 
@@ -2310,23 +2309,29 @@ name = "Shields"
 description = "Manage shield systems."
 rank = "Ens."
 short_code = "SHD"
-console = "shields"
 
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[console]]
+id = "shield-screen"
+home_station = "shields"
+screen = "gui/shields.html"
+
+[[system]]
+id = "shields"
+kind = "shields"
+console = "shield-screen"
 "#;
     let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
     let ship_config = config.ship_config.expect("ship_config present");
-    assert_eq!(ship_config.systems.len(), 2);
+    assert_eq!(ship_config.systems.len(), 3);
     for sys in &ship_config.systems {
-        assert!(
-            !sys.ai_only,
-            "with a shields station, arcs are player-controlled"
-        );
+        assert!(!sys.ai_only, "the parent Console owns generated arcs");
         assert_eq!(
-            sys.station,
-            Some(crate::core::messages::StationId("shields".into()))
+            ship_config.system_home_station(sys),
+            Some(&crate::core::messages::StationId("shields".into()))
         );
     }
 }
@@ -2351,11 +2356,19 @@ fn courier_toml_is_a_valid_two_station_hull() {
     assert_eq!(ship_config.stations[0].ratings.len(), 1);
     assert_eq!(ship_config.stations[1].ratings.len(), 1);
     assert_eq!(
-        ship_config.stations[0].console.as_deref(),
+        ship_config
+            .console(&crate::core::messages::ConsoleId("captain".into()))
+            .unwrap()
+            .screen
+            .as_deref(),
         Some("gui/courier/captain.html")
     );
     assert_eq!(
-        ship_config.stations[1].console.as_deref(),
+        ship_config
+            .console(&crate::core::messages::ConsoleId("tactical".into()))
+            .unwrap()
+            .screen
+            .as_deref(),
         Some("gui/courier/tactical.html")
     );
 
@@ -2384,7 +2397,7 @@ fn courier_toml_is_a_valid_two_station_hull() {
     // would be inert on the player spawn path.
     for sys in &ship_config.systems {
         assert!(
-            matches!(sys.station.as_ref(), Some(station) if station == &captain || station == &tactical),
+            matches!(ship_config.system_home_station(sys), Some(station) if station == &captain || station == &tactical),
             "system {:?} must be station-owned",
             sys.id
         );
@@ -2439,8 +2452,8 @@ fn battleship_toml_produces_five_shield_arcs() {
     for sys in &arc_systems {
         assert!(!sys.ai_only);
         assert_eq!(
-            sys.station,
-            Some(crate::core::messages::StationId("shields".into()))
+            ship_config.system_home_station(sys),
+            Some(&crate::core::messages::StationId("shields".into()))
         );
         assert_eq!(sys.power_group, None);
     }
@@ -2491,7 +2504,10 @@ fn npc_ship_with_single_shield_arc_produces_one_arc_system() {
         let sys = arc_systems[0];
         assert_eq!(sys.id.0, "shield-arc-all", "{path} SystemId shape");
         assert!(sys.ai_only, "{path} NPC arc must be ai_only");
-        assert!(sys.station.is_none(), "{path} NPC arc must be ownerless");
+        assert!(
+            ship_config.system_home_station(sys).is_none(),
+            "{path} NPC arc must be ownerless"
+        );
     }
 }
 
@@ -3049,8 +3065,11 @@ fn harrow_warhawk_declares_its_artillery_bank_as_a_system() {
         "a station-owned system must not rely on `ai_only`"
     );
     assert_eq!(
-        declared.station,
-        Some(crate::core::messages::StationId("tactical".into())),
+        cfg.ship_config
+            .as_ref()
+            .unwrap()
+            .system_home_station(declared),
+        Some(&crate::core::messages::StationId("tactical".into())),
         "the artillery bank belongs to the Tactical seat"
     );
 }
@@ -9488,9 +9507,13 @@ text = "Destroy hostiles"
 directive_kind = "Destroy"
 base_priority = 35.0
 
+[[console]]
+id = "helm-thrust-scope"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
+console = "helm-thrust-scope"
 ai_only = true
 "#;
 
@@ -9514,7 +9537,12 @@ fn behaviour_npc_without_red_alert_gets_ai_only_ownerless_provision() {
     assert_eq!(sys.id.0, crate::ship::system_registry::RED_ALERT_SYSTEM_ID);
     assert!(sys.ai_only, "provisioned red_alert must be ai_only");
     assert!(
-        sys.station.is_none(),
+        config
+            .ship_config
+            .as_ref()
+            .unwrap()
+            .system_home_station(sys)
+            .is_none(),
         "provisioned red_alert must be ownerless"
     );
 }
@@ -9550,9 +9578,13 @@ text = "Destroy hostiles"
 directive_kind = "Destroy"
 base_priority = 35.0
 
+[[console]]
+id = "phaser-fore-scope"
+
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
+console = "phaser-fore-scope"
 ai_only = true
 "#;
     let config = EntityConfig::from_toml_in_mode(
@@ -9562,7 +9594,15 @@ ai_only = true
     .expect("fixture must parse");
     let reds = red_alert_systems(&config);
     assert_eq!(reds.len(), 1, "behaviour NPC provisioned one red_alert");
-    assert!(reds[0].ai_only && reds[0].station.is_none());
+    assert!(
+        reds[0].ai_only
+            && config
+                .ship_config
+                .as_ref()
+                .unwrap()
+                .system_home_station(reds[0])
+                .is_none()
+    );
 }
 
 #[test]
@@ -9583,8 +9623,12 @@ fn harrow_destroyer_authors_its_own_captain_owned_red_alert() {
         "authored red_alert must not be double-provisioned"
     );
     assert_eq!(
-        reds[0].station,
-        Some(crate::core::messages::StationId("captain".into())),
+        config
+            .ship_config
+            .as_ref()
+            .unwrap()
+            .system_home_station(reds[0]),
+        Some(&crate::core::messages::StationId("captain".into())),
         "the Captain seat owns Red Alert"
     );
     assert!(
@@ -9610,8 +9654,12 @@ fn explicit_red_alert_is_left_untouched() {
         "authored red_alert must not be double-provisioned"
     );
     assert_eq!(
-        reds[0].station,
-        Some(crate::core::messages::StationId("captain".into())),
+        config
+            .ship_config
+            .as_ref()
+            .unwrap()
+            .system_home_station(reds[0]),
+        Some(&crate::core::messages::StationId("captain".into())),
         "authored captain ownership must survive provisioning"
     );
     assert!(

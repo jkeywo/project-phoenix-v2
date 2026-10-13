@@ -12,6 +12,36 @@ use phoenix_sim_gameplay::ship::helm_ai::{
     impulse::ImpulseAxis, lateral::LateralAxis, vertical::VerticalAxis,
 };
 
+/// These planner tests supply world contacts directly instead of running the
+/// Console publishers. Supply their ordinary read surfaces as well: authored
+/// Console bindings still decide which axes may read each publication.
+fn test_app() -> App {
+    let mut app = crate::ship::test_support::test_app();
+    let ship = find_ship_entity(&mut app);
+    let mut entity = app.world_mut().entity_mut(ship);
+    let mut boards = entity
+        .get_mut::<crate::server_app::ShipSystemBlackboards>()
+        .unwrap();
+    boards.0.insert(
+        crate::ship::system_registry::helm_station_key(),
+        crate::core::messages::SystemBlackboard::Helm(Default::default()),
+    );
+    boards.0.insert(
+        crate::ship::system_registry::navigation_system_id(),
+        crate::core::messages::SystemBlackboard::Navigation(
+            crate::core::messages::NavigationBlackboard {
+                nav_chart_range: 5000.0,
+                nav_chart_shows: vec![],
+                nav_chart_selects: vec![],
+                navigation_waypoint: None,
+                civilians: vec![],
+                host_station: None,
+            },
+        ),
+    );
+    app
+}
+
 // ── Table-driven per-axis wiring guard (issue #1208) ──────────────────────
 //
 // Every `HelmAxisHost` must resolve its OWN accepted verb through the shared
@@ -331,7 +361,19 @@ fn install_control_sources(app: &mut App, resolver: &ControlSourceResolver) {
         .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
     for mut cs in q.iter_mut(app.world_mut()) {
         cs.0 = resolver.clone();
+        for (id, source) in resolver.entries() {
+            if *source == ControlSource::Offline {
+                cs.0.set_gm_disabled(id.clone(), true);
+            }
+        }
     }
+    crate::ship::test_support::materialize_fixture_control_sources(
+        app,
+        &resolver
+            .entries()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>(),
+    );
 }
 
 /// AC5 (issue #800), and the coverage gap that let the dormancy ship.
@@ -2618,6 +2660,7 @@ fn cleared_nav_waypoint_reaches_the_motion_planner_regardless_of_source() {
 #[test]
 fn helm_ai_does_nothing_when_helm_human() {
     let mut app = test_app();
+    set_helm_control_source(&mut app, ControlSource::Human);
     let anchor = "station-alpha";
     set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
     app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
@@ -3096,8 +3139,8 @@ fn waypoint_set_while_helm_human_is_flown_once_helm_flips_to_ai() {
     app.add_plugins(crate::console::navigation::NavigationPlugin)
         .init_resource::<crate::lobby::server::ShipClientConfigResource>();
 
-    // A human captain + navigation officer, game started. The helm axes
-    // stay on their default Human control for now.
+    // A human captain + navigation officer start the game. The test then
+    // adds the Helm operator before delivering the waypoint.
     push(
         &mut app,
         "captain",
@@ -3139,6 +3182,8 @@ fn waypoint_set_while_helm_human_is_flown_once_helm_flips_to_ai() {
         ClientMessage::SetReady { ready: true },
     );
     tick(&mut app);
+
+    set_helm_control_source(&mut app, ControlSource::Human);
 
     // A Helm-relevant objective that cannot resolve, so once the helm is
     // AI the only thing left to fly is the Navigation waypoint.
@@ -3361,17 +3406,11 @@ fn lateral_intent(app: &mut App) -> f32 {
 fn lateral_thrust_ai_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
     let mut app = test_app();
     set_helm_control_source(&mut app, ControlSource::Human);
-    {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
-        for mut cs in q.iter_mut(app.world_mut()) {
-            cs.0.set(
-                crate::ship::system_registry::lateral_thrust_system_id(),
-                ControlSource::Ai,
-            );
-        }
-    }
+    set_fine_control_source(
+        &mut app,
+        crate::ship::system_registry::lateral_thrust_system_id(),
+        ControlSource::Ai,
+    );
     set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
     if let Some(behaviour) = behaviour {
         set_behaviour_section(&mut app, behaviour);
@@ -3689,18 +3728,37 @@ fn vertical_thrust_ai_app(
     behaviour: Option<crate::entities::config::BehaviourConfig>,
 ) -> App {
     let mut app = test_app();
-    set_helm_control_source(&mut app, ControlSource::Human);
+    // The base Cruiser has planar actuators. This fixture adds vertical
+    // equipment as well as its capability, with the same Helm knowledge scope.
+    let ship = find_ship_entity(&mut app);
     {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
-        for mut cs in q.iter_mut(app.world_mut()) {
-            cs.0.set(
-                crate::ship::system_registry::vertical_thrust_system_id(),
-                ControlSource::Ai,
-            );
-        }
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut config = entity.get_mut::<ShipConfigComponent>().unwrap();
+        let console = config
+            .0
+            .system(&crate::ship::system_registry::helm_thrust_system_id())
+            .unwrap()
+            .console
+            .clone();
+        config
+            .0
+            .systems
+            .push(crate::ship::config::SystemInstanceConfig {
+                id: crate::ship::system_registry::vertical_thrust_system_id(),
+                kind: crate::ship::system_registry::VERTICAL_THRUST_KIND.into(),
+                console,
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            });
     }
+    set_helm_control_source(&mut app, ControlSource::Human);
+    set_fine_control_source(
+        &mut app,
+        crate::ship::system_registry::vertical_thrust_system_id(),
+        ControlSource::Ai,
+    );
     set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
     let ship = find_ship_entity(&mut app);
     app.world_mut()
@@ -6148,6 +6206,7 @@ fn detect_reach_completion_does_not_complete_when_helm_human() {
     use crate::world::server::ObjectiveManagerRes;
 
     let mut app = test_app();
+    set_helm_control_source(&mut app, ControlSource::Human);
     let anchor = "dock-beta";
     set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
     app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
@@ -12039,4 +12098,30 @@ fn an_unauthored_hull_never_acquires_a_flip_slot() {
         None,
         "a floor with no restore reading and no dwell is not a latch"
     );
+}
+
+#[test]
+fn fixture_control_sources_survive_console_host_resolution() {
+    let mut app = test_app();
+    let thrust = crate::ship::system_registry::helm_thrust_system_id();
+    let steering = crate::ship::system_registry::helm_steering_system_id();
+    set_helm_control_source(&mut app, ControlSource::Ai);
+    set_fine_control_source(&mut app, thrust.clone(), ControlSource::Human);
+    set_fine_control_source(&mut app, steering.clone(), ControlSource::Offline);
+    tick_twice(&mut app);
+    let mut query = app
+        .world_mut()
+        .query_filtered::<&ShipSystemControlSources, With<Ship>>();
+    for sources in query.iter(app.world()) {
+        assert_eq!(sources.0.source_for(&thrust), ControlSource::Human);
+        assert!(sources.0.policy_for(&thrust).accept_human_input);
+        assert!(!sources.0.policy_for(&steering).operate_ai);
+        assert!(!sources.0.policy_for(&steering).accept_human_input);
+        assert!(
+            sources
+                .0
+                .policy_for(&crate::ship::system_registry::helm_impulse_system_id())
+                .operate_ai
+        );
+    }
 }

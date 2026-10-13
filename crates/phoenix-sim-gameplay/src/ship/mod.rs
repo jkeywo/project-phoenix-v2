@@ -2,6 +2,7 @@ pub mod boost;
 pub mod command_stance;
 pub mod components;
 pub mod config;
+pub mod console_ownership;
 pub mod control_source;
 pub mod coordination;
 pub mod damage;

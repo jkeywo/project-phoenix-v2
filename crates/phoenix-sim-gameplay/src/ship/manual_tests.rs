@@ -43,40 +43,50 @@ automated_systems = ["sensors"]
 name = "Simplified"
 automated_systems = ["sensors", "shield-arc-fore", "shield-arc-aft"]
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "fixture.html"
+
+[[console]]
+id = "science-console"
+home_station = "science"
+screen = "fixture.html"
+
 [[system]]
 id = "captain"
 kind = "captain"
-station = "captain"
+console = "captain-console"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "science"
+console = "science-console"
 
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "science"
+console = "science-console"
 
 [[system]]
 id = "shield-arc-fore"
 kind = "shield_arc"
-station = "science"
+console = "science-console"
 
 [[system]]
 id = "shield-arc-port"
 kind = "shield_arc"
-station = "science"
+console = "science-console"
 
 [[system]]
 id = "shield-arc-aft"
 kind = "shield_arc"
-station = "science"
+console = "science-console"
 
 [[system]]
 id = "shield-arc-starboard"
 kind = "shield_arc"
-station = "science"
+console = "science-console"
 "#
 }
 
@@ -345,54 +355,79 @@ rank = "Ens."
 name = "Std"
 automated_systems = []
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
+[[console]]
+id = "engineering-console"
+home_station = "engineering"
+screen = "fixture.html"
+
+[[console]]
+id = "science-console"
+home_station = "science"
+screen = "fixture.html"
+
+[[console]]
+id = "comms-console"
+home_station = "comms"
+screen = "fixture.html"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm-console"
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-station = "tactical"
+console = "tactical-console"
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-station = "tactical"
+console = "tactical-console"
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
-station = "tactical"
+console = "tactical-console"
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
-station = "tactical"
+console = "tactical-console"
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-station = "engineering"
+console = "engineering-console"
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-station = "engineering"
+console = "engineering-console"
 [[system]]
 id = "repair"
 kind = "repair"
-station = "engineering"
+console = "engineering-console"
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "science"
+console = "science-console"
 [[system]]
 id = "sensor-radar"
 kind = "sensor_radar"
-station = "science"
+console = "science-console"
 [[system]]
 id = "comms"
 kind = "comms"
-station = "comms"
+console = "comms-console"
 "#
 }
 

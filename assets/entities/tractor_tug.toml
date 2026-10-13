@@ -112,6 +112,7 @@ max_penalty = 0.8
 id = "engineering"
 name = "Engineering"
 home_station = "engineering"
+screen = "gui/cruiser/engineering.html"
 
 [[console.feed]]
 source = "tractor"

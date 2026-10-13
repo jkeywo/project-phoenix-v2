@@ -8,7 +8,7 @@ use crate::core::messages::{
     SystemControlPayload, SystemId,
 };
 use crate::ship::command_stance;
-use crate::ship::config::{ShipConfig, StanceKind, StationConfig, StationStanceConfig};
+use crate::ship::config::{ShipConfig, StanceKind, StationStanceConfig};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 
@@ -281,13 +281,13 @@ fn project_active_objective_stances(
 
 // ── Config helpers (pure) ─────────────────────────────────────────────────────
 
-/// The one authored Command station on a hull, if any: an auxiliary station that
-/// names a `command_target`.
-pub fn command_station(config: &ShipConfig) -> Option<&StationConfig> {
+/// The authored Command Console, independent of its current hosting Station.
+/// Its target remains a crew Station with an authored stance catalogue.
+pub fn command_console(config: &ShipConfig) -> Option<&phoenix_model::console::ConsoleConfig> {
     config
-        .stations
+        .consoles
         .iter()
-        .find(|station| station.command_target.is_some())
+        .find(|console| console.command_target.is_some())
 }
 
 /// Whether a Station is currently AI-controlled — the only state in which
@@ -305,7 +305,13 @@ pub fn station_is_ai_controlled(
     config
         .systems
         .iter()
-        .filter(|system| system.station.as_ref() == Some(station) && !system.human_seeking)
+        .filter(|system| {
+            config
+                .console_for_system(&system.id)
+                .is_some_and(|console| {
+                    console.home_station.as_ref() == Some(station) && !console.human_seeking
+                })
+        })
         .all(|system| control_sources.source_for(&system.id) == ControlSource::Ai)
 }
 
@@ -371,7 +377,7 @@ fn handle_set_station_stance(
         let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
         let active = scoped_active.as_ref();
         let config = &ship_config.0;
-        let Some(command) = command_station(config) else {
+        let Some(command) = command_console(config) else {
             continue;
         };
         let target = command.command_target.as_ref();
@@ -551,7 +557,7 @@ fn reconcile_directed_target_control(
         let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
         let active = scoped_active.as_ref();
         let config = &ship_config.0;
-        let Some(command) = command_station(config) else {
+        let Some(command) = command_console(config) else {
             continue;
         };
         let Some(target) = command.command_target.clone() else {
@@ -664,7 +670,7 @@ fn operate_command_ai(
         let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
         let active = scoped_active.as_ref();
         let config = &ship_config.0;
-        let Some(command) = command_station(config) else {
+        let Some(command) = command_console(config) else {
             continue;
         };
         // Only when the Command SEAT itself is AI-operated. This is the
@@ -748,7 +754,7 @@ fn publish_command_blackboard(
         let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
         let active = scoped_active.as_ref();
         let config = &ship_config.0;
-        let Some(command) = command_station(config) else {
+        let Some(command) = command_console(config) else {
             continue;
         };
         let Some(target) = command.command_target.clone() else {

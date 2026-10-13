@@ -248,6 +248,21 @@ pub(crate) fn helm_shared_target_view(
     {
         push(Some(source_uuid.clone()));
     }
+    // A designation shares identity, not the world's full contact record.
+    // Match the client read view: Viewscreen alone does not supply contacts.
+    let has_contacts = blackboards.0.values().any(|board| {
+        matches!(
+            board,
+            crate::core::messages::SystemBlackboard::Helm(_)
+                | crate::core::messages::SystemBlackboard::Sensors(_)
+                | crate::core::messages::SystemBlackboard::Navigation(_)
+                | crate::core::messages::SystemBlackboard::TacticalRadar(_)
+                | crate::core::messages::SystemBlackboard::Weapons(_)
+        )
+    });
+    if !has_contacts {
+        return (world_view, ids);
+    }
     for id in &ids {
         if !world_view.entities.iter().any(|e| e.uuid == *id) {
             if let Some(entity) = snapshot_entities.iter().find(|e| e.uuid == *id) {
@@ -407,6 +422,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::ship::components::ShipConfigComponent>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::entities::spawner::ColliderSection>,
@@ -443,6 +459,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         sources,
         physics,
         blackboards,
+        ship_config,
         entity_uuid,
         faction,
         collider,
@@ -468,6 +485,19 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             continue;
         }
 
+        // The existing shared movement planner may only use knowledge available
+        // to every participating axis. It never unions co-hosted Console feeds.
+        // This temporary projection borrows existing publications at assembly;
+        // no policy memory or authoritative observation store is replaced.
+        let scoped = shared_helm_observations(ship_config.map(|c| &c.0), sources, blackboards);
+        let blackboards = &scoped;
+        let has_navigation = blackboards.0.values().any(|board| {
+            matches!(
+                board,
+                crate::core::messages::SystemBlackboard::Navigation(_)
+            )
+        });
+        let waypoint = has_navigation.then_some(surfaces.waypoint).flatten();
         let scored = helm_ai_scored_objectives(blackboards);
         let has_objective = has_helm_objective(&scored);
         if !has_objective {
@@ -491,7 +521,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             continue;
         }
 
-        let visible_view = helm_ai_world_view(
+        let mut visible_view = helm_ai_world_view(
             physics,
             entity_uuid,
             faction,
@@ -503,11 +533,18 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             &frame.anchors,
             &snapshot_entities,
         );
+        if !blackboards
+            .0
+            .values()
+            .any(|board| matches!(board, crate::core::messages::SystemBlackboard::Helm(_)))
+        {
+            visible_view.entities.clear();
+        }
         let (merged_view, shared_targets) = helm_shared_target_view(
             visible_view.clone(),
             &snapshot_entities,
             blackboards,
-            surfaces.waypoint,
+            waypoint,
         );
         let destroy_target = helm_destroy_target(&scored, &merged_view, &shared_targets, registry);
         // Issue #874: reduce the hostiles' published arc sectors against this
@@ -532,11 +569,8 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 merged_view,
                 destroy_target,
                 weapons_target: helm_weapons_target(combat_lock.as_deref()),
-                nav_waypoint: cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
-                nav_waypoint_anchor: cleared_nav_waypoint_anchor(
-                    surfaces.waypoint,
-                    surfaces.clearance,
-                ),
+                nav_waypoint: cleared_nav_waypoint(waypoint, surfaces.clearance),
+                nav_waypoint_anchor: cleared_nav_waypoint_anchor(waypoint, surfaces.clearance),
                 forward_speed: physics.forward_speed,
                 hostile_arc_exposure,
                 red_alert,
@@ -552,3 +586,49 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 // `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
 pub use phoenix_sim_gameplay::ship::helm_ai::surfaces::*;
+
+#[cfg(test)]
+#[path = "surfaces_scope_tests.rs"]
+mod shared_target_scope_tests;
+
+/// Shared coordination work is restricted to the intersection of its readers.
+fn shared_helm_observations(
+    config: Option<&crate::ship::config::ShipConfig>,
+    sources: &ShipSystemControlSources,
+    boards: &crate::server_app::ShipSystemBlackboards,
+) -> crate::server_app::ShipSystemBlackboards {
+    let Some(config) = config else {
+        return Default::default();
+    };
+    let readers: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|system| {
+            matches!(
+                system.kind.as_str(),
+                "helm_thrust"
+                    | "helm_steering"
+                    | "lateral_thrust"
+                    | "vertical_thrust"
+                    | "helm_impulse"
+                    | "helm_boost"
+            ) && sources.0.policy_for(&system.id).operate_ai
+        })
+        .collect();
+    crate::server_app::ShipSystemBlackboards(
+        boards
+            .0
+            .iter()
+            .filter(|(source, _)| {
+                !readers.is_empty()
+                    && readers.iter().all(|system| {
+                        config
+                            .observations_for_system(&system.id, &boards.0)
+                            .get(source)
+                            .is_some()
+                    })
+            })
+            .map(|(source, board)| (source.clone(), board.clone()))
+            .collect(),
+    )
+}

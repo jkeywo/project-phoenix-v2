@@ -216,9 +216,6 @@ fn ensure_known_ship_fields(
         for (name, kind) in [
             ("manual_overview", "optional"),
             ("tutorial", "list"),
-            ("host_order", "list"),
-            ("visiting_rating", "optional"),
-            ("command_target", "optional"),
             ("stance", "list"),
         ] {
             ensure_authored(values, fields, format!("{prefix}.{name}"), kind);
@@ -235,8 +232,7 @@ fn ensure_known_ship_fields(
     for system in &config.systems {
         let prefix = format!("system[{}]", system.id.0);
         for (name, kind) in [
-            ("station", "optional"),
-            ("seek_order", "list"),
+            ("console", "optional"),
             ("power_group", "optional"),
             ("marker", "optional"),
             ("config", "optional"),

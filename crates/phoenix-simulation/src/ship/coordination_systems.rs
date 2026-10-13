@@ -7,7 +7,7 @@ use crate::server_app::LocalShip;
 use crate::ship::components::{
     ActiveStationRatings, CoordinationDelivery, CoordinationEnqueue, CoordinationEnqueueCursor,
     CoordinationQueue, DeliveredCoordination, HumanSeekingHosts, OrderedCoordinationPopup,
-    ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
+    ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -136,24 +136,16 @@ fn coarsen_repair_request(
     vis: Option<&crate::console::repair::visibility::HullVisibility>,
     viewer: Option<&crate::core::messages::StationId>,
 ) -> CoordinationPayload {
-    let CoordinationPayload::RepairRequest {
-        system_id,
-        station_id,
-        station_label,
-        tier,
-        deficit,
-    } = payload
-    else {
-        return payload.clone();
-    };
-    let entitled = vis.map(|v| v.can_see(viewer, system_id)).unwrap_or(false);
-    CoordinationPayload::RepairRequest {
-        system_id: system_id.clone(),
-        station_id: station_id.clone(),
-        station_label: station_label.clone(),
-        tier: *tier,
-        deficit: if entitled { *deficit } else { None },
+    let mut result = payload.clone();
+    if let CoordinationPayload::RepairRequest {
+        system_id, deficit, ..
+    } = &mut result
+    {
+        if !vis.is_some_and(|v| v.can_see(viewer, system_id)) {
+            *deficit = None;
+        }
     }
+    result
 }
 
 /// Build the seat list the pure ship-broadcast router works from (issue #879).
@@ -176,7 +168,7 @@ fn ship_seats(
             let policies: Vec<crate::ship::control_source::ControlTickPolicy> = config
                 .systems
                 .iter()
-                .filter(|s| s.station.as_ref() == Some(&station.id))
+                .filter(|s| config.system_home_station(s) == Some(&station.id))
                 .map(|s| control_sources.0.policy_for(&s.id))
                 .collect();
             coordination::ShipSeat {
@@ -224,101 +216,10 @@ pub fn write_scenario_detail_floor(
     }
 }
 
-/// Re-resolve, EVERY tick, which station is hosting each `human_seeking`
-/// `[[system]]` on the player's ship, and put that system's `ControlSource`
-/// where the answer says it belongs.
-///
-/// Comms and Navigation "always try to be under human control" (pasm decision
-/// `console-complexity-human-seeking-systems`). The decision itself is the pure
-/// [`coordination::seek_human_host`] over the pure
-/// [`coordination::seeking_seats`]; this adapter only supplies the ship's
-/// authored config, its live control sources, its active ratings and the lobby
-/// session map, then writes the two things the rest of the host reads:
-///
-/// * `ControlSource::Human` on a hit, `ControlSource::Ai` on a miss, for the
-///   seeking system ALONE. This is not cosmetic:
-///   `command_admission::is_command_authorized` tests `accept_human_input`
-///   BEFORE station tenure, so a sought human whose comms system was still
-///   `Ai` (because its owning station is backfilled) would be refused at the
-///   gate with no other symptom. No other system's source is touched — a
-///   station's rating is the player's to set, and inflating the systems around
-///   the sought one would silently promote a Backfill console.
-/// * [`HumanSeekingHosts`], the system→station map
-///   `command_admission::station_for_system` consults, so tenure is checked
-///   against the seat the seek actually chose.
-/// * [`VisitingStationHosts`], including each complete visiting Station's
-///   observable effective rating after the live [`ScenarioDetailFloor`] has
-///   been composed with its authored visiting baseline.
-///
-/// **Every tick, idempotently, never on-change.** `apply_rating` fires on lobby
-/// events (a claim, a disconnect, a `SetStationRating`) and rewrites every
-/// system its station owns — including a sought one. A resolver that only ran
-/// on a change of its own inputs would be silently undone by the next rating
-/// event. Writing unconditionally but only *dereferencing* when a value
-/// actually differs keeps that re-assertion free of spurious change-detection
-/// ticks.
-///
-/// Scoped to the ships a host in the FLEET flies (`With<FleetSlotOf>`), never
-/// to NPCs — `Sessions` describes the local crew and nothing else, so resolving
-/// an enemy alliance hull against it would let a human seated on the player's
-/// bridge switch that hull's comms off AI.
-///
-/// # Whose crew answers for which ship (issue #1116)
-///
-/// It used to be scoped to `LocalShip`, which was right while a host had
-/// exactly one crewed hull and wrong the moment it had two. A peer's ship is
-/// crewed — by people on another machine — and a host that resolved it against
-/// its own empty `Sessions` would write `Ai` onto a console a human is sitting
-/// at, while the host that crew is connected to writes `Human`. The two hosts
-/// then run different AI on the same hull, and diverge.
-///
-/// In an active **lockstep fleet**, every ship — this host's own included —
-/// answers from the roster's frozen crewing, which every host received
-/// identically, so both hosts derive identical control sources from tick zero.
-/// Without `FleetLockstep`, the local ship answers from live `Sessions`, which
-/// lets a solo or independently restored pilot re-take a seat within a tick;
-/// retained remote saved ships answer from their empty frozen crew.
-///
-/// The freeze is why `is_afk` / `is_eligible` / the Station Rating — live
-/// per-session flags an ordinary in-mission player message can flip
-/// (`handle_set_afk_system`, `SetStationRating`) — do not move a fleet ship's
-/// control sources. They are read only on the solo path. Were the local ship
-/// resolved live while peers were resolved frozen, a crew member toggling AFK
-/// mid-mission would re-seek the station on their own host alone, and the two
-/// hosts would run different AI on that hull — the exact "applied at different
-/// ticks on different peers" divergence `p2p-delta-backfill-replaces-auto-crew`
-/// rules out. A proper tick-stamped AFK/rating fleet event, applied identically
-/// on every host, belongs to #1119 alongside its host-loss transitions; it is
-/// deliberately deferred rather than approximated here.
-///
-/// A system may author its own walk (`seek_order`), which this adapter hands
-/// straight through to [`coordination::seek_human_host_in`]. It is one more
-/// authored vector read in authored order, so nothing below changes: an empty
-/// `seek_order` takes the derived owner-first walk, and the shared `seats` list
-/// is still built once for the whole hull (the order chooses among the seats,
-/// it does not change what a seat is).
-///
-/// Determinism (issue #984 §2.4): the iteration order is the authored
-/// `ShipConfig.systems` and `ShipConfig.stations` vectors — never a map — and
-/// the only non-config inputs are `Sessions` and the control sources, neither
-/// of which is folded into `state_digest`. A headless or replayed run has an
-/// EMPTY `Sessions` (`headless/app.rs`), so no seat ever has a holder, every
-/// seek returns `None`, and this system writes the `Ai` that
-/// `seed_boot_ratings` already set.
-///
-/// That argument is only half the story, and the missing half cost two digests.
-/// The VALUES this system writes are indeed digest-free, but the SHAPE of the
-/// entity it writes them to is not: a `Commands::insert` of
-/// [`HumanSeekingHosts`] on the first tick moved the player ship to a fresh
-/// archetype mid-run, which shifted the archetype ids every LATER-created
-/// archetype received, which swapped the order two NPC hull groups are iterated
-/// in by every query that matches both — and `duel` and `rng_coverage` both
-/// moved on that alone. (Proven, not inferred: substituting an unrelated
-/// zero-sized marker for the real component reproduced both digests exactly.)
-/// So the component is NOT inserted here. `LocalShip` `#[require]`s it, so it
-/// arrives in the same archetype transition as the marker during the spawn
-/// burst, this system takes it as a plain `&mut`, and there is no `Commands`
-/// parameter left through which a mid-run move could be reintroduced.
+/// Resolve Console placement in authored order every tick, then project its
+/// controller to each owned System. Sessions supply local crew availability;
+/// lockstep ships use the shared frozen roster, preserving existing determinism.
+/// Console placement is derived and never resets System intent or AI memory.
 pub fn resolve_human_seeking_hosts(
     mut ships: Query<(
         &ShipConfigComponent,
@@ -326,7 +227,7 @@ pub fn resolve_human_seeking_hosts(
         Option<&ActiveStationRatings>,
         &ScenarioDetailFloor,
         &mut HumanSeekingHosts,
-        &mut VisitingStationHosts,
+        Option<&mut crate::ship_plugin::ConsoleHosts>,
         &crate::lockstep::FleetSlotOf,
     )>,
     sessions: Res<Sessions>,
@@ -342,7 +243,7 @@ pub fn resolve_human_seeking_hosts(
         ratings,
         scenario_floor,
         mut hosts,
-        mut station_hosts,
+        console_hosts,
         slot,
     ) in ships.iter_mut()
     {
@@ -355,122 +256,43 @@ pub fn resolve_human_seeking_hosts(
         let local_crew =
             crate::lockstep::uses_live_sessions(roster, fleet_session.is_some(), slot.0);
         let frozen_crew = roster.crew_of(slot.0);
-        let holder_of = |station: &crate::core::messages::StationId| -> Option<String> {
-            if local_crew {
-                sessions.0.holder_for_station(station).map(str::to_string)
-            } else {
-                frozen_crew
-                    .iter()
-                    .find(|(id, _)| id == station)
-                    // A synthetic name, never a token: a real token is a bearer
-                    // credential and for a peer's crew it lives on another
-                    // machine. Nothing downstream reads it — the seek asks only
-                    // whether a seat HAS a holder — and it is never stored or
-                    // broadcast, so a fleet ship (this host's own included) uses
-                    // it purely to answer that yes/no from the frozen roster.
-                    .map(|(id, _)| format!("fleet:{}:{}", slot.0.slot_id(), id.0))
-            }
-        };
-        // Whether `candidate` can host the VISITING station `visiting`. Two
-        // stations, deliberately: eligibility is a fact about the person and the
-        // station they would be visiting, not about the seat they are sitting in.
+        // Placement eligibility belongs to the Console and proposed rating,
+        // independent of the candidate's crew-seat eligibility.
         let seat_is_available = |candidate: &crate::core::messages::StationId,
-                                 visiting: &crate::core::messages::StationId|
+                                 console: &crate::core::messages::ConsoleId,
+                                 rating: &str|
          -> bool {
             if local_crew {
                 sessions.0.holder_for_station(candidate).is_some_and(|tok| {
-                    !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, visiting)
+                    !sessions.0.is_afk(tok) && sessions.0.is_console_eligible(tok, console, rating)
                 })
             } else {
-                // AFK and eligibility are live per-session facts. In a fleet no
-                // ship reads them — every seat is exactly as crewed as the
-                // roster froze it, this host's own included, so two hosts cannot
-                // disagree; anything finer is #1119's tick-stamped fleet event.
+                // Fleet placement uses the frozen roster on every peer.
                 frozen_crew.iter().any(|(id, _)| id == candidate)
             }
         };
         let config = &ship_config.0;
-        if !config.systems.iter().any(|s| s.human_seeking)
-            && !config.stations.iter().any(|station| station.human_seeking)
-        {
-            continue;
-        }
-        let seats = coordination::seeking_seats(
-            config,
-            &control_sources.0,
-            ratings.map(|r| &r.0).unwrap_or(&no_ratings),
-            holder_of,
-        );
-
-        let mut resolved: std::collections::BTreeMap<
-            crate::core::messages::SystemId,
-            crate::core::messages::StationId,
-        > = std::collections::BTreeMap::new();
-        let mut decisions: Vec<(crate::core::messages::SystemId, ControlSource)> = Vec::new();
-        for system in config.systems.iter().filter(|s| s.human_seeking) {
-            match coordination::seek_human_host_in(
-                system.station.as_ref(),
-                &system.seek_order,
-                &seats,
-            ) {
-                Some(seat) => {
-                    resolved.insert(system.id.clone(), seat.station.clone());
-                    decisions.push((system.id.clone(), ControlSource::Human));
-                }
-                None => decisions.push((system.id.clone(), ControlSource::Ai)),
-            }
-        }
-
-        if decisions
-            .iter()
-            .any(|(id, source)| control_sources.0.source_for(id) != *source)
-        {
-            for (id, source) in &decisions {
-                control_sources.0.set(id.clone(), *source);
-            }
-        }
-        let mut resolved_stations = Vec::new();
-        for station in config
-            .stations
-            .iter()
-            .filter(|station| station.human_seeking)
-        {
-            let mut assignment = coordination::resolve_visiting_station(
-                config,
-                station,
-                // A candidate direct seat is a valid host for THIS visiting
-                // station only when its holder is present (not AFK, issue #1104)
-                // AND eligible for it (issue #1103 AC2). An AFK or ineligible
-                // holder is skipped and the walk falls through to the next
-                // `host_order` entry or AI — the resolver never sees the AFK
-                // state's cause, the settings or the reason, only the booleans.
-                // Pure per-tick recompute, so an AFK holder is dropped as a host
-                // deterministically the moment they step away and re-included the
-                // tick after they return (AC3/AC4).
-                |candidate| seat_is_available(candidate, &station.id),
-                &scenario_floor.0,
-            );
-            if assignment.host.as_ref() == Some(&station.id) {
-                assignment.rating = ratings
-                    .and_then(|active| active.0.get(&station.id))
-                    .cloned()
-                    .or_else(|| station.ratings.first().map(|rating| rating.name.clone()))
-                    .unwrap_or_default();
-            }
-
-            let depths = crate::ship::rating::resolve_system_depths(
-                config,
-                &station.id,
-                &assignment.rating,
-                &std::collections::HashMap::new(),
-            )
-            .unwrap_or_default();
+        let mut resolved = std::collections::BTreeMap::new();
+        let mut resolved_consoles = Vec::new();
+        for console in &config.consoles {
+            let assignment =
+                phoenix_sim_gameplay::ship::console_ownership::resolve_assignment_with_eligibility(
+                    config,
+                    console,
+                    |candidate, rating| seat_is_available(candidate, &console.id, rating),
+                    ratings.map(|r| &r.0).unwrap_or(&no_ratings),
+                    &scenario_floor.0,
+                );
+            let host = assignment.host.as_ref();
+            let rating = &assignment.rating;
+            let depths = config.console_system_depths(console, rating);
             for system in config
                 .systems
                 .iter()
-                .filter(|system| system.station.as_ref() == Some(&station.id))
+                .filter(|system| system.console.as_ref() == Some(&console.id))
             {
-                let source = if assignment.host.is_none() {
+                resolved.remove(&system.id);
+                let source = if host.is_none() || system.ai_only {
                     ControlSource::Ai
                 } else {
                     depths
@@ -480,17 +302,19 @@ pub fn resolve_human_seeking_hosts(
                         .control_source()
                 };
                 control_sources.0.set(system.id.clone(), source);
-                if let Some(host) = assignment.host.as_ref() {
-                    resolved.insert(system.id.clone(), host.clone());
+                if let Some(host) = host.as_ref().filter(|_| !system.ai_only) {
+                    resolved.insert(system.id.clone(), (*host).clone());
                 }
             }
-            resolved_stations.push(assignment);
+            resolved_consoles.push(assignment);
+        }
+        if let Some(mut console_hosts) = console_hosts {
+            if console_hosts.0 != resolved_consoles {
+                console_hosts.0 = resolved_consoles;
+            }
         }
         if hosts.0 != resolved {
             hosts.0 = resolved;
-        }
-        if station_hosts.0 != resolved_stations {
-            station_hosts.0 = resolved_stations;
         }
     }
 }
@@ -510,12 +334,36 @@ pub(crate) fn station_delivery_policy(
     crate::ship::control_source::ControlTickPolicy,
     ControlSource,
 ) {
-    let helm_station = coordination::address_for_system(
+    address_delivery_policy(
         config,
-        &crate::ship::system_registry::helm_steering_system_id(),
-    );
-    if helm_station.as_ref() == Some(&CoordinationAddress::Station(station.clone())) {
-        if helm_axes_operate_ai(control_sources) {
+        control_sources,
+        &CoordinationAddress::Station(station.clone()),
+    )
+}
+
+fn address_delivery_policy(
+    config: &crate::ship::config::ShipConfig,
+    control_sources: &ShipSystemControlSources,
+    address: &CoordinationAddress,
+) -> (
+    crate::ship::control_source::ControlTickPolicy,
+    ControlSource,
+) {
+    // Explicit Station addresses retain their established home-seat reduction;
+    // movable Console addresses only reduce their own Systems, never cohosts.
+    let owns = |system: &crate::core::messages::SystemId| match address {
+        CoordinationAddress::Station(station) => config
+            .system(system)
+            .is_some_and(|entry| config.system_home_station(entry) == Some(station)),
+        CoordinationAddress::Console(console) => config
+            .console_for_system(system)
+            .is_some_and(|owner| &owner.id == console),
+        CoordinationAddress::Ship => false,
+    };
+    if owns(&crate::ship::system_registry::helm_steering_system_id()) {
+        if owns(&crate::ship::system_registry::helm_thrust_system_id())
+            && helm_axes_operate_ai(control_sources)
+        {
             return (
                 crate::ship::control_source::control_tick_policy(ControlSource::Ai),
                 ControlSource::Ai,
@@ -528,11 +376,39 @@ pub(crate) fn station_delivery_policy(
         );
     }
 
-    if config.weapons_station().as_ref() == Some(station) {
-        let source = if crate::console::weapons::shared::any_tactical_system_operates_ai(
-            control_sources,
-            config,
-        ) {
+    let weapon_policies: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|system| owns(&system.id))
+        .filter(|system| {
+            [
+                crate::ship::system_registry::PHASER_BANK_KIND,
+                crate::ship::system_registry::TORPEDO_TUBE_KIND,
+                crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
+            ]
+            .contains(&system.kind.as_str())
+        })
+        .map(|system| control_sources.0.policy_for(&system.id))
+        .collect();
+    let tactical = match address {
+        CoordinationAddress::Station(station) => config.weapons_station().as_ref() == Some(station),
+        CoordinationAddress::Console(_) => {
+            !weapon_policies.is_empty()
+                && owns(&crate::ship::system_registry::tactical_radar_system_id())
+        }
+        CoordinationAddress::Ship => false,
+    };
+    if tactical {
+        let any_weapon_ai = match address {
+            CoordinationAddress::Station(_) => {
+                crate::console::weapons::shared::any_tactical_system_operates_ai(
+                    control_sources,
+                    config,
+                )
+            }
+            _ => weapon_policies.iter().any(|policy| policy.operate_ai),
+        };
+        let source = if any_weapon_ai {
             ControlSource::Ai
         } else {
             ControlSource::Human
@@ -546,7 +422,7 @@ pub(crate) fn station_delivery_policy(
     let policies: Vec<_> = config
         .systems
         .iter()
-        .filter(|system| system.station.as_ref() == Some(station))
+        .filter(|system| owns(&system.id))
         .map(|system| control_sources.0.policy_for(&system.id))
         .collect();
     let source = coordination::seat_control_source(&policies);
@@ -563,6 +439,7 @@ pub(crate) fn process_coordination_lag(
             Entity,
             &ShipConfigComponent,
             &ShipSystemControlSources,
+            Option<&crate::ship::components::ConsoleHosts>,
             &mut CoordinationQueue,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
@@ -581,6 +458,7 @@ pub(crate) fn process_coordination_lag(
         ship_entity,
         ship_config,
         control_sources,
+        console_hosts,
         mut queue,
         entity_hull,
         entity_teams,
@@ -597,7 +475,8 @@ pub(crate) fn process_coordination_lag(
         });
 
         for msg in queue.0.due_messages(tick.0) {
-            let to_label = coordination::coordination_addressee_label(&msg.address);
+            let to_label =
+                coordination::coordination_addressee_label_for_config(&ship_config.0, &msg.address);
             // Whole-ship delivery is selected by its address, never by looking
             // for a particular payload variant. The authored Station order is
             // retained for deterministic fan-out.
@@ -635,16 +514,30 @@ pub(crate) fn process_coordination_lag(
                 continue;
             }
 
-            let CoordinationAddress::Station(station_id) = &msg.address else {
-                continue;
+            let station_id = match &msg.address {
+                CoordinationAddress::Station(station) => {
+                    if ship_config.0.station(station).is_none() {
+                        continue;
+                    }
+                    Some(station)
+                }
+                CoordinationAddress::Console(console) => {
+                    if !ship_config
+                        .0
+                        .consoles
+                        .iter()
+                        .any(|item| &item.id == console)
+                    {
+                        continue;
+                    }
+                    console_hosts
+                        .and_then(|hosts| hosts.0.iter().find(|host| &host.console == console))
+                        .and_then(|host| host.host.as_ref())
+                }
+                CoordinationAddress::Ship => unreachable!(),
             };
-            if ship_config.0.station(station_id).is_none() {
-                // An explicit but unknown Station is invalid for this hull. It
-                // is not silently widened to the whole ship.
-                continue;
-            }
             let (target_policy, target_control) =
-                station_delivery_policy(&ship_config.0, control_sources, station_id);
+                address_delivery_policy(&ship_config.0, control_sources, &msg.address);
             let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
                 coordination::DeliverAction::Consume
             } else {
@@ -704,16 +597,26 @@ pub(crate) fn process_coordination_lag(
                     } else {
                         msg.sender_label
                     };
-                    if let Some(token) = sessions
-                        .0
-                        .holder_for_station(station_id)
+                    if let Some(token) = station_id
+                        .and_then(|station| sessions.0.holder_for_station(station))
                         .map(|token| token.to_string())
                     {
-                        let payload = coarsen_repair_request(
-                            &msg.payload,
-                            repair_vis.as_ref(),
-                            Some(station_id),
-                        );
+                        let payload = if let CoordinationAddress::Console(console) = &msg.address {
+                            let mut payload = msg.payload.clone();
+                            if let CoordinationPayload::RepairRequest {
+                                system_id, deficit, ..
+                            } = &mut payload
+                            {
+                                if !repair_vis.as_ref().is_some_and(|vis| {
+                                    vis.console_can_see(&ship_config.0, console, system_id)
+                                }) {
+                                    *deficit = None;
+                                }
+                            }
+                            payload
+                        } else {
+                            coarsen_repair_request(&msg.payload, repair_vis.as_ref(), station_id)
+                        };
                         if repair_address.as_ref() == Some(&msg.address)
                             && matches!(&payload, CoordinationPayload::RepairRequest { .. })
                         {
@@ -781,3 +684,7 @@ pub(crate) fn flush_coordination_popups(
 mod tests;
 
 use crate::ship::rating::SystemDepthRuntime as _;
+
+#[cfg(test)]
+#[path = "coordination_console_tests.rs"]
+mod coordination_console_tests;

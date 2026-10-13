@@ -261,8 +261,17 @@ pub fn validate_station_command(
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
+    console_hosts: Option<&crate::ship_plugin::ConsoleHosts>,
 ) -> Result<crate::core::messages::AdmittedCommand, StationCommandPolicyFailure> {
-    authorize_station_command(station, &target, &payload, control_sources, config, hosts)?;
+    authorize_station_command(
+        station,
+        &target,
+        &payload,
+        control_sources,
+        config,
+        hosts,
+        console_hosts,
+    )?;
     Ok(crate::core::messages::AdmittedCommand {
         target,
         payload,

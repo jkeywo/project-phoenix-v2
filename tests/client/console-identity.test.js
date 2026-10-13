@@ -209,3 +209,42 @@ it('keeps detached and co-hosted Console attention separate and clears only auth
   state.apply({type:'SimState',data:{snapshot:{...snapshot,console_importance:[]}}});
   expect(model().tabs.find(t => t.id === 'right').importance).toBeNull();
 });
+
+
+describe('per-Console exact hull projection', () => {
+  const rows = ['drive', 'scan', 'core'].map(system_id => ({ system_id, current: 42 }));
+  it('isolates exact hull rows between cohosted screens with the same implementation', () => {
+    const state = { consoleHull: rows, blackboards: {}, blackboardKinds: {} };
+    expect(consoleReadState(state, consoles[0]).consoleHull.map(row => row.system_id)).toEqual(['drive']);
+    expect(consoleReadState(state, consoles[1]).consoleHull.map(row => row.system_id)).toEqual(['scan']);
+    expect(state.consoleHull).toEqual(rows);
+  });
+  it('adds only exact rows disclosed by a permitted typed Repair feed', () => {
+    const state = { consoleHull: rows, blackboards: { repair: { system_hull: [rows[2]] } }, blackboardKinds: { repair: 'Repair' } };
+    const reader = { ...consoles[0], feeds: [{ source: 'repair', kind: 'Repair' }] };
+    expect(consoleReadState(state, reader).consoleHull.map(row => row.system_id)).toEqual(['drive', 'core']);
+    expect(consoleReadState(state, consoles[1]).consoleHull.map(row => row.system_id)).toEqual(['scan']);
+    expect(consoleReadState(state, { ...reader, feeds: [{ source: 'repair', kind: 'Helm' }] }).consoleHull.map(row => row.system_id)).toEqual(['drive']);
+  });
+});
+
+it('keeps differently sourced co-hosted Navigation waypoints isolated', () => {
+  const definitions = ['nav-a', 'nav-b'].map((system, i) => ({
+    id: `nav-console-${i}`, home_station: 'pilot', screen: 'gui/cruiser/comms.html', systems:[system], feeds:[],
+  }));
+  const a = { position:[10,0,20], label:'A' };
+  const b = { position:[30,0,40], label:'B' };
+  const state = { consoleDefinitions:definitions,
+    consoleHosts:Object.fromEntries(definitions.map(c=>[c.id,{host:'pilot'}])),
+    systemConsoleFamilies:{'nav-a':'navigation','nav-b':'navigation'},
+    blackboardKinds:{'nav-a':'Navigation','nav-b':'Navigation'},
+    blackboards:{'nav-b':{navigation_waypoint:b},'nav-a':{navigation_waypoint:a}},
+    navigationWaypoint:b };
+  expect(buildConsoleView(definitions[0].id,state).waypoint).toEqual(a);
+  expect(buildConsoleView(definitions[1].id,state).waypoint).toEqual(b);
+  state.blackboards['nav-a'].navigation_waypoint = null;
+  expect(buildConsoleView(definitions[0].id,state).waypoint).toBeNull();
+  expect(state.navigationWaypoint).toEqual(b);
+  const feedOnly = {...definitions[0],systems:[],feeds:[{source:'nav-a',kind:'Navigation'}]};
+  expect(consoleReadState(state,feedOnly).navigationWaypoint).toBeNull();
+});

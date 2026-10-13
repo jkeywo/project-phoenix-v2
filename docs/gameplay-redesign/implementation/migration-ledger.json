@@ -29,12 +29,15 @@
     {
       "id": 1,
       "title": "Explicit Consoles and ownership",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         0
       ],
       "completion": "Explicit Console identities and bindings preserve existing screens, joining, ratings, human seeking, Backfill and reconnect.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/console-ownership.yaml",
+        "docs/acceptance/1562-explicit-consoles.md"
+      ]
     },
     {
       "id": 2,

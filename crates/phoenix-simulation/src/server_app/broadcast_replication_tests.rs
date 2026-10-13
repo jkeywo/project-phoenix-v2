@@ -49,3 +49,70 @@ fn repeated_uuid_pruning_keeps_long_session_caches_bounded() {
     assert_eq!(positions.0.len(), LIVE_AT_ONCE);
     assert_eq!(health.0.len(), LIVE_AT_ONCE);
 }
+
+#[test]
+fn console_health_keeps_detached_and_same_seat_scopes_distinct() {
+    use crate::core::messages::{ConsoleId, SystemId};
+    let config = crate::ship::config::ShipConfig::from_toml(
+        r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Pilot"
+rank = "Ens."
+[[console]]
+id = "flight"
+home_station = "helm"
+screen = "fixture.html"
+[[console]]
+id = "drive"
+home_station = "helm"
+screen = "fixture.html"
+[[console]]
+id = "detached"
+[[console]]
+id = "unmodeled"
+[[system]]
+id = "a"
+kind = "dock"
+console = "flight"
+[[system]]
+id = "b"
+kind = "dock"
+console = "drive"
+[[system]]
+id = "c"
+kind = "dock"
+console = "detached"
+ai_only = true
+[[system]]
+id = "d"
+kind = "dock"
+console = "detached"
+ai_only = true
+"#,
+        &["dock"],
+    )
+    .unwrap();
+    let mut hull = crate::ship::damage::SystemHull::from_config(&[
+        (SystemId("a".into()), 100.0),
+        (SystemId("b".into()), 100.0),
+        (SystemId("c".into()), 100.0),
+        (SystemId("d".into()), 300.0),
+        (SystemId("core".into()), 900.0),
+    ]);
+    hull.restore(&SystemId("a".into()), -75.0);
+    hull.restore(&SystemId("c".into()), -100.0);
+    let rows = console_health_from_parts(&config, Some(&hull));
+    assert_eq!(
+        rows.iter().map(|r| r.console.clone()).collect::<Vec<_>>(),
+        ["flight", "drive", "detached", "unmodeled"].map(|id| ConsoleId(id.into()))
+    );
+    assert_eq!(
+        rows.iter().map(|r| r.health).collect::<Vec<_>>(),
+        vec![Some(0.25), Some(1.0), Some(0.75), None]
+    );
+    assert!(console_health_from_parts(&config, None)
+        .iter()
+        .all(|r| r.health.is_none()));
+}

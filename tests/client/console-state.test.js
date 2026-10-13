@@ -3416,13 +3416,13 @@ describe('auto fields', () => {
     const sim = new ClientSimState();
     sim.stationRatings = { navigation: 'Backfill' };
     sim.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      console_hosts: [{ console: 'navigation', host: 'tactical', rating: 'Std' }],
       control_sources: { navigation: 'Human' },
     } } });
     expect(buildNavigationConsoleState(sim).navigation_auto).toBe(false);
 
     sim.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'navigation', host: null, rating: 'Simplified' }],
+      console_hosts: [{ console: 'navigation', host: null, rating: 'Simplified' }],
       control_sources: { navigation: 'Ai' },
     } } });
     expect(buildNavigationConsoleState(sim).navigation_auto).toBe(true);
@@ -3459,13 +3459,13 @@ describe('auto fields', () => {
     const sim = new ClientSimState();
     sim.stationRatings = { comms: 'Backfill' };
     sim.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'comms', host: 'tactical', rating: 'Std' }],
+      console_hosts: [{ console: 'comms', host: 'tactical', rating: 'Std' }],
       control_sources: { comms: 'Human' },
     } } });
     expect(buildCommsConsoleState(sim).comms_auto).toBe(false);
 
     sim.apply({ type: 'SimState', data: { snapshot: {
-      station_hosts: [{ station: 'comms', host: null, rating: 'Std' }],
+      console_hosts: [{ console: 'comms', host: null, rating: 'Std' }],
       control_sources: { comms: 'Ai' },
     } } });
     expect(buildCommsConsoleState(sim).comms_auto).toBe(true);

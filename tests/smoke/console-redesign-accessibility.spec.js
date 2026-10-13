@@ -43,9 +43,13 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }
         model: heroBarModel({ directStation: 'tactical', activeStation, activeOverlay,
           stations: [
             { id: 'tactical', name: 'Tactical', short_code: 'TAC' },
-            { id: 'helm', name: 'Helm', short_code: 'HELM', human_seeking: true },
+            { id: 'helm', name: 'Helm', short_code: 'HELM' },
           ],
-          stationHosts: { helm: { host: 'tactical' } },
+          consoles: [
+            { id: 'tactical', name: 'Tactical', home_station: 'tactical', screen: 'gui/tactical.html', short_code: 'TAC' },
+            { id: 'helm', name: 'Helm', screen: 'gui/helm.html', short_code: 'HELM', human_seeking: true },
+          ],
+          consoleHosts: { tactical: { host: 'tactical' }, helm: { host: 'tactical' } },
           stationHealth: { tactical: 0.5, helm: 1 },
           consoleTabs: [{ id: 'intel', name: 'Intel', code: 'INT', badge: 2 }],
         }),

@@ -1140,6 +1140,7 @@ rank = "Ltn."
 [[console]]
 id = "science-console"
 home_station = "sensors"
+screen = "gui/battleship/sensors.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
@@ -1147,6 +1148,7 @@ kind = "Viewscreen"
 [[console]]
 id = "weapons-console"
 home_station = "tactical"
+screen = "gui/battleship/tactical.html"
 
 [[system]]
 id = "sensors"
@@ -2581,8 +2583,12 @@ fn the_ai_leaves_a_cold_weapons_group_cold() {
 /// groups take by omitting the key.
 fn weapons_capped_ship_config() -> crate::ship::config::ShipConfig {
     let toml = r#"
+[[console]]
+id = "ai-power-reactor"
+
 [[system]]
 id = "power-reactor"
+console = "ai-power-reactor"
 kind = "power_reactor"
 ai_only = true
 

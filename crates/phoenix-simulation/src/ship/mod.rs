@@ -3,6 +3,7 @@ pub mod combat_activity;
 pub mod command_stance;
 pub mod components;
 pub mod config;
+pub mod console_views;
 pub mod continuation;
 pub mod control_source;
 pub mod coordination;
@@ -39,3 +40,5 @@ pub mod test_clock;
 #[cfg(test)]
 pub mod test_support;
 pub mod viewscreen;
+
+pub mod console_publication;

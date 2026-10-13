@@ -178,3 +178,96 @@ fn registered_reset_rearms_initial_default_projection_for_a_second_run() {
     );
     assert!(!app.world().resource::<WeaponsUpdateFirstTick>().0);
 }
+
+#[test]
+fn unchanged_weapons_projection_republishes_after_console_handoff() {
+    use crate::core::broadcast::{BroadcastRegistry, Sim};
+    use crate::core::messages::StationId;
+    use crate::lobby::{Sessions, Target};
+    use crate::ship::components::ConsoleHosts;
+    use crate::ship_plugin::ShipConfigComponent;
+    use phoenix_model::console::{ConsoleConfig, ConsoleHostSnapshot};
+    use phoenix_model::identity::ConsoleId;
+    let mut app = App::new();
+    register_weapons_replication_lifecycle(&mut app);
+    app.insert_resource(Sessions(crate::lobby::session::SessionManager::new()));
+    app.insert_resource(CurrentPhaserMode(PhaserMode::Auto));
+    app.add_plugins(weapons_update_broadcaster());
+    for (token, station) in [("old", "tactical"), ("new", "helm")] {
+        let mut sessions = app.world_mut().resource_mut::<Sessions>();
+        sessions.0.register(token.into(), token.into()).unwrap();
+        sessions
+            .0
+            .set_station(token, Some(StationId(station.into())));
+    }
+    let console = ConsoleId("armament".into());
+    let config = crate::ship::config::ShipConfig {
+        consoles: vec![ConsoleConfig {
+            id: console.clone(),
+            ..Default::default()
+        }],
+        systems: vec![crate::ship::config::SystemInstanceConfig {
+            id: crate::core::messages::SystemId("blaster-fore".into()),
+            kind: "blaster_bank".into(),
+            console: Some(console.clone()),
+            ai_only: false,
+            power_group: None,
+            marker: None,
+            config: None,
+        }],
+        stations: vec![],
+        power_groups: Default::default(),
+        coordination_lag_secs: 2.0,
+    };
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::LocalShip,
+            ShipConfigComponent(config),
+            ConsoleHosts(vec![ConsoleHostSnapshot {
+                console,
+                host: Some(StationId("tactical".into())),
+                rating: "Std".into(),
+            }]),
+        ))
+        .id();
+    let producer = app
+        .world()
+        .resource::<BroadcastRegistry<Sim>>()
+        .registrations[0]
+        .producer
+        .clone();
+    let first = producer(app.world_mut());
+    assert_eq!(first.len(), 1);
+    assert_eq!(
+        app.world().resource::<LastWeaponsAudience>().0,
+        Some(Target::Token("old".into()))
+    );
+    assert!(producer(app.world_mut()).is_empty());
+    app.world_mut().get_mut::<ConsoleHosts>(ship).unwrap().0[0].host =
+        Some(StationId("helm".into()));
+    assert_eq!(
+        producer(app.world_mut()),
+        first,
+        "handoff republishes unchanged machinery state"
+    );
+    assert_eq!(
+        app.world().resource::<LastWeaponsAudience>().0,
+        Some(Target::Token("new".into()))
+    );
+    assert!(producer(app.world_mut()).is_empty());
+    app.world_mut().get_mut::<ConsoleHosts>(ship).unwrap().0[0].host = None;
+    use bevy::ecs::system::RunSystemOnce;
+    app.world_mut()
+        .run_system_once(invalidate_unhosted_weapons_projection)
+        .unwrap();
+    assert!(app.world().resource::<LastWeaponsAudience>().0.is_none());
+    app.world_mut().get_mut::<ConsoleHosts>(ship).unwrap().0[0].host =
+        Some(StationId("helm".into()));
+    assert_eq!(
+        producer(app.world_mut()),
+        first,
+        "returning to the same host after a revoked interval republishes"
+    );
+    assert!(producer(app.world_mut()).is_empty());
+}

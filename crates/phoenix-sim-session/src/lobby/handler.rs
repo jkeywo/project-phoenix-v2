@@ -242,15 +242,9 @@ pub fn handle_identify(
                 .map(|p| p.station.is_some())
                 .unwrap_or(false);
             if !player_has_station {
-                // Auxiliary stations are visiting consoles, not lobby seats.
-                // They stay in the Welcome roster so their host can surface
-                // them, but cannot be claimed and therefore must not delay
-                // the spectator outcome once every ordinary seat is held.
-                let capacity = ship_stations
-                    .stations
-                    .iter()
-                    .filter(|station| !station.auxiliary)
-                    .count() as u32;
+                // The Station roster contains claimable seats only; visiting
+                // Consoles are carried separately and do not consume a seat.
+                let capacity = ship_stations.stations.len() as u32;
                 let at_capacity = connected_with_stations >= capacity;
                 if at_capacity {
                     outbound.push((
@@ -320,9 +314,6 @@ pub fn handle_select_station(
     let Some(station_def) = station_def else {
         return LobbyHandlerResult::default();
     };
-    if station_def.auxiliary {
-        return LobbyHandlerResult::default();
-    }
 
     if !sessions.station_claim_allowed(token, &station_def.id) {
         return LobbyHandlerResult::default();
@@ -631,7 +622,7 @@ pub fn handle_set_spectator(
 /// `AfkChanged { true }`.
 ///
 /// On `afk == false`: re-apply the snapshotted prior rating and consume the
-/// snapshot (AC4). Visiting Stations need nothing stored — the pure per-tick
+/// snapshot (AC4). Visiting Consoles need nothing stored — the pure per-tick
 /// resolver re-includes the no-longer-AFK holder on the next tick (AC4).
 /// Broadcasts `RatingChanged { station, prev }`, then `AfkChanged { false }`.
 ///

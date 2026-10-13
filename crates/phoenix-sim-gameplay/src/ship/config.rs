@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShipConfig {
+    #[serde(default, rename = "console")]
+    pub consoles: Vec<phoenix_model::console::ConsoleConfig>,
     #[serde(default, rename = "station")]
     pub stations: Vec<StationConfig>,
     #[serde(default, rename = "system")]
@@ -34,6 +36,7 @@ const WEAPONS_KINDS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StationConfig {
     pub id: StationId,
     pub name: String,
@@ -43,11 +46,6 @@ pub struct StationConfig {
     pub short_code: String,
     #[serde(default, rename = "rating")]
     pub ratings: Vec<StationRatingConfig>,
-    /// Console root URL for this station (e.g. "gui/captain-console.html").
-    /// When absent, the client falls back to a generic console or the
-    /// station has no dedicated UI.
-    #[serde(default)]
-    pub console: Option<String>,
     /// Authored overview prose for this station's ship manual tab (issue #772).
     ///
     /// Authored `[[station]] manual_overview` accepts a `strings.csv` id or
@@ -65,110 +63,27 @@ pub struct StationConfig {
     /// hold `strings.csv` ids, enforced by `scripts/check-strings.mjs`.
     #[serde(default, rename = "tutorial", skip_serializing_if = "Vec::is_empty")]
     pub tutorials: Vec<TutorialOverlayWire>,
-    /// Complete-station human seeking (issue #1097). The station keeps its
-    /// identity, systems and console while this resolver chooses a directly
-    /// held station on which to present it.
-    #[serde(default)]
-    pub human_seeking: bool,
-    /// Compatible direct stations, in preference order, tried after this
-    /// station's own active holder. This is deliberately a finite allow-list:
-    /// exhaustion means ordinary AI even if another unrelated seat is held.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub host_order: Vec<StationId>,
-    /// Rating used while this station is visiting another direct station.
-    /// Scenario detail requirements may raise it, but never lower it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visiting_rating: Option<String>,
-    /// Auxiliary stations are mounted and resolved like any other station but
-    /// are not offered as a separately claimable lobby seat.
-    #[serde(default)]
-    pub auxiliary: bool,
-    /// The proving Station this (Command) station directs (issue #1107).
-    ///
-    /// Authored on an auxiliary Command station, never hard-coded: it names the
-    /// AI-controlled Station whose authored stance catalogue this Command
-    /// surface lists and applies. `None` on every ordinary station.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command_target: Option<StationId>,
     /// This station's authored stance catalogue (issue #1107).
     ///
     /// Standard stances plus the two mandatory alert-neutral fallbacks
-    /// (`normal_alert_neutral`, `high_alert_neutral`). A Command station reads
+    /// (`normal_alert_neutral`, `high_alert_neutral`). A Command Console reads
     /// its `command_target`'s catalogue; the target station authors it here.
     /// Empty on stations that are never directed.
     #[serde(default, rename = "stance", skip_serializing_if = "Vec::is_empty")]
     pub stances: Vec<StationStanceConfig>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct StationRatingConfig {
-    pub name: String,
-    pub automated_systems: Vec<SystemId>,
-    /// Explicit direct-control systems in this authored rung. Remaining owned
-    /// systems are simplified. Absent on legacy hulls: their non-automated
-    /// systems retain direct control, including their existing default rating.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detailed_systems: Option<Vec<SystemId>>,
-    /// Per-rating AI tuning parameters (replaces assets/complexity/*.toml).
-    /// Keys are AI rule names (e.g. "torpedo_auto_fire", "frequency_match");
-    /// values are TOML tables with rule-specific parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ai_tuning: Option<toml::Value>,
-}
+pub use phoenix_model::console::ConsoleRatingConfig as StationRatingConfig;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SystemInstanceConfig {
     pub id: SystemId,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub station: Option<StationId>,
+    pub console: Option<crate::core::messages::ConsoleId>,
     #[serde(default)]
     pub ai_only: bool,
-    /// Marks a system as human-seeking (pasm decision
-    /// `console-complexity-human-seeking-systems`): comms and navigation
-    /// always try to be under human control, walking the ship's authored
-    /// station order — owner first — until they find a human-held station.
-    /// "The seek order only ever chooses among human-held stations: the
-    /// mechanism prefers any human over the AI, it never forces a human." With
-    /// no human anywhere in the order the system falls back to AI control
-    /// exactly as today. See [`crate::ship::coordination::seek_human_host`]
-    /// for the pure resolution this flag gates.
-    #[serde(default)]
-    pub human_seeking: bool,
-    /// Optional authored walk for this system's human seek, overriding the
-    /// order derived from `station` + the authored `[[station]]` list.
-    ///
-    /// **Absent is the default and means exactly today's behaviour**: the
-    /// system's own `station` first, then the remaining stations in authored
-    /// order. Nothing about a hull that authors no `seek_order` changes — the
-    /// field is `skip_serializing_if` empty, so such a config also round-trips
-    /// byte-for-byte.
-    ///
-    /// **Present, the list IS the walk, literally and completely.** It is a
-    /// PERMUTATION of the hull's stations — every station exactly once, the
-    /// system's own `station` first — enforced by [`validate`]. Three reasons
-    /// the contract is a permutation and not a prefix or an allow-list:
-    ///
-    /// * The field is an *order*, so it reorders; it does not filter. A list
-    ///   that could omit a station would need a second, invisible rule about
-    ///   what happens to the omitted ones, and the TOML would no longer say
-    ///   what the seek does.
-    /// * Exhaustiveness preserves the decision's own promise — "the mechanism
-    ///   prefers any human over the AI". An author who omitted a station could
-    ///   drop a system to AI while a human sat at the unlisted console, which
-    ///   is the one outcome `human_seeking` exists to avoid.
-    /// * Owner-first is not a courtesy, it is the rule that keeps a hull's own
-    ///   officer at their own console (see
-    ///   [`crate::ship::coordination::seek_human_host`]). Requiring the owner
-    ///   at the head, rather than silently prepending it, means the authored
-    ///   list can be read top-to-bottom as the literal walk and cannot quietly
-    ///   author the invariant away.
-    ///
-    /// A hull that gains a station therefore fails the load loudly until every
-    /// `seek_order` names it — the alternative being a new console the seek
-    /// never visits, with no symptom but a system stuck on AI.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub seek_order: Vec<StationId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_group: Option<PowerGroupId>,
     /// Optional rig-marker name for this system instance.
@@ -234,6 +149,14 @@ pub const fn default_max_power_level() -> u8 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShipConfigError {
+    ConsoleCommandTargetUnknownStation {
+        console: crate::core::messages::ConsoleId,
+        target: StationId,
+    },
+    ConsoleCommandTargetHasNoStances {
+        console: crate::core::messages::ConsoleId,
+        target: StationId,
+    },
     ParseError(String),
     InvalidCoordinationLagSecs {
         value: f32,
@@ -449,7 +372,7 @@ impl ShipConfig {
     ) -> impl Iterator<Item = &'a SystemInstanceConfig> + 'a {
         self.systems
             .iter()
-            .filter(move |system| system.station.as_ref() == Some(id))
+            .filter(move |system| self.system_home_station(system) == Some(id))
     }
 
     /// The single owning Station shared by every authored System of `kind`.
@@ -460,9 +383,9 @@ impl ShipConfig {
     /// widening the audience.
     pub fn station_for_system_kind(&self, kind: &str) -> Option<StationId> {
         let mut systems = self.systems.iter().filter(|system| system.kind == kind);
-        let station = systems.next()?.station.clone()?;
+        let station = self.system_home_station(systems.next()?)?.clone();
         systems
-            .all(|system| system.station.as_ref() == Some(&station))
+            .all(|system| self.system_home_station(system) == Some(&station))
             .then_some(station)
     }
 
@@ -481,7 +404,7 @@ impl ShipConfig {
         self.systems
             .iter()
             .filter(|s| WEAPONS_KINDS.contains(&s.kind.as_str()))
-            .find_map(|s| s.station.clone())
+            .find_map(|s| self.system_home_station(s).cloned())
             .or_else(|| {
                 // Legacy/test ships declare a `tactical` station but no fine
                 // weapon systems. Preserve the pre-lookup behaviour for them.
@@ -510,7 +433,7 @@ impl ShipConfig {
         self.systems
             .iter()
             .find(|s| s.kind == crate::ship::system_registry::SENSORS_KIND)
-            .and_then(|s| s.station.clone())
+            .and_then(|s| self.system_home_station(s).cloned())
     }
 
     /// Look up a named rating for a station.
@@ -573,7 +496,9 @@ pub fn parse_ship_config(
     registered_system_kinds: &[&str],
 ) -> Result<ShipConfig, ShipConfigError> {
     let config: ShipConfig =
-        toml::from_str(toml_str).map_err(|e| ShipConfigError::ParseError(e.to_string()))?;
+        toml::from_str(toml_str).map_err(|e| ShipConfigError::ParseError(format!(
+            "{e}\nContent requires explicit Console ownership: add [[console]] definitions and replace system.station with system.console. Use the pack's original game version if it has not been converted."
+        )))?;
     validate(&config, registered_system_kinds)?;
     Ok(config)
 }
@@ -620,57 +545,9 @@ pub fn validate(
                 });
             }
         }
-        if !station.human_seeking
-            && (!station.host_order.is_empty() || station.visiting_rating.is_some())
-        {
-            return Err(ShipConfigError::HostOrderWithoutHumanSeeking {
-                station: station.id.clone(),
-            });
-        }
-        if station.human_seeking {
-            let Some(visiting_rating) = station.visiting_rating.as_ref() else {
-                return Err(ShipConfigError::MissingVisitingRating {
-                    station: station.id.clone(),
-                });
-            };
-            if !station
-                .ratings
-                .iter()
-                .any(|rating| &rating.name == visiting_rating)
-            {
-                return Err(ShipConfigError::UnknownVisitingRating {
-                    station: station.id.clone(),
-                    rating: visiting_rating.clone(),
-                });
-            }
-        }
     }
 
-    for station in &config.stations {
-        let mut seen = HashSet::new();
-        for host in &station.host_order {
-            let Some(_host_station) = config
-                .stations
-                .iter()
-                .find(|candidate| &candidate.id == host)
-            else {
-                return Err(ShipConfigError::HostOrderUnknownStation {
-                    station: station.id.clone(),
-                    host: host.clone(),
-                });
-            };
-            if !seen.insert(host) {
-                return Err(ShipConfigError::HostOrderDuplicateStation {
-                    station: station.id.clone(),
-                    host: host.clone(),
-                });
-            }
-            // A human-seeking Station is a valid compatible host while it is
-            // actively directly held. Runtime placement tests that state,
-            // rather than rejecting the Station's authored type here; a
-            // visiting Station is never recursively eligible.
-        }
-    }
+    super::console_ownership::validate_consoles(config)?;
 
     // Stance catalogues and Command targets (issue #1107).
     for station in &config.stations {
@@ -736,22 +613,6 @@ pub fn validate(
                 }
             }
         }
-
-        // A Command target must name a real station that authors a catalogue.
-        if let Some(target) = &station.command_target {
-            let Some(target_station) = config.station(target) else {
-                return Err(ShipConfigError::CommandTargetUnknownStation {
-                    station: station.id.clone(),
-                    target: target.clone(),
-                });
-            };
-            if target_station.stances.is_empty() {
-                return Err(ShipConfigError::CommandTargetHasNoStances {
-                    station: station.id.clone(),
-                    target: target.clone(),
-                });
-            }
-        }
     }
 
     let power_group_ids: HashSet<PowerGroupId> = config.power_groups.keys().cloned().collect();
@@ -808,12 +669,17 @@ pub fn validate(
                 kind: system.kind.clone(),
             });
         }
-        if system.station.is_none() && !system.ai_only {
+        if config.system_home_station(system).is_none()
+            && !system.ai_only
+            && !config
+                .console_for_system(&system.id)
+                .is_some_and(|console| console.human_seeking)
+        {
             return Err(ShipConfigError::OwnerlessSystemWithoutAiOnly {
                 system: system.id.clone(),
             });
         }
-        if let Some(station) = &system.station {
+        if let Some(station) = config.system_home_station(system) {
             if !station_id_set.contains(station) {
                 return Err(ShipConfigError::UnknownStation {
                     system: system.id.clone(),
@@ -829,8 +695,10 @@ pub fn validate(
                 });
             }
         }
-        validate_seek_order(system, &config.stations)?;
-        system_owner_by_id.insert(system.id.clone(), system.station.clone());
+        system_owner_by_id.insert(
+            system.id.clone(),
+            config.system_home_station(system).cloned(),
+        );
     }
 
     for station in &config.stations {
@@ -893,66 +761,6 @@ pub fn validate(
         }
     }
 
-    Ok(())
-}
-
-/// Enforce the `seek_order` contract: authored only on a seeking system, and
-/// then a permutation of the hull's stations headed by the system's own.
-///
-/// The whole contract is checked here rather than folded into the system loop
-/// above so the rules read as one paragraph — the field's doc comment argues
-/// for each of them, and a reader who wants to know what a `seek_order` may
-/// say has exactly one function to read.
-fn validate_seek_order(
-    system: &SystemInstanceConfig,
-    stations: &[StationConfig],
-) -> Result<(), ShipConfigError> {
-    if system.seek_order.is_empty() {
-        return Ok(());
-    }
-    if !system.human_seeking {
-        return Err(ShipConfigError::SeekOrderWithoutHumanSeeking {
-            system: system.id.clone(),
-        });
-    }
-
-    let hull: HashSet<&StationId> = stations.iter().map(|s| &s.id).collect();
-    let mut seen: HashSet<&StationId> = HashSet::new();
-    for station in &system.seek_order {
-        if !hull.contains(station) {
-            return Err(ShipConfigError::SeekOrderUnknownStation {
-                system: system.id.clone(),
-                station: station.clone(),
-            });
-        }
-        if !seen.insert(station) {
-            return Err(ShipConfigError::SeekOrderDuplicateStation {
-                system: system.id.clone(),
-                station: station.clone(),
-            });
-        }
-    }
-    // Reported in AUTHORED station order, so a hull that grew two stations
-    // names the first of them rather than a hash-order pick.
-    if let Some(missing) = stations.iter().find(|s| !seen.contains(&s.id)) {
-        return Err(ShipConfigError::SeekOrderMissingStation {
-            system: system.id.clone(),
-            station: missing.id.clone(),
-        });
-    }
-    // An ownerless system has no owner to lead with; every other rule still
-    // applies. (`validate` has already refused an ownerless system that is not
-    // `ai_only`, so this arm is only reachable for a config that asks the AI to
-    // run a seeking system — contradictory, but not this check's business.)
-    if let Some(owner) = &system.station {
-        if system.seek_order.first() != Some(owner) {
-            return Err(ShipConfigError::SeekOrderOwnerNotFirst {
-                system: system.id.clone(),
-                owner: owner.clone(),
-                first: system.seek_order.first().cloned(),
-            });
-        }
-    }
     Ok(())
 }
 

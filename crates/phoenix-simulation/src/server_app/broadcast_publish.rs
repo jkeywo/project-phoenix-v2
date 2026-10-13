@@ -22,22 +22,10 @@
 
 use super::*;
 use crate::core::broadcast::sim::SimProducer;
+use crate::ship::components::ShipConfigComponent;
 
 /// Stable lifecycle key for the wire projection of per-System blackboards.
 pub(crate) const BLACKBOARD_REPLICATION_KEY: &str = "blackboards";
-
-/// Last live-broadcast blackboard state per System.
-///
-/// The live publisher compares `ShipSystemBlackboards` against this cache and
-/// emits only entries that changed. Its run reset and cache-independent
-/// reconnect projection are registered beside the publisher below.
-#[derive(Resource, Default)]
-pub struct LastBroadcastBlackboards(
-    pub  std::collections::HashMap<
-        crate::core::messages::SystemId,
-        crate::core::messages::SystemBlackboard,
-    >,
-);
 
 /// Register Blackboard-owned replication lifecycle behavior.
 ///
@@ -49,10 +37,8 @@ pub(crate) fn register_blackboard_replication_lifecycle(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};
     use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
 
-    app.init_resource::<LastBroadcastBlackboards>()
-        .init_resource::<crate::console::repair::visibility::LastVisibleRepairBlackboard>()
-        .declare_state::<LastBroadcastBlackboards>(StateClass::Cache, "digest-exclusion-classes")
-        .declare_state::<crate::console::repair::visibility::LastVisibleRepairBlackboard>(
+    app.init_resource::<crate::ship::console_publication::LastConsolePublications>()
+        .declare_state::<crate::ship::console_publication::LastConsolePublications>(
             StateClass::Cache,
             "digest-exclusion-classes",
         )
@@ -64,25 +50,33 @@ pub(crate) fn register_blackboard_replication_lifecycle(app: &mut App) {
         BlackboardReconnect,
         BlackboardReconnectParams<'static, 'static>,
     >(app, BLACKBOARD_REPLICATION_KEY, |params| {
-        let (requests, inputs, query, lifecycle) = params
+        let (requests, inputs, query, lifecycle, tick) = params
             .downcast::<BlackboardReconnectParams>()
             .expect("registered owner parameter type");
-        reconnect_blackboard_projection(requests, inputs, query, lifecycle)
+        reconnect_blackboard_projection(requests, inputs, query, lifecycle, tick)
     });
 }
 struct BlackboardReconnect;
 type BlackboardReconnectParams<'w, 's> = (
     Res<'w, crate::core::broadcast::ReconnectRequests>,
     crate::console::repair::visibility::HullProjectionInputs<'w, 's>,
-    Query<'w, 's, &'static ShipSystemBlackboards, With<LocalShip>>,
+    Query<
+        'w,
+        's,
+        (
+            &'static ShipSystemBlackboards,
+            &'static ShipConfigComponent,
+            Option<&'static crate::ship::components::ConsoleHosts>,
+        ),
+        With<LocalShip>,
+    >,
     Option<Res<'w, crate::audio_lifecycle::RoomAudioLifecycle>>,
+    Option<Res<'w, crate::sim_tick::SimTick>>,
 );
 
 fn reset_blackboard_replication(world: &mut World) {
-    *world.resource_mut::<LastBroadcastBlackboards>() = LastBroadcastBlackboards::default();
-    world
-        .resource_mut::<crate::console::repair::visibility::LastVisibleRepairBlackboard>()
-        .clear();
+    *world.resource_mut::<crate::ship::console_publication::LastConsolePublications>() =
+        Default::default();
 }
 
 /// Build every current Blackboard the reconnecting session is permitted to
@@ -90,10 +84,17 @@ fn reset_blackboard_replication(world: &mut World) {
 fn reconnect_blackboard_projection(
     requests: Res<crate::core::broadcast::ReconnectRequests>,
     inputs: crate::console::repair::visibility::HullProjectionInputs,
-    query: Query<&ShipSystemBlackboards, With<LocalShip>>,
+    query: Query<
+        (
+            &ShipSystemBlackboards,
+            &ShipConfigComponent,
+            Option<&crate::ship::components::ConsoleHosts>,
+        ),
+        With<LocalShip>,
+    >,
     lifecycle: Option<Res<crate::audio_lifecycle::RoomAudioLifecycle>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
 ) -> crate::core::broadcast::ReconnectBatch {
-    use crate::console::repair::visibility;
     if requests.0.is_empty() {
         return Vec::new();
     }
@@ -106,32 +107,50 @@ fn reconnect_blackboard_projection(
                 .sessions
                 .as_ref()
                 .and_then(|s| s.0.station_for_token(token));
-            let Ok(blackboards) = query.single() else {
+            let Ok((blackboards, config, hosts)) = query.single() else {
                 return Vec::new();
             };
-            let mut updates: Vec<_> = blackboards
-                .0
-                .iter()
+            let privileged = token == crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+            let empty_hosts = crate::ship::components::ConsoleHosts::default();
+            let permitted = if privileged {
+                blackboards
+                    .0
+                    .iter()
+                    .map(|(id, board)| (id.clone(), board.clone()))
+                    .collect()
+            } else {
+                crate::ship::console_publication::permitted_publications(
+                    &config.0,
+                    hosts.unwrap_or(&empty_hosts),
+                    station,
+                    &blackboards.0,
+                )
+            };
+            let console_scope = Some(permitted.keys().cloned().collect());
+            let updates = permitted
+                .into_iter()
                 .map(|(id, board)| {
-                    (
-                        id.clone(),
-                        visibility::project_blackboard_for_token(
+                    let projected = if privileged {
+                        board
+                    } else {
+                        crate::ship::console_publication::project_permitted_board(
+                            &config.0,
+                            &id,
+                            &board,
                             hull_visibility.as_ref(),
-                            station,
-                            board,
-                        ),
-                    )
+                        )
+                    };
+                    (id, projected)
                 })
                 .collect();
-            updates.sort_by(|a, b| a.0.cmp(&b.0));
-            if updates.is_empty() {
-                Vec::new()
-            } else {
-                vec![ServerMessage::BlackboardUpdate {
-                    updates,
-                    presentation_generation: lifecycle.as_ref().map(|owner| owner.state.generation),
-                }]
-            }
+            vec![ServerMessage::BlackboardUpdate {
+                console_scope_tick: Some(tick.as_ref().map_or(0, |tick| tick.0)),
+                console_scope,
+                updates,
+                presentation_generation: Some(
+                    lifecycle.as_ref().map_or(0, |owner| owner.state.generation),
+                ),
+            }]
         })
         .collect()
 }
@@ -601,129 +620,11 @@ pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
 /// in the world to work out which ones match — per tick, for a query that
 /// resolves to a single `LocalShip` entity. Bevy asserts the state's world id on
 /// use, so a cached state cannot silently be applied to the wrong world.
-pub fn broadcast_blackboard_updates(
-    world: &mut World,
-    mut bb_query: Local<Option<QueryState<&'static ShipSystemBlackboards, With<LocalShip>>>>,
-    mut last_generation: Local<Option<u64>>,
-) {
-    use crate::console::repair::visibility;
-
-    world.init_resource::<visibility::LastVisibleRepairBlackboard>();
-    let presentation_generation = world
+pub fn broadcast_blackboard_updates(world: &mut World) {
+    let generation = world
         .get_resource::<crate::audio_lifecycle::RoomAudioLifecycle>()
         .map(|owner| owner.state.generation);
-    let rebase = *last_generation != presentation_generation;
-    if rebase {
-        // Native sparse queues discard older-generation batches wholesale.
-        // Re-send recipient projections too, even when their visible repair
-        // fields did not change across this continuation boundary.
-        world
-            .resource_mut::<visibility::LastVisibleRepairBlackboard>()
-            .clear();
-    }
-
-    let mut updates: Vec<(
-        crate::core::messages::SystemId,
-        crate::core::messages::SystemBlackboard,
-    )> = {
-        let q = bb_query.get_or_insert_with(|| {
-            world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>()
-        });
-        let Some(bb) = q.iter(world).next() else {
-            return;
-        };
-        let last = world.resource::<LastBroadcastBlackboards>();
-        let mut changed: Vec<(
-            crate::core::messages::SystemId,
-            crate::core::messages::SystemBlackboard,
-        )> =
-            bb.0.iter()
-                .filter(|(id, bb)| rebase || last.0.get(*id) != Some(*bb))
-                .map(|(id, bb)| (id.clone(), bb.clone()))
-                .collect();
-        // Sorted because this vec becomes the `BlackboardUpdate` payload, and
-        // it was collected from a `HashMap` whose order follows `RandomState`'s
-        // per-process seed — two `--seed` runs emitted the same updates in a
-        // different order every time. Sorting the changed set (a handful of
-        // entries) rather than ordering the map itself keeps the per-tick
-        // publish writes on cheap hash lookups.
-        changed.sort_by(|a, b| a.0.cmp(&b.0));
-        changed
-    };
-
-    let viewers = visibility::connected_viewers(world);
-
-    // A token's station is an input to its repair-blackboard projection, so a
-    // player changing station mid-game invalidates it even though nothing the
-    // `LastBroadcastBlackboards` diff can see has changed. Without this, an
-    // idle undamaged ship would leave the previous station's detail on that
-    // phone until the internal blackboard next changed — possibly never.
-    let stations_changed = {
-        let cache = world.resource::<visibility::LastVisibleRepairBlackboard>();
-        cache.stations_changed(&viewers)
-    };
-
-    // Prune first so a disconnected token cannot keep suppressing a resend if
-    // it reconnects into the same station later in the same game.
-    {
-        let mut cache = world.resource_mut::<visibility::LastVisibleRepairBlackboard>();
-        visibility::prune_repair_blackboard_cache(&mut cache, &viewers);
-        cache.record_stations(&viewers);
-    }
-
-    if updates.is_empty() && !stations_changed {
-        return;
-    }
-
-    // Station change with an otherwise-unchanged blackboard: re-feed the
-    // current repair blackboard so the per-token projection is recomputed. The
-    // per-token cache inside `project_repair_blackboards` still suppresses the
-    // send for every token whose *view* did not actually change.
-    if stations_changed
-        && !updates
-            .iter()
-            .any(|(_, bb)| matches!(bb, crate::core::messages::SystemBlackboard::Repair(_)))
-    {
-        let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-        if let Some(bb) = q.iter(world).next() {
-            if let Some((id, repair)) = bb
-                .0
-                .iter()
-                .find(|(_, bb)| matches!(bb, crate::core::messages::SystemBlackboard::Repair(_)))
-            {
-                updates.push((id.clone(), repair.clone()));
-            }
-        }
-    }
-
-    // One `resource_mut` for the whole batch, not one per entry: each call is a
-    // resource lookup plus a change-tick bump, and this loop runs every tick
-    // that anything changed.
-    {
-        let mut last = world.resource_mut::<LastBroadcastBlackboards>();
-        for (id, bb) in &updates {
-            last.0.insert(id.clone(), bb.clone());
-        }
-    }
-
-    let vis = visibility::hull_visibility(world);
-    let mut cache = world
-        .remove_resource::<visibility::LastVisibleRepairBlackboard>()
-        .unwrap_or_default();
-    let mut pending =
-        visibility::project_repair_blackboards(updates, vis.as_ref(), &viewers, &mut cache);
-    world.insert_resource(cache);
-    for (_, message) in &mut pending {
-        if let ServerMessage::BlackboardUpdate {
-            presentation_generation: stamp,
-            ..
-        } = message
-        {
-            *stamp = presentation_generation;
-        }
-    }
-    *last_generation = presentation_generation;
-    world.resource_mut::<SimOutbox>().extend_snapshot(pending);
+    crate::ship::console_publication::publish_console_blackboards(world, generation);
 }
 
 /// When a player reconnects mid-game (Identify during InProgress),

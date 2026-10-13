@@ -91,29 +91,37 @@ fn local_start_assets_wait_for_authoritative_rigs_without_a_renderer() {
 }
 
 #[test]
-fn host_lobby_roster_excludes_auxiliary_stations() {
+fn host_lobby_roster_excludes_detached_consoles() {
     use crate::core::messages::StationId;
     use crate::lobby::stations_config::StationDef;
 
-    let station = |id: &str, name: &str, auxiliary: bool| StationDef {
+    let station = |id: &str, name: &str| StationDef {
         id: StationId(id.into()),
         name: name.into(),
         description: String::new(),
         rank: String::new(),
         short_code: name.chars().take(3).collect(),
-        console: None,
         ratings: vec!["Std".into()],
-        human_seeking: auxiliary,
-        host_order: vec![],
-        visiting_rating: auxiliary.then(|| "Std".into()),
-        auxiliary,
-        command_target: None,
     };
     let stations = ShipStations {
-        stations: vec![
-            station("captain", "Captain", false),
-            station("command", "Command", true),
-        ],
+        consoles: vec![phoenix_model::wire::ConsoleDef {
+            id: crate::core::messages::ConsoleId("command".into()),
+            name: "Command".into(),
+            description: String::new(),
+            short_code: String::new(),
+            manual_overview: None,
+            tutorials: vec![],
+            command_target: None,
+            ratings: vec![],
+            home_station: None,
+            screen: Some("fixture.html".into()),
+            human_seeking: true,
+            host_order: vec![StationId("captain".into())],
+            visiting_rating: None,
+            feeds: vec![],
+            systems: vec![],
+        }],
+        stations: vec![station("captain", "Captain")],
     };
     let players = vec![
         Player {

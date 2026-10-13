@@ -10,7 +10,7 @@ updated: 2026-08-27
 
 The runtime uses one system-addressed command path. Every human console and AI
 controller emits `ControlSystem { target: SystemId, payload }`; command
-admission resolves the target's owning station and effective control policy
+admission resolves System → Console → current hosting Station and effective policy
 before the payload reaches a system handler.
 
 ## Identifier namespaces
@@ -18,9 +18,10 @@ before the payload reaches a system handler.
 | Namespace | Meaning | Examples |
 |---|---|---|
 | `SystemId` | Declared capability instance; command, damage, power, and control-policy address | `helm-thrust`, `phaser-fore`, `navigation` |
-| `StationId` | Direct or auxiliary operable surface; owns systems and ratings | `helm`, `tactical`, `engineering` |
+| `StationId` | Claimable crew seat and native display assignment | `helm`, `tactical`, `engineering` |
+| `ConsoleId` | Ship-local screen and knowledge scope, owning Systems | `helm`, `navigation`, `comms` |
 | Blackboard key | Published state address; normally a system id, with explicit station-key helpers for composed console views | `power-reactor`, Helm station key |
-| `CoordinationAddress` | Explicit recipient address, either `Station(StationId)` or the whole `Ship`; never a disguised `SystemId` | `Station(helm)`, `Ship` |
+| `CoordinationAddress` | Explicit recipient address, `Station(StationId)`, `Console(ConsoleId)` or the whole `Ship`; never a disguised `SystemId` | `Station(helm)`, `Ship` |
 
 Wire command targets are system ids. Station ids are not a fallback command
 surface. Helm and Tactical are composed stations, so their commands target
@@ -54,17 +55,18 @@ systems rather than assume a fixed suite or instance count.
 
 `ControlSourceResolver::policy_for` is the shared Human/AI/Offline gate. Station
 ratings populate its per-system sources, while damage contributes an overriding
-offline set. Human-seeking station resolution changes which directly held
-station may present a surface; it does not transfer system ownership or invent
+offline set. Human-seeking Console resolution changes which directly held
+Station may host a screen; it does not transfer system ownership or invent
 a new command target.
 
-Cross-system requests use the coordination channel with an explicit Station or
-Ship recipient. Producers resolve a fine System to its owning Station before
-enqueue; the payload does not select its own route. Requests never bypass
+Cross-system requests use explicit Station, Console or Ship recipients.
+Detached and human-seeking equipment retains its Console address while queued;
+delivery resolves its current host or ordinary AI. Fixed home-Station addressing
+retains its existing meaning. The payload does not select its own route. Requests never bypass
 command admission to mutate another system's state directly.
 
 After delivery, the owning module interprets the typed fact. Helm resolves its
-Station and live AI authority through `helm-steering`, matching the router's
+authored coordination address and live AI authority through `helm-steering`, matching the router's
 representative-axis fallback, before applying arc-bearing or waypoint-clearance
 state. Other Helm axes neither receive nor veto that steering-owned work.
 

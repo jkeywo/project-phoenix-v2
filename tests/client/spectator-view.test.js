@@ -6,10 +6,8 @@ import {
 } from '../../gui/spectator-view.js';
 
 const stations = [
-  { id: 'helm', name: 'Helm', human_seeking: true },
-  { id: 'tactical', name: 'Tactical', human_seeking: true },
-  // A non-crew / auxiliary station must never appear on the summary.
-  { id: 'viewscreen', name: 'Viewscreen', human_seeking: false },
+  { id: 'helm', name: 'Helm' },
+  { id: 'tactical', name: 'Tactical' },
 ];
 
 describe('spectatorSummaryModel', () => {

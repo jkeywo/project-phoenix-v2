@@ -1006,16 +1006,20 @@ id = "captain"
 name = "Captain"
 description = ""
 rank = ""
-console = "captain.html"
 
 [[station.rating]]
 name = "Manual"
 automated_systems = []
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "captain.html"
+
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "captain-console"
 "#,
             &["red_alert"],
         )
@@ -1458,15 +1462,25 @@ name = "station.tactical.display_name"
 description = "station.tactical.description"
 rank = "Lieutenant"
 
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
+[[console]]
+id = "tactical-console"
+home_station = "tactical"
+screen = "fixture.html"
+
 [[system]]
 id = "impulse-drive"
 kind = "impulse-drive"
-station = "helm"
+console = "helm-console"
 
 [[system]]
 id = "phaser-bank"
 kind = "phaser-bank"
-station = "tactical"
+console = "tactical-console"
 "#,
                 )
                 .expect("a well-formed authoring fixture"),
@@ -1619,5 +1633,123 @@ fn armed_gm_despawns_round_trip_in_order_and_affect_the_digest() {
         crate::sim_digest::world_digest(live.world()),
         crate::sim_digest::world_digest(recovered.world()),
         "forgetting an accepted removal must diverge"
+    );
+}
+
+#[test]
+fn console_views_survive_capture_restore_without_becoming_device_preferences() {
+    use crate::ship::components::ConsoleWorkingViews;
+    use phoenix_model::{
+        console::{ConsoleWorkingView, NavigationWorkingView},
+        identity::ConsoleId,
+    };
+    let mut world = sparse_capture_world(None);
+    let views = ConsoleWorkingViews(std::collections::BTreeMap::from([(
+        ConsoleId("navigation".into()),
+        ConsoleWorkingView {
+            navigation: Some(NavigationWorkingView {
+                zoom: 2.0,
+                center_x: 100.0,
+                center_y: -50.0,
+                selected_uuid: Some(uuid::Uuid::nil()),
+            }),
+            ..Default::default()
+        },
+    )]));
+    let entity = world.spawn((EntityUuid("ship".into()), views.clone())).id();
+    let row = capture_entities(&world).remove(0);
+    world
+        .get_mut::<ConsoleWorkingViews>(entity)
+        .unwrap()
+        .0
+        .clear();
+    apply_entity_state(&mut world, entity, &row, 10);
+    assert_eq!(world.get::<ConsoleWorkingViews>(entity), Some(&views));
+    assert_eq!(capture_entities(&world)[0].console_views, row.console_views);
+}
+
+#[test]
+fn gm_npc_console_assignment_applies_and_survives_capture_restore() {
+    use crate::core::messages::{AdmittedCommands, StationId, SystemControlPayload, SystemId};
+    use crate::ship::components::{
+        ConsoleWorkingViews, ShipConfigComponent, ShipSystemControlSources,
+    };
+    use bevy::ecs::system::RunSystemOnce;
+    use phoenix_model::{console::ConsoleWorkingView, identity::ConsoleId};
+    let config: crate::ship::config::ShipConfig = toml::from_str(
+        r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = ""
+rank = ""
+[[console]]
+id = "npc-navigation"
+home_station = "helm"
+screen = "navigation.html"
+"#,
+    )
+    .unwrap();
+    let console = ConsoleId("npc-navigation".into());
+    let view = ConsoleWorkingView {
+        comms_thread: Some("fleet".into()),
+        ..Default::default()
+    };
+    // An authenticated GM can operate an uncrewed NPC's authored home Console.
+    let command = crate::command_admission::validate_station_command(
+        &StationId("helm".into()),
+        SystemId(crate::ship::console_views::ASSIGN_CONSOLE_VIEW.into()),
+        SystemControlPayload::AssignConsoleView {
+            console: console.clone(),
+            view: view.clone(),
+        },
+        &ShipSystemControlSources::default(),
+        &config,
+        None,
+        None,
+    )
+    .expect("valid GM Console assignment");
+    let mut world = sparse_capture_world(None);
+    let entity = world
+        .spawn((
+            EntityUuid("npc-console-ship".into()),
+            ShipConfigComponent(config),
+            AdmittedCommands(vec![command]),
+        ))
+        .id();
+    assert!(!world
+        .entity(entity)
+        .contains::<crate::server_app::LocalShip>());
+    assert!(world
+        .get::<ConsoleWorkingViews>(entity)
+        .unwrap()
+        .0
+        .is_empty());
+    world
+        .run_system_once(crate::ship::console_views::apply_console_views)
+        .unwrap();
+    assert_eq!(
+        world
+            .get::<ConsoleWorkingViews>(entity)
+            .unwrap()
+            .0
+            .get(&console),
+        Some(&view)
+    );
+    let row = capture_entities(&world).remove(0);
+    assert_eq!(row.console_views.get(&console), Some(&view));
+    world
+        .get_mut::<ConsoleWorkingViews>(entity)
+        .unwrap()
+        .0
+        .clear();
+    apply_entity_state(&mut world, entity, &row, 10);
+    assert_eq!(
+        world
+            .get::<ConsoleWorkingViews>(entity)
+            .unwrap()
+            .0
+            .get(&console),
+        Some(&view)
     );
 }

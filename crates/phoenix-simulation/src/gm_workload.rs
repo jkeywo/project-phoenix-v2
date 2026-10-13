@@ -807,7 +807,7 @@ fn collect_repairs(reading: &ShipReading<'_>, demands: &mut StationDemands) {
         record(
             demands,
             &station,
-            format!("repair:{}/{}", reading.uuid, entry.station_id),
+            format!("repair:{}/{}", reading.uuid, entry.group.selector_key()),
             REPAIR_SOURCE,
             GmAttentionReason {
                 id: REPAIR_REASON.to_string(),
@@ -815,7 +815,11 @@ fn collect_repairs(reading: &ShipReading<'_>, demands: &mut StationDemands) {
                     (
                         "station".to_string(),
                         if entry.station_label.is_empty() {
-                            entry.station_id.clone()
+                            match &entry.group {
+                                crate::core::messages::RepairGroup::Core => "core".into(),
+                                crate::core::messages::RepairGroup::Station(id) => id.0.clone(),
+                                crate::core::messages::RepairGroup::Console(id) => id.0.clone(),
+                            }
                         } else {
                             entry.station_label.clone()
                         },

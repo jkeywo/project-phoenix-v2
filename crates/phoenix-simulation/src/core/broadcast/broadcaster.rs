@@ -225,7 +225,10 @@ pub fn dispatch<M: BroadcastKind>(
     mut config_query: Local<
         Option<
             QueryState<
-                &'static crate::ship_plugin::ShipConfigComponent,
+                (
+                    &'static crate::ship_plugin::ShipConfigComponent,
+                    Option<&'static crate::ship::components::ConsoleHosts>,
+                ),
                 With<crate::server_app::LocalShip>,
             >,
         >,
@@ -256,11 +259,19 @@ pub fn dispatch<M: BroadcastKind>(
     // conflicts. The `QueryState` is cached in a `Local` rather than rebuilt per
     // tick by `World::query_filtered` — building one walks every archetype in
     // the world, which this system was paying for on every single tick.
-    let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = {
+    let ship_config_opt: Option<(
+        crate::ship_plugin::ShipConfigComponent,
+        Option<crate::ship::components::ConsoleHosts>,
+    )> = {
         let q = config_query.get_or_insert_with(|| {
-            world.query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>()
+            world.query_filtered::<(
+                &crate::ship_plugin::ShipConfigComponent,
+                Option<&crate::ship::components::ConsoleHosts>,
+            ), With<crate::server_app::LocalShip>>()
         });
-        q.single(world).ok().cloned()
+        q.single(world)
+            .ok()
+            .map(|(config, hosts)| (config.clone(), hosts.cloned()))
     };
 
     // Collect (target, producer) for entries that should fire this tick.
@@ -283,9 +294,13 @@ pub fn dispatch<M: BroadcastKind>(
                     return None;
                 }
                 // Resolve audience → target.
-                let target = reg
-                    .audience
-                    .resolve(&sessions.0, ship_config_opt.as_ref().map(|c| &c.0))?;
+                let target = reg.audience.resolve(
+                    &sessions.0,
+                    ship_config_opt.as_ref().map(|(c, _)| &c.0),
+                    ship_config_opt
+                        .as_ref()
+                        .and_then(|(_, hosts)| hosts.as_ref()),
+                )?;
                 Some((target, reg.producer.clone()))
             })
             .collect()

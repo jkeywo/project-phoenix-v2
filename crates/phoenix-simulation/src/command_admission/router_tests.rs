@@ -3,12 +3,11 @@ use crate::core::messages::{AdmittedCommand, SystemControlPayload, SystemId};
 
 fn system(id: &str, kind: &str) -> crate::ship::config::SystemInstanceConfig {
     crate::ship::config::SystemInstanceConfig {
+        console: Some(phoenix_model::identity::ConsoleId("router-scope".into())),
         id: SystemId(id.into()),
         kind: kind.into(),
-        station: None,
         ai_only: true,
-        human_seeking: false,
-        seek_order: Vec::new(),
+
         power_group: None,
         marker: None,
         config: None,
@@ -22,6 +21,10 @@ fn ship_config(
         stations: Vec::new(),
         systems,
         power_groups: std::collections::HashMap::new(),
+        consoles: vec![phoenix_model::console::ConsoleConfig {
+            id: phoenix_model::identity::ConsoleId("router-scope".into()),
+            ..Default::default()
+        }],
         coordination_lag_secs: 0.0,
     }
 }

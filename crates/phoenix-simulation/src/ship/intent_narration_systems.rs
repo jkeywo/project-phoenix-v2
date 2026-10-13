@@ -134,8 +134,8 @@ fn station_owning_kind(
     config
         .systems
         .iter()
-        .find(|s| kinds.contains(&s.kind.as_str()) && s.station.is_some())
-        .and_then(|s| s.station.clone())
+        .find(|s| kinds.contains(&s.kind.as_str()) && config.system_home_station(s).is_some())
+        .and_then(|s| config.system_home_station(s).cloned())
 }
 
 /// Emit one coarsened advisory per narrating seat whose decision changed.
@@ -268,7 +268,7 @@ pub fn tick_intent_narration(
             let policies: Vec<crate::ship::control_source::ControlTickPolicy> = config
                 .systems
                 .iter()
-                .filter(|s| s.station.as_ref() == Some(&station_id))
+                .filter(|s| config.system_home_station(s) == Some(&station_id))
                 .map(|s| control_sources.0.policy_for(&s.id))
                 .collect();
             let sender_origin = seat_control_source(&policies);

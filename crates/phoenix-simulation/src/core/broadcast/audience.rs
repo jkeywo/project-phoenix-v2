@@ -8,23 +8,11 @@ use crate::ship::config::ShipConfig;
 pub enum Audience {
     All,
     Holding(StationId),
-    /// Dynamically resolves the station that owns the given system from the
-    /// ship config, then targets that station's holder.  Falls back to
-    /// `None` (skip broadcast) when no config is available.
+    /// Targets the current host of the controlling Console; missing placement skips delivery.
     HoldingSystem(SystemId),
-    /// Dynamically resolves the single station shared by every authored System
-    /// of the given kind, then targets that station's holder. Instance ids are
-    /// author-defined, so capability-level publishers use this instead of
-    /// freezing one hull's id. Missing, ownerless, or split ownership skips the
-    /// broadcast.
+    /// All instances must resolve to one current Console host; split or missing hosts skip delivery.
     HoldingSystemKind(String),
-    /// Resolves the station owning this ship's weapons suite from the ship
-    /// config, then targets that station's holder. `None` (skip broadcast)
-    /// when there's no config, no weapons owner, or the station is unheld.
-    ///
-    /// Distinct from `Holding(StationId("tactical"))` because the owner is not
-    /// always named "tactical" — the single-station Courier puts its blaster on
-    /// "pilot". See [`ShipConfig::weapons_station`].
+    /// Targets the shared current host of the declared weapons suite, without home-seat fallback.
     HoldingWeapons,
     Token(String),
     AllExcept(String),
@@ -39,6 +27,7 @@ impl Audience {
         &self,
         sessions: &SessionManager,
         ship_config: Option<&ShipConfig>,
+        hosts: Option<&crate::ship::components::ConsoleHosts>,
     ) -> Option<Target> {
         match self {
             Audience::All => Some(Target::All),
@@ -46,29 +35,80 @@ impl Audience {
                 .holder_for_station(station_id)
                 .map(|t| Target::Token(t.to_string())),
             Audience::HoldingSystem(system_id) => {
-                let station_id = ship_config
-                    .and_then(|config| config.system(system_id))
-                    .and_then(|sys| sys.station.clone())?;
+                let config = ship_config?;
+                let station = current_system_host(config, hosts?, system_id)?;
                 sessions
-                    .holder_for_station(&station_id)
-                    .map(|t| Target::Token(t.to_string()))
+                    .holder_for_station(station)
+                    .map(|token| Target::Token(token.into()))
             }
             Audience::HoldingSystemKind(kind) => {
-                let station_id = ship_config?.station_for_system_kind(kind)?;
+                let config = ship_config?;
+                let station = common_system_host(
+                    config,
+                    hosts?,
+                    config
+                        .systems
+                        .iter()
+                        .filter(|system| &system.kind == kind)
+                        .map(|system| &system.id),
+                )?;
                 sessions
-                    .holder_for_station(&station_id)
-                    .map(|t| Target::Token(t.to_string()))
+                    .holder_for_station(station)
+                    .map(|token| Target::Token(token.into()))
             }
             Audience::HoldingWeapons => {
-                let station_id = ship_config.and_then(|config| config.weapons_station())?;
+                use crate::ship::system_registry::*;
+                let config = ship_config?;
+                let station = common_system_host(
+                    config,
+                    hosts?,
+                    config
+                        .systems
+                        .iter()
+                        .filter(|system| {
+                            [
+                                PHASER_BANK_KIND,
+                                BLASTER_BANK_KIND,
+                                TORPEDO_TUBE_KIND,
+                                TORPEDO_MAGAZINE_KIND,
+                                TACTICAL_RADAR_KIND,
+                            ]
+                            .contains(&system.kind.as_str())
+                        })
+                        .map(|system| &system.id),
+                )?;
                 sessions
-                    .holder_for_station(&station_id)
-                    .map(|t| Target::Token(t.to_string()))
+                    .holder_for_station(station)
+                    .map(|token| Target::Token(token.into()))
             }
             Audience::Token(t) => Some(Target::Token(t.clone())),
             Audience::AllExcept(t) => Some(Target::AllExcept(t.clone())),
         }
     }
+}
+
+fn current_system_host<'a>(
+    config: &ShipConfig,
+    hosts: &'a crate::ship::components::ConsoleHosts,
+    system: &SystemId,
+) -> Option<&'a StationId> {
+    let console = config.console_for_system(system)?;
+    hosts
+        .0
+        .iter()
+        .find(|host| host.console == console.id)?
+        .host
+        .as_ref()
+}
+fn common_system_host<'a, 's>(
+    config: &ShipConfig,
+    hosts: &'a crate::ship::components::ConsoleHosts,
+    mut systems: impl Iterator<Item = &'s SystemId>,
+) -> Option<&'a StationId> {
+    let first = current_system_host(config, hosts, systems.next()?)?;
+    systems
+        .all(|system| current_system_host(config, hosts, system) == Some(first))
+        .then_some(first)
 }
 
 #[cfg(test)]

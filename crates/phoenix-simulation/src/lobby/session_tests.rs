@@ -15,15 +15,10 @@ fn test_stations() -> ShipStations {
         description: "".into(),
         rank: "".into(),
         short_code: "".into(),
-        console: None,
         ratings: vec![],
-        human_seeking: false,
-        host_order: vec![],
-        visiting_rating: None,
-        auxiliary: false,
-        command_target: None,
     };
     ShipStations {
+        consoles: Vec::new(),
         stations: [
             ("captain", "Captain"),
             ("helm", "Helm"),
@@ -53,24 +48,17 @@ fn test_ship_config() -> ShipConfig {
                 rank: station.rank,
                 short_code: station.short_code,
                 ratings: vec![],
-                console: None,
                 manual_overview: None,
                 tutorials: vec![],
-                human_seeking: false,
-                host_order: vec![],
-                visiting_rating: None,
-                auxiliary: false,
-                command_target: None,
                 stances: vec![],
             })
             .collect(),
         systems: vec![SystemInstanceConfig {
+            console: Some(phoenix_model::identity::ConsoleId("background".into())),
             id: SystemId("dummy".into()),
             kind: "dummy".into(),
-            station: None,
             ai_only: true,
-            human_seeking: false,
-            seek_order: Vec::new(),
+
             power_group: None,
             marker: None,
             config: None,
@@ -85,6 +73,10 @@ fn test_ship_config() -> ShipConfig {
             },
         ))
         .collect(),
+        consoles: vec![phoenix_model::console::ConsoleConfig {
+            id: phoenix_model::identity::ConsoleId("background".into()),
+            ..Default::default()
+        }],
         coordination_lag_secs: 2.0,
     }
 }
@@ -104,7 +96,24 @@ fn fleet_lobby_ratings_follow_connected_seats_and_pending_choices() {
     let mut sm = sm();
     let mut stations = test_stations();
     stations.stations[0].ratings = vec!["Assisted".into()];
-    stations.stations[3].auxiliary = true;
+    stations.stations.remove(3);
+    stations.consoles.push(phoenix_model::wire::ConsoleDef {
+        id: crate::core::messages::ConsoleId("repair".into()),
+        name: "Repair".into(),
+        description: String::new(),
+        short_code: String::new(),
+        manual_overview: None,
+        tutorials: vec![],
+        command_target: None,
+        ratings: vec![],
+        home_station: None,
+        screen: Some("fixture.html".into()),
+        human_seeking: true,
+        host_order: vec![StationId("captain".into())],
+        visiting_rating: None,
+        feeds: vec![],
+        systems: vec![],
+    });
     for (token, station) in [
         ("captain-token", "captain"),
         ("helm-token", "helm"),
@@ -745,4 +754,21 @@ fn eligibility_is_absent_from_the_serialized_player() {
         !wire.contains("eligib"),
         "no eligibility field may appear on the broadcast Player: {wire}"
     );
+}
+
+#[test]
+fn console_eligibility_is_rating_scoped_and_separate_from_station_claims() {
+    let mut sessions = sm();
+    let console = phoenix_model::identity::ConsoleId("comms-display".into());
+    assert!(sessions.is_console_eligible("crew", &console, "Std"));
+    sessions.set_console_eligibility(
+        "crew",
+        std::collections::BTreeMap::from([(console.clone(), vec!["Std".into()])]),
+    );
+    assert!(!sessions.is_console_eligible("crew", &console, "Std"));
+    assert!(sessions.is_console_eligible("crew", &console, "Simplified"));
+    assert!(sessions.is_eligible("crew", &StationId("comms-display".into())));
+    assert!(sessions.is_console_eligible("other", &console, "Std"));
+    sessions.clear_all_eligibility();
+    assert!(sessions.is_console_eligible("crew", &console, "Std"));
 }

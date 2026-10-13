@@ -24,20 +24,20 @@ pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
         &crate::entities::include_resolve::HostFragmentSource,
     )
     .unwrap_or_else(|e| panic!("ship_config: {HULL} failed to compose: {e}"));
-    let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
-        .expect("core system registry must be valid");
-    let kinds: Vec<&str> = registry.kinds().collect();
-    match crate::ship::config::parse_and_validate(&resolved.toml, &kinds) {
-        Ok(config) => {
-            bevy::log::info!(
-                "ship_config: loaded {} stations, {} systems",
-                config.stations.len(),
-                config.systems.len()
-            );
-            ShipConfigComponent(config)
-        }
-        Err(e) => panic!("ship_config: failed validation: {e}"),
-    }
+    // Parse the complete entity so generated equipment and its Console feeds
+    // are validated together, exactly as on an ordinary selected-hull boot.
+    let entity: crate::entities::config::EntityConfig = resolved
+        .parse_with(crate::entities::config::EntityConfig::from_toml)
+        .unwrap_or_else(|e| panic!("ship_config: failed validation: {e}"));
+    let config = entity
+        .ship_config
+        .expect("fallback hull must declare ship_config");
+    bevy::log::info!(
+        "ship_config: loaded {} stations, {} systems",
+        config.stations.len(),
+        config.systems.len()
+    );
+    ShipConfigComponent(config)
 }
 
 #[cfg(test)]

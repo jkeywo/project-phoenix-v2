@@ -218,7 +218,7 @@ fn a_released_claim_returns_the_record_to_the_idle_default() {
 
 fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
     crate::console::repair::server::RepairQueueEntry {
-        station_id: "engineering".into(),
+        group: fixture_repair_group("engineering"),
         station_label: "engineering".into(),
         tier: DamageTier::Disabled,
         deficit: 0.9,
@@ -779,4 +779,13 @@ fn a_target_that_drifts_out_of_range_ends_the_live_dispatch() {
         .unwrap()
         .dispatched_target
         .is_none());
+}
+
+fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
+    use crate::core::messages::{RepairGroup, StationId};
+    if id == "core" {
+        RepairGroup::Core
+    } else {
+        RepairGroup::Station(StationId(id.into()))
+    }
 }

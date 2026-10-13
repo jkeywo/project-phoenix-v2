@@ -322,7 +322,7 @@ fn a_pack_faction_may_name_a_base_faction_as_its_enemy() {
 #[test]
 fn a_project_rung_naming_an_unowned_system_reports_the_rung_entry_line() {
     let hull = format!(
-        "class = \"cruiser\"\nfaction = \"{ALLIANCE}\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\n    \"red-alert\",\n    \"phaser-fore\",\n]\n\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nstation = \"captain\"\n\n[[system]]\nid = \"phaser-fore\"\nkind = \"phaser_bank\"\nstation = \"tactical\"\n"
+        "class = \"cruiser\"\nfaction = \"{ALLIANCE}\"\n\n[[station]]\nid = \"captain\"\nname = \"Captain\"\n\n[[station.rating]]\nname = \"Std\"\nautomated_systems = []\n\n[[station.rating]]\nname = \"Simplified\"\nautomated_systems = [\n    \"red-alert\",\n    \"phaser-fore\",\n]\n\n[[station]]\nid = \"tactical\"\nname = \"Tactical\"\n\n[[system]]\nid = \"red-alert\"\nkind = \"red_alert\"\nconsole = \"captain-console\"\n\n[[system]]\nid = \"phaser-fore\"\nkind = \"phaser_bank\"\nconsole = \"tactical-console\"\n[[console]]\nid = \"captain-console\"\nhome_station = \"captain\"\nscreen = \"fixture.html\"\n[[console]]\nid = \"tactical-console\"\nhome_station = \"tactical\"\nscreen = \"fixture.html\"\n"
     );
     let files = BTreeMap::from([
         (
@@ -430,7 +430,7 @@ fn the_native_provider_answers_definitions_edit_and_new_faction() {
 
 const COMPOSITION_HULL: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='boost'\nkind='helm_boost'\nstation='captain'\n";
+[[system]]\nid='boost'\nkind='helm_boost'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
 
 /// The one member set both paths read: two roots, one curating its hull.
 fn composition_members() -> BTreeMap<String, String> {

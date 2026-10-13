@@ -725,6 +725,7 @@ kind = "Viewscreen"
 id = "security"
 kind = "security"
 console = "operations"
+ai_only = true
 "#,
             &["security"],
         )
@@ -1231,7 +1232,7 @@ fn the_alliance_destroyer_exposes_two_tactical_owned_security_teams() {
         .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
         .expect("the destroyer authors a kind = \"security\" [[system]]");
     assert_eq!(
-        system.station.as_ref().map(|s| s.0.as_str()),
+        ship.system_home_station(system).map(|s| s.0.as_str()),
         Some("tactical"),
         "Tactical owns Security on this hull"
     );
@@ -1302,7 +1303,7 @@ fn the_alliance_cruiser_exposes_two_tactical_owned_security_teams() {
         .find(|s| s.kind == crate::ship::system_registry::SECURITY_KIND)
         .expect("the cruiser authors a kind = \"security\" [[system]]");
     assert_eq!(
-        system.station.as_ref().map(|s| s.0.as_str()),
+        ship.system_home_station(system).map(|s| s.0.as_str()),
         Some("tactical"),
         "Tactical owns Security on this hull too"
     );

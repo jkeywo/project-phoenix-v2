@@ -3,7 +3,7 @@ title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
 sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-27
+updated: 2026-10-13
 ---
 
 # System
@@ -14,20 +14,19 @@ human/AI control policy, and the unit that can be disabled by system damage.
 
 ## Identity and authoring
 
-Hull TOML declares systems with a stable id, a kind, an owning station where
-applicable, and optional power/config data:
+Hull TOML declares systems with a stable id, a kind, an owning Console, and optional power/config data:
 
 ```toml
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "helm"
+console = "helm"
 power_group = "helm"
 ```
 
 `SystemInstanceConfig` parses this shape. Ship validation requires every kind
-to be registered, every station reference to resolve, and every system named by
-a station rating to exist and belong to that station.
+to be registered, every Console reference to resolve, and every system named by
+a rating to exist and belong to its Console or home Station.
 
 `SystemKindDescriptor` in `crates/phoenix-sim-gameplay/src/ship/system_registry.rs` is the authoritative
 metadata record for an authored kind. A kind chooses the server behaviour and
@@ -56,18 +55,17 @@ capability can use the bare id (`captain`, `navigation`, `comms`). Kind strings
 are registry keys and may use snake case. Use the helpers in
 `crates/phoenix-sim-gameplay/src/ship/system_registry.rs` instead of duplicating stable ids in Rust.
 
-Station ids and system ids are separate namespaces. `helm` and `tactical` are
-Station identities used for console-level blackboards; Helm axes and Tactical
-operations target declared Systems such as `helm-steering`, `tactical-radar`,
-and `phaser-control`. Coordination has its own explicit
-`CoordinationAddress::Station(StationId)` or `CoordinationAddress::Ship` wire
-type and never disguises a Station as `SystemId`.
+Station, Console and System ids are separate namespaces. `helm` and `tactical`
+remain publication keys for composed observations; machinery commands target
+Systems such as `helm-steering`, `tactical-radar` and `phaser-control`.
+Coordination uses explicit `Station`, `Console` or `Ship` addresses. Queued
+Console messages resolve the current host at delivery.
 
 ## Console Family
 
 A Console Family selects the client payload builder and dirty-console routing
 for a System's presentation. It does not own the System, grant access, or
-replace a command target: Station topology remains the ownership source and the
+replace a command target: System → Console ownership and current Console hosting determine authority; the
 authored `SystemId` remains command authority.
 
 Every descriptor requires Console Family metadata. The host resolves it into
@@ -107,12 +105,13 @@ system resolves to one policy:
 | AI | no | yes | yes |
 | Offline | no | no | no |
 
-Station ratings choose Human or AI per owned system. The implicit Backfill
-rating delegates every system of an unmanned station to AI. Damage adds an
+Console ratings choose Human or AI per owned System. The implicit Backfill
+rating delegates every System of an unhosted Console to AI. Damage adds an
 independent offline override, so a Disabled or Destroyed system remains inert
 regardless of the station rating until repair clears the override.
 
-Command admission checks the effective policy and station tenure before a
+Command admission follows System → Console → current hosting Station and checks
+the effective policy and Station tenure before a
 human command enters the simulation. AI policy hosts consult the same
 `operate_ai` field before emitting their corresponding command.
 

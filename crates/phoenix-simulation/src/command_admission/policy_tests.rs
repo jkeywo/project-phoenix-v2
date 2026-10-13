@@ -15,10 +15,15 @@ name = "Engineering"
 description = "Damage control."
 rank = "Ltn."
 
+[[console]]
+id = "repair-console"
+home_station = "repair"
+screen = "fixture.html"
+
 [[system]]
 id = "repair"
 kind = "repair_control"
-station = "repair"
+console = "repair-console"
 "#,
         &["repair_control"],
     )
@@ -47,15 +52,25 @@ name = "Helm"
 description = "Flight control."
 rank = "Lt."
 
+[[console]]
+id = "captain-console"
+home_station = "captain"
+screen = "fixture.html"
+
+[[console]]
+id = "helm-console"
+home_station = "helm"
+screen = "fixture.html"
+
 [[system]]
 id = "bridge-display"
 kind = "viewscreen"
-station = "captain"
+console = "captain-console"
 
 [[system]]
 id = "flight-scope"
 kind = "helm_radar"
-station = "helm"
+console = "helm-console"
 "#,
         &[
             crate::ship::system_registry::VIEWSCREEN_KIND,
@@ -230,20 +245,25 @@ name = "Engineering"
 description = "Shields and power."
 rank = "Ltn."
 
+[[console]]
+id = "engineering-console"
+home_station = "engineering"
+screen = "fixture.html"
+
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "engineering"
+console = "engineering-console"
 
 [[system]]
 id = "shield-arc-fore"
 kind = "shield_arc"
-station = "engineering"
+console = "engineering-console"
 
 [[system]]
 id = "shield-arc-aft"
 kind = "shield_arc"
-station = "engineering"
+console = "engineering-console"
 "#,
         &["shields", "shield_arc"],
     )
@@ -255,8 +275,12 @@ station = "engineering"
 fn config_with_ownerless_arcs() -> crate::ship::config::ShipConfig {
     crate::ship::config::ShipConfig::from_toml(
         r#"
+[[console]]
+id = "ai-shield-arc-all"
+
 [[system]]
 id = "shield-arc-all"
+console = "ai-shield-arc-all"
 kind = "shield_arc"
 ai_only = true
 "#,
@@ -309,18 +333,23 @@ name = "Shields"
 description = "Defensive grid."
 rank = "Ltn."
 
+[[console]]
+id = "shields-console"
+home_station = "shields"
+screen = "fixture.html"
+
 [[system]]
 id = "repair"
 kind = "repair_control"
-station = "shields"
+console = "shields-console"
 "#,
         &["repair_control"],
     )
     .unwrap();
     assert_eq!(
         station_for_system(&empty, None, &SystemId("shield-arc-fore".into())),
-        Some(StationId("shields".into())),
-        "legacy fixtures with no synthesised arcs keep the historical shields-station mapping"
+        None,
+        "an undeclared shield arc cannot acquire authority from a Station name"
     );
 }
 
@@ -531,8 +560,8 @@ fn a_non_spectator_registered_token_still_reaches_the_debug_route() {
 // ownership resolves through step 0 (the live seek), so this exercises the
 // real authorization boundary AC3 depends on.
 
-/// A hull with a Captain seat and the auxiliary, human-seeking Command
-/// station that owns the `command` system. `command_target` is deliberately
+/// A hull with a Captain seat and the detached, human-seeking Command
+/// Console that owns the `command` system. `command_target` is deliberately
 /// omitted so no stance catalogue is required — admission turns on station
 /// tenure, not on the stance content this fixture is not about.
 fn command_config() -> crate::ship::config::ShipConfig {
@@ -550,24 +579,23 @@ name = "Tactical"
 description = "Weapons."
 rank = "Ltn."
 
-[[station]]
-id = "command"
+[[console]]
+id = "command-console"
 name = "Command"
 description = "Direct an AI station."
-rank = "Cpt."
-auxiliary = true
+screen = "gui/command-console.html"
 human_seeking = true
 host_order = ["captain"]
 visiting_rating = "Std"
 
-[[station.rating]]
+[[console.rating]]
 name = "Std"
 automated_systems = []
 
 [[system]]
 id = "command"
 kind = "command"
-station = "command"
+console = "command-console"
 "#,
         &["command"],
     )

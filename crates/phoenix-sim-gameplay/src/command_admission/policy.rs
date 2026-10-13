@@ -1,33 +1,7 @@
 use crate::core::messages::{StationId, SystemControlPayload};
-/// Maps a `SystemId` to the `StationId` whose holder is authoritative for
-/// that system's admission. Returns `None` for systems with no owning
-/// station (either ship-wide or unknown), signalling a deny at the
-/// caller.
-///
-/// Lookup order:
-///   0. The live human-seeking host map (issue #984), when the caller has one.
-///      A `human_seeking` system is authoritative wherever this tick's seek put
-///      it, which is NOT necessarily the station its `[[system]]` block
-///      authors — the destroyer's Comms officer may be sitting on `captain`.
-///   1. Shield-arc prefix match — arcs are not auto-generated into
-///      `ShipConfig.systems` (they're synthesised at the entity-config layer),
-///      so they must be matched by prefix.
-///   2. Direct system→station from the config's `[[system]]` blocks
-///      (handles fine-grained systems and modern coarse systems).
-///   3. `None` — truly unknown system id, caller will deny.
-///
-/// The former station-name fallback (target string matches a station id) was
-/// removed in issue #832: since #801/#822 every wire `target` a client emits
-/// names a declared `[[system]]` id, so it always resolves at step 1 or 2.
-///
-/// `hosts` is `Option` because most callers have no ship entity in hand — and
-/// because a ship that authors no `human_seeking` system never grows the
-/// component. `None` is exactly the pre-#984 behaviour.
-///
-/// NEVER shortcut this with `StationId(system_id.0)`. `SystemId("comms")` and
-/// `StationId("comms")` are different types naming different things that merely
-/// coincide on the cruiser and battleship; that coincidence is what hid the
-/// destroyer/courier `CommsState` bug for as long as it did.
+/// Resolve authority through the System's Console and current hosting Station.
+/// Generated equipment must carry the same explicit ownership as authored gear;
+/// an unknown target never acquires authority from its spelling.
 pub fn station_for_system(
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
@@ -37,24 +11,9 @@ pub fn station_for_system(
     if let Some(host) = hosts.and_then(|h| h.host_for(target)) {
         return Some(host.clone());
     }
-    // Step 1: shield-arc prefix. Arcs are synthesised into `config.systems`
-    // by the entity-config layer (`EntityConfig::from_toml_in_mode`, which
-    // appends a `kind = "shield_arc"` entry per `[[shield_arc]]`) carrying
-    // the owning station of the ship's `kind = "shields"` system — e.g. the
-    // destroyer's arcs live on "engineering". Resolve through the config so
-    // the holder of THAT station is authoritative. Ownerless NPC arcs carry
-    // `station: None`, which correctly denies humans. Only when the config
-    // has no arc entry at all (legacy/test fixtures whose `ShipConfigComponent`
-    // predates arc synthesis) fall back to a literal "shields" station.
-    if target.0.starts_with("shield-arc-") {
-        if let Some(system) = config.system(target) {
-            return system.station.clone();
-        }
-        return Some(StationId("shields".into()));
-    }
     // Step 2: direct system lookup.
     if let Some(system) = config.system(target) {
-        return system.station.clone();
+        return config.system_home_station(system).cloned();
     }
     // Step 3: unknown.
     None
@@ -127,7 +86,22 @@ pub fn authorize_station_command(
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
+    console_hosts: Option<&crate::ship_plugin::ConsoleHosts>,
 ) -> Result<crate::core::messages::SystemId, StationCommandPolicyFailure> {
+    if let SystemControlPayload::AssignConsoleView { console, view } = payload {
+        let Some(definition) = config.console(console) else {
+            return Err(StationCommandPolicyFailure::SystemOutsideStation);
+        };
+        let live_host = console_hosts
+            .and_then(|hosts| hosts.0.iter().find(|host| &host.console == console))
+            .and_then(|host| host.host.as_ref());
+        let owner = live_host.or(definition.home_station.as_ref());
+        return if target.0 == "assign-console-view" && view.is_valid() && owner == Some(station) {
+            Ok(target.clone())
+        } else {
+            Err(StationCommandPolicyFailure::SystemOutsideStation)
+        };
+    }
     let effective_target = effective_target_for_command(config, target, payload);
     if station_for_system(config, hosts, &effective_target).as_ref() != Some(station) {
         return Err(StationCommandPolicyFailure::SystemOutsideStation);

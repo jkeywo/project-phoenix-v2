@@ -326,3 +326,16 @@ describe('System-local component and channel identities', () => {
     expect(merged.system[1]).toEqual(base.system[1]);
   });
 });
+
+
+describe('AI tree identity within owning System', () => {
+  it('merges all named levels in place without crossing System scopes', () => {
+    const tree = id => ({ id, state: [{ id: 'work', task: [{ id: 'first', action: { kind: 'complete', result: 'success' } }, { id: 'last' }], transition: [{ id: 'leave', target: { kind: 'complete', result: 'success' } }] }] });
+    const base = { system: ['dock-a', 'dock-b'].map(id => ({ id, config: { ai: { root: 'shared', tree: [tree('shared')] } } })) };
+    const local = { system: [{ id: 'dock-a', config: { ai: { tree: [{ id: 'shared', state: [{ id: 'work', task: [{ id: 'first', _remove: true }, { id: 'new' }], transition: [{ id: 'leave', target: { result: 'failure' } }] }] }] } } }] };
+    const merged = stripRemovals(mergeComposeFragments(base, local));
+    expect(merged.system[0].config.ai.tree[0].state[0].task.map(row => row.id)).toEqual(['last', 'new']);
+    expect(merged.system[0].config.ai.tree[0].state[0].transition[0].target).toEqual({ kind: 'complete', result: 'failure' });
+    expect(merged.system[1]).toEqual(base.system[1]);
+  });
+});

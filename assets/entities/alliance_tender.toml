@@ -29,7 +29,8 @@
 # is the SOURCE; the stranded ship carries the empty receiving ledger. It is NOT a
 # shipped combat hull and flies in no scenario.
 
-includes = ["fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml"]
+includes = [
+  "fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml"]
 
 class = "courier"  # picker badge / scan subtitle — a light support hull
 tags = ["ship", "npc"]

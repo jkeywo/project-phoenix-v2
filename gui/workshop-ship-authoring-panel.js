@@ -1,3 +1,4 @@
+import { mountStateTrees } from './workshop-state-trees.js';
 import { mountSystemComponents } from './workshop-system-components.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
 import { entityInventory } from '../editor/workshop-entity-composition.js';
@@ -74,7 +75,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const ownership = () => ({ console: systemStation.value || undefined, ai_only: systemAiOnly.checked });
   const systemAdd = button('workshop-ship-system-add', 'workshop.ship.add_system', () => ({ type: 'system-add', id: systemId.value,
     kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined,
-    ...(systemKind.value === 'dock' ? componentEditor.value() : {}) }));
+    ...(systemKind.value === 'dock' ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
   const systemApply = button('workshop-ship-system-apply', 'workshop.ship.apply_system', () => ({ type: 'system-update', id: systems.value,
     fields: { kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined } }));
   const systemUp = button('workshop-ship-system-up', 'workshop.ship.move_up', () => ({ type: 'system-move', id: systems.value, direction: -1 }));
@@ -121,6 +122,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     label(doctrineRoute, 'workshop.ship.directive_route'), doctrineRoute,
     doctrineAdd, doctrineApply, doctrineUp, doctrineDown, doctrineRemove, status);
   const componentEditor = mountSystemComponents({ root: section, apply });
+  const stateTreeEditor = mountStateTrees({ root: section, apply });
   if (attach) root.append(section);
 
   let dependencies = null, schema = null, inspection = null, loading = null, generation = 0, disposed = false;
@@ -210,6 +212,8 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     doctrineApply.disabled = doctrineUp.disabled = doctrineDown.disabled = doctrineRemove.disabled = held || !doctrine?.local;
     const composingNewSystem = !system || systemId.value !== system.id;
     componentEditor.refresh(composingNewSystem ? { id: null, kind: systemKind.value, local: true }
+      : { ...system, kind: systemKind.value }, schema, held);
+    stateTreeEditor.refresh(composingNewSystem ? { id: null, kind: systemKind.value, local: true }
       : { ...system, kind: systemKind.value }, schema, held);
   }
   function inspect() {

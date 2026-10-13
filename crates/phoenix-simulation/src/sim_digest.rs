@@ -451,6 +451,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("console-views", fold_console_views_namespace),
     ("tractor", fold_tractor_namespace),
     ("dock", fold_dock_namespace),
+    ("system-ai-trees", fold_ai_trees_namespace),
     ("external-repair", fold_external_repair_namespace),
     ("umbilical", fold_umbilical_namespace),
     ("asteroid", fold_asteroid_namespace),
@@ -2053,6 +2054,19 @@ fn fold_dock_namespace(world: &World, acc: u64) -> u64 {
             acc = fold_u64(acc, u64::from(state.docked));
             fold_optional_triple(acc, state.undock_target)
         },
+    )
+}
+
+/// Full private continuation in entity and System order, including nested calls.
+fn fold_ai_trees_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "system-ai-tree-namespace",
+        |state: &crate::ai::state_tree_runtime::ShipAiTreeRuntime| {
+            (!state.0.is_empty()).then_some(&state.0)
+        },
+        fold_serde,
     )
 }
 

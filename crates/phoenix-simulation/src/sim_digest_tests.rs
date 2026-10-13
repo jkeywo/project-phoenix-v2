@@ -97,6 +97,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("console-views", 7675036808710624197),
             ("tractor", 3412975283742167187),
             ("dock", 196895128352095218),
+            ("system-ai-trees", 196895128352095218),
             ("external-repair", 15298784236101610809),
             ("umbilical", 203970584908569017),
             ("asteroid", 10848069915580109200),
@@ -112,6 +113,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
     let mut registered = fold_world();
     registered.register_component::<ShipStationStances>();
     registered.register_component::<DockControl>();
+    registered.register_component::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>();
     registered.register_component::<ExternalRepairDispatch>();
     registered.register_component::<ShipSecurityTeams>();
     for world in [World::new(), registered] {
@@ -122,6 +124,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
             fold_station_stances_namespace,
             fold_tractor_namespace,
             fold_dock_namespace,
+            fold_ai_trees_namespace,
             fold_external_repair_namespace,
             fold_umbilical_namespace,
             fold_security_namespace,
@@ -2803,4 +2806,75 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
     assert!(FOLD_STAGES
         .iter()
         .any(|(name, _)| *name == "internal-repair"));
+}
+
+#[test]
+fn system_tree_digest_covers_private_calls_and_stable_system_identity() {
+    use crate::ai::state_tree_runtime::{continued_tree, ShipAiTreeRuntime};
+    use crate::core::messages::SystemId;
+    let make = |reverse: bool, progressed: bool| {
+        let mut world = fold_world();
+        let mut rows = vec![
+            (
+                SystemId("left".into()),
+                if progressed {
+                    continued_tree()
+                } else {
+                    Default::default()
+                },
+            ),
+            (SystemId("right".into()), Default::default()),
+        ];
+        if reverse {
+            rows.reverse();
+        }
+        world.spawn((
+            EntityUuid("docker".into()),
+            ShipAiTreeRuntime(rows.into_iter().collect()),
+        ));
+        world
+    };
+    assert_eq!(
+        fold_ai_trees_namespace(&make(false, true), FOLD_SEED),
+        fold_ai_trees_namespace(&make(true, true), FOLD_SEED)
+    );
+    assert_ne!(
+        fold_ai_trees_namespace(&make(false, true), FOLD_SEED),
+        fold_ai_trees_namespace(&make(false, false), FOLD_SEED)
+    );
+    let original = fold_ai_trees_namespace(&make(false, true), FOLD_SEED);
+    let mut child_changed = make(false, true);
+    let mut query = child_changed.query::<&mut ShipAiTreeRuntime>();
+    query
+        .single_mut(&mut child_changed)
+        .unwrap()
+        .0
+        .get_mut(&SystemId("left".into()))
+        .unwrap()
+        .root
+        .as_mut()
+        .unwrap()
+        .calls
+        .values_mut()
+        .next()
+        .unwrap()
+        .memory
+        .insert("visited".into(), false);
+    assert_ne!(
+        original,
+        fold_ai_trees_namespace(&child_changed, FOLD_SEED),
+        "nested call memory is authoritative independently of root state"
+    );
+    let mut other_system = fold_world();
+    other_system.spawn((
+        EntityUuid("docker".into()),
+        ShipAiTreeRuntime(std::collections::BTreeMap::from([
+            (SystemId("right".into()), continued_tree()),
+            (SystemId("left".into()), Default::default()),
+        ])),
+    ));
+    assert_ne!(
+        fold_ai_trees_namespace(&make(false, true), FOLD_SEED),
+        fold_ai_trees_namespace(&other_system, FOLD_SEED)
+    );
 }

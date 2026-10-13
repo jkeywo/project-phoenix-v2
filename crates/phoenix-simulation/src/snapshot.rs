@@ -645,7 +645,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// saves cannot describe which Console owns a System or its shared work context.
 /// `38` - composed Dock command channels and mechanical undock clearance.
 /// Older intent state cannot be restored into authored channel bindings.
-pub const SNAPSHOT_FORMAT: u32 = 38;
+/// `39` — individual System AI tree states, memory and call continuation.
+pub const SNAPSHOT_FORMAT: u32 = 39;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -722,7 +723,8 @@ pub const SNAPSHOT_FORMAT: u32 = 38;
 /// and individual System AI inputs. Older saves lack the ownership and working
 /// view state needed to continue under these rules.
 /// "0.10" - Dock composition and complete intent/clearance digest coverage.
-pub const SIMULATION_RULES: &str = "0.10";
+/// "0.11" — Dock runs one authored state-tree controller with persistent private memory.
+pub const SIMULATION_RULES: &str = "0.11";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -1011,6 +1013,9 @@ pub struct EntityState {
     /// state, including idle intent; format 38 refuses older incomplete state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockSaveState>,
+    /// Private tree continuation, including suspended human/offline Systems.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_trees: Option<crate::ai::state_tree_runtime::ShipAiTreeRuntime>,
     /// The ship's external repair-dispatch state (issues #1161, #1386) — which
     /// ally or structure a repair team is working abroad, and which team it is.
     ///
@@ -4263,6 +4268,9 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     infrastructure: capture_infrastructure(entity),
                     tractor: capture_tractors(entity),
                     dock: capture_docks(entity),
+                    ai_trees: entity
+                        .get::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>()
+                        .cloned(),
                     external_repair: capture_external_repair(entity),
                     umbilical: capture_umbilicals(entity),
                     security: capture_security(entity),
@@ -6211,6 +6219,9 @@ fn apply_entity_state_with(
         if let Some(mut beam) = entity_mut.get_mut::<crate::tractor::TractorBeam>() {
             beam.restore(tractor);
         }
+    }
+    if let Some(trees) = &row.ai_trees {
+        entity_mut.insert(trees.clone());
     }
     if let Some(dock) = &row.dock {
         if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {

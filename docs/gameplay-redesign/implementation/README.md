@@ -125,3 +125,11 @@ state trees, resource redesign and component damage in their scheduled steps.
 Increment 2 runtime is committed as `efac36b7`. [Automated receipts](composition-validation.json)
 and [gameplay comparison](composition-baseline.md) pass; physical/device acceptance
 and the recorded landscape-phone overlap remain open. Increment 3 has not started.
+
+## Increment 3 — reusable AI state trees
+
+The user explicitly authorised starting this increment while prior physical/device
+acceptance remains open. See [the implementation contract](increment-3.md),
+`pasm/spec/design/ai-state-trees.yaml`, and [acceptance record](../../acceptance/1562-ai-state-trees.md).
+Dock is the first migrated individual controller. Other controllers move with
+their owning capabilities; shared jobs and Scenario tree contexts remain later work.

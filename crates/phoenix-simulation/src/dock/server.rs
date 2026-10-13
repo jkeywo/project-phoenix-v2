@@ -22,9 +22,10 @@
 //! one target — `docking_target` is a single `Option` — which the umbilical (#1160)
 //! reads; berth-side occupancy (one docker per target) is not enforced here.
 
-use crate::ai::standing_operation::OperationFacts;
+use crate::ai::state_tree_runtime::{ShipAiTreePrograms, ShipAiTreeRuntime};
 use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
+use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
 use phoenix_sim_gameplay::ship::composition::{
     dock_composition, CommandChannelConfig, CommandChannelKind, CommandChannelValue,
     SystemCommandChannels,
@@ -258,19 +259,13 @@ impl Plugin for DockPlugin {
         // commands into every ship's `AdmittedCommands` each tick.
         // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent.
         crate::ai::cadence::register_ai_cadence(app);
-        // Authoritative-state exclusion declarations (issue #1221, Track 3 step
-        // C9). `DockMarkers` is DERIVED spawn-time rig geometry — resolved at spawn
-        // from the model rig sidecar and read-only thereafter (it is what makes a
-        // hull dockable, static geometry, never runtime state; the live docking it
-        // gates lives in the folded `DockControl`). `DockAiEngaged` is the DERIVED
-        // "I am driving this dock" marker, re-derived every AI tick from the folded
-        // directive and dock state, never a second copy of either. Both are
-        // declared here at their owning site, replacing the `EXCLUSIONS` const in
-        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        // Geometry/programs are reconstructed; private per-System continuation
+        // is captured and folded in full, including inactive/human-owned trees.
         {
             use crate::authoritative::{DeclareState, StateClass};
             app.declare_state::<DockMarkers>(StateClass::Derived, "dock-controller")
-                .declare_state::<DockAiEngaged>(StateClass::Derived, "dock-relationship-state");
+                .declare_state::<ShipAiTreePrograms>(StateClass::Derived, "system-ai-tree-programs")
+                .declare_state::<ShipAiTreeRuntime>(StateClass::Folded, "system-ai-tree-runtime");
         }
         // Registry coverage is keyed by the authoritative System kind, so an
         // arbitrary authored Dock id is linted through the same identity the
@@ -451,14 +446,6 @@ fn terminal_reason_for(refusal: DockRefusal) -> TaskTerminalReason {
     }
 }
 
-/// Marks a ship the backfill dock host has DOCKED to serve a `Transfer`
-/// directive (issue #1162). Inserted when the host engages the dock, removed when
-/// it undocks; the host undocks only while it is present, so it never undocks a
-/// dock a console engaged on the same AI-operated system. Not folded/snapshotted:
-/// re-adopted from the still-present directive on resume.
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct DockAiEngaged;
-
 /// Resolve a directive's named target to the UUID a dock's `available_target`
 /// carries (issue #1162): a world entity NAME through the runtime map, or the
 /// value itself when it is already a UUID (or the runtime is absent).
@@ -480,7 +467,7 @@ fn resolve_dock_target(name: &str, runtime: Option<&WorldContentRuntime>) -> Str
 /// appears for a human then. Decides ONLY on the shared AI cadence (rule 7).
 #[allow(clippy::type_complexity)]
 pub fn operate_dock_ai(
-    mut commands: Commands,
+    tick: Res<crate::sim_tick::SimTick>,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
@@ -491,11 +478,12 @@ pub fn operate_dock_ai(
         Option<&crate::ship_plugin::ShipConfigComponent>,
         &DockControl,
         &crate::server_app::ShipSystemBlackboards,
-        Has<DockAiEngaged>,
+        &ShipAiTreePrograms,
+        &mut ShipAiTreeRuntime,
         &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
-    for (entity, uuid, sources, config, dock, blackboards, host_engaged, mut admitted) in
+    for (_entity, uuid, sources, config, dock, blackboards, programs, mut runtimes, mut admitted) in
         ships.iter_mut()
     {
         if !sources.0.policy_for(&dock.system_id).operate_ai {
@@ -523,42 +511,56 @@ pub fn operate_dock_ai(
                 .as_deref()
                 .is_some_and(|a| a == resolved)
         });
-        let facts = OperationFacts {
-            order_present: directive_target.is_some(),
-            ready,
-            active: dock.engaged() || dock.docked,
-            owned: host_engaged,
+        let Some(program) = programs.0.get(&dock.system_id) else {
+            continue;
         };
-        let decision = crate::ai::standing_operation::decide(facts);
-        // Dock historically tests engaged alone when starting, but both
-        // engaged and docked when adopting or withdrawing (including restored state).
-        let start = crate::ai::standing_operation::decide(OperationFacts {
-            active: dock.engaged(),
-            ..facts
-        })
-        .start;
-        if decision.claim {
-            commands.entity(entity).insert(DockAiEngaged);
-        }
-        let payload = if decision.withdraw {
-            commands.entity(entity).remove::<DockAiEngaged>();
-            // The scenario closing the task, not the operator changing
-            // their mind (issue #1345). Reported HERE, ahead of the
-            // `Undock` this emits and this system's own ordering ahead of
-            // `handle_dock_commands`, so the withdrawn order — not the
-            // handler's own `Released` for the same hold — is the first
-            // (and therefore recorded) terminal report.
-            push_lifecycle(
-                lifecycle.as_deref_mut(),
-                uuid,
-                TaskLifecycleRequest::End {
-                    slot: hold_slot(&dock.system_id, uuid),
-                    reason: TaskTerminalReason::OrderWithdrawn,
-                },
-            );
-            Some(SystemControlPayload::Undock)
-        } else {
-            start.then_some(SystemControlPayload::Dock)
+        let Some(tree) = runtimes.0.get_mut(&dock.system_id) else {
+            continue;
+        };
+        let was_owned = tree.memory("owned").unwrap_or(false);
+        let active = dock.engaged() || dock.docked;
+        let facts = std::collections::BTreeMap::from([
+            ("order_present".into(), directive_target.is_some()),
+            ("ready".into(), ready),
+            ("active".into(), active),
+            ("engaged".into(), dock.engaged()),
+        ]);
+        let channels =
+            std::collections::BTreeMap::from([(dock.enabled_channel.clone(), dock.engaged())]);
+        let result = match decide_tree(
+            &sources.0,
+            &dock.system_id,
+            Some(program),
+            &facts,
+            &channels,
+            tree,
+            tick.0,
+        ) {
+            Ok(TreeHostOutcome::Evaluated(result)) => result,
+            Ok(_) => continue,
+            Err(error) => {
+                warn!(system = %dock.system_id.0, %error, "Dock AI tree evaluation refused");
+                continue;
+            }
+        };
+        let payload = match result.intents.get(&dock.enabled_channel).copied() {
+            Some(true) if !dock.engaged() => Some(SystemControlPayload::Dock),
+            Some(false) if active => {
+                if was_owned && directive_target.is_none() {
+                    // Preserve withdrawal before the shared handler's Released
+                    // report, without introducing a second policy decision.
+                    push_lifecycle(
+                        lifecycle.as_deref_mut(),
+                        uuid,
+                        TaskLifecycleRequest::End {
+                            slot: hold_slot(&dock.system_id, uuid),
+                            reason: TaskTerminalReason::OrderWithdrawn,
+                        },
+                    );
+                }
+                Some(SystemControlPayload::Undock)
+            }
+            _ => None,
         };
 
         if let Some(payload) = payload {

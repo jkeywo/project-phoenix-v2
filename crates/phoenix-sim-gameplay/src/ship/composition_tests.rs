@@ -2,11 +2,8 @@ use super::*;
 use crate::ship::config::SystemInstanceConfig;
 
 fn dock() -> SystemInstanceConfig {
-    let entity: crate::entities::config::EntityConfig =
-        crate::entities::config::EntityConfig::from_toml(include_str!(
-            "../../../../assets/entities/dock_probe.toml"
-        ))
-        .unwrap();
+    let entity = crate::test_fixtures::load_entity_config("assets/entities/dock_probe.toml")
+        .expect("shipped Dock probe composes and validates");
     entity
         .ship_config
         .unwrap()
@@ -115,7 +112,9 @@ fn component_identity_and_channels_are_local_to_each_system() {
 
 #[test]
 fn active_legacy_tuning_has_an_actionable_conversion_error() {
-    let source = include_str!("../../../../assets/entities/dock_probe.toml");
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("assets/entities/dock_probe.toml").unwrap();
+    let source = toml::to_string(&resolved.value).unwrap();
     let system = dock();
     let legacy = toml::to_string(&dock_composition(&system.components).unwrap().config).unwrap();
     let error =
@@ -137,4 +136,66 @@ fn non_finite_mechanical_values_are_refused_before_spawn() {
     assert!(validate_composition(&system)
         .unwrap_err()
         .contains("finite"));
+}
+
+#[test]
+fn dock_tree_declaration_and_channel_bindings_are_checked_at_load() {
+    use crate::entities::config::EntityConfig;
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("assets/entities/dock_probe.toml").unwrap();
+    let source = toml::to_string(&resolved.value).unwrap();
+    let mut missing: toml::Value = toml::from_str(&source).unwrap();
+    let systems = missing["system"].as_array_mut().unwrap();
+    let dock = systems
+        .iter_mut()
+        .find(|s| s["kind"].as_str() == Some("dock"))
+        .unwrap();
+    dock["config"].as_table_mut().unwrap().remove("ai");
+    let error = EntityConfig::from_toml(&toml::to_string(&missing).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("requires config.ai"), "{error}");
+    assert!(error.contains("original game version"), "{error}");
+
+    let mut renamed: toml::Value = toml::from_str(&source).unwrap();
+    let dock = renamed["system"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|s| s["kind"].as_str() == Some("dock"))
+        .unwrap();
+    dock["channel"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c["name"].as_str() == Some("enabled"))
+        .unwrap()["name"] = "hold".into();
+    dock["component"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c["kind"].as_str() == Some("dock_mating"))
+        .unwrap()["enabled_channel"] = "hold".into();
+    let error = EntityConfig::from_toml(&toml::to_string(&renamed).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("config.ai"), "{error}");
+    // An explicit idle definition is valid and is not replaced by built-in behavior.
+    let dock = renamed["system"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|s| s["kind"].as_str() == Some("dock"))
+        .unwrap();
+    dock["config"]["ai"] = toml::from_str::<toml::Value>(
+        r#"root = "idle"
+[[tree]]
+id = "idle"
+initial = "idle"
+[[tree.state]]
+id = "idle"
+"#,
+    )
+    .unwrap();
+    EntityConfig::from_toml(&toml::to_string(&renamed).unwrap()).unwrap();
 }

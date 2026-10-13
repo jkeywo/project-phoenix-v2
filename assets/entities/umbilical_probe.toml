@@ -16,6 +16,8 @@
 # therefore no committed world's digest) moves for this slice. The demo destroyer
 # gains resupply in a later integration, not here.
 
+includes = ["fragments/ai/dock_state_tree.toml"]
+
 tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 

@@ -1447,7 +1447,13 @@ mod shipped_tree {
     fn assert_no_fragment_supplied_equipment(path: &str, resolved: &ResolvedTemplate) -> usize {
         let mut checked = 0usize;
         for (field, origin) in resolved.provenance.fields() {
-            if !HULL_OWNED.iter().any(|p| owned(field, p)) {
+            // Only the migrated System's controller definition is reusable AI
+            // policy. Its id/kind/components/Console remain hull-owned equipment.
+            let tree_policy = field.split_once("].config.ai").is_some_and(|(head, tail)| {
+                head.starts_with("system[id=")
+                    && (tail.is_empty() || tail.starts_with('.') || tail.starts_with('['))
+            });
+            if tree_policy || !HULL_OWNED.iter().any(|p| owned(field, p)) {
                 continue;
             }
             checked += 1;

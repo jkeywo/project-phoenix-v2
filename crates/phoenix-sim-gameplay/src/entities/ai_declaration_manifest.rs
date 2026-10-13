@@ -129,7 +129,7 @@ pub enum IdleLever {
 ///   [`ai_flag_hosts::AiHost`], and a per-hull authored block whose presence the
 ///   manifest counts. The twentieth is [`FineSystemKey::WeaponsDoctrine`], added
 ///   by issue #956.
-/// * The **operate kinds** (Tractor, Umbilical, Dock, ExternalRepair), added by
+/// * The **operate kinds** (Tractor, Umbilical, ExternalRepair), added by
 ///   issue #1162. These are AI-capable — a backfilled crew works them — but
 ///   their behaviour is NOT authored per hull: it is driven by a per-verb
 ///   operate directive (`Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`)
@@ -601,8 +601,10 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
             }],
             None => Vec::new(),
         },
-        // The operate kinds (issue #1162) carry NO per-hull AI declaration: a
-        // backfilled crew works the tractor/umbilical/dock/external-repair from
+        // Unmigrated operate kinds carry no per-hull policy declaration.
+        // Dock now has a separate mandatory typed config.ai tree validation in
+        // EntityConfig: it uses no scenario-flag host/legacy policy slot here.
+        // Backfill works tractor/umbilical/external-repair from
         // a per-verb operate directive and the shared `fleet_baseline` thresholds,
         // not from an authored `[X.ai]` block. There is nothing to omit, so the
         // manifest tracks no slot for them — and a hull that carries the system

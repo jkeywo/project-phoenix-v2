@@ -14,6 +14,8 @@
 # mate, so the probe needs no helm axes — the helm station exists only to OWN the
 # dock system and give the Dock/Undock commands a seat to be admitted against.
 
+includes = ["fragments/ai/dock_state_tree.toml"]
+
 tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 

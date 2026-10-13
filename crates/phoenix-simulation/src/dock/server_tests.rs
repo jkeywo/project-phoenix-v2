@@ -59,7 +59,7 @@ fn feedback_outcomes(
 
 // The fixture reads only the command publication consumed by its AI host.
 fn dock_ai_scope() -> crate::ship_plugin::ShipConfigComponent {
-    crate::ship_plugin::ShipConfigComponent(
+    let mut scope = crate::ship_plugin::ShipConfigComponent(
         crate::ship::config::ShipConfig::from_toml(
             r#"
 [[station]]
@@ -111,11 +111,16 @@ label = "Dock"
             &["dock"],
         )
         .expect("explicit fixture Console scope"),
-    )
+    );
+    let fragment: toml::Value = toml::from_str(include_str!(
+        "../../../../assets/entities/fragments/ai/dock_state_tree.toml"
+    ))
+    .unwrap();
+    scope.0.systems[0].config = Some(fragment["system"][0]["config"].clone());
+    scope
 }
 
-#[test]
-fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
+fn dock_tree_app() -> (App, Entity) {
     use crate::core::messages::{
         AdmittedCommands, AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus,
         ScoredObjective, ViewscreenBlackboard,
@@ -125,6 +130,7 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
         crate::lobby::session::SessionManager::new(),
     ));
     app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+    app.init_resource::<crate::sim_tick::SimTick>();
     app.add_systems(Update, operate_dock_ai);
     let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
     sources.0.set(
@@ -162,19 +168,33 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
             ..Default::default()
         }),
     );
+    let scope = dock_ai_scope();
+    let trees = crate::ai::state_tree_runtime::compile_ship_trees(&scope.0).unwrap();
     let operator = app
         .world_mut()
         .spawn((
             EntityUuid("operator".into()),
             sources,
-            dock_ai_scope(),
+            scope,
+            trees,
             dock,
             blackboards,
             AdmittedCommands::default(),
         ))
         .id();
+    (app, operator)
+}
+
+#[test]
+fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
+    use crate::core::messages::AdmittedCommands;
+    let (mut app, operator) = dock_tree_app();
     app.update();
-    assert!(app.world().entity(operator).contains::<DockAiEngaged>());
+    assert_eq!(
+        app.world().get::<ShipAiTreeRuntime>(operator).unwrap().0[&SystemId("dock".into())]
+            .memory("owned"),
+        Some(true)
+    );
     let first = app
         .world_mut()
         .entity_mut(operator)
@@ -191,8 +211,13 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
         .unwrap()
         .0
         .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
     app.update();
-    assert!(!app.world().entity(operator).contains::<DockAiEngaged>());
+    assert_eq!(
+        app.world().get::<ShipAiTreeRuntime>(operator).unwrap().0[&SystemId("dock".into())]
+            .memory("owned"),
+        Some(false)
+    );
     assert_eq!(
         app.world()
             .entity(operator)
@@ -746,4 +771,150 @@ fn availability_uses_current_conditions_not_historical_refusal() {
         dock.availability_refusal(2, false, false),
         Some(DockRefusal::NoDockMarkers)
     );
+}
+
+#[test]
+fn dock_tree_suspends_private_memory_on_human_and_offline_then_resumes_withdrawal() {
+    use crate::core::messages::AdmittedCommands;
+    use crate::ship::control_source::ControlSource;
+    let (mut app, operator) = dock_tree_app();
+    app.update();
+    let saved = app
+        .world()
+        .get::<ShipAiTreeRuntime>(operator)
+        .unwrap()
+        .clone();
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(operator)
+        .unwrap()
+        .0
+        .clear();
+    for source in [ControlSource::Human, ControlSource::Offline] {
+        app.world_mut()
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(operator)
+            .unwrap()
+            .0
+            .set(SystemId("dock".into()), source);
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(operator)
+            .unwrap()
+            .0
+            .clear();
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        app.update();
+        assert_eq!(app.world().get::<ShipAiTreeRuntime>(operator), Some(&saved));
+        assert!(app
+            .world()
+            .get::<AdmittedCommands>(operator)
+            .unwrap()
+            .0
+            .is_empty());
+    }
+    // A wire round trip during human control retains ownership and call memory.
+    let restored: ShipAiTreeRuntime =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    app.world_mut().entity_mut(operator).insert(restored);
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ShipSystemControlSources>(operator)
+        .unwrap()
+        .0
+        .set(SystemId("dock".into()), ControlSource::Ai);
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    app.update();
+    assert_eq!(
+        app.world().get::<AdmittedCommands>(operator).unwrap().0[0].payload,
+        SystemControlPayload::Undock
+    );
+}
+
+#[test]
+fn dock_tree_cannot_read_unbound_orders_or_undock_unowned_human_work() {
+    use crate::core::messages::AdmittedCommands;
+    let (mut app, operator) = dock_tree_app();
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ShipConfigComponent>(operator)
+        .unwrap()
+        .0
+        .consoles[0]
+        .feeds
+        .clear();
+    app.update();
+    assert!(app
+        .world()
+        .get::<AdmittedCommands>(operator)
+        .unwrap()
+        .0
+        .is_empty());
+    assert_eq!(
+        app.world().get::<ShipAiTreeRuntime>(operator).unwrap().0[&SystemId("dock".into())]
+            .memory("owned"),
+        Some(false)
+    );
+    assert!(app.world().get::<DockControl>(operator).unwrap().docked);
+}
+
+#[test]
+fn custom_tree_stop_with_live_order_is_not_reported_as_order_withdrawal() {
+    use crate::core::messages::AdmittedCommands;
+    use phoenix_sim_gameplay::ai::state_tree::{AiTreeConfig, BoolSource, TaskAction, TaskDef};
+    let (mut app, operator) = dock_tree_app();
+    let mut scope = dock_ai_scope();
+    let mut tree: AiTreeConfig = scope.0.systems[0].config.as_ref().unwrap()["ai"]
+        .clone()
+        .try_into()
+        .unwrap();
+    // An authored last writer stops the operation for its own reason while
+    // the directive remains present. It still uses normal Undock admission.
+    tree.tree
+        .iter_mut()
+        .find(|tree| tree.id == "dock-actions")
+        .unwrap()
+        .state[0]
+        .task
+        .push(TaskDef {
+            id: "custom-stop".into(),
+            when: vec![],
+            action: TaskAction::Write {
+                channel: "enabled".into(),
+                value: BoolSource::Literal { value: false },
+            },
+        });
+    scope.0.systems[0].config.as_mut().unwrap()["ai"] = toml::Value::try_from(tree).unwrap();
+    let trees = crate::ai::state_tree_runtime::compile_ship_trees(&scope.0).unwrap();
+    app.world_mut().entity_mut(operator).insert((scope, trees));
+    // Controller-only fixture leaves the physical hold active between decisions:
+    // first adopts it; the second proves previously owned work isn't mislabeled.
+    for tick in [0, 1] {
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(operator)
+            .unwrap()
+            .0
+            .clear();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AdmittedCommands>(operator)
+                .unwrap()
+                .0
+                .len(),
+            1
+        );
+        assert_eq!(
+            app.world().get::<AdmittedCommands>(operator).unwrap().0[0].payload,
+            SystemControlPayload::Undock
+        );
+        assert_eq!(
+            app.world().get::<ShipAiTreeRuntime>(operator).unwrap().0[&SystemId("dock".into())]
+                .memory("owned"),
+            Some(true)
+        );
+        assert!(
+            app.world()
+                .resource::<EffectQueue<TaskLifecycleRequest>>()
+                .0
+                .is_empty(),
+            "a live order has not been withdrawn"
+        );
+    }
 }

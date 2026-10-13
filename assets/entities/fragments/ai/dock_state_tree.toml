@@ -1,0 +1,76 @@
+# Ordinary Dock AI. The library is reused as authored data; every System keeps
+# its own memory and call state. Final enabled writes use ordinary Dock/Undock.
+[[system]]
+id = "dock"
+[system.config.ai]
+root = "dock-standard"
+
+# A variant inherits structure and can adjust supported parameters without code.
+[[system.config.ai.tree]]
+id = "dock-standard"
+extends = "dock-base"
+parameters = { allow_start = true }
+
+[[system.config.ai.tree]]
+id = "dock-base"
+initial = "supervise"
+parameters = { allow_start = true }
+memory = { owned = false }
+[[system.config.ai.tree.state]]
+id = "supervise"
+initial_child = "waiting"
+
+# Adopt existing work when an applicable order arrives, including restored work.
+[[system.config.ai.tree.state.task]]
+id = "adopt-active"
+when = [{ value = { source = "fact", name = "order_present" }, equals = true }, { value = { source = "fact", name = "active" }, equals = true }]
+action = { kind = "remember", key = "owned", value = { source = "literal", value = true } }
+
+# Preserve the existing engaged-only start test, including docked-but-not-engaged.
+[[system.config.ai.tree.state.task]]
+id = "adopt-start"
+when = [{ value = { source = "fact", name = "order_present" }, equals = true }, { value = { source = "fact", name = "ready" }, equals = true }, { value = { source = "fact", name = "engaged" }, equals = false }, { value = { source = "parameter", name = "allow_start" }, equals = true }]
+action = { kind = "remember", key = "owned", value = { source = "literal", value = true } }
+
+# Calls run at this exact position and see the ownership writes above.
+[[system.config.ai.tree.state.task]]
+id = "operate"
+action = { kind = "call", tree = "dock-actions", parameters = { owned = { source = "memory", name = "owned" }, allow_start = { source = "parameter", name = "allow_start" } } }
+
+# Relinquish AI ownership after an actual withdrawal request, never on handoff.
+[[system.config.ai.tree.state.task]]
+id = "release-owned"
+when = [{ value = { source = "fact", name = "order_present" }, equals = false }, { value = { source = "fact", name = "active" }, equals = true }, { value = { source = "memory", name = "owned" }, equals = true }]
+action = { kind = "remember", key = "owned", value = { source = "literal", value = false } }
+
+[[system.config.ai.tree.state]]
+id = "waiting"
+parent = "supervise"
+[[system.config.ai.tree.state.transition]]
+id = "receive-order"
+when = [{ value = { source = "fact", name = "order_present" }, equals = true }]
+target = { kind = "state", state = "ordered" }
+
+[[system.config.ai.tree.state]]
+id = "ordered"
+parent = "supervise"
+[[system.config.ai.tree.state.transition]]
+id = "order-withdrawn"
+when = [{ value = { source = "fact", name = "order_present" }, equals = false }]
+target = { kind = "state", state = "waiting" }
+
+# Reusable procedure. Its bindings are caller values; no extra world knowledge.
+[[system.config.ai.tree]]
+id = "dock-actions"
+initial = "react"
+parameters = { allow_start = true, owned = false }
+[[system.config.ai.tree.state]]
+id = "react"
+[[system.config.ai.tree.state.task]]
+id = "engage"
+when = [{ value = { source = "fact", name = "order_present" }, equals = true }, { value = { source = "fact", name = "ready" }, equals = true }, { value = { source = "fact", name = "engaged" }, equals = false }, { value = { source = "parameter", name = "allow_start" }, equals = true }]
+action = { kind = "write", channel = "enabled", value = { source = "literal", value = true } }
+[[system.config.ai.tree.state.task]]
+id = "withdraw"
+when = [{ value = { source = "fact", name = "order_present" }, equals = false }, { value = { source = "fact", name = "active" }, equals = true }, { value = { source = "parameter", name = "owned" }, equals = true }]
+action = { kind = "write", channel = "enabled", value = { source = "literal", value = false } }

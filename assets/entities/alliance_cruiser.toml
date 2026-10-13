@@ -142,6 +142,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # sees one resolved document, and PRD #774's "every AI-capable fine system
 # declares a policy" is satisfied by that document, not by this file.
 includes = [
+  "fragments/ai/dock_state_tree.toml",
   "fragments/ai/fleet_baseline.toml",
   "fragments/ai/captain_alliance.toml",
   "fragments/ai/movement_broadside_orbit.toml",

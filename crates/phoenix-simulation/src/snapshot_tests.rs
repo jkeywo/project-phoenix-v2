@@ -1753,3 +1753,27 @@ screen = "navigation.html"
         Some(&view)
     );
 }
+
+#[test]
+fn system_tree_snapshot_restores_private_nested_continuation() {
+    use crate::ai::state_tree_runtime::{continued_tree, ShipAiTreeRuntime};
+    use crate::core::messages::SystemId;
+    let mut source = sparse_capture_world(None);
+    let state = ShipAiTreeRuntime(std::collections::BTreeMap::from([
+        (SystemId("dock-left".into()), continued_tree()),
+        (SystemId("dock-right".into()), Default::default()),
+    ]));
+    source.spawn((EntityUuid("docker".into()), state.clone()));
+    let rows = capture_entities(&source);
+    let saved: EntityState =
+        serde_json::from_slice(&serde_json::to_vec(&rows[0]).unwrap()).unwrap();
+    assert_eq!(saved.ai_trees.as_ref(), Some(&state));
+    let mut target = sparse_capture_world(None);
+    let entity = target
+        .spawn((EntityUuid("docker".into()), ShipAiTreeRuntime::default()))
+        .id();
+    let changed_at = target.change_tick();
+    apply_entity_state_with(&mut target, entity, &saved, 8, 0.0, changed_at);
+    assert_eq!(target.get::<ShipAiTreeRuntime>(entity), Some(&state));
+    assert_eq!(capture_entities(&target)[0].ai_trees, saved.ai_trees);
+}

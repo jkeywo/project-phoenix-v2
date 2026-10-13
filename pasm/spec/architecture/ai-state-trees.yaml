@@ -1,0 +1,58 @@
+entities:
+  - component: system-ai-tree-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Individual System AI Tree Controller
+      summary: "Executes a migrated System's validated authored tree through the existing AI host Control Source gate. Dock captures permitted Console facts and supported own-equipment observations, resolves final boolean enabled intent in deterministic authored order and emits ordinary System-addressed Dock/Undock commands. Human/offline control suspends private execution state. No legacy Dock decision controller runs alongside the tree."
+      rationale:
+        - "Increment 3 implements AD14-AD19 with one real consumer and bounded supported nodes. Other AI capabilities remain on their owning controllers until migrated."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      depends_on: [dock-controller]
+      owns: [system-ai-tree-runtime, system-ai-tree-programs]
+      reads: [ship-station-system-topology-state, system-control-source-state, dock-relationship-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - crates/phoenix-sim-gameplay/src/ai/state_tree/mod.rs
+        - crates/phoenix-sim-gameplay/src/ai/state_tree/compile.rs
+        - crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs
+        - crates/phoenix-sim-gameplay/src/ai/host.rs
+        - crates/phoenix-sim-gameplay/src/entities/config.rs
+        - crates/phoenix-simulation/src/ai/state_tree_runtime.rs
+        - crates/phoenix-simulation/src/dock/server.rs
+      symbols: [compile, step, decide_tree, compile_ship_trees, operate_dock_ai]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ai/state_tree/tests.rs, crates/phoenix-simulation/src/dock/server_tests.rs]
+  - state: system-ai-tree-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Private System AI Tree Continuation
+      summary: "Per entity and SystemId: active hierarchy leaf, private boolean memory, each reference call's independent frame/completion, and last evaluated logical tick. Authoritative and deterministically folded in entity/System order. Saved/restored without resetting on human hosting changes. Definitions and execution trace are not extra authoritative state. Snapshot format 39 and rules 0.11 refuse older incomplete continuations."
+    architecture:
+      classification: authoritative
+      owner: system-ai-tree-controller
+      writers: [system-ai-tree-controller]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [ShipAiTreeRuntime, TreeRuntime, FrameRuntime]
+      tests: [cargo test, crates/phoenix-simulation/src/snapshot_tests.rs, crates/phoenix-simulation/src/sim_digest_tests.rs]
+  - state: system-ai-tree-programs
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Compiled System AI Tree Definitions
+      summary: "Immutable resolved per-System programs compiled once from validated config.ai. Rebuilt from pinned content at spawn/restore; not saved as simulation state and not shared mutable memory. Inheritance and call cycles, unsupported bindings and bounded expansion are checked before execution."
+    architecture:
+      classification: derived
+      owner: system-ai-tree-controller
+      writers: [system-ai-tree-controller]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/entities/spawner.rs]
+      symbols: [ShipAiTreePrograms, compile_ship_trees]
+      tests: [cargo test, crates/phoenix-sim-gameplay/src/ai/state_tree/tests.rs]

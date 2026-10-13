@@ -811,6 +811,47 @@ impl EntityConfig {
             }
         }
 
+        // State-tree adoption is per capability. Missing Dock trees must not
+        // silently remove ordinary Backfill behavior from an older content pack.
+        if let Some(ship) = &config.ship_config {
+            for system in &ship.systems {
+                let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind != crate::ship::system_registry::DOCK_KIND {
+                    if authored.is_some() {
+                        return Err(SerdeError::custom(format!(
+                            "System '{}' kind '{}' does not yet support config.ai state trees; migrate its owning capability before authoring a tree",
+                            system.id.0, system.kind
+                        )));
+                    }
+                    continue;
+                }
+                let Some(authored) = authored else {
+                    if ai_declarations == AiDeclarationMode::Strict {
+                        return Err(SerdeError::custom(format!(
+                            "Dock System '{}' requires config.ai with an explicit state-tree root/library (increment 3). Reuse fragments/ai/dock_state_tree.toml, author an explicit idle tree, or use the original game version for an unconverted pack",
+                            system.id.0
+                        )));
+                    }
+                    continue;
+                };
+                let tree: crate::ai::state_tree::AiTreeConfig =
+                    authored.clone().try_into().map_err(|error| {
+                        SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
+                    })?;
+                let binding = crate::ship::composition::dock_composition(&system.components)
+                    .ok_or_else(|| {
+                        SerdeError::custom("Dock state tree requires validated mating composition")
+                    })?;
+                crate::ai::state_tree::compile(
+                    &tree,
+                    &crate::ai::state_tree::dock_bindings(binding.enabled_channel),
+                )
+                .map_err(|error| {
+                    SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
+                })?;
+            }
+        }
+
         // Validation: a [repair.external_dispatch] table has to describe a
         // dispatch that can do something (issue #1161). A non-positive reach or
         // repair rate is an author mistake whose only other symptom would be a

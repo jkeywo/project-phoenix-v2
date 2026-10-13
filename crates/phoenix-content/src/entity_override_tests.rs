@@ -957,3 +957,67 @@ kind = "entity_target"
     );
     assert_eq!(merged["system"][1], base["system"][1]);
 }
+
+#[test]
+fn tree_fragment_nodes_merge_by_identity_with_stable_order_and_explicit_removal() {
+    let base: toml::Value = toml::from_str(
+        r#"
+[[system]]
+id = "dock"
+[system.config.ai]
+root = "main"
+[[system.config.ai.tree]]
+id = "main"
+initial = "run"
+[[system.config.ai.tree.state]]
+id = "run"
+[[system.config.ai.tree.state.task]]
+id = "first"
+action = { kind = "remember", key = "owned", value = { source = "literal", value = true } }
+[[system.config.ai.tree.state.task]]
+id = "second"
+action = { kind = "write", channel = "enabled", value = { source = "literal", value = true } }
+[[system.config.ai.tree]]
+id = "shared"
+initial = "idle"
+"#,
+    )
+    .unwrap();
+    let overlay: toml::Value = toml::from_str(
+        r#"
+[[system]]
+id = "dock"
+[[system.config.ai.tree]]
+id = "main"
+[[system.config.ai.tree.state]]
+id = "run"
+[[system.config.ai.tree.state.task]]
+id = "first"
+_remove = true
+[[system.config.ai.tree.state.task]]
+id = "second"
+action = { value = { source = "literal", value = false } }
+[[system.config.ai.tree.state.task]]
+id = "last"
+action = { kind = "complete", result = "success" }
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+    let trees = merged["system"][0]["config"]["ai"]["tree"]
+        .as_array()
+        .unwrap();
+    assert_eq!(trees.len(), 2);
+    assert_eq!(trees[1], base["system"][0]["config"]["ai"]["tree"][1]);
+    let tasks = trees[0]["state"][0]["task"].as_array().unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0]["id"].as_str(), Some("second"));
+    assert_eq!(tasks[0]["action"]["channel"].as_str(), Some("enabled"));
+    assert_eq!(tasks[0]["action"]["value"]["value"].as_bool(), Some(false));
+    assert_eq!(tasks[1]["id"].as_str(), Some("last"));
+    // World instance overrides still replace Systems wholesale, as before.
+    let error =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::InstanceOverride).unwrap_err();
+    assert!(error.contains("not honoured by a per-instance override"));
+}

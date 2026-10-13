@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 2,
+  "current_increment": 3,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -60,12 +60,16 @@
     {
       "id": 3,
       "title": "Reusable AI state trees",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         2
       ],
       "completion": "Dock proves one bounded-knowledge System controller with supported state trees, inheritance, references and Workshop editing.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-3.md",
+        "pasm/spec/design/ai-state-trees.yaml",
+        "docs/acceptance/1562-ai-state-trees.md"
+      ]
     },
     {
       "id": 4,
@@ -2644,6 +2648,14 @@
       "user_instruction": "continue with incriment 2",
       "pending_acceptance": "Physical phone/native multi-monitor and human workload acceptance remains pending; automated Increment 1 evidence is recorded.",
       "evidence": "docs/acceptance/1562-explicit-consoles.md"
+    },
+    {
+      "from_increment": 2,
+      "to_increment": 3,
+      "date": "2026-10-14",
+      "user_instruction": "Continue to increment 3",
+      "pending_acceptance": "Physical phone/native multi-monitor, human workload and recorded landscape-phone diagnostics overlap remain pending.",
+      "evidence": "docs/acceptance/1562-composable-systems.md"
     }
   ]
 }

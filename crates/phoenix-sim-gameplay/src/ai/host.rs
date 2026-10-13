@@ -175,3 +175,29 @@ impl AiEmitter {
         )
     }
 }
+
+/// Execute an authored tree through the same authority gate as ordinary policies.
+pub fn decide_tree(
+    sources: &ControlSourceResolver,
+    system: &SystemId,
+    program: Option<&super::state_tree::Program>,
+    facts: &std::collections::BTreeMap<String, bool>,
+    current_channels: &std::collections::BTreeMap<String, bool>,
+    runtime: &mut super::state_tree::TreeRuntime,
+    tick: u64,
+) -> Result<TreeHostOutcome, super::state_tree::TreeError> {
+    if !ai_operates(sources, system) {
+        return Ok(TreeHostOutcome::NotAiOperated);
+    }
+    let Some(program) = program else {
+        return Ok(TreeHostOutcome::Undeclared);
+    };
+    super::state_tree::step(program, facts, current_channels, runtime, tick)
+        .map(TreeHostOutcome::Evaluated)
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TreeHostOutcome {
+    NotAiOperated,
+    Undeclared,
+    Evaluated(super::state_tree::StepResult),
+}

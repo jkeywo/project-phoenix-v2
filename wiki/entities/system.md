@@ -3,7 +3,7 @@ title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
 sources: [crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-sim-gameplay/src/ship/system_registry.rs, crates/phoenix-simulation/src/command_admission/policy.rs, crates/phoenix-simulation/src/command_admission/router.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/coordination.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml, crates/phoenix-sim-gameplay/src/ship/composition.rs, crates/phoenix-simulation/src/server_app/system_status.rs, gui/components/ph-system-status.js]
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # System
@@ -157,4 +157,5 @@ display label are also published for console presentation.
 - [Station](./station.md)
 - [Console](./console.md)
 - [System Addressing](../concepts/coarse-system-migration.md)
+- [Individual System AI State Trees](../concepts/ai-state-trees.md)
 - [Damage and Repair Runtime](../concepts/damage-and-repair-intent.md)

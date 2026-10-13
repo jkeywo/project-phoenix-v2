@@ -57,8 +57,19 @@ describe('shipped explicit Console composition', () => {
       }
     }
   });
+  it('reuses the authored Dock tree library only on the five complete Dock hulls', () => {
+    for (const name of ['alliance_cruiser', 'alliance_destroyer', 'alliance_tender', 'dock_probe', 'umbilical_probe']) {
+      const ship = hull(name);
+      const dock = ship.system.find(system => system.kind === 'dock');
+      expect(dock.config.ai.root, name).toBe('dock-standard');
+      expect(dock.config.ai.tree.find(tree => tree.id === 'dock-standard').extends, name).toBe('dock-base');
+      expect(dock.config.ai.tree.find(tree => tree.id === 'dock-base').state[0].task.some(task => task.action.kind === 'call'), name).toBe(true);
+      expect(ship.system.filter(system => system.kind !== 'dock').every(system => !system.config?.ai), name).toBe(true);
+    }
+  });
   it('loads every authored entity with explicit ownership and no auxiliary Station records', () => {
-    for (const file of readdirSync('assets/entities', { recursive: true }).filter(file => file.endsWith('.toml'))) {
+    // Fragments are partial definitions; complete entity templates compose them before validation.
+    for (const file of readdirSync('assets/entities', { recursive: true }).filter(file => file.endsWith('.toml') && !file.replaceAll('\\', '/').startsWith('fragments/'))) {
       const ship = hull(file.replaceAll('\\', '/').slice(0, -5));
       for (const system of ship.system || []) expect(ship.console?.some(console => console.id === system.console), `${file}:${system.id}`).toBe(true);
       expect((ship.station || []).some(station => station.auxiliary), file).toBe(false);

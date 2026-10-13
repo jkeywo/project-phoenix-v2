@@ -623,6 +623,13 @@ impl SpawnSection for DockSpawn {
             }
             if let Some(system) = active {
                 cmds.insert(crate::dock::DockControl::from_system(system));
+                let ship = config
+                    .ship_config
+                    .as_ref()
+                    .expect("active Dock has ship config");
+                let trees = crate::ai::state_tree_runtime::compile_ship_trees(ship)
+                    .expect("validated System AI tree content");
+                cmds.insert(trees);
             }
         }
     }

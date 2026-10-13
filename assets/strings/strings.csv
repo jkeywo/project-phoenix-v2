@@ -4726,3 +4726,43 @@ system.status.reason.destroyed,Shared System status UI,Destroyed,Zerstört,Destr
 system.status.reason.offline,Shared System status UI,Offline,Offline,Offline,machine
 system.status.reason.unpowered,Shared System status UI,Insufficient power,Unzureichende Energie,Insufficient power,machine
 system.status.reason.no_dock_markers,Shared System status UI,No docking attachment points,Keine Andockpunkte,No docking attachment points,machine
+workshop.ship.ai.title,Workshop System AI state-tree editor,System AI state trees,KI-Zustandsbäume des Systems,System AI state trees,machine
+workshop.ship.ai.draft,Workshop System AI state-tree editor,Edit a local draft; Apply validates and saves one undoable change.,Bearbeiten Sie einen lokalen Entwurf; Anwenden prüft und speichert eine rückgängig machbare Änderung.,Edit a local draft; Apply validates and saves one undoable change.,machine
+workshop.ship.ai.origin,Workshop System AI state-tree editor,Source,Quelle,Source,machine
+workshop.ship.ai.inherited,Workshop System AI state-tree editor,Inherited,Geerbt,Inherited,machine
+workshop.ship.ai.materialise,Workshop System AI state-tree editor,Explicitly materialise inherited AI,Geerbte KI ausdrücklich lokal übernehmen,Explicitly materialise inherited AI,machine
+workshop.ship.ai.root,Workshop System AI state-tree editor,Root tree,Wurzelbaum,Root tree,machine
+workshop.ship.ai.trees,Workshop System AI state-tree editor,Trees in authored order,Bäume in festgelegter Reihenfolge,Trees in authored order,machine
+workshop.ship.ai.add,Workshop System AI state-tree editor,Add,Hinzufügen,Add,machine
+workshop.ship.ai.remove,Workshop System AI state-tree editor,Remove,Entfernen,Remove,machine
+workshop.ship.ai.up,Workshop System AI state-tree editor,Move up,Nach oben,Move up,machine
+workshop.ship.ai.down,Workshop System AI state-tree editor,Move down,Nach unten,Move down,machine
+workshop.ship.ai.reset,Workshop System AI state-tree editor,Reset AI draft,KI-Entwurf zurücksetzen,Reset AI draft,machine
+workshop.ship.ai.apply,Workshop System AI state-tree editor,Apply AI draft,KI-Entwurf anwenden,Apply AI draft,machine
+workshop.ship.ai.none,Workshop System AI state-tree editor,None,Keine,None,machine
+workshop.ship.ai.id,Workshop System AI state-tree editor,ID,ID,ID,machine
+workshop.ship.ai.extends,Workshop System AI state-tree editor,Base tree,Basisbaum,Base tree,machine
+workshop.ship.ai.initial,Workshop System AI state-tree editor,Initial state,Anfangszustand,Initial state,machine
+workshop.ship.ai.parameters,Workshop System AI state-tree editor,Boolean parameters,Boolesche Parameter,Boolean parameters,machine
+workshop.ship.ai.memory,Workshop System AI state-tree editor,Private boolean memory,Privater boolescher Speicher,Private boolean memory,machine
+workshop.ship.ai.resolved,Workshop System AI state-tree editor,Resolved execution order and hierarchy,Aufgelöste Ausführungsreihenfolge und Hierarchie,Resolved execution order and hierarchy,machine
+workshop.ship.ai.flatten,Workshop System AI state-tree editor,Materialise resolved tree and remove extends,Aufgelösten Baum lokal übernehmen und Vererbung entfernen,Materialise resolved tree and remove extends,machine
+workshop.ship.ai.states,Workshop System AI state-tree editor,States in authored order,Zustände in festgelegter Reihenfolge,States in authored order,machine
+workshop.ship.ai.parent,Workshop System AI state-tree editor,Parent state,Übergeordneter Zustand,Parent state,machine
+workshop.ship.ai.initial_child,Workshop System AI state-tree editor,Initial child state,Anfänglicher Unterzustand,Initial child state,machine
+workshop.ship.ai.tasks,Workshop System AI state-tree editor,Tasks in execution order,Aufgaben in Ausführungsreihenfolge,Tasks in execution order,machine
+workshop.ship.ai.transitions,Workshop System AI state-tree editor,Transitions in priority order,Übergänge in Prioritätsreihenfolge,Transitions in priority order,machine
+workshop.ship.ai.conditions,Workshop System AI state-tree editor,Conditions (all must match),Bedingungen (alle müssen erfüllt sein),Conditions (all must match),machine
+workshop.ship.ai.equals,Workshop System AI state-tree editor,Expected boolean,Erwarteter boolescher Wert,Expected boolean,machine
+workshop.ship.ai.source,Workshop System AI state-tree editor,Value source,Wertquelle,Value source,machine
+workshop.ship.ai.value,Workshop System AI state-tree editor,Boolean value,Boolescher Wert,Boolean value,machine
+workshop.ship.ai.channel,Workshop System AI state-tree editor,Command channel,Befehlskanal,Command channel,machine
+workshop.ship.ai.task,Workshop System AI state-tree editor,Qualified call task,Qualifizierte Aufrufaufgabe,Qualified call task,machine
+workshop.ship.ai.result,Workshop System AI state-tree editor,Completion result,Abschlussergebnis,Completion result,machine
+workshop.ship.ai.name,Workshop System AI state-tree editor,Name,Name,Name,machine
+workshop.ship.ai.kind,Workshop System AI state-tree editor,Supported kind,Unterstützter Typ,Supported kind,machine
+workshop.ship.ai.key,Workshop System AI state-tree editor,Memory key,Speicherschlüssel,Memory key,machine
+workshop.ship.ai.tree,Workshop System AI state-tree editor,Referenced tree,Referenzierter Baum,Referenced tree,machine
+workshop.ship.ai.bind,Workshop System AI state-tree editor,Bind parameter,Parameter binden,Bind parameter,machine
+workshop.ship.ai.state,Workshop System AI state-tree editor,Target state,Zielzustand,Target state,machine
+workshop.ship.ai.rebinding,Workshop AI channel binding notice,Renaming a component command channel also updates this System AI in a local override.,Das Umbenennen eines Komponenten-Befehlskanals aktualisiert auch diese System-KI in einer lokalen Überschreibung.,Renaming a component command channel also updates this System AI in a local override.,machine

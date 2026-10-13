@@ -1100,9 +1100,10 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // retired Station screen/hosting and direct System ownership paths.
     // Dock composition replaces six legacy tuning leaves with thirteen typed
     // component/channel leaves; the other four domains remain unchanged.
+    // Dock state-tree definitions add thirty authored ship schema leaves.
     assert_eq!(
         counts,
-        [55, 71, 680, 51, 56],
+        [55, 71, 710, 51, 56],
         "update the reviewed inventory ratchet"
     );
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1121,7 +1122,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         }
     }
     assert_eq!(
-        fingerprint, 13_579_727_185_304_965_444,
+        fingerprint, 9_984_313_219_501_151_292,
         "update the reviewed inventory fingerprint"
     );
 }

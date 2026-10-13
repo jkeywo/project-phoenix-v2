@@ -121,7 +121,15 @@ pub struct WorkshopShipSchema {
     pub system_kinds: Vec<String>,
     pub component_fields: std::collections::BTreeMap<String, Vec<WorkshopComponentField>>,
     pub channel_kinds: Vec<String>,
+    pub ai_state_tree: WorkshopAiTreeSchema,
     pub directive_kinds: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WorkshopAiTreeSchema {
+    pub system_kinds: Vec<String>,
+    #[serde(flatten)]
+    pub vocabulary: crate::ai::state_tree::SchemaMetadata,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -173,6 +181,12 @@ pub fn ship_schema() -> WorkshopShipSchema {
         .into_iter()
         .collect(),
         channel_kinds: vec!["boolean".into(), "entity_target".into()],
+        ai_state_tree: WorkshopAiTreeSchema {
+            system_kinds: vec![crate::ship::system_registry::DOCK_KIND.into()],
+            vocabulary: crate::ai::state_tree::schema_metadata(
+                &crate::ai::state_tree::dock_bindings("enabled"),
+            ),
+        },
         system_kinds,
         directive_kinds: crate::objectives::directive::DirectiveKind::ALL
             .into_iter()

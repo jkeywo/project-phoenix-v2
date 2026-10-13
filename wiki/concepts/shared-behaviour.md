@@ -12,7 +12,7 @@ Native setup accessibility owns reflow arithmetic, focus traversal and the setup
 
 Mod-pack CRC-32 retains its public import path through a re-export of `vellum_digest::crc32_ieee`. Simulation stream-name selectors use `vellum_digest::fnv1a`; literal first-draw fixtures and serialization/continuation tests pin the seeded sequences. Seeded and incremental FNV folds retain their own contracts.
 
-AI policy hosts and selector/ranked hosts share the borrowed-SystemId `ai_operates` gate, which reads the Control Source resolver directly. `decide` calls it before declaration and policy resolution; damage, GM-disable and destroyed-hull overrides remain in the resolver.
+AI state-tree, policy and selector/ranked hosts share the borrowed-SystemId `ai_operates` gate, which reads the Control Source resolver directly. `decide` and `decide_tree` call it before declaration and their respective resolution; damage, GM-disable and destroyed-hull overrides remain in the resolver.
 
 Nine optional digest namespaces share component-row collection, UUID ordering with entity-index tie-breaking, silent empty handling and namespace headers through sim_digest::fold_optional_namespace. Each adapter retains row selection and exact payload folding; namespace stage order and the distinct entity, asteroid, collision and scenario walks remain local.
 

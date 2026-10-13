@@ -1,3 +1,4 @@
+import { writeStateTrees, rebindStateTreeChannel } from './workshop-state-trees.js';
 import { writeSystemComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
@@ -211,7 +212,11 @@ export function inspectShipAuthoring(draft, dependencies, path) {
     return { ...structuredClone(row), owner, local: localDoctrine.has(String(row.id)) };
   });
   const generated = authoredAndGeneratedSystems(composition.resolved.value).filter(system => system.generated).map(system => ({ ...system, local: false, owner: path }));
-  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated], doctrines, composition };
+  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated].map(system => {
+    const fields = composition.fields.filter(field => field.path.startsWith(`system[id=${system.id}].config.ai`));
+    return { ...system, ai_inherited: fields.some(field => field.owner !== path),
+      ai_owner: [...new Set(fields.map(field => field.owner))].join(', ') };
+  }), doctrines, composition };
 }
 
 export function prepareShipOperation(draft, dependencies, schema, operation) {
@@ -224,10 +229,20 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     if (dependent) throw finding(operation.path, before, quote(operation.rating), `Console ${dependent.id} uses rating ${operation.rating}; choose another visiting rating before removing it.`);
   }
 
-  if (operation.type === 'system-composition-set') {
+  if (operation.type === 'system-ai-set') {
+    const system = inspection.systems.find(row => row.id === operation.id);
+    if (!system) throw new Error('Unknown System');
+    after = writeStateTrees(before, system, operation.ai, operation);
+  }
+  else if (operation.type === 'system-composition-set') {
     const system = inspection.systems.find(row => row.id === operation.id);
     if (!system?.local) throw new Error('Materialise the containing System before editing its components.');
     after = writeSystemComposition(before, operation.id, operation, system);
+    const oldChannel = system.component?.find(row => row.kind === 'dock_mating')?.enabled_channel;
+    const newChannel = operation.components?.find(row => row.kind === 'dock_mating')?.enabled_channel;
+    if (oldChannel && newChannel && oldChannel !== newChannel && system.config?.ai) {
+      after = writeStateTrees(after, system, rebindStateTreeChannel(system.config.ai, oldChannel, newChannel), { materialise: true });
+    }
   }
   else if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
     description: operation.description || operation.id, rank: operation.rank || '' }] });
@@ -268,7 +283,8 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   else if (operation.type === 'system-add') after = append(after, { system: [{ id: operation.id, kind: operation.kind,
     console: operation.console, ai_only: operation.ai_only === true,
     ...(operation.power_group ? { power_group: operation.power_group } : {}),
-    ...(operation.components ? { component: operation.components, channel: operation.channels || [] } : {}) }] });
+    ...(operation.components ? { component: operation.components, channel: operation.channels || [] } : {}),
+    ...(operation.ai ? { config: { ai: operation.ai } } : {}) }] });
   else if (operation.type === 'system-set' || operation.type === 'system-update') {
     const fields = operation.type === 'system-set' ? { [operation.field]: operation.value } : operation.fields;
     for (const [field, value] of Object.entries(fields)) { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before editing.`);

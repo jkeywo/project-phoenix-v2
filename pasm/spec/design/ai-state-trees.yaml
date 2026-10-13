@@ -1,0 +1,41 @@
+entities:
+  - decision: system-ai-state-tree-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Individual System AI State Trees
+      summary: "Increment 3 extends the existing AI host boundary with supported, configurable state trees. Dock is the first migrated controller; its built-in standing-operation decider is replaced, never run alongside the tree. Inputs are captured permitted Console observations and supported own-System facts. Human/offline control suspends the same private runtime without reset; ordinary Backfill resumes it. Final outputs use existing SystemId command admission. Networking and other capability controllers are retained."
+      rationale:
+        - "User instruction: Continue to increment 3. AD14-AD19 and approved roadmap increment 3."
+  - decision: state-tree-definition-and-inheritance
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Supported Tree Definitions and Reuse
+      summary: "A migrated System carries config.ai with a root and named tree definitions. Existing entity include fragments reuse authored libraries; each System resolves its own immutable program and private execution state. Single-base extends merges named boolean parameters/memory and named states; tasks/transitions merge by stable id within their state, replacement retaining position and additions appending. Explicit parent, initial and initial-child overrides replace supplied values. No implicit deletion is inferred. Reference tasks invoke another named tree with supported boolean parameter bindings, within the same System authority and external observation snapshot. Per-call state is private to that invocation."
+      rationale:
+        - "[ai] Concrete increment 3 schema: existing System config avoids an extra entity registry or asset loader. The supported vocabulary grows with migrated consumers; custom Workshop code/nodes remain excluded."
+  - decision: state-tree-ordered-evaluation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Deterministic Hierarchical Tree Evaluation
+      summary: "On an eligible logical AI tick, each frame checks transitions from parent to active leaf and takes the first eligible authored transition, at most one per frame, then runs active tasks parent before child in authored order. Reference evaluation occurs inline at its task position. Parent transitions interrupt and discard affected call state immediately; physical effects are not rewound. Pending channel values begin with current intent, later nodes see earlier pending/memory writes, and the last write per channel wins before any command is admitted. External facts remain fixed. Completed calls retain success/failure while their call site stays active; leaving discards that call's state. No same-tick transition loop is introduced."
+      rationale:
+        - "AD17-AD19 selected immediate parent interruption and sequential internal visibility. [ai] Explicit transition selection and bounded per-evaluation semantics resolve previously open implementation details."
+  - decision: state-tree-vocabulary-and-validation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Closed Tree Vocabulary and Bounded Validation
+      summary: "Initial nodes read supported boolean facts, parameters, private memory, pending booleans and call completion; conditions compare a typed source with a boolean. Tasks write a supported channel, remember a private value, call a tree or complete with success/failure. Transitions target a named state or completion. Dock exposes order_present, ready, active and engaged, and its bound enabled channel. Unsupported facts/channels, malformed references, hierarchy/inheritance/call cycles and oversized definitions are refused before Preview/Test/spawn. Missing required runtime inputs fail transactionally. No expressions, scripting or custom extensions are offered in Workshop."
+      rationale:
+        - "[ai] First real consumer determines the supported vocabulary. Bounds: 32 trees, 128 resolved states/tree, 256 tasks/tree, 256 transitions/tree, depth 16 and expanded visit budget 4096."
+  - decision: state-tree-continuation-and-authoring
+    core:
+      status: accepted
+      confidence: confirmed
+      title: State Tree Continuation and Workshop Authoring
+      summary: "Active states, completion, per-call memory and evaluation continuity are authoritative deterministic state and participate in capture, restore and digests. Runtime state belongs to the individual System rather than definition assets or GUI. Workshop visually edits supported definitions, hierarchy, task/transition order, inheritance and references through its existing source/history/validation/preview/disposable-Test workflow. Inherited definitions and execution order are inspectable; materialisation is explicit. Structural migration preserves existing Dock start/adopt/withdraw and lifecycle behavior; gameplay and balance evidence compare increment 2."
+      rationale:
+        - "User-approved increment 3 completion contract. Prior increments' physical acceptance remains open under explicit user-authorised continuation."

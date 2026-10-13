@@ -88,6 +88,30 @@ test('Workshop authors Consoles and Dock components through real validation, his
     await byId(page, 'console-feed-kind').selectOption('Viewscreen');
     await applied(page, 'console-feed-add');
     await expect(byId(page, 'console-feeds')).toContainText('viewscreen: Viewscreen');
+    // Inspect a shipped inherited library, explicitly materialise its derived
+    // tree, then edit a typed parameter through the real authoring surface.
+    const beforeAi = await sourceOf(page);
+    await revealWorkshopPanel(page, 'composition');
+    await byId(page, 'systems').selectOption('dock');
+    const ai = page.locator('#workshop-ai');
+    await expect(ai.locator('#workshop-ai-resolved')).toContainText('operate: call');
+    await expect(ai.locator(':scope > [data-ai-action="apply"]')).toBeDisabled();
+    await ai.locator('#workshop-ai-materialise').check();
+    await ai.locator('[data-ai-action="flatten"]').click();
+    await ai.locator('[data-ai-field="parameters.allow_start.value"]').uncheck();
+    await ai.locator(':scope > [data-ai-action="apply"]').click();
+    await expect(byId(page, 'status')).toHaveText(ts('workshop.ship.applied'));
+    const afterAi = await sourceOf(page);
+    const authoredAi = parse(afterAi).system.find(row => row.id === 'dock').config.ai;
+    const derived = authoredAi.tree.find(row => row.id === 'dock-standard' && !row._remove);
+    expect(derived.extends).toBeUndefined();
+    expect(derived.parameters.allow_start).toBe(false);
+    expect(derived.state[0].task.some(row => row.action.kind === 'call')).toBe(true);
+    await page.locator('#workshop-undo').click();
+    await expect.poll(() => sourceOf(page)).toBe(beforeAi);
+    await page.locator('#workshop-redo').click();
+    await expect.poll(() => sourceOf(page)).toBe(afterAi);
+
     // Component edits use the same accepted-source gate. A missing power input
     // must be rejected without changing source; intermediate palette edits stay
     // in the form until a complete composition is applied.
@@ -113,6 +137,9 @@ test('Workshop authors Consoles and Dock components through real validation, his
     const afterComponents = await sourceOf(page);
     const composedDock = parse(afterComponents).system.find(row => row.id === 'dock');
     expect(composedDock.component[0]).toMatchObject({ kind: 'dock_mating', enabled_channel: 'hold', target_channel: 'berth', config: { range: 201 } });
+    const writes = composedDock.config.ai.tree.filter(row => !row._remove).flatMap(tree => (tree.state || []).flatMap(state => (state.task || []).filter(task => task.action.kind === 'write')));
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.every(task => task.action.channel === 'hold')).toBe(true);
     expect(composedDock.channel).toEqual([{ name: 'hold', kind: 'boolean' }, { name: 'berth', kind: 'entity_target' }]);
     await page.locator('#workshop-undo').click();
     await expect.poll(() => sourceOf(page)).toBe(beforeComponents);

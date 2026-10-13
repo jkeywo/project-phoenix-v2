@@ -1468,6 +1468,7 @@ fn simulate_low_lod_ships(
         (
             &mut ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&ObjectiveCursors>,
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&AiProfile>,
@@ -1509,6 +1510,7 @@ fn simulate_low_lod_ships(
     for (
         mut physics,
         blackboards,
+        ship_config,
         cursors,
         helm_section,
         ai_profile,
@@ -1553,6 +1555,25 @@ fn simulate_low_lod_ships(
             .map(|h| h.0.max_yaw_rate)
             .filter(|&r| r > 0.0)
             .unwrap_or(LOW_LOD_DEFAULT_MAX_YAW_RATE);
+        // The low-fidelity route combines thrust and steering in one update.
+        // Both controllers must be entitled to the shared objective publication;
+        // LOD cannot grant one axis knowledge held only by another Console.
+        let blackboards = blackboards.filter(|boards| {
+            ship_config.is_some_and(|config| {
+                [
+                    crate::ship::system_registry::helm_thrust_system_id(),
+                    crate::ship::system_registry::helm_steering_system_id(),
+                ]
+                .iter()
+                .all(|system| {
+                    config
+                        .0
+                        .observations_for_system(system, &boards.0)
+                        .get(&crate::ship::system_registry::viewscreen_system_id())
+                        .is_some()
+                })
+            })
+        });
         let route = blackboards.and_then(active_waypoint_route);
 
         // Where this ship's *top-scoring, still-qualifying* standing `Destroy`

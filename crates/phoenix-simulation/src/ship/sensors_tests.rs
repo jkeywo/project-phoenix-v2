@@ -352,6 +352,42 @@ fn frequency_hint_emitted_when_target_changes() {
 }
 
 #[test]
+fn low_fidelity_frequency_hint_respects_sensors_console_feed() {
+    let mut app = test_app();
+    start_game_with_sensors_and_tactical(&mut app);
+    let mut configs = app.world_mut().query_filtered::<
+        &mut crate::ship_plugin::ShipConfigComponent,
+        With<crate::server_app::LocalShip>,
+    >();
+    let mut config = configs.single_mut(app.world_mut()).unwrap();
+    let owner = config
+        .0
+        .system(&crate::ship::system_registry::sensors_system_id())
+        .unwrap()
+        .console
+        .clone()
+        .unwrap();
+    config
+        .0
+        .consoles
+        .iter_mut()
+        .find(|console| console.id == owner)
+        .unwrap()
+        .feeds
+        .retain(|feed| feed.source != crate::ship::system_registry::viewscreen_system_id());
+    set_local_weapons_target(&mut app, Some("asteroid-1".into()));
+    tick(&mut app);
+    let mut states = app
+        .world_mut()
+        .query_filtered::<&SensorsFrequencyState, With<crate::server_app::LocalShip>>();
+    assert!(states
+        .single(app.world())
+        .unwrap()
+        .last_sent_target
+        .is_none());
+}
+
+#[test]
 fn frequency_hint_not_re_emitted_for_same_target() {
     let mut app = test_app();
     start_game_with_sensors_and_tactical(&mut app);

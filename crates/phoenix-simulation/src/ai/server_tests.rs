@@ -4577,3 +4577,75 @@ fn low_lod_without_patrol_objective_keeps_dumb_forward_move() {
         "cursor must stay empty when there is no patrol objective"
     );
 }
+
+#[test]
+fn low_lod_route_cannot_borrow_another_axes_console_knowledge() {
+    fn config(steering_feed: bool) -> crate::ship::config::ShipConfig {
+        let mut config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Flight controls"
+rank = "Ens."
+[[console]]
+id = "throttle"
+home_station = "helm"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[console]]
+id = "steering"
+home_station = "helm"
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+console = "throttle"
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+console = "steering"
+"#,
+            &["helm_thrust", "helm_steering"],
+        )
+        .unwrap();
+        if steering_feed {
+            config.consoles[1].feeds = config.consoles[0].feeds.clone();
+        }
+        config
+    }
+    for permitted in [false, true] {
+        let mut app = build_lod_test_app();
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("wp0".into(), [500.0, 0.0, 500.0]);
+        world.anchors.insert("wp1".into(), [700.0, 0.0, 500.0]);
+        app.insert_resource(world);
+        spawn_player(&mut app, 0.0, 0.0);
+        let npc = spawn_patrolling_npc(
+            &mut app,
+            500.0,
+            500.0,
+            "npc-console",
+            "patrol",
+            &["wp0", "wp1"],
+            true,
+        );
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(crate::ship_plugin::ShipConfigComponent(config(permitted)));
+        tick_with_dt(&mut app, 0.1);
+        tick_with_dt(&mut app, 0.1);
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+        if permitted {
+            assert!((physics.yaw - std::f32::consts::FRAC_PI_2).abs() < 0.01);
+            assert!(physics.x > 500.0);
+        } else {
+            assert_eq!(
+                physics.x, 500.0,
+                "the co-hosted throttle must not lend its route to steering"
+            );
+            assert_eq!(physics.yaw, 0.0);
+        }
+        assert!(app.world().get::<AiHighFidelity>(npc).is_none());
+    }
+}

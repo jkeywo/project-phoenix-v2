@@ -857,13 +857,28 @@ fn tick_weapons_arc_request(
             continue;
         };
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
-        let combat_lock = match blackboards
+        let combat_lock = ship_config
             .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
-        };
+            .systems
+            .iter()
+            .filter(|system| {
+                matches!(
+                    system.kind.as_str(),
+                    "phaser_bank" | "blaster_bank" | "torpedo_tube" | "phaser_control"
+                )
+            })
+            .find_map(|system| {
+                match ship_config
+                    .0
+                    .observations_for_system(&system.id, &blackboards.0)
+                    .get(&crate::ship::system_registry::viewscreen_system_id())
+                {
+                    Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => {
+                        board.combat_lock.clone()
+                    }
+                    _ => None,
+                }
+            });
         let Some(target_uuid) = combat_lock else {
             state.last = None;
             continue;
@@ -875,7 +890,14 @@ fn tick_weapons_arc_request(
 
         let is_offline = |sid: Option<crate::core::messages::SystemId>| -> bool {
             match sid {
-                Some(id) => control_sources.0.is_offline(&id),
+                Some(id) => {
+                    control_sources.0.is_offline(&id)
+                        || ship_config
+                            .0
+                            .observations_for_system(&id, &blackboards.0)
+                            .get(&crate::ship::system_registry::viewscreen_system_id())
+                            .is_none()
+                }
                 None => false,
             }
         };
@@ -1124,6 +1146,15 @@ fn tick_weapons_arc_request(
 
         // Debounce on family + target + the usable arc set: a change to any of
         // these is a new condition and must re-fire (issue #767 AC4).
+        let sender_system = arc_request_sender_system(family, blaster_opt, torpedo_opt);
+        if ship_config
+            .0
+            .observations_for_system(&sender_system, &blackboards.0)
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+            .is_none()
+        {
+            continue;
+        }
         let key = (family, target_uuid.clone(), arcs.clone());
         if state.last.as_ref() == Some(&key) {
             continue;
@@ -1700,13 +1731,22 @@ fn ai_target_selection(
         // selector's own authored horizon is a static outer bound only. The
         // one explicit exception is an objective-operate candidate within its
         // installed system's authored executable reach, resolved below.
-        let top_destroy = top_destroy_objective_target(Some(&*blackboards));
+        let shared_boards = ship_config
+            .0
+            .observations_for_system(
+                &crate::ship::system_registry::tactical_radar_system_id(),
+                &blackboards.0,
+            )
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+            .is_some()
+            .then_some(&*blackboards);
+        let top_destroy = top_destroy_objective_target(shared_boards);
         // A Patrol objective that names a visible entity is a defend marker:
         // Backfill still flies its route, but when hostiles arrive it chooses
         // the attacker closest to the protected hull rather than the one
         // closest to itself.  Ordinary patrols with only anchors remain the
         // historical nearest-to-self behaviour.
-        let defend_target = top_defend_objective_target(Some(&*blackboards)).and_then(|name| {
+        let defend_target = top_defend_objective_target(shared_boards).and_then(|name| {
             resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
         });
         // An *untargeted* Destroy directive — `Destroy { target: "" }` — is
@@ -1728,7 +1768,7 @@ fn ai_target_selection(
         // UUID the same way a Destroy target is. `None` unless an active
         // Tow/Stabilise/Escort/FieldRepair names something, keeping the
         // `source_operate` candidate inert in ordinary combat.
-        let operate_order = top_operate_objective_target(Some(&*blackboards));
+        let operate_order = top_operate_objective_target(shared_boards);
         let operate_target: Option<String> = operate_order.and_then(|(name, _)| {
             resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
         });
@@ -1748,10 +1788,11 @@ fn ai_target_selection(
         // viewscreen `science_target` (#829) — never the channel-3
         // `TargetDesignation` chatter, which is viewscreen-only and unreadable
         // here. Cloned to own it before the mutable blackboard write below.
-        let science_target: Option<String> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
+        let science_target: Option<String> = match shared_boards.and_then(|boards| {
+            boards
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        }) {
             Some(SystemBlackboard::Viewscreen(vbb)) => vbb.science_target.clone(),
             _ => None,
         };
@@ -2140,8 +2181,12 @@ fn tick_npc_auto_match_frequency(
         }
 
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
-        let locked_target = match blackboards
+        let locked_target = match ship_config
             .0
+            .observations_for_system(
+                &crate::ship::system_registry::phaser_control_system_id(),
+                &blackboards.0,
+            )
             .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),

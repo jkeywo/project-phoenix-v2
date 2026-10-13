@@ -321,8 +321,12 @@ pub fn tick_sensors_frequency_hint(
         }
 
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
-        let combat_lock = match blackboards
+        let combat_lock = match ship_config
             .0
+            .observations_for_system(
+                &crate::ship::system_registry::sensors_system_id(),
+                &blackboards.0,
+            )
             .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
@@ -1251,9 +1255,15 @@ pub fn operate_sensors_ai(
         // the sole applier and owns capability/range refusals. A refused scan is
         // therefore retried on the next authored AI snapshot while its objective
         // remains active.
-        let viewscreen_bb = blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id());
+        let viewscreen_bb = ship_config_comp.and_then(|config| {
+            config
+                .0
+                .observations_for_system(
+                    &crate::ship::system_registry::sensors_system_id(),
+                    &blackboards.0,
+                )
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+        });
         if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
             let requested_target = crate::objectives::top_operate_directive(
                 &bb.scored_objectives,

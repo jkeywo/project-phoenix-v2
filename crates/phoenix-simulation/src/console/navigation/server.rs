@@ -143,9 +143,16 @@ pub fn operate_civilian_order_ai(
         ) {
             continue;
         }
-        let Some(crate::core::messages::SystemBlackboard::Viewscreen(view)) = blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
+        let Some(crate::core::messages::SystemBlackboard::Viewscreen(view)) =
+            ship_config.and_then(|config| {
+                config
+                    .0
+                    .observations_for_system(
+                        &crate::ship::system_registry::navigation_system_id(),
+                        &blackboards.0,
+                    )
+                    .get(&crate::ship::system_registry::viewscreen_system_id())
+            })
         else {
             continue;
         };
@@ -877,15 +884,21 @@ pub fn operate_navigation_ai(
             continue;
         };
 
-        let scored: Vec<crate::core::messages::ScoredObjective> = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
-                bb.scored_objectives.clone()
-            }
-            _ => vec![],
-        };
+        let scored: Vec<crate::core::messages::ScoredObjective> =
+            match ship_config.and_then(|config| {
+                config
+                    .0
+                    .observations_for_system(
+                        &crate::ship::system_registry::navigation_system_id(),
+                        &blackboards.0,
+                    )
+                    .get(&crate::ship::system_registry::viewscreen_system_id())
+            }) {
+                Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+                    bb.scored_objectives.clone()
+                }
+                _ => vec![],
+            };
 
         // ── Build candidate sources for the reusable selector (#778) ──────────
         // The selector ranks entity UUIDs; Navigation needs Waypoints, so a

@@ -811,12 +811,22 @@ pub(crate) fn ai_phaser_auto_fire(
         // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted
         // for firing. The tactical radar owns the live selection; auto-fire
         // reads the aggregated viewscreen fact.
-        let Some(target_uuid) = (match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
+        let Some(target_uuid) = ship_config_opt.and_then(|config| {
+            config
+                .0
+                .systems
+                .iter()
+                .filter(|system| system.kind == "phaser_bank" || system.kind == "phaser_control")
+                .find_map(|system| {
+                    match config
+                        .0
+                        .observations_for_system(&system.id, &blackboards.0)
+                        .get(&crate::ship::system_registry::viewscreen_system_id())
+                    {
+                        Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.clone(),
+                        _ => None,
+                    }
+                })
         }) else {
             continue;
         };
@@ -886,6 +896,16 @@ pub(crate) fn ai_phaser_auto_fire(
                         {
                             return None;
                         }
+                    }
+                    let bank_id = crate::ship::system_registry::phaser_bank_system_id(&b.id)?;
+                    let config = ship_config_opt?;
+                    if config
+                        .0
+                        .observations_for_system(&bank_id, &blackboards.0)
+                        .get(&crate::ship::system_registry::viewscreen_system_id())
+                        .is_none()
+                    {
+                        return None;
                     }
                     // Cooldown and "already burning" are the same per-bank question
                     // asked of two surfaces: a bank mid-beam must not be re-lit, but

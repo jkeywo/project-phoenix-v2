@@ -705,6 +705,33 @@ fn optional_target_config(action: SecurityAction) -> SecurityTargetConfig {
     }
 }
 
+// The fixture reads only the command publication consumed by its AI host.
+fn security_ai_scope() -> crate::ship_plugin::ShipConfigComponent {
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "operations"
+name = "Operations"
+description = "Fixture controls"
+rank = "Ens."
+[[console]]
+id = "operations"
+home_station = "operations"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[system]]
+id = "security"
+kind = "security"
+console = "operations"
+"#,
+            &["security"],
+        )
+        .expect("explicit fixture Console scope"),
+    )
+}
+
 /// Spawn the AI-operated Security ship and the given targets into `app`.
 ///
 /// The Security System's control source is `Ai`, which is the whole of what makes
@@ -723,6 +750,7 @@ fn spawn_ai_operator(app: &mut App, targets: &[(&str, Vec3, SecurityTargetConfig
             Transform::from_translation(Vec3::ZERO),
             AdmittedCommands::default(),
             ShipSecurityTeams::new(config()),
+            security_ai_scope(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipSystemControlSources(sources),
         ))

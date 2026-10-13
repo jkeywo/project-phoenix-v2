@@ -57,6 +57,33 @@ fn feedback_outcomes(
         .collect()
 }
 
+// The fixture reads only the command publication consumed by its AI host.
+fn dock_ai_scope() -> crate::ship_plugin::ShipConfigComponent {
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "operations"
+name = "Operations"
+description = "Fixture controls"
+rank = "Ens."
+[[console]]
+id = "operations"
+home_station = "operations"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[system]]
+id = "dock"
+kind = "dock"
+console = "operations"
+"#,
+            &["dock"],
+        )
+        .expect("explicit fixture Console scope"),
+    )
+}
+
 #[test]
 fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
     use crate::core::messages::{
@@ -110,6 +137,7 @@ fn restored_docked_state_keeps_engaged_only_start_and_host_withdrawal() {
         .spawn((
             EntityUuid("operator".into()),
             sources,
+            dock_ai_scope(),
             dock,
             blackboards,
             AdmittedCommands::default(),

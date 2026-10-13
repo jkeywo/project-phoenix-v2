@@ -2026,6 +2026,37 @@ fn faction_registry_resource_accessible_as_res_not_option() {
 use crate::server_app::Ship;
 use crate::ship::state::ShipPhysics;
 
+// The fixture reads only the command publication consumed by its AI host.
+fn low_lod_console_scope() -> crate::ship_plugin::ShipConfigComponent {
+    crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "operations"
+name = "Operations"
+description = "Fixture controls"
+rank = "Ens."
+[[console]]
+id = "operations"
+home_station = "operations"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+console = "operations"
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+console = "operations"
+"#,
+            &["helm_thrust", "helm_steering"],
+        )
+        .expect("explicit fixture Console scope"),
+    )
+}
+
 /// Mirrors the production schedule: `simulate_low_lod_ships` (Physics)
 /// steers from the cursor, then `advance_objective_cursors` (Modifiers)
 /// advances it against the ship's post-movement position. The `SimSet`s
@@ -2523,6 +2554,7 @@ fn demoted_ship_mid_escape_returns_to_engagement_envelope_within_bounded_time() 
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 300.0),
             ShipPhysics {
                 x: 0.0,
@@ -2697,6 +2729,7 @@ fn demoted_attacked_ship_does_not_steer_toward_a_zero_gated_destroy_target() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 300.0),
             ShipPhysics {
                 x: 0.0,
@@ -2814,6 +2847,7 @@ fn demoted_ship_resolves_destroy_target_by_score_not_authoring_order() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 300.0),
             ShipPhysics {
                 x: 0.0,
@@ -2965,6 +2999,7 @@ fn first_low_ship_with_a_scored_destroy_steers_at_it_instead_of_its_spawn_headin
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 0.0),
             // Exactly what `spawner.rs` seeds: facing -Z, stationary.
             ShipPhysics::default(),
@@ -3053,6 +3088,7 @@ fn low_lod_ship_diverts_to_its_scored_destroy_when_the_run_in_route_completes() 
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(600.0, 0.0, 400.0),
             ShipPhysics {
                 x: 600.0,
@@ -3167,6 +3203,7 @@ fn low_lod_divert_still_avoids_a_hazard_on_the_objective_bearing() {
             .world_mut()
             .spawn((
                 Ship,
+                low_lod_console_scope(),
                 Transform::from_xyz(600.0, 0.0, 400.0),
                 ShipPhysics {
                     x: 600.0,
@@ -3267,6 +3304,7 @@ fn low_lod_ship_still_parks_on_a_completed_route_with_a_zero_gated_destroy() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(600.0, 0.0, 400.0),
             ShipPhysics {
                 x: 600.0,
@@ -3345,6 +3383,7 @@ fn first_low_ship_does_not_steer_toward_a_zero_gated_destroy_target() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 0.0),
             ShipPhysics {
                 forward_speed: 10.0,
@@ -3406,6 +3445,7 @@ fn first_low_ship_without_an_ai_profile_keeps_its_unmodified_drift() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(0.0, 0.0, 0.0),
             ShipPhysics {
                 forward_speed: 10.0,
@@ -3587,6 +3627,7 @@ fn spawn_patrolling_npc(
     app.world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(x, 0.0, z),
             ShipPhysics {
                 x,
@@ -3888,6 +3929,7 @@ fn reach_objective_cursor_advances_to_terminal_on_arrival() {
         .world_mut()
         .spawn((
             Ship,
+            low_lod_console_scope(),
             Transform::from_xyz(500.0, 0.0, 500.0),
             ShipPhysics {
                 x: 500.0,

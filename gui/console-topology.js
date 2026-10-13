@@ -19,11 +19,14 @@ export function consoleReadState(state, definition) {
     blackboardPresentation: select(state.blackboardPresentation),
     consoleSystems: { [definition.id]: definition.systems || [] } };
   const hosting = state.consoleHosts?.[definition.id];
-  const rating = hosting?.rating || state.stationRatings?.[definition.home_station];
+  const rating = hosting?.rating || (definition.home_station ? state.stationRatings?.[definition.home_station] : definition.visiting_rating);
   // Legacy family builders read their automation fallback under family keys.
   // This is a read projection only; the client's Station rating controls and
   // authoritative controlSources retain their original seat/System identities.
   view.stationRatings = { ...state.stationRatings };
+  view.stationTutorials = { ...state.stationTutorials,
+    [definition.id]: definition.tutorials?.length ? definition.tutorials
+      : (definition.home_station ? state.stationTutorials?.[definition.home_station] || [] : []) };
   if (rating) for (const id of definition.systems || []) {
     const family = state.systemConsoleFamilies?.[id];
     if (family) view.stationRatings[family] = rating;

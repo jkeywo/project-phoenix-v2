@@ -114,3 +114,11 @@ describe('explicit Console identity', () => {
     expect(view.system_ids).toEqual(['drive']);
   });
 });
+
+it('detached Console uses its own rating and tutorial metadata, without host Station pooling', () => {
+  const tutorial = { id: 'aux-help' };
+  const view = consoleReadState({ stationRatings: { pilot: 'Backfill' }, stationTutorials: { pilot: [{ id: 'seat-help' }] },
+    systemConsoleFamilies: { drive: 'helm' } }, { ...consoles[0], home_station: null, visiting_rating: 'Simplified', tutorials: [tutorial] });
+  expect(view.stationRatings.helm).toBe('Simplified');
+  expect(view.stationTutorials.left).toEqual([tutorial]);
+});

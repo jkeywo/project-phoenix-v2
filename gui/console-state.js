@@ -2719,7 +2719,7 @@ export function buildConsoleView(consoleName, state) {
     let view = buildConsoleViewInner(consoleName, scoped);
     view = withStationDamage(consoleName, scoped, view);
     view = withCommandAdvice(definition.home_station, scoped, view);
-    view = withTutorialOverlay(definition.home_station, scoped, view);
+    view = withTutorialOverlay(definition.id, scoped, view);
     view = withGmTakeover(definition.home_station, scoped, view);
     return { ...view, console_id: definition.id, station_id: definition.home_station,
       hosted_systems: definition.systems || [],

@@ -601,15 +601,25 @@ name = "station.tactical.display_name"
 description = "station.tactical.description"
 rank = "Lieutenant"
 
+[[console]]
+id = "flight-screen"
+home_station = "helm"
+screen = "gui/helm.html"
+
+[[console]]
+id = "weapons-screen"
+home_station = "tactical"
+screen = "gui/weapons.html"
+
 [[system]]
 id = "impulse-drive"
 kind = "impulse-drive"
-station = "helm"
+console = "flight-screen"
 
 [[system]]
 id = "phaser-bank"
 kind = "phaser-bank"
-station = "tactical"
+console = "weapons-screen"
 "#,
             )
             .expect("a well-formed authoring fixture"),

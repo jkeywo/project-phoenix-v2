@@ -83,6 +83,9 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickCivilianTraffic,
             OperateDemolitionAi,
             HandleDemolitionCommands,
+            // Working views consume the admitted lane after its Input-phase
+            // producers; reading that shared buffer must have a declared order.
+            ApplyConsoleViews,
         ],
     );
     // Input: reviewed conflicting owner sequence.

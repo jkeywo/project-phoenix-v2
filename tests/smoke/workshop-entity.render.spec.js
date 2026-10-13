@@ -34,7 +34,7 @@ const HULL_ID = 'WRK-1476';
 // in the simulation. The row's own label is deliberately not asserted: a Test's
 // player ship does not take its name from the template it flies, and this spec
 // has no business pinning a mechanism it did not establish.
-const COMPOSED_STATIONS = ['Captain', 'Tactical', 'Command'];
+const COMPOSED_STATIONS = ['Captain', 'Tactical'];
 const isTestFrame = frame => /\/workshop-test(?:\.html)?$/.test(new URL(frame.url() || 'about:blank').pathname);
 const WORLD_TEXT = `[global]
 title = "Composed hull in the Workshop"
@@ -145,6 +145,15 @@ test('the entity panel materialises an inherited value through the real runtime 
     await expect.poll(() => sourceOf(page, HULL)).toBe(materialised);
     // The fragment it came from was never touched.
     expect(await sourceOf(page, FRAGMENT)).toBe(FRAGMENT_TEXT);
+
+    // Command is an inherited Console, not an extra claimable Station. The
+    // composition form reads these distinct lists through the real runtime.
+    await revealWorkshopPanel(page, 'composition');
+    await page.locator('#workshop-ship-template').selectOption(HULL);
+    await expect(page.locator('#workshop-ship-consoles option[value="command"]')).toHaveCount(1);
+    await expect(page.locator('#workshop-ship-stations option[value="command"]')).toHaveCount(0);
+    await page.locator('#workshop-ship-consoles').selectOption('command');
+    await expect(page.locator('#workshop-ship-console-screen')).toHaveValue('gui/command-console.html');
 
     // Criterion 5: the panel's own Test control hands the composed hull to the
     // existing disposable Test rather than standing up a second runner. The

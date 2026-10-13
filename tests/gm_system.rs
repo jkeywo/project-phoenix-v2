@@ -51,14 +51,18 @@ id = "captain"
 name = "Captain"
 description = "Command"
 rank = "Captain"
+[[console]]
+id = "command-screen"
+home_station = "captain"
+screen = "gui/captain.html"
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "captain"
+console = "command-screen"
 [[system]]
 id = "other-alert"
 kind = "red_alert"
-station = "captain"
+console = "command-screen"
 "#,
         &["red_alert"],
     )

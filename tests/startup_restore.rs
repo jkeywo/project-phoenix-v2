@@ -11,9 +11,8 @@ use project_phoenix::core::messages::{
 use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::server_app::LocalShip;
-use project_phoenix::ship::control_source::ControlSource;
 use project_phoenix::ship::state::ShipRedAlert;
-use project_phoenix::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
+use project_phoenix::ship_plugin::ShipConfigComponent;
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::sim_tick::SimTick;
 use project_phoenix::startup_restore::*;
@@ -41,6 +40,20 @@ fn fresh_app() -> App {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.finish();
     app.cleanup();
+    // A real Captain hosts Command across source and restore bootstraps. Direct
+    // control-source writes are transient: ordinary Console resolution owns them.
+    {
+        let mut sessions = app
+            .world_mut()
+            .resource_mut::<project_phoenix::lobby::Sessions>();
+        sessions
+            .0
+            .register("restore-captain".into(), "Captain".into())
+            .unwrap();
+        sessions
+            .0
+            .set_station("restore-captain", Some(StationId("captain".into())));
+    }
     app
 }
 
@@ -49,25 +62,6 @@ fn local_ship(app: &mut App) -> Entity {
         .query_filtered::<Entity, With<LocalShip>>()
         .single(app.world())
         .unwrap()
-}
-
-fn keep_human_controls(app: &mut App, ship: Entity) {
-    let ids: Vec<_> = app
-        .world()
-        .get::<ShipConfigComponent>(ship)
-        .unwrap()
-        .0
-        .systems
-        .iter()
-        .map(|system| system.id.clone())
-        .collect();
-    let mut sources = app
-        .world_mut()
-        .get_mut::<ShipSystemControlSources>(ship)
-        .unwrap();
-    for id in ids {
-        sources.0.set(id, ControlSource::Human);
-    }
 }
 
 fn captain_alert(app: &mut App, ship: Entity, active: bool) {
@@ -114,7 +108,6 @@ fn shared_startup_restore_preserves_alert_frontier_then_accepts_live_captain_com
             &GamePhase::InProgress
         );
         let source_ship = local_ship(&mut source);
-        keep_human_controls(&mut source, source_ship);
         captain_alert(&mut source, source_ship, captured_alert);
         // A real stable authored entity, present in both bootstraps, keeps the
         // ordinary dead-attacker cleanup from masking the alert-edge contract.
@@ -204,7 +197,6 @@ fn shared_startup_restore_preserves_alert_frontier_then_accepts_live_captain_com
             let ready = snapshot::ready_to_restore(target.world(), &checkpoint);
             if ready {
                 let ship = local_ship(&mut target);
-                keep_human_controls(&mut target, ship);
                 // Insert immediately before the actual restore, without an
                 // update in between: the bootstrap change has no consumed edge.
                 target.world_mut().entity_mut(ship).remove::<ShipRedAlert>();

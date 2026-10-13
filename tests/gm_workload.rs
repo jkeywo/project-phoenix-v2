@@ -157,12 +157,29 @@ fn crew_everything(app: &mut App, source: ControlSource) {
         .iter()
         .map(|system| system.id.clone())
         .collect();
-    let mut entity_mut = app.world_mut().entity_mut(entity);
-    let mut sources = entity_mut
-        .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>()
-        .unwrap();
-    for id in ids {
-        sources.0.set(id, source);
+    for id in &ids {
+        app.world_mut()
+            .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>(entity)
+            .unwrap()
+            .0
+            .set(id.clone(), source);
+    }
+    let stations: Vec<_> = app
+        .world()
+        .get::<phoenix::ship::components::ShipConfigComponent>(entity)
+        .unwrap()
+        .0
+        .stations
+        .iter()
+        .map(|station| station.id.clone())
+        .collect();
+    for station in stations {
+        crew_station(app, &station);
+    }
+    if source != ControlSource::Human {
+        for id in &ids {
+            set_source(app, id, source);
+        }
     }
 }
 
@@ -221,10 +238,13 @@ fn crew_station_on_rating(app: &mut App, station: &StationId, rating: &str) {
     let token = format!("crew-{}", station.0);
     {
         let mut sessions = app.world_mut().resource_mut::<phoenix::lobby::Sessions>();
-        sessions
-            .0
-            .register(token.clone(), format!("Operator {}", station.0))
-            .expect("a fresh token");
+        if sessions.0.reconnect(&token).is_none() {
+            sessions
+                .0
+                .register(token.clone(), format!("Operator {}", station.0))
+                .expect("fixture operator");
+        }
+        sessions.0.set_afk(&token, false);
         sessions.0.set_station(&token, Some(station.clone()));
     }
     let mut entity_mut = app.world_mut().entity_mut(entity);
@@ -263,9 +283,8 @@ fn seat_source_of(app: &mut App, station: &StationId) -> ControlSource {
     phoenix::ship::coordination::seat_control_source(&policies)
 }
 
-/// Mark every System one Station owns as damage-offline, the way the damage
-/// sweep does. Durable, unlike a control-source write: `policy_for` returns the
-/// offline policy whatever the resolver says.
+/// Disable every currently hosted System through the ordinary GM availability
+/// latch, which survives both hosting and damage-state recomputation.
 fn disable_station(app: &mut App, station: &StationId) {
     let entity = fleet_entity(app);
     let ids = systems_of(app, station);
@@ -274,12 +293,10 @@ fn disable_station(app: &mut App, station: &StationId) {
         .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>()
         .unwrap();
     for id in ids {
-        // Both halves of "nothing can operate this": the explicit offline
-        // control source a Station Rating sets, and the damage latch the
-        // console-damage sweep sets. Either alone is enough for `policy_for`;
-        // together they survive whichever of the two the next tick re-derives.
+        // The availability latch keeps this System inoperable even when Input
+        // re-derives the source or damage synchronization clears its own mask.
         sources.0.set(id.clone(), ControlSource::Offline);
-        sources.0.set_offline(id, true);
+        sources.0.set_gm_disabled(id, true);
     }
 }
 
@@ -312,36 +329,14 @@ fn systems_of(app: &mut App, station: &StationId) -> Vec<SystemId> {
         .collect()
 }
 
-/// Every System one Station AUTHORS, straight from the hull TOML.
-///
-/// `ShipConfig::systems_for_station` — the same `[[system]] station = ...`
-/// membership the lobby projects into the roster pill's `station_systems`, and
-/// (since #1438) the same membership the advisory reduces to a level. Distinct
-/// from [`systems_of`] above, which answers the live "where is this operated
-/// from" question instead.
-fn authored_systems_of(app: &mut App, station: &StationId) -> Vec<SystemId> {
-    let entity = fleet_entity(app);
-    let config = app
-        .world()
-        .entity(entity)
-        .get::<phoenix::ship::components::ShipConfigComponent>()
-        .unwrap()
-        .0
-        .clone();
-    config
-        .systems_for_station(station)
-        .map(|system| system.id.clone())
-        .collect()
-}
-
-/// Mark one System damage-offline, the way the damage sweep does.
+/// Toggle one System’s ordinary GM availability latch without changing its HP.
 fn set_offline(app: &mut App, system: &SystemId, offline: bool) {
     let entity = fleet_entity(app);
     let mut entity_mut = app.world_mut().entity_mut(entity);
     let mut sources = entity_mut
         .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>()
         .unwrap();
-    sources.0.set_offline(system.clone(), offline);
+    sources.0.set_gm_disabled(system.clone(), offline);
 }
 
 /// Write the ship's shared Navigation goal — the same component both the human
@@ -450,7 +445,7 @@ fn issued_generation(app: &mut App) -> Option<u64> {
 /// Who is operating the `navigation` System right now.
 ///
 /// Read rather than written, on purpose: `navigation` belongs to a human-seeking
-/// Station, so its control source is RE-DERIVED every tick from where the crew
+/// Console, so its control source is RE-DERIVED every tick from where the crew
 /// are actually sitting. A test that wrote it directly would be overwritten on
 /// the next step and would be asserting about a value nothing produced.
 fn navigation_source(app: &mut App) -> ControlSource {
@@ -463,28 +458,55 @@ fn navigation_source(app: &mut App) -> ControlSource {
         .source_for(&phoenix::ship::system_registry::navigation_system_id())
 }
 
-/// Everybody stands up. The lobby's own seat release, so the human-seeking
-/// resolver re-derives from an empty table exactly as it does in a real game.
-fn vacate_stations(app: &mut App) {
-    let mut sessions = app.world_mut().resource_mut::<phoenix::lobby::Sessions>();
-    let tokens: Vec<String> = sessions
-        .0
-        .players()
-        .iter()
-        .map(|player| player.token.clone())
-        .collect();
-    for token in tokens {
-        sessions.0.set_station(&token, None);
-    }
-}
-
+/// Persist deliberate fixture delegation in the owning Console's rating data.
+/// The ordinary Input resolver remains active and derives the requested source.
 fn set_source(app: &mut App, system: &SystemId, source: ControlSource) {
     let entity = fleet_entity(app);
     let mut entity_mut = app.world_mut().entity_mut(entity);
-    let mut sources = entity_mut
-        .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>()
-        .unwrap();
-    sources.0.set(system.clone(), source);
+    {
+        let mut sources = entity_mut
+            .get_mut::<phoenix::ship_plugin::ShipSystemControlSources>()
+            .unwrap();
+        sources.0.set(system.clone(), source);
+        sources
+            .0
+            .set_gm_disabled(system.clone(), source == ControlSource::Offline);
+    }
+    let sources = entity_mut
+        .get::<phoenix::ship_plugin::ShipSystemControlSources>()
+        .unwrap()
+        .0
+        .clone();
+    let original = entity_mut
+        .get::<phoenix::ship::components::ShipConfigComponent>()
+        .unwrap()
+        .0
+        .clone();
+    let Some(owner) = original.console_for_system(system) else {
+        return;
+    };
+    let owned: Vec<_> = original
+        .systems
+        .iter()
+        .filter(|row| row.console.as_ref() == Some(&owner.id))
+        .collect();
+    let mut ratings = original.console_ratings(owner).to_vec();
+    for rating in &mut ratings {
+        rating.automated_systems = owned
+            .iter()
+            .filter(|row| sources.source_for(&row.id) == ControlSource::Ai)
+            .map(|row| row.id.clone())
+            .collect();
+    }
+    entity_mut
+        .get_mut::<phoenix::ship::components::ShipConfigComponent>()
+        .unwrap()
+        .0
+        .consoles
+        .iter_mut()
+        .find(|console| console.id == owner.id)
+        .unwrap()
+        .ratings = ratings;
 }
 
 fn grant(sequence: u64, at: u64, action: GmAction) -> GmActionGrant {
@@ -947,12 +969,15 @@ fn a_backfill_to_human_flip_still_ends_a_repair_request_whose_damage_is_gone() {
 fn a_navigation_clearance_delivered_to_a_human_helm_is_one_demand_keyed_by_generation() {
     let mut app = seeded(COURSE_WORLD);
     crew_everything(&mut app, ControlSource::Human);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     let steering = phoenix::ship::system_registry::helm_steering_system_id();
     let helm = station_of(&mut app, &steering);
-    // Deliberately NOT crewing a seat. `navigation` is a human-seeking Station
-    // whose host order reaches the Helm, so the moment anybody sits down it
-    // comes and sits with them — and then Navigation and Helm are one person,
-    // which the router suppresses (the case below).
+    // Navigation is explicitly delegated while Helm remains crewed, so its
+    // ordinary clearance is work for the human Helm operator.
     step(&mut app, 8);
     assert_eq!(navigation_source(&mut app), ControlSource::Ai);
     assert!(
@@ -994,6 +1019,11 @@ fn a_navigation_clearance_delivered_to_a_human_helm_is_one_demand_keyed_by_gener
 fn a_withdrawn_course_ends_the_clearance_demand() {
     let mut app = seeded(COURSE_WORLD);
     crew_everything(&mut app, ControlSource::Human);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     let steering = phoenix::ship::system_registry::helm_steering_system_id();
     let helm = station_of(&mut app, &steering);
     step(&mut app, 8);
@@ -1023,12 +1053,20 @@ fn a_withdrawn_course_ends_the_clearance_demand() {
 fn a_clearance_between_two_people_is_suppressed_and_never_counted() {
     let mut app = seeded(COURSE_WORLD);
     crew_everything(&mut app, ControlSource::Human);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     let steering = phoenix::ship::system_registry::helm_steering_system_id();
     let helm = station_of(&mut app, &steering);
-    // Somebody sits at the Helm. `navigation` is human-seeking and its host
-    // order reaches the Helm, so the same person now plots the course AND flies
-    // it: a human sender to a human recipient.
+    // Both capabilities are human-operated; ordinary routing suppresses the popup.
     crew_station(&mut app, &helm);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Human,
+    );
     step(&mut app, 2);
     assert_eq!(navigation_source(&mut app), ControlSource::Human);
 
@@ -1047,11 +1085,13 @@ fn a_clearance_between_two_people_is_suppressed_and_never_counted() {
         "a human Navigation and a human Helm can simply talk"
     );
 
-    // The operator steps away from the Helm seat. Navigation has nowhere left to
-    // seek a person, falls to the hull's own AI, plots the authored destination,
-    // and NOW the Helm — whose Systems are still under a person — is genuinely
-    // being asked to take a course up.
-    vacate_stations(&mut app);
+    // Delegate Navigation while keeping the Helm operator. AI now issues the
+    // course as a demand on that person through the same ordinary channel.
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     step(&mut app, 12);
     assert_eq!(navigation_source(&mut app), ControlSource::Ai);
     assert_eq!(row(&app, &helm).count, 1);
@@ -1064,6 +1104,11 @@ fn a_clearance_between_two_people_is_suppressed_and_never_counted() {
 fn arriving_completes_the_clearance_demand_without_clearing_the_course() {
     let mut app = seeded(COURSE_WORLD);
     crew_everything(&mut app, ControlSource::Human);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     let steering = phoenix::ship::system_registry::helm_steering_system_id();
     let helm = station_of(&mut app, &steering);
     step(&mut app, 8);
@@ -1115,6 +1160,11 @@ fn arriving_completes_the_clearance_demand_without_clearing_the_course() {
 fn a_flown_clearance_survives_capture_and_restore() {
     let mut app = seeded(COURSE_WORLD);
     crew_everything(&mut app, ControlSource::Human);
+    set_source(
+        &mut app,
+        &phoenix::ship::system_registry::navigation_system_id(),
+        ControlSource::Ai,
+    );
     let steering = phoenix::ship::system_registry::helm_steering_system_id();
     let helm = station_of(&mut app, &steering);
     step(&mut app, 8);
@@ -1521,7 +1571,7 @@ fn a_station_nothing_can_operate_reads_offline() {
     step(&mut app, 2);
     assert!(row(&app, &engineering).level.counts_people());
 
-    // Damage takes the whole seat out. It is neither underused (nobody is being
+    // Explicit disablement takes the whole seat out. It is neither underused (nobody is being
     // under-asked) nor backfilled (no AI is operating it either).
     disable_station(&mut app, &engineering);
     step(&mut app, 2);
@@ -1532,27 +1582,11 @@ fn a_station_nothing_can_operate_reads_offline() {
 
 // ── Human-seeking migration: a Station that is nobody's seat ───────────
 
-/// A Station every one of whose AUTHORED Systems has migrated to a
-/// human-seeking host is not a seat anybody holds, so the summary does not name
-/// it at all — and its work is counted once, at the seat actually presenting it.
-///
-/// The stock Alliance Cruiser authors three of these and they are the ORDINARY
-/// case, not a corner. `navigation` and `command` are human-seeking Stations
-/// (`host_order = ["comms", "captain", …]` and `["captain"]`); the `comms`
-/// SYSTEM is human-seeking with no `seek_order`, so with its own seat empty it
-/// goes and sits at whichever seat is crewed. Each of the three authors exactly
-/// one System, so reading membership from the LIVE host map left each of them
-/// with the EMPTY set the moment anybody sat down — and an empty set reduces to
-/// `Offline`. All three therefore read "No System here can be operated", which
-/// is false, contradicts the roster pill on the same row, and contradicts
-/// `GmWorkloadLevel::Offline`'s own meaning. Membership is authored; the live
-/// map only says where the work is being presented.
-///
-/// Nothing here hand-sets a control source: every seat is taken the way a lobby
-/// claim takes it, through `crew_station`, and every migration is the hull's own
-/// authored seek rules doing what they do in a real game.
+/// Detached Navigation/Command Consoles never add workload seats. Comms retains
+/// a home seat but its work follows its human-seeking Console to the current host.
+/// The demand is counted once at that host and moves back to Comms on a claim.
 #[test]
-fn a_station_whose_systems_have_all_migrated_is_left_out_of_the_summary() {
+fn detached_consoles_and_migrated_comms_do_not_duplicate_workload_seats() {
     let mut app = seeded(WORLD);
     let captain = StationId("captain".into());
     let comms = StationId("comms".into());
@@ -1563,21 +1597,42 @@ fn a_station_whose_systems_have_all_migrated_is_left_out_of_the_summary() {
         &phoenix::ship::system_registry::repair_system_id(),
     );
 
+    let entity = fleet_entity(&mut app);
+    let config = &app
+        .world()
+        .get::<phoenix::ship::components::ShipConfigComponent>(entity)
+        .unwrap()
+        .0;
     let visiting: Vec<(StationId, SystemId)> = [&navigation, &command, &comms]
         .into_iter()
-        .map(|station| {
-            let mut authored = authored_systems_of(&mut app, station);
+        .map(|label| {
+            let console = config
+                .consoles
+                .iter()
+                .find(|console| console.id.0 == label.0)
+                .expect("authored visiting Console");
+            let owned: Vec<_> = config
+                .systems
+                .iter()
+                .filter(|system| system.console.as_ref() == Some(&console.id))
+                .collect();
             assert_eq!(
-                authored.len(),
+                owned.len(),
                 1,
-                "the cruiser gives {station:?} exactly one authored System"
+                "each visiting Console owns exactly one System"
             );
-            (station.clone(), authored.remove(0))
+            if label != &comms {
+                assert!(
+                    !config.stations.iter().any(|station| station.id == *label),
+                    "detached Consoles are not crew seats"
+                );
+            }
+            (label.clone(), owned[0].id.clone())
         })
         .collect();
 
     // One person, in the Captain's chair. The hull's own seek rules send all
-    // three visiting Stations' Systems to them.
+    // three visiting Consoles' Systems to them.
     crew_station(&mut app, &captain);
     step(&mut app, 4);
     for (station, system) in &visiting {
@@ -1643,7 +1698,7 @@ fn a_station_whose_systems_have_all_migrated_is_left_out_of_the_summary() {
     assert!(!named(&app, &command));
 
     // Offline is reserved for a Station whose OWN authored Systems are all
-    // damage-disabled, and it is the only thing in the whole summary that
+    // disabled, and it is the only thing in the whole summary that
     // reads it.
     crew_station(&mut app, &engineering);
     step(&mut app, 2);

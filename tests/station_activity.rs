@@ -55,15 +55,25 @@ name = "Tactical"
 description = "Guns."
 rank = "Ltn."
 
+[[console]]
+id = "flight-screen"
+home_station = "helm"
+screen = "gui/helm.html"
+
+[[console]]
+id = "weapons-screen"
+home_station = "weapons"
+screen = "gui/weapons.html"
+
 [[system]]
 id = "helm"
 kind = "repair_control"
-station = "helm"
+console = "flight-screen"
 
 [[system]]
 id = "weapons"
 kind = "repair_control"
-station = "weapons"
+console = "weapons-screen"
 "#,
         &["repair_control"],
     )

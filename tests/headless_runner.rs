@@ -4206,6 +4206,7 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
 /// it.
 #[test]
 fn the_composed_player_destroyer_boots_backfilled_and_flies() {
+    use project_phoenix::core::messages::SystemId;
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/probe_duel.toml".into(),
@@ -4223,14 +4224,12 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
             &ShipSystemControlSources,
             &ActiveStationRatings,
             &ShipConfigComponent,
+            &project_phoenix::ship::components::ConsoleHosts,
         ), With<LocalShip>>();
-        let (sources, ratings, config) = q.single(app.world()).expect("exactly one LocalShip");
-        // `seed_boot_ratings` inserts one entry per authored station with no
-        // auxiliary filter, so the raw total counts the auxiliary stations
-        // (Navigation, Comms, Command) too. The real invariant is the number of
-        // *crewable* (non-auxiliary) seats — auxiliary stations are data-authored
-        // directors/hosted tabs, not seats a human can take — so a future
-        // auxiliary addition must not be silently accepted here as a new seat.
+        let (sources, ratings, config, hosts) =
+            q.single(app.world()).expect("exactly one LocalShip");
+        // Crew ratings belong to the four Stations. The auxiliary screens are
+        // Consoles with their own Backfill hosting, never extra crew seats.
         let crewable = config.0.stations.len();
         assert_eq!(
             crewable, 4,
@@ -4239,11 +4238,26 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
         );
         assert_eq!(
             ratings.0.len(),
-            7,
-            "four crewable seats + three auxiliary stations (navigation, comms, \
-             command) each boot a rating: {:?}",
+            4,
+            "only the four crewable seats boot Station ratings: {:?}",
             ratings.0
         );
+        for id in ["navigation", "comms", "command"] {
+            let hosted = hosts
+                .0
+                .iter()
+                .find(|entry| entry.console.0 == id)
+                .expect("each auxiliary Console survives composition");
+            assert!(hosted.host.is_none(), "no human holds {id}");
+            assert_eq!(
+                hosted.rating,
+                project_phoenix::ship::rating::BACKFILL_RATING
+            );
+            assert_eq!(
+                sources.0.source_for(&SystemId(id.into())),
+                ControlSource::Ai
+            );
+        }
         for (station, rating) in &ratings.0 {
             assert_eq!(
                 rating,

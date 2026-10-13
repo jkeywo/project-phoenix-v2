@@ -453,6 +453,21 @@ fn alert_restore_fixture(active: bool) -> (App, Entity) {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.finish();
     app.cleanup();
+    // Seat a real Captain so detached Command remains human-operated after
+    // Console resolution, including the updates immediately following restore.
+    {
+        let mut sessions = app
+            .world_mut()
+            .resource_mut::<project_phoenix::lobby::Sessions>();
+        sessions
+            .0
+            .register("restore-captain".into(), "Captain".into())
+            .unwrap();
+        sessions.0.set_station(
+            "restore-captain",
+            Some(project_phoenix::core::messages::StationId("captain".into())),
+        );
+    }
     for _ in 0..4 {
         app.update();
     }
@@ -461,7 +476,6 @@ fn alert_restore_fixture(active: bool) -> (App, Entity) {
         .query_filtered::<Entity, With<LocalShip>>()
         .single(app.world())
         .unwrap();
-    human(&mut app, victim);
     app.world_mut()
         .spawn((EntityUuid(SHOOTER.into()), Transform::from_xyz(X, 0.0, 0.0)));
     ordinary_alert(&mut app, victim, active);

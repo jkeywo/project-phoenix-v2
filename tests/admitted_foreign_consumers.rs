@@ -268,7 +268,10 @@ fn set_gate(app: &mut App, ship: Entity, family: &str, tube: &SystemId, offline:
         ControlSource::Human
     };
     match family {
-        "volley" => sources.0.set(tube.clone(), source),
+        "volley" => {
+            sources.0.set(tube.clone(), source);
+            sources.0.set_gm_disabled(tube.clone(), offline);
+        }
         "phaser-mode" | "phaser-frequency" => {
             let banks: Vec<_> = config
                 .systems
@@ -278,6 +281,7 @@ fn set_gate(app: &mut App, ship: Entity, family: &str, tube: &SystemId, offline:
             assert!(!banks.is_empty());
             for bank in banks {
                 sources.0.set(bank.id.clone(), source);
+                sources.0.set_gm_disabled(bank.id.clone(), offline);
             }
         }
         _ => {}
@@ -452,7 +456,42 @@ fn foreign_consumer_child() {
         .get_mut::<ShipSystemControlSources>(ship)
         .unwrap()
         .0
-        .set(captain, ControlSource::Ai);
+        .set(captain.clone(), ControlSource::Ai);
+    // Real Input hosting replaces direct source assignments on crewed ships.
+    // Seat the authored crew and delegate only Captain through its Console
+    // rating, preserving the real AI producer and all ordinary consumers.
+    let captain_console = config.console_for_system(&captain).unwrap().id.clone();
+    let captain_rating = project_phoenix::ship::config::StationRatingConfig {
+        name: "Std".into(),
+        automated_systems: vec![captain.clone()],
+        detailed_systems: None,
+        ai_tuning: None,
+    };
+    app.world_mut()
+        .get_mut::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .consoles
+        .iter_mut()
+        .find(|console| console.id == captain_console)
+        .unwrap()
+        .ratings = vec![captain_rating];
+    for station in &config.stations {
+        let token = format!("foreign-consumer-operator-{}", station.id.0);
+        {
+            let mut sessions = app
+                .world_mut()
+                .resource_mut::<project_phoenix::lobby::Sessions>();
+            sessions.0.register(token.clone(), token.clone()).unwrap();
+            sessions.0.set_station(&token, Some(station.id.clone()));
+            sessions.0.set_last_rating(&token, Some("Std".into()));
+        }
+        app.world_mut()
+            .get_mut::<project_phoenix::ship_plugin::ActiveStationRatings>(ship)
+            .unwrap()
+            .0
+            .insert(station.id.clone(), "Std".into());
+    }
     let position = Vec3::new(100_000.0, 0.0, 0.0);
     app.world_mut().entity_mut(ship).insert((
         ShipPhysics {
@@ -533,6 +572,17 @@ fn foreign_consumer_child() {
             }
             let wire = step(&mut app, ship, &mut readers, &mut trace, &mut raw);
             let after = consumer_state(&app, ship);
+            let sources = &app.world().get::<ShipSystemControlSources>(ship).unwrap().0;
+            assert!(
+                sources.policy_for(&captain).operate_ai,
+                "the real foreign Captain producer remains delegated"
+            );
+            assert!(
+                !sources
+                    .policy_for(&system_registry::tactical_radar_system_id())
+                    .operate_ai,
+                "the Tactical crew, not Backfill, owns the seeded consumer state"
+            );
             let admitted = &app.world().get::<AdmittedCommands>(ship).unwrap().0;
             let foreign: Vec<_> = admitted
                 .iter()

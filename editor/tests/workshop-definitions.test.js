@@ -15,7 +15,7 @@ const choices = { factions: [{ uuid: A, name: 'Mine', origin: 'draft' }, { uuid:
   { uuid: C, name: 'Pirate', origin: 'base' }], order_responses: ['comply', 'refuse'], ai_rules: ['torpedo_auto_fire'] };
 const faction = (extra = {}) => ({ path: 'assets/factions/mine.toml', origin: 'draft', uuid: A, uuid_line: 1, name: 'Mine', name_line: 2,
   display_name: null, display_name_line: null, enemies: [{ uuid: B, line: 4, name: 'Alliance' }], compliance: null, unknown_keys: [], ...extra });
-const station = (extra = {}) => ({ id: 'helm', name: 'Helm', line: 10, human_seeking: true, visiting_rating: { source: '"Std"', line: 12 },
+const station = (extra = {}) => ({ id: 'helm', name: 'Helm', line: 10,
   systems: [{ id: 'helm-lateral-thrust', kind: 'thruster', line: 3 }, { id: 'helm-impulse', kind: 'impulse', line: 5 }],
   ratings: [
     { index: 0, name: 'Std', line: 14, automated_systems: [], ai_tuning: [] },
@@ -193,22 +193,13 @@ describe('planRatingEdits', () => {
     expect(rungNames(twice)).toEqual(['Simplified', 'Simplified']);
   });
 
-  it('sets, puts and removes the visiting rating', () => {
+  it('keeps hosting out of Station rating forms and edit plans', () => {
     const target = station();
     const form = ratingForm(target);
-    expect(form.visiting_rating).toBe('Std');
-    form.visiting_rating = 'Simplified';
-    expect(planRatingEdits({ station: target, stationIndex: 0, form })).toEqual([
-      { op: 'set', path: ['station', 0, 'visiting_rating'], value_source: '"Simplified"' },
-    ]);
-    form.visiting_rating = '';
-    expect(planRatingEdits({ station: target, stationIndex: 0, form })).toEqual([
-      { op: 'remove', path: ['station', 0, 'visiting_rating'] },
-    ]);
-    const bare = station({ visiting_rating: null });
-    expect(planRatingEdits({ station: bare, stationIndex: 0, form: { ...ratingForm(bare), visiting_rating: 'Std' } })).toEqual([
-      { op: 'put', path: ['station', 0, 'visiting_rating'], value_source: '"Std"' },
-    ]);
+    expect(form).not.toHaveProperty('visiting_rating');
+    expect(form).not.toHaveProperty('human_seeking');
+    expect(planRatingEdits({ station: target, stationIndex: 0,
+      form: { ...form, visiting_rating: 'Simplified' } })).toEqual([]);
   });
 
   it('renames a rung and inserts and removes its automated systems by index', () => {

@@ -14,7 +14,6 @@ id = "helm"
 name = "Helm"
 description = "Fly"
 rank = "Lt."
-console = "gui/helm.html"
 unknown_station = 7
 
 [[station.rating]]
@@ -27,16 +26,26 @@ name = "Science"
 description = "Scan"
 rank = "Lt."
 
+[[console]] # screen comment
+id = "flight-screen"
+home_station = "helm"
+screen = "gui/helm.html"
+
+[[console]]
+id = "scan-screen"
+home_station = "science"
+screen = "gui/sensors.html"
+
 [[system]] # drive comment
 id = "drive"
 kind = "helm_thrust"
-station = "helm"
+console = "flight-screen"
 unknown_system = true
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "science"
+console = "scan-screen"
 `;
 const dependencies = { base_files: {}, packs: [] };
 const schema = { system_kinds: ['helm_thrust', 'sensors'], directive_kinds: ['None', 'Destroy', 'Reach', 'Patrol'] };
@@ -51,8 +60,9 @@ describe('Workshop playable ship exact-source transactions', () => {
     const inspection = inspectShipAuthoring(draft, dependencies, op({}).path);
     expect(inspection.stations.map(row => row.id)).toEqual(['helm', 'science']);
     expect(inspection.stations.every(row => row.local)).toBe(true);
+    expect(inspection.consoles.map(row => row.id)).toEqual(['flight-screen', 'scan-screen']);
     const prepared = prepareShipOperation(draft, dependencies, schema, op({ type: 'station-update', id: 'helm',
-      fields: { name: 'Flight', console: 'gui/flight.html' } }));
+      fields: { name: 'Flight', description: 'Pilot the ship' } }));
     expect(prepared.changes).toHaveLength(1);
     expect(prepared.changes[0].after).toContain('[[station]] # bridge comment\nid = "helm"\nname = "Flight"');
     expect(prepared.changes[0].after).toContain('unknown_station = 7');
@@ -60,14 +70,15 @@ describe('Workshop playable ship exact-source transactions', () => {
     expect(prepared.changes[0].after.indexOf('id = "helm"')).toBeLessThan(prepared.changes[0].after.indexOf('id = "science"'));
   });
 
-  it('distinguishes included ship rows and allows local Systems to name included Stations', () => {
+  it('distinguishes included ship rows and allows local Systems to name included Consoles', () => {
     const draft = pack();
     draft.edit(operationPath(), 'tags = ["ship"]\nincludes = ["base.toml"]\n');
     const inherited = { base_files: { 'assets/entities/base.toml': source }, packs: [] };
     const inspection = inspectShipAuthoring(draft, inherited, operationPath());
     expect(inspection.stations[0]).toMatchObject({ id: 'helm', local: false, owner: 'assets/entities/base.toml' });
-    const prepared = prepareShipOperation(draft, inherited, schema, op({ type: 'system-add', id: 'second-drive', kind: 'helm_thrust', station: 'helm' }));
-    expect(parse(prepared.changes[0].after).system[0]).toMatchObject({ id: 'second-drive', station: 'helm' });
+    expect(inspection.consoles[0]).toMatchObject({ id: 'flight-screen', local: false, owner: 'assets/entities/base.toml' });
+    const prepared = prepareShipOperation(draft, inherited, schema, op({ type: 'system-add', id: 'second-drive', kind: 'helm_thrust', console: 'flight-screen' }));
+    expect(parse(prepared.changes[0].after).system[0]).toMatchObject({ id: 'second-drive', console: 'flight-screen' });
   });
 
   it('adds, reorders and removes Stations and Systems without normalising untouched source', () => {
@@ -78,8 +89,10 @@ describe('Workshop playable ship exact-source transactions', () => {
     const moved = prepareShipOperation(draft, dependencies, schema, op({ type: 'station-move', id: 'captain', direction: -1 }));
     expect(parse(moved.changes[0].after).station.map(row => row.id)).toEqual(['helm', 'captain', 'science']);
     expect(moved.changes[0].after).toContain('# ship comments stay');
-    const system = prepareShipOperation(draft, dependencies, schema, op({ type: 'system-add', id: 'command', kind: 'sensors', station: 'captain' }));
-    expect(parse(system.changes[0].after).system.at(-1)).toMatchObject({ id: 'command', kind: 'sensors', station: 'captain' });
+    const console = prepareShipOperation(draft, dependencies, schema, op({ type: 'console-add', id: 'command-screen', fields: { home_station: 'captain', screen: 'gui/sensors.html' } }));
+    draft.apply(console.changes);
+    const system = prepareShipOperation(draft, dependencies, schema, op({ type: 'system-add', id: 'command', kind: 'sensors', console: 'command-screen' }));
+    expect(parse(system.changes[0].after).system.at(-1)).toMatchObject({ id: 'command', kind: 'sensors', console: 'command-screen' });
   });
 
   it('authors rating automation only against Systems owned by that Station', () => {
@@ -97,11 +110,11 @@ describe('Workshop playable ship exact-source transactions', () => {
     expect(parse(renamed.changes[0].after).station[0].rating[0]).toMatchObject({ name: 'Direct', automated_systems: ['drive'] });
   });
 
-  it('source-links unknown kinds and invalid Station membership before history changes', () => {
+  it('source-links unknown kinds and invalid Console membership before history changes', () => {
     const draft = pack();
     for (const operation of [
-      op({ type: 'system-add', id: 'mystery', kind: 'made_up', station: 'helm' }),
-      op({ type: 'system-add', id: 'orphan', kind: 'sensors', station: 'missing' }),
+      op({ type: 'system-add', id: 'mystery', kind: 'made_up', console: 'flight-screen' }),
+      op({ type: 'system-add', id: 'orphan', kind: 'sensors', console: 'missing' }),
     ]) {
       try { prepareShipOperation(draft, dependencies, schema, operation); throw new Error('accepted invalid operation'); }
       catch (error) { expect(error.report.findings[0]).toMatchObject({ file: operation.path, line: expect.any(Number) }); }
@@ -144,7 +157,7 @@ describe('Workshop playable ship exact-source transactions', () => {
   it('commits one grouped undo entry only after ordinary runtime acceptance and rejects stale completions', async () => {
     const draft = pack(), runtime = { dependencies: vi.fn(async () => dependencies), shipSchema: vi.fn(async () => schema),
       validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
-    await applyShipOperation({ draft, runtime, operation: op({ type: 'system-update', id: 'drive', fields: { kind: 'helm_thrust', station: 'helm', ai_only: false } }) });
+    await applyShipOperation({ draft, runtime, operation: op({ type: 'system-update', id: 'drive', fields: { kind: 'helm_thrust', console: 'flight-screen', ai_only: false } }) });
     expect(draft.snapshot().history.undo).toHaveLength(1);
     draft.undo(); expect(draft.read(operationPath())).toBe(source);
     await expect(applyShipOperation({ draft, runtime, operation: op({ type: 'system-update', id: 'drive', fields: { kind: 'helm_thrust' } }), current: () => false }))

@@ -68,7 +68,9 @@
       "evidence": [
         "docs/gameplay-redesign/implementation/increment-3.md",
         "pasm/spec/design/ai-state-trees.yaml",
-        "docs/acceptance/1562-ai-state-trees.md"
+        "docs/acceptance/1562-ai-state-trees.md",
+        "docs/gameplay-redesign/implementation/tree-validation.json",
+        "docs/gameplay-redesign/implementation/tree-baseline.md"
       ]
     },
     {

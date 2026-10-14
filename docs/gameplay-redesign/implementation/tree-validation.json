@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "e78fb19486e9434c4acad77e8407316a2fd7341e",
+  "baseline_revision": "ba854ad88f63a33dece1207a65ef607a33575cdc",
+  "revision_note": "Runtime 22e5a23e plus deferred-boundary correction 6edc55bb and Workshop-only source/layout fixes 5f647f20/e78fb194. Full native suite rerun after scheduling fix; full JS rerun after authoring fix. Unchanged native/static/PASM inputs retain prior evidence. WASM built at 6edc55bb; Workshop rebuilt with final JS/CSS; final smoke source only removes diagnostic console output from the tested fixture.",
+  "checks": [
+    {
+      "name": "Native workspace",
+      "command": "cargo test --workspace --features headless",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-workspace-2.log",
+      "raw_sha256": "8aa2d4f5f50dd888f64e3656e3be365e4eb08ef83c58393e113edbb7c7d4162d",
+      "passed_tests": 9079,
+      "ignored_tests": 102,
+      "environment": {
+        "PHOENIX_AMBIGUITY_BASE_REF": "ba854ad88f63a33dece1207a65ef607a33575cdc"
+      }
+    },
+    {
+      "name": "Renderer-independent Simulation",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-simulation-owner-final.log",
+      "raw_sha256": "1c29198c6af59ac7ad36178a751b52810a0281c2dd19129059d0ad9cb597d1c0",
+      "passed_tests": 4667,
+      "ignored_tests": 0,
+      "revision_note": "Full independence suite at 22e5a23e, before the deferred-boundary correction. Final native suite covers the corrected controller; dependency definitions are unchanged."
+    },
+    {
+      "name": "Pure tree evaluator",
+      "command": "cargo test -p phoenix-sim-gameplay --lib ai::state_tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-tree-targeted-final.log",
+      "raw_sha256": "c43edec182553266241a123a6818fce74d223166e8ace0f7d0c54e7f3303dc9d",
+      "passed_tests": 12,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Dock deferred boundary",
+      "command": "cargo test -p project-phoenix --features headless --test admitted_foreign_consumers",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-foreign-consumers-fix.log",
+      "raw_sha256": "85708f2e84e3b47e0b718d73900d8fcd9bda79e0aafe4cfc8ff02de61f682703",
+      "passed_tests": 1,
+      "ignored_tests": 1
+    },
+    {
+      "name": "JavaScript",
+      "command": "npx vitest run --maxWorkers=4",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-vitest-3.log",
+      "raw_sha256": "aca05ac707534d783962eb722f678acd7012bd0c63db5902b08f0405116a637a",
+      "passed_tests": 8708
+    },
+    {
+      "name": "Clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-clippy-2.log",
+      "raw_sha256": "488504fcf7193a2da4b42b19c42c828d93a08f3073037cd0f01bad806ff75742"
+    },
+    {
+      "name": "Formatting",
+      "command": "cargo fmt -- --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-fmt-2.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "Layer dependency tree",
+      "command": "node scripts/check-layers.mjs --dependency-tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-dependency-tree.log",
+      "raw_sha256": "c0cbb45370281f666a3e8424631aac295e23e34dd0bdf19beb21459e56d21871"
+    },
+    {
+      "name": "Layers",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-layers.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92"
+    },
+    {
+      "name": "Debug surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91"
+    },
+    {
+      "name": "Live layout",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-live-layout.log",
+      "raw_sha256": "171fce78a23b602a10a5a0ccc0d7f20acb7cdd4b69e17b19a798d9540dd26d8e"
+    },
+    {
+      "name": "Strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-strings.log",
+      "raw_sha256": "746b7dd55b6fbc3ad9961fd11eb333b77a59833c2460ca4c31befeacf331d47b"
+    },
+    {
+      "name": "LODs",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45"
+    },
+    {
+      "name": "LOD captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7"
+    },
+    {
+      "name": "PASM validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-pasm-validate.log",
+      "raw_sha256": "bdac15ca5a5179b85b920b70b6b2068ce5cf4dd922f11254b6b34a3faf9b0d34"
+    },
+    {
+      "name": "PASM scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-pasm-scan-2.log",
+      "raw_sha256": "904d9acc2c7b631c4792ad8b516c1a4224a278d895e31b521ab7f97a9535a83e"
+    },
+    {
+      "name": "PASM traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-final-pasm-traceability.log",
+      "raw_sha256": "cabe3a596b1d1b7328a1e9b0c4c42021fefad4cf34f007c3228c9fb6eb24dd8a"
+    },
+    {
+      "name": "WASM build",
+      "command": "trunk build",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-wasm.log",
+      "raw_sha256": "e024391d49e54fa4206194d39da9bf7edc9ac0e24f5057d25d871c3fe800e139"
+    },
+    {
+      "name": "Phone client",
+      "command": "node scripts/build-client.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-client-build.log",
+      "raw_sha256": "69284e5dda1364f8188bf3babf0ae20385025a18159343edc1d0230bbda8aafa"
+    },
+    {
+      "name": "Workshop browser",
+      "command": "PHOENIX_SMOKE_PORT=3147 npx --no-install playwright test workshop-consoles.render.spec.js --project=render",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-browser-workshop-5.log",
+      "raw_sha256": "24a42c077e1971386deaac7ca42616144e7342acbdf70899f54b73d2c5006e2a",
+      "passed_tests": 1
+    },
+    {
+      "name": "Wiki lint",
+      "command": "SCHEMA source-path/index and affected-page reconciliation",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-wiki-lint-final.log",
+      "raw_sha256": "9dccd5435e0a38be7a3d28c72fa0cd38f6dde7850b265c75b5c4b8646bc32a80"
+    },
+    {
+      "name": "Dock/status/transfer browser",
+      "command": "PHOENIX_SMOKE_PORT=3142 npx --no-install playwright test helm-dock.spec.js operations-dock-umbilical.spec.js --project=chromium",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-browser-dock.log",
+      "raw_sha256": "489a241f29974c8e1303ce1c2671d3391240fa9f4e84f26bbfbc9b9d3bba4a06",
+      "passed_tests": 4
+    },
+    {
+      "name": "Gameplay, determinism and performance",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-14-tree-measure --profile measure",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-baseline.log",
+      "raw_sha256": "00e9057486aa90ac173fd639b897eab39fbc87208bcb56b810db8d37d93389fb"
+    },
+    {
+      "name": "Ratified Cruiser matrix",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture .phoenix/redesign-baseline/2026-10-14-tree-measure/summary.json --out .phoenix/redesign-baseline/2026-10-14-tree-cruiser",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa"
+    },
+    {
+      "name": "Final Workshop bundle",
+      "command": "node scripts/build-workshop.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-3-workshop-layout-build-3.log",
+      "raw_sha256": "35696f95a83a70335eba734ffe1070ce65d244c87899af1ee081caae46017838"
+    }
+  ],
+  "limitations": [
+    "Physical phones, native multi-monitor and human workload acceptance pending.",
+    "Landscape phone: existing connection diagnostics overlap Dock; status popup checked separately from desktop operation.",
+    "Browser transport is the existing shim; these checks do not establish real remote-network acceptance."
+  ],
+  "review": "Independent evaluator, Dock runtime, Workshop and deferred-boundary reviews passed; findings corrected.",
+  "corrected_validation_failures": [
+    "Dock controller initially removed its deferred publication boundary, producing a FixedUpdate cycle. Restored real deferred runtime publication; targeted registration-order test and full workspace suite pass.",
+    "AI authoring form now wraps within its narrow docked panel, including the composition grid boundary; rendered containment assertion and visual inspection pass.",
+    "Workshop ownership scalar insertion now stops before single-table AI headers; LF/CRLF regressions and real rendered authoring journey pass.",
+    "Shipped include/provenance and GM inventory fixtures updated for explicit authored AI; fragment-only inputs excluded from full-entity composition tests."
+  ],
+  "visual_inspection": {
+    "phone": ".phoenix/increment-3-dock-status-phone.png",
+    "desktop_live_details": ".phoenix/increment-3-dock-status-live.png",
+    "workshop": ".phoenix/increment-3-workshop-ai.png",
+    "result": "Status labels/focus and new AI form wrapping verified. Rendered form containment assertion passes. Physical devices and known phone diagnostics overlap remain pending."
+  },
+  "tracker_url": "https://github.com/jkeywo/project-phoenix-v2/issues/1562",
+  "tracker_update": "Increment 3 implementation and evidence recorded; programme open, human/device acceptance pending, Increment 4 not started."
+}

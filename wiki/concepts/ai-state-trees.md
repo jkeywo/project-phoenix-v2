@@ -2,7 +2,7 @@
 title: Individual System AI State Trees
 type: concept
 tags: [ai, systems, workshop, determinism]
-sources: [crates/phoenix-sim-gameplay/src/ai/state_tree/mod.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/schema.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/compile.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs, crates/phoenix-sim-gameplay/src/ai/host.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, assets/entities/fragments/ai/dock_state_tree.toml, gui/workshop-state-trees.js, editor/workshop-state-trees.js, pasm/spec/design/ai-state-trees.yaml, pasm/spec/architecture/ai-state-trees.yaml]
+sources: [crates/phoenix-sim-gameplay/src/ai/state_tree/mod.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/schema.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/compile.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs, crates/phoenix-sim-gameplay/src/ai/host.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, assets/entities/fragments/ai/dock_state_tree.toml, gui/workshop-state-trees.js, gui/workshop.css, editor/workshop-state-trees.js, pasm/spec/design/ai-state-trees.yaml, pasm/spec/architecture/ai-state-trees.yaml]
 updated: 2026-10-14
 ---
 
@@ -17,7 +17,9 @@ Gameplay owns the closed schema, inheritance compiler and pure evaluator under
 `ai/state_tree/`. `ai::host::decide_tree` shares the existing Control Source gate.
 The Simulation Dock adapter captures its permitted Transfer order and supported
 own-equipment facts, evaluates final enabled intent and sends ordinary Dock/Undock
-commands through admission. Human/offline operation leaves tree memory suspended.
+commands through admission. Successful evaluation queues its private runtime at
+the controller's existing deferred flush. Human/offline operation leaves tree
+memory suspended.
 
 ## Definitions and order
 
@@ -58,6 +60,7 @@ materialises or replaces only the selected System's AI definition through the
 existing accepted-source history. A derived tree can be explicitly flattened for
 structural changes. Renaming a mating enabled channel also rebinds its AI writes
 and pending reads in the same source operation. Inherited fragments remain intact.
+The editor uses the shared Workshop grid/wrapping conventions inside narrow docks.
 
 ## Related
 

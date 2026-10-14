@@ -4861,3 +4861,13 @@ it('keeps a human shield arc usable beside delegated aggregate and sibling contr
   state.controlSources['actual-port']='Ai';
   expect(rawBuildSystemStationConsoleState('science',state).systems['actual-port'].shields_auto).toBe(true);
 });
+
+it('shows the public neutralized fact without removing human target selection or inventing it', () => {
+  const contact = { uuid: 'defeated', neutralized: true, selectable: true };
+  const [out] = foldTorpedoBadges([contact]);
+  expect(out.neutralized_badge).toBe(t('console.radar.neutralized'));
+  expect(out.selectable).toBe(true);
+  expect(contact).not.toHaveProperty('neutralized_badge');
+  const [unknown] = foldTorpedoBadges([{ uuid: 'unknown', description: 'damaged vessel' }]);
+  expect(unknown).not.toHaveProperty('neutralized_badge');
+});

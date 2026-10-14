@@ -1528,6 +1528,7 @@ pub struct ShipModifiersParams<'w, 's> {
 pub struct AiEventReaders<'w, 's> {
     pub attacked: MessageReader<'w, 's, crate::ai::server::AiEntityAttacked>,
     pub destroyed: MessageReader<'w, 's, crate::ai::server::AiEntityDestroyed>,
+    pub disabled: MessageReader<'w, 's, crate::ai::server::AiEntityDisabled>,
     pub waypoint_reached: MessageReader<'w, 's, crate::ai::server::AiWaypointReached>,
 }
 

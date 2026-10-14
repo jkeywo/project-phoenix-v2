@@ -439,6 +439,7 @@ fn a_scripted_trigger_fires_and_its_handler_emits_the_action_cmds() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -844,5 +845,39 @@ fn skip_on_a_manual_gm_event_is_a_blocking_finding() {
             .as_ref()
             .is_none_or(|controls| !controls.skip)),
         "and must not register a half-built lever"
+    );
+}
+
+#[test]
+fn reversible_defeat_builders_keep_entity_and_group_semantics_separate() {
+    assert_builds(
+        r#"on_disabled("raider", "h")"#,
+        TriggerCondition::OnDisabled {
+            entity_name: "raider".into(),
+        },
+    );
+    assert_builds(
+        r#"on_all_neutralized("wave", "h")"#,
+        TriggerCondition::OnAllNeutralized {
+            group: "wave".into(),
+            after_secs: 0.0,
+        },
+    );
+    assert_builds(
+        r#"on_all_neutralized("wave", 5, "h")"#,
+        TriggerCondition::OnAllNeutralized {
+            group: "wave".into(),
+            after_secs: 5.0,
+        },
+    );
+}
+
+#[test]
+fn on_neutralized_builds_the_either_defeat_or_destruction_condition() {
+    assert_builds(
+        r#"on_neutralized("raider", "h")"#,
+        TriggerCondition::OnNeutralized {
+            entity_name: "raider".into(),
+        },
     );
 }

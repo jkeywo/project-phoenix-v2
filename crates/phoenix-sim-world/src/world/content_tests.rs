@@ -26,6 +26,7 @@ fn on_destroyed_fires_when_entity_destroyed() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -45,6 +46,7 @@ fn on_destroyed_does_not_fire_for_different_entity() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -65,6 +67,7 @@ fn trigger_fires_only_once_single_shot() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -99,6 +102,7 @@ fn repeat_trigger_re_fires_each_time_condition_holds() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -120,6 +124,7 @@ fn cooldown_gates_repeat_until_enough_time_elapses() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -159,6 +164,7 @@ fn reset_re_arms_a_fired_once_only_trigger() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -191,6 +197,7 @@ fn reset_unknown_id_is_a_noop() {
         fired: true,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: Some(3.0),
     }];
     let n = reset_triggers_by_id(&mut states, "nonexistent");
@@ -221,6 +228,7 @@ fn on_all_destroyed_fires_only_after_last_named_entity_dies() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -276,6 +284,7 @@ fn on_all_destroyed_is_single_shot() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -299,6 +308,7 @@ fn on_all_destroyed_never_fires_for_unspawned_entity() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -346,6 +356,7 @@ fn on_all_destroyed_fires_when_all_named_entities_die_in_one_batch() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -376,6 +387,7 @@ fn on_all_destroyed_ignores_destruction_events_for_other_entities() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -417,6 +429,7 @@ fn on_all_destroyed_when_predicate_gates_firing_but_seen_set_persists() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -491,6 +504,7 @@ fn on_all_destroyed_after_secs_gates_until_time_elapsed() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -544,6 +558,7 @@ fn on_timer_fires_when_elapsed_exceeds_threshold() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -571,6 +586,7 @@ fn on_attacked_fires_when_entity_attacked() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -599,6 +615,7 @@ fn on_hailed_fires_when_entity_hailed() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -618,6 +635,7 @@ fn only_matching_trigger_fires() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         },
         TriggerState {
@@ -625,6 +643,7 @@ fn only_matching_trigger_fires() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         },
     ];
@@ -647,6 +666,7 @@ fn on_destroyed_does_not_fire_if_entity_name_unknown() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -675,6 +695,7 @@ fn on_world_loaded_matches_world_loaded_event() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -698,6 +719,7 @@ fn on_world_loaded_does_not_match_unrelated_events() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -728,6 +750,7 @@ fn on_world_loaded_is_single_shot() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new();
@@ -756,6 +779,7 @@ fn on_entered_region_matches_entered_region_event_with_resolved_uuid() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -784,6 +808,7 @@ fn on_entered_region_does_not_match_different_uuid() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -812,6 +837,7 @@ fn on_entered_region_does_not_match_exited_region_event() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -839,6 +865,7 @@ fn on_exited_region_matches_exited_region_event_with_resolved_uuid() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let mut name_to_uuid = HashMap::new();
@@ -866,6 +893,7 @@ fn on_entered_region_does_not_match_unresolved_name() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }];
     let name_to_uuid = HashMap::new(); // empty — name does not resolve
@@ -897,6 +925,7 @@ fn on_flag_set_with_parent_prefix_matches_event_in_loader_layer() {
         fired: false,
         origin_layer: Some("child.toml".into()),
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     };
     let layer_chain = vec![Some("child.toml".into()), None];
@@ -938,6 +967,7 @@ fn on_flag_set_does_not_match_same_name_in_different_layer() {
         fired: false,
         origin_layer: Some("child.toml".into()),
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     };
     let layer_chain = vec![Some("child.toml".into()), None];
@@ -980,6 +1010,7 @@ fn on_flag_set_parent_walk_past_root_does_not_match() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     };
     let layer_chain = vec![None];
@@ -1084,6 +1115,7 @@ fn run_combat_test_chain(ship_power: i64, kill_after_secs: f32) -> ChainRun {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         })
         .collect();

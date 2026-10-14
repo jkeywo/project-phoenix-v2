@@ -153,23 +153,22 @@ pub struct AiEntityAttacked {
     pub attacker_uuid: uuid::Uuid,
 }
 
-/// Emitted by the AI plugin when an NPC entity's hull reaches ≤ 0.0.
-///
-/// The world plugin observes this event to evaluate `on_entity_destroyed`
-/// trigger conditions without a direct dependency on the AI module.
+/// Emitted on actual destruction/catastrophe, never recoverable disablement.
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityDestroyed {
     pub entity_uuid: String,
 }
 
-/// Emitted by `advance_objective_cursors` when a ship reaches the waypoint its
-/// cursor is currently pointing at, immediately before the cursor advances.
-///
-/// The world plugin reads this in `tick_trigger_pipeline` and turns it into a
-/// `WorldEvent::WaypointReached`, which drives `on_waypoint_reached` scenario
-/// triggers — the same event-bridge shape `AiEntityAttacked` /
-/// `AiEntityDestroyed` already use, so the AI module stays free of any
-/// dependency on world content.
+/// An equipped actor entered or recovered from reversible combat defeat.
+/// Moving ships are propulsion-disabled; static actors have lost generation,
+/// usable reserves and all fitted physical capabilities. Never a destruction.
+#[derive(Message, Clone, Debug)]
+pub struct AiEntityDisabled {
+    pub entity_uuid: String,
+    pub disabled: bool,
+}
+
+/// Emitted when a ship reaches the waypoint its objective cursor follows.
 #[derive(Message, Clone, Debug)]
 pub struct AiWaypointReached {
     /// UUID of the ship that arrived.

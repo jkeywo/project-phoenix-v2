@@ -519,6 +519,12 @@ fn render_f32(value: f32) -> String {
 pub fn render_condition(condition: &TriggerCondition) -> String {
     match condition {
         TriggerCondition::OnDestroyed { entity_name } => format!("on_destroyed({entity_name})"),
+        TriggerCondition::OnDisabled { entity_name } => format!("on_disabled({entity_name})"),
+        TriggerCondition::OnNeutralized { entity_name } => format!("on_neutralized({entity_name})"),
+        TriggerCondition::OnAllNeutralized { group, after_secs } => format!(
+            "on_all_neutralized({group}, after_secs={})",
+            render_f32(*after_secs)
+        ),
         TriggerCondition::OnAllDestroyed { group, after_secs } => {
             format!(
                 "on_all_destroyed({group}, after_secs={})",

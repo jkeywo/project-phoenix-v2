@@ -1152,6 +1152,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
             &Transform,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&TorpedoSystemResource>,
+            Option<&phoenix_sim_gameplay::ship::disablement::DisablementObservation>,
         ),
         Without<AsteroidUuid>,
     >,
@@ -1239,7 +1240,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
                         blips.push(b);
                     }
                 }
-                for (uuid_comp, transform, faction, torpedoes) in entity_q.iter() {
+                for (uuid_comp, transform, faction, torpedoes, defeat) in entity_q.iter() {
                     let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
                     // Capability, not readiness (issue #957): a hull with tubes
                     // is torpedo-armed whether or not any tube happens to be
@@ -1252,7 +1253,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
                             faction.map(|f| f.0),
                             registry,
                         );
-                    if let Some(b) = project_blip(
+                    if let Some(mut b) = project_blip(
                         &uuid_comp.0,
                         transform.translation.x,
                         transform.translation.z,
@@ -1265,6 +1266,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
                         &selects,
                         torpedo_armed,
                     ) {
+                        b.neutralized = defeat.is_some_and(|observation| observation.disabled);
                         blips.push(b);
                     }
                 }
@@ -1610,6 +1612,7 @@ fn project_blip(
         description,
         target_tags: target_tags_raw.to_vec(),
         torpedo_armed,
+        neutralized: false,
     })
 }
 

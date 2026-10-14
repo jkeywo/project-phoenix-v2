@@ -175,3 +175,35 @@ fn incoming_world_travel_uses_inverse_simulation_yaw() {
         );
     }
 }
+
+#[path = "disablement_tests.rs"]
+mod disablement_tests;
+
+#[test]
+fn structural_loss_is_a_reportable_symptom_without_losing_machinery_efficiency() {
+    let (mut damage, _, _) = fixture();
+    assert_eq!(
+        damage.operating_tier(&SystemId("radio".into())),
+        crate::ship::damage::DamageTier::Operational
+    );
+    damage.state.compartments.get_mut("room").unwrap().hp = 99.0;
+    assert_eq!(
+        damage.factor(
+            &SystemId("radio".into()),
+            phoenix_model::damage::DamageBinding::Operation
+        ),
+        1.0
+    );
+    assert_eq!(
+        damage.operating_tier(&SystemId("radio".into())),
+        crate::ship::damage::DamageTier::Damaged
+    );
+    damage
+        .state
+        .restore_structure(&damage.definition, "room", 1.0)
+        .unwrap();
+    assert_eq!(
+        damage.operating_tier(&SystemId("radio".into())),
+        crate::ship::damage::DamageTier::Operational
+    );
+}

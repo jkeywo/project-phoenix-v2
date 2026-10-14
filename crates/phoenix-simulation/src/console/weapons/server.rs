@@ -1363,6 +1363,16 @@ struct TargetSelectionScans<'w, 's> {
             With<crate::entities::spawner::StaticPointDefence>,
         )>,
     >,
+    /// The public coarse lifecycle observation, shared with human radar.
+    /// Never infer another actor's faults or remaining reserves in this host.
+    defeat: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static phoenix_sim_gameplay::ship::disablement::DisablementObservation,
+        ),
+    >,
     /// The debris scan surface (issue #1347) — a FIFTH surface, and narrow on
     /// purpose: every moving hazard in the world, so the host can offer Tactical
     /// the ones a crew have confirmed. It is not folded into `hostiles` because
@@ -1584,6 +1594,7 @@ fn ai_target_selection(
         other_ships: other_ships_q,
         hostiles: hostile_scan_q,
         debris: debris_q,
+        defeat: defeat_q,
     } = scans;
     // Retained crew hulls keep their UUID, faction and Ship marker for private
     // projections and spectating. They cease being automatic combat targets.
@@ -1592,6 +1603,12 @@ fn ai_target_selection(
         .filter(|(_, _, _, hull, damage, fleet)| {
             *fleet && crate::ship::compartment_damage::is_catastrophic(*damage, *hull)
         })
+        .map(|(uuid, ..)| uuid.0.as_str())
+        .collect();
+
+    let neutralized: std::collections::BTreeSet<&str> = defeat_q
+        .iter()
+        .filter(|(_, observation)| observation.disabled)
         .map(|(uuid, ..)| uuid.0.as_str())
         .collect();
 
@@ -1836,7 +1853,12 @@ fn ai_target_selection(
                 // civilians (issue #1348) — whatever source proposed it. The
                 // human fire path (`SetTarget`/`FirePhaser`) does not run through
                 // here, so a human operator is untouched by this exclusion.
-                if civilian_carrying.contains(uuid) || crew_wrecks.contains(uuid) {
+                let is_operate_target =
+                    source_fact == crate::entities::ai_flag_hosts::SOURCE_OPERATE.name();
+                if civilian_carrying.contains(uuid)
+                    || crew_wrecks.contains(uuid)
+                    || (!is_operate_target && neutralized.contains(uuid))
+                {
                     return None;
                 }
                 let (tx, ty, tz) = target_xyz(uuid)?;
@@ -1847,8 +1869,6 @@ fn ai_target_selection(
                 // very next tick. Preserve only that exact lock while the exact
                 // operate directive remains active; ending either the coupling
                 // or directive restores the ordinary range gate immediately.
-                let is_operate_target =
-                    source_fact == crate::entities::ai_flag_hosts::SOURCE_OPERATE.name();
                 let operation_distance =
                     Vec3::new(physics.x, physics.y, physics.z).distance(Vec3::new(tx, ty, tz));
                 let is_within_operate_reach = is_operate_target
@@ -1888,7 +1908,11 @@ fn ai_target_selection(
                 let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
                 let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
                     .iter()
-                    .filter(|(u, ..)| u.0 != self_uuid_str && !crew_wrecks.contains(u.0.as_str()))
+                    .filter(|(u, ..)| {
+                        u.0 != self_uuid_str
+                            && !crew_wrecks.contains(u.0.as_str())
+                            && !neutralized.contains(u.0.as_str())
+                    })
                     .filter_map(|(u, t, faction, ..)| {
                         // Only canonically-UUID'd entities can take part: an
                         // unparseable id would collapse to the nil UUID and let

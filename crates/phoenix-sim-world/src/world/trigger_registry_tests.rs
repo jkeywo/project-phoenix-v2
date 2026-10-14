@@ -15,6 +15,7 @@ fn declarative() -> TriggerState {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }
 }
@@ -98,6 +99,7 @@ fn continuation_restore_keeps_handlers_and_replaces_every_latch() {
             index: 1,
             fired: true,
             seen_destroyed: vec!["z".into(), "a".into()],
+            seen_disabled: Default::default(),
             last_fired_elapsed: Some(8.0),
         },
         TriggerRuntimeState {

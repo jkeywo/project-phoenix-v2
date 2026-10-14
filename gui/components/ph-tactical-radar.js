@@ -263,7 +263,7 @@ export class PhTacticalRadar extends PhElement {
   #renderTorpedoBadges(s, cx, cy, r) {
     const g = this.shadowRoot.getElementById('torpedo-badges');
     if (!g) return;
-    const badged = (s.blips || []).filter(b => b && b.torpedo_badge);
+    const badged = (s.blips || []).filter(b => b && (b.torpedo_badge || b.neutralized_badge));
     while (g.children.length > badged.length) g.removeChild(g.lastChild);
     badged.forEach((b, i) => {
       let label = g.children[i];
@@ -276,7 +276,7 @@ export class PhTacticalRadar extends PhElement {
       label.setAttribute('x', (bx + 3).toFixed(1));
       label.setAttribute('y', (by - 3).toFixed(1));
       label.setAttribute('data-uuid', b.uuid || '');
-      label.textContent = b.torpedo_badge;
+      label.textContent = [b.torpedo_badge, b.neutralized_badge].filter(Boolean).join(" · ");
     });
   }
 

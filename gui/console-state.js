@@ -607,11 +607,14 @@ export function buildTargetProjection(
  * @returns {RadarBlip[]}
  */
 export function foldTorpedoBadges(blips) {
-  return (blips || []).map(b => (
-    b && b.torpedo_armed
-      ? { ...b, torpedo_badge: t('console.radar.torpedo_armed') }
-      : b
-  ));
+  return (blips || []).map(b => {
+    if (!b || (!b.torpedo_armed && !b.neutralized)) return b;
+    return {
+      ...b,
+      ...(b.torpedo_armed ? { torpedo_badge: t('console.radar.torpedo_armed') } : {}),
+      ...(b.neutralized ? { neutralized_badge: t('console.radar.neutralized') } : {}),
+    };
+  });
 }
 
 // ── Console state builders ──────────────────────────────────────────────────

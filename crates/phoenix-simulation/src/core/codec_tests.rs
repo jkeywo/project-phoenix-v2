@@ -5499,6 +5499,7 @@ fn radar_blip_with_new_fields_round_trips() {
         description: Some("A pirate vessel".into()),
         target_tags: vec!["ship".into(), "pirate".into()],
         torpedo_armed: true,
+        neutralized: true,
     };
     let json = serde_json::to_string(&blip).unwrap();
     let decoded: RadarBlip = serde_json::from_str(&json).unwrap();

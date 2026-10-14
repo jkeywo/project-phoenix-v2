@@ -17568,3 +17568,6 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
 
 #[path = "equipment_presence_tests.rs"]
 mod equipment_presence_tests;
+
+#[path = "disablement_tests.rs"]
+mod disablement_tests;

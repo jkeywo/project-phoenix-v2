@@ -29,6 +29,8 @@ pub struct TriggerRuntimeState {
     pub fired: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub seen_destroyed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seen_disabled: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_fired_elapsed: Option<f32>,
 }
@@ -166,6 +168,7 @@ impl WorldTriggerRegistry {
                     fired: false,
                     origin_layer: origin.map(str::to_owned),
                     seen_destroyed: HashSet::new(),
+                    seen_disabled: Default::default(),
                     last_fired_elapsed: None,
                 },
                 handler: Some(ScriptHandlerRef {
@@ -210,8 +213,8 @@ impl WorldTriggerRegistry {
         )
     }
 
-    /// Pause is checked before any condition state changes; dispatch filtering
-    /// runs only after an occurrence has advanced its ordinary latch/cooldown.
+    /// Pause blocks occurrence evaluation, not current defeat observations.
+    /// Dispatch filtering runs after an occurrence advances its latch/cooldown.
     pub fn evaluate_filtered<'a>(
         &mut self,
         events: &[WorldEvent],
@@ -227,6 +230,7 @@ impl WorldTriggerRegistry {
         let (mut should_evaluate, mut should_dispatch) = filters;
         let mut fired = Vec::new();
         for entry in &mut self.entries {
+            super::content::observe_neutralization(&mut entry.state, events);
             if !should_evaluate(&entry.state) {
                 continue;
             }
@@ -310,10 +314,13 @@ impl WorldTriggerRegistry {
                 let mut seen_destroyed: Vec<_> =
                     entry.state.seen_destroyed.iter().cloned().collect();
                 seen_destroyed.sort();
+                let mut seen_disabled: Vec<_> = entry.state.seen_disabled.iter().cloned().collect();
+                seen_disabled.sort();
                 TriggerRuntimeState {
                     index: index as u32,
                     fired: entry.state.fired,
                     seen_destroyed,
+                    seen_disabled,
                     last_fired_elapsed: entry.state.last_fired_elapsed,
                 }
             })
@@ -344,6 +351,7 @@ impl WorldTriggerRegistry {
             let state = &mut self.entries[row.index as usize].state;
             state.fired = row.fired;
             state.seen_destroyed = row.seen_destroyed.iter().cloned().collect();
+            state.seen_disabled = row.seen_disabled.iter().cloned().collect();
             state.last_fired_elapsed = row.last_fired_elapsed;
         }
         self.changed();

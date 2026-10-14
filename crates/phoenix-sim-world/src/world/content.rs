@@ -31,6 +31,8 @@ use crate::world::flags::FlagStore;
 pub enum WorldEvent {
     /// An entity (by UUID) was destroyed.
     Destroyed { uuid: String },
+    /// Reversible combat defeat. False means normal recovery, not a new entity.
+    Disabled { uuid: String, disabled: bool },
     /// An entity (by UUID) was attacked; `attacker_uuid` is the attacker.
     Attacked { uuid: String, attacker_uuid: String },
     /// An entity's aggregate hull fraction crossed downward. Both samples are
@@ -90,12 +92,16 @@ pub struct TriggerState {
     /// to the parent `WorldLayerMap` entry so `UnloadWorld` cascades.
     #[doc(hidden)]
     pub origin_layer: Option<String>,
-    /// Set of entity names whose `WorldEvent::Destroyed` we have already
-    /// observed. Only populated for `OnAllDestroyed` triggers; ignored by
-    /// every other condition. The matcher fires when this set contains
-    /// every name in the condition's `entity_names`. (#470)
+    /// Irreversible destruction observations. OnAllDestroyed stores authored
+    /// names (legacy semantics); OnAllNeutralized stores actual actor UUIDs so
+    /// a name reused for a healthy replacement cannot inherit defeat.
     #[doc(hidden)]
     pub seen_destroyed: HashSet<String>,
+    /// Current defeated UUIDs for OnAllNeutralized, retained even while a
+    /// trigger is spent/paused. Names resolve at match time so replacement actors
+    /// cannot inherit defeat. That condition's seen_destroyed also stores UUIDs;
+    /// legacy OnAllDestroyed continues to accumulate authored names.
+    pub seen_disabled: HashSet<String>,
     /// World-elapsed seconds at which this trigger last fired, or `None` if it
     /// has never fired (issue #751). Used to gate `repeat` re-fires by
     /// `Trigger::cooldown_secs`. Reset to `None` by a `ResetTrigger` action.
@@ -141,7 +147,12 @@ pub fn reset_triggers_by_id(states: &mut [TriggerState], id: &str) -> usize {
     for state in states.iter_mut() {
         if state.trigger.id.as_deref() == Some(id) {
             state.fired = false;
-            state.seen_destroyed.clear();
+            if !matches!(
+                state.trigger.condition,
+                TriggerCondition::OnAllNeutralized { .. }
+            ) {
+                state.seen_destroyed.clear();
+            }
             state.last_fired_elapsed = None;
             count += 1;
         }
@@ -153,6 +164,8 @@ pub fn reset_triggers_by_id(states: &mut [TriggerState], id: &str) -> usize {
 pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String> {
     match condition {
         TriggerCondition::OnDestroyed { entity_name }
+        | TriggerCondition::OnDisabled { entity_name }
+        | TriggerCondition::OnNeutralized { entity_name }
         | TriggerCondition::OnAttacked { entity_name }
         | TriggerCondition::OnHullBelow { entity_name, .. }
         | TriggerCondition::OnHailed { entity_name }
@@ -163,6 +176,7 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
         | TriggerCondition::OnFlagSet { .. }
         | TriggerCondition::OnFlagCleared { .. }
         | TriggerCondition::OnAllDestroyed { .. }
+        | TriggerCondition::OnAllNeutralized { .. }
         | TriggerCondition::OnWorldLoaded
         | TriggerCondition::Manual => None,
     }
@@ -206,6 +220,7 @@ pub fn evaluate_triggers_with_flags(
 ) -> Vec<FiredTrigger> {
     let mut results = Vec::new();
     for state in states.iter_mut() {
+        observe_neutralization(state, events);
         // Once-only triggers (the default) never fire twice. Repeatable
         // triggers fall through and re-evaluate their condition each tick
         // (issue #751).
@@ -218,7 +233,7 @@ pub fn evaluate_triggers_with_flags(
             events,
             name_to_uuid,
             &layer_chain,
-            &mut state.seen_destroyed,
+            (&mut state.seen_destroyed, &state.seen_disabled),
             entity_groups,
             current_elapsed,
         );
@@ -273,6 +288,7 @@ pub fn evaluate_single_trigger(
     entity_groups: &HashMap<String, HashSet<String>>,
     current_elapsed: f32,
 ) -> Option<FiredTrigger> {
+    observe_neutralization(state, events);
     // Once-only triggers (the default) never fire twice; repeatable triggers
     // re-evaluate each tick (issue #751).
     if state.fired && !state.trigger.repeat {
@@ -283,7 +299,7 @@ pub fn evaluate_single_trigger(
         events,
         name_to_uuid,
         layer_chain,
-        &mut state.seen_destroyed,
+        (&mut state.seen_destroyed, &state.seen_disabled),
         entity_groups,
         current_elapsed,
     );
@@ -405,6 +421,33 @@ pub fn resolve_layer_prefix(
     Some((rest.to_string(), layer_chain[depth].clone()))
 }
 
+/// Observe current defeat before dispatch/lifecycle filters. Membership is
+/// simulation continuation, not a latch that reset or GM pause may erase.
+pub(crate) fn observe_neutralization(state: &mut TriggerState, events: &[WorldEvent]) {
+    if !matches!(
+        state.trigger.condition,
+        TriggerCondition::OnAllNeutralized { .. }
+    ) {
+        return;
+    }
+    for event in events {
+        match event {
+            WorldEvent::Disabled { uuid, disabled } => {
+                if *disabled {
+                    state.seen_disabled.insert(uuid.clone());
+                } else {
+                    state.seen_disabled.remove(uuid);
+                }
+            }
+            WorldEvent::Destroyed { uuid } => {
+                state.seen_destroyed.insert(uuid.clone());
+                state.seen_disabled.remove(uuid);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Decide whether a single trigger fires for the given batch of events.
 ///
 /// Most conditions delegate to the stateless `condition_matches` once per
@@ -420,10 +463,22 @@ fn trigger_fires_for_events(
     events: &[WorldEvent],
     name_to_uuid: &HashMap<String, String>,
     layer_chain: &[Option<String>],
-    seen_destroyed: &mut HashSet<String>,
+    membership: (&mut HashSet<String>, &HashSet<String>),
     entity_groups: &HashMap<String, HashSet<String>>,
     current_elapsed: f32,
 ) -> bool {
+    let (seen_destroyed, seen_disabled) = membership;
+    if let TriggerCondition::OnAllNeutralized { group, after_secs } = condition {
+        return current_elapsed >= *after_secs
+            && entity_groups.get(group).is_some_and(|members| {
+                !members.is_empty()
+                    && members.iter().all(|name| {
+                        name_to_uuid.get(name).is_some_and(|uuid| {
+                            seen_destroyed.contains(uuid) || seen_disabled.contains(uuid)
+                        })
+                    })
+            });
+    }
     if let TriggerCondition::OnAllDestroyed { group, after_secs } = condition {
         let members: HashSet<String> = entity_groups.get(group).cloned().unwrap_or_default();
         // Backward compat for tests: if entity_groups is empty or group not found,
@@ -479,6 +534,25 @@ pub fn condition_matches(
                 .map(|u| u == uuid)
                 .unwrap_or(false)
         }
+        (
+            TriggerCondition::OnDisabled { entity_name },
+            WorldEvent::Disabled {
+                uuid,
+                disabled: true,
+            },
+        ) => name_to_uuid
+            .get(entity_name)
+            .is_some_and(|mapped| mapped == uuid),
+        (TriggerCondition::OnNeutralized { entity_name }, WorldEvent::Destroyed { uuid })
+        | (
+            TriggerCondition::OnNeutralized { entity_name },
+            WorldEvent::Disabled {
+                uuid,
+                disabled: true,
+            },
+        ) => name_to_uuid
+            .get(entity_name)
+            .is_some_and(|mapped| mapped == uuid),
         (TriggerCondition::OnAttacked { entity_name }, WorldEvent::Attacked { uuid, .. }) => {
             name_to_uuid
                 .get(entity_name)
@@ -572,3 +646,7 @@ pub fn condition_matches(
 #[cfg(test)]
 #[path = "content_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "neutralized_tests.rs"]
+mod neutralized_tests;

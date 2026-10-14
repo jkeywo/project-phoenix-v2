@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use phoenix_model::damage::{DamageBinding, DamageHit, DamageOutcome};
 
 #[derive(Component, Clone, Debug)]
+#[require(super::disablement::DisablementObservation)]
 pub struct ShipDamage {
     pub definition: DamageDefinition,
     pub state: DamageState,
@@ -93,11 +94,94 @@ impl ShipDamage {
         }
         let reactor_usable = !power.0.network().reactor.thermal_stopped
             && power.0.network().reactor.energy > 0.0
+            && power.0.config().reactor.max_output_per_sec > 0.0
             && generation.iter().any(|system| self.operational(&system.id));
-        let local_usable = power.0.network().consumers.iter().any(|(system, state)| {
-            state.energy > 0.0 && !state.thermal_stopped && self.operational(system)
-        });
+        let local_usable = self.usable_local_reserve(power);
         !reactor_usable && !local_usable
+    }
+
+    /// Combat defeat is reversible. Moving ships use propulsion disablement;
+    /// static equipment additionally needs every fitted physical capability
+    /// unavailable. Administrative controls never count as surviving machinery.
+    pub fn neutralized(
+        &self,
+        config: &crate::ship::config::ShipConfig,
+        power: Option<&crate::ship::power::ShipPowerSystem>,
+    ) -> bool {
+        use crate::ship::system_registry::*;
+        if config.systems.iter().any(|system| {
+            matches!(
+                system.kind.as_str(),
+                HELM_ENGINE_KIND
+                    | HELM_THRUST_KIND
+                    | HELM_IMPULSE_KIND
+                    | LATERAL_THRUST_KIND
+                    | VERTICAL_THRUST_KIND
+            )
+        }) {
+            return self.disabled(config, power);
+        }
+        let Some(power) = power else {
+            return false;
+        };
+        let generators: Vec<_> = config
+            .systems
+            .iter()
+            .filter(|system| system.kind == POWER_REACTOR_KIND)
+            .collect();
+        if generators.is_empty() {
+            return false;
+        }
+        let generation_lost = power.0.network().reactor.thermal_stopped
+            || generators.iter().all(|system| {
+                !self.operational(&system.id)
+                    || self.factor(&system.id, DamageBinding::Intake) == 0.0
+            });
+        let reserve_usable = (!power.0.network().reactor.thermal_stopped
+            && power.0.network().reactor.energy > 0.0
+            && power.0.config().reactor.max_output_per_sec > 0.0
+            && generators.iter().any(|system| self.operational(&system.id)))
+            || self.usable_local_reserve(power);
+        generation_lost
+            && !reserve_usable
+            && config
+                .systems
+                .iter()
+                .filter(|system| {
+                    !matches!(
+                        system.kind.as_str(),
+                        POWER_REACTOR_KIND
+                            | POWER_BATTERY_KIND
+                            | POWER_KIND
+                            | CAPTAIN_KIND
+                            | COMMAND_KIND
+                            | RED_ALERT_KIND
+                            | VIEWSCREEN_KIND
+                            | HELM_JOYSTICK_KIND
+                            | PHASER_CONTROL_KIND
+                            | SHIELDS_KIND
+                    )
+                })
+                .all(|system| !self.operational(&system.id))
+    }
+
+    fn usable_local_reserve(&self, power: &crate::ship::power::ShipPowerSystem) -> bool {
+        power.0.network().consumers.iter().any(|(id, state)| {
+            state.energy > 0.0
+                && !state.thermal_stopped
+                && self.operational(id)
+                && power
+                    .0
+                    .config()
+                    .consumers
+                    .iter()
+                    .find(|profile| &profile.system == id)
+                    .is_some_and(|profile| {
+                        profile.continuous_cost_per_sec > 0.0
+                            || (profile.discrete_cost > 0.0
+                                && state.energy >= profile.discrete_cost)
+                    })
+        })
     }
 
     pub fn structural_totals(&self) -> (f64, f64) {
@@ -135,11 +219,26 @@ impl ShipDamage {
         if self.factor(system, DamageBinding::Operation) == 0.0 {
             return DamageTier::Destroyed;
         }
-        if self.state.components.get(system).is_some_and(|components| {
-            components
-                .values()
-                .any(|component| component.condition != ComponentCondition::Healthy)
-        }) {
+        let structural_loss = self
+            .definition
+            .interior
+            .placements
+            .get(system)
+            .and_then(|id| {
+                self.definition
+                    .interior
+                    .compartments
+                    .iter()
+                    .find(|room| &room.id == id)
+            })
+            .is_some_and(|definition| room.hp < definition.max_hp as f64);
+        if structural_loss
+            || self.state.components.get(system).is_some_and(|components| {
+                components
+                    .values()
+                    .any(|component| component.condition != ComponentCondition::Healthy)
+            })
+        {
             DamageTier::Damaged
         } else {
             DamageTier::Operational

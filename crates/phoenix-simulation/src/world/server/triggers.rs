@@ -136,6 +136,12 @@ pub(crate) fn collect_world_events(
             uuid: ev.entity_uuid.clone(),
         });
     }
+    for ev in ai_events.disabled.read() {
+        world_events.push(WorldEvent::Disabled {
+            uuid: ev.entity_uuid.clone(),
+            disabled: ev.disabled,
+        });
+    }
     // `advance_objective_cursors` writes these in `SimSet::Modifiers`, i.e.
     // after this system has already run for the tick, so an arrival is
     // observed here on the following tick.

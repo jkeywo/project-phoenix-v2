@@ -3869,6 +3869,10 @@ pub struct RadarBlip {
     /// give away.
     #[serde(default)]
     pub torpedo_armed: bool,
+    /// Public coarse lifecycle observation for this normally visible contact.
+    /// No fault, reserve or cause is disclosed. Manual targeting remains valid.
+    #[serde(default)]
+    pub neutralized: bool,
 }
 
 /// A radar overlay region drawn as a coloured shape on the Tactical radar.

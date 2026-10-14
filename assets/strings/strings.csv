@@ -5190,3 +5190,4 @@ console.umbilical.deliver,Transfer direction,Send to docked partner,An angedockt
 console.umbilical.collect,Transfer direction,Collect from docked partner,Vom angedockten Partner abholen,Collect from docked partner,machine
 semantic_action.engineering.transfer_direction.label,Transfer direction semantic action,Choose transfer direction,Transferrichtung auswählen,Choose transfer direction,machine
 semantic_action.engineering.transfer_direction.accessibility,Transfer direction semantic action,Choose transfer direction,Transferrichtung auswählen,Choose transfer direction,machine
+console.radar.neutralized,Public contact lifecycle radar badge,NEUTRALIZED,KAMPFUNFÄHIG,NEUTRALIZED,machine

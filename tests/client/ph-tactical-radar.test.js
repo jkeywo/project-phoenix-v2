@@ -286,3 +286,15 @@ describe('PhTacticalRadar', () => {
     expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'abc' });
   });
 });
+
+it('renders public defeat alongside capability and clears it after recovery', () => {
+  const { el } = setup();
+  el.state = { blips: [{ uuid: 'actor', radar_x: 0, radar_y: 0,
+    torpedo_badge: 'TORP', neutralized_badge: t('console.radar.neutralized') }] };
+  const badges = el.shadowRoot.getElementById('torpedo-badges');
+  expect(badges.children.length).toBe(1);
+  expect(badges.children[0].textContent).toContain('TORP');
+  expect(badges.children[0].textContent).toContain(t('console.radar.neutralized'));
+  el.state = { blips: [{ uuid: 'actor', radar_x: 0, radar_y: 0 }] };
+  expect(badges.children.length).toBe(0);
+});

@@ -1370,6 +1370,13 @@ pub enum DelayedUnloadPolicy {
 pub enum TriggerCondition {
     /// Fires when the named entity (by name, resolved to UUID at runtime) is destroyed.
     OnDestroyed { entity_name: String },
+    /// Fires on entry into reversible combat defeat, not on recovery.
+    OnDisabled { entity_name: String },
+    /// Fires on reversible defeat or actual destruction of this actor.
+    OnNeutralized { entity_name: String },
+    /// Every current group member is destroyed or currently disabled.
+    /// Recovery removes membership; destruction is irreversible.
+    OnAllNeutralized { group: String, after_secs: f32 },
     /// Fires when every entity in a named group has been destroyed.
     ///
     /// Group membership is tracked dynamically via `entity_groups` in

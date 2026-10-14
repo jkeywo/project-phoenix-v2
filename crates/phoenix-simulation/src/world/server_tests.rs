@@ -921,6 +921,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -1016,6 +1017,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -1084,6 +1086,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -1275,6 +1278,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -1362,6 +1366,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -1435,6 +1440,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         merge_script_triggers(&mut runtime, &mut sr, None);
@@ -3226,6 +3232,7 @@ fn on_waypoint_reached_trigger_fires() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -3271,6 +3278,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_waypoint() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -3316,6 +3324,7 @@ fn on_waypoint_reached_without_waypoint_fires_on_any_waypoint() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -3362,6 +3371,7 @@ fn on_waypoint_reached_trigger_ignores_a_different_ship() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -3406,6 +3416,7 @@ fn on_entity_destroyed_trigger_fires() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -4049,6 +4060,7 @@ fn on_all_destroyed_trigger_fires_after_all_named_entities_die_across_ticks() {
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }]);
 
@@ -4113,6 +4125,7 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4172,6 +4185,7 @@ fn delayed_set_flag_action_fires_on_flag_set_trigger_on_the_next_tick() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4242,6 +4256,7 @@ fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4294,6 +4309,7 @@ fn delayed_clear_flag_action_fires_on_flag_cleared_trigger_on_the_next_tick() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4363,6 +4379,7 @@ fn parent_prefix_in_when_predicate_reads_loader_layer_flag() {
             fired: false,
             origin_layer: Some(layer_path.clone()),
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4422,6 +4439,7 @@ fn same_named_flag_in_sub_world_does_not_fire_base_world_on_flag_set() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -4514,6 +4532,7 @@ fn on_entity_attacked_trigger_fires() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -8030,6 +8049,7 @@ fn tick_trigger_pipeline_is_a_noop_on_an_empty_world() {
         .add_message::<CommsChannel2Event>()
         .add_message::<crate::ai::server::AiEntityAttacked>()
         .add_message::<crate::ai::server::AiEntityDestroyed>()
+        .add_message::<crate::ai::server::AiEntityDisabled>()
         .add_message::<crate::ai::server::AiWaypointReached>()
         .add_systems(
             Update,
@@ -8176,6 +8196,7 @@ fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
             // unload. The chain builder must treat it as the base world.
             origin_layer: Some("assets/worlds/ghost.toml".to_string()),
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
@@ -8382,6 +8403,7 @@ fn delayed_queue_dispatches_every_action_variant_in_queue_order() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         all_variants
@@ -8560,6 +8582,7 @@ fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
@@ -8719,6 +8742,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -8836,6 +8860,7 @@ fn region_trigger_test_app() -> App {
         .init_resource::<WorldEventBuffer>()
         .add_message::<crate::ai::server::AiEntityAttacked>()
         .add_message::<crate::ai::server::AiEntityDestroyed>()
+        .add_message::<crate::ai::server::AiEntityDisabled>()
         .add_message::<crate::ai::server::AiWaypointReached>()
         .add_message::<CommsChannel2Event>()
         .add_systems(
@@ -8933,6 +8958,7 @@ fn install_region_trigger_gated(
         fired: false,
         origin_layer: None,
         seen_destroyed: HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     });
     runtime.triggers.len() - 1
@@ -9526,6 +9552,7 @@ fn destroy_entity_action_despawns_and_emits_chained_event() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -9872,6 +9899,7 @@ fn on_timer_trigger_fires() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -9911,6 +9939,7 @@ fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]);
     }
@@ -10438,3 +10467,6 @@ fn snapshot_reports_incompatible_trigger_rows_without_writing_partial_continuati
         assert_eq!(runtime.triggers.generation(), generation);
     }
 }
+
+#[path = "disablement_tests.rs"]
+mod disablement_tests;

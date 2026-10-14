@@ -145,6 +145,66 @@ pub fn register_trigger_builders(engine: &mut HostRegistry, state: Arc<Mutex<Bui
         },
     );
 
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "on_disabled",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity enters reversible combat defeat.",
+        move |entity: ImmutableString, handler: ImmutableString| {
+            push_trigger(
+                &s,
+                TriggerCondition::OnDisabled {
+                    entity_name: entity.to_string(),
+                },
+                &handler,
+            )
+        },
+    );
+    let s = state.clone();
+    host_fn!(engine, "on_all_neutralized", receiver = "", category = "trigger",
+        params = ["group", "handler"],
+        summary = "Fire when all current group members are destroyed or currently disabled. Optional middle after_secs gates firing.",
+        move |group: ImmutableString, handler: ImmutableString| {
+            push_trigger(&s, TriggerCondition::OnAllNeutralized { group: group.to_string(), after_secs: 0.0 }, &handler)
+        },
+    );
+    let s = state.clone();
+    engine.register_fn(
+        "on_all_neutralized",
+        move |group: ImmutableString, after_secs: i64, handler: ImmutableString| {
+            push_trigger(
+                &s,
+                TriggerCondition::OnAllNeutralized {
+                    group: group.to_string(),
+                    after_secs: after_secs as f32,
+                },
+                &handler,
+            )
+        },
+    );
+
+    let s = state.clone();
+    host_fn!(
+        engine,
+        "on_neutralized",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity is disabled or destroyed.",
+        move |entity: ImmutableString, handler: ImmutableString| {
+            push_trigger(
+                &s,
+                TriggerCondition::OnNeutralized {
+                    entity_name: entity.to_string(),
+                },
+                &handler,
+            )
+        },
+    );
+
     // 3. OnAttacked { entity_name }
     let s = state.clone();
     host_fn!(

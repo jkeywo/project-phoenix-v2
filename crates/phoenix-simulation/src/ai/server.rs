@@ -821,6 +821,7 @@ impl Plugin for AiPlugin {
         app.init_resource::<AiTokenRegistry>();
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
+        app.add_message::<AiEntityDisabled>();
         app.add_message::<AiWaypointReached>();
         app.init_resource::<WorldSnapshot>();
         // The ONE shared AI decision cadence (issues #889, #895), which also

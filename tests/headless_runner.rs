@@ -5658,359 +5658,96 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
     );
 }
 
-/// **A sustained red-alert fight never reaches the exhaustion lock (#1003).**
-///
-/// The end-to-end half of the shed ladder. `modifiers::power_system::tick` slams
-/// every group to `GROUP_LEVEL_MIN` and LOCKS the reactor the instant the
-/// battery reaches 0, and nothing unlocks it until the charge climbs back to the
-/// hull's `emergency_threshold` — a ship that fights hard enough to flatten its
-/// own battery loses its drive, its guns and its shield regeneration at once,
-/// for as long as the recovery takes. The authored SHED floors
-/// (`min_reserve_helm` = 50, `min_reserve_weapons` = 25) exist so that an AI
-/// crew cannot walk a ship into that on its own decisions: at 50 the helm
-/// elevation is shed (total 7, a slow drain), at 25 the weapons elevation
-/// follows (total 6, which every shipped reactor authors as a POSITIVE rate),
-/// and the charge oscillates across the band between the weapons shed floor and
-/// its RESTORE floor (`min_restore_weapons` = 35, with `min_restore_helm` = 60
-/// one rung up). The gap between each pair is what makes that oscillation a
-/// decision taken seconds apart instead of a per-tick flip.
-///
-/// A unit test on the shipped hull already walks the ladder rung by rung
-/// (`console_ai::server::tests::the_shipped_power_policy_sheds_one_group_at_each_authored_floor`
-/// and its no-lock sibling). This is the one that puts the claim in front of a
-/// real fight: two hulls under their own AI crews, red alert raised by their own
-/// captains, thrust commanded by their own helm doctrine, damage taken and
-/// systems degrading — every input the ladder reads driven by the simulation
-/// rather than by the test.
-///
-/// `probe_duel` is the vehicle because its default seed deliberately does NOT
-/// resolve inside 60 s (see that world's own seed sweep): a duel that ends early
-/// stops draining, and the seed that keeps both ships shooting for the whole
-/// window is exactly the one this probe wants.
-///
-/// The control is the drain itself. A run in which no battery ever fell under
-/// the helm floor would satisfy "never locked" without exercising a single step
-/// of the ladder, so the probe insists that at least one reactor crossed it.
+/// A real AI-crewed fight keeps finite local energy and the mapped reactor
+/// tree's private continuation valid. Incoming flow can be cut and reserves can
+/// empty: the retired pooled-allocation lock and rung dwell are no longer game
+/// rules. The control is actual consumer work and executed reactor AI.
 #[test]
-fn neither_reactor_reaches_the_exhaustion_lock_across_a_seeded_duel() {
-    use project_phoenix::entities::config::{
-        POWER_HELM_RESERVE_PARAM, POWER_WEAPONS_RESERVE_PARAM,
-    };
+fn seeded_duel_uses_finite_energy_and_mapped_power_tree_continuation() {
+    use project_phoenix::ai::state_tree_runtime::{ShipAiTreePrograms, ShipAiTreeRuntime};
     use project_phoenix::server_app::Ship;
-    use project_phoenix::ship::power::{PowerAiPolicy, PowerConfigResource, ShipPowerSystem};
-    use std::collections::BTreeMap;
+    use project_phoenix::ship::power::ShipPowerSystem;
+    use std::collections::BTreeSet;
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/probe_duel.toml".into(),
         dt,
-        max_ticks: 0, // driven by hand below
+        max_ticks: 0,
         deterministic: true,
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("probe_duel must build an app");
     app.finish();
     app.cleanup();
-
-    // Per-ship: lowest battery percentage seen, the set of ship-wide allocation
-    // totals seen, and each hull's own authored SHED floors.
-    //
-    // No `Default`: a derived `min_pct` would be 0.0, which reads as "this
-    // reactor flattened" and would quietly invert the `min_pct > 0.0` assertion
-    // below for any ship constructed that way. Every construction site below
-    // seeds `f64::MAX` explicitly.
-    struct Reading {
-        min_pct: f64,
-        totals: Vec<u8>,
-        floors: Option<(f64, f64)>,
-    }
-    let mut readings: BTreeMap<Entity, Reading> = BTreeMap::new();
-
-    // Built once and reused: `run` takes the world back between samples, but a
-    // `QueryState` only borrows it while it is iterating.
     let mut reactors = app.world_mut().query_filtered::<(
         Entity,
         &ShipPowerSystem,
-        Option<&PowerConfigResource>,
-        Option<&PowerAiPolicy>,
+        Option<&ShipAiTreePrograms>,
+        Option<&ShipAiTreeRuntime>,
     ), With<Ship>>();
-
-    // (entity, locked, battery pct, commanded total, authored shed floors)
-    type SampledReactor = (Entity, bool, f64, u8, Option<(f64, f64)>);
-
-    let total_ticks = ticks_for_sim_seconds(60.0, dt);
-    for tick in 0..total_ticks {
+    let mut sampled = BTreeSet::new();
+    let mut executed = BTreeSet::new();
+    let mut consumers_did_work = false;
+    for tick in 0..ticks_for_sim_seconds(60.0, dt) {
         run(&mut app, 1);
-
-        let sampled: Vec<SampledReactor> = reactors
-            .iter(app.world())
-            .map(|(e, power, cfg, policy)| {
-                let capacity = cfg.map(|c| c.0.capacity).unwrap_or(0.0);
-                let pct = if capacity > 0.0 {
-                    (power.0.battery_charge / capacity) as f64 * 100.0
-                } else {
-                    f64::NAN
-                };
-                let floors = policy.and_then(|p| {
-                    Some((
-                        p.0.params.get(POWER_HELM_RESERVE_PARAM)?,
-                        p.0.params.get(POWER_WEAPONS_RESERVE_PARAM)?,
-                    ))
-                });
-                (e, power.0.locked(), pct, power.0.commanded_total(), floors)
-            })
-            .collect();
-
-        for (ship, locked, pct, total, floors) in sampled {
+        for (entity, power, programs, frames) in reactors.iter(app.world()) {
+            let physical = &power.0;
+            let hardware = physical.config();
+            let ship = physical.ship_config();
+            physical
+                .network()
+                .validate_against(hardware, ship)
+                .unwrap_or_else(|error| panic!("{entity} invalid energy at tick {tick}: {error}"));
+            let reactor = ship
+                .systems
+                .iter()
+                .find(|system| system.kind == "power_reactor")
+                .expect("actual energy hardware has a reactor System");
+            let programs = programs.expect("every physical ship has compiled System programs");
+            let frames = frames.expect("every physical ship has private System continuation");
             assert!(
-                !locked,
-                "{ship} hit the reactor exhaustion lock at tick {tick} \
-                 ({:.1} s into the duel) with the battery at {pct:.2} %. The AI \
-                 shed ladder is supposed to make that unreachable: helm is given \
-                 back at `min_reserve_helm` and weapons at `min_reserve_weapons`, \
-                 and the total those leave is one the hull's own `rates` recharge \
-                 from. Totals this ship held before the lock: {:?}",
-                tick as f64 * dt,
-                readings
-                    .get(&ship)
-                    .map(|r| r.totals.clone())
-                    .unwrap_or_default()
+                programs.0.contains_key(&reactor.id),
+                "{entity}: missing mapped program"
             );
-            let entry = readings.entry(ship).or_insert(Reading {
-                min_pct: f64::MAX,
-                totals: Vec::new(),
-                floors: None,
+            let frame = frames
+                .0
+                .get(&reactor.id)
+                .expect("mapped private reactor frame");
+            sampled.insert(entity);
+            if frame.last_tick.is_some_and(|last| last > 0) {
+                executed.insert(entity);
+            }
+            consumers_did_work |= hardware.consumers.iter().any(|consumer| {
+                consumer.continuous_cost_per_sec > 0.0
+                    && physical
+                        .last_work_fraction(&consumer.system)
+                        .is_some_and(|value| value > 0.0)
             });
-            if pct.is_finite() {
-                entry.min_pct = entry.min_pct.min(pct);
-            }
-            if !entry.totals.contains(&total) {
-                entry.totals.push(total);
-            }
-            if entry.floors.is_none() {
-                entry.floors = floors;
+            if tick % 60 == 0 {
+                let saved = physical.capture_continuation();
+                let decoded =
+                    serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+                let mut restored = physical.clone();
+                restored
+                    .restore_continuation(&decoded)
+                    .expect("real finite continuation restores");
+                assert_eq!(restored.capture_continuation(), saved);
             }
         }
-
         if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
             break;
         }
     }
-
-    assert!(
-        readings.len() >= 2,
-        "the duel should have carried two reactors; sampled {}",
-        readings.len()
+    assert!(sampled.len() >= 2, "both duel reactors must be sampled");
+    assert_eq!(
+        executed, sampled,
+        "every sampled reactor must execute its own authored tree"
     );
-
-    // The control: the ladder must actually have been walked. At least one
-    // reactor has to have crossed its own helm floor, or "never locked" is a
-    // statement about a fight that never spent any power.
-    let crossed_helm = readings.values().any(|r| match r.floors {
-        Some((helm, _)) => r.min_pct < helm,
-        None => false,
-    });
-    let summary: Vec<String> = readings
-        .iter()
-        .map(|(ship, r)| {
-            format!(
-                "{ship}: min {:.2} %, totals {:?}, floors {:?}",
-                r.min_pct, r.totals, r.floors
-            )
-        })
-        .collect();
     assert!(
-        crossed_helm,
-        "no reactor in the duel ever fell under its own `min_reserve_helm`, so \
-         the no-lock assertion above passed without a single step of the shed \
-         ladder being exercised. Readings: {summary:?}"
+        consumers_did_work,
+        "the duel must perform actual energy-funded work"
     );
-    for (ship, r) in &readings {
-        assert!(
-            r.min_pct > 0.0,
-            "{ship} reached {:.2} % — that is the lock. Readings: {summary:?}",
-            r.min_pct
-        );
-    }
-}
-
-/// A helm power level is a DECISION, not a strobe: once the channel moves it
-/// must hold the new level for a while before moving again.
-///
-/// The regression this pins is the AI-thrust-burst defect. `thrust` is a
-/// CONTINUOUS fact — `plan_helm_travel` hands out analogue throttles, and the
-/// decel ramps sweep smoothly through the whole range — so a helm rule whose
-/// HOLD and ELEVATE both read one bare `thrust_threshold` flips the channel on
-/// consecutive AI decision arms for as long as the throttle DWELLS near that
-/// number. Each flip is a ×1.25/×1.0 `MaxSpeed` swing, which is a ship visibly
-/// thrusting in bursts instead of holding a constant burn. The fix is the
-/// authored `thrust_release_threshold` — the thrust axis's mirror of the
-/// battery axis's `min_reserve_*`/`min_restore_*` pair.
-///
-/// `rng_coverage` is the vehicle because its two lancers fly a geometry that
-/// parks a throttle right on 0.70 and dithers there: before the band,
-/// `lancer_alpha` changed helm level 18 times across this window, SIXTEEN of
-/// them inside 38 ticks, with the battery at 57-59 % — nowhere near its 50 %
-/// shed floor, so the battery ladder was provably not the thing moving it.
-///
-/// The assertion is on the GAP between changes rather than on their count, and
-/// deliberately so: a ship that genuinely changes its travel intention should be
-/// free to re-decide, and bounding the total would fight that.
-///
-/// WHERE THE BOUND COMES FROM, measured on both sides. The defect reversed the
-/// channel every 2 to 4 ticks — one or two AI decision arms at the authored
-/// 30 Hz, against a 60 Hz sim tick. The banded tree's two CLOSEST changes in
-/// this same run are 28 and 16 ticks, and both are legitimate single-axis
-/// decisions rather than chatter, which the recorded facts prove:
-///
-///   * tick 39, gap 28, throttle 0.5911 — the throttle genuinely collapsed
-///     past the 0.6 RELEASE floor, a 0.16 move from the 0.7497 it elevated on.
-///   * tick 1423, gap 16, throttle 0.7483, reserve 49.83 % — the throttle is
-///     still high, so this is the BATTERY axis: the reserve crossed
-///     `min_reserve_helm` (50 %) and the shed ladder did its documented job.
-///
-/// So the bound is set to catch reversals within a handful of AI arms — the
-/// strobe's signature — and deliberately NOT to police the ladder's legitimate
-/// steps, whose timing belongs to the battery and the doctrine and may fall
-/// close behind an elevate. Ten ticks is five decision arms: comfortably above
-/// the defect's 2-to-4 and comfortably below the banded tree's 16. Do not
-/// tighten it towards 16 without re-reading the two changes above; they are
-/// correct behaviour and a tighter bound would forbid them.
-#[test]
-fn a_helm_power_level_holds_instead_of_strobing_at_the_thrust_threshold() {
-    use project_phoenix::core::messages::PowerGroupId;
-    use project_phoenix::entities::spawner::EntityName;
-    use project_phoenix::modifiers::power_system::HELM_POWER_GROUP;
-    use project_phoenix::server_app::Ship;
-    use project_phoenix::ship::power::ShipPowerSystem;
-    use std::collections::BTreeMap;
-
-    /// Minimum ticks a helm level must hold before it may move again. Anything
-    /// shorter is chatter rather than a decision — see the bound's derivation in
-    /// this test's doc comment before changing it.
-    const MIN_DWELL_TICKS: u64 = 10;
-
-    let args = HeadlessArgs {
-        world_path: "assets/worlds/rng_coverage.toml".into(),
-        max_ticks: 0, // driven by hand below
-        seed: Some(42),
-        deterministic: true,
-        ..test_args()
-    };
-    let mut app = build_headless_app(&args).expect("rng_coverage must build an app");
-    app.finish();
-    app.cleanup();
-
-    let helm = PowerGroupId(HELM_POWER_GROUP.into());
-    /// One recorded helm level change, carrying the two facts that could have
-    /// caused it. A bare (from, to, tick) says a level moved; the throttle and
-    /// the reserve beside it say which axis moved it, which is the whole
-    /// difference between a decision and the strobe.
-    #[derive(Debug)]
-    #[allow(dead_code)] // read only through the Debug rendering in the message
-    struct Change {
-        from: u8,
-        to: u8,
-        tick: u64,
-        gap: Option<u64>,
-        thrust: f32,
-        battery_pct: f32,
-    }
-    struct Seen {
-        name: String,
-        level: u8,
-        changed_at: Option<u64>,
-        changes: Vec<Change>,
-    }
-    let mut seen: BTreeMap<Entity, Seen> = BTreeMap::new();
-
-    let mut reactors = app.world_mut().query_filtered::<(
-        Entity,
-        &ShipPowerSystem,
-        Option<&EntityName>,
-        Option<&project_phoenix::ship::helm::ThrustInput>,
-        Option<&project_phoenix::ship::power::PowerConfigResource>,
-    ), With<Ship>>();
-
-    for tick in 0..1800u64 {
-        run(&mut app, 1);
-
-        let sampled: Vec<(Entity, u8, String, f32, f32)> = reactors
-            .iter(app.world())
-            .map(|(e, power, name, thrust, cfg)| {
-                let capacity = cfg.map(|c| c.0.capacity).unwrap_or(0.0);
-                let pct = if capacity > 0.0 {
-                    (power.0.battery_charge / capacity) * 100.0
-                } else {
-                    f32::NAN
-                };
-                (
-                    e,
-                    power.0.level_for(&helm),
-                    name.map(|n| n.0.clone()).unwrap_or_else(|| format!("{e}")),
-                    thrust.map(|t| t.0).unwrap_or(f32::NAN),
-                    pct,
-                )
-            })
-            .collect();
-
-        for (ship, level, name, thrust, battery_pct) in sampled {
-            let entry = seen.entry(ship).or_insert_with(|| Seen {
-                name: name.clone(),
-                level,
-                changed_at: None,
-                changes: Vec::new(),
-            });
-            if entry.level == level {
-                continue;
-            }
-            let gap = entry.changed_at.map(|prev| tick - prev);
-            entry.changes.push(Change {
-                from: entry.level,
-                to: level,
-                tick,
-                gap,
-                thrust,
-                battery_pct,
-            });
-            entry.level = level;
-            entry.changed_at = Some(tick);
-        }
-    }
-
-    // The control: a run in which no helm level ever moved would satisfy the
-    // dwell assertion without exercising the rule whose text this fix changed.
-    let total_changes: usize = seen.values().map(|s| s.changes.len()).sum();
-    assert!(
-        total_changes > 0,
-        "no ship in rng_coverage moved its helm power level at all, so the dwell \
-         assertion below passed without the helm rules ever resolving. Ships \
-         sampled: {:?}",
-        seen.values().map(|s| &s.name).collect::<Vec<_>>()
-    );
-
-    for entry in seen.values() {
-        for change in &entry.changes {
-            let Some(gap) = change.gap else { continue };
-            assert!(
-                gap >= MIN_DWELL_TICKS,
-                "{} strobed its helm power level: {} -> {} at tick {}, only {gap} \
-                 ticks after the previous change (minimum dwell is \
-                 {MIN_DWELL_TICKS}), with the throttle at {:.4} and the reserve \
-                 at {:.1} %. That is the AI-thrust-burst defect — the helm \
-                 channel flipping on consecutive AI decision arms because the \
-                 HOLD and the ELEVATE read one bare `thrust_threshold` while the \
-                 throttle dithers across it. Every change this ship made: {:?}",
-                entry.name,
-                change.from,
-                change.to,
-                change.tick,
-                change.thrust,
-                change.battery_pct,
-                entry.changes
-            );
-        }
-    }
 }
 
 // ── The fixed logical tick (issue #895) ─────────────────────────────────────

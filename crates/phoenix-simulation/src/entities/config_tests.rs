@@ -5342,7 +5342,7 @@ fn default_captain_policy_validates_and_resolves() {
 /// AND decodes to a policy with NO machine, no states and no memory: the
 /// #882 schema fields are all `#[serde(default)]`, so nothing an author
 /// wrote before this issue changed meaning. Enumerates all fourteen
-/// canonical defaults behind the twelve Group A hosts.
+/// remaining policy defaults; the reactor's closed tree is checked separately.
 #[test]
 fn every_shipped_stateless_default_still_parses_as_stateless() {
     let shipped: Vec<(&str, FineSystemAiConfigToml)> = vec![
@@ -5397,10 +5397,6 @@ fn every_shipped_stateless_default_still_parses_as_stateless() {
         (
             "shields_focus",
             crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus"),
-        ),
-        (
-            "power",
-            crate::entities::authored_ai_pins::shipped_policy_toml("power"),
         ),
     ];
     for (name, cfg) in shipped {
@@ -7703,59 +7699,54 @@ default_level = 1
     )
 }
 
+/// Physical Power has exactly one controller: the authored reactor System tree.
+/// Strict loading must reject both a missing tree and a competing legacy policy.
 #[test]
-fn default_power_policy_validates_and_resolves() {
-    // The shipped authored block is six rules since issue #1003 — hold,
-    // elevate and baseline on each of helm and weapons — all emitting the
-    // value-carrying allocation verb, and every rule declares a reserve
-    // param.
-    let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("power");
-    // Validated against the canonical group channels.
-    assert!(validate_fine_system_ai_policy(
-        &cfg,
-        &["helm", "weapons", "sensors"],
-        &[POWER_SET_ALLOCATION_VERB]
-    )
-    .is_ok());
-    let p = cfg.to_policy().expect("default power policy resolves");
-    assert!(!p.idle);
-    assert_eq!(p.rules.len(), 6);
-    // The elevate and hold rules carry the absolute magnitude in the verb
-    // payload, and the elevated level is strictly above the baseline one —
-    // the authored numbers themselves are the designer's business (#885b
-    // stage 5d deleted the Rust constants they used to have to match).
-    let levels: Vec<u8> = p
-        .rules
+fn authored_power_tree_loads_and_rejects_missing_or_competing_controller() {
+    let source = resolved_text("alliance_cruiser");
+    let config = EntityConfig::from_toml(&source).expect("actual authored energy hull loads");
+    let ship = config.ship_config.as_ref().unwrap();
+    let reactor = ship
+        .systems
         .iter()
-        .filter_map(|r| match r.verb {
-            crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level) => Some(level),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(levels.len(), 6, "every rule carries an allocation payload");
+        .find(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+        .unwrap();
+    let (programs, frames) =
+        crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, config.energy.as_ref())
+            .unwrap();
+    assert!(programs.0.contains_key(&reactor.id));
+    assert!(frames.0.contains_key(&reactor.id));
+
+    let mut missing: toml::Value = toml::from_str(&source).unwrap();
+    let system = missing["system"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|system| system["id"].as_str() == Some(reactor.id.0.as_str()))
+        .unwrap();
+    system["config"].as_table_mut().unwrap().remove("ai");
+    let error = EntityConfig::from_toml(&toml::to_string(&missing).unwrap())
+        .unwrap_err()
+        .to_string();
     assert!(
-            levels.iter().max() > levels.iter().min(),
-            "the elevate rules must raise their group above the baseline rules, or              the whole policy is a no-op: {levels:?}"
-        );
-    assert!(cfg.param.contains_key(POWER_HELM_RESERVE_PARAM));
-    assert!(cfg.param.contains_key(POWER_WEAPONS_RESERVE_PARAM));
-    // Each channel's SHED floor has a matching RESTORE floor above it: the
-    // pair is the hysteresis, and one without the other is a ladder that
-    // flips its channel every tick the charge rests on the floor.
-    for (shed, restore) in [
-        (POWER_HELM_RESERVE_PARAM, POWER_HELM_RESTORE_PARAM),
-        (POWER_WEAPONS_RESERVE_PARAM, POWER_WEAPONS_RESTORE_PARAM),
-    ] {
-        let (lo, hi) = (
-            cfg.param
-                .get(shed)
-                .unwrap_or_else(|| panic!("the shipped policy authors `{shed}`")),
-            cfg.param
-                .get(restore)
-                .unwrap_or_else(|| panic!("the shipped policy authors `{restore}`")),
-        );
-        assert!(hi > lo, "`{restore}` ({hi}) must sit above `{shed}` ({lo})");
-    }
+        error.contains("[system.config.ai]") && error.contains(&reactor.id.0),
+        "{error}"
+    );
+    assert!(error.contains("ShipAiTreePrograms"), "{error}");
+
+    let mut competing: toml::Value = toml::from_str(&source).unwrap();
+    competing["power"].as_table_mut().unwrap().insert(
+        "ai_policy".into(),
+        toml::from_str::<toml::Value>("idle = true").unwrap(),
+    );
+    let error = EntityConfig::from_toml(&toml::to_string(&competing).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Remove retired [power.ai_policy]")
+            && error.contains("two Power controllers"),
+        "{error}"
+    );
 }
 
 #[test]

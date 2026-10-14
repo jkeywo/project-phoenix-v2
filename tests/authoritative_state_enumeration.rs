@@ -337,8 +337,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::ship::helm_ai::surfaces::HelmRecoveryHistory",
     "phoenix_simulation::ship::helm_ai::steering::HelmSteeringAiPolicyState",
     "phoenix_simulation::ship::helm_planner::HelmMotionPlan",
-    "phoenix_simulation::ship::power::PowerAiCadence",
-    "phoenix_simulation::ship::power::PowerAiPolicy",
     "phoenix_simulation::ship::power::PowerConfigResource",
     "phoenix_simulation::ship::power::PowerMultiplierResource",
     "phoenix_simulation::ship::power::ShipPowerSystem",
@@ -870,6 +868,16 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
              (digest-boundary-reviewer-answers)."
         );
     }
+    assert!(
+        authoritative.contains("ShipAiTreeRuntime"),
+        "the reactor's private tree continuation must remain in the authoritative fold"
+    );
+    let excluded = census_excluded_short_names(&app);
+    assert!(
+        excluded.contains("ShipAiTreePrograms"),
+        "immutable compiled reactor programs must be declared derived, not unclassified"
+    );
+    assert!(!authoritative.contains("ShipAiTreePrograms"));
     // RenderInterp OUT: it must never be declared authoritative. It is declared
     // `Presentation` at `RendererPlugin::build`, a plugin the headless run never
     // adds, so it never registers here (see `census_excluded_short_names` above),

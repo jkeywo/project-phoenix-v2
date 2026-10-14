@@ -169,10 +169,17 @@ fn seed_transition(app: &mut App, ships: &[Entity], phase: usize) {
     for (index, ship) in ships.iter().copied().enumerate() {
         let mut power = app.world_mut().get_mut::<ShipPowerSystem>(ship).unwrap();
         let group = PowerGroupId("weapons".into());
-        let floor = power.0.floor_for(&group);
+        let maximum = power
+            .0
+            .config()
+            .groups
+            .iter()
+            .find(|entry| entry.id == group)
+            .unwrap()
+            .max_flow_per_sec;
         power
             .0
-            .set_group_allocation(&group, if phase == 0 { floor } else { floor + 1 })
+            .set_flow(&group, maximum * if phase == 0 { 0.25 } else { 0.75 })
             .unwrap();
         let count = app
             .world()

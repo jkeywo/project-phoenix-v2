@@ -62,16 +62,16 @@ fn power_no_longer_writes_the_radar_range_slot() {
         "a hull's acquisition horizon must be what its own file authors, at \
              every reactor setting"
     );
-    assert!(mods.get(&ModifierSlot::ShieldRegen) > 1.0);
+    assert_eq!(mods.get(&ModifierSlot::ShieldRegen), 1.0);
 }
 
-/// The `shields` group buys regen at the rungs its multiplier table says.
+/// Incoming flow never creates a fixed shield regeneration multiplier.
 #[test]
-fn shields_power_drives_the_shield_regen_slot() {
-    for (level, expected) in [(1u8, 1.0 / 1.5), (2, 1.0), (3, 1.25), (4, 1.5)] {
+fn shields_flow_does_not_write_a_regeneration_multiplier() {
+    for (level, expected) in [(1u8, 1.0), (2, 1.0), (3, 1.0), (4, 1.0)] {
         let mut mods = ShipModifiers::new();
         let mut power = PowerSystem::default();
-        // Free the budget first so level 4 is not refused by the 8-point cap.
+        // Independent incoming-flow requests never buy fixed modifiers.
         power.set_group_allocation(&helm(), 1).unwrap();
         power.set_group_allocation(&weapons(), 1).unwrap();
         power.set_group_allocation(&shields(), level).unwrap();
@@ -84,154 +84,58 @@ fn shields_power_drives_the_shield_regen_slot() {
     }
 }
 
-/// **Every shipped Alliance hull spends its combat-stations point on WEAPONS
-/// DAMAGE, and its reach does not depend on the reactor at all (#955).**
-///
-/// This replaces `every_alliance_hull_reaches_its_authored_beam_range_at_combat_stations`
-/// (#923), which asserted the opposite of the second half: that
-/// `beam_range × RadarRange` *equalled* the authored `beam_range` at combat
-/// stations, i.e. that a hull had to SPEND a reactor point to reach the
-/// numbers its own file wrote down. That assertion was pinning a coupling
-/// that should not have existed — the old test could only ever be satisfied
-/// by holding `sensors` at exactly the ×1.0 rung, so it silently forbade the
-/// fleet from ever moving that group — and #955 deleted the multiplication
-/// instead. Reach is now a property of the gun and is not asserted here at
-/// all; it is pinned where it is computed
-/// (`ai::server::tests::direct_fire_reach_ignores_the_radar_range_slot` and
-/// `console::weapons::server_tests::phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot`).
-///
-/// What is left for this pin is the half that IS a reactor question, walked
-/// on the SHIPPED files through the include resolver rather than asserted on
-/// a multiplier in isolation:
-///
-///   1. seed a `PowerSystem` from the hull's `[power_groups.*]`, in the
-///      runtime's own order (`authored_power_group_seed`);
-///   2. resolve every group's channel against the hull's own
-///      `[power.ai_policy]` over a COMBAT-STATIONS fact snapshot, and apply
-///      the winning level through `set_group_allocation` DIRECTLY, group by
-///      group, with no budget planning in between — so the 8-point total cap
-///      is exercised for real and a policy that asks for nine points fails
-///      here rather than in a duel;
-///   3. translate that power state through `apply_power_modifiers_from_read_state`;
-///   4. assert `ModifierSlot::PhaserDamage` is strictly ABOVE nominal — the
-///      point #923 moved to `sensors` is back on `weapons`, and it buys
-///      intensity.
+/// Authored local power pays actual work without a fixed performance multiplier.
 #[test]
-fn every_alliance_hull_elevates_its_phaser_damage_at_combat_stations() {
+fn alliance_energy_profiles_pay_work_without_fixed_performance_multipliers() {
     for path in [
         "assets/entities/alliance_battleship.toml",
         "assets/entities/alliance_cruiser.toml",
         "assets/entities/alliance_destroyer.toml",
         "assets/entities/alliance_courier.toml",
     ] {
-        let config = crate::entities::include_resolve::load_entity_config(path)
-            .unwrap_or_else(|e| panic!("{path}: {e}"));
-        let reactor = config
-            .power
-            .as_ref()
-            .unwrap_or_else(|| panic!("{path} authors a [power] reactor"));
-        let policy = reactor
-            .ai_policy
-            .as_ref()
-            .unwrap_or_else(|| panic!("{path} authors a [power.ai_policy]"))
-            .to_policy()
-            .unwrap_or_else(|e| panic!("{path}: {e}"));
-        let topology = config
-            .ship_config
-            .as_ref()
-            .unwrap_or_else(|| panic!("{path} authors a ship_config"));
-
-        // (1) The reactor as the spawner seeds it.
-        let seed = crate::ship::power::authored_power_group_seed(&topology.power_groups);
-        assert!(
-            !seed.is_empty(),
-            "{path} authors no [power_groups.*]; this pin is about the four-group \
-                 Alliance hulls, whose 8-point cap is what makes the red-alert \
-                 allocation load-bearing"
-        );
-        let power_config = crate::modifiers::power_system::PowerConfig {
-            strike_reserve: reactor.strike_reserve.clone(),
-            capacity: reactor.capacity,
-            rates: reactor.rates,
-            sustainable_total: reactor.sustainable_total,
-            max_commanded_total: reactor.max_commanded_total,
-            emergency_threshold: reactor.emergency_threshold,
-        };
-        let mut power = PowerSystem::from_authored_groups(&power_config, &seed);
-
-        // (2) Combat stations: red alert, a full battery, under way.
-        //
-        // Deliberately the UNPLANNED walk — each channel resolved and
-        // applied on its own, in `power.iter()` order, with none of issue
-        // #959's budget planning. That is the point of this pin: since #959
-        // a policy that over-spends is RATIONED rather than refused, so a
-        // hull could quietly acquire a ninth point and still run. The
-        // assertion below is the authoring guard that says it must not need
-        // rationing at all — every shipped Alliance hull's combat-stations
-        // allocation has to fit the reactor as written, so the planner is
-        // never the thing deciding which of its groups goes without.
-        let facts = crate::ship::power::seed_power_facts(
-            &power,
-            100.0, // battery_pct — above every authored reserve
-            1.0,   // thrust — above `thrust_threshold`
-            true,  // red alert
-            Some(0.0),
-            None,
-            true,
-            0,
-        );
-        let group_ids: Vec<PowerGroupId> = power.iter().map(|(id, _)| id.clone()).collect();
-        for id in &group_ids {
-            if let Some(crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level)) =
-                policy.resolve_channel(&id.0, &facts, &[])
-            {
-                let wanted = *level;
-                power
-                    .set_group_allocation(id, wanted)
-                    .unwrap_or_else(|e| panic!("{path}: {e:?}"));
-                assert_eq!(
-                    power.level_for(id),
-                    wanted,
-                    "{path}: the authored policy asked for `{}` = {wanted} at combat \
-                         stations and the reactor's 8-point total cap refused it (total is \
-                         now {}). Since issue #959 `ai_power_allocation` would ration this \
-                         rather than re-emit it for ever — so nothing would visibly break \
-                         in a duel, and this hull would simply fly with a group the \
-                         planner had quietly cut. Author the allocation to fit: take the \
-                         point off another group rather than off the cap",
-                    id.0,
-                    power.total()
-                );
-            }
-        }
-        assert!(
-            power.total() <= 8,
-            "{path}: combat stations totals {} against a cap of 8",
-            power.total()
-        );
-
-        // (3) Power → modifiers, through the hull's own multiplier table.
-        let mut multipliers = default_multipliers();
-        if let Some(pm) = config
-            .weapons_console
-            .as_ref()
-            .and_then(|wc| wc.power_multipliers)
-        {
-            multipliers.insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), pm);
+        let config = crate::entities::include_resolve::load_entity_config(path).unwrap();
+        let hardware = config.energy.unwrap();
+        let ship = config.ship_config.unwrap();
+        let mut power = PowerSystem::from_energy(hardware.clone(), ship).unwrap();
+        for group in &hardware.groups {
+            power.set_flow(&group.id, group.max_flow_per_sec).unwrap();
         }
         let mut mods = ShipModifiers::new();
-        apply_power_modifiers_from_read_state(&mut mods, &power.read_state(), &multipliers);
-
-        // (4) The claim: the alert buys DAMAGE.
-        let damage_mult = mods.get(&ModifierSlot::PhaserDamage);
+        apply_power_modifiers_from_read_state(
+            &mut mods,
+            &power.read_state(),
+            &default_multipliers(),
+        );
+        for slot in [
+            ModifierSlot::MaxSpeed,
+            ModifierSlot::PhaserDamage,
+            ModifierSlot::ShieldRegen,
+            ModifierSlot::RadarRange,
+        ] {
+            assert_eq!(
+                mods.get(&slot),
+                1.0,
+                "{path}: incoming flow cannot amplify {slot:?}"
+            );
+        }
+        let consumer = hardware
+            .consumers
+            .iter()
+            .find(|consumer| {
+                consumer.system.0.starts_with("phaser-") && consumer.continuous_cost_per_sec > 0.0
+            })
+            .unwrap();
+        let before = power.network().consumers[&consumer.system].energy;
+        assert_eq!(
+            power
+                .work_continuous(&consumer.system, 0.1, 1.0)
+                .unwrap()
+                .fraction,
+            1.0
+        );
         assert!(
-            damage_mult > 1.0,
-            "{path}: at combat stations `weapons` sits at level {} and \
-                 `ModifierSlot::PhaserDamage` resolves to x{damage_mult:.3}, i.e. nominal \
-                 or worse. #955 put the red-alert reactor point back on this group \
-                 precisely so going to combat stations means something; a hull that \
-                 elevates nothing has a red alert that changes no number at all",
-            power.level_for(&weapons())
+            power.network().consumers[&consumer.system].energy < before,
+            "{path}: actual phaser activity spends its finite local buffer"
         );
     }
 }
@@ -292,7 +196,6 @@ const ACQUISITION_MARGIN: f32 = 1.2;
 /// walk of the shipped files can bound it.
 #[test]
 fn every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest() {
-    use crate::ai::policy::AiPolicyVerb;
     use crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM;
 
     let mut checked: Vec<String> = Vec::new();
@@ -358,53 +261,13 @@ fn every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest() {
             continue;
         };
 
-        // The reactor as the spawner seeds it, then AT REST: no red alert,
-        // nothing under way, a full battery. Since #952 no reactor setting
-        // touches `RadarRange` at all, so this walk is now checking that
-        // nothing has quietly re-coupled them as much as it is checking the
-        // authored number — which is why the `radar_mult == 1.0` assertion
-        // below sits inside the loop rather than being folded away.
-        let seed = crate::ship::power::authored_power_group_seed(
-            &config
-                .ship_config
-                .as_ref()
-                .map(|s| s.power_groups.clone())
-                .unwrap_or_default(),
-        );
-        let power_config = config
-            .power
-            .as_ref()
-            .map(|p| crate::modifiers::power_system::PowerConfig {
-                strike_reserve: p.strike_reserve.clone(),
-                capacity: p.capacity,
-                rates: p.rates,
-                sustainable_total: p.sustainable_total,
-                max_commanded_total: p.max_commanded_total,
-                emergency_threshold: p.emergency_threshold,
-            })
-            .unwrap_or_default();
-        let mut power = PowerSystem::from_authored_groups(&power_config, &seed);
-        if let Some(authored) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
-            let policy = authored
-                .to_policy()
-                .unwrap_or_else(|e| panic!("{path}: {e}"));
-            // battery_pct 100 (above every authored reserve), thrust 0
-            // (station-keeping), red alert DOWN, no combat in living memory,
-            // no enemy in sensor range, no Destroy directive, nothing offline.
-            let facts = crate::ship::power::seed_power_facts(
-                &power, 100.0, 0.0, false, None, None, false, 0,
-            );
-            let group_ids: Vec<PowerGroupId> = power.iter().map(|(id, _)| id.clone()).collect();
-            for id in &group_ids {
-                if let Some(AiPolicyVerb::SetPowerGroupAllocation(level)) =
-                    policy.resolve_channel(&id.0, &facts, &[])
-                {
-                    power
-                        .set_group_allocation(id, *level)
-                        .unwrap_or_else(|e| panic!("{path}: {e:?}"));
-                }
-            }
-        }
+        // Acquisition bounds retain their authored values, using actual hardware
+        // without evaluating the retired pooled-allocation policy.
+        let power = PowerSystem::from_energy(
+            config.energy.clone().expect("powered radar hardware"),
+            config.ship_config.clone().expect("powered ship graph"),
+        )
+        .unwrap();
 
         let multipliers = default_multipliers();
         let mut mods = ShipModifiers::new();
@@ -443,34 +306,45 @@ fn every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest() {
 }
 
 #[test]
-fn helm_power_4_gives_positive_bonus() {
+fn high_helm_flow_does_not_amplify_base_speed() {
     let mut mods = ShipModifiers::new();
     let mut power = PowerSystem::default();
     power.set_group_allocation(&helm(), 4).unwrap();
     apply_power_modifiers(&mut mods, &power, &default_multipliers());
-    assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+    assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
 }
 
 #[test]
-fn helm_power_1_gives_negative_bonus() {
+fn low_helm_flow_does_not_rewrite_base_speed() {
     let mut mods = ShipModifiers::new();
     let mut power = PowerSystem::default();
     power.set_group_allocation(&helm(), 1).unwrap();
     apply_power_modifiers(&mut mods, &power, &default_multipliers());
-    // Negative bonus uses 1/(1+|bonus|): -0.5 → 1/1.5 ≈ 0.667
-    let expected = 1.0 / 1.5f32;
+    let expected = 1.0f32;
     assert!((mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-5);
 }
 
 #[test]
-fn apply_twice_does_not_stack() {
+fn repeated_power_translation_preserves_other_sources() {
     let mut mods = ShipModifiers::new();
     let mut power = PowerSystem::default();
     power.set_group_allocation(&helm(), 4).unwrap();
+    mods.add_or_update(crate::modifiers::Modifier {
+        source: ModifierSource::PowerGroup(helm()),
+        slot: ModifierSlot::MaxSpeed,
+        bonus: 0.5,
+    });
+    mods.add_or_update(crate::modifiers::Modifier {
+        source: ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(8),
+        },
+        slot: ModifierSlot::MaxSpeed,
+        bonus: 0.25,
+    });
     let mult = default_multipliers();
     apply_power_modifiers(&mut mods, &power, &mult);
     apply_power_modifiers(&mut mods, &power, &mult);
-    assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+    assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.25);
 }
 
 // ── apply_region_effects tests ─────────────────────────────────────
@@ -846,22 +720,17 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
 
 /// Regression test for PRD #597 gap-4: NPC ships with per-entity
 /// `ShipPowerSystem`, `PowerMultiplierResource`, and `ShipModifiers`
-/// components must have their power settings translated into modifiers by
-/// `translate_power_modifiers`, the same way the player ship does.
-///
-/// Spawns an NPC ship (Ship marker, no LocalShip) with helm=3 and asserts
-/// that after one tick the ship's own `ShipModifiers` component carries a
-/// MaxSpeed bonus > 1.0.
+/// components pass through `translate_power_modifiers`, as player ships do.
+/// A desired incoming-flow setting must not create a fixed speed multiplier.
 #[test]
-fn npc_ship_helm_power_translates_to_max_speed_modifier() {
+fn npc_ship_power_translation_does_not_amplify_base_speed() {
     use crate::modifiers::power_system::PowerSystem;
     use crate::server_app::Ship;
     use crate::ship::power::{PowerMultiplierResource, ShipPowerSystem};
 
     let mut app = App::new();
 
-    // Spawn an NPC ship (Ship marker, no LocalShip). Give it helm=3 and
-    // an explicit multipliers table so we can predict the bonus.
+    // An NPC with an old multiplier table must still obey physical flow semantics.
     let mut power = PowerSystem::default();
     power.set_group_allocation(&helm(), 3).unwrap();
     let mut mult = PowerMultiplierResource::default();
@@ -875,15 +744,15 @@ fn npc_ship_helm_power_translates_to_max_speed_modifier() {
     app.add_systems(Update, translate_power_modifiers);
     app.update();
 
-    // The NPC's own per-entity ShipModifiers must reflect helm=3 → +1.0.
+    // Ordinary NPC translation obeys the same no-fixed-multiplier rule.
     let mods_comp = app
         .world()
         .get::<ShipModifiers>(npc)
         .expect("NPC must have ShipModifiers component");
     let max_speed = mods_comp.get(&ModifierSlot::MaxSpeed);
     assert!(
-        (max_speed - 2.0).abs() < 1e-6,
-        "NPC helm=3 should give MaxSpeed multiplier 2.0, got {max_speed}"
+        (max_speed - 1.0).abs() < 1e-6,
+        "NPC incoming flow must leave base MaxSpeed unchanged, got {max_speed}"
     );
 }
 

@@ -232,14 +232,23 @@ fn prefix(app: &mut App, ships: &[Entity], phase: &str) -> BTreeMap<String, Vec<
     let mut all = BTreeMap::new();
     for &e in ships {
         let uuid = app.world().get::<EntityUuid>(e).unwrap().0.clone();
-        let commands: Vec<_> = [0, 1]
+        let group = PowerGroupId("weapons".into());
+        let cooling = app
+            .world()
+            .get::<ShipPowerSystem>(e)
+            .unwrap()
+            .0
+            .cooling_for(&group)
+            .unwrap();
+        let commands: Vec<_> = [0.0, 1.0]
             .into_iter()
             .enumerate()
-            .map(|(i, level)| AdmittedCommand {
+            .map(|(i, flow)| AdmittedCommand {
                 target: system_registry::power_reactor_system_id(),
-                payload: P::SetPowerGroupAllocation {
-                    group: PowerGroupId("weapons".into()),
-                    level,
+                payload: P::SetEnergyGroup {
+                    group: group.clone(),
+                    flow_per_sec: flow,
+                    cooling_per_sec: cooling,
                 },
                 response_token: Some(TOKEN.into()),
                 feedback_correlation: Some(
@@ -282,8 +291,8 @@ fn decision(app: &mut App, ships: &[Entity], o: &mut Observe, phase: &str, enabl
                 .get::<ShipPowerSystem>(e)
                 .unwrap()
                 .0
-                .commanded_level_for(&PowerGroupId("weapons".into())),
-            1
+                .flow_for(&PowerGroupId("weapons".into())),
+            Some(1.0)
         );
         for c in &p.prefix[u] {
             let matching:Vec<_>=messages.iter().filter(|m|matches!(&m.msg,ServerMessage::ActionFeedback{correlation,..}if Some(correlation)==c.feedback_correlation.as_ref())).collect();

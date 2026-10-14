@@ -475,3 +475,6 @@ fn oblique_penetration_and_escape_budget_remain_conservative() {
         }
     }
 }
+
+#[path = "compartment_damage_internal_tests.rs"]
+mod internal_tests;

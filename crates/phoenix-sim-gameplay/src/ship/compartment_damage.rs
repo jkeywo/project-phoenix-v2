@@ -664,3 +664,6 @@ fn intersect(
 #[cfg(test)]
 #[path = "compartment_damage_tests.rs"]
 mod tests;
+
+#[path = "compartment_damage_internal.rs"]
+mod internal;

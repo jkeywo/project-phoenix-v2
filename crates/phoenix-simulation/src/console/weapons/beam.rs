@@ -328,6 +328,7 @@ pub(crate) fn handle_fire_phaser(
     mut ship_q: Query<
         (
             Entity,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
@@ -359,19 +360,39 @@ pub(crate) fn handle_fire_phaser(
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
-    for (
-        ship_entity,
-        control_sources,
-        physics,
-        blackboards,
-        mut beam,
-        cooldown,
-        admitted,
-        combat_config_opt,
-        ship_config_opt,
-        mut power_opt,
-    ) in ship_q.iter_mut()
-    {
+    // A host projects a different LocalShip archetype. Assign seeded cycle
+    // jitter to stable ship identity, never to archetype/query iteration order.
+    // The entity index is only a same-key tie-break for reduced test fixtures.
+    let mut order: Vec<_> = ship_q
+        .iter()
+        .map(|(entity, uuid, ..)| {
+            (
+                (
+                    uuid.map(|id| id.0.clone()).unwrap_or_default(),
+                    entity.index(),
+                ),
+                entity,
+            )
+        })
+        .collect();
+    order.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, entity) in order {
+        let Ok((
+            ship_entity,
+            _uuid,
+            control_sources,
+            physics,
+            blackboards,
+            mut beam,
+            cooldown,
+            admitted,
+            combat_config_opt,
+            ship_config_opt,
+            mut power_opt,
+        )) = ship_q.get_mut(entity)
+        else {
+            continue;
+        };
         for cmd in admitted.0.iter() {
             let SystemControlPayload::FirePhaser = &cmd.payload else {
                 continue;

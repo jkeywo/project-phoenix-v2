@@ -259,3 +259,52 @@ fn authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers() {
         );
     }
 }
+
+/// Each peer tags a different local hull, changing ECS archetype iteration.
+/// The first seeded firing cycle must still assign identical burn/rest draws
+/// to each fleet ship, before a mismatched duration can cause divergent damage.
+#[test]
+fn phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers() {
+    fn cycles(app: &mut App) -> std::collections::BTreeMap<String, Vec<(String, f32, f32)>> {
+        let world = app.world_mut();
+        let mut query = world.query::<(
+            &project_phoenix::entities::spawner::EntityUuid,
+            &FleetSlotOf,
+            &project_phoenix::console::weapons::ActiveBeam,
+        )>();
+        query
+            .iter(world)
+            .filter_map(|(uuid, _, beam)| {
+                let cycles: Vec<_> = beam
+                    .live_banks()
+                    .map(|(bank, slot)| {
+                        (
+                            bank.clone(),
+                            slot.remaining_secs,
+                            slot.pending_cooldown_secs,
+                        )
+                    })
+                    .collect();
+                (!cycles.is_empty()).then_some((uuid.0.clone(), cycles))
+            })
+            .collect()
+    }
+    let mut hosts = [host(HostSlot(1), false), host(HostSlot(2), false)];
+    for frame in 0..120 {
+        step(&mut hosts);
+        let left = cycles(&mut hosts[0]);
+        let right = cycles(&mut hosts[1]);
+        assert_eq!(
+            left, right,
+            "the seeded cycle belongs to its ship at frame {frame}"
+        );
+        if left.len() == 2 {
+            assert!(left
+                .values()
+                .flatten()
+                .all(|(_, burn, rest)| *burn > 0.0 && *rest > 0.0));
+            return;
+        }
+    }
+    panic!("both fleet ships must begin a real authored firing cycle");
+}

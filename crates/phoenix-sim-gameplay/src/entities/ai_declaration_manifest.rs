@@ -109,6 +109,8 @@ pub enum IdleLever {
     /// it still means authoring the block, so it is not a shortcut past the
     /// declaration — it is what the declaration can say.
     InBandPolicy,
+    /// The System owns an authored tree; an explicit no-op tree declares idle.
+    StateTree,
     /// A dedicated field OUTSIDE the block, which declares intent without
     /// authoring anything. The quoted text is the authored key.
     Field(&'static str),
@@ -207,12 +209,20 @@ impl FineSystemKey {
     }
 }
 
+/// Supported controller family behind an authored declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclarationController {
+    PolicyOrSelector,
+    SystemStateTree,
+}
+
 /// One AI-capable fine-system kind: which host owns it, which synthesiser fills
 /// it when unauthored, how it could declare idle, and where the synthesis
 /// happens.
 #[derive(Clone, Copy, Debug)]
 pub struct FineSystemKind {
     pub key: FineSystemKey,
+    pub controller: DeclarationController,
     /// The host whose runtime evaluation this declaration feeds. Reused from
     /// [`crate::entities::ai_flag_hosts`] rather than restated, so the authored
     /// block name and the system's human name have one home.
@@ -247,11 +257,24 @@ const COMMS_HELPER: &[EvalSite] = &[site(
     "comms_console_ai_components",
 )];
 
+const POWER_TREE_HOST: AiHost = AiHost {
+    system: "Power System state tree",
+    block: "[system.config.ai] on the reactor System",
+    flag_chain: ai_flag_hosts::FlagChain::Empty,
+    history_fold: None,
+    facts: &[],
+};
+const POWER_TREE_INSTALLER: &[EvalSite] = &[site(
+    "crates/phoenix-simulation/src/entities/ship_spawn.rs",
+    "insert_power_state",
+)];
+
 /// Roll call, ordered to mirror [`ai_flag_hosts::AI_HOSTS`]: fifteen policy
 /// kinds, then five selector kinds.
 pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     FineSystemKind {
         key: FineSystemKey::Captain,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::CAPTAIN_RED_ALERT,
         component: "CaptainAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
@@ -259,6 +282,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Engines,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_ENGINES,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -266,6 +290,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Steering,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_STEERING,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -273,6 +298,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Lateral,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_LATERAL,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -280,6 +306,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Vertical,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_VERTICAL,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -287,6 +314,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Impulse,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_IMPULSE,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -294,6 +322,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Boost,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::HELM_BOOST,
         component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -301,6 +330,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::PhaserBank,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::PHASER_BANK,
         component: "PhaserBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -308,6 +338,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::BlasterBank,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::BLASTER_BANK,
         component: "BlasterBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -315,6 +346,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoTube,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::TORPEDO_TUBE,
         component: "TorpedoTubeAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
@@ -322,6 +354,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::WeaponsDoctrine,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::WEAPONS_DOCTRINE,
         component: "WeaponsDoctrineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
@@ -329,6 +362,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoMagazine,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::TORPEDO_MAGAZINE,
         component: "TorpedoMagazineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
@@ -336,6 +370,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::ShieldsFocus,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::SHIELDS_FOCUS,
         component: "ShieldsFocusAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
@@ -343,13 +378,15 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::Power,
-        host: &ai_flag_hosts::POWER_ALLOCATION,
-        component: "PowerAiPolicy",
-        idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SHIP_INSTALLER,
+        controller: DeclarationController::SystemStateTree,
+        host: &POWER_TREE_HOST,
+        component: "ShipAiTreePrograms",
+        idle_lever: IdleLever::StateTree,
+        spawn_sites: POWER_TREE_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::CommsResponse,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::COMMS_RESPONSE,
         component: "CommsResponseAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
@@ -357,6 +394,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::SensorsSelector,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::SENSORS_SELECTOR,
         component: "SensorsTargetSelector",
         idle_lever: IdleLever::Absent,
@@ -364,6 +402,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::TacticalSelector,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::TACTICAL_SELECTOR,
         component: "TacticalTargetSelector",
         idle_lever: IdleLever::Field("[weapons_console] selector_idle"),
@@ -371,6 +410,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::NavigationSelector,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::NAVIGATION_SELECTOR,
         component: "NavigationTargetSelector",
         idle_lever: IdleLever::Absent,
@@ -378,6 +418,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::RepairSelector,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::REPAIR_SELECTOR,
         component: "RepairTargetSelector",
         idle_lever: IdleLever::Absent,
@@ -385,6 +426,7 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::CommsSelector,
+        controller: DeclarationController::PolicyOrSelector,
         host: &ai_flag_hosts::COMMS_SELECTOR,
         component: "CommsTargetSelector",
         idle_lever: IdleLever::Absent,
@@ -494,20 +536,28 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
                 .as_ref()
                 .is_some_and(|x| x.ai_policy.is_some()),
         ),
-        FineSystemKey::Power => ship_level(if c.energy.is_some() {
-            c.ship_config.as_ref().is_some_and(|ship| {
-                ship.systems.iter().any(|system| {
-                    system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
-                        && system
+        FineSystemKey::Power => {
+            if c.energy.is_none() || (c.behaviour.is_none() && !c.is_static_point_defence()) {
+                return Vec::new();
+            }
+            c.ship_config
+                .as_ref()
+                .into_iter()
+                .flat_map(|ship| &ship.systems)
+                .filter(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+                .map(|system| Slot {
+                    kind,
+                    instance: Some(system.id.0.clone()),
+                    declared: declared_from(
+                        system
                             .config
                             .as_ref()
                             .and_then(|value| value.get("ai"))
-                            .is_some()
+                            .is_some(),
+                    ),
                 })
-            })
-        } else {
-            c.power.as_ref().is_some_and(|x| x.ai_policy.is_some())
-        }),
+                .collect()
+        }
         // Ship-level in SHAPE (one slot, no instance id) but NOT gated like the
         // five selectors it sits beside: it gates on `[weapons_console]`, the
         // way the per-weapon kinds below do, and deliberately not on
@@ -730,6 +780,7 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
         .map(|slot| {
             let idle = match slot.kind.idle_lever {
                 IdleLever::InBandPolicy => "or `idle = true` inside it".to_string(),
+                IdleLever::StateTree => "or author an explicit no-op state tree".to_string(),
                 IdleLever::Field(f) => format!("or set `{f}`"),
                 IdleLever::Absent => {
                     "— this selector has NO idle field, so an explicit idle is not \

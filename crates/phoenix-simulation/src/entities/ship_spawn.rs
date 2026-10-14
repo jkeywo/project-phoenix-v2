@@ -187,7 +187,7 @@ fn insert_ship_scratch_state(cmds: &mut EntityCommands) {
 
 /// The reactor and its allocation AI: the [`ShipPowerSystem`] (seeded from the
 /// authored power groups), the per-entity [`PowerConfigResource`], and the
-/// optional inline power-allocation policy from `[power.ai_policy]`.
+/// closed authored System trees with their own private continuation.
 fn insert_power_state(
     config: &EntityConfig,
     _power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
@@ -214,7 +214,10 @@ fn insert_power_state(
         .with_strike_reserve(legacy.0.strike_reserve.clone())
         .expect("validated strike overdrive");
     cmds.insert((crate::ship::power::ShipPowerSystem(power), legacy));
-    let trees = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
+    let trees: (
+        crate::ai::state_tree_runtime::ShipAiTreePrograms,
+        crate::ai::state_tree_runtime::ShipAiTreeRuntime,
+    ) = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
         .expect("validated System AI trees");
     cmds.insert(trees);
 }

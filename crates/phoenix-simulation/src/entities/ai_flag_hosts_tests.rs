@@ -582,7 +582,7 @@ fn a_flag_guard_is_rejected_in_both_selector_positions() {
 /// `include_str!` bakes bytes at compile time, so a baked site can never see
 /// include resolution, and `alliance_cruiser` is a COMPOSED hull since #876:
 /// its `[captain_console.ai]` comes from `fragments/ai/captain_alliance.toml`
-/// and its `[power.ai_policy]` from `fragments/ai/fleet_baseline.toml`. Both
+/// and its helm policies from the fleet fragments. Both
 /// mutations below substitute a guard inside one of those blocks, so the
 /// resolved document is the only text that carries them — and it is also the
 /// only text `EntityConfig::from_toml` accepts, since the raw file now
@@ -664,23 +664,17 @@ fn a_flag_guard_on_a_shipped_hull_loads_and_reads_the_world() {
     );
 }
 
-/// AC: the hosts that CAN evaluate flags still accept them — same hull, same
-/// load path, a flag added to its `[power.ai_policy]` instead.
-///
-/// The guard mutated is the weapons ELEVATE rule, which since issue #1003
-/// reads the RESTORE floor (`min_restore_weapons`) — its sibling hold rule
-/// is the one that reads `min_reserve_weapons`. Either would do; naming the
-/// restore floor is what keeps [`with_guard`]'s exactly-once assertion true.
+/// A second supported legacy-policy host still accepts a world guard through
+/// the real composed load path. Power's closed numeric tree is a separate family.
 #[test]
 fn a_flag_guard_on_a_plumbed_host_of_a_shipped_hull_still_loads() {
     let mutated = with_guard(
         &cruiser(),
-        r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)""#,
-        r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons) and flag(weapons_free)""#,
+        r#"when = "fact(secs_since_combat) < param(combat_window_secs)""#,
+        r#"when = "fact(secs_since_combat) < param(combat_window_secs) and counter(weapons_clearance) > 0""#,
     );
-    crate::entities::config::EntityConfig::from_toml(&mutated).expect(
-        "the Power reactor passes a real flag chain, so a flag() guard on it is valid content",
-    );
+    crate::entities::config::EntityConfig::from_toml(&mutated)
+        .expect("the Captain policy host passes a real world flag/counter chain");
 }
 
 // ── History, through the real entity-load path (issue #890) ─────────────

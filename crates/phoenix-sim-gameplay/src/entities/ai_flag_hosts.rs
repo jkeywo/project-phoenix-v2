@@ -280,8 +280,10 @@ pub const SHIELDS_FOCUS: AiHost = AiHost {
     facts: SHIELDS_FACTS,
 };
 
+/// Legacy policy-schema validator only. The physical Power System now runs a
+/// closed numeric System tree; this descriptor does not describe its inputs.
 pub const POWER_ALLOCATION: AiHost = AiHost {
-    system: "Power reactor",
+    system: "Legacy Power allocation policy (validation only)",
     block: "[power.ai_policy]",
     flag_chain: FlagChain::Plumbed,
     history_fold: None,

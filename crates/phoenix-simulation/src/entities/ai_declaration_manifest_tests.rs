@@ -8,21 +8,48 @@ use std::collections::BTreeSet;
 // ── The table is complete and internally consistent ──────────────────────
 
 #[test]
-fn every_ai_host_owns_exactly_one_fine_system_kind() {
-    let hosted: Vec<&str> = FINE_SYSTEM_KINDS.iter().map(|k| k.host.block).collect();
-    let unique: BTreeSet<&str> = hosted.iter().copied().collect();
+fn every_controller_family_has_exact_declaration_and_host_coverage() {
+    let hosted: Vec<_> = FINE_SYSTEM_KINDS
+        .iter()
+        .map(|kind| kind.host.block)
+        .collect();
+    let unique: BTreeSet<_> = hosted.iter().copied().collect();
     assert_eq!(
         hosted.len(),
         unique.len(),
-        "two kinds claim the same authored block, so the worklist would name the \
-             wrong system"
+        "each live declaration has one owner"
     );
-    let all_hosts: BTreeSet<&str> = ai_flag_hosts::AI_HOSTS.iter().map(|h| h.block).collect();
+    let policies: BTreeSet<_> = FINE_SYSTEM_KINDS
+        .iter()
+        .filter(|kind| kind.controller == DeclarationController::PolicyOrSelector)
+        .map(|kind| kind.host.block)
+        .collect();
+    let validated_policies: BTreeSet<_> = ai_flag_hosts::AI_HOSTS
+        .iter()
+        .filter(|host| host.block != ai_flag_hosts::POWER_ALLOCATION.block)
+        .map(|host| host.block)
+        .collect();
     assert_eq!(
-        unique, all_hosts,
-        "the manifest's kinds and ai_flag_hosts::AI_HOSTS must be the same twenty \
-             hosts. A host with no kind is a fine system whose missing declaration \
-             nothing counts — which is exactly the invisibility #885a closes."
+        policies, validated_policies,
+        "every current policy/selector host remains counted"
+    );
+    let trees: Vec<_> = FINE_SYSTEM_KINDS
+        .iter()
+        .filter(|kind| kind.controller == DeclarationController::SystemStateTree)
+        .collect();
+    assert_eq!(
+        trees.len(),
+        1,
+        "every migrated tree family is explicitly counted"
+    );
+    assert_eq!(trees[0].key, FineSystemKey::Power);
+    assert_eq!(trees[0].component, "ShipAiTreePrograms");
+    assert_eq!(trees[0].idle_lever, IdleLever::StateTree);
+    assert_eq!(trees[0].host.flag_chain, ai_flag_hosts::FlagChain::Empty);
+    assert_ne!(
+        trees[0].host.block,
+        ai_flag_hosts::POWER_ALLOCATION.block,
+        "the legacy policy validator must not masquerade as a live tree host"
     );
 }
 
@@ -369,7 +396,6 @@ fn strict_mode_rejects_an_undeclared_policy_and_names_the_worklist() {
         // component for the lateral slot rather than a per-axis newtype.
         ("[helm_console.lateral_ai]", "FineSystemAiPolicies"),
         ("[shields_console.ai_policy]", "ShieldsFocusAiPolicy"),
-        ("[power.ai_policy]", "PowerAiPolicy"),
         ("[comms_console.ai]", "CommsResponseAiPolicy"),
     ] {
         assert!(
@@ -486,9 +512,23 @@ fn attached(w: &World, e: Entity, slot: &Slot) -> Option<Attached> {
         FineSystemKey::ShieldsFocus => w
             .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
             .map(|c| Attached::Policy(c.0.clone())),
-        FineSystemKey::Power => w
-            .get::<crate::ship::power::PowerAiPolicy>(e)
-            .map(|c| Attached::Policy(c.0.clone())),
+        FineSystemKey::Power => {
+            let id = crate::core::messages::SystemId(slot.instance.as_ref()?.clone());
+            let definition = w
+                .get::<crate::ship_plugin::ShipConfigComponent>(e)?
+                .0
+                .system(&id)?;
+            if definition.kind != crate::ship::system_registry::POWER_REACTOR_KIND {
+                return None;
+            }
+            w.get::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(e)?
+                .0
+                .get(&id)?;
+            w.get::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>(e)?
+                .0
+                .get(&id)?;
+            Some(Attached::Tree)
+        }
         FineSystemKey::TorpedoMagazine => w
             .get::<crate::console::weapons::TorpedoMagazineAiPolicy>(e)
             .map(|c| Attached::Policy(c.0.clone())),
@@ -535,6 +575,7 @@ fn attached(w: &World, e: Entity, slot: &Slot) -> Option<Attached> {
 enum Attached {
     Policy(AiPolicy),
     Selector(TargetSelector),
+    Tree,
 }
 
 /// How many declarations of one kind the real spawner attached: 1/0 for a
@@ -571,7 +612,23 @@ fn attached_count(w: &World, e: Entity, key: FineSystemKey) -> usize {
         FineSystemKey::ShieldsFocus => one(w
             .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
             .is_some()),
-        FineSystemKey::Power => one(w.get::<crate::ship::power::PowerAiPolicy>(e).is_some()),
+        FineSystemKey::Power => {
+            let Some(config) = w.get::<crate::ship_plugin::ShipConfigComponent>(e) else {
+                return 0;
+            };
+            config
+                .0
+                .systems
+                .iter()
+                .filter(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+                .filter(|system| {
+                    w.get::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(e)
+                        .is_some_and(|programs| programs.0.contains_key(&system.id))
+                        && w.get::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>(e)
+                            .is_some_and(|frames| frames.0.contains_key(&system.id))
+                })
+                .count()
+        }
         FineSystemKey::TorpedoMagazine => one(w
             .get::<crate::console::weapons::TorpedoMagazineAiPolicy>(e)
             .is_some()),
@@ -653,7 +710,10 @@ fn the_manifest_matches_the_real_spawner() {
                 slot.key()
             );
             assert!(
-                matches!(got, Attached::Policy(_) | Attached::Selector(_)),
+                matches!(
+                    got,
+                    Attached::Policy(_) | Attached::Selector(_) | Attached::Tree
+                ),
                 "{stem}/{}: the attached declaration must decode",
                 slot.key()
             );
@@ -768,4 +828,105 @@ fn a_declared_slot_renders_as_declared() {
         captain.contains("declared") && !captain.contains("UNDECLARED"),
         "an authored block must not be reported as undeclared: {captain}"
     );
+}
+
+#[test]
+fn power_tree_manifest_names_the_actual_system_and_requires_its_authored_tree() {
+    let mut config = parse("assets/entities/alliance_cruiser.toml");
+    let kind = FINE_SYSTEM_KINDS
+        .iter()
+        .find(|kind| kind.key == FineSystemKey::Power)
+        .unwrap();
+    let reactor = config
+        .ship_config
+        .as_ref()
+        .unwrap()
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+        .unwrap()
+        .id
+        .clone();
+    let slots = slots_of_kind(kind, &config);
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].instance.as_deref(), Some(reactor.0.as_str()));
+    assert_eq!(slots[0].declared, Declared::Block);
+    config
+        .ship_config
+        .as_mut()
+        .unwrap()
+        .systems
+        .iter_mut()
+        .find(|system| system.id == reactor)
+        .unwrap()
+        .config
+        .as_mut()
+        .unwrap()
+        .as_table_mut()
+        .unwrap()
+        .remove("ai");
+    assert_eq!(slots_of_kind(kind, &config)[0].declared, Declared::Nothing);
+    let error = strict_error(&config).unwrap();
+    assert!(
+        error.contains("[system.config.ai]")
+            && error.contains("ShipAiTreePrograms")
+            && error.contains(&reactor.0)
+    );
+    assert!(error.contains("no-op state tree"));
+    config.energy = None;
+    assert!(
+        slots_of_kind(kind, &config).is_empty(),
+        "no physical reactor means no installed Power tree"
+    );
+}
+
+#[test]
+fn power_tree_attachment_requires_the_mapped_program_and_private_frame() {
+    let source = shipped_toml("assets/entities/alliance_cruiser.toml");
+    let config = EntityConfig::from_toml(&source).unwrap();
+    let slot = manifest(&config)
+        .into_iter()
+        .find(|slot| slot.kind.key == FineSystemKey::Power)
+        .unwrap();
+    let id = crate::core::messages::SystemId(slot.instance.as_ref().unwrap().clone());
+    let (mut app, entity) = spawn(&source, "power-tree-binding");
+    assert!(matches!(
+        attached(app.world(), entity, &slot),
+        Some(Attached::Tree)
+    ));
+    assert_eq!(attached_count(app.world(), entity, FineSystemKey::Power), 1);
+    let frame = app
+        .world_mut()
+        .get_mut::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>(entity)
+        .unwrap()
+        .0
+        .remove(&id)
+        .unwrap();
+    assert!(attached(app.world(), entity, &slot).is_none());
+    assert_eq!(attached_count(app.world(), entity, FineSystemKey::Power), 0);
+    app.world_mut()
+        .get_mut::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>(entity)
+        .unwrap()
+        .0
+        .insert(id.clone(), frame);
+    let program = app
+        .world_mut()
+        .get_mut::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(entity)
+        .unwrap()
+        .0
+        .remove(&id)
+        .unwrap();
+    app.world_mut()
+        .get_mut::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(entity)
+        .unwrap()
+        .0
+        .insert(
+            crate::core::messages::SystemId("unrelated-reactor".into()),
+            program,
+        );
+    assert!(
+        attached(app.world(), entity, &slot).is_none(),
+        "a different System's tree does not satisfy the binding"
+    );
+    assert_eq!(attached_count(app.world(), entity, FineSystemKey::Power), 0);
 }

@@ -954,8 +954,15 @@ hull_integrity = 60.0
 num_facings = 1
 max_hp = 30
 regen_per_sec = 1.5
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 360
 "#;
-    let config = EntityConfig::from_toml(toml).expect("toml must parse");
+    let config =
+        EntityConfig::from_toml(&shield_fixture::with_energy(toml)).expect("toml must parse");
     let uuid = uuid::Uuid::new_v4().to_string();
     let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
     let shields = app

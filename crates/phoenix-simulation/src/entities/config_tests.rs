@@ -2475,7 +2475,19 @@ fn battleship_toml_produces_five_shield_arcs() {
             ship_config.system_home_station(sys),
             Some(&crate::core::messages::StationId("shields".into()))
         );
-        assert_eq!(sys.power_group, None);
+        let profile = config
+            .energy
+            .as_ref()
+            .unwrap()
+            .consumers
+            .iter()
+            .find(|profile| profile.system == sys.id)
+            .expect("each arc has one canonical local reserve");
+        assert!(profile.reserve.capacity > 0.0);
+        assert_eq!(
+            sys.power_group.as_ref().unwrap().0,
+            format!("energy-{}", sys.id.0)
+        );
     }
 }
 
@@ -4509,7 +4521,16 @@ max_hp = 200
 regen_per_sec = 7.5
 offline_duration = 12.0
 "##;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let powered = shield_fixture::with_energy(&format!(
+        r#"{toml_str}
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 360
+"#
+    ));
+    let config = EntityConfig::from_toml(&powered).expect("parse must succeed");
     let sc = config
         .shields_console
         .expect("shields_console must be Some");
@@ -4546,7 +4567,16 @@ fn shields_base_block_partial_keeps_defaults_for_missing_fields() {
 [shields_console.base]
 max_hp = 250
 "##;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let powered = shield_fixture::with_energy(&format!(
+        r#"{toml_str}
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 360
+"#
+    ));
+    let config = EntityConfig::from_toml(&powered).expect("parse must succeed");
     let base = config
         .shields_console
         .expect("shields_console")

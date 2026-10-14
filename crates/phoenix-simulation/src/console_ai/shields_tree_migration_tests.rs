@@ -292,7 +292,9 @@ fn physical_history_accumulates_and_expires_at_the_authored_tick_boundary() {
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
     injury(&mut app, entity, "port", 10);
     observe(&mut app);
-    decide(&mut app);
+    // Keep both impacts unfocused so the test measures incoming physical
+    // evidence, independently of the selected arc's damage reduction.
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
     injury(&mut app, entity, "port", 5);
     observe(&mut app);
     decide(&mut app);

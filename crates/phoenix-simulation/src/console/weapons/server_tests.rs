@@ -4425,6 +4425,13 @@ fn payload_probe(
         crate::ship::shields::ShipShields(shield_sys, 0.5),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
+    // The probe replaces its equipment after the generic fixture has already
+    // installed weapon reserves. Rebuild that initial hardware once so the new
+    // physical arcs also pay upkeep from their own finite reserve.
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::ship::power::ShipPowerSystem>();
+    attach_fixture_weapon_energy(app, ship);
     app.world_mut()
         .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![crate::core::messages::EntitySnapshot {

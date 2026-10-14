@@ -608,6 +608,7 @@ fn test_app() -> App {
     .add_plugins(crate::console::weapons::WeaponsPlugin)
     .add_plugins(crate::console::repair::server::RepairPlugin)
     .add_plugins(crate::ship::power::ShipPowerPlugin)
+    .add_plugins(crate::infrastructure::server::InfrastructurePlugin)
     .add_plugins(crate::ship::shields::ShipShieldsPlugin)
     .add_plugins(crate::ship::sensors::ShipSensorsPlugin)
     .add_plugins(crate::console::comms::server::CommsConsolePlugin)
@@ -730,6 +731,14 @@ fn test_app() -> App {
         crate::ship::sensors::SensorRadarSelection::default(),
         crate::console::navigation::NavigationWaypoint::default(),
         crate::ship::power::PowerBrownoutState::default(),
+    ));
+    // Use the same actual hardware, stock services and closed programs as the
+    // shared physical fixture; the ordinary Power/Shield owners do the work.
+    crate::ship::test_support::attach_shipped_ai_declarations(&mut app, ship);
+    use crate::sim_rng::InstallSimRng;
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
+        417,
+        crate::sim_rng::SeedSource::World,
     ));
     app.insert_resource(ShipEntity(ship));
     app.configure_sets(

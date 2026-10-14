@@ -35,6 +35,34 @@ fn collect_coord(
     }
 }
 
+/// Install finite local reserves from real shipped hardware. These narrow
+/// shield-owner tests omit reactor production and spend their initial charge.
+fn attach_shield_fixture_power(app: &mut App, entity: Entity) {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .unwrap();
+    let mut power = crate::modifiers::power_system::PowerSystem::from_energy(
+        authored.energy.unwrap(),
+        authored.ship_config.unwrap(),
+    )
+    .unwrap();
+    let capacities: Vec<_> = power
+        .config()
+        .consumers
+        .iter()
+        .map(|profile| (profile.system.clone(), profile.reserve.capacity))
+        .collect();
+    for (id, capacity) in capacities {
+        if id.0.starts_with("shield-arc-") {
+            power.network_mut().consumers.get_mut(&id).unwrap().energy = capacity;
+        }
+    }
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::ship::power::ShipPowerSystem(power));
+}
+
 #[test]
 fn damage_history_prunes_with_the_shared_strict_tick_window() {
     let mut history = ShieldsDamageHistory {
@@ -165,7 +193,7 @@ fn human_popup_threat_bearing_cannot_latch_the_ai_inbox() {
 }
 
 /// **`tick_shields` regenerates at the ship's own `ModifierSlot::ShieldRegen`**
-/// (issue #952) — the wire from the `shields` power group to the screens.
+/// (issue #952), with every regenerated HP paid by its local reserve.
 ///
 /// Two ships in one world so the reading is per-entity: the same system
 /// pass must give them different regen. A ship carrying no `ShipModifiers`
@@ -200,11 +228,9 @@ fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
 
     let mut boosted_mods = ShipModifiers::new();
     boosted_mods.add_or_update(Modifier {
-        source: crate::core::messages::ModifierSource::PowerGroup(
-            crate::core::messages::PowerGroupId(
-                crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
-            ),
-        ),
+        source: crate::core::messages::ModifierSource::RegionEffect {
+            uuid: "shield-test-region".into(),
+        },
         slot: crate::core::messages::ModifierSlot::ShieldRegen,
         bonus: 1.0, // x2.0
     });
@@ -229,6 +255,9 @@ fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
         .spawn((crate::server_app::Ship, ShipShields(damaged(), 0.5)))
         .id();
 
+    for entity in [plain, boosted, unmodified] {
+        attach_shield_fixture_power(&mut app, entity);
+    }
     // Bevy's first `update()` after `TimePlugin` reports a zero delta and
     // `tick_shields` returns early on it, so five passes are four 250 ms
     // steps: one second of regen.
@@ -250,7 +279,7 @@ fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
     assert_eq!(
         hp(boosted, &app),
         70,
-        "shields power at x2.0 doubles the same second's regen"
+        "an independent region modifier doubles the paid regeneration rate"
     );
 }
 
@@ -331,6 +360,7 @@ fn test_app() -> App {
             ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();
+    attach_shield_fixture_power(&mut app, ship);
     app.insert_resource(ShipEntity(ship));
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
@@ -1131,6 +1161,7 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .id();
 
     for e in [npc, tuned] {
+        attach_shield_fixture_power(&mut app, e);
         let mut entity_mut = app.world_mut().entity_mut(e);
         {
             let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();

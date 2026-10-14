@@ -1192,3 +1192,62 @@ fn energy_profiles_replace_as_one_hardware_definition() {
         assert_eq!(base["energy"]["group"][0]["id"].as_str(), Some("old"));
     }
 }
+
+#[test]
+fn shield_arc_tree_fragments_share_named_node_composition_without_system_overrides() {
+    let base: toml::Value = toml::from_str(r#"
+[[shield_arc]]
+id = "fore"
+max_hp = 100
+[shield_arc.energy]
+upkeep_per_sec = 0.1
+[shield_arc.ai]
+root = "derived"
+[[shield_arc.ai.tree]]
+id = "base"
+initial = "run"
+[[shield_arc.ai.tree.state]]
+id = "run"
+[[shield_arc.ai.tree.state.task]]
+id = "first"
+action = { kind = "write", channel = "raised", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "second"
+action = { kind = "write", channel = "focus", value = { source = "fact", name = "preferred_focus" } }
+[[shield_arc.ai.tree]]
+id = "derived"
+extends = "base"
+"#).unwrap();
+    let overlay: toml::Value = toml::from_str(
+        r#"
+[[shield_arc]]
+id = "fore"
+[[shield_arc.ai.tree]]
+id = "base"
+[[shield_arc.ai.tree.state]]
+id = "run"
+[[shield_arc.ai.tree.state.task]]
+id = "first"
+_remove = true
+[[shield_arc.ai.tree.state.task]]
+id = "second"
+action = { value = { source = "literal", value = false } }
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+    assert!(merged.get("system").is_none());
+    assert_eq!(merged["shield_arc"][0]["max_hp"].as_integer(), Some(100));
+    assert_eq!(
+        merged["shield_arc"][0]["energy"],
+        base["shield_arc"][0]["energy"]
+    );
+    let trees = merged["shield_arc"][0]["ai"]["tree"].as_array().unwrap();
+    assert_eq!(trees.len(), 2);
+    assert_eq!(trees[1]["extends"].as_str(), Some("base"));
+    let tasks = trees[0]["state"][0]["task"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0]["id"].as_str(), Some("second"));
+    assert_eq!(tasks[0]["action"]["value"]["value"].as_bool(), Some(false));
+}

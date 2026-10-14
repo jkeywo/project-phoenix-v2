@@ -22,6 +22,18 @@ export function systemTreeVocabulary(owner, schema) {
       vocabulary.numeric_channels['cooling-' + group.id] = { min: 0, max: Math.fround(group.max_cooling_per_sec) };
     }
   }
+  if (owner?.kind === 'shield_arc') {
+    vocabulary.facts = [...(host?.facts || [])];
+    vocabulary.channels = [...(host?.channels || [])];
+    vocabulary.numeric_facts = [...(host?.numeric_facts || [])];
+    vocabulary.numeric_channels = {};
+    const prefixes = schema.shield_recovery_bindings || {};
+    for (const target of owner.shield_energy?.recovery_targets || []) {
+      for (const [destination, key] of [['facts', 'facts'], ['channels', 'channels'], ['numeric_facts', 'numeric_facts']]) {
+        for (const prefix of prefixes[key] || []) vocabulary[destination].push(`${prefix}-${target}`);
+      }
+    }
+  }
   if (!vocabulary.numeric_facts?.length) vocabulary.sources = (vocabulary.sources || []).filter(source => source !== 'number_compare');
   if (!Object.keys(vocabulary.numeric_channels || {}).length) vocabulary.actions = (vocabulary.actions || []).filter(action => action !== 'write_number');
   return vocabulary;
@@ -31,7 +43,7 @@ export const systemTreeContext = {
   value: owner => owner?.config?.ai, defaultValue: () => idleStateTree(),
   channels: (owner, schema) => [...new Set([...(schema?.channels || []), ...(owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel)])],
   vocabulary: systemTreeVocabulary,
-  inherited: owner => owner?.ai_inherited === true || owner?.local === false,
+  inherited: owner => owner?.ai_inherited === true || (owner?.local === false && !owner?.shield_arc_id),
   available: owner => !!owner?.id, supported: (owner, schema) => !!schema.hosts?.[owner?.kind] || schema.system_kinds?.includes(owner?.kind),
   operation: (owner, ai, materialise) => ({ type: 'system-ai-set', id: owner.id, ai, materialise }),
 };

@@ -7,6 +7,7 @@ export function authoredAndGeneratedSystems(value) {
     const id = shieldArcSystemId(arc.id);
     if (!id) continue;
     if (!systems.some(system => system.id === id)) systems.push({ id, kind: 'shield_arc', console: shields?.console || 'generated-shields',
+      shield_arc_id: arc.id, shield_energy: structuredClone(arc.energy), config: { ai: structuredClone(arc.ai) },
       ...(value.energy?.consumer?.some(row => row.system === id) ? { power_group: `energy-${id}` } : {}), generated: true });
   }
   return systems;

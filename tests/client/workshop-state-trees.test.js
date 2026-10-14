@@ -106,3 +106,46 @@ describe('visual typed System AI authoring', () => {
     change('action.number', '1000'); action('apply'); await expect(pending).rejects.toThrow(); expect(draft.read(path)).toBe(after);
   });
 });
+
+
+const shieldSchema = () => ({...metadata.ai_state_tree,system_kinds:['shield_arc'],
+  hosts:{shield_arc:{facts:['preferred_focus','raised','thermal_stopped'],channels:['raised','focus'],numeric_facts:['strength_fraction','reserve_fraction','heat_fraction','recent_damage'],numeric_channels:{},sources:[...metadata.ai_state_tree.sources,'number_compare'],actions:metadata.ai_state_tree.actions}},
+  shield_recovery_bindings:{facts:['target-visible','target-preferred','target-ready','recovering'],channels:['recover'],numeric_facts:['target-strength','target-reserve']}});
+
+describe('closed shield arc state-tree Workshop controls',()=>{
+  it('offers only authored physical endpoints and supported observations, without numeric machinery writes',()=>{
+    const base=shieldSchema();
+    const vocab=systemTreeVocabulary({kind:'shield_arc',shield_energy:{recovery_targets:['shield-arc-port-aux']}},base);
+    expect(vocab.facts).toContain('target-ready-shield-arc-port-aux');
+    expect(vocab.channels).toEqual(['raised','focus','recover-shield-arc-port-aux']);
+    expect(vocab.numeric_facts).toContain('target-reserve-shield-arc-port-aux');
+    expect(vocab.actions).not.toContain('write_number');
+    expect(vocab.sources).toContain('number_compare');
+    expect(base.hosts.shield_arc.channels).toEqual(['raised','focus']);
+  });
+  it('edits canonical generated arc AI through ordinary acceptance, history and refusal',async()=>{
+    const path='assets/entities/shield-ship.toml';
+    const ai=idleStateTree(), energy={upkeep_per_sec:0.1,recharge_energy_per_hp:0.5,recovery_energy_per_hp:0.2,discharge_hp_per_sec:5,recovery_targets:['shield-arc-aft']};
+    const source='# retain geometry\n'+stringify({tags:['ship'],station:[{id:'science'}],console:[{id:'science',home_station:'science',screen:'science.html'}],system:[{id:'shields',kind:'shields',console:'science'}],shield_arc:[{id:'port_aux',label:'Port',max_hp:100,energy,ai},{id:'aft',label:'Aft',max_hp:100,energy:{...energy,recovery_targets:[]},ai}]});
+    const draft=new WorkshopDocument(createStoreZip([{path:'scenarios.toml',text:'[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n'},{path,text:source}]));
+    const dependencies={base_files:{},packs:[]};
+    const runtime={shipSchema:async()=>({system_kinds:['shields','shield_arc']}),validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+    const selected=inspectShipAuthoring(draft,dependencies,path).systems.find(system=>system.id==='shield-arc-port-aux');
+    expect(selected).toMatchObject({shield_arc_id:'port_aux',config:{ai},shield_energy:energy,ai_inherited:false});
+    document.body.innerHTML='<main></main>';let pending;
+    const editor=mountStateTrees({root:document.querySelector('main'),apply:factory=>{pending=applyShipOperation({draft,runtime,dependencies,operation:{path,...factory()}});}});
+    editor.refresh(selected,{ai_state_tree:shieldSchema()},false);
+    action('add','tasks');change('action.channel','recover-shield-arc-aft');
+    document.querySelector('[data-ai-conditions="task.when"] > [data-ai-action="add"]').click();
+    change('task.when.0.source','number_compare');change('task.when.0.name','target-reserve-shield-arc-aft');change('task.when.0.number','0.3');
+    expect(el('action.channel').options.length).toBe(3);
+    action('apply');await pending;
+    const after=draft.read(path),value=stripRemovals(parse(after));
+    expect(value.system).toEqual(parse(source).system);
+    expect(value.shield_arc[0].energy).toEqual(energy);
+    expect(value.shield_arc[0].ai.tree[0].state[0].task[0]).toMatchObject({action:{kind:'write',channel:'recover-shield-arc-aft'},when:[{value:{source:'number_compare',name:'target-reserve-shield-arc-aft',value:0.3}}]});
+    expect(draft.snapshot().history.undo).toHaveLength(1);draft.undo();expect(draft.read(path)).toBe(source);draft.redo();expect(draft.read(path)).toBe(after);
+    runtime.validate.mockResolvedValueOnce({accepted:false,findings:[{message:'unsupported shield observation'}]});
+    action('apply');await expect(pending).rejects.toThrow();expect(draft.read(path)).toBe(after);
+  });
+});

@@ -219,7 +219,8 @@ export function inspectShipAuthoring(draft, dependencies, path) {
   return { path, repair: repair ? { ...structuredClone(repair), id: path,
     ai_inherited: repairFields.some(field => field.owner !== path),
     ai_owner: [...new Set(repairFields.map(field => field.owner))].join(', ') } : null, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated].map(system => {
-    const fields = composition.fields.filter(field => field.path.startsWith(`system[id=${system.id}].config.ai`));
+    const aiPath = system.shield_arc_id ? `shield_arc[id=${system.shield_arc_id}].ai` : `system[id=${system.id}].config.ai`;
+    const fields = composition.fields.filter(field => field.path.startsWith(aiPath));
     return { ...system, energy_profile: structuredClone(composition.resolved.value.energy), ai_inherited: fields.some(field => field.owner !== path),
       ai_owner: [...new Set(fields.map(field => field.owner))].join(', ') };
   }), doctrines, composition };

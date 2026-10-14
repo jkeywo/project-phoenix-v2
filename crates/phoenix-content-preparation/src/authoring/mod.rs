@@ -112,8 +112,18 @@ pub struct WorkshopShipSchema {
 pub struct WorkshopAiTreeSchema {
     pub system_kinds: Vec<String>,
     pub hosts: BTreeMap<String, crate::ai::state_tree::SchemaMetadata>,
+    pub shield_recovery_bindings: WorkshopShieldRecoveryBindings,
     #[serde(flatten)]
     pub vocabulary: crate::ai::state_tree::SchemaMetadata,
+}
+
+/// Closed endpoint vocabulary. Authoring expands these prefixes only for the
+/// selected arc's physical eligible targets; runtime binding admission remains Rust-owned.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WorkshopShieldRecoveryBindings {
+    pub facts: Vec<String>,
+    pub channels: Vec<String>,
+    pub numeric_facts: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -142,6 +152,22 @@ pub fn ship_schema() -> WorkshopShipSchema {
     );
     power_tree_vocabulary.sources.push("number_compare");
     power_tree_vocabulary.actions.push("write_number");
+    let (shield_base, shield_numbers) = crate::ship::shield_ai::bindings(&[]);
+    let (shield_target, shield_target_numbers) =
+        crate::ship::shield_ai::bindings(&[crate::core::messages::SystemId(
+            "workshop-target".into(),
+        )]);
+    let prefixes = |names: &std::collections::BTreeSet<String>| {
+        names
+            .iter()
+            .filter_map(|name| name.strip_suffix("-workshop-target").map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let shield_recovery_bindings = WorkshopShieldRecoveryBindings {
+        facts: prefixes(&shield_target.facts),
+        channels: prefixes(&shield_target.channels),
+        numeric_facts: prefixes(&shield_target_numbers.facts),
+    };
     WorkshopShipSchema {
         console_feed_sources,
         console_publication_kinds,
@@ -181,7 +207,9 @@ pub fn ship_schema() -> WorkshopShipSchema {
             system_kinds: vec![
                 crate::ship::system_registry::DOCK_KIND.into(),
                 crate::ship::system_registry::POWER_REACTOR_KIND.into(),
+                crate::ship::system_registry::SHIELD_ARC_KIND.into(),
             ],
+            shield_recovery_bindings,
             hosts: BTreeMap::from([
                 (
                     crate::ship::system_registry::DOCK_KIND.into(),
@@ -192,6 +220,13 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 (
                     crate::ship::system_registry::POWER_REACTOR_KIND.into(),
                     power_tree_vocabulary,
+                ),
+                (
+                    crate::ship::system_registry::SHIELD_ARC_KIND.into(),
+                    crate::ai::state_tree::schema_metadata_with_numbers(
+                        &shield_base,
+                        &shield_numbers,
+                    ),
                 ),
             ]),
             vocabulary: crate::ai::state_tree::schema_metadata(

@@ -926,3 +926,47 @@ fn project_string_table_is_utf8_source_not_a_binary_runtime_asset() {
         .any(|finding| finding.file == "assets/strings/unknown.csv"
             && finding.category == "invalid-runtime-asset"));
 }
+
+#[test]
+fn shield_tree_palette_tracks_closed_runtime_bindings_and_physical_target_prefixes() {
+    let schema = super::ship_schema().ai_state_tree;
+    let (base, numbers) = crate::ship::shield_ai::bindings(&[]);
+    assert!(schema.system_kinds.contains(&"shield_arc".to_owned()));
+    assert_eq!(
+        schema.hosts["shield_arc"],
+        crate::ai::state_tree::schema_metadata_with_numbers(&base, &numbers)
+    );
+    let target = crate::core::messages::SystemId("shield-arc-port-aux".into());
+    let (actual, actual_numbers) = crate::ship::shield_ai::bindings(&[target.clone()]);
+    let expand = |prefixes: &[String]| {
+        prefixes
+            .iter()
+            .map(|prefix| format!("{prefix}-{}", target.0))
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(
+        actual
+            .facts
+            .difference(&base.facts)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expand(&schema.shield_recovery_bindings.facts)
+    );
+    assert_eq!(
+        actual
+            .channels
+            .difference(&base.channels)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expand(&schema.shield_recovery_bindings.channels)
+    );
+    assert_eq!(
+        actual_numbers
+            .facts
+            .difference(&numbers.facts)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expand(&schema.shield_recovery_bindings.numeric_facts)
+    );
+    assert!(schema.hosts["shield_arc"].numeric_channels.is_empty());
+}

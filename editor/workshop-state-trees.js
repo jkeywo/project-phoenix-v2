@@ -25,33 +25,39 @@ export function resolveStateTree(ai, id, stack = []) {
 
 /** Replace the selected System's AI subtree, preserving its other authored bytes. */
 export function writeStateTrees(source, system, ai, { materialise = false } = {}) {
+  const section = system.shield_arc_id ? 'shield_arc' : 'system';
+  const recordId = system.shield_arc_id || system.id;
+  const aiPath = section === 'shield_arc' ? 'shield_arc.ai' : 'system.config.ai';
+  const readAi = row => section === 'shield_arc' ? row?.ai : row?.config?.ai;
   const nl = source.includes('\r\n') ? '\r\n' : '\n';
   const headers = [...source.matchAll(/^[ \t]*\[(\[?)([^\]\r\n]+)\]\]?[^\r\n]*(?:\r?\n|$)/gm)]
     .map(match => ({ name: match[2].trim(), array: match[1] === '[', start: match.index, end: match.index + match[0].length }));
   let found;
   for (let i = 0; i < headers.length; i += 1) {
-    const header = headers[i]; if (header.name !== 'system' || !header.array) continue;
-    const end = headers.slice(i + 1).find(next => next.name === 'system' || !next.name.startsWith('system.'))?.start ?? source.length;
-    const local = parse(source.slice(header.start, end)).system?.[0];
-    if (local?.id === system.id && local._remove !== true) { found = { start: header.start, end, local }; break; }
+    const header = headers[i]; if (header.name !== section || !header.array) continue;
+    const end = headers.slice(i + 1).find(next => next.name === section || !next.name.startsWith(section + '.'))?.start ?? source.length;
+    const local = parse(source.slice(header.start, end))[section]?.[0];
+    if (local?.id === recordId && local._remove !== true) { found = { start: header.start, end, local }; break; }
   }
-  if ((!found || stable(stripRemovals(found.local.config?.ai)) !== stable(system.config?.ai)) && !materialise) {
+  if ((!found || stable(stripRemovals(readAi(found.local))) !== stable(system.config?.ai)) && !materialise) {
     throw new Error('Explicitly materialise inherited AI before editing it.');
   }
   // Keep explicit resets on every subsequent edit: dropping them would resurrect
   // inherited fields or nodes after a previously materialised library was edited.
   const resetIds = new Set([...(system.config?.ai?.tree || []).map(tree => tree.id),
-    ...(found?.local.config?.ai?.tree || []).filter(tree => tree._remove).map(tree => tree.id)]);
+    ...(readAi(found?.local)?.tree || []).filter(tree => tree._remove).map(tree => tree.id)]);
   const authored = { ...clone(ai), tree: [
     ...[...resetIds].map(id => ({ id, _remove: true })), ...clone(ai.tree || []),
   ] };
-  const serialized = stringify({ system: [{ config: { ai: authored } }] })
-    .replace(/^\[\[system\]\]\r?\n/, '').replace(/^\s*\[system.config\]\r?\n/, '').trim().replace(/\n/g, nl);
-  if (!found) return source.trimEnd() + nl + nl + `[[system]]${nl}id = ${JSON.stringify(system.id)}${nl}` + serialized + nl;
-  const first = headers.find(header => header.start > found.start && header.start < found.end && header.name === 'system.config.ai');
-  if (!first && found.local.config?.ai) throw new Error('Expand inline config.ai into TOML tables before visual editing.');
+  const record = section === 'shield_arc' ? { ai: authored } : { config: { ai: authored } };
+  const serialized = stringify({ [section]: [record] })
+    .replace(new RegExp(`^\\[\\[${section}\\]\\]\\r?\\n`), '')
+    .replace(/^\s*\[system.config\]\r?\n/, '').trim().replace(/\n/g, nl);
+  if (!found) return source.trimEnd() + nl + nl + `[[${section}]]${nl}id = ${JSON.stringify(recordId)}${nl}` + serialized + nl;
+  const first = headers.find(header => header.start > found.start && header.start < found.end && header.name === aiPath);
+  if (!first && readAi(found.local)) throw new Error('Expand inline AI into TOML tables before visual editing.');
   if (first) {
-    const end = headers.find(header => header.start > first.start && !header.name.startsWith('system.config.ai.'))?.start ?? source.length;
+    const end = headers.find(header => header.start > first.start && !header.name.startsWith(aiPath + '.'))?.start ?? source.length;
     return source.slice(0, first.start) + serialized + nl + nl + source.slice(Math.min(end, found.end));
   }
   return source.slice(0, found.end).trimEnd() + nl + nl + serialized + nl + nl + source.slice(found.end);

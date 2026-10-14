@@ -117,3 +117,34 @@ describe('state-tree authoring source and inheritance', () => {
     expect(draft.read(path)).toBe(after);
   });
 });
+
+
+describe('canonical generated shield arc AI source', () => {
+  it('writes the physical arc AI only, preserving geometry, costs, sibling arcs and other source', () => {
+    const ai=library(), arc={id:'port_aux',label:'Port',max_hp:100,energy:{upkeep_per_sec:0.1},ai};
+    const source='# geometry remains\n'+stringify({shield_arc:[arc,{id:'aft',label:'Aft'}]})+'\n# footer\n';
+    const owner={id:'shield-arc-port-aux',shield_arc_id:arc.id,config:{ai}};
+    const next=structuredClone(ai);next.tree[1].state[0].task[0].action.channel='focus';
+    const after=writeStateTrees(source,owner,next);
+    const value=stripRemovals(parse(after));
+    expect(value.system).toBeUndefined();
+    expect(value.shield_arc[0]).toMatchObject({id:'port_aux',max_hp:100,energy:arc.energy,ai:next});
+    expect(value.shield_arc[1]).toEqual({id:'aft',label:'Aft'});
+    expect(after.startsWith('# geometry remains')).toBe(true);expect(after).toContain('# footer');
+  });
+  it('materialises inherited arc libraries with stable keyed removal and preserves reference inheritance', () => {
+    const ai=library(), arc={id:'fore',energy:{upkeep_per_sec:0.2},ai};
+    const owner={id:'shield-arc-fore',shield_arc_id:'fore',config:{ai}};
+    const local='includes=["base.toml"]\n';
+    const next=structuredClone(ai);next.tree[0].state[0].task.pop();
+    expect(()=>writeStateTrees(local,owner,next)).toThrow(/materialise/);
+    const after=writeStateTrees(local,owner,next,{materialise:true});
+    const merged=mergeComposeFragments({shield_arc:[arc]},parse(after));
+    expect(merged.shield_arc[0].ai).toEqual(next);
+    expect(merged.shield_arc[0].energy).toEqual(arc.energy);
+    expect(resolveStateTree(merged.shield_arc[0].ai,'variant').state[0].task.map(task=>task.id)).toEqual(['first','extra']);
+    const edited=structuredClone(next);edited.tree[1].parameters.allowed=true;
+    const again=writeStateTrees(after,{...owner,config:{ai:next}},edited);
+    expect(mergeComposeFragments({shield_arc:[arc]},parse(again)).shield_arc[0].ai).toEqual(edited);
+  });
+});

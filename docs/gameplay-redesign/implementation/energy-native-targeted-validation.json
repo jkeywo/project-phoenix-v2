@@ -7,7 +7,14 @@
   "source_status_at_execution": "clean",
   "cargo_target_dir": "C:/Coding/project-phoenix-v2/target",
   "source_provenance": {
-    "refreshed_lib_mtimes_without_byte_changes": ["phoenix-model", "phoenix-sim-contracts", "phoenix-sim-gameplay", "phoenix-sim-session", "phoenix-sim-world", "phoenix-simulation"],
+    "refreshed_lib_mtimes_without_byte_changes": [
+      "phoenix-model",
+      "phoenix-sim-contracts",
+      "phoenix-sim-gameplay",
+      "phoenix-sim-session",
+      "phoenix-sim-world",
+      "phoenix-simulation"
+    ],
     "evidence": "Build log explicitly recompiles these packages from the pinned worktree; dependency records use relative crate paths, with absolute fixture paths on some records. No concurrent Cargo workload was authorized."
   },
   "runs": [
@@ -19,13 +26,32 @@
       "counting": "Eight selected top-level cases; the publisher test's failing subprocess child is not double counted.",
       "log": ".phoenix/increment-8-changed-paths-retry.log",
       "log_sha256": "f0ce8ca5ff587b4568c47a282fb8e9b0845214bcddcde8ea1e71d557f796ceb0",
-      "passed_cases": ["seeded_duel_uses_finite_energy_and_mapped_power_tree_continuation", "explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire", "capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage"],
+      "passed_cases": [
+        "seeded_duel_uses_finite_energy_and_mapped_power_tree_continuation",
+        "explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire",
+        "capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage"
+      ],
       "failed_cases": [
-        {"test": "authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers", "finding": "Uncrewed phase reached 12000 frames without a peer digest mismatch, but only one boost enable and no depletion/recovery; original activity assertion remains failed. The human phase was not reached."},
-        {"test": "phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers", "finding": "No mismatched compared cycles, but both ships did not expose simultaneous live cycles within the new 120-frame precondition. This does not prove the required two-ship assignment."},
-        {"test": "a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it", "finding": "Standing coupling is absent at resumed-work assertion. Subsequent source inspection identifies the fixture's unpowered move to x4000 exceeding the authored 600 range; independent range interruption must be separated before claiming resumption."},
-        {"test": "two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it", "finding": "A redock helper precondition fails with disabled mate intent and an active undock target. Cause remains under investigation."},
-        {"test": "three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes", "finding": "Historical frozen owner lookup cannot resolve the moved energy_publication publisher. Symbol mapping and actual ordering proof remain to reconcile."}
+        {
+          "test": "authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers",
+          "finding": "Uncrewed phase reached 12000 frames without a peer digest mismatch, but only one boost enable and no depletion/recovery; original activity assertion remains failed. The human phase was not reached."
+        },
+        {
+          "test": "phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers",
+          "finding": "No mismatched compared cycles, but both ships did not expose simultaneous live cycles within the new 120-frame precondition. This does not prove the required two-ship assignment."
+        },
+        {
+          "test": "a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it",
+          "finding": "Standing coupling is absent at resumed-work assertion. Subsequent source inspection identifies the fixture's unpowered move to x4000 exceeding the authored 600 range; independent range interruption must be separated before claiming resumption."
+        },
+        {
+          "test": "two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it",
+          "finding": "A redock helper precondition fails with disabled mate intent and an active undock target. Cause remains under investigation."
+        },
+        {
+          "test": "three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes",
+          "finding": "Historical frozen owner lookup cannot resolve the moved energy_publication publisher. Symbol mapping and actual ordering proof remain to reconcile."
+        }
       ]
     },
     {
@@ -51,7 +77,78 @@
   },
   "limits": [
     "This is historical Increment 8 source, protocol6/content epoch1/snapshot43/rules0.15; current integrated protocol7/content epoch2 requires its own evidence.",
-    "Five selected tests remain unresolved. No full-suite, final default-feature, native visual/human, balance, or complete playable-exit claim is made.",
-    "No thresholds, timing windows or assertions were weakened for this retry."
-  ]
+    "The four fixture/ordering failures pass in the recorded follow-up. Original Dynasty activity remains pending with the new generation mechanism. No full-suite, final default-feature, native visual/human, balance, or complete playable-exit claim is made.",
+    "Original authored Dynasty 12000-frame/two-enable/depletion/recovery requirements and service motion/damage assertions remain. The new jitter regression startup assumption changed from120 frames to the existing12000-frame gameplay window, retaining positive two-ship live-cycle evidence and exact equality; this is explicitly a fixture correction."
+  ],
+  "follow_up_runs": [
+    {
+      "runtime_and_test_sources_match_revision": "535b8b63063ca6ab5f893cd209576d18222de14c",
+      "execution_note": "Three reviewed fixture/symbol files were uncommitted at launch and committed unchanged after the run; concurrent Git commits changed only documentation/metadata, not compiled source bytes.",
+      "command": "cargo test -p project-phoenix --no-default-features --features headless --no-fail-fast --test dynasty_backfill --test headless_runner --test publisher_ordering -- phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes --test-threads=1",
+      "exit_code": 0,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "scope": "The two-ship positive live-cycle regression, actual tractor/dock funded recovery and publisher ordering matrix now pass. The original authored Dynasty depletion/recovery cycle was not selected by this retry.",
+      "log": ".phoenix/increment-8-fixture-isolation-retry.log",
+      "log_sha256": "6114b9f0ad51c4ced53f7828b255a1e619c62e15ba9bc53ee8b0fbfd47fe98e7"
+    }
+  ],
+  "reactor_generation_follow_up": {
+    "source_revision": "1a620420f7b31fb0347bd2664ac996fa9fe331b0",
+    "contract_revision": "0f6a2f9eb15e1b32daad1fccd12739ab9ba4730c",
+    "independent_source_review": "weapon_workshop PASS; canonical reserve/export/cooling, current-operator admission, permitted observation/current-channel bindings, Workshop/UI parity reviewed read-only.",
+    "runs": [
+      {
+        "command": "cargo test -p phoenix-sim-gameplay --lib disabled_generation_still_exports_finite_reserve_and_preserves_cooling_and_continuation -- --test-threads=1",
+        "exit_code": 0,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "log": ".phoenix/increment-8-generation-pure-confirmed.log",
+        "log_sha256": "6cb664d63cdbbec7b531b4ef83c3c716c445cb9c7dac71960145d2aeb72774b2"
+      },
+      {
+        "command": "cargo test -p phoenix-simulation --lib --no-default-features -- console_ai::server::tests::power_ai_tests:: ship::power::tests:: authored_power_trees_drive_actual_finite_hardware_without_legacy_policy --test-threads=1",
+        "exit_code": 0,
+        "passed": 25,
+        "failed": 0,
+        "ignored": 0,
+        "scope": "Power AI9, current-operator/continuation Power15, real authored Power-tree pins1",
+        "log": ".phoenix/increment-8-generation-simulation-owner.log",
+        "log_sha256": "599f6f03adeab04164159a928bd95b5696678cffb7ba5a79988d1170be1e2200"
+      },
+      {
+        "command": "npx vitest run tests/client/action-map.test.js tests/client/ph-energy-controls.test.js tests/client/workshop-state-trees.test.js",
+        "exit_code": 0,
+        "passed": 134,
+        "failed": 0,
+        "files_passed": 3,
+        "log": ".phoenix/increment-8-generation-js.log",
+        "log_sha256": "d9e62877b454f03a6f969dcc8d3cb61a0da30773072cbbf4f90f28137817daac"
+      },
+      {
+        "command": "node scripts/check-strings.mjs --strict",
+        "exit_code": 0,
+        "strings": 5014,
+        "errors": 0,
+        "warnings": 0,
+        "log": ".phoenix/increment-8-generation-strings.log",
+        "log_sha256": "cb430b6f2fbe42bd32480e852754da3b672e997ced9233538cf735d5f555c354"
+      }
+    ],
+    "earlier_attempts": [
+      {
+        "finding": "New owner test used the wrong validator method name; corrected validate to validate_against.",
+        "log": ".phoenix/increment-8-generation-pure.log",
+        "log_sha256": "b184986b066ee6d6a0ae31674216ff2166fe59dd59c035bb9a571811812a9e71"
+      },
+      {
+        "finding": "New thermal fixture requested only1 heat/second cooling while gross export plus passive loss generated1.2; authored fixture cooling is now5, without changing production coefficients or assertions.",
+        "log": ".phoenix/increment-8-generation-pure-retry.log",
+        "log_sha256": "bcd8c11d343bc74f15c8be14dd108341fa7e167266c924a54b36aada26985569"
+      }
+    ],
+    "pending": "The original 12000-frame Dynasty activity/two-peer proof must be rerun with the generation intent. No passing activity/complete exit is claimed yet."
+  }
 }

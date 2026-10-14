@@ -276,7 +276,7 @@ short_code = "DCO"
 manual_overview = "dynasty.onboarding.damage_control.role"
 [[station.rating]]
 name = "Std"
-automated_systems = ["tractor", "umbilical"]
+automated_systems = ["tractor", "umbilical", "logistics"]
 [[station.tutorial]]
 id = "damage-control-welcome"
 title = "entity.dynasty_player_cruiser.station.damage_control.tutorial.title"
@@ -3648,6 +3648,14 @@ kind = "Umbilical"
 source = "viewscreen"
 kind = "Viewscreen"
 
+[[console.feed]]
+source = "logistics"
+kind = "Logistics"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
 [[console]]
 id = "comms-service"
 name = "comms"
@@ -3754,6 +3762,7 @@ travel_secs = 2.5
 boundary = "weapons-access"
 
 [interior.placements]
+logistics = "engineering"
 dock = "support"
 captain = "bridge"
 red-alert = "bridge"
@@ -6265,3 +6274,8 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# New inherited handling follows this hull's existing Damage Control Console.
+[[system]]
+id = "logistics"
+console = "damage-control"

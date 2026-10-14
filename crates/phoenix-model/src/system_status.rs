@@ -18,6 +18,8 @@ pub enum StatusReasonCode {
     Destroyed,
     Offline,
     Unpowered,
+    Overheated,
+    IntakeCut,
     NoDockMarkers,
 }
 

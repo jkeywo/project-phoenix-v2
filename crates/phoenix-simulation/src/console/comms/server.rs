@@ -190,12 +190,18 @@ pub(crate) fn publish_comms_blackboard(
 /// Range-gates the hail, records it on `CommsRuntime::open_hails`, and emits
 /// `WorldEvent::Hailed` so a scripted `on_hailed` handler can answer it.
 pub(crate) fn handle_hail(
-    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
+    mut ship_query: Query<
+        (
+            &crate::core::messages::AdmittedCommands,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, mut power)) = ship_query.iter_mut().next() else {
         return;
     };
     for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
@@ -222,6 +228,22 @@ pub(crate) fn handle_hail(
                     continue;
                 }
             }
+        }
+
+        if !power.as_deref_mut().is_some_and(|power| {
+            power
+                .0
+                .try_work_discrete(&crate::ship::system_registry::comms_system_id())
+                .unwrap_or(false)
+        }) {
+            if let Some(outbox) = outbox.as_deref_mut() {
+                finish_action_feedback(
+                    cmd,
+                    outbox,
+                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                );
+            }
+            continue;
         }
 
         // Record the hail as authoritative comms state (issue #786). This is
@@ -261,7 +283,8 @@ pub(crate) fn handle_hail(
 /// `SimOutbox` for routing `CommsResponseRejected` to the submitting holder, and
 /// the script runtime + clock the scripted arm answers a dialogue with.
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct CommsRespondAux<'w> {
+pub(crate) struct CommsRespondAux<'w, 's> {
+    power: Query<'w, 's, &'static mut crate::ship::power::ShipPowerSystem>,
     sessions: Res<'w, crate::lobby::Sessions>,
     outbox: ResMut<'w, crate::server_app::SimOutbox>,
     /// The tick-scoped id mint (issue #907): spawned-entity ids for the shared
@@ -298,6 +321,7 @@ pub(crate) struct CommsRespondAux<'w> {
 /// the two things it used to read off "the local ship" — the narrative actor and
 /// the rejection channel — are per-hull facts, not per-tick ones.
 struct RespondingHull<'a> {
+    entity: Entity,
     /// The hull's own uuid: the narrative SOURCE of every beat it answers
     /// (issue #1338). `Option` because a bare-`App` fixture can put
     /// `AdmittedCommands` on a hull with no `EntityUuid`.
@@ -363,6 +387,7 @@ struct RespondingHull<'a> {
 pub(crate) fn handle_respond_to_message(
     ship_query: Query<
         (
+            Entity,
             &crate::core::messages::AdmittedCommands,
             // The host-neutral fleet identity, and the sort key below. `Option`
             // for the bare-`App` fixtures that spawn a bridge without a roster.
@@ -422,7 +447,7 @@ pub(crate) fn handle_respond_to_message(
     // is a `String`, and a key function returning one clones it on every
     // comparison, every tick, for a value the sort only ever compares.
     fleet.sort_by(
-        |(_, a_slot, _, _, _, a_uuid), (_, b_slot, _, _, _, b_uuid)| {
+        |(_, _, a_slot, _, _, _, a_uuid), (_, _, b_slot, _, _, _, b_uuid)| {
             a_slot.map(|s| s.0).cmp(&b_slot.map(|s| s.0)).then_with(|| {
                 a_uuid
                     .map(|u| u.0.as_str())
@@ -445,7 +470,7 @@ pub(crate) fn handle_respond_to_message(
     let hulls: Vec<RespondingHull<'_>> = fleet
         .into_iter()
         .map(
-            |(admitted, slot, is_local, ship_config, seeking_hosts, uuid)| {
+            |(entity, admitted, slot, is_local, ship_config, seeking_hosts, uuid)| {
                 let station = ship_config.and_then(|c| {
                     crate::command_admission::station_for_system(
                         &c.0,
@@ -463,6 +488,7 @@ pub(crate) fn handle_respond_to_message(
                     .flatten()
                     .map(|t| t.to_string());
                 RespondingHull {
+                    entity,
                     uuid,
                     slot: slot.map(|s| s.0),
                     station,
@@ -571,6 +597,21 @@ pub(crate) fn handle_respond_to_message(
         let responses = &dialogue.current_node.responses;
         if *response_index >= responses.len() {
             // Out-of-bounds index (forced/stale client): reject.
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
+            continue;
+        }
+
+        if !aux
+            .power
+            .get_mut(hull.entity)
+            .ok()
+            .is_some_and(|mut power| {
+                power
+                    .0
+                    .try_work_discrete(&crate::ship::system_registry::comms_system_id())
+                    .unwrap_or(false)
+            })
+        {
             reject(&mut aux.outbox, cmd, message_id, *response_index);
             continue;
         }

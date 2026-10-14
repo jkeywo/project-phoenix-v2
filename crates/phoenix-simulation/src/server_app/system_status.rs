@@ -27,26 +27,45 @@ pub(crate) fn project(
                 sources.is_offline(&system.id) || source == ControlSource::Offline,
                 source == ControlSource::Ai,
             );
-            if let Some(dock) = dock.filter(|dock| dock.system_id == system.id) {
+            if let Some(power) = power {
+                let state = if system.kind == crate::ship::system_registry::POWER_REACTOR_KIND {
+                    Some(&power.0.network().reactor)
+                } else {
+                    power.0.network().consumers.get(&system.id)
+                };
+                if let Some(state) = state {
+                    if status.availability == Availability::Unknown {
+                        status.availability = Availability::Normal;
+                    }
+                    if state.thermal_stopped {
+                        status.unavailable(StatusReasonCode::Overheated, None);
+                    }
+                    if state.energy <= 0.0
+                        && system.kind != crate::ship::system_registry::POWER_REACTOR_KIND
+                    {
+                        status.unavailable(StatusReasonCode::Unpowered, None);
+                    }
+                    if system
+                        .power_group
+                        .as_ref()
+                        .and_then(|group| power.0.network().groups.get(group))
+                        .is_some_and(|group| group.cut)
+                    {
+                        if status.availability == Availability::Normal {
+                            status.availability = Availability::Degraded;
+                        }
+                        status
+                            .reasons
+                            .push(phoenix_model::system_status::StatusReason {
+                                code: StatusReasonCode::IntakeCut,
+                                component_id: None,
+                            });
+                    }
+                }
+            }
+            if dock.is_some_and(|dock| dock.system_id == system.id) {
                 if status.availability == Availability::Unknown {
                     status.availability = Availability::Normal;
-                }
-                let level = power
-                    .map(|power| crate::ship::power::power_level_for(&power.0, &dock.power_group))
-                    .unwrap_or(0);
-                if level < dock.config.min_power_level {
-                    let component =
-                        system
-                            .components
-                            .iter()
-                            .find_map(|component| match component {
-                                crate::ship::composition::SystemComponentConfig::DockMating {
-                                    power_input,
-                                    ..
-                                } => Some(power_input.clone()),
-                                _ => None,
-                            });
-                    status.unavailable(StatusReasonCode::Unpowered, component);
                 }
                 if markers.is_none_or(|markers| markers.is_empty()) {
                     let component =

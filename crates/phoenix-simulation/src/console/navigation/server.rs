@@ -420,19 +420,27 @@ use crate::command_admission::finish_action_feedback as finish_waypoint_action_f
 
 fn handle_navigation_waypoint(
     mut ship_query: Query<
-        (&AdmittedCommands, &mut NavigationWaypoint),
+        (
+            &AdmittedCommands,
+            &mut NavigationWaypoint,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+        ),
         With<crate::server_app::Ship>,
     >,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, mut waypoint) in ship_query.iter_mut() {
+    for (admitted, mut waypoint, mut power) in ship_query.iter_mut() {
         for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
             match &cmd.payload {
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
+                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&crate::ship::system_registry::navigation_system_id()).unwrap_or(false)) {
+                        finish_waypoint_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Refused);
+                        continue;
+                    }
                     // Only the goal is written here. The Channel-3 `NavigateTo`
                     // clearance for it is issued by the shared, origin-agnostic
                     // `issue_navigate_to_clearance` — the same issuer the AI
@@ -595,10 +603,23 @@ fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode
 /// UUID, auto-clear the waypoint (per the despawn policy). Iterates every
 /// ship so both player and NPC waypoints track their anchors.
 fn refresh_anchored_waypoint(
-    mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::Ship>>,
+    mut waypoint_q: Query<
+        (
+            &mut NavigationWaypoint,
+            Option<&crate::ship::power::ShipPowerSystem>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform)>,
 ) {
-    for mut waypoint in waypoint_q.iter_mut() {
+    for (mut waypoint, power) in waypoint_q.iter_mut() {
+        let fraction = phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+            power.map(|power| &power.0),
+            crate::ship::system_registry::NAVIGATION_KIND,
+        );
+        if fraction <= 0.0 {
+            continue;
+        }
         let Some(WaypointMode::Anchored {
             source_uuid,
             last_x,
@@ -616,8 +637,8 @@ fn refresh_anchored_waypoint(
                 // bumping the generation, or a waypoint anchored to a moving
                 // ship would re-incur the Channel-3 lag every tick and the AI
                 // Helm would never follow it (issue #702).
-                *last_x = transform.translation.x;
-                *last_z = transform.translation.z;
+                *last_x += (transform.translation.x - *last_x) * fraction;
+                *last_z += (transform.translation.z - *last_z) * fraction;
                 found = true;
                 break;
             }

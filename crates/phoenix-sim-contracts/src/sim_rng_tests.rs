@@ -45,6 +45,7 @@ fn seed_12345_preserves_the_first_three_draws_of_every_stream() {
             [2609058382, 3464922140, 4053235755],
         ),
         (SimStream::EntityUuid, [2447351754, 1062639042, 3560280982]),
+        (SimStream::PowerFlowCuts, [991391398, 943974932, 2886891992]),
     ];
     assert_eq!(cases.len(), SimStream::ALL.len());
     for (stream, expected) in cases {
@@ -110,6 +111,7 @@ fn stream_names_are_pinned_to_their_recorded_strings() {
         (SimStream::BeamCycleJitter, "beam-cycle-jitter"),
         (SimStream::CommsBackfillChoice, "comms-backfill-choice"),
         (SimStream::EntityUuid, "entity-uuid"),
+        (SimStream::PowerFlowCuts, "power-flow-cuts"),
     ] {
         assert_eq!(
             stream.name(),
@@ -121,7 +123,7 @@ fn stream_names_are_pinned_to_their_recorded_strings() {
     // variant would go unpinned and be free to be renamed later.
     assert_eq!(
         SimStream::ALL.len(),
-        8,
+        9,
         "a stream was added — pin its name above too"
     );
 }

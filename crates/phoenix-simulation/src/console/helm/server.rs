@@ -161,6 +161,7 @@ fn publish_helm_blackboard(
     mut ship_q: Query<
         (
             Option<&ShipPhysics>,
+            Option<&crate::ship::power::ShipPowerSystem>,
             Option<&BoostConfigResource>,
             Option<&ShipImpulse>,
             Option<&ShipBoost>,
@@ -189,6 +190,7 @@ fn publish_helm_blackboard(
 
     for (
         physics,
+        power,
         boost_config,
         impulse,
         boost,
@@ -246,7 +248,12 @@ fn publish_helm_blackboard(
             } else {
                 0.0
             });
-        let radar_range = base_radar_range * radar_mult;
+        let radar_range = base_radar_range
+            * radar_mult
+            * phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+                power.map(|power| &power.0),
+                crate::ship::system_registry::HELM_RADAR_KIND,
+            );
 
         // ── Hostile weapon arcs (issue #874) ────────────────────────────────
         //

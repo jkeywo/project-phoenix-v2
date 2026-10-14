@@ -1130,6 +1130,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
     mut ship_q: Query<
         (
             Option<&TacticalRadarSelection>,
+            Option<&crate::ship::power::ShipPowerSystem>,
             Option<&ShipPhysics>,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entities::spawner::FactionComponent>,
@@ -1163,6 +1164,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
 
     for (
         weapons_target,
+        power,
         ship_physics,
         modifiers,
         self_faction,
@@ -1183,7 +1185,12 @@ pub(crate) fn publish_tactical_radar_blackboard(
 
         if is_local {
             // ── Radar blips ──────────────────────────────────────────────────
-            let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
+            let effective_tactical_range = ship_config.0.tactical_radar_range
+                * radar_range_mult
+                * phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+                    power.map(|power| &power.0),
+                    crate::ship::system_registry::TACTICAL_RADAR_KIND,
+                );
             let shows = crate::entities::tags::parse_tags(&ship_config.0.tactical_radar_shows);
             let selects = crate::entities::tags::parse_tags(&ship_config.0.tactical_radar_selects);
 

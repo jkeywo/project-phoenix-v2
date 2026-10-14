@@ -6,7 +6,8 @@ export function normalizeConsoleView(value) {
     ? { zoom: Math.max(0.25, Math.min(8, nav.zoom)), center_x: nav.center_x, center_y: nav.center_y,
       selected_uuid: text(nav.selected_uuid) } : null;
   return { inspected_record: text(value?.inspected_record), comms_thread: text(value?.comms_thread),
-    overlay: text(value?.overlay), navigation };
+    overlay: text(value?.overlay), navigation,
+    ...(['min', 'mid', 'detail'].includes(value?.energy_depth) ? { energy_depth: value.energy_depth } : {}) };
 }
 
 /** Repeated old snapshots must not undo a local gesture still travelling to the host. */

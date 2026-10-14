@@ -7,6 +7,7 @@ import {
   TACTICAL_BLASTER_CHARGE_ACTION_ID,
   TACTICAL_ACTION_CONTEXT,
   TACTICAL_PHASER_FIRE_ACTION_ID,
+  TACTICAL_RESTRAINT_ACTION_ID,
   TACTICAL_TARGET_ACTION_ID,
   TACTICAL_TORPEDO_FIRE_ACTION_ID,
   TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID,
@@ -34,8 +35,17 @@ const view = () => ({
 });
 
 describe('Tactical semantic actions', () => {
+  it('allows a human radar controller to hold delegated weapons and rejects a delegated radar', () => {
+    let state = { ...view(), tactical_auto: true, tactical_radar_system_id: 'radar-forward', weapons_restrained: false, weapons_restraint_auto: false };
+    const sendAction = vi.fn(), actions = registry({ getState: () => state, sendAction });
+    expect(actions.activate(TACTICAL_RESTRAINT_ACTION_ID, { context: TACTICAL_ACTION_CONTEXT })).toMatchObject({ handled: true });
+    expect(sendAction).toHaveBeenLastCalledWith('set_weapons_restraint', expect.objectContaining({ held: true, control_system_id: 'radar-forward', correlation: expect.any(String) }));
+    state = { ...state, weapons_restraint_auto: true, tactical_auto: false };
+    expect(actions.activate(TACTICAL_RESTRAINT_ACTION_ID, { context: TACTICAL_ACTION_CONTEXT })).toMatchObject({ handled: false });
+    expect(sendAction).toHaveBeenCalledTimes(1);
+  });
   it('publishes every visible Tactical intent with a stable context and two device slots', () => {
-    expect(TACTICAL_ACTIONS).toHaveLength(10);
+    expect(TACTICAL_ACTIONS).toHaveLength(11);
     for (const action of TACTICAL_ACTIONS) {
       expect(action.contexts).toEqual([TACTICAL_ACTION_CONTEXT]);
       expect(action.bindings).toHaveLength(2);

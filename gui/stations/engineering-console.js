@@ -90,7 +90,7 @@ export function makeEngineeringRender(variant) {
     // ── Power ───────────────────────────────────────────────────────────
     const p = familyView(s, 'power');
     const powerEl = doc.getElementById(ids.power);
-    if (powerEl) powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
+    if (powerEl) powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto, ...(p.energy ? { energy: p.energy, system_id: p.system_id } : {}) };
     const batteryEl = doc.getElementById(ids.battery);
     if (batteryEl) {
       batteryEl.state = {

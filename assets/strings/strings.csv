@@ -4964,3 +4964,44 @@ energy.group.phaser-defence.label,Local energy fine control group,Phaser Defence
 energy.group.phaser-lash.label,Local energy fine control group,Phaser Lash,Phaser Peitsche,Phaser Lash,machine
 energy.group.blaster-spike.label,Local energy fine control group,Blaster Spike,Blaster Dorn,Blaster Spike,machine
 energy.group.torpedo-tube-lance.label,Local energy fine control group,Torpedo Tube Lance,Torpedorohr Lanze,Torpedo Tube Lance,machine
+energy.controls.depth,Local energy human controls,Control detail,Bedienungsumfang,Control detail,machine
+energy.controls.min,Local energy human controls,Minimal,Minimal,Minimal,machine
+energy.controls.mid,Local energy human controls,Groups,Gruppen,Groups,machine
+energy.controls.detail,Local energy human controls,Detailed,Detailliert,Detailed,machine
+energy.controls.mode,Local energy human controls,Allocation,Zuteilung,Allocation,machine
+energy.controls.manual,Local energy human controls,Manual flows,Manuelle Zuflüsse,Manual flows,machine
+energy.controls.minimal,Local energy human controls,Priority allocation,Prioritätszuteilung,Priority allocation,machine
+energy.controls.coolant_usage,Local energy human controls,Coolant use,Kühlmitteleinsatz,Coolant use,machine
+energy.controls.none,Local energy human controls,None,Kein,None,machine
+energy.controls.low,Local energy human controls,Low,Niedrig,Low,machine
+energy.controls.high,Local energy human controls,High,Hoch,High,machine
+energy.controls.reactor,Local energy human controls,Reactor reserve,Reaktorreserve,Reactor reserve,machine
+energy.controls.local_reserves,Local energy human controls,System reserves and heat,Systemreserven und Wärme,System reserves and heat,machine
+energy.controls.output,Local energy human controls,Reactor output / second,Reaktorleistung / Sekunde,Reactor output / second,machine
+energy.controls.cooling,Local energy human controls,Cooling / second,Kühlung / Sekunde,Cooling / second,machine
+energy.controls.flow,Local energy human controls,Incoming flow / second,Zufluss / Sekunde,Incoming flow / second,machine
+energy.controls.priority,Local energy human controls,Priority order,Prioritätsreihenfolge,Priority order,machine
+energy.controls.raise_priority,Local energy human controls,Move earlier,Früher einordnen,Move earlier,machine
+energy.controls.lower_priority,Local energy human controls,Move later,Später einordnen,Move later,machine
+energy.controls.reactor_status,Local energy human controls,Reserve {energy}/{capacity} · Heat {heat}/{trip} · Output {output}/{desired},Reserve {energy}/{capacity} · Wärme {heat}/{trip} · Leistung {output}/{desired},Reserve {energy}/{capacity} · Heat {heat}/{trip} · Output {output}/{desired},machine
+energy.controls.thermal_stop,Local energy human controls,Thermal stop; resumes after cooling.,Wärmeabschaltung; Wiederanlauf nach Abkühlung.,Thermal stop; resumes after cooling.,machine
+energy.controls.coolant_stock,Local energy human controls,{provider}: {available} coolant; fractional reserve {credit},{provider}: {available} Kühlmittel; Teilreserve {credit},{provider}: {available} coolant; fractional reserve {credit},machine
+energy.controls.group_status,Local energy human controls,Flow {actual}/{desired} · Cooling {cooling}/{requested_cooling},Zufluss {actual}/{desired} · Kühlung {cooling}/{requested_cooling},Flow {actual}/{desired} · Cooling {cooling}/{requested_cooling},machine
+energy.controls.flow_cut,Local energy human controls,Intake cut; saved flow will return when feasible.,"Zufluss unterbrochen; gespeicherte Zuteilung kehrt zurück, sobald möglich.",Intake cut; saved flow will return when feasible.,machine
+energy.controls.consumer_status,Local energy human controls,Reserve {energy}/{capacity} · Heat {heat}/{trip} · Intake {intake},Reserve {energy}/{capacity} · Wärme {heat}/{trip} · Zufluss {intake},Reserve {energy}/{capacity} · Heat {heat}/{trip} · Intake {intake},machine
+energy.controls.override_flow,Local energy human controls,Individual incoming flow,Individueller Zufluss,Individual incoming flow,machine
+energy.controls.reset_flow,Local energy human controls,Use group flow,Gruppenzufluss verwenden,Use group flow,machine
+energy.controls.hold_weapons,Local energy human controls,Hold weapons fire,Waffenfeuer einstellen,Hold weapons fire,machine
+energy.controls.resume_weapons,Local energy human controls,Release weapons hold,Feuerfreigabe erteilen,Release weapons hold,machine
+semantic_action.power.energy_reactor.label,Local energy semantic action,Set reactor output and cooling,Reaktorleistung und Kühlung festlegen,Set reactor output and cooling,machine
+semantic_action.power.energy_reactor.accessibility,Local energy semantic action,Set reactor output and cooling,Reaktorleistung und Kühlung festlegen,Set reactor output and cooling,machine
+semantic_action.power.energy_group.label,Local energy semantic action,Set group flow and cooling,Gruppenzufluss und Kühlung festlegen,Set group flow and cooling,machine
+semantic_action.power.energy_group.accessibility,Local energy semantic action,Set group flow and cooling,Gruppenzufluss und Kühlung festlegen,Set group flow and cooling,machine
+semantic_action.power.energy_priority.label,Local energy semantic action,Change energy priority order,Energieprioritäten ändern,Change energy priority order,machine
+semantic_action.power.energy_priority.accessibility,Local energy semantic action,Change energy priority order,Energieprioritäten ändern,Change energy priority order,machine
+semantic_action.power.energy_mode.label,Local energy semantic action,Select energy allocation mode,Energiezuteilungsmodus wählen,Select energy allocation mode,machine
+semantic_action.power.energy_mode.accessibility,Local energy semantic action,Select energy allocation mode,Energiezuteilungsmodus wählen,Select energy allocation mode,machine
+semantic_action.power.energy_system.label,Local energy semantic action,Set individual System flow,Individuellen Systemzufluss festlegen,Set individual System flow,machine
+semantic_action.power.energy_system.accessibility,Local energy semantic action,Set individual System flow,Individuellen Systemzufluss festlegen,Set individual System flow,machine
+semantic_action.tactical.weapons_restraint.label,Weapon restraint semantic action,Toggle weapons hold,Feuersperre umschalten,Toggle weapons hold,machine
+semantic_action.tactical.weapons_restraint.accessibility,Weapon restraint semantic action,Toggle weapons hold,Feuersperre umschalten,Toggle weapons hold,machine

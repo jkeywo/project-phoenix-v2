@@ -23,6 +23,7 @@ export const TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID = 'tactical.torpedo-volley-d
 export const TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID = 'tactical.torpedo-volley-up';
 export const TACTICAL_TORPEDO_FIRE_ACTION_ID = 'tactical.torpedo-fire';
 export const TACTICAL_STRIKE_BOOST_ACTION_ID = 'tactical.strike-boost';
+export const TACTICAL_RESTRAINT_ACTION_ID = 'tactical.weapons-restraint';
 
 function action(id, label, accessibility, keyboard, gamepad) {
   return defineStationAction({ id, contexts: [TACTICAL_ACTION_CONTEXT],
@@ -41,6 +42,7 @@ export const TACTICAL_ACTIONS = Object.freeze([
   action(TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID, 'torpedo_volley_up', 'torpedo_volley_up', key('KeyE'), axis('left-stick-y', 'negative')),
   action(TACTICAL_TORPEDO_FIRE_ACTION_ID, 'torpedo_fire', 'torpedo_fire', key('KeyG'), axis('left-stick-y', 'positive')),
   action(TACTICAL_STRIKE_BOOST_ACTION_ID, 'strike_boost', 'strike_boost', key('KeyV'), button('face-top')),
+  action(TACTICAL_RESTRAINT_ACTION_ID, 'weapons_restraint', 'weapons_restraint', key('KeyH'), null),
 ]);
 
 export function tacticalActionView(state) {
@@ -124,6 +126,12 @@ export function registerTacticalActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
+  registry.register(TACTICAL_ACTIONS[10], ({ actionId, correlation, inputMs, detail } = {}) => {
+    const view = tacticalActionView(getState());
+    if (!view || view.weapons_restraint_auto || !view.tactical_radar_system_id || typeof view.weapons_restrained !== 'boolean') return false;
+    return send(actionId, correlation, inputMs, 'set_weapons_restraint', { held: typeof detail?.held === 'boolean' ? detail.held : !view.weapons_restrained,
+      control_system_id: view.tactical_radar_system_id });
+  });
 
   registry.register(TACTICAL_ACTIONS[9], ({ actionId, correlation, inputMs } = {}) => {
     const view = tacticalActionView(getState());

@@ -438,6 +438,7 @@ export function initConsole({
       if (typeof document === 'undefined') return;
       for (const panel of document.querySelectorAll('ph-dossier-panel')) panel.applyConsoleView?.(view.inspected_record);
       for (const map of document.querySelectorAll('ph-navigation-map')) map.applyConsoleView?.(view.navigation);
+      for (const power of document.querySelectorAll('ph-power-controls')) power.applyConsoleView?.(view.energy_depth);
       render.applyConsoleView?.(_latestState, view.comms_thread, document);
       _root.__setConsoleOverlay?.(view.overlay);
     },

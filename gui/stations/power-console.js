@@ -46,7 +46,7 @@ export function makePowerRender(variant) {
     const pct = s.battery_max > 0 ? (s.battery_charge / s.battery_max) * 100 : 0;
 
     const controlsEl = doc.getElementById(ids.controls);
-    if (controlsEl) controlsEl.state = { groups: groups, auto: !!s.power_auto };
+    if (controlsEl) controlsEl.state = { groups: groups, auto: !!s.power_auto, ...(s.energy ? { energy: s.energy, system_id: s.system_id } : {}) };
 
     const batteryEl = doc.getElementById(ids.battery);
     if (batteryEl) batteryEl.state = { level_pct: pct, charging: !!s.charging, emergency_threshold_pct: 20 };

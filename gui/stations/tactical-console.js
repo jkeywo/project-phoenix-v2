@@ -58,6 +58,8 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
+import { TACTICAL_RESTRAINT_ACTION_ID } from './tactical-actions.js';
+import { activateTacticalAction } from './tactical-action-control.js';
 
 /**
  * Build a Tactical `renderStation(s, doc)` for one hull from its `variant`.
@@ -87,6 +89,17 @@ export function makeTacticalRender(variant) {
     // highlight ring. Setting only the latter — the pre-#1234 bug on three
     // hulls — left the inner radar blind to the lock.
     const radarEl = doc.getElementById(ids.radar);
+    let restraintControl = radarEl?.parentElement.querySelector('[data-weapons-restraint]');
+    if (restraintControl) restraintControl.hidden = typeof w.weapons_restrained !== 'boolean';
+    if (radarEl && typeof w.weapons_restrained === 'boolean') {
+      let control = restraintControl;
+      if (!control) { control = doc.createElement('button'); control.type = 'button'; control.className = 'mini-btn'; control.dataset.weaponsRestraint = '';
+        control.style.minHeight = '44px'; control.onclick = () => activateTacticalAction({ sendAction: (...args) => doc.defaultView?.sendAction?.(...args) }, TACTICAL_RESTRAINT_ACTION_ID,
+          { held: !control._weaponsHeld, control_system_id: control._radarSystemId }, 'set_weapons_restraint'); radarEl.before(control); }
+      control._radarSystemId = w.tactical_radar_system_id;
+      control._weaponsHeld = w.weapons_restrained; control.disabled = !!w.weapons_restraint_auto;
+      control.setAttribute('aria-pressed', String(w.weapons_restrained)); control.textContent = t(w.weapons_restrained ? 'energy.controls.resume_weapons' : 'energy.controls.hold_weapons');
+    }
     if (radarEl) {
       radarEl.state = {
         blips: w.blips || [],

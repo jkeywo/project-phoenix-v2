@@ -43,8 +43,27 @@ function controlSystemId(action, fallback) {
     ? action.control_system_id
     : fallback;
 }
+function energyCommand(type, fields) {
+  return (action, send) => {
+    const correlated = typeof action.correlation === 'string' && action.correlation;
+    const data = Object.fromEntries(fields.map(key => [key, action[key]]));
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: action.correlation } : {}), target: controlSystemId(action, 'power-reactor'), payload: { type, data },
+    });
+  };
+}
 
 export const ACTION_MAP = Object.freeze({
+  set_weapons_restraint: (action, send) => {
+    const correlated = typeof action.correlation === 'string' && action.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', { ...(correlated ? { correlation: action.correlation } : {}),
+      target: controlSystemId(action, 'tactical-radar'), payload: { type: 'SetWeaponsRestraint', data: { held: !!action.held } } });
+  },
+  set_energy_reactor: energyCommand('SetEnergyReactor', ['output_per_sec', 'cooling_per_sec']),
+  set_energy_group: energyCommand('SetEnergyGroup', ['group', 'flow_per_sec', 'cooling_per_sec']),
+  set_energy_priority: energyCommand('SetEnergyPriority', ['group', 'priority']),
+  set_energy_mode: energyCommand('SetEnergyMode', ['mode', 'cooling_usage']),
+  set_energy_system: energyCommand('SetEnergySystemFlow', ['system', 'flow_per_sec']),
   set_console_view: (a, send) => {
     if (typeof a.console === 'string' && a.console && a.view) {
       send('SetConsoleView', { console: a.console, view: a.view });

@@ -16,7 +16,7 @@
  * stores a readable property and we assert the exact object the console pushed,
  * with no shadow-DOM / canvas / ResizeObserver machinery in the way.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/tactical.console.js';
 import { renderStation as rawCruiserRender } from '../../gui/cruiser/tactical.console.js';
@@ -36,6 +36,22 @@ function mount(markup) {
   document.body.innerHTML = markup;
 }
 const el = (id) => document.getElementById(id);
+
+describe('Tactical weapon restraint control', () => {
+  afterEach(() => { delete window.activateSemanticAction; });
+  it('keeps a human radar control usable with delegated weapons and retires it with its projection', () => {
+    mount('<ph-tactical-radar id="tactical-radar"></ph-tactical-radar>');
+    window.activateSemanticAction = vi.fn();
+    const state = { tactical_auto: true, weapons_restrained: false, weapons_restraint_auto: false, tactical_radar_system_id: 'radar-forward' };
+    battleshipRender(state, document);
+    const button = document.querySelector('[data-weapons-restraint]');
+    expect(button.disabled).toBe(false); expect(button.getAttribute('aria-pressed')).toBe('false');
+    button.click(); expect(window.activateSemanticAction).toHaveBeenCalledWith('tactical.weapons-restraint', expect.objectContaining({ detail: { held: true, control_system_id: 'radar-forward' } }));
+    battleshipRender({ ...state, weapons_restrained: true, weapons_restraint_auto: true }, document);
+    expect(button.disabled).toBe(true); expect(button.getAttribute('aria-pressed')).toBe('true');
+    battleshipRender({}, document); expect(button.hidden).toBe(true);
+  });
+});
 
 // ── Fixtures: only the elements each hull's markup actually carries ──────────
 const FIXTURES = {

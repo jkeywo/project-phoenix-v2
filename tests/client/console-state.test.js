@@ -477,6 +477,11 @@ describe('foldTorpedoBadges', () => {
 });
 
 describe('buildWeaponsConsoleState', () => {
+  it('keeps restraint authority separate from weapon automation and addresses the actual radar', () => {
+    const state = { blackboards: { tactical: { weapons_restrained: true, weapons_restraint_auto: false }, 'tactical-radar': {} },
+      controlSources: { 'phaser-fore': 'Ai', 'tactical-radar': 'Player' } };
+    expect(buildWeaponsConsoleState(state)).toMatchObject({ weapons_restrained: true, weapons_restraint_auto: false, tactical_radar_system_id: 'tactical-radar' });
+  });
   it('returns valid JSON', () => {
     expect(() => buildWeaponsConsoleState(EMPTY)).not.toThrow();
   });
@@ -1900,6 +1905,14 @@ describe('overallHull', () => {
 });
 
 describe('buildPowerConsoleState', () => {
+  it('projects energy intact and takes control solely from the actual reactor', () => {
+    const energy = { reactor: { energy: 12 }, groups: [], consumers: [], coolant: [] };
+    const state = { blackboards: { power: { energy }, 'power-reactor': { is_online: true }, 'power-battery': { is_online: true } },
+      controlSources: { 'power-reactor': 'Ai', 'power-battery': 'Player' } };
+    expect(buildPowerConsoleState(state)).toMatchObject({ energy, system_id: 'power-reactor', power_auto: true });
+    state.controlSources = { 'power-reactor': 'Player', 'power-battery': 'Ai' };
+    expect(buildPowerConsoleState(state).power_auto).toBe(false);
+  });
   it('returns valid JSON', () => {
     expect(() => buildPowerConsoleState(EMPTY)).not.toThrow();
   });

@@ -60,8 +60,15 @@ const repair = () => ({
 });
 
 describe('Engineering, Power, and Repair semantic actions', () => {
+  it('never sends retired allocation rungs while local energy is active', () => {
+    const sendAction = vi.fn();
+    const actions = registry({ getState: () => ({ ...power(), energy: {} }), sendAction });
+    expect(actions.activate(POWER_INCREASE_ACTION_ID, { context: POWER_ACTION_CONTEXT })).toMatchObject({ handled: false });
+    expect(actions.activate(POWER_DECREASE_ACTION_ID, { context: POWER_ACTION_CONTEXT, detail: { target: 'helm', level: 2 } })).toMatchObject({ handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
   it('publishes eight authoritative actions with exactly two slots and shipped contexts', () => {
-    expect(ENGINEERING_ACTIONS).toHaveLength(8);
+    expect(ENGINEERING_ACTIONS).toHaveLength(13);
     for (const action of ENGINEERING_ACTIONS) {
       expect(action.authoritativeFeedback).toBe(true);
       expect(action.bindings).toHaveLength(2);

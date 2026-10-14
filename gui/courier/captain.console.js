@@ -51,7 +51,7 @@ export const renderStation = makeCaptainRender({
     }
 
     const powerEl = doc.getElementById('power');
-    if (powerEl) powerEl.state = { groups: power.consoles || [], auto: !!power.power_auto };
+    if (powerEl) powerEl.state = { groups: power.consoles || [], auto: !!power.power_auto, ...(power.energy ? { energy: power.energy, system_id: power.system_id } : {}) };
     const batteryEl = doc.getElementById('battery');
     if (batteryEl) {
       batteryEl.state = {

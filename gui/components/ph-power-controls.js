@@ -12,6 +12,7 @@ import {
 } from '../stations/engineering-actions.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PhElement, phDefine } from './ph-element.js';
+import './ph-energy-controls.js';
 
 /**
  * The commandable floor assumed for a group whose entry carries no `min_level`
@@ -105,6 +106,7 @@ export class PhPowerControls extends PhElement {
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="groups-container"></div>
+  <ph-energy-controls id="energy-controls" hidden></ph-energy-controls>
 `;
   }
 
@@ -128,6 +130,7 @@ export class PhPowerControls extends PhElement {
 
   /** The panel's rovable controls: every group's − and + stepper, in DOM order. */
   #rovingItems() {
+    if (this.state?.energy) return [];
     return Array.from(this.shadowRoot.querySelectorAll('.mini-btn'));
   }
 
@@ -143,6 +146,9 @@ export class PhPowerControls extends PhElement {
     const container = this.shadowRoot.getElementById('groups-container');
     const badge = this.shadowRoot.getElementById('auto-badge');
     badge.style.display = auto ? 'inline' : 'none';
+    const energy = this.shadowRoot.getElementById('energy-controls');
+    energy.hidden = !s.energy; container.hidden = !!s.energy;
+    if (s.energy) { energy.sendAction = (action, detail) => this.sendAction?.(action, detail); energy.state = s; return; }
 
     if (groups.length === 0) {
       if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.power.empty'); container.appendChild(this.#emptyEl); }
@@ -330,6 +336,7 @@ export class PhPowerControls extends PhElement {
   #stateAuto() {
     return !!(this.state && this.state.auto);
   }
+  applyConsoleView(depth) { this.shadowRoot.getElementById('energy-controls').applyConsoleView(depth); }
 }
 
 /** @see PhPowerControls#currentLevel — the commanded level, with its fallback. */

@@ -774,7 +774,8 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // Combat Lock + radar blips/regions moved to the tactical-radar blackboard
   // (issue #829). `selected_target` is the authoritative lock; fall back to the
   // Weapons blackboard's `target_uuid` (still published for reconnect resync).
-  const tacRadarBb = blackboardOfKind(state, 'TacticalRadar', systemIds)?.data || {};
+  const tacRadarEntry = blackboardOfKind(state, 'TacticalRadar', systemIds);
+  const tacRadarBb = tacRadarEntry?.data || {};
   const targetUuid   = tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
   const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
   const bankStates   = bb.banks         ?? state.weaponsBanks        ?? [];
@@ -889,6 +890,8 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     blasters,
     own_hull:      aggregateStationHull('tactical', state.consoleHull, state.stationSystems),
     tactical_auto: tacticalAuto,
+    ...(typeof bb.weapons_restrained === 'boolean' ? { weapons_restrained: bb.weapons_restrained,
+      weapons_restraint_auto: !!bb.weapons_restraint_auto, tactical_radar_system_id: tacRadarEntry?.systemId ?? null } : {}),
     station_rating: state.stationRatings?.['tactical'] || 'Std',
   };
 }
@@ -1746,6 +1749,7 @@ export function buildPowerConsoleState(state, systemIds = []) {
     // issue #516 cleanup closed out).
     consoles:       bb.groups        || [],
     strike_reserve: bb.strike_reserve || null,
+    ...(bb.energy ? { energy: bb.energy } : {}),
     total:          bb.total          ?? 0,
     total_max:      bb.total_max      ?? 8,
     battery_charge: bb.battery_charge ?? 0,
@@ -1768,7 +1772,9 @@ export function buildPowerConsoleState(state, systemIds = []) {
     // reconstruct it from a family name in the iframe/action map.
     system_id:      reactorEntry?.systemId ?? null,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
-    power_auto:     systemIds.length > 0
+    power_auto:     bb.energy && reactorEntry
+      ? state.controlSources?.[reactorEntry.systemId] === 'Ai'
+      : systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
       : state.stationRatings?.['power'] === 'Backfill',
     station_rating: state.stationRatings?.['power'] || 'Std',

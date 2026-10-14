@@ -3,6 +3,16 @@ import { createConsoleViewSession, normalizeConsoleView } from '../../gui/consol
 import { ACTION_MAP } from '../../gui/action-map.js';
 
 describe('Console working-view continuity', () => {
+  it('carries supported energy depth through handoff without sharing device preferences', () => {
+    const send = vi.fn(), apply = vi.fn(), session = createConsoleViewSession({ send, apply });
+    session.receive({ energy_depth: 'detail' }, 'engineer');
+    session.change({ energy_depth: 'min', font_scale: 2 });
+    expect(send.mock.calls[0][0]).toMatchObject({ energy_depth: 'min' });
+    expect(send.mock.calls[0][0]).not.toHaveProperty('font_scale');
+    session.receive({ energy_depth: 'detail' }, 'relief');
+    expect(apply).toHaveBeenLastCalledWith(expect.objectContaining({ energy_depth: 'detail' }));
+    expect(normalizeConsoleView({ energy_depth: 'unsupported' })).not.toHaveProperty('energy_depth');
+  });
   it('merges local field changes and never sends operator preferences', () => {
     const send = vi.fn(), apply = vi.fn();
     const session = createConsoleViewSession({ send, apply });

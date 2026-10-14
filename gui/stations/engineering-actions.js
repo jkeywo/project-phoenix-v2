@@ -15,6 +15,7 @@ import { defineStationAction, createCorrelatedActionSender, keyboard, button, dp
 import { familySystemId, familyView } from '../console-payload.js';
 import { EXTERNAL_REPAIR_TARGET } from '../repair-dispatch.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
+import { ENERGY_ACTIONS, registerEnergyActions } from './energy-actions.js';
 
 export const POWER_ACTION_CONTEXT = 'power';
 export const REPAIR_ACTION_CONTEXT = 'repair';
@@ -131,6 +132,7 @@ export const EXTERNAL_REPAIR_TOGGLE_ACTION = action(
 );
 
 export const ENGINEERING_ACTIONS = Object.freeze([
+  ...ENERGY_ACTIONS,
   POWER_DECREASE_ACTION,
   POWER_INCREASE_ACTION,
   REPAIR_DISPATCH_ACTION,
@@ -191,7 +193,9 @@ function powerLimit(group, direction) {
 }
 
 function choosePowerChange(view, direction, detail) {
-  if (!view || view.power_auto || view.locked) return null;
+  // Rung shortcuts have no authored flow step or selected energy group. The
+  // new sliders retain native keyboard operation without a parallel command.
+  if (!view || view.energy || view.power_auto || view.locked) return null;
   const groups = powerGroups(view);
   const explicitId = detail && typeof detail.target === 'string' ? detail.target : null;
   const candidates = explicitId
@@ -310,6 +314,7 @@ export function registerEngineeringActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
+  registerEnergyActions(registry, { ...options, getState, sendAction });
 
   const power = (direction) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const state = getState();

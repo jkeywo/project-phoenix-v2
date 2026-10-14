@@ -355,6 +355,11 @@ pub fn is_atomic_weapon_delivery(path: &str) -> bool {
     path == "weapon.delivery"
 }
 
+/// A complete hardware profile replaces inherited provider variants and groups.
+pub fn is_atomic_energy_profile(path: &str) -> bool {
+    path == "energy"
+}
+
 fn merge_at(
     path: &str,
     template: &toml::Value,
@@ -363,7 +368,9 @@ fn merge_at(
 ) -> toml::Value {
     match (template, override_) {
         (toml::Value::Table(_), toml::Value::Table(_))
-            if is_atomic_resource_endpoint(path) || is_atomic_weapon_delivery(path) =>
+            if is_atomic_resource_endpoint(path)
+                || is_atomic_weapon_delivery(path)
+                || is_atomic_energy_profile(path) =>
         {
             override_.clone()
         }

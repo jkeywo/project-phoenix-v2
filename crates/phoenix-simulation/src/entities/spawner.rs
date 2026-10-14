@@ -641,8 +641,11 @@ impl SpawnSection for DockSpawn {
                     .ship_config
                     .as_ref()
                     .expect("active Dock has ship config");
-                let trees = crate::ai::state_tree_runtime::compile_ship_trees(ship)
-                    .expect("validated System AI tree content");
+                let trees = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(
+                    ship,
+                    config.energy.as_ref(),
+                )
+                .expect("validated System AI tree content");
                 cmds.insert(trees);
             }
         }

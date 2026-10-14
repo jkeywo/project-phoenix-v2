@@ -1181,3 +1181,14 @@ amount = 7
     assert_eq!(capacities[0]["amount"].as_integer(), Some(7));
     assert_eq!(capacities[1]["id"].as_str(), Some("spares"));
 }
+
+#[test]
+fn energy_profiles_replace_as_one_hardware_definition() {
+    let base: toml::Value = toml::from_str("[energy.reactor]\nsustainable_output_per_sec=10.0\n[energy.reactor.coolant.provider]\nkind='capacity'\nid='old'\n[[energy.group]]\nid='old'\nparent='obsolete'\n").unwrap();
+    let replacement: toml::Value = toml::from_str("[energy.reactor]\nsustainable_output_per_sec=20.0\n[energy.reactor.coolant]\nservice='coolant'\n[[energy.group]]\nid='new'\n").unwrap();
+    for policy in [MergePolicy::ComposeFragments, MergePolicy::InstanceOverride] {
+        let merged = merge_entity_config_toml_with(&base, &replacement, policy).unwrap();
+        assert_eq!(merged["energy"], replacement["energy"]);
+        assert_eq!(base["energy"]["group"][0]["id"].as_str(), Some("old"));
+    }
+}

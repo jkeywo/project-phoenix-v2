@@ -25,9 +25,14 @@ pub struct FrameRuntime {
     pub calls: BTreeMap<String, FrameRuntime>,
     pub result: Option<Completion>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceEvent {
+    WriteNumber {
+        node: String,
+        channel: String,
+        value: f64,
+    },
     Read {
         node: String,
         source: BoolSource,
@@ -56,9 +61,10 @@ pub enum TraceEvent {
         result: Completion,
     },
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StepResult {
     pub intents: BTreeMap<String, bool>,
+    pub numeric_intents: BTreeMap<String, f64>,
     pub trace: Vec<TraceEvent>,
 }
 fn frame(tree: &TreeDef) -> Result<FrameRuntime, TreeError> {
@@ -125,8 +131,10 @@ fn validate(
 struct Context<'a> {
     program: &'a Program,
     facts: &'a BTreeMap<String, bool>,
+    numeric_facts: &'a BTreeMap<String, f64>,
     pending: BTreeMap<String, bool>,
     intents: BTreeMap<String, bool>,
+    numeric_intents: BTreeMap<String, f64>,
     trace: Vec<TraceEvent>,
     visits: usize,
 }
@@ -148,6 +156,11 @@ impl Context<'_> {
     ) -> Result<bool, TreeError> {
         self.visit()?;
         let result = match value {
+            BoolSource::NumberCompare {
+                name,
+                comparison,
+                value,
+            } => comparison.compare(self.numeric_facts[name], *value),
             BoolSource::Literal { value } => *value,
             BoolSource::Fact { name } => self.facts[name],
             BoolSource::Parameter { name } => params[name],
@@ -243,6 +256,14 @@ impl Context<'_> {
                     continue;
                 }
                 match &task.action {
+                    TaskAction::WriteNumber { channel, value } => {
+                        self.numeric_intents.insert(channel.clone(), *value);
+                        self.trace.push(TraceEvent::WriteNumber {
+                            node,
+                            channel: channel.clone(),
+                            value: *value,
+                        });
+                    }
                     TaskAction::Write { channel, value } => {
                         let value = self.read(value, frame, params, &node)?;
                         self.pending.insert(channel.clone(), value);
@@ -314,11 +335,31 @@ pub fn step(
     runtime: &mut TreeRuntime,
     tick: u64,
 ) -> Result<StepResult, TreeError> {
+    step_with_numbers(
+        program,
+        facts,
+        &BTreeMap::new(),
+        current_channels,
+        runtime,
+        tick,
+    )
+}
+
+pub fn step_with_numbers(
+    program: &Program,
+    facts: &BTreeMap<String, bool>,
+    numeric_facts: &BTreeMap<String, f64>,
+    current_channels: &BTreeMap<String, bool>,
+    runtime: &mut TreeRuntime,
+    tick: u64,
+) -> Result<StepResult, TreeError> {
     if runtime.last_tick.is_some_and(|last| tick <= last) {
         return Err(fail("tree tick must advance"));
     }
     if facts.keys().ne(program.bindings.facts.iter())
         || current_channels.keys().ne(program.bindings.channels.iter())
+        || numeric_facts.keys().ne(program.numeric.facts.iter())
+        || numeric_facts.values().any(|value| !value.is_finite())
     {
         return Err(fail("input bindings do not match compiled interface"));
     }
@@ -331,8 +372,10 @@ pub fn step(
     let mut context = Context {
         program,
         facts,
+        numeric_facts,
         pending: current_channels.clone(),
         intents: BTreeMap::new(),
+        numeric_intents: BTreeMap::new(),
         trace: Vec::new(),
         visits: 0,
     };
@@ -345,6 +388,7 @@ pub fn step(
     *runtime = next;
     Ok(StepResult {
         intents: context.intents,
+        numeric_intents: context.numeric_intents,
         trace: context.trace,
     })
 }

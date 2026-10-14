@@ -186,16 +186,47 @@ pub fn decide_tree(
     runtime: &mut super::state_tree::TreeRuntime,
     tick: u64,
 ) -> Result<TreeHostOutcome, super::state_tree::TreeError> {
+    decide_tree_with_numbers(
+        sources,
+        system,
+        program,
+        facts,
+        &std::collections::BTreeMap::new(),
+        current_channels,
+        runtime,
+        tick,
+    )
+}
+
+/// The same individual-System gate, with a closed set of numeric readings.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_tree_with_numbers(
+    sources: &ControlSourceResolver,
+    system: &SystemId,
+    program: Option<&super::state_tree::Program>,
+    facts: &std::collections::BTreeMap<String, bool>,
+    numeric_facts: &std::collections::BTreeMap<String, f64>,
+    current_channels: &std::collections::BTreeMap<String, bool>,
+    runtime: &mut super::state_tree::TreeRuntime,
+    tick: u64,
+) -> Result<TreeHostOutcome, super::state_tree::TreeError> {
     if !ai_operates(sources, system) {
         return Ok(TreeHostOutcome::NotAiOperated);
     }
     let Some(program) = program else {
         return Ok(TreeHostOutcome::Undeclared);
     };
-    super::state_tree::step(program, facts, current_channels, runtime, tick)
-        .map(TreeHostOutcome::Evaluated)
+    super::state_tree::step_with_numbers(
+        program,
+        facts,
+        numeric_facts,
+        current_channels,
+        runtime,
+        tick,
+    )
+    .map(TreeHostOutcome::Evaluated)
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TreeHostOutcome {
     NotAiOperated,
     Undeclared,

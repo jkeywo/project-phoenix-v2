@@ -23,6 +23,13 @@ pub struct ShipAiTreePrograms(pub BTreeMap<SystemId, Program>);
 pub fn compile_ship_trees(
     ship: &ShipConfig,
 ) -> Result<(ShipAiTreePrograms, ShipAiTreeRuntime), String> {
+    compile_ship_trees_with_energy(ship, None)
+}
+
+pub fn compile_ship_trees_with_energy(
+    ship: &ShipConfig,
+    energy: Option<&phoenix_sim_gameplay::entities::config::EnergyConfigSection>,
+) -> Result<(ShipAiTreePrograms, ShipAiTreeRuntime), String> {
     let mut programs = BTreeMap::new();
     let mut runtimes = BTreeMap::new();
     for system in &ship.systems {
@@ -33,11 +40,24 @@ pub fn compile_ship_trees(
             .clone()
             .try_into()
             .map_err(|error| format!("System {} AI: {error}", system.id.0))?;
-        let dock = dock_composition(&system.components)
-            .ok_or_else(|| format!("System {} has no supported tree bindings", system.id.0))?;
-        let bindings = dock_bindings(dock.enabled_channel);
-        let program = compile(&definition, &bindings)
-            .map_err(|error| format!("System {} AI: {error}", system.id.0))?;
+        let program = if system.kind == crate::ship::system_registry::POWER_REACTOR_KIND {
+            let energy = energy.ok_or_else(|| {
+                format!(
+                    "Power System {} requires an energy hardware profile",
+                    system.id.0
+                )
+            })?;
+            phoenix_sim_gameplay::ai::state_tree::compile_with_numbers(
+                &definition,
+                &phoenix_sim_gameplay::ai::state_tree::SupportedBindings::default(),
+                &phoenix_sim_gameplay::resources::energy_ai::power_numeric_bindings(energy),
+            )
+        } else {
+            let dock = dock_composition(&system.components)
+                .ok_or_else(|| format!("System {} has no supported tree bindings", system.id.0))?;
+            compile(&definition, &dock_bindings(dock.enabled_channel))
+        }
+        .map_err(|error| format!("System {} AI: {error}", system.id.0))?;
         programs.insert(system.id.clone(), program);
         runtimes.insert(system.id.clone(), TreeRuntime::default());
     }

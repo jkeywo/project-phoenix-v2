@@ -92,7 +92,7 @@ pub struct WorkshopValidation {
 /// Runtime-owned vocabulary used by Workshop's ship authoring controls.
 /// Keeping this beside the validators means the browser and native surfaces
 /// cannot drift into offering a System or Directive spelling the build rejects.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WorkshopShipSchema {
     pub console_feed_kinds: Vec<String>,
     pub console_feed_sources: Vec<String>,
@@ -108,14 +108,15 @@ pub struct WorkshopShipSchema {
     pub directive_kinds: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WorkshopAiTreeSchema {
     pub system_kinds: Vec<String>,
+    pub hosts: BTreeMap<String, crate::ai::state_tree::SchemaMetadata>,
     #[serde(flatten)]
     pub vocabulary: crate::ai::state_tree::SchemaMetadata,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WorkshopJobWorkflowSchema {
     #[serde(flatten)]
     pub vocabulary: crate::ai::state_tree::SchemaMetadata,
@@ -136,6 +137,11 @@ pub fn ship_schema() -> WorkshopShipSchema {
     let console_publication_kinds = crate::ship::system_registry::fixed_publication_kinds();
     let mut console_feed_sources: Vec<_> = console_publication_kinds.keys().cloned().collect();
     console_feed_sources.sort();
+    let mut power_tree_vocabulary = crate::ai::state_tree::schema_metadata(
+        &crate::ai::state_tree::SupportedBindings::default(),
+    );
+    power_tree_vocabulary.sources.push("number_compare");
+    power_tree_vocabulary.actions.push("write_number");
     WorkshopShipSchema {
         console_feed_sources,
         console_publication_kinds,
@@ -172,7 +178,22 @@ pub fn ship_schema() -> WorkshopShipSchema {
         .collect(),
         channel_kinds: vec!["boolean".into(), "entity_target".into()],
         ai_state_tree: WorkshopAiTreeSchema {
-            system_kinds: vec![crate::ship::system_registry::DOCK_KIND.into()],
+            system_kinds: vec![
+                crate::ship::system_registry::DOCK_KIND.into(),
+                crate::ship::system_registry::POWER_REACTOR_KIND.into(),
+            ],
+            hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::DOCK_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(&crate::ai::state_tree::dock_bindings(
+                        "enabled",
+                    )),
+                ),
+                (
+                    crate::ship::system_registry::POWER_REACTOR_KIND.into(),
+                    power_tree_vocabulary,
+                ),
+            ]),
             vocabulary: crate::ai::state_tree::schema_metadata(
                 &crate::ai::state_tree::dock_bindings("enabled"),
             ),

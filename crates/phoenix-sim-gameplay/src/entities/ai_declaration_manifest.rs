@@ -494,7 +494,20 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
                 .as_ref()
                 .is_some_and(|x| x.ai_policy.is_some()),
         ),
-        FineSystemKey::Power => ship_level(c.power.as_ref().is_some_and(|x| x.ai_policy.is_some())),
+        FineSystemKey::Power => ship_level(if c.energy.is_some() {
+            c.ship_config.as_ref().is_some_and(|ship| {
+                ship.systems.iter().any(|system| {
+                    system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
+                        && system
+                            .config
+                            .as_ref()
+                            .and_then(|value| value.get("ai"))
+                            .is_some()
+                })
+            })
+        } else {
+            c.power.as_ref().is_some_and(|x| x.ai_policy.is_some())
+        }),
         // Ship-level in SHAPE (one slot, no instance id) but NOT gated like the
         // five selectors it sits beside: it gates on `[weapons_console]`, the
         // way the per-weapon kinds below do, and deliberately not on

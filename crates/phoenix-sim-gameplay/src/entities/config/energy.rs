@@ -2,7 +2,7 @@
 //! alternate battery state or allocation-to-output multipliers.
 use crate::core::messages::{PowerGroupId, SystemId};
 use crate::resources::energy::EnergyConfig;
-use crate::resources::service::{ResourceEndpoint, ResourceLink, resolve_endpoint};
+use crate::resources::service::{resolve_endpoint, ResourceEndpoint, ResourceLink};
 use crate::ship::config::ShipConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -65,6 +65,38 @@ fn default_coolant_link() -> ResourceLink {
         service: Some("coolant".into()),
         provider: None,
     }
+}
+
+/// Equipment that performs real work needs explicit local storage even on NPCs.
+/// Aggregate/control-only surfaces do not add a second physical consumer.
+pub fn requires_energy_profile(kind: &str) -> bool {
+    use crate::ship::system_registry::*;
+    matches!(
+        kind,
+        HELM_THRUST_KIND
+            | HELM_STEERING_KIND
+            | LATERAL_THRUST_KIND
+            | VERTICAL_THRUST_KIND
+            | HELM_IMPULSE_KIND
+            | HELM_BOOST_KIND
+            | HELM_RADAR_KIND
+            | TACTICAL_RADAR_KIND
+            | SENSOR_RADAR_KIND
+            | SENSORS_KIND
+            | NAVIGATION_KIND
+            | COMMS_KIND
+            | REPAIR_KIND
+            | TRACTOR_KIND
+            | DOCK_KIND
+            | UMBILICAL_KIND
+            | TRANSPORTER_KIND
+            | SECURITY_KIND
+            | TORPEDO_MAGAZINE_KIND
+            | PHASER_BANK_KIND
+            | BLASTER_BANK_KIND
+            | TORPEDO_TUBE_KIND
+            | SHIELD_ARC_KIND
+    )
 }
 
 fn finite_nonnegative(owner: &str, field: &str, value: f32) -> Result<(), String> {
@@ -224,6 +256,10 @@ impl EnergyConfigSection {
                         group.0
                     ));
                 }
+            } else {
+                return Err(format!(
+                    "{owner} requires an explicit power_group for energy distribution"
+                ));
             }
             initial_state(
                 &owner,
@@ -245,7 +281,7 @@ impl EnergyConfigSection {
             coolant_link(&owner, &consumer.coolant, services, capacities)?;
         }
         for system in &ship.systems {
-            if system.power_group.is_some()
+            if (system.power_group.is_some() || requires_energy_profile(&system.kind))
                 && !aliases(&system.kind)
                 && !consumers.contains(&system.id)
             {

@@ -84,6 +84,8 @@ pub struct EntityConfig {
     #[serde(default)]
     pub comms_console: Option<CommsConsoleConfig>,
     pub power: Option<PowerConfigSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy: Option<EnergyConfigSection>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
     /// Unified shields config. Contains focus tuning at the top level and
@@ -551,13 +553,24 @@ impl EntityConfig {
                         components: Vec::new(),
                         channels: Vec::new(),
                         console: shields_console.clone(),
-                        id: sid,
+                        id: sid.clone(),
                         kind: crate::ship::system_registry::SHIELD_ARC_KIND.into(),
                         ai_only: shields_ai_only,
                         // Shield arcs are governed by the shields group as a
                         // whole through ShieldRegen; they are not an extra
                         // allocatable Operations channel.
-                        power_group: None,
+                        power_group: config
+                            .energy
+                            .as_ref()
+                            .and_then(|energy| {
+                                energy
+                                    .consumers
+                                    .iter()
+                                    .find(|consumer| consumer.system == sid)
+                            })
+                            .map(|_| {
+                                crate::core::messages::PowerGroupId(format!("energy-{}", sid.0))
+                            }),
                         marker: None,
                         config: Some(toml::Value::Table(synthesised_config)),
                     });
@@ -759,6 +772,26 @@ impl EntityConfig {
             }
         }
 
+        if let Some(energy) = &config.energy {
+            let ship = config.ship_config.as_ref().ok_or_else(|| {
+                SerdeError::custom("[energy] requires authored ship Systems and groups")
+            })?;
+            let capacities = config
+                .infrastructure
+                .as_ref()
+                .map(|infrastructure| {
+                    infrastructure
+                        .capacities
+                        .iter()
+                        .map(|row| row.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            energy
+                .validate(ship, &config.resource_services, &capacities)
+                .map_err(SerdeError::custom)?;
+        }
+
         // Validation: a [scan] table has to describe a fidelity ladder that can
         // actually answer (issue #1032). No bands at all, two bands claiming
         // the same id, ranges that do not strictly increase, an unlabelled band
@@ -885,6 +918,29 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
+                    && config.energy.is_some()
+                {
+                    let authored = authored.ok_or_else(|| SerdeError::custom(format!("Power System '{}' requires an explicit config.ai state tree for increment 8", system.id.0)))?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(|error| {
+                            SerdeError::custom(format!(
+                                "System '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    crate::ai::state_tree::compile_with_numbers(
+                        &tree,
+                        &crate::ai::state_tree::SupportedBindings::default(),
+                        &crate::resources::energy_ai::power_numeric_bindings(
+                            config.energy.as_ref().unwrap(),
+                        ),
+                    )
+                    .map_err(|error| {
+                        SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
+                    })?;
+                    continue;
+                }
                 if system.kind != crate::ship::system_registry::DOCK_KIND {
                     if authored.is_some() {
                         return Err(SerdeError::custom(format!(

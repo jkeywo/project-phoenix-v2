@@ -17,6 +17,7 @@ pub struct Program {
     pub(super) root: String,
     pub(super) trees: BTreeMap<String, TreeDef>,
     pub(super) bindings: SupportedBindings,
+    pub(super) numeric: NumericBindings,
 }
 impl Program {
     pub fn resolved(&self) -> AiTreeConfig {
@@ -136,8 +137,12 @@ fn source(
     value: &BoolSource,
     tree: &TreeDef,
     bindings: &SupportedBindings,
+    numeric: &NumericBindings,
 ) -> Result<(), TreeError> {
     let valid = match value {
+        BoolSource::NumberCompare { name, value, .. } => {
+            numeric.facts.contains(name) && value.is_finite()
+        }
         BoolSource::Literal { .. } => true,
         BoolSource::Fact { name } => bindings.facts.contains(name),
         BoolSource::Parameter { name } => tree.parameters.contains_key(name),
@@ -159,12 +164,13 @@ fn conditions(
     values: &[BoolCondition],
     tree: &TreeDef,
     bindings: &SupportedBindings,
+    numeric: &NumericBindings,
 ) -> Result<(), TreeError> {
     if values.len() > MAX_CONDITIONS {
         return Err(fail("condition bound exceeded"));
     }
     for c in values {
-        source(&c.value, tree, bindings)?;
+        source(&c.value, tree, bindings, numeric)?;
     }
     Ok(())
 }
@@ -201,6 +207,31 @@ fn budget(
     }
 }
 pub fn compile(config: &AiTreeConfig, bindings: &SupportedBindings) -> Result<Program, TreeError> {
+    compile_with_numbers(config, bindings, &NumericBindings::default())
+}
+
+pub fn compile_with_numbers(
+    config: &AiTreeConfig,
+    bindings: &SupportedBindings,
+    numeric: &NumericBindings,
+) -> Result<Program, TreeError> {
+    if numeric.facts.len() > MAX_NUMERIC_BINDINGS
+        || numeric.channels.len() > MAX_NUMERIC_BINDINGS
+        || numeric
+            .channels
+            .values()
+            .any(|bounds| !bounds.contains(bounds.min))
+        || numeric
+            .facts
+            .iter()
+            .any(|name| bindings.facts.contains(name))
+        || numeric
+            .channels
+            .keys()
+            .any(|name| bindings.channels.contains(name))
+    {
+        return Err(fail("invalid numeric interface"));
+    }
     if config.tree.is_empty() || config.tree.len() > MAX_TREES {
         return Err(fail("tree count out of bounds"));
     }
@@ -273,25 +304,34 @@ pub fn compile(config: &AiTreeConfig, bindings: &SupportedBindings) -> Result<Pr
                 descend(tree, &state.id)?;
             }
             for tr in &state.transition {
-                conditions(&tr.when, tree, bindings)?;
+                conditions(&tr.when, tree, bindings, numeric)?;
                 if let TransitionTarget::State { state } = &tr.target {
                     path(tree, state)?;
                 }
             }
             for task in &state.task {
-                conditions(&task.when, tree, bindings)?;
+                conditions(&task.when, tree, bindings, numeric)?;
                 match &task.action {
+                    TaskAction::WriteNumber { channel, value } => {
+                        if !numeric
+                            .channels
+                            .get(channel)
+                            .is_some_and(|bounds| bounds.contains(*value))
+                        {
+                            return Err(fail("unsupported or out-of-bounds numeric output"));
+                        }
+                    }
                     TaskAction::Write { channel, value } => {
                         if !bindings.channels.contains(channel) {
                             return Err(fail("unknown output channel"));
                         }
-                        source(value, tree, bindings)?;
+                        source(value, tree, bindings, numeric)?;
                     }
                     TaskAction::Remember { key, value } => {
                         if !tree.memory.contains_key(key) {
                             return Err(fail("unknown memory key"));
                         }
-                        source(value, tree, bindings)?;
+                        source(value, tree, bindings, numeric)?;
                     }
                     TaskAction::Call {
                         tree: callee,
@@ -304,7 +344,7 @@ pub fn compile(config: &AiTreeConfig, bindings: &SupportedBindings) -> Result<Pr
                             if !callee.parameters.contains_key(key) {
                                 return Err(fail("unknown reference parameter"));
                             }
-                            source(value, tree, bindings)?;
+                            source(value, tree, bindings, numeric)?;
                         }
                     }
                     TaskAction::Complete { .. } => {}
@@ -319,5 +359,6 @@ pub fn compile(config: &AiTreeConfig, bindings: &SupportedBindings) -> Result<Pr
         root: config.root.clone(),
         trees,
         bindings: bindings.clone(),
+        numeric: numeric.clone(),
     })
 }

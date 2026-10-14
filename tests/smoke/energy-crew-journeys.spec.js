@@ -27,8 +27,8 @@ for (const hull of [
   const flow = frame.locator('ph-energy-controls #groups > fieldset input[type="range"]').first();
   await expect(flow).toBeEnabled();
   const requested = await flow.evaluate(input => { const value = Number(input.value), max = Number(input.max);
-    const next = value < max ? Math.min(max, value + 1) : Math.max(0, value - 1);
-    input.value = String(next); input.dispatchEvent(new Event('change', { bubbles: true })); return { group: input.closest('[data-energy-group]').dataset.energyGroup, value: next }; });
+    const next = value + 1 <= max ? value + 1 : Math.max(0, value - 1);
+    input.value = String(next); input.dispatchEvent(new Event('change', { bubbles: true })); return { group: input.closest('[data-energy-group]').dataset.energyGroup, value: input.valueAsNumber }; });
   await expect.poll(() => frame.locator('ph-energy-controls').evaluate((widget, id) => widget.state.energy.groups.find(group => group.id === id).desired_flow_per_sec, requested.group)).toBeCloseTo(requested.value);
   await depth.selectOption('min');
   await phone.waitForFunction(id => window.simState.consoleViews?.[id]?.energy_depth === 'min', hull.primary);

@@ -341,3 +341,26 @@ fn appending_evidence_does_not_open_a_path_for_the_withheld_condition() {
              carries what a SCENARIO said the crew found, and nothing this module read"
     );
 }
+
+#[test]
+fn evidence_metadata_retains_claim_provenance_without_asserting_certainty() {
+    use phoenix_model::observation::{ObservationSource, ObservationUncertainty};
+    let mut subject = subject();
+    subject.evidence = vec![finding(
+        "world.probe.claim",
+        EvidenceProvenance::Dialogue,
+        45,
+    )];
+    let projected = project(&subject);
+    let evidence = &projected.evidence[0];
+    let metadata = evidence.observation.as_ref().unwrap();
+    assert_eq!(metadata.observed_tick, Some(45));
+    assert_eq!(metadata.age_ticks(70), Some(25));
+    assert_eq!(metadata.provenance.kind, ObservationSource::Evidence);
+    assert_eq!(
+        metadata.provenance.label,
+        "component.dossier.provenance.dialogue"
+    );
+    assert_eq!(metadata.uncertainty, ObservationUncertainty::Unspecified);
+    assert_eq!(evidence.text, "world.probe.claim");
+}

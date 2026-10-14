@@ -50,6 +50,8 @@ fn decode(bus: &PaneBus, id: PaneId) -> Vec<ServerMessage> {
 
 fn snapshot(entity_states: Vec<EntityStateSnapshot>) -> SimSnapshot {
     SimSnapshot {
+        observation_tick: None,
+        observation_generation: None,
         console_hosts: Vec::new(),
         console_views: Default::default(),
         entity_states,

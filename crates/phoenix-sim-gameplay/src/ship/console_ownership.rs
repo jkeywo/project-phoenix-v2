@@ -103,6 +103,15 @@ pub struct ConsoleKnowledgeView<'a> {
 }
 
 impl<'a> ConsoleKnowledgeView<'a> {
+    /// Metadata never bypasses the owned/typed-feed predicate used for its value.
+    pub fn recorded_observations(
+        &self,
+        source: &SystemId,
+    ) -> Vec<&'a phoenix_model::observation::ObservationMetadata> {
+        self.get(source)
+            .map_or_else(Vec::new, |board| board.recorded_observations())
+    }
+
     pub fn get(&self, source: &SystemId) -> Option<&'a phoenix_model::messages::SystemBlackboard> {
         let console = self.console?;
         let value = self.publications.get(source)?;
@@ -365,3 +374,7 @@ pub fn validate_consoles(config: &ShipConfig) -> Result<(), ShipConfigError> {
 #[cfg(test)]
 #[path = "console_ownership_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "console_observation_tests.rs"]
+mod observation_tests;

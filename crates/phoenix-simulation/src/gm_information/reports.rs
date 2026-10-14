@@ -77,6 +77,18 @@ pub fn projection(
             (
                 target.clone(),
                 state.presented.as_ref().map(|sample| SensorReport {
+                    observation: Some(phoenix_model::observation::ObservationMetadata::at(
+                        sample.observed_tick,
+                        phoenix_model::observation::ObservationSubject::Entity {
+                            uuid: target.clone(),
+                        },
+                        phoenix_model::observation::ObservationProvenance {
+                            kind: phoenix_model::observation::ObservationSource::SensorsReport,
+                            system: None,
+                            label: "console.sensors.report_source".into(),
+                        },
+                        phoenix_model::observation::ObservationUncertainty::Unspecified,
+                    )),
                     observed_tick: sample.observed_tick,
                     age_ticks: tick.saturating_sub(sample.observed_tick),
                     source: "console.sensors.report_source".into(),

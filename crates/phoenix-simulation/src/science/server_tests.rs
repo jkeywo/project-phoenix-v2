@@ -638,3 +638,49 @@ fn the_save_projection_carries_the_reading_and_not_the_authored_table() {
     restored.restore(&saved);
     assert_eq!(restored, live, "the whole record comes back");
 }
+
+#[test]
+fn held_scan_metadata_keeps_its_sample_and_precision_after_the_clock_advances() {
+    use phoenix_model::observation::{ObservationSource, ObservationUncertainty};
+    let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+    app.insert_resource(crate::sim_tick::SimTick(17));
+    ask_for_scan(&mut app, ship, DEPOT);
+    app.update();
+    let first = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0[&scan_blackboard_key()]
+        .clone();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(ship)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 90;
+    app.update();
+    let current = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0[&scan_blackboard_key()];
+    assert_eq!(
+        *current, first,
+        "publishing/forwarding does not renew a held reading"
+    );
+    let SystemBlackboard::Scan(board) = current else {
+        panic!("Scan publication");
+    };
+    let reading = board.reading.as_ref().unwrap();
+    let metadata = reading.observation.as_ref().unwrap();
+    assert_eq!(metadata.observed_tick, Some(17));
+    assert_eq!(metadata.age_ticks(90), Some(73));
+    assert_eq!(metadata.provenance.kind, ObservationSource::Scan);
+    assert_eq!(
+        metadata.uncertainty,
+        ObservationUncertainty::Quantized {
+            field: "condition_fraction".into(),
+            step: reading.condition_step
+        }
+    );
+}

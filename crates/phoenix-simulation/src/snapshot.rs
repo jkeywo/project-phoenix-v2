@@ -646,7 +646,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// `38` - composed Dock command channels and mechanical undock clearance.
 /// Older intent state cannot be restored into authored channel bindings.
 /// `39` — individual System AI tree states, memory and call continuation.
-pub const SNAPSHOT_FORMAT: u32 = 39;
+/// `40` — common observation metadata and repair report continuation.
+pub const SNAPSHOT_FORMAT: u32 = 40;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -724,7 +725,8 @@ pub const SNAPSHOT_FORMAT: u32 = 39;
 /// view state needed to continue under these rules.
 /// "0.10" - Dock composition and complete intent/clearance digest coverage.
 /// "0.11" — Dock runs one authored state-tree controller with persistent private memory.
-pub const SIMULATION_RULES: &str = "0.11";
+/// "0.12" — explicit repair report reduction and observation continuity.
+pub const SIMULATION_RULES: &str = "0.12";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -1733,6 +1735,7 @@ pub struct RepairState {
         String,
         crate::ship::damage::DamageTier,
         f32,
+        Vec<phoenix_model::observation::ObservationMetadata>,
     )>,
     /// The "this crew has already been told" latch, as `(repair group, tier)`
     /// sorted by id — the component is a `HashMap`, and a payload may not
@@ -1741,6 +1744,11 @@ pub struct RepairState {
     pub alerted: Vec<(
         crate::core::messages::RepairGroup,
         crate::ship::damage::DamageTier,
+    )>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recoveries: Vec<(
+        crate::core::messages::RepairGroup,
+        phoenix_model::observation::ObservationMetadata,
     )>,
 }
 
@@ -3764,10 +3772,19 @@ fn repair_state(
             .map(|q| {
                 q.entries
                     .iter()
-                    .map(|e| (e.group.clone(), e.station_label.clone(), e.tier, e.deficit))
+                    .map(|e| {
+                        (
+                            e.group.clone(),
+                            e.station_label.clone(),
+                            e.tier,
+                            e.deficit,
+                            e.observations.clone(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default(),
+        recoveries: queue.map(|q| q.recoveries.clone()).unwrap_or_default(),
         alerted: alerted_rows,
     }
 }
@@ -6867,15 +6884,19 @@ fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState) {
         teams.0.restore_slots(&stored.teams);
     }
     if let Some(mut queue) = entity.get_mut::<RepairRequestQueue>() {
+        queue.recoveries = stored.recoveries.clone();
         queue.entries = stored
             .queue
             .iter()
-            .map(|(group, station_label, tier, deficit)| RepairQueueEntry {
-                group: group.clone(),
-                station_label: station_label.clone(),
-                tier: *tier,
-                deficit: *deficit,
-            })
+            .map(
+                |(group, station_label, tier, deficit, observations)| RepairQueueEntry {
+                    observations: observations.clone(),
+                    group: group.clone(),
+                    station_label: station_label.clone(),
+                    tier: *tier,
+                    deficit: *deficit,
+                },
+            )
             .collect();
     }
     if let Some(mut alerted) = entity.get_mut::<RepairHumanAlerted>() {

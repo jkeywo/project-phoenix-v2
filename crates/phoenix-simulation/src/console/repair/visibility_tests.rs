@@ -352,6 +352,7 @@ fn queue(entries: &[(&str, f32)]) -> Vec<QueueEntryPreview> {
     entries
         .iter()
         .map(|(station, deficit)| QueueEntryPreview {
+            observations: vec![],
             group: if *station == "core" {
                 RepairGroup::Core
             } else {
@@ -1209,4 +1210,34 @@ fn ship_with_no_engineering_station_reveals_nothing_extra() {
         vec![SystemId("core".into())],
     );
     assert!(v.entries_for(Some(&StationId("pilot".into()))).is_empty());
+}
+
+#[test]
+fn coarse_queue_group_does_not_disclose_hidden_contributor_identity() {
+    use phoenix_model::observation::*;
+    let evidence = |id: &str| {
+        ObservationMetadata::at(
+            5,
+            ObservationSubject::System {
+                id: SystemId(id.into()),
+            },
+            ObservationProvenance {
+                kind: ObservationSource::SystemReport,
+                system: Some(SystemId(id.into())),
+                label: String::new(),
+            },
+            ObservationUncertainty::Qualitative,
+        )
+    };
+    let entry = QueueEntryPreview {
+        group: RepairGroup::Core,
+        station_label: "Core".into(),
+        tier: crate::ship::damage::DamageTier::Damaged,
+        deficit: 10.0,
+        observations: vec![evidence("visible"), evidence("hidden")],
+    };
+    let projected = filter_queue_observations(&entry, |id| id.0 == "visible");
+    assert_eq!(projected.observations, vec![evidence("visible")]);
+    assert_eq!(entry.observations.len(), 2);
+    assert_eq!(projected.deficit, entry.deficit);
 }

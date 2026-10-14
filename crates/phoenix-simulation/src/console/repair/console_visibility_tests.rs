@@ -132,12 +132,14 @@ fn detached_repair_queue_detail_is_withheld_until_a_team_arrives() {
     let raw = RepairBlackboard {
         queue_depth: vec![
             QueueEntryPreview {
+                observations: vec![],
                 group: RepairGroup::Core,
                 station_label: "Core".into(),
                 tier: DamageTier::Damaged,
                 deficit: 10.0,
             },
             QueueEntryPreview {
+                observations: vec![],
                 group: RepairGroup::Console(ConsoleId("visitor".into())),
                 station_label: "Visitor".into(),
                 tier: DamageTier::Damaged,

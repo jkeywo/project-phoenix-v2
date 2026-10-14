@@ -206,6 +206,7 @@ fn repair_publication_follows_console_and_explicit_feed_without_revealing_hidden
         queue_depth: ids
             .iter()
             .map(|id| QueueEntryPreview {
+                observations: vec![],
                 group: fixture_repair_group(id),
                 station_label: (*id).into(),
                 tier: DamageTier::Operational,

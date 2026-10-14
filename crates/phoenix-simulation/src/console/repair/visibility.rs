@@ -643,7 +643,7 @@ impl HullVisibility {
                         && can_see(&hull.system_id)
                 })
             })
-            .cloned()
+            .map(|entry| filter_queue_observations(entry, can_see))
             .collect();
         projected
     }
@@ -657,7 +657,7 @@ impl HullVisibility {
         queue
             .iter()
             .filter(|e| self.can_see_group(viewer, &e.group))
-            .cloned()
+            .map(|entry| filter_queue_observations(entry, |id| self.can_see(viewer, id)))
             .collect()
     }
 }
@@ -843,3 +843,18 @@ mod tests;
 #[cfg(test)]
 #[path = "console_visibility_tests.rs"]
 mod console_tests;
+
+fn filter_queue_observations(
+    entry: &QueueEntryPreview,
+    can_see: impl Fn(&SystemId) -> bool,
+) -> QueueEntryPreview {
+    let mut projected = entry.clone();
+    projected.observations.retain(|observation| {
+        let subject_allowed = match &observation.subject {
+            phoenix_model::observation::ObservationSubject::System { id } => can_see(id),
+            _ => true,
+        };
+        subject_allowed && observation.provenance.system.as_ref().is_none_or(&can_see)
+    });
+    projected
+}

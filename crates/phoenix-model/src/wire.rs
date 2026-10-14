@@ -205,8 +205,10 @@ pub struct PresentationCardWire {
     pub literal_title: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SensorReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::observation::ObservationMetadata>,
     pub observed_tick: u64,
     pub age_ticks: u64,
     pub source: String,

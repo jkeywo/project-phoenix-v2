@@ -2,8 +2,8 @@
 title: Console
 type: entity
 tags: [console, knowledge, ownership, station]
-sources: [crates/phoenix-model/src/console.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/ship/console_views.rs, gui/console-topology.js, gui/console-state.js, gui/console-working-view.js, editor/workshop-ship-authoring.js]
-updated: 2026-10-13
+sources: [crates/phoenix-model/src/observation.rs, crates/phoenix-model/src/console.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/ship/console_views.rs, gui/console-topology.js, gui/console-state.js, gui/console-working-view.js, editor/workshop-ship-authoring.js]
+updated: 2026-10-14
 ---
 
 # Console
@@ -36,6 +36,10 @@ screen. Native display assignment and lobby tenure remain Station-based.
 
 `ConsoleKnowledgeView` reads existing System publications: owned Systems plus
 explicit source-and-kind feeds. Co-hosted Consoles do not pool these views.
+`recorded_observations(source)` borrows metadata through that same `get` predicate;
+it cannot expose metadata for a withheld value. Scan, dossier evidence, held Sensors
+reports and repair queue observations use this surface; live gauges produce no
+invented sample timestamp. See [Recorded Observations](../concepts/recorded-observations.md).
 `console_publication` projects permitted publications per recipient, while the
 client further filters each mounted Console. Projection caches are derived;
 there is no second authoritative observation store.

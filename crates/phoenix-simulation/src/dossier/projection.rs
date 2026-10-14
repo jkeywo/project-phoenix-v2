@@ -220,6 +220,25 @@ pub fn project(subject: &DossierSubject) -> DossierSnapshot {
             .evidence
             .iter()
             .map(|entry| DossierEvidenceSnapshot {
+                observation: Some(phoenix_model::observation::ObservationMetadata::at(
+                    entry.gathered_at_tick,
+                    phoenix_model::observation::ObservationSubject::Entity {
+                        uuid: subject.uuid.clone(),
+                    },
+                    phoenix_model::observation::ObservationProvenance {
+                        kind: phoenix_model::observation::ObservationSource::Evidence,
+                        system: None,
+                        label: match entry.provenance.as_str() {
+                            "scan" => "component.dossier.provenance.scan",
+                            "dialogue" => "component.dossier.provenance.dialogue",
+                            "records" => "component.dossier.provenance.records",
+                            "briefing" => "component.dossier.provenance.briefing",
+                            _ => "",
+                        }
+                        .into(),
+                    },
+                    phoenix_model::observation::ObservationUncertainty::Unspecified,
+                )),
                 text: entry.text.clone(),
                 // The typed provenance crosses the wire under its own script
                 // name, so the panel's PROVENANCE_LABELS table, a scenario's

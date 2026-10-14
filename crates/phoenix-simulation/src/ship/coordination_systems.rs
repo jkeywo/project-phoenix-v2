@@ -101,10 +101,16 @@ pub fn handle_coordination_enqueue(
         } else {
             ControlSource::Human
         };
+        // Client-supplied evidence cannot impersonate equipment or assert a future sample.
+        // Legacy human requests retain unknown sample time and attribution.
+        let mut payload = payload.clone();
+        if let CoordinationPayload::RepairRequest { observation, .. } = &mut payload {
+            *observation = None;
+        }
         queue.0.enqueue(QueuedCoordination {
             sender_origin,
             address: address.clone(),
-            payload: payload.clone(),
+            payload,
             presentation: presentation.clone(),
             sender_label: player.name.clone(),
             due_tick: tick.0.saturating_add(lag_ticks),

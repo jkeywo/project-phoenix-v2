@@ -226,3 +226,34 @@ fn native_projection_never_enriches_a_sample_with_current_truth_or_concealed_dat
         truth
     );
 }
+
+#[test]
+fn common_metadata_describes_only_the_presented_delayed_sample() {
+    use phoenix_model::observation::{
+        ObservationSource, ObservationSubject, ObservationUncertainty,
+    };
+    let mut state = ReportState::new(policy(4));
+    state.advance(10, || sample(10));
+    state.advance(14, || sample(14));
+    let reports = Reports::from([(
+        "observer".into(),
+        BTreeMap::from([("target".into(), state)]),
+    )]);
+    let projected = projection(&reports, "observer", 100);
+    let report = projected["target"].as_ref().unwrap();
+    assert_eq!(report.position_mm, [10, 0, 0]);
+    let metadata = report.observation.as_ref().unwrap();
+    assert_eq!(metadata.observed_tick, Some(10));
+    assert_eq!(metadata.age_ticks(100), Some(90));
+    assert_eq!(
+        metadata.subject,
+        ObservationSubject::Entity {
+            uuid: "target".into()
+        }
+    );
+    assert_eq!(metadata.provenance.kind, ObservationSource::SensorsReport);
+    assert_eq!(metadata.provenance.label, "console.sensors.report_source");
+    assert_eq!(metadata.uncertainty, ObservationUncertainty::Unspecified);
+    assert!(metadata.provenance.system.is_none());
+    assert!(projection(&reports, "other", 100).is_empty());
+}

@@ -34,10 +34,12 @@ pub struct ShipRepairTeams(pub RepairTeams);
 #[derive(Component, Clone, Debug, Default)]
 pub struct RepairRequestQueue {
     pub entries: Vec<RepairQueueEntry>,
+    pub recoveries: Vec<(RepairGroup, phoenix_model::observation::ObservationMetadata)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RepairQueueEntry {
+    pub observations: Vec<phoenix_model::observation::ObservationMetadata>,
     pub group: RepairGroup,
     pub station_label: String,
     pub tier: DamageTier,
@@ -56,19 +58,7 @@ impl RepairRequestQueue {
     /// through the merge below instead of the whole call returning early and
     /// leaving a stale reading behind.
     pub fn push_or_merge(&mut self, entry: RepairQueueEntry) {
-        if let Some(existing) = self.entries.iter_mut().find(|e| e.group == entry.group) {
-            if entry.tier > existing.tier {
-                existing.tier = entry.tier;
-            }
-            if entry.deficit > existing.deficit {
-                existing.deficit = entry.deficit;
-            }
-            if !entry.station_label.is_empty() {
-                existing.station_label = entry.station_label.clone();
-            }
-        } else {
-            self.entries.push(entry);
-        }
+        self.reduce_report(entry);
     }
 
     /// Severity ordering shared by [`Self::pop_worst`] and [`Self::peek`]:
@@ -229,6 +219,7 @@ impl Plugin for RepairPlugin {
 /// `RepairRequest` sent to some other valid Station cannot mutate Repair state.
 /// Suppressed and offline outcomes never reach this receiver.
 pub(crate) fn receive_repair_coordination(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut delivered: MessageReader<DeliveredCoordination>,
     mut ships: Query<
         (
@@ -257,6 +248,7 @@ pub(crate) fn receive_repair_coordination(
             station_label,
             tier,
             deficit,
+            observation,
             ..
         } = &message.payload
         else {
@@ -285,6 +277,14 @@ pub(crate) fn receive_repair_coordination(
             CoordinationDelivery::Ai | CoordinationDelivery::HumanRouted => {
                 if let Some(queue) = queue.as_deref_mut() {
                     queue.push_or_merge(RepairQueueEntry {
+                        observations: observation
+                            .clone()
+                            .map(|mut value| {
+                                value.received_tick = tick.as_ref().map(|tick| tick.0);
+                                value
+                            })
+                            .into_iter()
+                            .collect(),
                         group: group.clone(),
                         station_label: station_label.clone(),
                         tier: *tier,
@@ -372,9 +372,11 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// behaviour — see `RepairTeams::tick`.
 pub fn tick_repair_teams(
     time: Res<Time>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut ship_q: Query<
         (
             Option<&mut ShipRepairTeams>,
+            Option<&mut RepairRequestQueue>,
             &ShipModifiers,
             &mut crate::entities::spawner::EntitySystemHull,
             Option<&crate::entities::spawner::EntityUuid>,
@@ -392,7 +394,9 @@ pub fn tick_repair_teams(
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, modifiers, mut hull, ship_uuid, config, fleet, local) in ship_q.iter_mut() {
+    for (teams_comp, mut queue, modifiers, mut hull, ship_uuid, config, fleet, local) in
+        ship_q.iter_mut()
+    {
         // Crew wrecks remain for identity and cinematic spectating. A queued
         // repair must not revive them on the next tick and reopen admission.
         // NPC repair/recovery, including authored derelicts, keeps its policy.
@@ -407,10 +411,49 @@ pub fn tick_repair_teams(
         // can be reported as a per-ship `RepairApplied` delta (issue #841).
         // This is the only path that actually ticks a ship's teams — the global
         // `ShipRepairTeams` resource is publish-only, never ticked.
+        let active_work: Vec<_> = teams
+            .0
+            .slots()
+            .iter()
+            .filter_map(|slot| match slot {
+                TeamSlot::Repairing {
+                    system_id: Some(id),
+                    ..
+                } if !hull.0.is_at_max(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
         let before = hull.0.total_current();
         teams
             .0
             .tick(dt * repair_mult, &mut hull.0, config.map(|c| &c.0));
+        if let (Some(queue), Some(config)) = (queue.as_mut(), config) {
+            for id in active_work.into_iter().filter(|id| hull.0.is_at_max(id)) {
+                // Actual repaired work, not a Returning/recall transition. This
+                // contributes evidence; only the established group diagnosis resolves.
+                let group = repair_group(&id, &config.0);
+                let Some(mut report) = queue
+                    .entries
+                    .iter()
+                    .find(|entry| entry.group == group)
+                    .cloned()
+                else {
+                    continue;
+                };
+                report.observations = vec![phoenix_model::observation::ObservationMetadata {
+                    subject: phoenix_model::observation::ObservationSubject::System { id },
+                    provenance: phoenix_model::observation::ObservationProvenance {
+                        kind: phoenix_model::observation::ObservationSource::RepairTeam,
+                        system: Some(repair_system_id()),
+                        label: String::new(),
+                    },
+                    observed_tick: tick.as_ref().map(|tick| tick.0),
+                    received_tick: tick.as_ref().map(|tick| tick.0),
+                    uncertainty: phoenix_model::observation::ObservationUncertainty::Qualitative,
+                }];
+                queue.reduce_report(report);
+            }
+        }
         let restored = hull.0.total_current() - before;
         if restored > 0.0 {
             if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
@@ -526,6 +569,7 @@ pub(crate) fn publish_repair_blackboard(
                 entries
                     .iter()
                     .map(|e| QueueEntryPreview {
+                        observations: e.observations.clone(),
                         group: e.group.clone(),
                         station_label: e.station_label.clone(),
                         tier: e.tier,
@@ -961,6 +1005,7 @@ fn request_still_open(
 /// the repair broadcaster repaints on change. A queue with nothing to prune must
 /// not repaint sixty times a second.
 pub(crate) fn prune_repair_request_queue(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut ships: Query<
         (
             &mut RepairRequestQueue,
@@ -978,9 +1023,30 @@ pub(crate) fn prune_repair_request_queue(
         {
             continue;
         }
-        queue
+        let recovered: Vec<_> = queue
             .entries
-            .retain(|entry| request_still_open(entry, hull, &config.0));
+            .iter()
+            .filter(|entry| !request_still_open(entry, hull, &config.0))
+            .map(|entry| entry.group.clone())
+            .collect();
+        for group in recovered {
+            // The same authoritative diagnostic at the same scheduled point;
+            // the reducer receives an observation rather than polling machinery.
+            queue.resolve_report(
+                group,
+                phoenix_model::observation::ObservationMetadata {
+                    subject: Default::default(),
+                    provenance: phoenix_model::observation::ObservationProvenance {
+                        kind: phoenix_model::observation::ObservationSource::RepairDiagnosis,
+                        system: Some(repair_system_id()),
+                        label: String::new(),
+                    },
+                    observed_tick: tick.as_ref().map(|tick| tick.0),
+                    received_tick: tick.as_ref().map(|tick| tick.0),
+                    uncertainty: phoenix_model::observation::ObservationUncertainty::Qualitative,
+                },
+            );
+        }
     }
 }
 

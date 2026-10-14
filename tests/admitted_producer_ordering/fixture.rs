@@ -168,6 +168,7 @@ pub fn prepare_navigation_and_repair(
             .get_mut::<RepairRequestQueue>(ship)
             .unwrap()
             .push_or_merge(RepairQueueEntry {
+                observations: vec![],
                 group: RepairGroup::Station(repair_station.clone()),
                 station_label: repair_station.0.clone(),
                 tier,

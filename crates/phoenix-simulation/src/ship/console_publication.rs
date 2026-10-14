@@ -141,3 +141,7 @@ mod tests;
 #[cfg(test)]
 #[path = "console_publication_tests.rs"]
 mod publication_regression_tests;
+
+#[cfg(test)]
+#[path = "console_observation_publication_tests.rs"]
+mod observation_tests;

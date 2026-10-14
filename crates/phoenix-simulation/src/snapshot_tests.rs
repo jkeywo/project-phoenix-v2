@@ -1777,3 +1777,41 @@ fn system_tree_snapshot_restores_private_nested_continuation() {
     assert_eq!(target.get::<ShipAiTreeRuntime>(entity), Some(&state));
     assert_eq!(capture_entities(&target)[0].ai_trees, saved.ai_trees);
 }
+
+#[test]
+fn repair_report_sources_and_recovery_watermarks_survive_snapshot_restore() {
+    use phoenix_model::observation::*;
+    let observation = ObservationMetadata::at(
+        42,
+        ObservationSubject::Unknown,
+        ObservationProvenance {
+            kind: ObservationSource::RepairDiagnosis,
+            ..Default::default()
+        },
+        ObservationUncertainty::Qualitative,
+    )
+    .received(43);
+    let mut queue = RepairRequestQueue::default();
+    queue.entries.push(RepairQueueEntry {
+        group: crate::core::messages::RepairGroup::Core,
+        station_label: "Core".into(),
+        tier: crate::ship::damage::DamageTier::Damaged,
+        deficit: 3.0,
+        observations: vec![observation.clone()],
+    });
+    queue.recoveries.push((
+        crate::core::messages::RepairGroup::Station(crate::core::messages::StationId(
+            "helm".into(),
+        )),
+        observation,
+    ));
+    let stored = repair_state(None, Some(&queue), None);
+    let json = serde_json::to_string(&stored).unwrap();
+    let restored: RepairState = serde_json::from_str(&json).unwrap();
+    let mut world = World::new();
+    let entity = world.spawn(RepairRequestQueue::default()).id();
+    apply_repair(&mut world.entity_mut(entity), &restored);
+    let actual = world.get::<RepairRequestQueue>(entity).unwrap();
+    assert_eq!(actual.entries, queue.entries);
+    assert_eq!(actual.recoveries, queue.recoveries);
+}

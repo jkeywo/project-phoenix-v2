@@ -29,6 +29,21 @@ pub fn scan_reading_snapshot_from_reading(
     reading: &crate::science::ScanReading,
 ) -> ScanReadingSnapshot {
     ScanReadingSnapshot {
+        observation: Some(phoenix_model::observation::ObservationMetadata::at(
+            reading.taken_at_tick,
+            phoenix_model::observation::ObservationSubject::Entity {
+                uuid: reading.subject_uuid.clone(),
+            },
+            phoenix_model::observation::ObservationProvenance {
+                kind: phoenix_model::observation::ObservationSource::Scan,
+                system: None,
+                label: String::new(),
+            },
+            phoenix_model::observation::ObservationUncertainty::Quantized {
+                field: "condition_fraction".into(),
+                step: reading.condition_step,
+            },
+        )),
         subject_uuid: reading.subject_uuid.clone(),
         subject_name: reading.subject_name.clone(),
         band: reading.band.clone(),

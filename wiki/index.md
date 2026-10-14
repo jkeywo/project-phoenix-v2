@@ -46,6 +46,7 @@ Current implementation orientation only. For intended design use
 - [Power Plugin](./concepts/power-plugin.md)
 - [Damage and Repair Runtime](./concepts/damage-and-repair-intent.md)
 - [Repair Plugin](./concepts/repair-plugin.md)
+- [Recorded Observations](./concepts/recorded-observations.md)
 - [Weapons Runtime](./concepts/weapons-intent.md)
 - [Weapons Plugin](./concepts/weapons-plugin.md)
 - [Shields Runtime](./concepts/shields-intent.md)

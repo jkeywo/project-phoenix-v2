@@ -435,6 +435,8 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessageDiscriminants::SimState,
             ServerMessage::SimState {
                 snapshot: SimSnapshot {
+                    observation_tick: None,
+                    observation_generation: None,
                     console_views: Default::default(),
                     console_importance: Vec::new(),
                     entity_states: vec![EntityStateSnapshot {
@@ -1962,6 +1964,7 @@ fn repair_request_coordination_payload_round_trips() {
             station_label: "Helm".into(),
             tier: crate::ship::damage::DamageTier::Damaged,
             deficit: Some(12.5),
+            observation: None,
         },
         presentation: CoordinationPresentation::titled("coordination.repair.title")
             .with_title_param("label", CoordinationParam::text("station.helm.name")),
@@ -1978,6 +1981,7 @@ fn repair_request_coordination_payload_round_trips() {
             // The wire form of a coarsened popup: tier crosses, exact
             // deficit withheld (issue #737).
             deficit: None,
+            observation: None,
         },
         presentation: CoordinationPresentation::titled("coordination.repair.title")
             .with_title_param("label", CoordinationParam::text("station.helm.name")),
@@ -3222,6 +3226,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000042".into(),
         subject_name: "world.entity.skyhook.name".into(),
         band: "detailed".into(),
@@ -3320,6 +3325,7 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
         subject_name: "world.falling_skyway.entity.skyway_debris_alpha.name".into(),
         band: "detailed".into(),
@@ -3481,6 +3487,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
                 summary: String::new(),
                 facts: Vec::new(),
                 evidence: vec![DossierEvidenceSnapshot {
+                    observation: None,
                     text: "world.x.evidence".into(),
                     provenance: "scan".into(),
                     gathered_at_tick: 900,
@@ -3505,6 +3512,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
     // they were not shown.
     let entry: serde_json::Value = serde_json::from_str(
         &serde_json::to_string(&DossierEvidenceSnapshot {
+            observation: None,
             text: "world.x.evidence".into(),
             provenance: "dialogue".into(),
             gathered_at_tick: 900,
@@ -5265,12 +5273,14 @@ fn system_blackboard_repair_round_trips() {
                 station_label: "Core".into(),
                 tier: crate::ship::damage::DamageTier::Damaged,
                 deficit: 60.0,
+                observations: vec![],
             },
             QueueEntryPreview {
                 group: fixture_repair_group("helm"),
                 station_label: "Helm".into(),
                 tier: crate::ship::damage::DamageTier::Disabled,
                 deficit: 90.0,
+                observations: vec![],
             },
         ],
         aggregate_hull_fraction: Some(0.75),
@@ -6684,4 +6694,29 @@ fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
     } else {
         RepairGroup::Station(StationId(id.into()))
     }
+}
+
+#[test]
+fn common_observation_metadata_roundtrips_without_renewing_sample_time() {
+    use phoenix_model::observation::*;
+    let original = ObservationMetadata::at(
+        8,
+        ObservationSubject::Entity {
+            uuid: "contact".into(),
+        },
+        ObservationProvenance {
+            kind: ObservationSource::Scan,
+            system: None,
+            label: String::new(),
+        },
+        ObservationUncertainty::Quantized {
+            field: "condition_fraction".into(),
+            step: 0.25,
+        },
+    )
+    .received(30);
+    let bytes = serde_json::to_string(&original).unwrap();
+    let decoded: ObservationMetadata = serde_json::from_str(&bytes).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(decoded.age_ticks(45), Some(37));
 }

@@ -92,6 +92,7 @@ pub fn sync_console_damage_tiers(
 /// one hit was never reported to Repair at all and no team was ever sent. The
 /// sweep repairs destroyed systems now, so the request is the one that matters.
 pub fn detect_damage_tier_crossings(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut ships: Query<(
         Entity,
         &crate::entities::spawner::EntitySystemHull,
@@ -240,6 +241,21 @@ pub fn detect_damage_tier_crossings(
                         sender_origin,
                         address,
                         payload: CoordinationPayload::RepairRequest {
+                            observation: Some(phoenix_model::observation::ObservationMetadata {
+                                subject: phoenix_model::observation::ObservationSubject::System {
+                                    id: system_id.clone(),
+                                },
+                                provenance: phoenix_model::observation::ObservationProvenance {
+                                    kind:
+                                        phoenix_model::observation::ObservationSource::SystemReport,
+                                    system: Some(system_id.clone()),
+                                    label: String::new(),
+                                },
+                                observed_tick: tick.as_ref().map(|tick| tick.0),
+                                received_tick: None,
+                                uncertainty:
+                                    phoenix_model::observation::ObservationUncertainty::Qualitative,
+                            }),
                             system_id: system_id.clone(),
                             group,
                             station_label: station_label.clone(),

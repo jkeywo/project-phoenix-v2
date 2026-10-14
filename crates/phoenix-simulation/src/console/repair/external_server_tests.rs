@@ -218,6 +218,7 @@ fn a_released_claim_returns_the_record_to_the_idle_default() {
 
 fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
     crate::console::repair::server::RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("engineering"),
         station_label: "engineering".into(),
         tier: DamageTier::Disabled,
@@ -233,7 +234,10 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     use crate::console::repair::server::RepairRequestQueue;
     assert_eq!(critical_local_repairs(None), 0);
     assert_eq!(
-        critical_local_repairs(Some(&RepairRequestQueue { entries: vec![] })),
+        critical_local_repairs(Some(&RepairRequestQueue {
+            recoveries: vec![],
+            entries: vec![]
+        })),
         0
     );
     // A merely-Damaged (non-critical) request reserves nothing.
@@ -243,6 +247,7 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     };
     assert_eq!(
         critical_local_repairs(Some(&RepairRequestQueue {
+            recoveries: vec![],
             entries: vec![damaged],
         })),
         0
@@ -250,6 +255,7 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     // Two Disabled requests reserve two teams.
     assert_eq!(
         critical_local_repairs(Some(&RepairRequestQueue {
+            recoveries: vec![],
             entries: vec![critical_entry(), critical_entry()],
         })),
         2

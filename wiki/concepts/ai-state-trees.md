@@ -46,7 +46,8 @@ No authored expressions or custom code nodes are supported.
 `ShipAiTreeRuntime` holds a deterministic map keyed by SystemId: active states,
 private memory, nested calls/completion and last evaluation tick. Snapshot capture,
 restore and the `system-ai-trees` digest stage include that state. Snapshot format
-39 and simulation rules 0.11 establish the compatibility boundary.
+40 and simulation rules 0.12 are the current compatibility boundary, including
+repair observation continuation.
 
 The shared `dock_state_tree.toml` library provides a derived standard controller
 and reusable operation call. Adoption and withdrawal ownership are authored memory,

@@ -126,6 +126,14 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         crate::console::repair::visibility::push_hull_updates(world);
 
         let mut snapshot = crate::core::messages::SimSnapshot {
+            observation_tick: world
+                .get_resource::<crate::sim_tick::SimTick>()
+                .map(|tick| tick.0),
+            observation_generation: Some(
+                world
+                    .get_resource::<crate::audio_lifecycle::RoomAudioLifecycle>()
+                    .map_or(0, |owner| owner.state.generation),
+            ),
             system_status,
             console_views: build_console_working_views(world),
             console_hosts: build_console_host_snapshots(world),

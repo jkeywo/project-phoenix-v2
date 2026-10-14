@@ -2,8 +2,8 @@
 title: Science / Sensors target
 type: concept
 tags: [science, sensors, scans, objectives, ai, blackboard]
-sources: [crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
-updated: 2026-08-27
+sources: [crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-model/src/observation.rs, crates/phoenix-simulation/src/science/mod.rs, crates/phoenix-simulation/src/science/server.rs, crates/phoenix-sim-gameplay/src/science/scan.rs, crates/phoenix-simulation/src/ship/sensors.rs, crates/phoenix-simulation/src/world/server.rs, crates/phoenix-model/src/messages.rs, pasm/spec/architecture/radar-sensors.yaml]
+updated: 2026-10-14
 ---
 
 # Science / Sensors target
@@ -56,6 +56,14 @@ blackboard: `SensorRadarBlackboard.selected_target` mirrors this ship's
 cross-system consumer reads the frozen `science_target` viewscreen fact rather
 than the live per-ship selection. The Sensors-panel target-info snapshot also
 carries `science_target_uuid` per ship (`crates/phoenix-simulation/src/ship/sensors.rs`).
+
+## Recorded reading metadata
+
+`scan_reading_snapshot_from_reading` projects common metadata from the existing
+`ScanReading`: its subject, original `taken_at_tick`, and `condition_step` as the
+quantization of `condition_fraction`. Publishing or reconnecting does not renew
+that sample. The recorded value and precision are unchanged. Metadata follows the
+same explicit Scan feed as the reading; see [Recorded Observations](./recorded-observations.md).
 
 ## Sources
 

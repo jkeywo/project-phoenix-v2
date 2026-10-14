@@ -1314,8 +1314,12 @@ fn queue_entry_retained_when_all_systems_destroyed() {
 
     let mut hull = SystemHull::from_config(&[(system_id.clone(), 25.0_f32)]);
 
-    let mut rq = RepairRequestQueue { entries: vec![] };
+    let mut rq = RepairRequestQueue {
+        recoveries: vec![],
+        entries: vec![],
+    };
     rq.entries.push(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group(station_id),
         station_label: "Helm".into(),
         tier: crate::ship::damage::DamageTier::Disabled,
@@ -1471,6 +1475,7 @@ fn spawn_npc_repair(
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("helm"),
         station_label: "Helm".into(),
         tier: DamageTier::Disabled,
@@ -1968,6 +1973,7 @@ fn spawn_two_station_npc(
             continue;
         }
         queue.push_or_merge(RepairQueueEntry {
+            observations: vec![],
             group: fixture_repair_group(station),
             station_label: station.into(),
             tier,
@@ -2405,6 +2411,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("helm"),
         station_label: "helm".into(),
         tier: DamageTier::Disabled,
@@ -2412,6 +2419,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
     });
     // `damage_sync` files an ownerless system's request under this id.
     queue.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
         tier: DamageTier::Disabled,
@@ -2508,6 +2516,7 @@ fn spawn_two_ownerless_rows(
     // id, so the destroyed `science` row is reported as a `core` request.
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
         tier: DamageTier::Destroyed,
@@ -2670,6 +2679,7 @@ fn a_second_team_is_not_dispatched_to_a_core_bucket_being_swept() {
 #[test]
 fn queue_severity_tie_breaks_on_smallest_station_id() {
     let entry = |station: &str| RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group(station),
         station_label: station.into(),
         tier: DamageTier::Damaged,
@@ -2725,6 +2735,7 @@ fn deliver_repair_request(
             source_entity: ship,
             address: CoordinationAddress::Station(StationId("repair".into())),
             payload: CoordinationPayload::RepairRequest {
+                observation: None,
                 system_id: SystemId(format!("{station_id}-system")),
                 group: fixture_repair_group(station_id),
                 station_label: station_id.into(),
@@ -2946,6 +2957,7 @@ fn prune_retains_an_all_destroyed_station_through_the_ai_loop() {
 fn destroyed_tier_requests_are_queued_and_merged() {
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Destroyed,
@@ -2955,12 +2967,14 @@ fn destroyed_tier_requests_are_queued_and_merged() {
 
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Disabled,
         deficit: 40.0,
     });
     rq.push_or_merge(RepairQueueEntry {
+        observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
         tier: DamageTier::Destroyed,
@@ -3251,6 +3265,7 @@ fn repair_queue_keeps_console_station_and_core_names_distinct() {
     ];
     for group in &groups {
         queue.push_or_merge(RepairQueueEntry {
+            observations: vec![],
             group: group.clone(),
             station_label: "Same display name".into(),
             tier: DamageTier::Damaged,
@@ -3264,4 +3279,77 @@ fn repair_queue_keeps_console_station_and_core_names_distinct() {
     let restored: Vec<RepairGroup> =
         serde_json::from_str(&serde_json::to_string(&groups).unwrap()).unwrap();
     assert_eq!(restored, groups);
+}
+
+#[test]
+fn actual_team_completion_records_evidence_without_resolving_other_group_work() {
+    use phoenix_model::observation::ObservationSource;
+    for recalled in [false, true] {
+        let mut app = App::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time)
+            .insert_resource(crate::sim_tick::SimTick(7));
+        app.add_systems(Update, tick_repair_teams);
+        let id = SystemId("a".into());
+        let mut hull =
+            SystemHull::from_config(&[(id.clone(), 100.0), (SystemId("b".into()), 100.0)]);
+        hull.set_hp(&id, 99.99);
+        hull.set_hp(&SystemId("b".into()), 50.0);
+        let mut teams = RepairTeams::new(1);
+        let slot = if recalled {
+            TeamSlot::Returning {
+                remaining: 10.0,
+                system_id: Some(id.clone()),
+                display_name: None,
+                queued_system_id: None,
+                queued_display_name: None,
+            }
+        } else {
+            TeamSlot::Repairing {
+                system_id: Some(id.clone()),
+                display_name: None,
+                priority: None,
+                priority_system_id: None,
+            }
+        };
+        teams.restore_slots(&[slot]);
+        let mut queue = RepairRequestQueue::default();
+        queue.push_or_merge(RepairQueueEntry {
+            observations: vec![],
+            group: RepairGroup::Core,
+            station_label: "Core".into(),
+            tier: DamageTier::Damaged,
+            deficit: 50.01,
+        });
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipRepairTeams(teams),
+                crate::modifiers::ShipModifiers::new(),
+                crate::entities::spawner::EntitySystemHull(hull),
+                ShipConfigComponent(toml::from_str("").unwrap()),
+                queue,
+            ))
+            .id();
+        app.update();
+        let queue = app.world().get::<RepairRequestQueue>(entity).unwrap();
+        assert_eq!(
+            queue.entries.len(),
+            1,
+            "completion of one System must not resolve its group"
+        );
+        assert!(queue.recoveries.is_empty());
+        let evidence = &queue.entries[0].observations;
+        assert_eq!(evidence.len(), usize::from(!recalled));
+        if !recalled {
+            assert_eq!(evidence[0].provenance.kind, ObservationSource::RepairTeam);
+            assert_eq!(evidence[0].observed_tick, Some(7));
+            assert_eq!(
+                evidence[0].subject,
+                phoenix_model::observation::ObservationSubject::System { id }
+            );
+        }
+    }
 }

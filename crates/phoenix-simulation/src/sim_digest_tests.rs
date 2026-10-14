@@ -2724,9 +2724,11 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
         world.spawn((
             EntityUuid("repair-ship".into()),
             RepairRequestQueue {
+                recoveries: vec![],
                 entries: groups
                     .iter()
                     .map(|group| RepairQueueEntry {
+                        observations: vec![],
                         group: group.clone(),
                         station_label: "same".into(),
                         tier: DamageTier::Damaged,
@@ -2877,4 +2879,47 @@ fn system_tree_digest_covers_private_calls_and_stable_system_identity() {
         fold_ai_trees_namespace(&make(false, true), FOLD_SEED),
         fold_ai_trees_namespace(&other_system, FOLD_SEED)
     );
+}
+
+#[test]
+fn repair_evidence_and_resolved_watermarks_participate_in_digest() {
+    use crate::console::repair::server::{RepairQueueEntry, RepairRequestQueue};
+    use crate::core::messages::RepairGroup;
+    use phoenix_model::observation::*;
+    let mut world = World::new();
+    let entity = world
+        .spawn((
+            EntityUuid("repair-evidence".into()),
+            RepairRequestQueue::default(),
+        ))
+        .id();
+    let empty = fold_internal_repair_namespace(&world, FOLD_SEED);
+    let observation = ObservationMetadata::at(
+        8,
+        ObservationSubject::Unknown,
+        ObservationProvenance::default(),
+        ObservationUncertainty::Qualitative,
+    );
+    world
+        .get_mut::<RepairRequestQueue>(entity)
+        .unwrap()
+        .recoveries
+        .push((RepairGroup::Core, observation.clone()));
+    let watermark = fold_internal_repair_namespace(&world, FOLD_SEED);
+    assert_ne!(empty, watermark);
+    world
+        .get_mut::<RepairRequestQueue>(entity)
+        .unwrap()
+        .entries
+        .push(RepairQueueEntry {
+            observations: vec![observation],
+            group: RepairGroup::Core,
+            station_label: "Core".into(),
+            tier: crate::ship::damage::DamageTier::Damaged,
+            deficit: 1.0,
+        });
+    let sampled = fold_internal_repair_namespace(&world, FOLD_SEED);
+    world.get_mut::<RepairRequestQueue>(entity).unwrap().entries[0].observations[0].observed_tick =
+        Some(9);
+    assert_ne!(sampled, fold_internal_repair_namespace(&world, FOLD_SEED));
 }

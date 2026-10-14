@@ -2,16 +2,20 @@
 use crate::identity::SystemId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObservationSubject {
     #[default]
     Unknown,
-    Entity { uuid: String },
-    System { id: SystemId },
+    Entity {
+        uuid: String,
+    },
+    System {
+        id: SystemId,
+    },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationSource {
     #[default]
@@ -24,7 +28,7 @@ pub enum ObservationSource {
     RepairDiagnosis,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ObservationProvenance {
     pub kind: ObservationSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,7 +45,10 @@ pub enum ObservationUncertainty {
     #[default]
     Unspecified,
     Qualitative,
-    Quantized { field: String, step: f32 },
+    Quantized {
+        field: String,
+        step: f32,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -62,7 +69,13 @@ impl ObservationMetadata {
         provenance: ObservationProvenance,
         uncertainty: ObservationUncertainty,
     ) -> Self {
-        Self { subject, provenance, observed_tick: Some(tick), received_tick: None, uncertainty }
+        Self {
+            subject,
+            provenance,
+            observed_tick: Some(tick),
+            received_tick: None,
+            uncertainty,
+        }
     }
 
     pub fn received(mut self, tick: u64) -> Self {
@@ -71,12 +84,15 @@ impl ObservationMetadata {
     }
 
     pub fn age_ticks(&self, now: u64) -> Option<u64> {
-        self.observed_tick.map(|observed| now.saturating_sub(observed))
+        self.observed_tick
+            .map(|observed| now.saturating_sub(observed))
     }
 
     pub fn is_valid(&self) -> bool {
         match &self.uncertainty {
-            ObservationUncertainty::Quantized { field, step } => !field.is_empty() && step.is_finite() && *step > 0.0,
+            ObservationUncertainty::Quantized { field, step } => {
+                !field.is_empty() && step.is_finite() && *step > 0.0
+            }
             _ => true,
         }
     }
@@ -85,3 +101,37 @@ impl ObservationMetadata {
 #[cfg(test)]
 #[path = "observation_tests.rs"]
 mod tests;
+
+impl crate::messages::SystemBlackboard {
+    /// Borrow held metadata from the same typed publication as its facts.
+    /// Live machinery gauges do not become recorded observations here.
+    pub fn recorded_observations(&self) -> Vec<&ObservationMetadata> {
+        use crate::messages::SystemBlackboard;
+        match self {
+            SystemBlackboard::Scan(scan) => scan
+                .reading
+                .as_ref()
+                .and_then(|reading| reading.observation.as_ref())
+                .into_iter()
+                .collect(),
+            SystemBlackboard::Dossiers(dossiers) => dossiers
+                .subjects
+                .iter()
+                .flat_map(|subject| &subject.evidence)
+                .filter_map(|evidence| evidence.observation.as_ref())
+                .collect(),
+            SystemBlackboard::Sensors(sensors) => sensors
+                .contact_reports
+                .values()
+                .filter_map(|report| report.as_ref())
+                .filter_map(|report| report.observation.as_ref())
+                .collect(),
+            SystemBlackboard::Repair(repair) => repair
+                .queue_depth
+                .iter()
+                .flat_map(|entry| &entry.observations)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}

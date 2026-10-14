@@ -1,0 +1,22 @@
+entities:
+  - component: common-recorded-observation-projection
+    origin: ai
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Common Recorded Observation Projection
+      summary: "Projects shared subject, provenance, logical sample/receipt ticks and supported uncertainty from existing Scan readings, dossier evidence, held Sensors reports and Repair queue contributors. ConsoleKnowledgeView exposes borrowed metadata through the same owned/typed-feed gate as the record. No new observation store, live-gauge sample timestamps or additional information access."
+      rationale:
+        - "Sample time comes from the existing owner, never publication or receipt. Quantization identifies an existing measured field; unspecified uncertainty does not certify a claim."
+        - "RepairRequestQueue retains contributor metadata and recovery watermarks in its existing capture/restore/digest path. Strictly older reports cannot reopen a recovered group; equal-tick damage remains admissible because diagnosis precedes damage sampling."
+        - "Client observation age requires the selected publication's generation to match the logical observation clock. Old snapshots cannot renew or mis-age held records across continuation."
+    architecture:
+      kind: subsystem
+      authority: derived
+      depends_on: [repair-visibility-publisher]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/observation.rs, crates/phoenix-sim-gameplay/src/core/messages.rs, crates/phoenix-sim-gameplay/src/ship/console_ownership.rs, crates/phoenix-simulation/src/gm_information/reports.rs, crates/phoenix-simulation/src/dossier/projection.rs, crates/phoenix-simulation/src/console/repair/reports.rs, gui/observation-details.js, gui/sim-state.js]
+      symbols: [ObservationMetadata, recorded_observations, scan_reading_snapshot_from_reading, observationTickFor]
+      tests: [crates/phoenix-model/src/observation_tests.rs, crates/phoenix-sim-gameplay/src/ship/console_observation_tests.rs, crates/phoenix-simulation/src/ship/console_observation_publication_tests.rs, crates/phoenix-simulation/src/console/repair/reports_tests.rs]

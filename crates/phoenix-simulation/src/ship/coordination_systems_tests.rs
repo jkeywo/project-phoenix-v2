@@ -2162,6 +2162,7 @@ fn ai_repair_request_reaches_the_repair_owned_queue_after_generic_routing() {
         ControlSource::Human,
         CoordinationAddress::Station(repair_station),
         CoordinationPayload::RepairRequest {
+            observation: None,
             system_id: SystemId("helm-radar".into()),
             group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
@@ -2202,6 +2203,7 @@ fn enqueue_human_repair_request(app: &mut App) {
         ControlSource::Ai,
         repair_address,
         CoordinationPayload::RepairRequest {
+            observation: None,
             system_id: SystemId("helm-radar".into()),
             group: fixture_repair_group("helm"),
             station_label: "Helm".into(),
@@ -3617,4 +3619,72 @@ fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
     } else {
         RepairGroup::Station(StationId(id.into()))
     }
+}
+
+#[test]
+fn human_repair_requests_cannot_forge_equipment_provenance_or_future_samples() {
+    let mut app = test_app();
+    let ship = find_ship_entity(&mut app);
+    app.world_mut()
+        .get_mut::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .coordination_lag_secs = 100.0;
+    push(
+        &mut app,
+        "crew",
+        ClientMessage::Identify {
+            token: "crew".into(),
+            name: "Officer".into(),
+        },
+    );
+    tick(&mut app);
+    let forged = phoenix_model::observation::ObservationMetadata::at(
+        u64::MAX,
+        phoenix_model::observation::ObservationSubject::System {
+            id: SystemId("engine".into()),
+        },
+        phoenix_model::observation::ObservationProvenance {
+            kind: phoenix_model::observation::ObservationSource::SystemReport,
+            system: Some(SystemId("engine".into())),
+            label: String::new(),
+        },
+        phoenix_model::observation::ObservationUncertainty::Qualitative,
+    );
+    push(
+        &mut app,
+        "crew",
+        ClientMessage::SendCoordination {
+            address: CoordinationAddress::Station(StationId("engineering".into())),
+            payload: CoordinationPayload::RepairRequest {
+                observation: Some(forged),
+                system_id: SystemId("engine".into()),
+                group: fixture_repair_group("helm"),
+                station_label: "Helm".into(),
+                tier: DamageTier::Damaged,
+                deficit: Some(10.0),
+            },
+            presentation: test_coordination_presentation(),
+        },
+    );
+    tick(&mut app);
+    let pending = app
+        .world()
+        .get::<CoordinationQueue>(ship)
+        .unwrap()
+        .0
+        .pending();
+    let request = pending
+        .iter()
+        .find_map(|item| match &item.payload {
+            CoordinationPayload::RepairRequest {
+                observation,
+                deficit,
+                ..
+            } => Some((observation, deficit)),
+            _ => None,
+        })
+        .expect("ordinary human request still queues");
+    assert!(request.0.is_none());
+    assert_eq!(*request.1, Some(10.0));
 }

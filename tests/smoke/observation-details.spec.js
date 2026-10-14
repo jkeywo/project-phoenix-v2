@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ts } from './strings';
+import path from 'node:path';
 
 // Real shipped custom elements and StringTable in a browser. The fixture supplies
 // already-projected records; server-side permission and restore behavior have
@@ -63,6 +64,7 @@ test('recorded observation details retain sample age and repair contributor priv
   await expect(reports.nth(1).locator('[data-observation="age"]')).toHaveText(ts('observation.unknown'));
   await expect(page.locator('#repair')).not.toContainText('7654321');
   await expect(reports.locator('button')).toHaveCount(0);
+  await page.screenshot({ path: path.join(__dirname, '../../.phoenix/increment-4-observation-details.png'), fullPage: true });
   await page.evaluate(() => {
     document.getElementById('repair').state = { teams: [], reports: [] };
     document.getElementById('scan').state = { scan: { capable: true, reading: null } };

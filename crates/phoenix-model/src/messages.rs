@@ -1477,6 +1477,12 @@ impl Default for ShipClientConfig {
 /// has migrated to `SystemBlackboard` (issue #570); only world entity snapshots
 /// remain here so the client can track NPC/asteroid positions and hull.
 pub struct SimSnapshot {
+    /// Current logical clock for observation age; absent means unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_tick: Option<u64>,
+    /// Existing presentation epoch distinguishes restore from reordered snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_generation: Option<u64>,
     /// Observed detail, filtered to each recipient's Console knowledge.
     #[serde(default)]
     pub system_status: BTreeMap<SystemId, crate::system_status::SystemStatus>,
@@ -2925,6 +2931,8 @@ pub enum CoordinationPayload {
     /// the visibility gate is per-system while the repair queue dedupes per
     /// station; deriving one from `sender_label` would let the two drift.
     RepairRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation: Option<crate::observation::ObservationMetadata>,
         system_id: SystemId,
         group: RepairGroup,
         station_label: String,
@@ -4872,6 +4880,9 @@ pub struct ScanBlackboard {
 /// [`crate::science::scan`] for the derivation and the argument.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanReadingSnapshot {
+    /// Shared metadata derived from this existing recorded observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::observation::ObservationMetadata>,
     /// The subject entity's UUID — the key a dossier comparison joins on.
     pub subject_uuid: String,
     /// `strings.csv` id for the subject's crew-facing name, or empty.
@@ -5016,6 +5027,9 @@ pub enum DossierValue {
 /// surface and the provenance vocabulary.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct DossierEvidenceSnapshot {
+    /// Shared metadata derived from this existing recorded observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::observation::ObservationMetadata>,
     /// `strings.csv` id for what was learned.
     pub text: String,
     /// How this crew learned it — a scan, a dialogue admission, a records
@@ -5195,6 +5209,8 @@ pub struct PowerGroupEntry {
 /// rule rather than parsing the display label.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct QueueEntryPreview {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<crate::observation::ObservationMetadata>,
     pub group: RepairGroup,
     pub station_label: String,
     pub tier: DamageTier,

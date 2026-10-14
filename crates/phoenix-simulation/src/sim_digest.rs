@@ -2381,22 +2381,27 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "repair-queue",
         |queue: &RepairRequestQueue| {
-            if queue.entries.is_empty() {
+            if queue.entries.is_empty() && queue.recoveries.is_empty() {
                 return None;
             }
             let mut entries = queue.entries.clone();
             entries.sort_by(|a, b| a.group.cmp(&b.group));
-            Some(entries)
+            let mut recoveries = queue.recoveries.clone();
+            recoveries.sort_by(|a, b| a.0.cmp(&b.0));
+            Some((entries, recoveries))
         },
-        |mut acc, entries| {
+        |mut acc, (entries, recoveries)| {
             acc = fold_u64(acc, entries.len() as u64);
             for entry in entries {
                 acc = fold_serde(acc, &entry.group);
                 acc = fold_str(acc, &entry.station_label);
                 acc = fold_u64(acc, entry.tier as u64);
                 acc = fold_f32(acc, entry.deficit);
+                let mut observations = entry.observations;
+                crate::console::repair::reports::sort_observations(&mut observations);
+                acc = fold_serde(acc, &observations);
             }
-            acc
+            fold_serde(acc, &recoveries)
         },
     );
     let acc = fold_optional_namespace(

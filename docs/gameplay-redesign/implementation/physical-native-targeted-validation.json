@@ -1,0 +1,126 @@
+{
+  "increment": 11,
+  "recorded_date": "2026-10-15",
+  "status": "targeted_followup_in_progress",
+  "runtime_base": "672bf376",
+  "tested_revision": "3ecd8909768e9d3f4ba952d11a41f89efc1eb891",
+  "compatibility": {
+    "protocol": 8,
+    "base_content_epoch": 3,
+    "snapshot": 46,
+    "rules": "0.18"
+  },
+  "worktree": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-11-validation",
+  "cargo_target_dir": "C:/Coding/project-phoenix-v2/target",
+  "source_provenance": {
+    "libraries_refreshed_without_byte_changes": [
+      "phoenix-model",
+      "phoenix-sim-contracts",
+      "phoenix-sim-gameplay",
+      "phoenix-sim-session",
+      "phoenix-sim-world",
+      "phoenix-simulation"
+    ],
+    "artifact": ".phoenix/increment-11-validation-library-provenance.json",
+    "sha256": "3a60ccf5c31aa04376e67b63c5b0cdf4f5508ba7c81cf65ac89581321f7ad328",
+    "compiler_log_paths_match_worktree": true
+  },
+  "runs": [
+    {
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features gm::observation::inspector_coverage::tests::complete_active_schema_inventory_is_ratcheted_across_all_five_domains -- --exact --test-threads=1 --nocapture",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 4283,
+      "build_seconds": 284,
+      "test_seconds": 0.65,
+      "log": ".phoenix/increment-11-inspector-pin-retry.log",
+      "sha256": "7a3ee70f05dbd8ad5365952ce2ec95286c1e4ae7ab38816a13f41785635246ae",
+      "evidence": {
+        "actual_schema_counts": [
+          55,
+          71,
+          915,
+          51,
+          56
+        ],
+        "actual_fingerprint": "14004827888913386031"
+      }
+    },
+    {
+      "command": "cargo test -p project-phoenix --no-default-features --features headless --test physical_damage_routes -- --test-threads=1 --nocapture",
+      "passed": 2,
+      "failed": 1,
+      "ignored": 0,
+      "filtered_out": 0,
+      "build_seconds": 226,
+      "test_seconds": 12.72,
+      "log": ".phoenix/increment-11-physical-routes.log",
+      "sha256": "e99eb8ffdabe6aadbeb0433045cafabd6814300484ced106061adbd48a0895f5",
+      "passed_cases": [
+        {
+          "name": "ordinary_ai_crosses_real_rooms_and_resumes_mid_route_into_actual_repair",
+          "evidence": [
+            "Actual authored Cruiser field-replaceable Operation fault and ordinary repair AI, with no direct job/controller injection.",
+            "Positive committed connection crossing before remote component repair.",
+            "Fresh complete JSON restore onto different bootstrap; full world digest and canonical route/jobs/access/physical/inventory comparisons for at least original360 steps and then authored manual-remedy bound.",
+            "Positive powered on-site work, Healthy restored component and exact once-only own finite machinery parts debit."
+          ]
+        },
+        {
+          "name": "ordinary_ai_physical_routes_match_across_different_local_ship_peers",
+          "evidence": [
+            "Two actual authored fleet Cruiser slots per peer, with different LocalShip owners.",
+            "720 actual mesh exchange steps, whole-world digest equality every step.",
+            "Four positive connection-crossing witnesses and four powered on-site work witnesses beyond modifier-adjusted manual progress.",
+            "Both physical components restored Healthy and each own finite machinery-parts debit exactly matches its authored remedy."
+          ]
+        }
+      ],
+      "failed_cases": [
+        {
+          "name": "all_shipped_world_entity_overrides_retain_valid_physical_ownership",
+          "cause": "Falling Skyway player Destroyer instance capacity override omitted inherited machinery_parts, leaving its existing resource service pointing at an absent actual endpoint."
+        }
+      ],
+      "non_gating_diagnostics": [
+        "Two no-default root-library warnings: unused native_file import and unused PreparedWorldIngest config/config_mut methods.",
+        "Repeated Bevy global logger setup diagnostic from multiple full Apps in one process; assertions continued and the two gameplay cases passed."
+      ]
+    }
+  ],
+  "source_review": {
+    "physical_routes_and_two_fixtures": "PASS: independent weapon_authoring read review; separate from execution.",
+    "normalized_snapshot_preflight": "PASS: complete staged roster and exact source claims reviewed at600327f8; no additional gates run.",
+    "snapshot_owner_execution": "Integrator already ran all four snapshot::physical_preflight_tests in its15-case batch (.phoenix/increment11-integrated-owner-tests.log); unchanged cases were not repeated by this worker."
+  },
+  "corpus_followup": {
+    "fix_commit": "b2153a726f143a4bac28b017d64ac4f02fb9849a",
+    "status": "source_reviewed_retry_pending",
+    "changes": [
+      "Retain exact Destroyer structural_parts39 and machinery_parts111 in Falling Skyway and probe_operations replacing capacity arrays.",
+      "Retain exact Axiom structural_parts10000 and machinery_parts10000 in Skyway Control replacing capacity array.",
+      "Collect every strict resolver error before requiring the complete list empty; refused instances are not counted as successful."
+    ],
+    "independent_source_review": "PASS: weapon_workshop, no gates/edits.",
+    "parsed_equivalence": {
+      "artifact": ".phoenix/increment-11-world-override-comparison.json",
+      "sha256": "9da5a24c96ff3b83e42bdf96c1b4155a3452afd465ae74a36625316981c2cbce",
+      "method": "Parse before/after with CRLF-to-LF normalization on both sources. Remove only six newly retained rows and require complete parsed worlds equal; compare added rows exactly with their hull templates.",
+      "actors": 3,
+      "parts_rows": 6
+    }
+  },
+  "pending": [
+    "Strict shipped-world corpus retry after the finite-parts override correction.",
+    "Physical reconnect admission/Identify full-wire/default-vs-pinned acceptance migration and execution.",
+    "Final integrated repository gates and independent renderer configuration coverage.",
+    "Matching browser/native/Workshop artifacts and human acceptance.",
+    "Balance, performance and station workload evidence; no complete playable exit claimed."
+  ],
+  "receipt_review": {
+    "status": "PASS",
+    "reviewer": "weapon_workshop",
+    "scope": "Read-only review of the two receipt/acceptance files; parsed JSON and recomputed all four referenced actual SHA256 values, matching exact results and pending boundaries. No gates/edits."
+  }
+}

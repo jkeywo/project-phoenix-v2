@@ -94,3 +94,27 @@ fields remain recreation-required, physical runtime detail derived, and actual
 checked effects named actions; exhaustive nested patterns and assertions passed.
 The numerical pin update is a separate follow-up requiring rerun; the failing
 batch is not recorded as a complete green batch.
+
+## Pinned native follow-up
+
+At runtime base `672bf376` with reviewed tests `3ecd8909`, the strict GM schema
+inventory retry passed: one case, exact counts `[55, 71, 915, 51, 56]` and
+fingerprint `14004827888913386031`. The actual ordinary-AI physical route/JSON
+continuation case and the two-peer 720-step Mesh case also passed. They require
+positive physical travel, powered on-site work, real restored component conditions
+and each source's exact once-only finite parts debit. The single-host comparison
+retains the original 360 steps and adds the authored manual-remedy completion
+bound; these results are separate from the historical Increment 10 evidence.
+
+The three-case integration command was **two passed, one failed**. Its strict
+shipped-world override corpus found a real migration gap: Falling Skyway's player
+capacity override omitted the inherited repair stores. Read-only inventory found
+the same replacement pattern on Skyway Control and the operations probe player.
+Reviewed source correction `b2153a72` retains each hull's exact existing finite
+parts quantities. Parsed comparison proves all other world data, including scripts
+and scenario cargo, unchanged. The corpus retry and physical reconnect acceptance
+remain pending; the source correction alone is not passing execution evidence.
+
+Exact commands, pins, raw log hashes, source provenance, diagnostics and pending
+boundaries are in [the targeted native receipt](../gameplay-redesign/implementation/physical-native-targeted-validation.json).
+No full repository, browser/native, balance or human acceptance exit is claimed.

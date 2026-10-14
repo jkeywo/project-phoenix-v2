@@ -261,14 +261,22 @@ fn all_shipped_world_entity_overrides_retain_valid_physical_ownership() {
     worlds_under(Path::new("assets/worlds"), &mut worlds);
     worlds.sort();
     let (mut entities, mut overrides, mut layouts, mut zero_team_layouts) = (0, 0, 0, 0);
+    let mut resolution_errors = Vec::new();
     for path in &worlds {
         let world = parse_world(&std::fs::read_to_string(path).unwrap())
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         for entry in &world.entities {
-            let config = resolve_entity_via(entry, &HashMap::new(), &FsTemplateLoader)
-                .unwrap_or_else(|error| {
-                    panic!("{} / {}: {error}", path.display(), entry.template_path)
-                });
+            let config = match resolve_entity_via(entry, &HashMap::new(), &FsTemplateLoader) {
+                Ok(config) => config,
+                Err(error) => {
+                    resolution_errors.push(format!(
+                        "{} / {}: {error}",
+                        path.display(),
+                        entry.template_path
+                    ));
+                    continue;
+                }
+            };
             entities += 1;
             overrides += usize::from(entry.overrides.is_some());
             let Some(ship) = config
@@ -299,7 +307,12 @@ fn all_shipped_world_entity_overrides_retain_valid_physical_ownership() {
     assert!(
         !worlds.is_empty() && entities > 0 && overrides > 0 && layouts > 0 && zero_team_layouts > 0
     );
-    println!("interior corpus: {} worlds, {entities} entity instances, {overrides} overrides, {layouts} layouts, {zero_team_layouts} zero-team layouts", worlds.len());
+    assert!(
+        resolution_errors.is_empty(),
+        "every shipped override must resolve:\n{}",
+        resolution_errors.join("\n")
+    );
+    println!("physical corpus: {} worlds, {entities} entity instances, {overrides} overrides, {layouts} layouts, {zero_team_layouts} zero-team layouts", worlds.len());
 }
 
 fn mesh_step(hosts: &mut [App; 2]) {

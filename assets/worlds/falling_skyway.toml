@@ -1096,6 +1096,20 @@ amount = 750
 ceiling = 750
 label = "energy.coolant"
 
+# Retain this hull's finite repair stores when replacing its capacity list.
+[[entity.overrides.infrastructure.capacity]]
+id = "structural_parts"
+amount = 39
+ceiling = 39
+label = "damage.resource.structural_parts"
+
+[[entity.overrides.infrastructure.capacity]]
+id = "machinery_parts"
+amount = 111
+ceiling = 111
+label = "damage.resource.machinery_parts"
+
+
 # ── The world below ──────────────────────────────────────────────────────────
 #
 # Anonymous scenery: the city the tether is anchored to, and the star it turns
@@ -1428,6 +1442,20 @@ id = "coolant"
 amount = 10000
 ceiling = 10000
 label = "energy.coolant"
+
+# Retain this hull's finite repair stores when replacing its capacity list.
+[[entity.overrides.infrastructure.capacity]]
+id = "structural_parts"
+amount = 10000
+ceiling = 10000
+label = "damage.resource.structural_parts"
+
+[[entity.overrides.infrastructure.capacity]]
+id = "machinery_parts"
+amount = 10000
+ceiling = 10000
+label = "damage.resource.machinery_parts"
+
 
 [[entity.overrides.infrastructure.capacity]]
 id = "skyway_claim_havelock"

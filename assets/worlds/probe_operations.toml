@@ -44,7 +44,7 @@ template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
 transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
-overrides = { weapons_console = { radar = { range = 700.0 } }, repair = { external_dispatch = { repair_rate = 20.0 } }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }, { id = "coolant", amount = 750, ceiling = 750, label = "energy.coolant" }] } }
+overrides = { weapons_console = { radar = { range = 700.0 } }, repair = { external_dispatch = { repair_rate = 20.0 } }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }, { id = "coolant", amount = 750, ceiling = 750, label = "energy.coolant" }, { id = "structural_parts", amount = 39, ceiling = 39, label = "damage.resource.structural_parts" }, { id = "machinery_parts", amount = 111, ceiling = 111, label = "damage.resource.machinery_parts" }] } }
 
 # THE TOW TARGET — a laden derelict hauler within the destroyer's 500-unit tractor
 # reach. A heavy authored mass (a hulk, well past the tug curve's knee, issue

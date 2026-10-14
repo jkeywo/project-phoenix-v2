@@ -3,11 +3,19 @@ use crate::entities::config::{EntityConfig, ShieldArcEnergyConfig};
 use crate::modifiers::power_system::{PowerConfig, PowerSystem};
 
 fn arc(id: &str, cost: f32, targets: &[&str]) -> ShieldArcConfig {
-    toml::from_str(&format!(
+    let mut value: toml::Value = toml::from_str(&format!(
         "id='{id}'\nlabel='Arc'\ncenter_deg=0.0\nwidth_deg=180.0\n[energy]\nupkeep_per_sec=0.05\nrecharge_energy_per_hp={cost}\nrecovery_energy_per_hp=0.25\ndischarge_hp_per_sec=5.0\nrecovery_targets={:?}\n",
         targets,
     ))
-    .unwrap()
+    .unwrap();
+    value.as_table_mut().unwrap().insert(
+        "ai".into(),
+        toml::from_str(include_str!(
+            "../../../../../tests/fixtures/shield-arc-ai.toml"
+        ))
+        .unwrap(),
+    );
+    value.try_into().unwrap()
 }
 
 fn hardware(arcs: &[ShieldArcConfig]) -> (ShipConfig, EnergyConfigSection) {

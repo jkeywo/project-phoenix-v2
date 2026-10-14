@@ -29,6 +29,13 @@ pub(super) fn with_energy(source: &str) -> String {
                 })
                 .unwrap(),
             );
+            arc.as_table_mut().unwrap().insert(
+                "ai".into(),
+                toml::from_str(include_str!(
+                    "../../../../tests/fixtures/shield-arc-ai.toml"
+                ))
+                .unwrap(),
+            );
             groups.insert(
                 group.0.clone(),
                 toml::from_str::<toml::Value>(

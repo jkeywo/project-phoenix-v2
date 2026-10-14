@@ -1,0 +1,23 @@
+# Explicit no-recovery fixture policy: raise and follow permitted focus evidence.
+root = "shields"
+[[tree]]
+id = "shields"
+initial = "operate"
+[[tree.state]]
+id = "operate"
+[[tree.state.task]]
+id = "raise"
+[tree.state.task.action]
+kind = "write"
+channel = "raised"
+[tree.state.task.action.value]
+source = "literal"
+value = true
+[[tree.state.task]]
+id = "focus"
+[tree.state.task.action]
+kind = "write"
+channel = "focus"
+[tree.state.task.action.value]
+source = "fact"
+name = "preferred_focus"

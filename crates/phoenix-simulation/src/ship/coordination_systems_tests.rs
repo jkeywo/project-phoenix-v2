@@ -1995,24 +1995,16 @@ fn brownout_advisories(app: &App) -> usize {
 /// that would drive a flat battery to the lock over many ticks), and these
 /// are ROUTING tests, so the lock state is set directly rather than reached.
 fn drive_ship_into_brownout(app: &mut App) {
-    use crate::core::messages::PowerGroupId;
-    use crate::modifiers::power_system::{
-        HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
-    };
     let mut q = app.world_mut().query_filtered::<(
         &mut crate::ship::power::ShipPowerSystem,
         &mut crate::ship::power::PowerBrownoutState,
     ), With<Ship>>();
     for (mut ps, mut brownout) in q.iter_mut(app.world_mut()) {
-        ps.0.restore(
-            &[
-                (PowerGroupId(HELM_POWER_GROUP.into()), 1),
-                (PowerGroupId(WEAPONS_POWER_GROUP.into()), 1),
-                (PowerGroupId(SHIELDS_POWER_GROUP.into()), 1),
-            ],
-            0.0,
-            true,
-        );
+        // Routing-only fixture: all supplies report an already selected cut.
+        // Canonical physics and restoration are exercised in the Power suite.
+        for group in ps.0.network_mut().groups.values_mut() {
+            group.cut = true;
+        }
         brownout.locked_changed = true;
     }
 }

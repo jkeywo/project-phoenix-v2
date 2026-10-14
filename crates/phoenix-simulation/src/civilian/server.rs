@@ -172,7 +172,10 @@ pub fn tick_civilian_traffic(
     factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
-    order_sources: Query<&AdmittedCommands>,
+    mut order_sources: Query<(
+        &AdmittedCommands,
+        Option<&mut crate::ship::power::ShipPowerSystem>,
+    )>,
     mut civilians: Query<(
         Entity,
         &EntityUuid,
@@ -210,7 +213,7 @@ pub fn tick_civilian_traffic(
     let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
     let mut rejections: Vec<(String, String, String, Option<ActionCorrelationId>)> = Vec::new();
     let mut accepted_feedback: Vec<(String, String, ActionCorrelationId)> = Vec::new();
-    for admitted in order_sources.iter() {
+    for (admitted, mut power) in order_sources.iter_mut() {
         for cmd in admitted.for_target(crate::ship::system_registry::NAVIGATION_SYSTEM_ID) {
             let SystemControlPayload::OrderCivilian { target, order } = &cmd.payload else {
                 continue;
@@ -227,6 +230,10 @@ pub fn tick_civilian_traffic(
             }
             match resolve_civilian(&runtime, target).filter(|uuid| addressable.contains(uuid)) {
                 Some(uuid) => {
+                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&crate::ship::system_registry::navigation_system_id()).unwrap_or(false)) {
+                        rejections.push((token, target.clone(), "civilian.order.rejected.insufficient_energy".into(), cmd.feedback_correlation.clone()));
+                        continue;
+                    }
                     queued.push(PendingCivilianOrder {
                         uuid: uuid.clone(),
                         order: order.clone(),

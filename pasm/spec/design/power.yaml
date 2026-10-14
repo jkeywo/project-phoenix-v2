@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power Operator
-      summary: Bridge role that allocates the ship's authored power groups and manages battery reserve through normal and emergency conditions.
+      summary: "Engineering allocates incoming energy flow and coolant across authored coarse/fine groups, manages local reserves and reactor thermal state, and rations scarce supply. Minimal controls expose a priority list and no/low/high cooling; depth changes presentation over the same physical network."
     game_design:
       architecture_links: [ship-power-controller]
       responsibilities: [set power-group allocation, manage battery reserve, respond to reactor and battery availability]
@@ -17,7 +17,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power AI Operator
-      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve. Since issue #784 the rules are inline stateless policy on the shared FineSystemAiConfigToml spine (per-group channels), and it emits its reallocation as an admitted SetPowerGroupAllocation command through the shared admission seam (the same surface a human uses), rather than through a private intent component.
+      summary: "The individual reactor System AI executes an authored supported state tree over its permitted Console energy readings, emits the same bounded commands as a human and retains private continuation through delegation or hosting changes."
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
 
@@ -26,11 +26,11 @@ entities:
       status: accepted
       confidence: confirmed
       title: Set Power Group Allocation
-      summary: Power sets an explicit level for one authored group through the reactor's authoritative allocation surface.
+      summary: "Power commands incoming flow, cooling and ordered priorities through the reactor System admission boundary. The legacy rung payload translates to a desired flow only; it stores no competing allocation physics and does not amplify equipment output."
     game_design:
       architecture_links: [ship-power-controller]
       owner_role: power-operator
-      inputs: [authored power group, desired allocation level]
+      inputs: [authored power group, desired incoming flow, desired cooling, ordered priority]
       resolution: host-authoritative
       outputs: [updated power-group allocation]
 
@@ -48,43 +48,36 @@ entities:
 
   - decision: coldable-power-group
     core:
-      status: accepted
+      status: rejected
       confidence: confirmed
       origin: ai
       title: A Power Group May Be Commanded Cold
-      summary: A power group's authored [power_groups.<id>] min_level is the lowest level any operator may command it to, and it may be 0 - a group that can be switched OFF rather than merely turned down. PowerSystem stores the floor per group (PowerSystem::floors, seeded by authored_power_group_seed) and every clamp in the allocation API reads it, so set_group_allocation, decrease, restore and plan_allocation all honour the hull's number instead of the global GROUP_LEVEL_MIN. GROUP_LEVEL_MIN remains the DEFAULT an unauthored group takes and the level the exhaustion lock forces every group DOWN to; the lock uses min(current, GROUP_LEVEL_MIN) so a brownout never raises a cold group. The Alliance destroyer and cruiser author weapons at min_level = 0 and helm and shields at 1; that is how those hulls express RESTRAINT, as an Engineering order visible on the reactor rather than as a hidden captain's toggle. The Power console shows LVL 0 with a COLD tag and an all-dark pip row; the row still draws four rungs, because level 0 is the absence of a lit rung and not a zeroth gem. is_group_cold(group) is the read model, guarded on has_group so a hull with no such group never reads as cold. Since issue #1396 that read model is a FIRE GATE: a mount whose authored [[system]].power_group is cold does not fire, for an AI-resolved doctrine and for a human order alike (see the weapons-cold-fire-gate component), which is what makes RESTRAINT-by-power a real lever rather than a display state.
+      summary: "The former rule that zero incoming allocation means weapons restraint is superseded. Charged local reserves can keep working without intake; explicit Tactical restraint is a separate admitted intent."
       rationale:
-        - "[ai] Issue #1395. Two rules bind the AI, and they are symmetric halves of one decision: the AI never RAISES a group somebody switched off, and it never PARKS one cold either. The first is enforced in plan_allocation, which drops a bid for a group already at 0 so the group holds through the un-bid reservation path at no cost to the budget. It has to be there rather than in the bid loop because every Alliance hull inherits an UNCONDITIONAL priority-0 weapons rule from fragments/ai/fleet_baseline.toml that bids level 2 on any healthy-battery tick - without the guard a cold weapons group is warmed on the next decision arm and restraint lasts one tick. The second is enforced in bid_guarantee, which guarantees a bid asking for a WARM level at least GROUP_LEVEL_MIN, so rationing a short budget can never be the thing that takes a coldable group to 0 and then, by the first rule, leave it there. An authored rule that explicitly bids 0 is still served, and costs the budget nothing. Nothing is stranded: warming a group is a COMMAND, and a human's or a script's SetPowerGroupAllocation reaches set_group_allocation through handle_power_messages without passing through the planner at all."
-        - "[ai] This is NOT a reintroduction of the reactor-side battery floors the 2026-08-10 revert removed, and the two must not be conflated because they share the word floor. Those were floors the reactor held a group UP at while the reserve was low - a commanded-versus-effective split, degradation the player did not ask for. min_level is a floor on what may be ORDERED, in the other direction entirely: it lowers the bottom of the commandable range rather than raising the bottom of the running one, creates no commanded-versus-effective split, and does nothing at all while the battery is healthy. The exhaustion lock is untouched. Avoidable brownouts remain an AI-side min_reserve discipline."
-        - "[ai] Two alternatives were rejected. A fifth pip for rung 0 on a coldable group: a lit gem meaning 'no light' is not a readout, and it would put five pips on weapons beside four on helm and shields, so the console would stop reading as one panel - LVL 0 plus a COLD tag over a dark row says it in one look. And a weapons_cold boolean on the wire: redundant, since the client already receives the group's level and level == 0 is the same predicate the server's is_group_cold applies, so a second field could only disagree with the first."
-    game_design:
-      enforcement_links: [ship-power-controller]
-      owner_role: power-operator
-      protected: true
-      must_not_be: [a reactor-side battery floor that holds a group up, a floor the AI may raise on its own, a floor a save file can rewrite, a fifth pip on the console's row]
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
 
   - decision: ai-power-allocation-rules
     core:
       status: accepted
       confidence: confirmed
       title: AI Power Allocation Rules
-      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches. Since issue #1003 each channel authors two battery floors rather than one, and three ranked rules over them instead of a single guard — a priority-15 HOLD, a priority-10 ELEVATE, and the priority-0 BASELINE it falls to when neither fires. ELEVATE requires the higher min_restore_* floor to raise the channel; once elevated, HOLD only needs the lower min_reserve_* shed floor to keep it there — so a channel that has shed may not re-elevate until the charge has climbed the full gap back up to the restore floor, the hysteresis that stops a straining battery from flipping the allocation at tick rate. HOLD also carries the SAME non-battery trigger clauses as its ELEVATE, so losing that trigger for even one tick (thrust dipping under threshold, or red alert dropping) sheds the channel exactly as a battery breach would, and the channel cannot climb back on the trigger returning alone while the charge is under the restore floor — a deliberate one-way ratchet on trigger flap for as long as the reserve is in the band, because elevated posture belongs to combat stations rather than to a trigger that blinked for a tick. Reworked in issue #784 onto the inline stateless FineSystemAiConfigToml spine — ai_power_allocation resolves each ship-authored power-group channel through AiPolicy.resolve_channel_ranked over a host-seeded fact snapshot (seed_power_facts) plus the read-only scenario flag chain; the highest-priority matching rule supplies the value-carrying SetPowerGroupAllocation verb (an absolute level). Each floor is an authored param referenced by its rule's when guard, so a below-floor guard never fires and allocation never rises when the battery cannot sustain it — replacing both the retired stateful engine (PowerRuleTrigger + EngageState + ShipPowerAiState) and the old global emergency exception. Since issue #959 those per-group results are not emitted one at a time: plan_allocation spends the reactor's whole commanded-total budget in one decision, reserving what the un-bid groups already hold, capping each grant at that group's authored max_level, and rationing any shortfall in authored rule-priority order (ties broken by the reactor's own seed order, since the battery-floor ladder that once formed the secondary key was reverted). The emitted plan never rises above the budget and its decreases precede its increases, so no command is silently refused by the applier and none is re-emitted on the next decision arm; it fits the budget outright whenever the hull's [power_groups.*] default_level values were themselves authored inside it, which every shipped hull satisfies and nothing validates at load.
+      summary: "Power uses the same individual-System supported state-tree host as other migrated controllers. Numeric facts come from the permitted Power Console view; literals and output bounds derive from actual hardware. No old ranked-rung policy or second controller operates the reactor."
       rationale:
-        - "[ai] Issue #1003 gave the AI shed ladder two battery floors per channel instead of one. Helm sheds its elevated point below 50 percent battery and takes it back at 60; weapons sheds below 25 and takes it back at 35, where it was a single 10 before and shed with barely a tenth of the reserve left. The shed floors are what keep a red-alert fight off the reactor's exhaustion lock, because below the weapons floor the ship-wide total is one every shipped reactor's rates recharge from. The gap up to the restore floors is what stops the two decisions chattering: with one threshold per channel the shed and the re-elevate sit on the same number, the lower total recharges past it inside a single tick, and the AI emits a SetPowerGroupAllocation and swings that group's modifier at tick rate. Ten percentage points makes the band seconds wide instead. The hysteresis carries no policy state - the hold rule reads fact(power_<group>), the channel's current level, to tell 'already elevated' from 'climbing back'. All four floors bind the AI's bid stage only; a human Power officer's command is applied by the same battery-blind applier. The hold rule also carries the SAME trigger clauses as the elevate it sits above, so one tick with the trigger false (thrust under threshold, or red alert down) sheds a channel exactly as a battery breach does, and it cannot climb back on the trigger returning alone while the charge is under the restore floor - only the restore floor brings it back. That is a deliberate one-way ratchet on trigger flap for as long as the reserve is in the band: elevated posture belongs to combat stations, not to a trigger that blinked for a tick."
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
     game_design:
       enforcement_links: [authored-power-ai-rule-evaluator]
       owner_role: power-ai-operator-role
       protected: true
-      must_not_be: [hard-coded to a fixed group list, allowed to cause avoidable brownouts, allowed to command more than the reactor's total budget, prioritised by a Rust ordering that overrides one the hull's own TOML expressed]
+      must_not_be: [operating while human-controlled, reading unbound Console information, bypassing admitted commands, running a second Power controller]
 
   - information: power-grid-information
     core:
       status: accepted
       confidence: confirmed
       title: Power Grid Information
-      summary: Power sees group allocation, total supply, battery reserve, allocation lock state, and fine reactor and battery availability. Alliance hulls author a six-pip sustainable allocation that recharges slowly plus a two-pip battery reserve; allocations above six drain the reserve.
+      summary: "The Power Console receives desired and effective incoming flows/cooling, priority order, cut/restoration state, each local reserve and thermal stop, reactor generation/capacitor/ramp readings and real coolant stock plus withdrawn fractional credit. Co-hosting never grants another Console knowledge."
       rationale:
-        - "[ai] Alliance reactors explicitly author sustainable_total = 6 and max_commanded_total = 8 so the six-base plus two-battery budget cannot remain an implicit global constant."
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
     game_design:
       enforcement_links: [ship-power-state]
       visibility: role-visible
@@ -96,7 +89,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power Brownout Information
-      summary: Power receives an advisory when active demand exceeds normal supply and battery reserve is draining toward emergency lock.
+      summary: "New incoming-flow cuts are reported to each affected Console, including descendants of coarse groups. A cut retains reserves and desired settings; low supply never freezes allocation controls. Reports use normal communication delivery and do not replace human coordination."
     game_design:
       enforcement_links: [ship-power-controller]
       visibility: role-visible
@@ -108,7 +101,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Authored Power Group AI Rules
-      summary: Each authored power group is a dynamic output channel of an inline stateless allocation policy that selects its level from current ship conditions. Rules are authored as [[power.ai_policy.rule]] TOML entries (priority, power-group channel, when guard, the value-carrying set_power_group_allocation verb, and its absolute level payload). Every rule declares a minimum battery reserve as an authored param referenced by its guard, so a group is elevated only while the battery is at or above that reserve — preventing routine brownouts with no global emergency exception. The valid-channel set is built at load from the ship's [power_groups.*] keys (no fixed catalogue); the reactor is seeded from those authored groups at spawn so any authored group is allocatable, and rest allocations are kept sustainable so idle ships never brown out. Since issue #885 the block is always AUTHORED: the default_power_ai_config synthesiser that used to reproduce the retired helm-thrust / weapons-red-alert baseline for a hull that omitted it is deleted, and omitting the block is now a load error. Issue #923 briefly moved the Alliance fleet's red-alert elevation from the weapons channel to a sensors one, on the reading that sensor power was weapon reach; issue #955 removed that range coupling in the weapons code instead, so the sensors channel is gone from fleet_baseline.toml and the red-alert point is back on weapons, where it buys PhaserDamage. Power buys intensity, not distance. Issue #959 made the evaluation budget-aware: the authored rule priority that decides which rule wins a channel now ALSO decides which channel wins the reactor's last point, so a policy whose per-group levels sum past the commanded-total budget is rationed in the hull's own priority order (ties broken by the reactor's seed order) instead of having the surplus dropped without error and re-asked for on every decision arm. Each group's grant is additionally capped at its own [power_groups.<id>] max_level.
+      summary: "Validated config.ai on the reactor compiles once into a supported numeric state tree. The host reads local reserve/heat/output observations through its Console, evaluates only while AI-operated, preserves private state and emits combined flow/cooling settings through normal admission. There is no hidden fallback generator or legacy policy controller."
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
       participating_roles: [power-ai-operator-role]
@@ -117,8 +110,8 @@ entities:
       outputs: [rule-derived group allocations]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-sim-gameplay/src/ai/policy.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
-      symbols: [ai_power_allocation, AiPolicy, resolve_channel, resolve_channel_ranked, seed_power_facts, POWER_SET_ALLOCATION_VERB, PowerAiPolicy, authored_power_group_seed, plan_allocation, AllocationBid, max_commanded_total]
+      paths: [crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-sim-gameplay/src/resources/energy_ai.rs, crates/phoenix-sim-gameplay/src/ai/host.rs]
+      symbols: [ai_power_allocation, compile_ship_trees_with_energy, power_numeric_bindings, decide_tree_with_numbers, ShipAiTreeRuntime]
       tests: [cargo test, crates/phoenix-sim-gameplay/src/modifiers/power_system_tests.rs]
 
   # --- Band-D supply/demand redesign (2026-08-17 customisation grill). ---
@@ -130,46 +123,40 @@ entities:
 
   - decision: power-supply-demand-model
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Per-Component Supply/Demand Power
-      summary: "Band D replaces the group-wide boost/amplifier model with a per-component supply/demand economy: every system draws power to run, and ship demand is the SUM of its per-component draws rather than a per-group boost level. This is what makes materiel customisation possible — a stronger component costs more to run — and is the sole reason the redesign happens (a boost model makes a stronger component a strict upgrade, not a sidegrade). The delivered three power groups [helm, weapons, shields] survive as the COARSE control tier that distributes a group budget across its member consumers via limited AI; direct per-system allocation is the detailed tier. Idle ships still rest sustainably: baseline demand is heat-cheap and generation covers it, so 'everything draws power' does not make an idle ship brown out."
+      summary: "Incoming energy replenishes local System batteries. Actual continuous work consumes its affordable fraction; a discrete action commits its entire cost before ammunition or effects. Fullness-dependent passive drain and gross charging/depletion heat create ongoing management. Authored nested groups allocate supply without an additional simulation store."
       rationale:
-        - "Reference model is EmptyEpsilon (per-system power with a simpler default management mode over it); phoenix keeps the three-group abstraction as that default mode."
-        - "'ops' — today's authored fourth group that drives no modifier — becomes the aux bucket into which non-combat draw (sensors, comms, navigation, repair) rolls at the coarse tier. Ratifiable, not yet John-confirmed."
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
     game_design:
       must_not_be: [expressed as a group-wide multiplier that makes a stronger component cost nothing extra, allowed to brown out an idle ship, a second control intelligence separate from the fine-system policy runtime]
 
   - decision: power-energy-exhaustion-lock-retained
     core:
-      status: proposed
+      status: rejected
       confidence: confirmed
       title: Energy Failure — Battery Then Exhaustion Lock (Retained)
-      summary: "The energy side of the economy is ship-wide and HARD, and deliberately keeps the delivered failure model. Demand above generation draws the battery; while the battery holds charge ALL demand is met (no per-system energy degradation); the battery empty trips the exhaustion LOCK (every group forced to minimum, allocation controls frozen) until charge recovers past the authored emergency_threshold. Only the demand INPUT changes from the delivered model — per-component draw instead of group boost-level — so a maxed loadout drains the battery and reaches the lock sooner. The 2026-08-10 no-floors revert stands: no reactor-side floors are reintroduced; avoidable brownouts stay an AI-side min_reserve discipline."
+      summary: "The earlier ship-wide battery exhaustion lock is rejected by the selected redesign. Supply shortfall cuts incoming flow deterministically, retains commanded values and restores feasible flow automatically; it does not force every System down or freeze controls."
       rationale:
-        - "John's exact call, 2026-08-17: 'battery then hard lock while it recharges.' The 'lose the lot, which is the point' stance is preserved under supply/demand rather than overturned; graceful degradation lives on the heat axis, not the energy axis."
-    game_design:
-      must_not_be: [replaced by graceful per-system energy degradation, given reactor-side battery floors, made to brown out an idle ship]
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
 
   - decision: power-heat-overpower-band
     core:
-      status: proposed
+      status: rejected
       confidence: confirmed
       title: Heat — The Per-System Overpower Band
-      summary: "Heat is the second, independent pressure: per-system and GRACEFUL. A system run at baseline is heat-cheap; pushing it above 100% into the OVERPOWER band buys more output (this is the delivered boost model re-homed, not deleted) paid in both energy draw and heat. Dissipation removes heat; a system that overheats drops offline to cool and then recovers — self-correcting, per-system, and never touching the ship-wide energy lock. Coolant is a detail-tier resource: the coarse three-group tier auto-cools the hottest system via limited AI, while the detailed Engineering screen lets a human route coolant (EmptyEpsilon Advanced-Engineering style). Reactor 'dissipation' sets the total coolant budget."
+      summary: "The earlier generic allocation-to-output overpower band is superseded. Heat follows actual gross charging/depletion, coolant consumes real stock for heat removed, and thermal trip/recovery has hysteresis. Equipment-specific effects remain authored capabilities rather than free group multipliers."
       rationale:
-        - "The overpower band is where 'spend power to amplify' survives the redesign, so nothing the delivered model does is lost — it is re-expressed as a per-system, heat-taxed choice instead of a group-wide free multiplier over sustainable output."
-        - "Coolant is optional depth per the console-complexity phone-depth doctrine, not a mandatory chore; making it detail-tier keeps the coarse tier at two coupled variables."
-    game_design:
-      must_not_be: [a ship-wide heat pool that removes per-system management, allowed to destroy a system on a single overheat rather than dropping it offline-to-cool, a mandatory chore at the coarse control tier]
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
 
   - decision: power-reactor-customisable-profile
     core:
       status: proposed
       confidence: confirmed
       title: Reactor As A Customisable Component
-      summary: "The reactor is itself a customisable component with a profile trading {generation, battery capacity, recovery rate, heat dissipation} against one another, so choosing headroom in one dimension costs another. It is the diegetic budget dial for materiel customisation (roadmap-ship-customisation) and the ONE component a starbase may upgrade — a mission-authored reward is the sole sanctioned way to raise the soft ceiling, campaign-gated by authoring so skirmish balance stays fixed."
+      summary: "Reactors have authored generation, ramp, capacitor, intake and thermal/cooling hardware profiles using the shared energy mechanism. Runtime stock replenishment is ordinary service transfer. Player equipment selection and refitting remain increment 13; no mission-only reactor upgrade exception or fitting currency is introduced."
       rationale:
-        - "A profile swap must re-author the [power] scalars coherently with the hull's authored AI min_reserve guards; the guards stay AI-side and relative, never reactor-side floors."
+        - "Increment 8 adopts consumer-local-energy-flow, reactor-local-capacitor-and-thermal-state and finite-coolant-and-saved-flow-cuts. Earlier group amplifiers, ranked-rung AI and ship-wide exhaustion lock are superseded. Existing System identity, Console knowledge, admission and transport remain."
     game_design:
-      must_not_be: [an unconditional upgrade available outside a mission-authored starbase reward, a way to reintroduce reactor-side power floors]
+      must_not_be: [an additional mandatory global battery, a separate fitting currency]

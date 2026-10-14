@@ -2733,7 +2733,9 @@ fn reactor_charge_and_allocation_move_the_digest() {
         .get_mut::<ShipPowerSystem>(entity)
         .unwrap()
         .0
-        .battery_charge -= 1.0;
+        .network_mut()
+        .reactor
+        .energy -= 1.0;
     let spent = world_digest(&world);
     assert_ne!(initial, spent);
     world

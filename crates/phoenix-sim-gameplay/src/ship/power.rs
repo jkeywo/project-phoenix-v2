@@ -1,4 +1,4 @@
-use crate::core::messages::{CoordinationPayload, PowerGroupId, SystemId};
+use crate::core::messages::{CoordinationPayload, PowerGroupId};
 use crate::modifiers::power_system::{
     power_level_for_group, AuthoredPowerGroup, PowerConfig, PowerSystem, HELM_POWER_GROUP,
     POWER_GROUP_ORDER, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,

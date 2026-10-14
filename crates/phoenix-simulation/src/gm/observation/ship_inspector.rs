@@ -64,7 +64,7 @@ fn group_for(path: &str) -> ShipFieldGroup {
         ShipFieldGroup::Station
     } else if path.starts_with("system[") {
         ShipFieldGroup::System
-    } else if path.starts_with("power_groups[") {
+    } else if path.starts_with("power_groups[") || path.starts_with("energy.") {
         ShipFieldGroup::Power
     } else if path.starts_with("runtime.") {
         ShipFieldGroup::Runtime
@@ -265,6 +265,7 @@ pub fn projection<'a>(
                     "captain_console",
                     "comms_console",
                     "power",
+                    "energy",
                     "sensors_console",
                     "navigation_console",
                     "shields_console",

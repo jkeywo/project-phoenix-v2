@@ -6003,7 +6003,7 @@ fn a_flat_battery_locks_every_group_to_one_and_updates_all_modifiers() {
             ),
             2,
         );
-        ps.0.battery_charge = 0.0;
+        ps.0.network_mut().reactor.energy = 0.0;
     }
 
     // Tick applies the lock -> translate_power_modifiers runs

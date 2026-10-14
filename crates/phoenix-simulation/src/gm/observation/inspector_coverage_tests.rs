@@ -337,6 +337,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         captain_console: _,
         comms_console: _,
         power: _,
+        energy: _,
         sensors_console: _,
         navigation_console: _,
         shields_console: _,
@@ -393,6 +394,63 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
                 let _ = $name as fn($type);
             };
         }
+    exhaustive_struct!(
+        energy_schema,
+        crate::entities::config::EnergyConfigSection,
+        reactor,
+        consumers,
+        groups
+    );
+    exhaustive_struct!(
+        reactor_energy_schema,
+        crate::entities::config::EnergyReactorConfig,
+        sustainable_output_per_sec,
+        max_output_per_sec,
+        ramp_per_sec,
+        initial_output_per_sec,
+        initial_energy,
+        initial_heat,
+        max_cooling_per_sec,
+        default_cooling_per_sec,
+        reserve,
+        coolant
+    );
+    exhaustive_struct!(
+        consumer_energy_schema,
+        crate::entities::config::EnergyConsumerConfig,
+        system,
+        initial_energy,
+        initial_heat,
+        continuous_cost_per_sec,
+        discrete_cost,
+        reserve,
+        coolant
+    );
+    exhaustive_struct!(
+        energy_group_schema,
+        crate::entities::config::EnergyGroupConfig,
+        id,
+        parent,
+        max_flow_per_sec,
+        default_flow_per_sec,
+        max_cooling_per_sec,
+        default_cooling_per_sec,
+        priority,
+        restore_delay_secs
+    );
+    exhaustive_struct!(
+        energy_capacity_schema,
+        crate::resources::energy::EnergyConfig,
+        capacity,
+        max_intake_per_sec,
+        passive_loss_at_full_per_sec,
+        charge_heat_per_unit,
+        discharge_heat_per_unit,
+        passive_cooling_per_sec,
+        coolant_heat_per_unit,
+        trip_heat,
+        recover_heat
+    );
     exhaustive_struct!(
         ship_config_schema,
         crate::ship::config::ShipConfig,
@@ -864,6 +922,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         umbilical_schema,
         crate::umbilical::UmbilicalConfig,
+        allowed_resources,
         link,
         capacity,
         rate,

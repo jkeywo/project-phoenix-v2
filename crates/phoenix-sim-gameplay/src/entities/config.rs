@@ -713,7 +713,7 @@ impl EntityConfig {
                         ));
                     }
                 }
-                ResourceEndpoint::TorpedoMagazine => {
+                ResourceEndpoint::TorpedoMagazine {} => {
                     if config.torpedoes.is_none() {
                         return Err(
                             "torpedo_magazine endpoint requires [torpedoes] on this entity".into(),

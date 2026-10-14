@@ -34,7 +34,7 @@ pub fn endpoint_stock(
         ResourceEndpoint::Capacity { id } => infrastructure
             .and_then(|state| state.0.capacity_stock(id))
             .map(|stock| (stock.clone(), 0)),
-        ResourceEndpoint::TorpedoMagazine => torpedoes.map(|system| {
+        ResourceEndpoint::TorpedoMagazine {} => torpedoes.map(|system| {
             let held = system.0.magazine.headroom() - system.0.magazine_headroom();
             (system.0.magazine.clone(), held)
         }),
@@ -146,7 +146,7 @@ pub fn tick_resource_transfers(
                     capacity: id.clone(),
                     delta,
                 }),
-                ResourceEndpoint::TorpedoMagazine => {
+                ResourceEndpoint::TorpedoMagazine {} => {
                     if let Some((_, _, Some(mut system))) =
                         endpoints.iter_mut().find(|(id, _, _)| id.0 == *uuid)
                     {

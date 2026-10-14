@@ -139,7 +139,7 @@ async function latestBlackboard(client, systemId) {
 // the destroyer's (#1167) and the cruiser's (#1390) — because the claim is that
 // the SAME two seats, the SAME two wire messages and the SAME blackboard gates
 // carry an authored dock+umbilical pair on any hull that mounts them.
-async function runTransferChain(context, world) {
+async function runTransferChain(context, world, ammunition = false) {
   await context.route('**/assets/worlds/default.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: world }),
   );
@@ -156,6 +156,7 @@ async function runTransferChain(context, world) {
   // Two human seats: Helm owns the dock, Engineering owns the umbilical.
   const helm = await createTestClient(context, hostId, { name: 'Helm' });
   const engineer = await createTestClient(context, hostId, { name: 'Eng' });
+  const tactical = ammunition ? await createTestClient(context, hostId, { name: 'Tac' }) : null;
 
   await helm.send('SelectStation', { station: 'Helm' });
   await waitForStation(helm);
@@ -163,6 +164,11 @@ async function runTransferChain(context, world) {
   await waitForStation(engineer);
 
   await helm.send('SetReady', { ready: true });
+  if (tactical) {
+    await tactical.send('SelectStation', { station: 'Tactical' });
+    await waitForStation(tactical);
+    await tactical.send('SetReady', { ready: true });
+  }
   await engineer.send('SetReady', { ready: true });
   await helm.waitForMessage('GameStarted', 10_000);
   await engineer.waitForMessage('GameStarted', 10_000);
@@ -177,6 +183,24 @@ async function runTransferChain(context, world) {
     undefined,
     { timeout: 15_000 },
   );
+
+  if (tactical) {
+    // A full magazine has no replenishment room. Spend a real round through
+    // ordinary human admission, then return remaining tube stock to storage.
+    await tactical.send('ControlSystem', { target: 'torpedo-tube-fore-port',
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: 1 } } });
+    await expect.poll(async () => tactical.page.evaluate(() => {
+      const update = [...(window.__messages || [])].reverse().find(m => m.type === 'WeaponsUpdate');
+      return update?.data?.tubes?.find(t => t.id === 'fore_port')?.loaded_count;
+    }), { timeout: 30_000 }).toBe(1);
+    await tactical.send('ControlSystem', { target: 'torpedo-tube-fore-port',
+      payload: { type: 'FireTorpedo', data: { target_uuid: null } } });
+    await tactical.waitForMessage('TorpedoLaunched', 15_000);
+    await tactical.send('ControlSystem', { target: 'torpedo-tube-fore-port',
+      payload: { type: 'SetTorpedoVolleyTarget', data: { count: 0 } } });
+    await expect.poll(async () => (await latestBlackboard(tactical, 'torpedo-magazine'))?.torpedoes_remaining,
+      { timeout: 30_000 }).toBe(5);
+  }
 
   // Wait until the berth is in dock range — the helm's dock blackboard reports it
   // `available` — before issuing the dock, so the manoeuvre has a target to fly to.
@@ -272,6 +296,16 @@ async function runTransferChain(context, world) {
 
   expect(serverCrashes, `server errors: ${serverCrashes.join('; ')}`).toEqual([]);
 
+  if (tactical) {
+    // Real magazine endpoint plus an explicitly aliased facility capacity:
+    // exactly the launched round is replaced; no ammunition is created.
+    await expect.poll(async () => {
+      const stock = await latestBlackboard(engineer, 'umbilical');
+      return [stock?.operator_level, stock?.partner_level];
+    }, { timeout: 30_000 }).toEqual([6, 99]);
+    expect((await latestBlackboard(tactical, 'torpedo-magazine'))?.torpedoes_remaining).toBe(6);
+    await tactical.close();
+  }
   await helm.close();
   await engineer.close();
 }
@@ -296,4 +330,17 @@ test('cruiser: Helm dock -> Engineering umbilical -> capacity moves between two 
 }) => {
   test.setTimeout(90_000);
   await runTransferChain(context, CRUISER_DOCK_WORLD);
+});
+
+// Increment 6: the same ordinary controls replenish actual ammunition from
+// a named facility store, after Tactical spends one round. Existing cases above
+// retain their original authored capacity flow and assertions.
+test('cruiser: real torpedo magazine replenishes from an explicit facility stock', async ({ context }) => {
+  test.setTimeout(150_000);
+  const world = CRUISER_DOCK_WORLD
+    .replace('umbilical = { rate = 40.0 }', 'umbilical = { rate = 40.0, capacity = "torpedoes", direction = "collect" }')
+    .replace(/spawn_on = "game_start"\s*$/,  `spawn_on = "game_start"
+overrides = { resource_services = { torpedoes = { kind = "capacity", id = "ordnance" } }, infrastructure = { capacity = [{ id = "ordnance", amount = 100, ceiling = 100 }] } }
+`);
+  await runTransferChain(context, world, true);
 });

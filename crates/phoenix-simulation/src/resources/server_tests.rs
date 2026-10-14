@@ -124,7 +124,7 @@ fn docked_ammunition_replenishes_without_using_tube_held_space() {
     system.magazine.adjust(-3);
     let mut world = World::new();
     let mut flow = request("crew", "depot", "crew", 7);
-    flow.destination_endpoint = ResourceEndpoint::TorpedoMagazine;
+    flow.destination_endpoint = ResourceEndpoint::TorpedoMagazine {};
     world.insert_resource(EffectQueue(vec![flow]));
     world.insert_resource(EffectQueue::<CapacityAdjustment>::default());
     world.spawn((EntityUuid("depot".into()), capacity(7, 7)));

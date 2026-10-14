@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResourceEndpoint {
     Capacity { id: String },
-    TorpedoMagazine,
+    TorpedoMagazine {},
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,7 +33,7 @@ impl ResourceEndpoint {
             Self::Capacity { id } if id.trim().is_empty() => {
                 Err("capacity endpoint must have a non-empty id".into())
             }
-            Self::TorpedoMagazine if resource != "torpedoes" => Err(format!(
+            Self::TorpedoMagazine {} if resource != "torpedoes" => Err(format!(
                 "torpedo_magazine endpoint only supports resource \"torpedoes\", got {resource:?}"
             )),
             _ => Ok(()),
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn exact_services_explicit_overrides_and_no_search() {
         let services = BTreeMap::from([
-            ("torpedoes".into(), ResourceEndpoint::TorpedoMagazine),
+            ("torpedoes".into(), ResourceEndpoint::TorpedoMagazine {}),
             (
                 "fuel".into(),
                 ResourceEndpoint::Capacity {
@@ -86,7 +86,7 @@ mod tests {
         ]);
         assert_eq!(
             resolve_endpoint("torpedoes", &services, &ResourceLink::default()).unwrap(),
-            ResourceEndpoint::TorpedoMagazine
+            ResourceEndpoint::TorpedoMagazine {}
         );
         assert_eq!(
             resolve_endpoint("other", &services, &ResourceLink::default()).unwrap(),
@@ -111,7 +111,7 @@ mod tests {
             "fuel",
             &services,
             &ResourceLink {
-                provider: Some(ResourceEndpoint::TorpedoMagazine),
+                provider: Some(ResourceEndpoint::TorpedoMagazine {}),
                 service: None
             }
         )
@@ -130,6 +130,8 @@ mod tests {
         let valid = r#"
 [torpedoes]
 count = 3
+[torpedoes.ai]
+idle = true
 [resource_services.reload]
 kind = "torpedo_magazine"
 [resource_services.fuel]
@@ -150,7 +152,7 @@ amount = 10
                 }
             )
             .unwrap(),
-            ResourceEndpoint::TorpedoMagazine
+            ResourceEndpoint::TorpedoMagazine {}
         );
         assert!(
             EntityConfig::from_toml("[resource_services.fuel]\nkind='capacity'\nid='missing'")

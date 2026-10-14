@@ -10,6 +10,15 @@ use crate::modifiers::power_system::{PowerState, PowerSystem};
 use crate::ship::power::ShipPowerSystem;
 use bevy::ecs::system::RunSystemOnce;
 
+fn clear_admitted_each_tick(mut queues: Query<&mut AdmittedCommands>) {
+    for mut queue in &mut queues {
+        queue.0.clear();
+    }
+}
+fn advance_fixture_tick(mut tick: ResMut<crate::sim_tick::SimTick>) {
+    tick.0 += 1;
+}
+
 fn content() -> EntityConfig {
     crate::entities::include_resolve::load_entity_config("assets/entities/alliance_cruiser.toml")
         .unwrap()
@@ -61,7 +70,7 @@ fn app_for(mut content: EntityConfig, memory_tree: bool) -> (App, Entity) {
             )
                 .chain(),
         )
-        .add_systems(Last, advance_shield_fixture_tick);
+        .add_systems(Last, advance_fixture_tick);
     let entity = app
         .world_mut()
         .spawn((

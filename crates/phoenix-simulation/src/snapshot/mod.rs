@@ -244,6 +244,8 @@ pub use crate::world::trigger_registry::TriggerRuntimeState;
 
 mod artifact;
 #[cfg(test)]
+mod physical_preflight_tests;
+#[cfg(test)]
 mod shield_tests;
 #[cfg(test)]
 #[path = "../snapshot_tests.rs"]

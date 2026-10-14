@@ -495,17 +495,6 @@ impl RepairPhases {
     /// team touches it. The old rule ("a repair team alone cannot lift the
     /// latch") left destroyed systems permanently stuck with nothing else in the
     /// game able to clear them.
-    #[cfg(test)]
-    pub fn tick(
-        &mut self,
-        dt: f32,
-        hull: &mut SystemHull,
-        config: Option<&ShipConfig>,
-        enabled: &[bool],
-    ) {
-        self.tick_with_repair_work(dt, hull, config, enabled, &vec![1.0; self.slots.len()]);
-    }
-
     pub fn tick_with_repair_work(
         &mut self,
         dt: f32,

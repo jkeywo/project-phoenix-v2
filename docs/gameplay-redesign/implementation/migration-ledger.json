@@ -99,7 +99,11 @@
       "completion": "Existing repair work runs through shared job/team execution with equivalent repair outcomes and report-driven work lists.",
       "evidence": [
         "pasm/spec/design/shared-jobs.yaml",
-        "docs/gameplay-redesign/implementation/increment-5.md"
+        "docs/gameplay-redesign/implementation/increment-5.md",
+        "docs/acceptance/1562-shared-jobs.md",
+        "docs/gameplay-redesign/implementation/jobs-validation.json",
+        "docs/gameplay-redesign/implementation/jobs-baseline.json",
+        "docs/gameplay-redesign/implementation/jobs-baseline.md"
       ]
     },
     {

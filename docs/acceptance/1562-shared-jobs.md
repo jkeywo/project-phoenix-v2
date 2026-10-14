@@ -37,11 +37,32 @@ existing networking remain.
 
 ## Evidence
 
-Automated validation and baseline comparison are recorded during integration.
+All required integrated gates pass: 9,112 native tests (102 existing ignored),
+4,684 renderer-independent Simulation tests and 8,730 JavaScript tests. Formatting,
+Clippy, generated surfaces, strict strings, LODs, layer/dependency checks and PASM
+validate/scan/traceability pass. The wiki lint and 216-entry ledger checks pass.
+
+Fifteen Repair browser cases and two rendered Workshop journeys pass. Workshop
+covers inherited workflow materialisation, editing, validation, undo/redo,
+export/reload, disposable Test and actual rendered Preview. A separate paused-job
+browser case passes; its desktop screenshot was inspected for readable assignment
+and pause status. These are automated/browser evidence, not physical device tests.
+
 Independent read-only reviews passed the pure executor, Simulation adapters,
 Workshop and root persistence/digest/client integration. Tests cover physical
 phase equivalence, named-team exclusion, failure cleanup, reference/final-write
 effects, RON continuation, malformed-state refusal and permitted projections.
+Explicit external-repair ordering resolves shared team access without increasing
+the ambiguity allowlist. Snapshot/digest characterization and authored-field
+inventory assertions remain exact after their intentional schema updates.
+
+Compact command/results are in [the validation receipt](../gameplay-redesign/implementation/jobs-validation.json).
+The [baseline comparison](../gameplay-redesign/implementation/jobs-baseline.md)
+records deterministic gameplay and performance separately from human acceptance.
+Both bounded scenario reports match Increment 4 byte for byte; seeded repeats,
+replay and continuation agree. Cruiser results remain identical: 20/20 victories
+and all 16 unchanged thresholds pass. Median tick timings measured 4–7% higher
+in the same-machine diagnostic; this is not release-budget acceptance.
 
 ## Human/device acceptance
 

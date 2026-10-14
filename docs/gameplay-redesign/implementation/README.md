@@ -171,3 +171,9 @@ Snapshot 41/rules 0.13 retain IDs, queued redirects and private continuation onc
 The existing Repair Console shows permitted assignment/outcome rows without
 additional controls or concealed diagnosis. Physical/device and human-workload
 acceptance remains open; Increment 6 has not started.
+
+
+[Validation receipts](jobs-validation.json) and [gameplay comparison](jobs-baseline.md)
+record the automated exit. Required native/client/PASM gates and real Workshop
+browser journeys pass. The ledger remains `in_progress` for physical/device and
+human-workload acceptance; the user authorised this increment with “Do 5”.

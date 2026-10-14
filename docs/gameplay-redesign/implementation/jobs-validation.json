@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "e858616abdcdb70d15f21b855f20d02ab11fec5e",
+  "snapshot_format": 41,
+  "simulation_rules": "0.13",
+  "protocol": 6,
+  "checks": [
+    {
+      "name": "fmt",
+      "command": "cargo fmt -- --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-fmt.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-clippy.log",
+      "raw_sha256": "b0d6010783030704b4620cb8dbfaf3066b8ac98523f813506a4fd1d8d5453eb9"
+    },
+    {
+      "name": "workspace",
+      "command": "PHOENIX_AMBIGUITY_BASE_REF=63444bf0 cargo test --workspace --features headless",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-workspace.log",
+      "raw_sha256": "97469faec36ee773481d0f3232ab42d86d74a3a90d354e0448c99f8f6be3bcba",
+      "passed_tests": 9112,
+      "ignored_tests": 102
+    },
+    {
+      "name": "simulation-owner",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-simulation-owner.log",
+      "raw_sha256": "dba1c56ad262c7f04de3a0a92a19b5cfe8f86a4c30afe33e61ff88776633398c",
+      "passed_tests": 4684,
+      "ignored_tests": 0
+    },
+    {
+      "name": "debug-surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91"
+    },
+    {
+      "name": "live-layout",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-live-layout.log",
+      "raw_sha256": "39e9e3e89dbea6d30b6e8f69bc61d3298efaa1f1c93f5610bf7045038a53f24e"
+    },
+    {
+      "name": "vitest",
+      "command": "npx --no-install vitest run",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-vitest.log",
+      "raw_sha256": "0f8062eb111ced8a6a0db44af3af931b5caf8d221d22cbc63ae89934c27603e8",
+      "passed_tests": 8730
+    },
+    {
+      "name": "strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-strings.log",
+      "raw_sha256": "a090a5a0c84c6822d5d327279c73b6bbee47ac71dca01c6f4e9a50526ad7408b"
+    },
+    {
+      "name": "lods",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45"
+    },
+    {
+      "name": "lod-captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7"
+    },
+    {
+      "name": "layers",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-layers.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92"
+    },
+    {
+      "name": "dependency-tree",
+      "command": "node scripts/check-layers.mjs --dependency-tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-dependency-tree.log",
+      "raw_sha256": "cd9eaf91f97f04e7ba6d7df6b11b5268aeb649251fa07e0834ff8c7600ed8cbe"
+    },
+    {
+      "name": "pasm-validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-pasm-validate.log",
+      "raw_sha256": "04ab00f8b2ce94e875cb6fcbb168ed21a4dd418cd687304dc42d3d32f9222e8e"
+    },
+    {
+      "name": "pasm-scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-pasm-scan.log",
+      "raw_sha256": "04ceb20c9a846233b8b9d2fb6b772967f1fada2d8110b05a792cb5db131e1b3f"
+    },
+    {
+      "name": "pasm-traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-final-pasm-traceability.log",
+      "raw_sha256": "cabe3a596b1d1b7328a1e9b0c4c42021fefad4cf34f007c3228c9fb6eb24dd8a"
+    },
+    {
+      "name": "Targeted continuation",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features -- repair sim_digest snapshot",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-continuation-targeted.log",
+      "raw_sha256": "a3cbfae8441d6982cac7ef6f6cf2e859a6a4c2b5aeab28d9c6bb2224835e7880",
+      "passed_tests": 305,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Pure jobs",
+      "command": "cargo test -p phoenix-sim-gameplay --lib jobs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-jobs-targeted.log",
+      "raw_sha256": "1d04d5019a78d2d55d53b8d10e7920026f39f826df2d5667b548f0cb9382c40f",
+      "passed_tests": 8,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Schedule ownership",
+      "command": "cargo test --test fixed_update_ambiguities -- live_debt_is_a_subset_and_the_allowlist_does_not_grow",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-schedule-targeted.log",
+      "raw_sha256": "4ba2a35a8849b7d436fb1a746cbf6635c340327cb4edf327fdce32414e8ba0f7",
+      "passed_tests": 1,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Content composition",
+      "command": "cargo test -p phoenix-content --lib repair_workflow",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-content-targeted.log",
+      "raw_sha256": "9d41e7e168fceaf3fda29879c97d568080ed1597d4c8b7cf5e84335a3ff432ed",
+      "passed_tests": 1,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Targeted client",
+      "command": "npx --no-install vitest run tests/client/job-work-list.test.js tests/client/repair-console.test.js tests/client/engineering-console.test.js tests/client/console-state.test.js tests/client/workshop-job-workflow.test.js editor/tests/workshop-job-workflow.test.js",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-client-integrated.log",
+      "raw_sha256": "c60995fb1409c131baf56cba531bb71df35e53ee6b2cc5caafc7e490545ae8bb",
+      "passed_tests": 449
+    },
+    {
+      "name": "Readout continuity",
+      "command": "npx --no-install vitest run tests/client/job-work-list.test.js",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-work-list-targeted.log",
+      "raw_sha256": "1af8de7056d5b84240124312d0e79995e5e73665fa5d2c27bad84c97f984901a",
+      "passed_tests": 1
+    },
+    {
+      "name": "WASM build",
+      "command": "NO_COLOR=true trunk build",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-wasm.log",
+      "raw_sha256": "3c29d8e028ad3848e6c6ac609201027c06047afe279a9c7f6696d49b81d5233b"
+    },
+    {
+      "name": "Phone client",
+      "command": "node scripts/build-client.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-client-build.log",
+      "raw_sha256": "2e5e9f857e46a75a577bd477ba249a33136537b54ee19933b36c1b3b1a616c46"
+    },
+    {
+      "name": "Workshop bundle",
+      "command": "node scripts/build-workshop.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-workshop-build.log",
+      "raw_sha256": "84e1fccbe971fb2ff483ddc540d6f3cecde035ee8808b2bd5121d4522e422d93"
+    },
+    {
+      "name": "Workshop viewer",
+      "command": "NO_COLOR=true trunk build --config workshop-preview-trunk.toml",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-workshop-viewer-build.log",
+      "raw_sha256": "3bda90c7a71b3c50a2d4e6c26166c75f8be6591f38751513382e620e9ae97c26"
+    },
+    {
+      "name": "Viewer install",
+      "command": "node scripts/copy-workshop-preview.mjs dist",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-workshop-viewer-copy.log",
+      "raw_sha256": "bcc8e1947b3d25ecd919f64a191d5e1ff2eafc4c3824474c3e24d69e61e23c6a"
+    },
+    {
+      "name": "Repair browser",
+      "command": "PHOENIX_SMOKE_PORT=3151 npx --no-install playwright test repair-console.spec.js --project=chromium",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-browser-repair.log",
+      "raw_sha256": "9f8ddfcd89c148a6f3142e2f226e99dda425ffc4617df6444c911e75b45330cd",
+      "passed_tests": 15
+    },
+    {
+      "name": "Repair visual browser",
+      "command": "PHOENIX_SMOKE_PORT=3153 npx --no-install playwright test repair-console.spec.js --project=chromium --grep 'repair jobs:' --output=../../.phoenix/increment-5-repair-visual",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-browser-visual.log",
+      "raw_sha256": "6aee2c07565e29330ebde8a536a4be0b10e3d585d2304535fb2de799cc87b8cf",
+      "passed_tests": 1
+    },
+    {
+      "name": "Workshop browser",
+      "command": "PHOENIX_SMOKE_PORT=3152 npx --no-install playwright test workshop-consoles.render.spec.js workshop-preview.render.spec.js --project=render",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-browser-workshop.log",
+      "raw_sha256": "bdd23f330fa2abac249f09d1b8aec119fd37db329f368d9ce63cbfcb20bc9e72",
+      "passed_tests": 2
+    },
+    {
+      "name": "Wiki lint",
+      "command": "node .phoenix/issue-closeout/wiki-lint.cjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-wiki.log",
+      "raw_sha256": "5693d9220d7810e7a1586734d4bbe12a28ca460438e150e835a322b8c81c248a"
+    },
+    {
+      "name": "Ledger",
+      "command": "node scripts/redesign-ledger.mjs --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-ledger.log",
+      "raw_sha256": "bf8a8cf14646527fd8c15e099c9ad323c5f57ec5b8b58cdaf2c8e455abd02cfa"
+    },
+    {
+      "name": "Baseline",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-14-jobs-measure --profile measure",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-baseline.log",
+      "raw_sha256": "452174df2c7cc9cbbd65d5cf3eb6dca4b91a681c54350517a46dbf6fe391cbd9"
+    },
+    {
+      "name": "Cruiser matrix",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture .phoenix/redesign-baseline/2026-10-14-jobs-measure/summary.json --out .phoenix/redesign-baseline/2026-10-14-jobs-cruiser",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-5-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa"
+    }
+  ],
+  "review": "Independent read-only reviews passed Gameplay executor, Simulation adapters, Workshop and root persistence/digest/client integration. Final fixture, digest characterization, readout caching and PASM reconciliation re-review passed.",
+  "corrected_validation_failures": [
+    "Exhaustive RepairConfig guard extended with workflow field. Sparse snapshot fixture now registers actual capture types. Canonical digest fixture defines three teams for its Team 3 claim; exact characterization assertions retained with new canonical namespace values. Expanded Workshop reply schema boxed to satisfy enum-size lint without changing serialization. Headless read-only fixture retains Debug diagnostics. Courier keeps an inline workflow matching the shared fragment to preserve raw baked loading. Inspector classification and fingerprint include authored workflow fields as recreate-required, with exact inventory assertions retained. Shared team access has explicit external-repair ordering; no ambiguity allowlist growth. Strict composite payload fixtures include optional jobs. PASM execution inputs and single canonical ownership mirror runtime."
+  ],
+  "setup_recovery": "Broken initial dependency junction and archive cleanup were repaired with locked npm dependencies and byte-identical tracked browser packages. No networking source change remained.",
+  "evidence_scope": "Native gates tested the final production sources through e641e43e; subsequent commits change only docs and tests. Baseline, balance and browser bundles pin the recorded revision.",
+  "visual": {
+    "path": ".phoenix/increment-5-paused-repair-job.png",
+    "sha256": "4c23b9cd76952c56bdcae4e8ec590401a83b0d43e9840f59671f937dc143aa7a",
+    "result": "inspected",
+    "scope": "Desktop paused-job readout; not physical phone/native acceptance"
+  },
+  "manual_pending": [
+    "Physical phones",
+    "Native multi-monitor displays",
+    "Human station workload and usability"
+  ],
+  "boundaries": [
+    "Increment 6 has not started",
+    "No push requested/performed",
+    "Unrelated GDD and modifier-coordination drafts preserved"
+  ]
+}

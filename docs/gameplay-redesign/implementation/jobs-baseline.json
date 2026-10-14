@@ -1,0 +1,328 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "revision": "e858616abdcdb70d15f21b855f20d02ab11fec5e",
+  "runtimeSourceSha256": "fea74f4cc064a0c9a8beb585ff7e69be1c238a79f61fa5ea993000ae9943099b",
+  "runtimeSourceClean": true,
+  "repositoryDirty": true,
+  "profile": "measure",
+  "features": [
+    "default",
+    "headless",
+    "server"
+  ],
+  "executableSha256": "1e47639e5dc82a053fc6692d477c1a09b8eefeda1e75d11668c2fa4b288b1a88",
+  "hardware": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logicalCpus": 24,
+    "totalMemoryBytes": 68112736256
+  },
+  "scope": "Headless same-machine diagnostic; no browser/native rendering, real-network or human workload acceptance.",
+  "referenceHull": "assets/entities/alliance_cruiser.toml",
+  "checks": [
+    {
+      "name": "combat_test byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc"
+    },
+    {
+      "name": "combat_test replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "combat_test performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:ff20bdbfed061121"
+    },
+    {
+      "name": "falling_skyway byte-identical seeded reports",
+      "passed": true,
+      "reportSha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833"
+    },
+    {
+      "name": "falling_skyway replay checkpoints",
+      "passed": true
+    },
+    {
+      "name": "falling_skyway performance continuation agreement",
+      "passed": true,
+      "continuation": "3600:0d4a87898108d852"
+    }
+  ],
+  "comparison_revision": "d111f0205b61d10a6eaf392b81d47fd4f4d7438b",
+  "raw_directory": ".phoenix/redesign-baseline/2026-10-14-jobs-measure",
+  "worlds": [
+    {
+      "world": "combat_test",
+      "gameplay_report_identical": true,
+      "report_sha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc",
+      "tick_metrics": [
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.485188912450774,
+          "p50": 1.4198,
+          "p95": 2.0192,
+          "p99": 2.5909,
+          "max": 5.683,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4799136019388057,
+          "p50": 1.4253,
+          "p95": 2.0077,
+          "p99": 2.4118,
+          "max": 5.407,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.5095675249924274,
+          "p50": 1.4507999999999999,
+          "p95": 2.0422000000000002,
+          "p99": 2.507,
+          "max": 6.4049,
+          "over16_67": 0
+        }
+      ],
+      "previous_tick_metrics": [
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4161777643138447,
+          "p50": 1.3644,
+          "p95": 1.9038,
+          "p99": 2.247,
+          "max": 4.5718,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4312084216903982,
+          "p50": 1.3734000000000002,
+          "p95": 1.9312,
+          "p99": 2.3482,
+          "max": 4.61,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.419402877915783,
+          "p50": 1.3617,
+          "p95": 1.9078000000000002,
+          "p99": 2.2664,
+          "max": 4.6658,
+          "over16_67": 0
+        }
+      ]
+    },
+    {
+      "world": "falling_skyway",
+      "gameplay_report_identical": true,
+      "report_sha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+      "tick_metrics": [
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3991315358982146,
+          "p50": 1.3748,
+          "p95": 1.8201,
+          "p99": 2.1860999999999997,
+          "max": 3.8645,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.414314874280519,
+          "p50": 1.3843,
+          "p95": 1.8554000000000002,
+          "p99": 2.1332999999999998,
+          "max": 7.0922,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.469442744622841,
+          "p50": 1.4009999999999998,
+          "p95": 2.012,
+          "p99": 2.8144,
+          "max": 6.446999999999999,
+          "over16_67": 0
+        }
+      ],
+      "previous_tick_metrics": [
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.348775522568919,
+          "p50": 1.3145,
+          "p95": 1.829,
+          "p99": 2.1064,
+          "max": 4.1779,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3293530748258109,
+          "p50": 1.3089,
+          "p95": 1.7454,
+          "p99": 2.0846,
+          "max": 4.7969,
+          "over16_67": 0
+        },
+        {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.334466373826112,
+          "p50": 1.3048,
+          "p95": 1.8051,
+          "p99": 2.1268,
+          "max": 3.9011,
+          "over16_67": 0
+        }
+      ]
+    }
+  ],
+  "balance": {
+    "status": "passed",
+    "runs": 20,
+    "thresholds": [
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_ttk_median",
+        "limit": 10,
+        "actual": 4.7833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_damage_margin",
+        "limit": 100,
+        "actual": 163,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 13.8167,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 283.8,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_ttk_median",
+        "limit": 20,
+        "actual": 8.5833,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 310.2,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_failures",
+        "limit": 0,
+        "actual": 0,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 1,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": 15.7,
+        "pass": true
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_damage_margin",
+        "limit": 25,
+        "actual": 47.241599999999984,
+        "pass": true
+      }
+    ],
+    "merged_results_identical": true,
+    "raw_directory": ".phoenix/redesign-baseline/2026-10-14-jobs-cruiser"
+  }
+}

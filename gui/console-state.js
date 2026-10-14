@@ -881,7 +881,8 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     tubes,
     torpedo_count: torpedoCount,
     torpedo_max:   torpedoMax,
-    stock_control: torpedoMagBb.stock_store && torpedoMagBb.stock_target != null ? {
+    stock_control: torpedoMagBb.stock_store && torpedoMagBb.stock_target != null
+      && !buildLocalStockViews(state).some(row => row.system_id === torpedoMagEntry?.systemId) ? {
       system_id: torpedoMagEntry.systemId, store: torpedoMagBb.stock_store, target: torpedoMagBb.stock_target,
       ceiling: torpedoMax, incoming: torpedoMagBb.stock_incoming ?? 0, reserved: torpedoMagBb.stock_reserved ?? 0,
       held: torpedoMagBb.stock_held ?? 0, auto: state.controlSources?.[torpedoMagEntry.systemId] !== 'Human',
@@ -2438,6 +2439,20 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
  * @param {{ blackboards, blackboardKinds? }} state
  * @param {string[]} [systemIds] authored Security-family ids for this Station
  */
+/** Read only the already-permitted typed feeds; hosting another tab adds nothing. */
+export function buildLocalStockViews(state, ownedSystems = []) {
+  const owned = new Set(ownedSystems), views = [];
+  for (const [key, kind] of Object.entries(state.blackboardKinds || {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    if (kind !== 'Stock') continue;
+    const publication = state.blackboards?.[key];
+    if (!publication || typeof publication.system !== 'string' || key !== 'stock/' + publication.system || !Array.isArray(publication.stores)) continue;
+    for (const store of publication.stores) views.push({ ...store, store: store.id, system_id: publication.system,
+      controllable: owned.has(publication.system) && state.controlSources?.[publication.system] === 'Human',
+      auto: state.controlSources?.[publication.system] !== 'Human' });
+  }
+  return views;
+}
+
 export function buildLogisticsConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Logistics', systemIds), bb = entry?.data || {};
   return { system_id: entry?.systemId ?? systemIds[0] ?? null, enabled: !!bb.enabled, max_batch: bb.max_batch ?? null, max_active: bb.max_active ?? null,
@@ -2816,6 +2831,7 @@ export function buildConsoleView(consoleName, state) {
     view = withGmTakeover(state.consoleHosts?.[definition.id]?.host || definition.home_station, scoped, view);
     return { ...view, console_id: definition.id, station_id: definition.home_station,
       hosted_systems: definition.systems || [],
+      local_stock: buildLocalStockViews(scoped, definition.systems || []),
       console_host: state.consoleHosts?.[definition.id] || null,
       console_view: state.consoleViews?.[definition.id] || null,
       observed_system_status: scoped.systemStatus || {},

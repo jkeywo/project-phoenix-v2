@@ -5565,6 +5565,10 @@ kind = "TorpedoTube"
 source = "viewscreen"
 kind = "Viewscreen"
 
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
 [[console]]
 id = "science"
 name = "Science"
@@ -5685,6 +5689,18 @@ kind = "Logistics"
 source = "torpedo-magazine"
 kind = "TorpedoMagazine"
 
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/repair"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/power-reactor"
+kind = "Stock"
 [[console]]
 id = "comms"
 name = "station.comms.name"
@@ -5961,8 +5977,8 @@ laser = 1
 
 [[infrastructure.capacity]]
 id = "structural_parts"
-amount = 59
-ceiling = 59
+amount = 8
+ceiling = 8
 label = "damage.resource.structural_parts"
 [resource_services.structural_parts]
 kind = "capacity"
@@ -5970,8 +5986,8 @@ id = "structural_parts"
 
 [[infrastructure.capacity]]
 id = "machinery_parts"
-amount = 114
-ceiling = 114
+amount = 12
+ceiling = 12
 label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
@@ -6050,10 +6066,11 @@ label = "logistics.hold-ammunition.label"
 [[logistics.store]]
 id = "hold-ammunition"
 resource = "torpedoes"
-compartment = "engineering"
+compartment = "support"
 role = "main"
 target = 4
 reserve = 0
+priority = 2
 
 [logistics.store.endpoint]
 kind = "capacity"
@@ -6064,20 +6081,117 @@ id = "magazine"
 resource = "torpedoes"
 compartment = "weapons"
 role = "local"
-system = "torpedo-magazine"
-source = "hold-ammunition"
 target = 6
 reserve = 0
+priority = 2
+system = "torpedo-magazine"
+source = "hold-ammunition"
 
 [logistics.store.endpoint]
 kind = "torpedo_magazine"
 
-[[logistics.storage]]
+[[logistics.store]]
+id = "hold-machinery-parts"
+resource = "machinery_parts"
+compartment = "support"
+role = "main"
+target = 102
+reserve = 20
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-machinery-parts"
+
+[[logistics.store]]
+id = "repair-machinery"
+resource = "machinery_parts"
 compartment = "engineering"
-space = 6
+role = "local"
+target = 12
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-machinery-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "machinery_parts"
+
+[[logistics.store]]
+id = "hold-structural-parts"
+resource = "structural_parts"
+compartment = "support"
+role = "main"
+target = 51
+reserve = 8
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-structural-parts"
+
+[[logistics.store]]
+id = "repair-structural"
+resource = "structural_parts"
+compartment = "engineering"
+role = "local"
+target = 8
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-structural-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "structural_parts"
+
+[[logistics.store]]
+id = "hold-coolant"
+resource = "coolant"
+compartment = "support"
+role = "main"
+target = 624
+reserve = 0
+priority = 0
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-coolant"
+
+[[logistics.store]]
+id = "coolant-reservoir"
+resource = "coolant"
+compartment = "engineering"
+role = "local"
+target = 156
+reserve = 0
+priority = 0
+system = "power-reactor"
+source = "hold-coolant"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "coolant"
+
+[[logistics.storage]]
+compartment = "support"
+space = 783
 
 [logistics.storage.unit_space]
 torpedoes = 1
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+
+[[logistics.storage]]
+compartment = "engineering"
+space = 176
+
+[logistics.storage.unit_space]
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
 
 [[logistics.storage]]
 compartment = "weapons"
@@ -6088,6 +6202,26 @@ torpedoes = 1
 
 [[logistics.handling]]
 system = "logistics"
-max_active = 1
-max_batch = 2
-units_per_sec = 1
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+# Increment 12.2: finite hold/local splits preserve each hull's original totals.
+[[infrastructure.capacity]]
+id = "hold-machinery-parts"
+amount = 102
+ceiling = 102
+label = "damage.resource.machinery_parts"
+
+[[infrastructure.capacity]]
+id = "hold-structural-parts"
+amount = 51
+ceiling = 51
+label = "damage.resource.structural_parts"
+
+[[infrastructure.capacity]]
+id = "hold-coolant"
+amount = 624
+ceiling = 624
+label = "energy.coolant"

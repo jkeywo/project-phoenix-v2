@@ -5273,3 +5273,10 @@ logistics.blocked.return_capacity,Logistics delivery blockage,Return storage is 
 logistics.blocked.receiving,Logistics delivery blockage,Receiving storage is unavailable; cargo is retained.,Empfangslager nicht verfügbar; Fracht bleibt erhalten.,Receiving storage is unavailable; cargo is retained.,machine
 logistics.blocked.disabled,Logistics delivery blockage,Handling is paused; committed cargo is retained.,Transport pausiert; übernommene Fracht bleibt erhalten.,Handling is paused; committed cargo is retained.,machine
 logistics.handling-limits,Logistics handling limits,Maximum {batch} per batch; {active} concurrent batches.,Maximal {batch} pro Lieferung; {active} gleichzeitige Lieferungen.,Maximum {batch} per batch; {active} concurrent batches.,machine
+workshop.logistics.priority,Logistics authoring,Delivery priority (lower first),Lieferpriorität (niedrigere zuerst),Delivery priority (lower first),machine
+workshop.logistics.reorder-fraction,Logistics authoring,Reorder threshold (fraction of target),Nachbestellschwelle (Anteil des Sollbestands),Reorder threshold (fraction of target),machine
+logistics.priority,Logistics controls,Delivery priority,Lieferpriorität,Delivery priority,machine
+logistics.action.priority,Logistics controls,Set delivery priority,Lieferpriorität setzen,Set delivery priority,machine
+logistics.maintain-hint,Logistics controls,Maintain desired local stocks automatically while enabled.,Bei Aktivierung die gewünschten lokalen Bestände automatisch halten.,Maintain desired local stocks automatically while enabled.,machine
+logistics.local-stores,Logistics controls,Local stocks,Lokale Vorräte,Local stocks,machine
+logistics.local-goal-summary,Logistics controls,Desired stock: {target},Gewünschter Bestand: {target},Desired stock: {target},machine

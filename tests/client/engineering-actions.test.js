@@ -68,8 +68,9 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(actions.activate(POWER_DECREASE_ACTION_ID, { context: POWER_ACTION_CONTEXT, detail: { target: 'helm', level: 2 } })).toMatchObject({ handled: false });
     expect(sendAction).not.toHaveBeenCalled();
   });
-  it('publishes eight authoritative actions with exactly two slots and shipped contexts', () => {
-    expect(ENGINEERING_ACTIONS).toHaveLength(21);
+  it('publishes authoritative actions with exactly two slots and shipped contexts', () => {
+    expect(ENGINEERING_ACTIONS).toHaveLength(22);
+    expect(ENGINEERING_ACTIONS.some(action => action.id === 'stock.priority')).toBe(true);
     for (const action of ENGINEERING_ACTIONS) {
       expect(action.authoritativeFeedback).toBe(true);
       expect(action.bindings).toHaveLength(2);

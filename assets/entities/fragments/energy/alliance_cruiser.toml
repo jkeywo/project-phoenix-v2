@@ -178,8 +178,8 @@ max_level = 4
 
 [[infrastructure.capacity]]
 id = "coolant"
-amount = 780
-ceiling = 780
+amount = 156
+ceiling = 156
 label = "energy.coolant"
 
 [resource_services.coolant]

@@ -20,12 +20,14 @@ describe('Workshop located logistics controls', () => {
   it('labels typed controls and saves targets, storage and handling through accepted history', async () => {
     const { draft, runtime, panel } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
-    control('reserve').value = '2'; control('save-store').click(); await settle();
+    control('priority').value = '3'; control('reserve').value = '2'; control('save-store').click(); await settle();
     expect(parse(draft.read(path)).logistics.store.find(row => row.id === 'hold').reserve).toBe(2);
+    expect(parse(draft.read(path)).logistics.store.find(row => row.id === 'hold').priority).toBe(3);
     control('space').value = '8'; control('save-storage').click(); await settle();
     expect(parse(draft.read(path)).logistics.storage.find(row => row.compartment === 'hold').space).toBe(8);
-    control('max-batch').value = '3'; control('save-handling').click(); await settle();
+    control('reorder-fraction').value = '0.5'; control('max-batch').value = '3'; control('save-handling').click(); await settle();
     expect(parse(draft.read(path)).logistics.handling[0].max_batch).toBe(3); expect(runtime.validate).toHaveBeenCalledTimes(3);
+    expect(parse(draft.read(path)).logistics.handling[0].reorder_fraction).toBe(0.5);
     draft.undo(); draft.undo(); draft.undo(); expect(draft.read(path)).toBe(logisticsFixture().source); panel.dispose();
   });
   it('edits local targets in authored data without inventing extra capacities', async () => {

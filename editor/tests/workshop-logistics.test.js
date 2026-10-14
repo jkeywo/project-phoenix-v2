@@ -47,6 +47,8 @@ describe('accepted located logistics authoring', () => {
     p => { p.handling[0].max_active = 65536; }, p => { p.handling.push(p.handling[0]); },
     p => { p.store[0].teleport = true; }, p => { p.handling[0].max_batch = 1.5; },
     p => { p.handling[0].max_batch = 1000000000; p.handling[0].units_per_sec = 1e-45; },
+    p => { p.store[0].priority = 65536; }, p => { p.store[1].priority = -1; },
+    p => { p.handling[0].reorder_fraction = -0.01; }, p => { p.handling[0].reorder_fraction = 1.01; },
   ])('refuses unsupported, dangling or impossible authored candidate %#', mutate => {
     const { value } = logisticsFixture(); mutate(value.logistics);
     expect(() => validateLogistics(value.logistics, value)).toThrow();

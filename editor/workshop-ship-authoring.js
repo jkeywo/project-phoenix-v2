@@ -1,3 +1,4 @@
+import { stockPublicationSources, guardLogisticsSystemRemoval, guardLogisticsLayout } from './workshop-stock-bindings.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
@@ -174,6 +175,7 @@ function verify(path, source, schema, value = parse(source)) {
     if (kind && publications.has(system.id) && publications.get(system.id) !== kind) throw finding(path, source, quote(system.id), `System ${system.id} conflicts with a reserved publication key.`);
     if (kind && !publications.has(system.id)) publications.set(system.id, kind);
   }
+  for (const source of stockPublicationSources(value, schema)) publications.set(source, schema.console_stock_publication_kind);
   for (const console of consoles) for (const feed of console.feed || []) {
     if (!publications.has(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
     if (!(schema.console_feed_kinds || []).includes(feed.kind)) throw finding(path, source, quote(feed.kind), `Unknown Console feed kind: ${feed.kind}`);
@@ -431,6 +433,10 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     after = updateInteriorBindings(after, proposed, { add: { [id]: operation.compartment }, materialise: operation.materialise === true });
   }
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;
+  if (operation.type === 'system-remove' || (operation.type === 'system-set' && operation.field === 'id' && operation.value !== operation.id)
+    || (operation.type === 'system-update' && operation.fields?.id && operation.fields.id !== operation.id))
+    guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
+  if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
   if (operation.type === 'system-composition-set') {
     const resolved = effectiveValue.system.find(row => row.id === operation.id);
     for (const [key, identity, desired] of [['component', 'id', operation.components], ['channel', 'name', operation.channels]]) {

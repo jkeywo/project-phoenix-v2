@@ -68,6 +68,7 @@ export const ACTION_MAP = Object.freeze({
   logistics_enabled: logisticsCommand('SetLogisticsEnabled', ['enabled']),
   logistics_target: logisticsCommand('SetStockTarget', ['store', 'amount']),
   logistics_reserve: logisticsCommand('SetStockReserve', ['store', 'amount']),
+  logistics_priority: logisticsCommand('SetStockPriority', ['store', 'priority']),
   logistics_dispatch: logisticsCommand('DispatchDelivery', ['source', 'destination', 'amount']),
   logistics_return: logisticsCommand('ReturnDelivery', ['job']),
   set_weapons_restraint: (action, send) => {

@@ -1066,6 +1066,13 @@ pub(crate) fn publish_weapons_core_blackboard(
             .unwrap_or_default();
 
         let bb = WeaponsBlackboard {
+            weapons_restrained: power.is_some_and(|power| power.0.weapons_restrained()),
+            weapons_restraint_auto: control_sources.is_some_and(|sources| {
+                sources
+                    .0
+                    .policy_for(&crate::ship::system_registry::tactical_radar_system_id())
+                    .operate_ai
+            }),
             strike_reserve: power
                 .zip(power_config)
                 .and_then(|(power, config)| power.0.strike_read(&config.0)),

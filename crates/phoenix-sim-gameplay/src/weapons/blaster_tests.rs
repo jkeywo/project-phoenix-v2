@@ -1228,3 +1228,133 @@ fn bank_state_includes_charge_progress_and_has_charge() {
         "has_charge must be false for instant-fire bank"
     );
 }
+
+#[test]
+fn paid_pattern_step_waits_atomically_without_minting_or_losing_cadence() {
+    let mut sys = make_system();
+    sys.config.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+        barrels: vec![0, 1],
+        offset_secs: 0.0,
+    }];
+    assert!(sys.request_charge_start());
+    let mut minted = 0;
+    let mut requested = Vec::new();
+    let denied = sys.tick_with_work(
+        0.1,
+        0.0,
+        &[(1.0, 2.0), (3.0, 4.0)],
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |count| {
+            requested.push(count);
+            false
+        },
+        &mut || {
+            minted += 1;
+            format!("p{minted}")
+        },
+    );
+    assert!(denied.is_empty());
+    assert_eq!(requested, vec![2]);
+    assert_eq!(minted, 0);
+    assert_eq!(sys.volley.next_step, 0);
+    assert_eq!(
+        sys.volley.volley_elapsed, 0.0,
+        "starvation must not compress later steps"
+    );
+    assert!(!sys.volley.on_cooldown);
+    let events = sys.tick_with_work(
+        0.1,
+        0.0,
+        &[(1.0, 2.0), (3.0, 4.0)],
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |count| {
+            assert_eq!(count, 2);
+            true
+        },
+        &mut || {
+            minted += 1;
+            format!("p{minted}")
+        },
+    );
+    assert_eq!(events.len(), 2);
+    assert_eq!(minted, 2);
+    assert_eq!((events[0].x, events[1].x), (1.0, 3.0));
+    assert!(sys.volley.on_cooldown);
+}
+
+#[test]
+fn funded_charge_progress_pauses_without_pausing_live_projectiles() {
+    let mut sys = make_system();
+    sys.config.charge_time_secs = 2.0;
+    assert!(sys.request_charge_start());
+    let origins = [(0.0, 0.0)];
+    let mut mint = || "paid".to_string();
+    sys.tick_with_work(
+        1.0,
+        0.5,
+        &origins,
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |_| true,
+        &mut mint,
+    );
+    assert_eq!(sys.volley.charge_elapsed, 0.5);
+    sys.tick_with_work(
+        1.0,
+        0.0,
+        &origins,
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |_| false,
+        &mut mint,
+    );
+    assert_eq!(sys.volley.charge_elapsed, 0.5);
+    let events = sys.tick_with_work(
+        0.1,
+        1.5,
+        &origins,
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |_| true,
+        &mut mint,
+    );
+    assert_eq!(events.len(), 1);
+    let before = sys.in_flight[0].z;
+    sys.tick_with_work(
+        0.1,
+        0.0,
+        &origins,
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |_| false,
+        &mut mint,
+    );
+    assert!(sys.in_flight[0].z < before);
+    assert_eq!(sys.volley.next_step, 1);
+}

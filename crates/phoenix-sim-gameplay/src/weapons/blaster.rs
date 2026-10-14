@@ -359,6 +359,39 @@ impl BlasterSystem {
         source_uuid: &str,
         next_uuid: &mut impl FnMut() -> String,
     ) -> Vec<LaunchEvent> {
+        self.tick_with_work(
+            dt,
+            dt,
+            barrel_origins,
+            shooter_yaw,
+            target_x,
+            target_z,
+            target_vx,
+            target_vz,
+            source_uuid,
+            &mut |_| true,
+            next_uuid,
+        )
+    }
+
+    /// Paid runtime entry point. Charging advances only by funded work time;
+    /// flight and cooldown use real time. Each simultaneous step is admitted
+    /// atomically before any projectile identity or firing state is changed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_work(
+        &mut self,
+        dt: f32,
+        charge_dt: f32,
+        barrel_origins: &[(f32, f32)],
+        shooter_yaw: f32,
+        target_x: f32,
+        target_z: f32,
+        target_vx: f32,
+        target_vz: f32,
+        source_uuid: &str,
+        admit_launch: &mut impl FnMut(usize) -> bool,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
         // Prune expired projectiles.
         self.in_flight.retain(|p| !p.is_expired());
 
@@ -369,7 +402,7 @@ impl BlasterSystem {
 
         // ── Charge phase (issue #636) ────────────────────────────────────
         if self.volley.charging {
-            self.volley.charge_elapsed += dt;
+            self.volley.charge_elapsed += charge_dt;
             if self.volley.charge_elapsed >= self.config.charge_time_secs {
                 // Charge complete — arm the volley from the firing schedule.
                 self.volley.charging = false;
@@ -402,6 +435,7 @@ impl BlasterSystem {
         // coarse `dt` spanning several offsets never batches successive steps
         // into a single tick). A single step still emits one event PER barrel,
         // so a simultaneous multi-barrel step fires together on one tick.
+        let elapsed_before = self.volley.volley_elapsed;
         self.volley.volley_elapsed += dt;
         let lifespan = self.config.range / self.config.projectile_speed;
         let mut events = Vec::new();
@@ -411,6 +445,10 @@ impl BlasterSystem {
             && self.volley.schedule[self.volley.next_step].1 <= self.volley.volley_elapsed
         {
             let barrels = self.volley.schedule[self.volley.next_step].0.clone();
+            if !admit_launch(barrels.len()) {
+                self.volley.volley_elapsed = elapsed_before;
+                return Vec::new();
+            }
             for &barrel in &barrels {
                 // Origin resolves per barrel; falls back to the first supplied
                 // origin (then the world origin) so a mis-sized origin slice

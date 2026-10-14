@@ -1449,7 +1449,8 @@ fn reserved_start_requires_a_real_claim_and_restore_rejects_orphan_claims() {
     assert!(!sys.start_load_reserved("fore_port"));
     assert!(!sys.claim_magazine_round("unknown"));
     assert!(sys.claim_magazine_round("fore_port"));
-    assert!(sys.claim_magazine_round("fore_port"));
+    assert!(sys
+        .claim_magazine_round_with_work("fore_port", &mut || panic!("duplicate claim paid twice")));
     assert_eq!(sys.magazine.reserved.len(), 1);
     assert!(sys.start_load_reserved("fore_port"));
     sys.validate_magazine().unwrap();
@@ -1498,4 +1499,122 @@ fn firing_a_partial_volley_releases_its_unfinished_loading_claim() {
     assert_eq!(sys.magazine.reserved.len(), 1);
     assert_eq!(sys.rounds_aboard(), 4);
     sys.validate_magazine().unwrap();
+}
+
+#[test]
+fn denied_magazine_work_keeps_rounds_and_skips_payment_for_unready_tubes() {
+    let mut sys = default_system();
+    let before = sys.rounds_aboard();
+    assert!(!sys.start_load_with_work("fore_port", &mut || false));
+    assert_eq!(sys.rounds_aboard(), before);
+    assert!(sys.magazine.reserved.is_empty());
+    assert!(sys.start_load_with_work("fore_port", &mut || true));
+    assert!(!sys.start_load_with_work("fore_port", &mut || panic!("unready tube paid")));
+    assert_eq!(sys.magazine.reserved.len(), 1);
+}
+
+#[test]
+fn funded_tube_progress_keeps_loading_claim_while_starved() {
+    let mut sys = default_system();
+    sys.tube_mut("fore_port").unwrap().target_count = 1;
+    assert!(sys.start_load("fore_port"));
+    let total = sys.tube("fore_port").unwrap().load_time;
+    let before = sys.rounds_aboard();
+    sys.tick_with_work(total, &HashMap::new(), &mut |_| 0.0, &mut no_uuid);
+    assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 0);
+    assert_eq!(sys.rounds_aboard(), before);
+    sys.tick_with_work(total, &HashMap::new(), &mut |_| 0.5, &mut no_uuid);
+    assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 0);
+    sys.tick_with_work(total, &HashMap::new(), &mut |_| 1.0, &mut no_uuid);
+    assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 1);
+    assert_eq!(sys.rounds_aboard(), before);
+    assert!(sys.validate_magazine().is_ok());
+}
+
+#[test]
+fn starved_burst_keeps_committed_ammo_until_each_projectile_launches() {
+    let mut tube = cfg("fore", 0.0, 90.0);
+    tube.volley_max = 3;
+    let mut sys = TorpedoSystem::from_configs(
+        &[tube],
+        TorpedoConfig {
+            count: 3,
+            ..Default::default()
+        },
+    );
+    sys.set_volley_target("fore", 3);
+    for _ in 0..4 {
+        sys.tick(10.0, &HashMap::new(), &mut no_uuid);
+    }
+    assert_eq!(sys.tube("fore").unwrap().loaded_count, 3);
+    assert!(matches!(
+        sys.launch("fore", "first".into(), 0.0, 0.0, 0.0, 0.0, None, None),
+        LaunchResult::Launched { .. }
+    ));
+    assert_eq!(sys.rounds_aboard(), 2);
+    assert_eq!(sys.magazine_headroom(), 1);
+    assert_eq!(sys.replenish(10), 1);
+    let mut minted = 0;
+    let result = sys.tick_with_work(0.5, &HashMap::new(), &mut |_| 0.0, &mut || {
+        minted += 1;
+        "unpaid".into()
+    });
+    assert!(result.burst_launched.is_empty());
+    assert_eq!(minted, 0);
+    assert_eq!(sys.burst_states[0].pending, 2);
+    assert!(sys.in_flight[0].z < 0.0, "existing flight continues");
+    assert_eq!(sys.rounds_aboard(), 3);
+    assert!(sys.validate_magazine().is_ok());
+    let result = sys.tick_with_work(
+        0.1,
+        &HashMap::new(),
+        &mut |work| {
+            if matches!(work, TorpedoWork::Launch { .. }) {
+                1.0
+            } else {
+                0.0
+            }
+        },
+        &mut || {
+            minted += 1;
+            "paid".into()
+        },
+    );
+    assert_eq!(result.burst_launched.len(), 1);
+    assert_eq!(minted, 1);
+    assert_eq!(sys.rounds_aboard(), 2);
+    assert_eq!(sys.burst_states[0].pending, 1);
+}
+
+#[test]
+fn completed_unload_waits_for_magazine_work_without_losing_a_round() {
+    let mut sys = default_system();
+    load_tube(&mut sys, "fore_port");
+    sys.set_volley_target("fore_port", 0);
+    assert!(sys.start_unload("fore_port"));
+    let before = sys.rounds_aboard();
+    let load_time = sys.tube("fore_port").unwrap().load_time;
+    sys.tick_with_work(
+        load_time,
+        &HashMap::new(),
+        &mut |work| {
+            if matches!(work, TorpedoWork::Transfer) {
+                0.0
+            } else {
+                1.0
+            }
+        },
+        &mut no_uuid,
+    );
+    assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 1);
+    assert_eq!(sys.rounds_aboard(), before);
+    assert!(matches!(
+        sys.tube("fore_port").unwrap().load_state,
+        TubeLoadState::Unloading { remaining: 0.0, .. }
+    ));
+    assert!(sys.validate_magazine().is_ok());
+    sys.tick_with_work(0.1, &HashMap::new(), &mut |_| 1.0, &mut no_uuid);
+    assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 0);
+    assert_eq!(sys.rounds_aboard(), before);
+    assert!(sys.validate_magazine().is_ok());
 }

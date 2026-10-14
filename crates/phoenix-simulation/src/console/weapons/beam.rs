@@ -447,7 +447,7 @@ pub(crate) fn handle_fire_phaser(
                 super::finish_action_feedback(
                     cmd,
                     &mut outbound,
-                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
+                    WeaponActionResult::Refused(WeaponActionRefusal::Restrained),
                 );
                 continue;
             }
@@ -534,6 +534,18 @@ pub(crate) fn handle_fire_phaser(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::OutOfArc),
+                );
+                continue;
+            }
+
+            if !power_opt
+                .as_deref_mut()
+                .is_some_and(|power| matches!(power.0.try_work_discrete(&cmd.target), Ok(true)))
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::EnergyUnavailable),
                 );
                 continue;
             }
@@ -694,7 +706,6 @@ pub(crate) fn ai_phaser_auto_fire(
             //     fixture that spawns none behaves exactly as before.
             (
                 Option<&crate::ship::state::ShipRedAlert>,
-                Option<&crate::ship::power::ShipPowerSystem>,
                 Option<&crate::console::command::server::ShipStationStances>,
             ),
         ),
@@ -726,7 +737,7 @@ pub(crate) fn ai_phaser_auto_fire(
         combat_config_opt,
         bank_policies_opt,
         phaser_freq_opt,
-        (red_alert_opt, power_opt, stances_opt),
+        (red_alert_opt, stances_opt),
     ) in ship_q.iter_mut()
     {
         // Read once per ship, folded into every bank's posture below.
@@ -761,12 +772,8 @@ pub(crate) fn ai_phaser_auto_fire(
         let posture_for = |bank_id: &str| {
             super::WeaponsAlertPosture::from_parts(
                 red_alert_opt,
-                crate::ship::system_registry::phaser_bank_system_id(bank_id).is_some_and(|sid| {
-                    super::system_power_group_is_cold(
-                        ship_config_opt.map(|c| &c.0),
-                        power_opt.map(|p| &p.0),
-                        &sid,
-                    )
+                crate::ship::system_registry::phaser_bank_system_id(bank_id).is_none_or(|sid| {
+                    super::observed_weapons_restraint(ship_config_opt, &sid, Some(blackboards))
                 }),
                 stance_override,
             )
@@ -1062,6 +1069,7 @@ pub(crate) fn tick_beams_prepare(
             Option<&FactionComponent>,
             // Shooter's phaser frequency for frequency-matching damage (issue #679).
             Option<&crate::ship::state::ShipPhaserFrequency>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1127,6 +1135,7 @@ pub(crate) fn tick_beams_prepare(
             is_local_shooter,
             shooter_faction_opt,
             shooter_phaser_freq_opt,
+            mut power,
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -1242,6 +1251,27 @@ pub(crate) fn tick_beams_prepare(
                 continue;
             }
 
+            let Some(system) = crate::ship::system_registry::phaser_bank_system_id(&active_bank)
+            else {
+                continue;
+            };
+            let Some(power) = power
+                .as_deref_mut()
+                .filter(|power| !power.0.weapons_restrained())
+            else {
+                continue;
+            };
+            // Preserve the existing fixed-tick burn cadence when fully funded.
+            let work_dt = dt;
+            let fraction = power
+                .0
+                .work_continuous(&system, work_dt, 1.0)
+                .map_or(0.0, |grant| grant.fraction);
+            if fraction <= 0.0 {
+                continue;
+            }
+            let funded_dt = work_dt * fraction;
+
             let damage_per_sec = active_bank_cfg
                 .map(|b| {
                     if b.beam_damage_per_sec > 0.0 {
@@ -1261,7 +1291,8 @@ pub(crate) fn tick_beams_prepare(
                     slot.damage_accumulator += damage_per_sec
                         * modifiers.get(&ModifierSlot::PhaserDamage)
                         * (1.0 + slot.strike_damage_bonus)
-                        * dt;
+                        * funded_dt;
+                    slot.remaining_secs -= funded_dt;
                     let whole = slot.damage_accumulator.floor() as i32;
                     // Deduct the integer part now; the snapshot below drives damage
                     // application in phase 2.
@@ -2035,7 +2066,6 @@ pub(crate) fn tick_beams_apply_damage(
 /// `TacticalRadarSelection.0` is set to `None`. NPC locks are re-evaluated by
 /// `ai_target_selection`, whose staleness guard clears a dead target.
 pub(crate) fn tick_beams_tick_lifetimes(
-    time: Res<Time>,
     mut commands: Commands,
     // Narrowed shooter query: phase 3 only mutates the shooter's beam,
     // cooldown, and (LocalShip only) weapons-target lock. Every production
@@ -2050,8 +2080,6 @@ pub(crate) fn tick_beams_tick_lifetimes(
     >,
     beam_context: Res<BeamContext>,
 ) {
-    let dt = time.delta_secs();
-
     for state in beam_context.0.iter() {
         let Ok((mut beam, mut cooldown, mut weapons_target_opt)) =
             ship_q.get_mut(state.shooter_entity)
@@ -2080,7 +2108,6 @@ pub(crate) fn tick_beams_tick_lifetimes(
         let Some(slot) = beam.bank_slot_mut(&state.active_bank) else {
             continue;
         };
-        slot.remaining_secs -= dt;
         if slot.remaining_secs <= 0.0 {
             // The ORDINARY end of a cycle, and the one the jitter is for: the
             // burn ran its drawn length and the rest it paired with follows it

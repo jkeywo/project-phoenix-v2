@@ -181,7 +181,7 @@ pub(crate) fn handle_fire_blaster(
                 super::finish_action_feedback(
                     cmd,
                     &mut outbound,
-                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
+                    WeaponActionResult::Refused(WeaponActionRefusal::Restrained),
                 );
                 continue;
             }
@@ -311,7 +311,6 @@ pub(crate) fn tick_blaster_auto_fire(
             // power group can be read for COLD (level 0) and folded into that
             // same fact. `Option<&_>`: a fixture with no reactor is not a ship
             // with dead guns.
-            Option<&crate::ship::power::ShipPowerSystem>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the fire posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
@@ -348,7 +347,6 @@ pub(crate) fn tick_blaster_auto_fire(
         bank_policies_opt,
         mut admitted,
         red_alert_opt,
-        power_opt,
         stances_opt,
     ) in ship_q.iter_mut()
     {
@@ -473,11 +471,7 @@ pub(crate) fn tick_blaster_auto_fire(
             // above takes.
             let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
                 red_alert_opt,
-                crate::console::weapons::system_power_group_is_cold(
-                    ship_config_opt.map(|c| &c.0),
-                    power_opt.map(|p| &p.0),
-                    &bank_sid,
-                ),
+                super::observed_weapons_restraint(ship_config_opt, &bank_sid, blackboards_opt),
                 stance_override,
             );
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, posture);
@@ -637,7 +631,7 @@ pub(crate) fn tick_blaster_system(
             mut physics,
             blackboards_opt,
             mut blaster_res,
-            ship_config_opt,
+            _ship_config_opt,
             mut power_opt,
         )) = ship_q.get_mut(shooter)
         else {
@@ -671,25 +665,24 @@ pub(crate) fn tick_blaster_system(
 
         for bank in blaster_res.0.iter_mut() {
             let bank_id = bank.config.id.clone();
-            // A hold-to-fire bank whose group went cold mid-charge does not get
-            // to finish (issue #1396). `tick` completes a charge into a volley
-            // on its own, with no admitted command behind it, so the applier's
-            // gate cannot see that shot — this is the only place it can be
-            // stopped. Cancelling costs the bank no cooldown, exactly as the
-            // crew's own `ChargeBlasterCancel` does, so powering the group back
-            // leaves the bank ready rather than punished.
-            //
-            // A volley already LAUNCHED is left alone: its rounds are spent, and
-            // its remaining shots are in flight rather than pending a decision.
-            if crate::ship::system_registry::blaster_bank_system_id(&bank_id).is_some_and(|sid| {
-                super::system_power_group_is_cold(
-                    ship_config_opt.map(|c| &c.0),
-                    power_opt.as_deref().map(|p| &p.0),
-                    &sid,
-                )
-            }) {
-                bank.request_charge_cancel();
-            }
+            let bank_system = crate::ship::system_registry::blaster_bank_system_id(&bank_id);
+            let charge_dt = if bank.volley.charging {
+                let charge_work_dt =
+                    dt.min((bank.config.charge_time_secs - bank.volley.charge_elapsed).max(0.0));
+                bank_system
+                    .as_ref()
+                    .and_then(|system| {
+                        power_opt
+                            .as_deref_mut()
+                            .filter(|power| !power.0.weapons_restrained())
+                            .and_then(|power| {
+                                power.0.work_continuous(system, charge_work_dt, 1.0).ok()
+                            })
+                    })
+                    .map_or(0.0, |grant| charge_work_dt * grant.fraction)
+            } else {
+                0.0
+            };
             let visual_scale = bank.config.visual_scale;
             let recoil_impulse = bank.config.recoil_impulse;
             // Read only by the server-gated screenshake push below (issue
@@ -719,8 +712,9 @@ pub(crate) fn tick_blaster_system(
                 })
                 .collect();
 
-            let events = bank.tick(
+            let events = bank.tick_with_work(
                 dt,
+                charge_dt,
                 &barrel_origins,
                 physics.yaw,
                 target_x,
@@ -728,6 +722,17 @@ pub(crate) fn tick_blaster_system(
                 target_vx,
                 target_vz,
                 &source_uuid,
+                &mut |count| {
+                    bank_system.as_ref().is_some_and(|system| {
+                        power_opt.as_deref_mut().is_some_and(|power| {
+                            !power.0.weapons_restrained()
+                                && matches!(
+                                    power.0.try_work_discrete_count(system, count),
+                                    Ok(true)
+                                )
+                        })
+                    })
+                },
                 // Was OS randomness, then a draw off the seeded RNG stream —
                 // both of which gave two instances different ids for the same
                 // shot, and those ids key the in-flight/hit bookkeeping. Now a

@@ -1,5 +1,5 @@
 use super::*;
-use crate::modifiers::power_system::{PowerConfig, PowerSystem, StrikeReserveConfig};
+use crate::modifiers::power_system::{PowerConfig, StrikeReserveConfig};
 use crate::modifiers::strike_reserve::StrikeWeaponConfig;
 use crate::ship::power::{PowerConfigResource, ShipPowerSystem};
 
@@ -39,8 +39,16 @@ fn reserve(app: &mut App, charge: f32, ids: &[&str]) -> Entity {
         }),
         ..Default::default()
     };
-    let mut power = PowerSystem::new(&config);
-    power.battery_charge = charge;
+    let hardware = app
+        .world()
+        .get::<ShipPowerSystem>(ship)
+        .expect("finite weapon hardware")
+        .0
+        .clone();
+    let mut power = hardware
+        .with_strike_reserve(config.strike_reserve.clone())
+        .unwrap();
+    power.network_mut().reactor.energy = charge;
     power.set_strike_boost(true);
     app.world_mut()
         .entity_mut(ship)
@@ -53,7 +61,7 @@ fn charge(app: &App, ship: Entity) -> f32 {
         .get::<ShipPowerSystem>(ship)
         .unwrap()
         .0
-        .battery_charge
+        .battery_charge()
 }
 
 #[test]

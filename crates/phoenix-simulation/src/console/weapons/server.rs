@@ -122,7 +122,7 @@ impl Plugin for WeaponsPlugin {
             )
             .with_feedback(
                 crate::command_admission::FeedbackAddress::MatcherSpelling,
-                &[Payload::SetTarget],
+                &[Payload::SetTarget, Payload::SetWeaponsRestraint],
             ),
         )
         .register_admitted_consumer(
@@ -223,6 +223,11 @@ impl Plugin for WeaponsPlugin {
                     // Ai radar refuses the human's message at admission. There is
                     // no ordering in which one clobbers the other, because only one
                     // of them ever produces a command.
+                    handle_set_weapons_restraint
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .before(ai_phaser_auto_fire)
+                        .before(tick_blaster_auto_fire)
+                        .before(tick_weapons_arc_request),
                     handle_set_target
                         .in_set(crate::sim_sets::FixedStep::HandleSetTarget)
                         .in_set(crate::sim_sets::SimSet::Input)
@@ -818,7 +823,6 @@ fn tick_weapons_arc_request(
             // groups are read against (issue #1396). `Option` for the same
             // reason as the alert beside it — a bare-`App` fixture spawns
             // neither.
-            Option<&crate::ship::power::ShipPowerSystem>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
@@ -855,7 +859,6 @@ fn tick_weapons_arc_request(
         torpedo_opt,
         doctrine_opt,
         red_alert_opt,
-        power_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
@@ -1060,9 +1063,9 @@ fn tick_weapons_arc_request(
             }))
             .collect();
         let every_emitter_cold = !emitter_sids.is_empty()
-            && emitter_sids.iter().all(|sid| {
-                system_power_group_is_cold(Some(&ship_config.0), power_opt.map(|p| &p.0), sid)
-            });
+            && emitter_sids
+                .iter()
+                .all(|sid| observed_weapons_restraint(Some(ship_config), sid, Some(blackboards)));
         let doctrine_facts = seed_weapons_doctrine_facts(
             target_facing_shields,
             WeaponsAlertPosture::from_components(red_alert_opt, every_emitter_cold),
@@ -2469,3 +2472,58 @@ pub(super) fn resolve_objective_target_uuid(
 mod tests;
 
 pub use phoenix_sim_gameplay::console::weapons::server::*;
+
+/// Console-bound policy input. Co-hosted screens never pool their knowledge;
+/// a missing Weapons binding supplies no permission to infer an unrestrained ship.
+pub fn observed_weapons_restraint(
+    config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    system: &crate::core::messages::SystemId,
+    boards: Option<&crate::server_app::ShipSystemBlackboards>,
+) -> bool {
+    let Some((config, boards)) = config.zip(boards) else {
+        return true;
+    };
+    match config
+        .0
+        .observations_for_system(system, &boards.0)
+        .get(&crate::ship::system_registry::tactical_station_key())
+    {
+        Some(SystemBlackboard::Weapons(board)) => board.weapons_restrained,
+        _ => true,
+    }
+}
+
+/// Sole explicit restraint applier. Admission owns current Console authority.
+fn handle_set_weapons_restraint(
+    mut ships: Query<
+        (
+            &crate::core::messages::AdmittedCommands,
+            &ShipSystemControlSources,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut outbound: Option<ResMut<Messages<crate::lobby::server::OutboundMessage>>>,
+) {
+    use super::{WeaponActionRefusal, WeaponActionResult};
+    use crate::core::messages::SystemControlPayload;
+    let target = crate::ship::system_registry::tactical_radar_system_id();
+    for (admitted, sources, mut power) in &mut ships {
+        for cmd in admitted.for_target(&target.0) {
+            let SystemControlPayload::SetWeaponsRestraint { held } = cmd.payload else {
+                continue;
+            };
+            let policy = sources.0.policy_for(&target);
+            let result = if let Some(power) = power
+                .as_deref_mut()
+                .filter(|_| policy.accept_human_input || policy.operate_ai)
+            {
+                power.0.set_weapons_restrained(held);
+                WeaponActionResult::Applied
+            } else {
+                WeaponActionResult::Refused(WeaponActionRefusal::Offline)
+            };
+            super::finish_action_feedback(cmd, &mut outbound, result);
+        }
+    }
+}

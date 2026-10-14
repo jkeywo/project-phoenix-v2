@@ -509,7 +509,7 @@ pub(crate) fn handle_fire_torpedo(
                 super::finish_action_feedback(
                     cmd,
                     &mut outbound,
-                    WeaponActionResult::Refused(WeaponActionRefusal::PowerCold),
+                    WeaponActionResult::Refused(WeaponActionRefusal::Restrained),
                 );
                 continue;
             }
@@ -543,6 +543,34 @@ pub(crate) fn handle_fire_torpedo(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::ConservationHold),
+                );
+                continue;
+            }
+
+            // No cost, identity or ammo movement until the tube can actually launch.
+            let launch_ready = torpedo_sys
+                .tube(&tube_id)
+                .is_some_and(|tube| tube.loaded_count > 0)
+                && !torpedo_sys
+                    .burst_states
+                    .iter()
+                    .any(|burst| burst.tube_id == tube_id && burst.pending > 0);
+            if !launch_ready {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::TubeNotLoaded),
+                );
+                continue;
+            }
+            if !power_opt
+                .as_deref_mut()
+                .is_some_and(|power| matches!(power.0.try_work_discrete(&cmd.target), Ok(true)))
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::EnergyUnavailable),
                 );
                 continue;
             }
@@ -703,7 +731,6 @@ pub(crate) fn handle_fire_torpedo(
 /// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
 pub fn handle_torpedo_magazine_inter_system(
     queue: Res<InterSystemQueue>,
-    ships: Query<(), With<crate::server_app::Ship>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -716,10 +743,10 @@ pub fn handle_torpedo_magazine_inter_system(
             &mut TorpedoSystemResource,
             Option<&TorpedoMagazineAiPolicy>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let magazine_id = crate::ship::system_registry::torpedo_magazine_system_id();
     // Collect targeted claims: (source_entity, tube_id). Only claims for the
@@ -742,13 +769,19 @@ pub fn handle_torpedo_magazine_inter_system(
     let local_ship_entity: Option<Entity> =
         ship_q
             .iter()
-            .find_map(|(e, _, _, _, is_local)| if is_local { Some(e) } else { None });
+            .find_map(|(e, _, _, _, is_local, _)| if is_local { Some(e) } else { None });
 
     for (source_entity, tube_id) in claims {
         let target_entity = source_entity.or(local_ship_entity);
         if let Some(target) = target_entity {
-            if let Ok((_e, control_sources, mut torpedo_sys, mag_policy_opt, _is_local)) =
-                ship_q.get_mut(target)
+            if let Ok((
+                _e,
+                control_sources,
+                mut torpedo_sys,
+                mag_policy_opt,
+                _is_local,
+                mut power,
+            )) = ship_q.get_mut(target)
             {
                 // Gate: magazine must be online (or absent → treat as online for
                 // ships that don't declare a magazine fine system, preserving
@@ -793,7 +826,14 @@ pub fn handle_torpedo_magazine_inter_system(
                 if !torpedo_magazine_grant_policy_fires(mag_policy, &facts, &flag_chain) {
                     continue; // authored policy refuses this claim.
                 }
-                if !torpedo_sys.0.claim_magazine_round(&tube_id) {
+                if !torpedo_sys
+                    .0
+                    .claim_magazine_round_with_work(&tube_id, &mut || {
+                        power.as_deref_mut().is_some_and(|power| {
+                            matches!(power.0.try_work_discrete(&magazine_id), Ok(true))
+                        })
+                    })
+                {
                     continue; // magazine empty — refuse this claim.
                 }
                 if !torpedo_sys.0.start_load_reserved(&tube_id) {
@@ -803,16 +843,7 @@ pub fn handle_torpedo_magazine_inter_system(
                 continue;
             }
         }
-        // Only an unaddressed claim in a resource-only harness may use this state.
-        if source_entity.is_some() || !ships.is_empty() {
-            continue;
-        }
-        if !torpedo_sys_res.0.claim_magazine_round(&tube_id) {
-            continue;
-        }
-        if !torpedo_sys_res.0.start_load_reserved(&tube_id) {
-            torpedo_sys_res.0.release_magazine_round(&tube_id);
-        }
+        // A claim with no physical owner has no local reserve and cannot work.
     }
 }
 
@@ -1126,9 +1157,42 @@ pub(crate) fn tick_torpedo_lifecycle(
             continue;
         };
         any_ship_component = true;
-        let result = torpedo_sys.0.tick(dt, target_positions, &mut || {
-            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
-        });
+        let result = torpedo_sys.0.tick_with_work(
+            dt,
+            target_positions,
+            &mut |work| {
+                use crate::weapons::torpedo::TorpedoWork;
+                let Some(power) = power.as_deref_mut() else {
+                    return 0.0;
+                };
+                match work {
+                    TorpedoWork::Progress { tube, dt } => {
+                        crate::ship::system_registry::torpedo_tube_system_id(tube)
+                            .and_then(|id| power.0.work_continuous(&id, dt, 1.0).ok())
+                            .map_or(0.0, |grant| grant.fraction)
+                    }
+                    TorpedoWork::Transfer => u8::from(matches!(
+                        power.0.try_work_discrete(
+                            &crate::ship::system_registry::torpedo_magazine_system_id()
+                        ),
+                        Ok(true)
+                    )) as f32,
+                    TorpedoWork::Launch { tube } => u8::from(
+                        !power.0.weapons_restrained()
+                            && crate::ship::system_registry::torpedo_tube_system_id(tube)
+                                .is_some_and(|id| {
+                                    matches!(power.0.try_work_discrete(&id), Ok(true))
+                                }),
+                    ) as f32,
+                }
+            },
+            &mut || {
+                crate::world_id::mint_live_id_with(
+                    id_mint,
+                    crate::world_id::IdNamespace::Projectile,
+                )
+            },
+        );
         for expired_uuid in result.expired {
             outbox.push_reliable((
                 Target::All,
@@ -1178,9 +1242,15 @@ pub(crate) fn tick_torpedo_lifecycle(
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` and no Ship entity still work.
     if !any_ship_component && ships.is_empty() {
-        let result = torpedo_sys_res.0.tick(dt, target_positions, &mut || {
-            crate::world_id::mint_live_id_with(id_mint, crate::world_id::IdNamespace::Projectile)
-        });
+        let result =
+            torpedo_sys_res
+                .0
+                .tick_with_work(dt, target_positions, &mut |_| 0.0, &mut || {
+                    crate::world_id::mint_live_id_with(
+                        id_mint,
+                        crate::world_id::IdNamespace::Projectile,
+                    )
+                });
         for expired_uuid in result.expired {
             outbox.push_reliable((
                 Target::All,

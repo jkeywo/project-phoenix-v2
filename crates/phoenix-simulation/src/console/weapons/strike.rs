@@ -7,15 +7,29 @@ pub(crate) fn ai_strike_boost(
             Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &crate::ship::power::ShipPowerSystem,
+            &crate::server_app::ShipSystemBlackboards,
             &crate::ship::power::PowerConfigResource,
             &mut crate::core::messages::AdmittedCommands,
         ),
         bevy::prelude::With<crate::server_app::Ship>,
     >,
 ) {
-    for (uuid, sources, ship, power, config, mut admitted) in &mut ships {
-        let Some(boost) = power.0.strike_boost() else {
+    for (uuid, sources, ship, boards, config, mut admitted) in &mut ships {
+        let target = crate::core::messages::SystemId(
+            crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID.into(),
+        );
+        let Some(reading) = ship.and_then(|ship| {
+            match ship
+                .0
+                .observations_for_system(&target, &boards.0)
+                .get(&crate::ship::system_registry::tactical_station_key())
+            {
+                Some(crate::core::messages::SystemBlackboard::Weapons(board)) => {
+                    board.strike_reserve.clone()
+                }
+                _ => None,
+            }
+        }) else {
             continue;
         };
         let Some(threshold) = config
@@ -26,7 +40,7 @@ pub(crate) fn ai_strike_boost(
         else {
             continue;
         };
-        if !boost.enabled && power.0.battery_charge >= threshold {
+        if !reading.enabled && reading.charge >= threshold {
             crate::command_admission::ai_emit::emit_ai_command(
                 uuid,
                 crate::core::messages::SystemId(

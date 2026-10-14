@@ -11,8 +11,13 @@ use crate::ship::damage::SystemHull;
 use crate::sim_rng::InstallSimRng;
 use crate::simmath;
 
+#[path = "energy_tests.rs"]
+mod energy_tests;
 #[path = "strike_tests.rs"]
 mod strike_tests;
+
+#[derive(Resource)]
+struct NoFixtureEnergy;
 
 #[derive(Resource, Default)]
 struct Outbox(Vec<OutboundMessage>);
@@ -76,6 +81,9 @@ screen = "tactical"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 
 [[system]]
 id = "phaser-port"
@@ -174,13 +182,21 @@ fn seed_viewscreen_from_selection(
         (
             Option<&TacticalRadarSelection>,
             Option<&crate::ship::sensors::SensorRadarSelection>,
+            Option<&crate::ship::power::ShipPowerSystem>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
-    for (tac, sci, mut bbs) in q.iter_mut() {
+    for (tac, sci, power, mut bbs) in q.iter_mut() {
+        let key = crate::ship::system_registry::tactical_station_key();
+        let mut weapons = match bbs.0.get(&key) {
+            Some(SystemBlackboard::Weapons(board)) => board.clone(),
+            _ => WeaponsBlackboard::default(),
+        };
+        weapons.weapons_restrained = power.is_some_and(|power| power.0.weapons_restrained());
+        bbs.0.insert(key, SystemBlackboard::Weapons(weapons));
         let combat_lock = tac.and_then(|t| t.0.clone());
         let science_target = sci.and_then(|s| s.0.clone());
         let mut vbb = match bbs
@@ -258,7 +274,10 @@ fn test_app() -> App {
     .insert_resource(PhaserCombatConfigResource(phaser_config.clone()))
     .add_systems(
         FixedUpdate,
-        seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
+        (
+            prepare_fixture_weapon_energy.before(seed_viewscreen_from_selection),
+            seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
+        ),
     )
     .add_plugins(weapons_update_broadcaster())
     // PR-7 (issue #597) — `tick_shields` (formerly `tick_npc_shield_regen`)
@@ -376,6 +395,9 @@ screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 "#,
     );
     for (id, kind) in systems {
@@ -387,7 +409,12 @@ kind = "Viewscreen"
     crate::ship_plugin::ShipConfigComponent(
         crate::ship::config::ShipConfig::from_toml(
             &authored,
-            &["phaser_bank", "blaster_bank", "torpedo_tube"],
+            &[
+                "phaser_bank",
+                "blaster_bank",
+                "torpedo_tube",
+                "torpedo_magazine",
+            ],
         )
         .expect("explicit fixture weapon ownership"),
     )
@@ -461,6 +488,8 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
             .insert(fixture_weapon_observations(&systems));
     }
 
+    attach_fixture_weapon_energy(app, ship);
+
     app.world_mut().entity_mut(ship).insert((
         crate::console::weapons::TacticalTargetSelector {
             selector: shipped_selector_toml("tactical")
@@ -514,6 +543,187 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
         // `weapons_fire_guard_truth_table` in `authored_ai_pins`.
         crate::ship::state::ShipRedAlert(true),
     ));
+}
+
+/// Finite authored-equivalent hardware for reduced weapon harnesses. This does
+/// not run in production and never grants an unknown System free work.
+fn attach_fixture_weapon_energy(app: &mut App, ship: Entity) {
+    attach_fixture_weapon_energy_world(app.world_mut(), ship);
+}
+
+fn prepare_fixture_weapon_energy(world: &mut World) {
+    if world.contains_resource::<NoFixtureEnergy>() {
+        return;
+    }
+    let mut query = world.query_filtered::<Entity, With<crate::server_app::Ship>>();
+    let ships: Vec<_> = query.iter(world).collect();
+    for ship in ships {
+        // Existing configured reserves are never replenished by this fixture
+        // pass. Only absent hardware is installed for newly constructed actors.
+        if world
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .is_none()
+        {
+            attach_fixture_weapon_energy_world(world, ship);
+        }
+    }
+}
+
+fn attach_fixture_weapon_energy_world(world: &mut World, ship: Entity) {
+    use crate::ship::config::SystemInstanceConfig;
+    let mut equipment = Vec::new();
+    if let Some(beams) = world.get::<PhaserCombatConfigResource>(ship) {
+        equipment.extend(beams.0.banks.iter().map(|bank| {
+            (
+                crate::ship::system_registry::phaser_bank_system_id(&bank.id).unwrap(),
+                "phaser_bank",
+            )
+        }));
+    }
+    if let Some(blasters) = world.get::<crate::console::weapons::BlasterSystemResource>(ship) {
+        equipment.extend(blasters.0.iter().map(|bank| {
+            (
+                crate::ship::system_registry::blaster_bank_system_id(&bank.config.id).unwrap(),
+                "blaster_bank",
+            )
+        }));
+    }
+    if let Some(torpedoes) = world.get::<TorpedoSystemResource>(ship) {
+        equipment.extend(torpedoes.0.tubes.iter().map(|tube| {
+            (
+                crate::ship::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
+                "torpedo_tube",
+            )
+        }));
+        equipment.push((
+            crate::ship::system_registry::torpedo_magazine_system_id(),
+            "torpedo_magazine",
+        ));
+    }
+    if equipment.is_empty() {
+        return;
+    }
+    let mut config = world
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .map(|config| config.0.clone())
+        .unwrap_or_else(|| fixture_weapon_observations(&equipment).0);
+    if world
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .is_none()
+    {
+        world
+            .entity_mut(ship)
+            .insert(crate::ship_plugin::ShipConfigComponent(config.clone()));
+    }
+    for (id, kind) in equipment {
+        if config.system(&id).is_none() {
+            config.systems.push(SystemInstanceConfig {
+                id,
+                kind: kind.into(),
+                console: None,
+                ai_only: true,
+                power_group: None,
+                marker: None,
+                config: None,
+                components: vec![],
+                channels: vec![],
+            });
+        }
+    }
+    let power = fixture_weapon_energy(config);
+    world
+        .entity_mut(ship)
+        .insert(crate::ship::power::ShipPowerSystem(power));
+}
+
+fn fixture_weapon_energy(
+    mut ship: crate::ship::config::ShipConfig,
+) -> crate::modifiers::power_system::PowerSystem {
+    use crate::entities::config::{
+        requires_energy_profile, EnergyConfigSection, EnergyConsumerConfig, EnergyGroupConfig,
+        EnergyReactorConfig,
+    };
+    use crate::resources::energy::EnergyConfig;
+    use crate::resources::service::{ResourceEndpoint, ResourceLink};
+    let group = crate::core::messages::PowerGroupId("weapons".into());
+    ship.power_groups
+        .entry(group.clone())
+        .or_insert(crate::ship::config::PowerGroupConfig {
+            label: "fixture".into(),
+            default_level: 2,
+            min_level: 0,
+            max_level: 4,
+        });
+    for system in &mut ship.systems {
+        if requires_energy_profile(&system.kind) {
+            system.power_group = Some(group.clone());
+        }
+    }
+    let reserve = EnergyConfig {
+        capacity: 1000.0,
+        max_intake_per_sec: 100.0,
+        passive_loss_at_full_per_sec: 0.0,
+        charge_heat_per_unit: 0.1,
+        discharge_heat_per_unit: 0.1,
+        passive_cooling_per_sec: 1.0,
+        coolant_heat_per_unit: 10.0,
+        trip_heat: 500.0,
+        recover_heat: 250.0,
+    };
+    let link = ResourceLink {
+        service: None,
+        provider: Some(ResourceEndpoint::Capacity {
+            id: "fixture-coolant".into(),
+        }),
+    };
+    let mut group_ids: Vec<_> = ship.power_groups.keys().cloned().collect();
+    group_ids.sort();
+    let hardware = EnergyConfigSection {
+        reactor: EnergyReactorConfig {
+            sustainable_output_per_sec: 100.0,
+            max_output_per_sec: 100.0,
+            ramp_per_sec: 100.0,
+            initial_output_per_sec: 100.0,
+            initial_energy: 1000.0,
+            initial_heat: 0.0,
+            max_cooling_per_sec: 10.0,
+            default_cooling_per_sec: 1.0,
+            reserve,
+            coolant: link.clone(),
+        },
+        consumers: ship
+            .systems
+            .iter()
+            .filter(|system| requires_energy_profile(&system.kind))
+            .map(|system| EnergyConsumerConfig {
+                system: system.id.clone(),
+                initial_energy: 1000.0,
+                initial_heat: 0.0,
+                continuous_cost_per_sec: 1.0,
+                discrete_cost: if system.kind == "phaser_bank" {
+                    0.0
+                } else {
+                    1.0
+                },
+                reserve,
+                coolant: link.clone(),
+            })
+            .collect(),
+        groups: group_ids
+            .into_iter()
+            .map(|id| EnergyGroupConfig {
+                id,
+                parent: None,
+                max_flow_per_sec: 100.0,
+                default_flow_per_sec: 10.0,
+                max_cooling_per_sec: 10.0,
+                default_cooling_per_sec: 1.0,
+                priority: 0,
+                restore_delay_secs: 0.5,
+            })
+            .collect(),
+    };
+    crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship).unwrap()
 }
 
 // ── PR 7 test helpers — per-entity access to Weapons state ──────────────
@@ -4889,6 +5099,9 @@ screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 
 [[system]]
 id = "phaser-port"
@@ -5628,6 +5841,9 @@ screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 
 [[system]]
 id = "phaser-fore"
@@ -13107,6 +13323,9 @@ id = "ai-phaser-port"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 
 [[system]]
 id = "phaser-port"
@@ -15485,6 +15704,9 @@ screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 
 [[system]]
 id = "phaser-fore"
@@ -15506,16 +15728,17 @@ console = "tactical-console"
 
 /// That hull's reactor, with the weapons group at `level`. `0` is COLD.
 fn weapons_reactor_at(level: u8) -> crate::ship::power::ShipPowerSystem {
-    crate::ship::power::ShipPowerSystem(
-        crate::modifiers::power_system::PowerSystem::from_authored_groups(
-            &crate::modifiers::power_system::PowerConfig::default(),
-            &[crate::modifiers::power_system::AuthoredPowerGroup {
-                id: crate::core::messages::PowerGroupId("weapons".into()),
-                level,
-                floor: 0,
-            }],
-        ),
-    )
+    let mut config = test_ship_config().0;
+    config.systems.extend(
+        coldable_weapons_ship_config()
+            .0
+            .systems
+            .into_iter()
+            .filter(|system| system.id.0 == "phaser-fore"),
+    );
+    let mut power = fixture_weapon_energy(config);
+    power.set_weapons_restrained(level == 0);
+    crate::ship::power::ShipPowerSystem(power)
 }
 
 fn is_firing(app: &App, ship: Entity) -> bool {
@@ -15572,8 +15795,7 @@ fn a_cold_weapons_group_holds_fire_and_power_gives_it_back() {
         .get_mut::<crate::ship::power::ShipPowerSystem>()
         .expect("the ship has a reactor")
         .0
-        .set_group_allocation(&crate::core::messages::PowerGroupId("weapons".into()), 2)
-        .expect("the weapons group is on this reactor");
+        .set_weapons_restrained(false);
     // Two frames, because the deciders run on the ONE shared AI cadence
     // (`ai_tick_ready`, issue #889) rather than per rendered frame — this is the
     // very next AI tick, not a settling period.
@@ -15649,8 +15871,7 @@ fn a_human_fire_order_is_refused_while_the_group_is_cold() {
         .get_mut::<crate::ship::power::ShipPowerSystem>()
         .expect("the reactor is on the ship")
         .0
-        .set_group_allocation(&crate::core::messages::PowerGroupId("weapons".into()), 2)
-        .expect("the weapons group is on this reactor");
+        .set_weapons_restrained(false);
     push(
         &mut app,
         "weapons",
@@ -15671,63 +15892,17 @@ fn a_human_fire_order_is_refused_while_the_group_is_cold() {
 /// The shared resolution every fire host reads through: the SYSTEM's authored
 /// group, this ship's reactor, and fail-open on either being absent.
 #[test]
-fn a_systems_cold_reading_comes_from_its_own_authored_power_group() {
-    use crate::console::weapons::system_power_group_is_cold;
-    let config = coldable_weapons_ship_config();
-    let cold = weapons_reactor_at(0);
-    let powered = weapons_reactor_at(2);
-    let bank = crate::ship::system_registry::phaser_bank_system_id("fore").unwrap();
-
-    assert!(system_power_group_is_cold(
-        Some(&config.0),
-        Some(&cold.0),
-        &bank
-    ));
-    assert!(!system_power_group_is_cold(
-        Some(&config.0),
-        Some(&powered.0),
-        &bank
-    ));
-    // DECLARED on the hull but on NO power group — `[[system]] tactical-radar`
-    // authors no `power_group`, so `power_group_for` reaches the system and
-    // finds `None`. Never cold: it is not on the reactor's books, so switching a
-    // group off cannot reach it. This is the arm most shipped NPC hulls take
-    // (none of `ship_harrow_cruiser.toml`'s systems name a group); if it ever
-    // read as cold, those hulls would stop shooting. `ship_harrow_patrol` is the
-    // deliberate exception since #1398 — its gun line names `weapons` precisely
-    // so a scenario CAN read it as cold, on the arm above.
-    //
-    // Pinned on the fixture first, so a later edit to the hull TOML cannot let
-    // this case quietly collapse into the undeclared-system one below.
-    let groupless = config
+fn restraint_is_explicit_and_independent_of_system_group_or_intake() {
+    let mut power = weapons_reactor_at(2);
+    power
         .0
-        .system(&SystemId("tactical-radar".into()))
-        .expect("the fixture hull DECLARES tactical-radar");
-    assert!(
-        groupless.power_group.is_none(),
-        "and declares it on no power group — that is the arm under test"
-    );
-    assert!(
-        config.0.system(&SystemId("phaser-aft".into())).is_none(),
-        "while phaser-aft is not declared at all — the other fail-open arm"
-    );
-    assert!(!system_power_group_is_cold(
-        Some(&config.0),
-        Some(&cold.0),
-        &SystemId("tactical-radar".into())
-    ));
-    // NOT DECLARED at all — a separate fail-open arm, pinned separately so it
-    // cannot stand in for the groupless-system one above. `power_group_for`
-    // short-circuits on the missing system rather than on a missing group.
-    assert!(!system_power_group_is_cold(
-        Some(&config.0),
-        Some(&cold.0),
-        &SystemId("phaser-aft".into())
-    ));
-    // Fail-open on absence, in both arguments — a fixture with no hull or no
-    // reactor is a ship the question cannot be asked of, not one with dead guns.
-    assert!(!system_power_group_is_cold(None, Some(&cold.0), &bank));
-    assert!(!system_power_group_is_cold(Some(&config.0), None, &bank));
+        .set_flow(&PowerGroupId("weapons".into()), 0.0)
+        .unwrap();
+    let bank = SystemId("phaser-port".into());
+    assert!(!system_power_group_is_cold(None, Some(&power.0), &bank));
+    assert!(power.0.try_work_discrete(&bank).unwrap());
+    power.0.set_weapons_restrained(true);
+    assert!(system_power_group_is_cold(None, Some(&power.0), &bank));
 }
 
 /// A hold-to-fire blaster bank cut down to what a cold gate reads: a charge
@@ -15783,6 +15958,7 @@ fn give_local_ship_a_charging_blaster(app: &mut App) -> Entity {
             crate::ship::control_source::ControlSource::Human,
         );
     }
+    attach_fixture_weapon_energy(app, ship);
     ship
 }
 
@@ -15811,14 +15987,6 @@ fn blaster_bank_state(app: &App, ship: Entity) -> crate::weapons::blaster::Blast
         .clone()
 }
 
-fn blaster_bank_is_fire_ready(app: &App, ship: Entity) -> bool {
-    app.world()
-        .get::<BlasterSystemResource>(ship)
-        .expect("the ship keeps its blaster bank")
-        .0[0]
-        .is_fire_ready()
-}
-
 fn blaster_bank_in_flight(app: &App, ship: Entity) -> usize {
     app.world()
         .get::<BlasterSystemResource>(ship)
@@ -15830,15 +15998,10 @@ fn blaster_bank_in_flight(app: &App, ship: Entity) -> usize {
 
 fn set_weapons_group_level(app: &mut App, ship: Entity, level: u8) {
     app.world_mut()
-        .entity_mut(ship)
-        .get_mut::<crate::ship::power::ShipPowerSystem>()
-        .expect("the reactor is on the ship")
+        .get_mut::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
         .0
-        .set_group_allocation(
-            &crate::core::messages::PowerGroupId("weapons".into()),
-            level,
-        )
-        .expect("the weapons group is on this reactor");
+        .set_weapons_restrained(level == 0);
 }
 
 /// The one `ActionFeedback` outcome the host sent for `correlation`.
@@ -15865,7 +16028,7 @@ fn feedback_for(out: &[OutboundMessage], correlation: &str) -> Option<ActionFeed
 /// powering the group back leaves the bank ready rather than punished for an
 /// order it never got to carry out.
 #[test]
-fn a_charge_in_flight_is_dropped_when_the_group_goes_cold_and_costs_no_cooldown() {
+fn explicit_restraint_pauses_charge_without_resetting_it_or_burning_cooldown() {
     let mut app = test_app();
     setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
@@ -15904,15 +16067,9 @@ fn a_charge_in_flight_is_dropped_when_the_group_goes_cold_and_costs_no_cooldown(
         .insert(weapons_reactor_at(0));
     let _ = tick(&mut app);
 
-    let cancelled = blaster_bank_state(&app, ship);
-    assert!(
-        !cancelled.charging,
-        "a bank whose group went cold mid-charge must drop the charge"
-    );
-    assert_eq!(
-        cancelled.charge_elapsed, 0.0,
-        "and drop it outright rather than parking a part-charge that resumes"
-    );
+    let paused = blaster_bank_state(&app, ship);
+    assert!(paused.charging);
+    assert_eq!(paused.charge_elapsed, charging.charge_elapsed);
 
     // Past the tick the charge WOULD have completed on (0.5s = three 200ms
     // steps from the start), so "no volley" is a fact about the whole charge
@@ -15941,18 +16098,6 @@ fn a_charge_in_flight_is_dropped_when_the_group_goes_cold_and_costs_no_cooldown(
     // Engineering powers the group back. The bank is ready THAT INSTANT — no
     // cooldown to sit out — and the next order it is given fires.
     set_weapons_group_level(&mut app, ship, 2);
-    assert!(
-        blaster_bank_is_fire_ready(&app, ship),
-        "with the group powered the bank must be fire-ready again immediately"
-    );
-    push(
-        &mut app,
-        "weapons",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
-            payload: SystemControlPayload::ChargeBlasterStart,
-        },
-    );
     for _ in 0..4 {
         let _ = tick(&mut app);
     }
@@ -16317,6 +16462,9 @@ screen = "fixture.html"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"

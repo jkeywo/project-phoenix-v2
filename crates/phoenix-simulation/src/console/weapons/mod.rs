@@ -30,16 +30,10 @@ pub(crate) enum WeaponActionResult {
 pub(crate) enum WeaponActionRefusal {
     UnknownMount,
     Offline,
-    /// The power group this mount's `[[system]]` entry authors is at level 0 —
-    /// switched off, not turned down (issue #1396).
-    ///
-    /// Kept apart from [`WeaponActionRefusal::Offline`] because they are
-    /// different facts about the ship: Offline is a system the crew have LOST
-    /// (damaged, destroyed, or nobody able to operate it), while cold is one
-    /// they deliberately switched off at the reactor and can switch back on
-    /// with one order. The wire carries only Applied/Refused, so the
-    /// distinction costs no message vocabulary.
-    PowerCold,
+    /// Explicit Tactical hold-fire intent, independent of local intake.
+    Restrained,
+    /// A complete local energy cost was unavailable; intent and ammo survive.
+    EnergyUnavailable,
     ActiveOrCooling,
     MissingCombatLock,
     MissingTarget,

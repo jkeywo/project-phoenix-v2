@@ -21,6 +21,15 @@ use std::f32::consts::PI;
 /// String identifier for a torpedo tube (matches the `id` field in TOML).
 pub type TorpedoTubeId = String;
 
+/// Physical work requested by tube execution. The runtime resolves reserves;
+/// this mechanism owns ammunition and cadence only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TorpedoWork<'a> {
+    Progress { tube: &'a str, dt: f32 },
+    Transfer,
+    Launch { tube: &'a str },
+}
+
 // ── Configuration ──────────────────────────────────────────────────────────
 
 /// Tuning knobs for the torpedo system.
@@ -619,10 +628,16 @@ impl TorpedoSystem {
     }
 
     /// Physical rounds aboard: magazine level already includes Loading claims;
-    /// ready and Unloading rounds remain in each tube until returned or fired.
-    /// In-flight rounds have been spent and are excluded.
+    /// ready/Unloading rounds remain in tubes and queued burst rounds remain
+    /// committed onboard until launched. In-flight rounds are excluded.
     pub fn rounds_aboard(&self) -> u32 {
-        self.magazine.level as u32 + self.tubes.iter().map(|t| t.loaded_count).sum::<u32>()
+        self.magazine.level as u32
+            + self.tubes.iter().map(|t| t.loaded_count).sum::<u32>()
+            + self
+                .burst_states
+                .iter()
+                .map(|burst| burst.pending)
+                .sum::<u32>()
     }
 
     /// Available ammunition retains the old magazine readout: claims disappear
@@ -644,6 +659,12 @@ impl TorpedoSystem {
                 self.tubes
                     .iter()
                     .map(|t| i64::from(t.loaded_count))
+                    .sum::<i64>(),
+            )
+            .saturating_sub(
+                self.burst_states
+                    .iter()
+                    .map(|burst| i64::from(burst.pending))
                     .sum::<i64>(),
             )
             .max(0)
@@ -683,11 +704,28 @@ impl TorpedoSystem {
         {
             return Err("magazine contains an unknown tube claim".into());
         }
+        let mut burst_tubes = std::collections::BTreeSet::new();
+        for burst in &self.burst_states {
+            let tube = self
+                .tube(&burst.tube_id)
+                .ok_or("burst references unknown tube")?;
+            if burst.pending == 0
+                || burst.pending >= tube.volley_max
+                || !burst_tubes.insert(&burst.tube_id)
+            {
+                return Err("invalid committed burst ammunition".into());
+            }
+        }
         if self.magazine.level
             + self
                 .tubes
                 .iter()
                 .map(|t| i64::from(t.loaded_count))
+                .sum::<i64>()
+            + self
+                .burst_states
+                .iter()
+                .map(|burst| i64::from(burst.pending))
                 .sum::<i64>()
             > self.magazine.ceiling
         {
@@ -702,7 +740,15 @@ impl TorpedoSystem {
     /// is empty, the tube id is unknown, the tube is not in the `Unloaded`
     /// state, or the tube is already at `volley_max` capacity.
     pub fn start_load(&mut self, tube_id: &str) -> bool {
-        if !self.claim_magazine_round(tube_id) {
+        self.start_load_with_work(tube_id, &mut || true)
+    }
+
+    pub fn start_load_with_work(
+        &mut self,
+        tube_id: &str,
+        admit: &mut impl FnMut() -> bool,
+    ) -> bool {
+        if !self.claim_magazine_round_with_work(tube_id, admit) {
             return false;
         }
         if self.start_load_reserved(tube_id) {
@@ -743,10 +789,28 @@ impl TorpedoSystem {
     /// Atomically claim the next round for an eligible tube. A repeated claim
     /// cannot reserve a second round, and loading tubes cannot claim again.
     pub fn claim_magazine_round(&mut self, tube_id: &str) -> bool {
+        self.claim_magazine_round_with_work(tube_id, &mut || true)
+    }
+
+    pub fn claim_magazine_round_with_work(
+        &mut self,
+        tube_id: &str,
+        admit: &mut impl FnMut() -> bool,
+    ) -> bool {
         let Some(tube) = self.tube(tube_id) else {
             return false;
         };
         if tube.load_state != TubeLoadState::Unloaded || tube.loaded_count >= tube.volley_max {
+            return false;
+        }
+        if let Some(claimed) = self
+            .magazine
+            .reserved
+            .get(&Self::magazine_claim_id(tube_id))
+        {
+            return *claimed == 1; // Idempotent receipt; the original claim already paid.
+        }
+        if self.magazine.available() < 1 || !admit() {
             return false;
         }
         reserve_requirements(
@@ -882,7 +946,12 @@ impl TorpedoSystem {
         let Some(idx) = self.tubes.iter().position(|t| t.id == tube_id) else {
             return LaunchResult::UnknownTube;
         };
-        if self.tubes[idx].loaded_count == 0 {
+        if self.tubes[idx].loaded_count == 0
+            || self
+                .burst_states
+                .iter()
+                .any(|burst| burst.tube_id == tube_id && burst.pending > 0)
+        {
             return LaunchResult::TubeNotLoaded;
         }
         let count = self.tubes[idx].loaded_count;
@@ -958,12 +1027,52 @@ impl TorpedoSystem {
         target_positions: &std::collections::HashMap<String, (f32, f32, f32)>,
         next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
+        self.tick_with_work(dt, target_positions, &mut |_| 1.0, next_uuid)
+    }
+
+    /// Work funding affects preparation and launch only. A waiting burst keeps
+    /// its rounds and target; launched torpedoes continue real-time flight.
+    pub fn tick_with_work(
+        &mut self,
+        dt: f32,
+        target_positions: &std::collections::HashMap<String, (f32, f32, f32)>,
+        work: &mut impl FnMut(TorpedoWork<'_>) -> f32,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> TorpedoTickResult {
         let mut result = TorpedoTickResult::default();
 
         // ── Tube load/unload progression ──────────────────────────────────
         let mut unload_completions: u32 = 0;
         for t in &mut self.tubes {
-            let outcome = t.tick(dt);
+            let work_dt = if matches!(
+                t.load_state,
+                TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }
+            ) {
+                let phase_dt = match t.load_state {
+                    TubeLoadState::Loading { remaining, .. }
+                    | TubeLoadState::Unloading { remaining, .. } => dt.min(remaining.max(0.0)),
+                    _ => 0.0,
+                };
+                phase_dt
+                    * work(TorpedoWork::Progress {
+                        tube: &t.id,
+                        dt: phase_dt,
+                    })
+                    .clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let awaiting_completion = matches!(t.load_state,
+                TubeLoadState::Loading { remaining, .. } | TubeLoadState::Unloading { remaining, .. } if remaining <= 0.0);
+            let unloading_total = match t.load_state {
+                TubeLoadState::Unloading { total, .. } => Some(total),
+                _ => None,
+            };
+            let outcome = if work_dt > 0.0 || awaiting_completion {
+                t.tick(work_dt)
+            } else {
+                LoadTickOutcome::None
+            };
             match outcome {
                 LoadTickOutcome::LoadedOne => {
                     if self
@@ -975,6 +1084,13 @@ impl TorpedoSystem {
                     }
                 }
                 LoadTickOutcome::UnloadedOne => {
+                    if work(TorpedoWork::Transfer) <= 0.0 {
+                        t.load_state = TubeLoadState::Unloading {
+                            remaining: 0.0,
+                            total: unloading_total.expect("unload completion has a duration"),
+                        };
+                        continue;
+                    }
                     if t.loaded_count > 0 {
                         t.loaded_count -= 1;
                     }
@@ -1000,9 +1116,12 @@ impl TorpedoSystem {
                 && self.torpedoes_remaining() > 0
             {
                 // start_load() requires Unloaded state, so reset from Loaded first.
+                let previous = self.tubes[i].load_state.clone();
                 self.tubes[i].load_state = TubeLoadState::Unloaded;
                 let id = self.tubes[i].id.clone();
-                self.start_load(&id);
+                if !self.start_load_with_work(&id, &mut || work(TorpedoWork::Transfer) > 0.0) {
+                    self.tubes[i].load_state = previous;
+                }
             }
         }
 
@@ -1036,7 +1155,12 @@ impl TorpedoSystem {
         let mut pattern_updates: Vec<(String, u32, u32)> = Vec::new();
         for (i, burst) in self.burst_states.iter_mut().enumerate() {
             burst.timer -= dt;
-            if burst.timer <= 0.0 && burst.pending > 0 {
+            if burst.timer <= 0.0
+                && burst.pending > 0
+                && work(TorpedoWork::Launch {
+                    tube: &burst.tube_id,
+                }) > 0.0
+            {
                 let uuid = next_uuid();
                 // Resolve this burst shot's origin from the barrel sequence
                 // captured at fire time (issue #766). A legacy single-origin

@@ -60,9 +60,13 @@ test('ordinary delegation disables machinery while complexity stays a Console wo
 
 test('keyboard input adjusts native flow without reviving retired rung shortcuts', async ({ page }) => {
   await open(page);
-  await page.locator('ph-energy-controls #flow-helm').focus();
+  const flow = page.locator('ph-energy-controls #flow-helm');
+  const before = await flow.evaluate(input => input.valueAsNumber);
+  await flow.focus();
   await page.keyboard.press('ArrowRight');
-  expect(await sent(page)).toContainEqual(expect.objectContaining({ action: 'set_energy_group', group: 'helm', flow_per_sec: 5 }));
+  const after = await flow.evaluate(input => input.valueAsNumber);
+  expect(after).toBeGreaterThan(before);
+  expect(await sent(page)).toContainEqual(expect.objectContaining({ action: 'set_energy_group', group: 'helm', flow_per_sec: after }));
   await page.keyboard.press('KeyQ'); await page.keyboard.press('KeyE');
   expect((await sent(page)).filter(action => action.action === 'set_power')).toEqual([]);
 });

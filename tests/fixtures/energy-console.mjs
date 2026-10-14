@@ -3,7 +3,7 @@ export function energyConsolePayload() {
   const group = (id, priority, parent = null) => ({ id, label: id.toUpperCase(), parent, priority,
     desired_flow_per_sec: 4, effective_flow_per_sec: id === 'weapons' ? 0 : 4, max_flow_per_sec: 12,
     desired_cooling_per_sec: 1, effective_cooling_per_sec: 1, max_cooling_per_sec: 4, cut: id === 'weapons' });
-  return { system_id: 'main-reactor', power_auto: false, battery_charge: 72, battery_max: 100, battery_online: true, charging: true,
+  return { console_id: 'power', system_id: 'main-reactor', power_auto: false, battery_charge: 72, battery_max: 100, battery_online: true, charging: true,
     draining: false, consoles: [], total: 0, total_max: 0,
     energy: { mode: 'manual', cooling_usage: 'low',
       reactor: { energy: 72, capacity: 100, heat: 5, trip_heat: 40, recover_heat: 20, thermal_stopped: false,

@@ -1,0 +1,1235 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-14",
+  "starting_main": "f14895ca87379b0a4823054f90ba1c32ee62b5b4",
+  "preintegration_main": "e69d655dd2550968b205561883388cc5ce3f4c83",
+  "tested_runtime_revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+  "source_branch_revision": "d0a4d7b176a84a001316af0a9ae8939ac763988d",
+  "pushed": false,
+  "formats": {
+    "snapshot": 41,
+    "simulation_rules": "0.13",
+    "protocol": 6
+  },
+  "environment": {
+    "PHOENIX_AMBIGUITY_BASE_REF": "e69d655dd2550968b205561883388cc5ce3f4c83",
+    "demo_PHOENIX_DEMO_BUILD": "true",
+    "browser_PHOENIX_SMOKE_PORT": "3168"
+  },
+  "gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 7.89,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "debug-surfaces",
+      "command": [
+        "npm.cmd",
+        "run",
+        "debug-surfaces:check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.45,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-debug-surfaces.log",
+      "log_sha256": "51e55f5fdb3b596c98e5df4bbae092be2ffb8eb7a024a361228d0ba6eeb11b2e"
+    },
+    {
+      "name": "live-layout",
+      "command": [
+        "npm.cmd",
+        "run",
+        "live-layout:check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.43,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-live-layout.log",
+      "log_sha256": "5a4a18dcd017c3f3635dec14330563298cea0e94f63f6979ac8b6e6ad4ead267"
+    },
+    {
+      "name": "vitest",
+      "command": [
+        "npx.cmd",
+        "--no-install",
+        "vitest",
+        "run"
+      ],
+      "exit_code": 0,
+      "seconds": 69.3,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-vitest.log",
+      "log_sha256": "c69754d88f7cb392d88a4d670663b072d24357a7d7fcb57ddd4f6c7765d6e846"
+    },
+    {
+      "name": "strings",
+      "command": [
+        "node",
+        "scripts/check-strings.mjs",
+        "--strict"
+      ],
+      "exit_code": 0,
+      "seconds": 0.78,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-strings.log",
+      "log_sha256": "9b40730efaa777ed8d85e1898bf5c405c5f123573368ce0655425f6f23af76d0"
+    },
+    {
+      "name": "lods",
+      "command": [
+        "npm.cmd",
+        "run",
+        "lods:check"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-lods.log",
+      "log_sha256": "b1a84c082db0e2cc46fb78a1d76bff60bf5e7bdac8119eae72b9dbe375b142da"
+    },
+    {
+      "name": "lod-captures",
+      "command": [
+        "npm.cmd",
+        "run",
+        "lod-captures:check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.76,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-lod-captures.log",
+      "log_sha256": "24f44a9773c81ed3bff6b55f55883df7ad27ea805faeefe9727a8a19612515ed"
+    },
+    {
+      "name": "layers",
+      "command": [
+        "npm.cmd",
+        "run",
+        "layers:check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.58,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-layers.log",
+      "log_sha256": "8f9224049f8d278eafeb963fc6518c1e500f04ccd6c5e11db9e73b84fb0d9e70"
+    },
+    {
+      "name": "dependency-tree",
+      "command": [
+        "node",
+        "scripts/check-layers.mjs",
+        "--dependency-tree"
+      ],
+      "exit_code": 0,
+      "seconds": 3.17,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-dependency-tree.log",
+      "log_sha256": "15cc946f5266463afd14dd67eeeb503a94d57ed502ef6a6343fac7a07debb039"
+    },
+    {
+      "name": "graph",
+      "command": [
+        "node",
+        "scripts/generate-layers-graph.mjs",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.17,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-graph.log",
+      "log_sha256": "335e7f3a10948fccc974fbc786329502bc3ac0a48cd237e711251cb1ea30548c"
+    },
+    {
+      "name": "pasm-validate",
+      "command": [
+        "uv",
+        "run",
+        "pasm",
+        "validate"
+      ],
+      "exit_code": 0,
+      "seconds": 188.6,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-pasm-validate.log",
+      "log_sha256": "02d2ab3282f0dc4169831002b87e6c589e9120a8fcd02de0d69fe3fcb587eb69"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--features",
+        "server,viewer,debug,headless,perf,host,capture",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 90.29,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-clippy.log",
+      "log_sha256": "986af1a05c2b66a70dab304a9b9c5079fce251eb9e3b62b606ef466a5b018d75"
+    },
+    {
+      "name": "pasm-scan",
+      "command": [
+        "uv",
+        "run",
+        "pasm",
+        "scan"
+      ],
+      "exit_code": 0,
+      "seconds": 265.43,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-pasm-scan.log",
+      "log_sha256": "756e404728ec224ab5c0195edbfadc17dc14d0fbb247f7c399df03b5b5520e6d"
+    },
+    {
+      "name": "pasm-traceability",
+      "command": [
+        "uv",
+        "run",
+        "pasm",
+        "traceability"
+      ],
+      "exit_code": 0,
+      "seconds": 244.05,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-pasm-traceability.log",
+      "log_sha256": "1f981da799a0f97a20fe0abc81983cb92f9d8c44a9281b94a77618861e3dac45"
+    },
+    {
+      "name": "workspace",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--features",
+        "headless"
+      ],
+      "exit_code": 0,
+      "seconds": 1076.59,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-workspace.log",
+      "log_sha256": "87d61037121356595d166dd4b403fff6d56b9fbc126d36c498518ce559fe4d0a"
+    },
+    {
+      "name": "viewer",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "phoenix-presentation",
+        "--lib",
+        "--features",
+        "viewer",
+        "viewer::"
+      ],
+      "exit_code": 0,
+      "seconds": 187.73,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-viewer.log",
+      "log_sha256": "4eb0438a19546cce68bf005a6fc7e242d1ab91ad7f32d3ae2a93fb831d450eee"
+    },
+    {
+      "name": "demo",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "phoenix-simulation",
+        "--lib",
+        "--",
+        "build_flags",
+        "command_admission::debug_route",
+        "route_is_absent_from_a_demo_build"
+      ],
+      "exit_code": 0,
+      "seconds": 253.8,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-demo.log",
+      "log_sha256": "dcd4cb23d596973b5d225424c7ba7b0235656fc8e9983ec90003f8cbbfdd23b7"
+    },
+    {
+      "name": "host",
+      "command": [
+        "cargo",
+        "build",
+        "--features",
+        "host",
+        "--bin",
+        "phoenix-host"
+      ],
+      "exit_code": 0,
+      "seconds": 198.61,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-host.log",
+      "log_sha256": "a235eb6d086aee6f64ad655d4ab136840b87d55cfb5722a1c5c0432f2cfa9f3c"
+    },
+    {
+      "name": "capture",
+      "command": [
+        "cargo",
+        "build",
+        "--features",
+        "capture",
+        "--bins"
+      ],
+      "exit_code": 0,
+      "seconds": 196.24,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-capture.log",
+      "log_sha256": "ce2f89b9099d9cd433a6ba202ae3a7f849963268e312c88b2323c8735b55d391"
+    },
+    {
+      "name": "server-wasm",
+      "command": [
+        "trunk",
+        "build"
+      ],
+      "exit_code": 0,
+      "seconds": 168.88,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-server-wasm.log",
+      "log_sha256": "c4b2b8a8fdac734a179dd73929cbeba5c937c30d2bdf2a4d003be9f7c89c599c"
+    },
+    {
+      "name": "client-bundle",
+      "command": [
+        "node",
+        "scripts/build-client.mjs"
+      ],
+      "exit_code": 0,
+      "seconds": 0.82,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-client-bundle.log",
+      "log_sha256": "fd9e4a4264c344ea6f05c2d873de9ff3f956e0a6b2b7668de8d09621e976cc1a"
+    },
+    {
+      "name": "preview-wasm",
+      "command": [
+        "trunk",
+        "build",
+        "--config",
+        "workshop-preview-trunk.toml"
+      ],
+      "exit_code": 0,
+      "seconds": 130.51,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-preview-wasm.log",
+      "log_sha256": "41c7c96cb4de52461302bb024799461d1a82378afdfd7d2e44b3e16729e45d80"
+    },
+    {
+      "name": "preview-copy",
+      "command": [
+        "node",
+        "scripts/copy-workshop-preview.mjs",
+        "dist"
+      ],
+      "exit_code": 0,
+      "seconds": 0.08,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-preview-copy.log",
+      "log_sha256": "d3d730ae75f8c1b6542209684439e5db298e4b39b91a8b5548233c5ed17849fd"
+    },
+    {
+      "name": "browser",
+      "command": [
+        "npx.cmd",
+        "--no-install",
+        "playwright",
+        "test",
+        "workshop-authoring.spec.js",
+        "workshop-consoles.render.spec.js",
+        "workshop-composition.render.spec.js",
+        "workshop-preview.render.spec.js",
+        "console-ownership-increment.spec.js",
+        "repair-console.spec.js",
+        "operations-dock-umbilical.spec.js",
+        "mod-pack.spec.js",
+        "save-slots.spec.js",
+        "snapshot-portability.spec.js",
+        "snapshot-channel.spec.js",
+        "viewscreen.render.spec.js"
+      ],
+      "exit_code": 0,
+      "seconds": 823.17,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-browser.log",
+      "log_sha256": "afef126584be4e18dae8146cf63fe73927db4f85f0d7b4bf87d92783346760df"
+    },
+    {
+      "name": "gameplay-baseline",
+      "command": [
+        "node",
+        "scripts/redesign-baseline.mjs",
+        "--out",
+        ".phoenix/composition-integration/gameplay",
+        "--profile",
+        "measure"
+      ],
+      "exit_code": 0,
+      "seconds": 467.64,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-gameplay-baseline.log",
+      "log_sha256": "bccff9a2369f0271634422407bdb9d88fe67f1175b833a4e7653e93e173ddbf1"
+    },
+    {
+      "name": "balance-baseline",
+      "command": [
+        "node",
+        "scripts/redesign-balance-baseline.mjs",
+        "--capture",
+        ".phoenix/composition-integration/gameplay/summary.json",
+        "--out",
+        ".phoenix/composition-integration/balance"
+      ],
+      "exit_code": 0,
+      "seconds": 15.99,
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "log": ".phoenix/composition-integration/final-balance-baseline.log",
+      "log_sha256": "c43fd47883050d125c435cbaf730ae06876d525059a68b54aeb832679af59241"
+    }
+  ],
+  "targeted_tests": {
+    "preparation": 300,
+    "delivery": 56,
+    "simulation_no_default_features": 4256
+  },
+  "final_tests": {
+    "workspace_passed": 9112,
+    "workspace_ignored": 102,
+    "vitest_passed": 8732,
+    "vitest_files": 438,
+    "viewer": 31,
+    "demo": 11,
+    "browser": 63
+  },
+  "function_audit": [
+    {
+      "area": "world/server",
+      "functions": 48,
+      "missing": [],
+      "formatting_only_reviewed": [
+        "apply_dispatch_result",
+        "tick_trigger_pipeline"
+      ],
+      "behaviour_changes": []
+    },
+    {
+      "area": "snapshot",
+      "functions": 114,
+      "missing": [],
+      "formatting_only_reviewed": [
+        "restore_run_scope",
+        "apply_entity_state_with"
+      ],
+      "behaviour_changes": []
+    }
+  ],
+  "snapshot_schema_audit": {
+    "types_compared": 56,
+    "missing": [],
+    "changed": []
+  },
+  "line_counts": [
+    {
+      "revision": "e69d655d",
+      "counts": {
+        "Simulation": [
+          145642,
+          199091
+        ],
+        "Preparation": [
+          0,
+          0
+        ],
+        "Delivery": [
+          0,
+          0
+        ],
+        "Host": [
+          56573,
+          38688
+        ]
+      }
+    },
+    {
+      "revision": "d38503bd2bb81e60220a5b9ed5f3bf848e15477f",
+      "counts": {
+        "Simulation": [
+          134747,
+          187637
+        ],
+        "Preparation": [
+          10970,
+          11459
+        ],
+        "Delivery": [
+          0,
+          0
+        ],
+        "Host": [
+          56573,
+          38688
+        ]
+      }
+    },
+    {
+      "revision": "e49752b426ec30897b030231001a3d11c6c16853",
+      "counts": {
+        "Simulation": [
+          134851,
+          187639
+        ],
+        "Preparation": [
+          10970,
+          11459
+        ],
+        "Delivery": [
+          0,
+          0
+        ],
+        "Host": [
+          56573,
+          38688
+        ]
+      }
+    },
+    {
+      "revision": "e2f817be4a3bd18ce4b8d4ce507ac9b96cc4221e",
+      "counts": {
+        "Simulation": [
+          135047,
+          187663
+        ],
+        "Preparation": [
+          10970,
+          11459
+        ],
+        "Delivery": [
+          0,
+          0
+        ],
+        "Host": [
+          56573,
+          38688
+        ]
+      }
+    },
+    {
+      "revision": "f84c3d176a8fc26f13307233daabc29e0c2efb92",
+      "counts": {
+        "Simulation": [
+          135279,
+          187757
+        ],
+        "Preparation": [
+          10970,
+          11459
+        ],
+        "Delivery": [
+          0,
+          0
+        ],
+        "Host": [
+          56573,
+          38688
+        ]
+      }
+    },
+    {
+      "revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+      "counts": {
+        "Simulation": [
+          132367,
+          185265
+        ],
+        "Preparation": [
+          10970,
+          11459
+        ],
+        "Delivery": [
+          1915,
+          1011
+        ],
+        "Host": [
+          57668,
+          40267
+        ]
+      }
+    }
+  ],
+  "baseline_comparison": {
+    "reference_revision": "e858616abdcdb70d15f21b855f20d02ab11fec5e",
+    "tested_revision": "62ba40b3644dfbacf4450d17f2844ec9dd44629a",
+    "reports": [
+      {
+        "name": "combat_test-repeat-0",
+        "sha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc",
+        "byte_identical": true,
+        "measured_wall_time_differences": [],
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-repeat-1",
+        "sha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc",
+        "byte_identical": true,
+        "measured_wall_time_differences": [],
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-perf-0",
+        "sha256": "144cb9d714e94a1efca5a7472c22e862c81c304b7c44c6d167d536ef233298f2",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/10/admit_to_broadcast/max_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/11/admit_to_broadcast/max_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/12/admit_to_broadcast/max_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/7/admit_to_broadcast/max_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/8/admit_to_broadcast/max_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/9/admit_to_broadcast/max_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-perf-1",
+        "sha256": "2f45e2d520a6396458014229f0e95e7c4ba87fa2b5c5018b3104b18964b5e104",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/10/admit_to_broadcast/max_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/11/admit_to_broadcast/max_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/12/admit_to_broadcast/max_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/7/admit_to_broadcast/max_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/8/admit_to_broadcast/max_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/9/admit_to_broadcast/max_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-perf-2",
+        "sha256": "74fc31b1b62975732a106446e3a98defd7de35b28d8ba531f8d14174e5dbded5",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/10/admit_to_broadcast/max_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/10/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/11/admit_to_broadcast/max_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/11/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/12/admit_to_broadcast/max_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/12/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/7/admit_to_broadcast/max_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/7/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/8/admit_to_broadcast/max_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/8/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/9/admit_to_broadcast/max_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/9/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-repeat-0",
+        "sha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+        "byte_identical": true,
+        "measured_wall_time_differences": [],
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-repeat-1",
+        "sha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+        "byte_identical": true,
+        "measured_wall_time_differences": [],
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-0",
+        "sha256": "4d0ce5d3dee14ed04e703968c9766533826e7b8339e3ec1ad346cfea533e4531",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-1",
+        "sha256": "8e334b143d1749f1bb93865d36932a3bb340717f42c6cde3cffb932939a466ca",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-2",
+        "sha256": "395009931f69b6c75d15903d7e06f60f7e5d56450cafbfb14b8f3fa27da4b218",
+        "byte_identical": false,
+        "measured_wall_time_differences": [
+          "/console_latency/actions/0/admit_to_broadcast/max_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/0/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/1/admit_to_broadcast/max_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/1/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/2/admit_to_broadcast/max_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/2/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/3/admit_to_broadcast/max_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/3/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/4/admit_to_broadcast/max_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/4/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/5/admit_to_broadcast/max_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/5/admit_to_broadcast/p75_ms",
+          "/console_latency/actions/6/admit_to_broadcast/max_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p50_ms",
+          "/console_latency/actions/6/admit_to_broadcast/p75_ms"
+        ],
+        "matches_increment_5": true
+      }
+    ],
+    "continuations": [
+      {
+        "name": "combat_test-perf-0",
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-perf-1",
+        "matches_increment_5": true
+      },
+      {
+        "name": "combat_test-perf-2",
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-0",
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-1",
+        "matches_increment_5": true
+      },
+      {
+        "name": "falling_skyway-perf-2",
+        "matches_increment_5": true
+      }
+    ],
+    "checks": [
+      {
+        "name": "combat_test byte-identical seeded reports",
+        "passed": true,
+        "reportSha256": "a25e46f1fb6981fc18629d2182fb165ad94a337484c7cd4566e8f5c17be312bc"
+      },
+      {
+        "name": "combat_test replay checkpoints",
+        "passed": true
+      },
+      {
+        "name": "combat_test performance continuation agreement",
+        "passed": true,
+        "continuation": "3600:ff20bdbfed061121"
+      },
+      {
+        "name": "falling_skyway byte-identical seeded reports",
+        "passed": true,
+        "reportSha256": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833"
+      },
+      {
+        "name": "falling_skyway replay checkpoints",
+        "passed": true
+      },
+      {
+        "name": "falling_skyway performance continuation agreement",
+        "passed": true,
+        "continuation": "3600:0d4a87898108d852"
+      }
+    ],
+    "performance": [
+      {
+        "name": "combat_test-perf-0",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.485188912450774,
+          "p50": 1.4198,
+          "p95": 2.0192,
+          "p99": 2.5909,
+          "max": 5.683,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4703739775825522,
+          "p50": 1.4152,
+          "p95": 1.9459,
+          "p99": 2.3643,
+          "max": 5.3929,
+          "over16_67": 0
+        }
+      },
+      {
+        "name": "combat_test-perf-1",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4799136019388057,
+          "p50": 1.4253,
+          "p95": 2.0077,
+          "p99": 2.4118,
+          "max": 5.407,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4654012420478626,
+          "p50": 1.4117000000000002,
+          "p95": 1.9553,
+          "p99": 2.297,
+          "max": 5.9529,
+          "over16_67": 0
+        }
+      },
+      {
+        "name": "combat_test-perf-2",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.5095675249924274,
+          "p50": 1.4507999999999999,
+          "p95": 2.0422000000000002,
+          "p99": 2.507,
+          "max": 6.4049,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.5068933959406223,
+          "p50": 1.4529,
+          "p95": 1.9853,
+          "p99": 2.4883,
+          "max": 5.5193,
+          "over16_67": 0
+        }
+      },
+      {
+        "name": "falling_skyway-perf-0",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3991315358982146,
+          "p50": 1.3748,
+          "p95": 1.8201,
+          "p99": 2.1860999999999997,
+          "max": 3.8645,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.3831514692517455,
+          "p50": 1.3606,
+          "p95": 1.8053,
+          "p99": 2.1445000000000003,
+          "max": 4.0998,
+          "over16_67": 0
+        }
+      },
+      {
+        "name": "falling_skyway-perf-1",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.414314874280519,
+          "p50": 1.3843,
+          "p95": 1.8554000000000002,
+          "p99": 2.1332999999999998,
+          "max": 7.0922,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.409030142381097,
+          "p50": 1.3684,
+          "p95": 1.8584999999999998,
+          "p99": 2.3016,
+          "max": 4.634799999999999,
+          "over16_67": 0
+        }
+      },
+      {
+        "name": "falling_skyway-perf-2",
+        "increment_5": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.469442744622841,
+          "p50": 1.4009999999999998,
+          "p95": 2.012,
+          "p99": 2.8144,
+          "max": 6.446999999999999,
+          "over16_67": 0
+        },
+        "integrated": {
+          "unit": "millis",
+          "excludedSamples": 300,
+          "count": 3301,
+          "mean": 1.4188207815813403,
+          "p50": 1.3716,
+          "p95": 1.8979000000000001,
+          "p99": 2.5726,
+          "max": 6.4356,
+          "over16_67": 0
+        }
+      }
+    ],
+    "balance_byte_identical": true,
+    "balance_sha256": "25e83d6860b3b2791a864a5bf603083a3e361af05ca14e894192b1ba899bb02d",
+    "passed": true
+  },
+  "preservation": [
+    {
+      "path": "docs/gdd/content/scenarios/alliance-convoy-escort.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/content/scenarios/cruiser-elimination.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/content/ships/dynasty-ships.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/current-baseline.md",
+      "original_hash_matches": false,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/future/roadmap-baseline.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/gm-and-workshop.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/content/scenarios/combat-test.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/content/scenarios/falling-skyway.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/content/ships/alliance-ships.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/campaign-continuity.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/difficulty-balance-playtesting.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/game-lifecycle.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/onboarding-accessibility.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/foundation/overview.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/future/future-modes.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/future/planned-not-scheduled.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/future/release-bands-g-i.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/index.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/command-and-crew-control.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/comms-commitments.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/damage-repair.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/duty-teams-and-operations.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/movement.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/navigation-relative-motion.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/power-resource-network.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/sensors-epistemics.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/shields.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/mechanics/targeting-weapons.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/ai-and-backfill.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/entity-authoring.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/native-network-foundation.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/scenario-authoring.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/station-experiences.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "docs/gdd/systems/world-environmental-systems.md",
+      "original_hash_matches": true,
+      "matches_intervening_commit": true
+    },
+    {
+      "path": "wiki/concepts/modifier-coordination.md",
+      "original_hash_matches": false,
+      "matches_intervening_commit": false
+    }
+  ],
+  "wiki_lint": {
+    "status": "passed",
+    "pages_checked": 69,
+    "errors": []
+  },
+  "limitations": [
+    "WASM bundles were development builds.",
+    "Physical phone, native multi-monitor, real-network and human-workload acceptance statuses remain unchanged.",
+    "Timing captures are same-machine diagnostics, not release-performance acceptance."
+  ]
+}

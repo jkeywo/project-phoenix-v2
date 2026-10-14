@@ -130,7 +130,7 @@ Test clocks, tracing and providers remain in Simulation.
 **Owner:** [`phoenix-simulation`](../../crates/phoenix-simulation/src/lib.rs).
 
 **Responsible for:** assembling the simulation schedule and connecting the
-independent game domains. It owns live adapters, spawning and materialization,
+independent game domains. It owns spawning and materialization,
 live adapters to offline content preparation, command
 application, state publication, snapshots, digest traversal and recovery
 integration. Systems that still combine several domains live here, so this is

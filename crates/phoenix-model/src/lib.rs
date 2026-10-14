@@ -14,3 +14,5 @@ pub mod messages;
 pub mod wire;
 
 pub mod system_status;
+
+pub mod observation;

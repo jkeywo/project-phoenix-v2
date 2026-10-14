@@ -1,0 +1,27 @@
+entities:
+  - decision: common-observation-metadata
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Common Recorded Observation Metadata
+      summary: "Increment 4 adds shared provenance, logical sample/receipt time and explicit uncertainty metadata to existing recorded observations. Start with Scan readings, dossier evidence, delayed Sensors reports and repair reports. Preserve existing values, access, timing and interpretation; unspecified confidence is never invented certainty. No blanket refresh timestamps, new sensing, prediction, information pooling or competing observation store."
+      rationale:
+        - "User-approved incremental roadmap, Increment 4; user instruction Do 4, 2026-10-14. AD02, AD06-AD07 and AD12 preserve permitted Console knowledge and record continuity."
+        - "[ai] Existing sample ticks and evidence provenance remain their canonical owners. Shared metadata is derived at projection; old wire fields can remain derived presentation mirrors. Quantization describes a named measured field, not probabilistic truth."
+  - decision: common-repair-report-reduction
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Reports and Recovery Observations
+      summary: "Use the existing outstanding repair queue for delivered reports and explicit recovery/completion outcomes. Reports from wholly AI or screenless Consoles use ordinary Coordination. Preserve current routing, severity ordering, travel, repair and visibility; reports grant information, never team authority. Retain contributor attribution and sample/receipt time; old outcomes cannot erase newer reports."
+      rationale:
+        - "User-selected AD20 and AD21; no acknowledgement chore, no jobs migration before Increment 5."
+        - "[ai] Make the current operational-group pruning predicate an explicit Repair diagnostic recovery observation before reduction, preserving its existing visibility and timing. Completed-team observations identify completed work; recall/returning alone never means repaired. The work-list reducer consumes reports, not unrestricted machinery reads."
+  - decision: common-observation-feed-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Observation Metadata Follows Existing Console Feeds
+      summary: "Metadata travels with its permitted observation through the existing typed owned/feed view, human and AI access, visibility projection, handoff and reconnect. Co-hosted tabs never pool information. Unchanged held readings remain publication-cache stable; forwarding does not renew their sample time. Existing Workshop feed authoring/validation/Preview/Test edits this mechanism."
+      rationale:
+        - "[ai] No additional feed kind or authorable confidence knob is needed for metadata on existing supported payloads. Common details presentation uses actual provenance/precision without revealing concealed figures or GM policy."

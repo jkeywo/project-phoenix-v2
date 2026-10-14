@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 3,
+  "current_increment": 4,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -76,12 +76,16 @@
     {
       "id": 4,
       "title": "Common observations and reports",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         3
       ],
       "completion": "Existing observations retain access while gaining provenance, age, uncertainty, explicit feeds and repair reports.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/common-observations.yaml",
+        "docs/gameplay-redesign/implementation/increment-4.md",
+        "docs/acceptance/1562-common-observations.md"
+      ]
     },
     {
       "id": 5,
@@ -2658,6 +2662,14 @@
       "user_instruction": "Continue to increment 3",
       "pending_acceptance": "Physical phone/native multi-monitor, human workload and recorded landscape-phone diagnostics overlap remain pending.",
       "evidence": "docs/acceptance/1562-composable-systems.md"
+    },
+    {
+      "from_increment": 3,
+      "to_increment": 4,
+      "date": "2026-10-14",
+      "user_instruction": "Do 4",
+      "pending_acceptance": "Physical phones, native multi-monitor and human workload acceptance remain open for prior increments.",
+      "evidence": "docs/acceptance/1562-ai-state-trees.md"
     }
   ]
 }

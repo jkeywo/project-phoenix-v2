@@ -17,7 +17,9 @@ Entity selections resolve their include closure with the canonical Rust resolver
 over captured text, then validate and seed the existing viewer source cache before
 boot. Missing captured fragments or invalid composed source refuse Preview;
 they cannot fall back to live project files. Measured mesh geometry distinguishes
-a loaded subject from the skybox and rig gizmos.
+a loaded subject from the skybox and rig gizmos. Statistics retry until scene
+meshes and their data are resident, then publish geometry readiness; an empty
+first frame does not freeze a zero count.
 
 Ordinary `ViewerPlugin` consumes captured preview input. Retained ladder mutation,
 asset reload and browser baking exports require explicit

@@ -72,8 +72,7 @@ pub fn measure_subject(
     if !subject.settled || subject.measured {
         return;
     }
-    subject.measured = true;
-
+    let mut pending_mesh = false;
     let mut found = SubjectStats::default();
     let mut seen_images: HashSet<AssetId<Image>> = HashSet::new();
 
@@ -81,6 +80,8 @@ pub fn measure_subject(
         found.meshes += 1;
         if let Some(mesh) = meshes.get(&mesh.0) {
             found.triangles += triangles_in(mesh);
+        } else {
+            pending_mesh = true;
         }
         let Some(material) = material.and_then(|m| materials.get(&m.0)) else {
             continue;
@@ -89,6 +90,14 @@ pub fn measure_subject(
             seen_images.insert(handle.id());
         }
     }
+
+    // SceneRoot descendants arrive after the loading system reports success.
+    // An empty or partially resident scene is pending, not a measured zero.
+    if found.meshes == 0 || pending_mesh {
+        *stats = SubjectStats::default();
+        return;
+    }
+    subject.measured = true;
 
     if let Some(surfaces) = surfaces {
         for handle in &planet_surfaces {
@@ -171,7 +180,14 @@ pub fn publish_stats(
     // distance readable rather than arbitrary.
     let extent = subject.extents.map(|e| e.max_element()).unwrap_or(0.0);
     let camera = cameras.iter().next().copied();
-    let json = render_stats(&stats, &ladder, *mode, subject.settled, extent, camera);
+    let json = render_stats(
+        &stats,
+        &ladder,
+        *mode,
+        subject.settled && stats.meshes > 0,
+        extent,
+        camera,
+    );
     STATS_JSON.with(|cell| *cell.borrow_mut() = json);
 }
 

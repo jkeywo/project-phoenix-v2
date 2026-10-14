@@ -14,7 +14,7 @@ const PACKED: &str = "assets/entities/fragments/packed.toml";
 /// The draft fragment the hull composes: a hull table, a station, one keyed
 /// system and a tag list.
 fn core() -> String {
-    [
+    let source = [
         "# The shared core",
         "tags = [\"core\"]",
         "",
@@ -31,6 +31,7 @@ fn core() -> String {
         "id = \"boost\"",
         "kind = \"helm_boost\"",
         "console = \"captain-console\"",
+        "power_group = \"fixture-energy\"",
         "",
         "[[console]]",
         "id = \"captain-console\"",
@@ -38,7 +39,11 @@ fn core() -> String {
         "screen = \"fixture.html\"",
         "",
     ]
-    .join("\n")
+    .join("\n");
+    format!(
+        "{source}\n{}",
+        include_str!("../../../../../tests/fixtures/workshop-boost-energy.toml")
+    )
 }
 
 /// The hull: two includes (one from the draft, one from the base set), a
@@ -917,19 +922,32 @@ fn a_local_component_is_added_from_the_runtimes_skeleton_and_removed_again() {
 #[test]
 fn an_inherited_keyed_entry_is_removed_with_the_tombstone_the_merge_understands() {
     let files = draft();
+    let mut hardware: toml::Value = toml::from_str(include_str!(
+        "../../../../../tests/fixtures/workshop-boost-energy.toml"
+    ))
+    .unwrap();
+    // Removing physical equipment also removes its canonical reserve binding;
+    // replace the inherited atomic hardware profile in the same transaction.
+    hardware["energy"]["consumer"] = toml::Value::Array(Vec::new());
     let edited = compose(
         &files,
         &dependencies(),
         &request(
             &files,
             HULL,
-            vec![Edit::AppendTable {
-                path: vec![Segment::Key("system".to_owned())],
-                fields: vec![
-                    ("id".to_owned(), "\"boost\"".to_owned()),
-                    ("_remove".to_owned(), "true".to_owned()),
-                ],
-            }],
+            vec![
+                Edit::Set {
+                    path: vec![Segment::Key("energy".to_owned())],
+                    value_source: value_source_of(&hardware["energy"]).unwrap(),
+                },
+                Edit::AppendTable {
+                    path: vec![Segment::Key("system".to_owned())],
+                    fields: vec![
+                        ("id".to_owned(), "\"boost\"".to_owned()),
+                        ("_remove".to_owned(), "true".to_owned()),
+                    ],
+                },
+            ],
         ),
     )
     .unwrap();

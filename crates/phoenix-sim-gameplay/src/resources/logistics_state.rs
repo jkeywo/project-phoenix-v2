@@ -381,6 +381,17 @@ impl LogisticsState {
         profile: &CompiledLogistics,
         stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
     ) -> Result<(), String> {
+        self.validate_with_incoming(profile, stocks, &BTreeMap::new())
+    }
+
+    /// Additional claims must come from another fully validated actual owner,
+    /// never from a namespace filter or from the inventory being checked.
+    pub fn validate_with_incoming(
+        &self,
+        profile: &CompiledLogistics,
+        stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
+        other: &BTreeMap<ResourceEndpoint, BTreeMap<String, i64>>,
+    ) -> Result<(), String> {
         profile.validate_stocks(stocks)?;
         let keys: BTreeSet<_> = profile.config.stores.iter().map(|s| s.id.clone()).collect();
         if self.owner != profile.handling().system
@@ -396,7 +407,20 @@ impl LogisticsState {
         for (store, value) in self.goals.iter().chain(&self.floors) {
             self.check_amount(profile, store, *value)?;
         }
-        let mut expected: BTreeMap<ResourceEndpoint, BTreeMap<String, i64>> = BTreeMap::new();
+        let mut expected = other.clone();
+        for (endpoint, claims) in &expected {
+            if !profile
+                .config
+                .stores
+                .iter()
+                .any(|s| &s.endpoint == endpoint)
+                || claims.iter().any(|(id, q)| id.is_empty() || *q <= 0)
+            {
+                return Err(
+                    "additional incoming owner names an unknown endpoint or malformed claim".into(),
+                );
+            }
+        }
         for (id, batch) in &self.batches {
             let from = profile.store(&batch.source)?;
             let original = profile.store(&batch.original_destination)?;
@@ -438,14 +462,16 @@ impl LogisticsState {
             } else if batch.stage != DeliveryStage::Travelling {
                 return Err("loading/unloading cannot happen while crossing".into());
             }
-            expected
+            if expected
                 .entry(to.endpoint.clone())
                 .or_default()
-                .insert(self.claim(*id), batch.amount);
+                .insert(self.claim(*id), batch.amount)
+                .is_some()
+            {
+                return Err("incoming claim is owned by more than one job".into());
+            }
         }
-        // In 12.1 Logistics is the sole producer of persistent incoming claims.
-        // Production (12.3) must add its real owner to combined claim preflight
-        // before another namespace is admitted; silently ignoring it is unsafe.
+        // The complete owner-derived union is exact, including every namespace.
         for store in &profile.config.stores {
             if stocks[&store.endpoint].stock.incoming
                 != expected.remove(&store.endpoint).unwrap_or_default()

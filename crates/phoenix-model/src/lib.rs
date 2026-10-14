@@ -22,6 +22,7 @@ pub mod energy;
 pub mod interior;
 pub mod job;
 pub mod logistics;
+pub mod production;
 
 pub mod logistics_ui;
 pub mod umbilical;

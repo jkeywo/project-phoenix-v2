@@ -790,8 +790,12 @@ pub fn load_from<S: vellum_save::Store>(
         .read(slot)
         .map_err(|e| LoadRefusal::Unreadable(e.to_string()))?
         .ok_or(LoadRefusal::Empty)?;
+    // Read the same Vellum envelope while skipping obsolete payload layouts.
+    // A removed stock field must report a version mismatch, not file corruption.
+    let header: Run<serde::de::IgnoredAny, serde::de::IgnoredAny> =
+        ron::from_str(&text).map_err(|e| LoadRefusal::Unparsable(e.to_string()))?;
+    header.versions.check(current).map_err(LoadRefusal::Moved)?;
     let run = StoredRun::from_ron(&text).map_err(|e| LoadRefusal::Unparsable(e.to_string()))?;
-    run.versions.check(current).map_err(LoadRefusal::Moved)?;
     required_boot_identity(&run)?;
     Ok(run)
 }

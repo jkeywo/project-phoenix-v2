@@ -39,7 +39,7 @@ use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::ship::damage::DamageTier;
-use crate::ship::power::{power_level_for, ShipPowerSystem};
+use crate::ship::power::ShipPowerSystem;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
 use crate::tractor::coupling::{
@@ -80,6 +80,9 @@ pub struct TractorBeam {
     /// shows, retained until the operator engages or releases again. `None` when
     /// the beam is idle or holding cleanly.
     pub last_refusal: Option<TractorRefusal>,
+    /// This tick's funded field strength, derived before placement. No reserve
+    /// or intent is copied here; restored ticks recompute it from local energy.
+    pub work_fraction: f32,
 }
 
 impl TractorBeam {
@@ -91,6 +94,7 @@ impl TractorBeam {
             engaged: false,
             coupled_target: None,
             last_refusal: None,
+            work_fraction: 0.0,
         }
     }
 
@@ -117,6 +121,7 @@ impl TractorBeam {
         self.engaged = save.engaged;
         self.coupled_target = save.coupled_target.clone();
         self.last_refusal = None;
+        self.work_fraction = 0.0;
     }
 }
 
@@ -582,6 +587,8 @@ pub fn operate_tractor_ai(
 /// the beam is really holding: a fresh coupling opens one, a lock that MOVES
 /// under a live hold closes one and opens another, and a refusal closes it.
 pub fn tick_tractor(
+    time: Res<Time>,
+    mut power_q: Query<&mut ShipPowerSystem>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
         // Operator rows: everything the verdict needs off the operator itself.
@@ -590,7 +597,6 @@ pub fn tick_tractor(
             &TractorBeam,
             Option<&TacticalRadarSelection>,
             &Transform,
-            Option<&ShipPowerSystem>,
             Option<&EntitySystemHull>,
             Option<&EntityUuid>,
         )>,
@@ -615,11 +621,9 @@ pub fn tick_tractor(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter(|(_, beam, _, _, _, _, _)| beam.engaged)
-        .map(|(entity, beam, selection, transform, power, hull, uuid)| {
-            let power_level = power
-                .map(|p| power_level_for(&p.0, &beam.power_group))
-                .unwrap_or(0);
+        .filter(|(_, beam, _, _, _, _)| beam.engaged)
+        .map(|(entity, beam, selection, transform, hull, uuid)| {
+            let power_level = u8::MAX;
             let disabled = hull
                 .map(|h| {
                     matches!(
@@ -676,6 +680,19 @@ pub fn tick_tractor(
             row.disabled,
         ) {
             Ok(()) => {
+                let fraction = power_q.get_mut(row.entity).ok().map_or(0.0, |mut power| {
+                    power
+                        .0
+                        .work_continuous(&tractor_system_id(), time.delta_secs(), 1.0)
+                        .map_or(0.0, |grant| grant.fraction)
+                });
+                beam.work_fraction = fraction;
+                if fraction == 0.0 {
+                    beam.last_refusal = Some(TractorRefusal::Unpowered);
+                    // Exhaustion pauses physical work without clearing standing
+                    // intent, the held target, or AI memory.
+                    continue;
+                }
                 // The ACTIVATION follows the coupling, never the intent (issue
                 // #1341). Every transition of `coupled_target` is reported from
                 // right here, which is the only place that knows what the beam
@@ -738,6 +755,7 @@ pub fn tick_tractor(
                 // Each interruption ends the hold: intent and coupling drop
                 // together, and the crew watch the hulk stop following them.
                 beam.engaged = false;
+                beam.work_fraction = 0.0;
                 beam.coupled_target = None;
                 beam.last_refusal = Some(refusal);
                 // …and it ends the ACTIVATION, with the reason the refusal
@@ -803,17 +821,21 @@ pub fn move_coupled_target(
     // its authored coupling rig — the placement is deferred until the target's
     // own held-response is known, because a formation-kept target rides its own
     // slot rather than the operator's rig.
-    let mut rigs: Vec<(String, String, Vec3, Quat, Vec3)> = set
+    let mut rigs: Vec<(String, String, Vec3, Quat, Vec3, f32)> = set
         .p0()
         .iter()
         .filter_map(|(uuid, transform, beam)| {
             let target = beam.coupled_target.as_ref()?;
+            if beam.work_fraction == 0.0 {
+                return None;
+            }
             Some((
                 uuid.0.clone(),
                 target.clone(),
                 transform.translation,
                 transform.rotation,
                 Vec3::from(beam.config.coupling_offset),
+                beam.work_fraction,
             ))
         })
         .collect();
@@ -822,7 +844,7 @@ pub fn move_coupled_target(
     }
     rigs.sort_by(|a, b| a.0.cmp(&b.0));
 
-    for (_, target_uuid, op_translation, op_rotation, operator_rig) in rigs {
+    for (_, target_uuid, op_translation, op_rotation, operator_rig, fraction) in rigs {
         let mut targets = set.p1();
         let Some((_, mut transform, physics, held)) = targets
             .iter_mut()
@@ -838,6 +860,7 @@ pub fn move_coupled_target(
             None => operator_rig,
         };
         let placed = coupled_position(op_translation, op_rotation, offset);
+        let placed = transform.translation.lerp(placed, fraction);
         transform.translation = placed;
         if let Some(mut physics) = physics {
             physics.x = placed.x;
@@ -885,7 +908,7 @@ pub fn apply_tow_load_penalty(
 ) {
     for (beam, mut modifiers) in operators.iter_mut() {
         match beam.coupled_target.as_deref() {
-            Some(target_uuid) => {
+            Some(target_uuid) if beam.work_fraction > 0.0 => {
                 // Every spawned entity carries `EntityMass`; the `unwrap_or` is
                 // the same DEFAULT_ENTITY_MASS fallback #1154 uses, so a target
                 // that somehow lacks the component is treated as the default
@@ -904,7 +927,7 @@ pub fn apply_tow_load_penalty(
                     });
                 }
             }
-            None => {
+            _ => {
                 for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
                     modifiers.remove(&ModifierSource::TractorLoad, &slot);
                 }
@@ -953,7 +976,8 @@ pub fn arrest_held_declines(
             let target_uuid = beam.coupled_target.as_ref()?;
             let (_, section, condition) =
                 targets.iter().find(|(uuid, _, _)| &uuid.0 == target_uuid)?;
-            let delta = condition_delta(&section.0.resolve(), condition.0.decay_per_sec(), dt);
+            let delta = condition_delta(&section.0.resolve(), condition.0.decay_per_sec(), dt)
+                * beam.work_fraction;
             if delta == 0.0 {
                 return None;
             }

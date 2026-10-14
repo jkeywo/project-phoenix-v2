@@ -2095,10 +2095,21 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "umbilical-namespace",
         |umbilical: &TransferUmbilical| {
-            (umbilical.running || umbilical.carry != 0.0)
-                .then_some((umbilical.running, umbilical.carry))
+            (umbilical.running
+                || umbilical.carry != 0.0
+                || umbilical.selected_resource != umbilical.config.capacity)
+                .then_some((
+                    umbilical.running,
+                    umbilical.carry,
+                    umbilical.selected_resource.clone(),
+                ))
         },
-        |acc, (running, carry)| fold_f32(fold_u64(acc, u64::from(running)), carry),
+        |acc, (running, carry, resource)| {
+            fold_str(
+                fold_f32(fold_u64(acc, u64::from(running)), carry),
+                &resource,
+            )
+        },
     )
 }
 

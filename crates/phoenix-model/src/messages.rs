@@ -2375,6 +2375,10 @@ pub enum SystemControlPayload {
     /// umbilical, so there is nothing to disambiguate. What has already moved has
     /// moved.
     StopTransfer,
+    /// Select one of the umbilical's authored resource choices.
+    SetTransferResource {
+        resource: String,
+    },
     /// Select a discovered rescue contact for the transporter (issue #1348).
     ///
     /// Targets the engineering-owned `transporter` system
@@ -4839,6 +4843,10 @@ pub struct DockBlackboard {
 /// could not start or was stopped.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct UmbilicalBlackboard {
+    #[serde(default)]
+    pub selected_resource: String,
+    #[serde(default)]
+    pub allowed_resources: Vec<String>,
     /// The authored capacity id the umbilical moves — a machine id, never shown
     /// as prose, the console renders the levels beside it.
     #[serde(default)]

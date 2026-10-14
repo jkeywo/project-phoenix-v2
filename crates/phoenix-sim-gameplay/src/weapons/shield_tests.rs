@@ -1,6 +1,27 @@
 use super::*;
 use std::f32::consts::PI;
 
+#[test]
+fn independent_regen_grants_do_not_pool_facing_energy() {
+    let mut shields = ShieldSystem::new(&ShieldConfig {
+        num_facings: 2,
+        max_hp: 100,
+        regen_per_sec: 8.0,
+        offline_duration: 2.0,
+    });
+    for facing in &mut shields.facings {
+        facing.apply_damage(40);
+    }
+    shields.tick_with_regen_scales(1.0, &[0.25, 0.0]);
+    assert_eq!(shields.facings[0].hp, 62);
+    assert_eq!(shields.facings[1].hp, 60);
+    shields.facings[1].apply_damage(60);
+    shields.tick_with_regen_scales(2.0, &[]);
+    assert!(shields.facings[1].is_online());
+    assert_eq!(shields.facings[1].hp, 0); // Recovery timer grants no free charge.
+    assert_eq!(shields.facings[0].hp, 62);
+}
+
 // ── ShieldFacing ─────────────────────────────────────────────────────────
 
 #[test]

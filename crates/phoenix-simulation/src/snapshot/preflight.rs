@@ -504,6 +504,12 @@ pub(super) fn validate_entity_resources(
         }
     }
     if let Some(flow) = &row.umbilical {
+        if !world
+            .get::<crate::umbilical::TransferUmbilical>(entity)
+            .is_some_and(|live| live.config.permits_resource(&flow.selected_resource))
+        {
+            return Err("umbilical continuation selects an unauthored resource".into());
+        }
         if !flow.carry.is_finite()
             || !(0.0..1.0).contains(&flow.carry)
             || (!flow.running && flow.carry != 0.0)

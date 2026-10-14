@@ -1,5 +1,31 @@
 use super::*;
 use crate::ai::state_tree::*;
+
+#[test]
+fn repair_tools_pay_only_on_site_work_and_pause_without_losing_the_job() {
+    let mut teams = RepairTeams::new_with_timings(1, timings());
+    let mut hull = hull();
+    teams.dispatch(0, sid("a"), "A".into());
+    let mut calls = 0;
+    teams.tick_with_work(1.0, &mut hull, None, |_, _| {
+        calls += 1;
+        0.0
+    });
+    assert_eq!(calls, 0); // Walking to the system uses no repair machinery.
+    let job = teams.work_list()[0].id;
+    teams.tick_with_work(1.0, &mut hull, None, |_, _| 0.25);
+    assert_eq!(hull.current_for(&sid("a")), Some(50.5));
+    teams.tick_with_work(1.0, &mut hull, None, |_, _| 0.0);
+    assert_eq!(hull.current_for(&sid("a")), Some(50.5));
+    assert_eq!(teams.work_list()[0].id, job);
+    teams.tick_with_work(1.0, &mut hull, None, |_, _| 1.0);
+    assert_eq!(hull.current_for(&sid("a")), Some(52.5));
+    teams.recall(0);
+    teams.tick_with_work(1.0, &mut hull, None, |_, _| {
+        panic!("return must not spend tool energy")
+    });
+    assert_eq!(teams.lowest_free_team(), Some(0));
+}
 fn sid(value: &str) -> SystemId {
     SystemId(value.into())
 }

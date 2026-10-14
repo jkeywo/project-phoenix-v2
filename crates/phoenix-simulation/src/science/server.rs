@@ -66,8 +66,8 @@
 use bevy::prelude::*;
 
 use crate::core::messages::{
-    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, PowerGroupId, ScanBlackboard,
-    SystemBlackboard, SystemControlPayload, SystemId,
+    ActionFeedbackOutcome, AdmittedCommand, AdmittedCommands, ScanBlackboard, SystemBlackboard,
+    SystemControlPayload, SystemId,
 };
 use crate::core::task_lifecycle::{
     TaskLifecycleRequest, TaskSlot, TaskTerminalReason, TASK_VERB_SCAN,
@@ -202,7 +202,7 @@ pub fn tick_scans(
             &EntityUuid,
             &Transform,
             &AdmittedCommands,
-            Option<&ShipPowerSystem>,
+            Option<&mut ShipPowerSystem>,
             Option<&mut ShipScanRecord>,
         ),
         With<crate::server_app::Ship>,
@@ -259,7 +259,7 @@ pub fn tick_scans(
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (operator_uuid, entity) in rows {
-        let Ok((entity, _, transform, admitted, power, record)) = ships.get_mut(entity) else {
+        let Ok((entity, _, transform, admitted, mut power, record)) = ships.get_mut(entity) else {
             continue;
         };
         // Carry the whole admitted command (issue #761), not just its target
@@ -365,17 +365,25 @@ pub fn tick_scans(
                 // absent, not zero. The reading #1026 takes for a bare fixture,
                 // and for the same reason: failing a hull for a component it
                 // never had would make every test rig unscannable.
-                power_level: match power {
-                    Some(power) => power
-                        .0
-                        .level_for(&PowerGroupId(record.config.power_group.clone())),
-                    None => u8::MAX,
-                },
-                power_locked: power.map(|power| power.0.locked()).unwrap_or(false),
+                power_level: u8::MAX,
+                power_locked: false,
                 region_effects: effects.clone(),
             };
 
-            match derive(&record.config, &subject, &conditions, now_tick) {
+            let reading =
+                derive(&record.config, &subject, &conditions, now_tick).and_then(|reading| {
+                    if power.as_deref_mut().is_some_and(|power| {
+                        power
+                            .0
+                            .try_work_discrete(&crate::ship::system_registry::sensors_system_id())
+                            .unwrap_or(false)
+                    }) {
+                        Ok(reading)
+                    } else {
+                        Err(ScanRefusal::Underpowered)
+                    }
+                });
+            match reading {
                 Ok(reading) => {
                     crate::pdebug!(
                         log,

@@ -33,6 +33,7 @@ fn capacity(level: i64, ceiling: i64) -> InfrastructureCondition {
 fn umbilical() -> TransferUmbilical {
     TransferUmbilical::new(
         UmbilicalConfig {
+            allowed_resources: vec![],
             link: Default::default(),
             capacity: "reserve_fuel".into(),
             rate: 5.0,
@@ -210,6 +211,7 @@ fn restore_reseeds_running_and_clears_the_projections() {
     u.last_refusal = Some(UmbilicalRefusal::Disabled);
     u.operator_level = Some(12);
     u.restore(&UmbilicalSaveState {
+        selected_resource: "reserve_fuel".into(),
         running: true,
         carry: 0.4,
     });
@@ -271,6 +273,7 @@ fn capacity_config(amount: i64, ceiling: i64) -> InfrastructureConfig {
 
 fn flow_config() -> UmbilicalConfig {
     UmbilicalConfig {
+        allowed_resources: vec![],
         link: Default::default(),
         capacity: "fuel".into(),
         rate: 10.0,

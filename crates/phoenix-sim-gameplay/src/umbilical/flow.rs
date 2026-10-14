@@ -52,6 +52,9 @@ pub struct UmbilicalConfig {
     /// then a direct capacity with this id. Each end must have the resolved
     /// endpoint; links confer neither control nor observation authority.
     pub capacity: String,
+    /// Additional resource choices. The original capacity is always available.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_resources: Vec<String>,
     /// Explicit local service/provider override. Empty uses the resource-name default.
     #[serde(
         default,
@@ -74,6 +77,14 @@ pub struct UmbilicalConfig {
 }
 
 impl UmbilicalConfig {
+    pub fn permits_resource(&self, resource: &str) -> bool {
+        resource == self.capacity || self.allowed_resources.iter().any(|id| id == resource)
+    }
+    pub fn resource_choices(&self) -> Vec<String> {
+        std::iter::once(self.capacity.clone())
+            .chain(self.allowed_resources.iter().cloned())
+            .collect()
+    }
     /// Reject an authored `[umbilical]` table that describes a flow that could
     /// never run (issue #1160). A blank capacity id, a non-positive or non-finite
     /// rate, or a zero minimum power level are author mistakes whose only other
@@ -81,6 +92,15 @@ impl UmbilicalConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.capacity.trim().is_empty() {
             return Err("[umbilical] capacity must name a non-empty capacity id".to_string());
+        }
+        let mut seen = std::collections::BTreeSet::from([self.capacity.as_str()]);
+        for resource in &self.allowed_resources {
+            if resource.trim().is_empty() || !seen.insert(resource.as_str()) {
+                return Err(
+                    "[umbilical] allowed_resources must be nonempty unique additional resource ids"
+                        .into(),
+                );
+            }
         }
         if !self.rate.is_finite() || self.rate <= 0.0 {
             return Err(format!(

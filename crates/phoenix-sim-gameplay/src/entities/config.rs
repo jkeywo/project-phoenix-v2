@@ -759,6 +759,12 @@ impl EntityConfig {
             validate_endpoint(endpoint).map_err(SerdeError::custom)?;
         }
         if let Some(umbilical) = &config.umbilical {
+            for resource in &umbilical.allowed_resources {
+                let endpoint =
+                    resolve_endpoint(resource, &config.resource_services, &Default::default())
+                        .map_err(SerdeError::custom)?;
+                validate_endpoint(&endpoint).map_err(SerdeError::custom)?;
+            }
             let endpoint = resolve_endpoint(
                 &umbilical.capacity,
                 &config.resource_services,

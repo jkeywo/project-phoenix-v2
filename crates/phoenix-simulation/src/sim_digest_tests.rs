@@ -778,6 +778,7 @@ fn dock_channels_and_mechanical_state_move_the_digest() {
 fn spawn_umbilical(world: &mut World, uuid: &str, running: bool) {
     let mut umbilical = TransferUmbilical::new(
         crate::umbilical::UmbilicalConfig {
+            allowed_resources: vec![],
             link: Default::default(),
             capacity: "reserve_fuel".into(),
             rate: 5.0,

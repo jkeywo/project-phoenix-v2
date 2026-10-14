@@ -837,6 +837,12 @@ impl ShieldSystem {
     /// grid somewhere, and letting reactor power soften it would turn the focus
     /// trade into a straight buff.
     pub fn tick_with_regen_scale(&mut self, dt: f32, regen_scale: f32) {
+        self.tick_with_regen_scales(dt, &vec![regen_scale; self.facings.len()]);
+    }
+
+    /// Regenerate independently funded arcs. Missing grants authorize no work;
+    /// focus decay and offline recovery remain ordinary elapsed-time effects.
+    pub fn tick_with_regen_scales(&mut self, dt: f32, regen_scales: &[f32]) {
         for (i, facing) in self.facings.iter_mut().enumerate() {
             let is_decaying = self.focused_facing != Some(i) && facing.hp > facing.max_hp;
 
@@ -861,7 +867,7 @@ impl ShieldSystem {
                     facing.offline_remaining = (facing.offline_remaining - dt).max(0.0);
                 }
             } else {
-                facing.tick_with_regen_scale(dt, regen_scale);
+                facing.tick_with_regen_scale(dt, regen_scales.get(i).copied().unwrap_or(0.0));
             }
         }
     }

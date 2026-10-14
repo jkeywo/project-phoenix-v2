@@ -11,10 +11,8 @@ use crate::modifiers::power_system::{
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::regions::effects::RegionEffectKind;
 use crate::regions::server::{RegionEntered, RegionExited, RegionMembership};
-use crate::server_app::ShipImpulse;
-use crate::ship::impulse::{ImpulseState, IMPULSE_SPEED_MULTIPLIER};
+use crate::ship::impulse::ImpulseState;
 use crate::ship::power::{PowerMultiplierResource, ShipPowerSystem};
-use crate::ship_plugin::ImpulseConfigResource;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
@@ -381,20 +379,12 @@ pub fn apply_impulse_to(
 /// replaced during snapshot adoption without depending on a phase transition.
 /// LocalShip selects presentation and must not select authoritative modifiers.
 pub fn translate_impulse_modifiers(
-    mut ships: Query<
-        (
-            &ShipImpulse,
-            Option<&ImpulseConfigResource>,
-            &mut ShipModifiers,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut ships: Query<&mut ShipModifiers, With<crate::server_app::Ship>>,
 ) {
-    for (impulse, config, mut modifiers) in &mut ships {
-        let speed_multiplier = config
-            .map(|c| c.speed_multiplier)
-            .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
-        apply_impulse_to(&mut modifiers, &impulse.0, speed_multiplier);
+    for mut modifiers in &mut ships {
+        // Paid impulse work is resolved by the sole physics integrator. Clear
+        // this former unconditional effect so a charged intent cannot act free.
+        modifiers.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
     }
 }
 

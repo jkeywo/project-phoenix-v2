@@ -227,6 +227,7 @@ pub(crate) fn receive_repair_coordination(
             Option<&mut RepairRequestQueue>,
             Option<&mut RepairHumanAlerted>,
             Has<crate::server_app::LocalShip>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -394,7 +395,7 @@ pub fn tick_repair_teams(
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, mut queue, modifiers, mut hull, ship_uuid, config, fleet, local) in
+    for (teams_comp, mut queue, modifiers, mut hull, ship_uuid, config, fleet, local, mut power) in
         ship_q.iter_mut()
     {
         // Crew wrecks remain for identity and cinematic spectating. A queued
@@ -424,9 +425,19 @@ pub fn tick_repair_teams(
             })
             .collect();
         let before = hull.0.total_current();
-        teams
-            .0
-            .tick(dt * repair_mult, &mut hull.0, config.map(|c| &c.0));
+        teams.0.tick_with_work(
+            dt * repair_mult,
+            &mut hull.0,
+            config.map(|c| &c.0),
+            |owner, work_dt| {
+                power.as_deref_mut().map_or(0.0, |power| {
+                    power
+                        .0
+                        .work_continuous(owner, work_dt, 1.0)
+                        .map_or(0.0, |grant| grant.fraction)
+                })
+            },
+        );
         if let (Some(queue), Some(config)) = (queue.as_mut(), config) {
             for id in active_work.into_iter().filter(|id| hull.0.is_at_max(id)) {
                 // Actual repaired work, not a Returning/recall transition. This

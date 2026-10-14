@@ -307,6 +307,18 @@ impl RepairTeams {
         result
     }
     pub fn tick(&mut self, dt: f32, hull: &mut SystemHull, config: Option<&ShipConfig>) {
+        self.tick_with_work(dt, hull, config, |_, _| 1.0);
+    }
+
+    /// Pay only enabled, on-site repair work. Travel/return and workflow
+    /// observation continue with elapsed time, even while tools lack energy.
+    pub fn tick_with_work(
+        &mut self,
+        dt: f32,
+        hull: &mut SystemHull,
+        config: Option<&ShipConfig>,
+        mut grant: impl FnMut(&SystemId, f32) -> f32,
+    ) {
         let enabled: Vec<_> = self
             .state
             .teams
@@ -322,7 +334,21 @@ impl RepairTeams {
             })
             .collect();
         let mut phases = self.phases();
-        phases.tick(dt, hull, config, &enabled);
+        let work: Vec<_> = phases
+            .slots()
+            .iter()
+            .zip(&enabled)
+            .map(|(slot, enabled)| match slot {
+                TeamSlot::Repairing {
+                    system_id: Some(id),
+                    ..
+                } if *enabled && !hull.is_at_max(id) => {
+                    grant(&self.state.owner, dt).clamp(0.0, 1.0)
+                }
+                _ => 0.0,
+            })
+            .collect();
+        phases.tick_with_repair_work(dt, hull, config, &enabled, &work);
         self.commit_phases(&phases);
     }
     pub fn external_team(&self) -> Option<usize> {

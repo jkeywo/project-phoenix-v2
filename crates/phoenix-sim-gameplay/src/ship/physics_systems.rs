@@ -101,7 +101,7 @@ pub fn apply_helm_commands(
                 boost.0.deactivate();
             } else if writes.boost || (cmd.is_changed() && !cmd.is_added()) {
                 if cmd.0 {
-                    boost.0.activate();
+                    boost.0.active = true;
                 } else {
                     boost.0.deactivate();
                 }
@@ -149,6 +149,7 @@ pub fn integrate_ship_physics(
     time: Res<Time>,
     physics_cfg_res: Option<Res<ShipPhysicsConfigResource>>,
     bank_cfg_res: Option<Res<BankConfigResource>>,
+    mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
     mut ships: Query<
         (
             Entity,
@@ -248,7 +249,19 @@ pub fn integrate_ship_physics(
             vertical_speed: physics.vertical_speed,
         };
 
-        let impulse_active = impulse.map(|i| i.0.is_active()).unwrap_or(false);
+        let mut power = power_q.get_mut(_entity).ok();
+        let impulse_requested = impulse.is_some_and(|i| i.0.is_active());
+        let impulse_fraction = if impulse_requested {
+            crate::ship::energy_work::continuous_for_kind(
+                power.as_deref_mut().map(|p| &mut p.0),
+                crate::ship::system_registry::HELM_IMPULSE_KIND,
+                dt,
+                1.0,
+            )
+        } else {
+            0.0
+        };
+        let impulse_active = impulse_requested && impulse_fraction > 0.0;
 
         let input = if impulse_active {
             // Autopilot: full forward thrust, steering scaled by authored multiplier.
@@ -337,7 +350,7 @@ pub fn integrate_ship_physics(
         let vertical_offline = sources
             .0
             .is_offline(&crate::ship::system_registry::vertical_thrust_system_id());
-        let scaled_input = ShipPhysicsInput {
+        let mut scaled_input = ShipPhysicsInput {
             thrust: if thrust_offline {
                 0.0
             } else {
@@ -356,6 +369,36 @@ pub fn integrate_ship_physics(
             },
         };
 
+        // Pay only the admitted, damage-available actuator work. These fractions
+        // constrain this tick's work; incoming allocation never changes output.
+        for (axis, kind) in [
+            (
+                &mut scaled_input.thrust,
+                crate::ship::system_registry::HELM_THRUST_KIND,
+            ),
+            (
+                &mut scaled_input.steering,
+                crate::ship::system_registry::HELM_STEERING_KIND,
+            ),
+            (
+                &mut scaled_input.lateral,
+                crate::ship::system_registry::LATERAL_THRUST_KIND,
+            ),
+            (
+                &mut scaled_input.vertical,
+                crate::ship::system_registry::VERTICAL_THRUST_KIND,
+            ),
+        ] {
+            if *axis != 0.0 {
+                *axis *= crate::ship::energy_work::continuous_for_kind(
+                    power.as_deref_mut().map(|p| &mut p.0),
+                    kind,
+                    dt,
+                    axis.abs().min(1.0),
+                );
+            }
+        }
+
         let mut config = physics_cfg_comp
             .map(|c| c.0)
             .or_else(|| physics_cfg_res.as_deref().map(|c| c.0))
@@ -369,12 +412,20 @@ pub fn integrate_ship_physics(
             // multiplier (e.g. an unset TOML field defaulting to 0) falls
             // back to the const instead of nuking acceleration entirely.
             let impulse_cfg = impulse_cfg.cloned().unwrap_or_default();
+            let speed_mult = if impulse_cfg.speed_multiplier > 0.0 {
+                impulse_cfg.speed_multiplier
+            } else {
+                crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER
+            };
+            let funded_speed = 1.0 + (speed_mult - 1.0) * impulse_fraction;
+            config.max_speed *= funded_speed;
+            config.max_reverse_speed *= funded_speed;
             let mult = if impulse_cfg.acceleration_multiplier > 0.0 {
                 impulse_cfg.acceleration_multiplier
             } else {
                 crate::ship::impulse::IMPULSE_ACCELERATION_MULTIPLIER
             };
-            config.acceleration *= mult;
+            config.acceleration *= 1.0 + (mult - 1.0) * impulse_fraction;
         }
 
         // Boost drive: while engaged, multiply max speed and acceleration.
@@ -382,10 +433,22 @@ pub fn integrate_ship_physics(
         let boost_cfg = boost_cfg_comp.cloned().unwrap_or_default();
         let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
         if boost_cfg.enabled && boost_active {
-            config.max_speed *= boost_cfg.multiplier;
-            config.max_reverse_speed *= boost_cfg.multiplier;
-            config.acceleration *= boost_cfg.multiplier;
-            config.max_yaw_rate *= boost_cfg.steering_multiplier;
+            let activity = scaled_input.thrust.abs() + scaled_input.steering.abs();
+            let fraction = if activity > 0.0 {
+                crate::ship::energy_work::continuous_for_kind(
+                    power.as_deref_mut().map(|p| &mut p.0),
+                    crate::ship::system_registry::HELM_BOOST_KIND,
+                    dt,
+                    activity,
+                )
+            } else {
+                0.0
+            };
+            let multiplier = 1.0 + (boost_cfg.multiplier - 1.0) * fraction;
+            config.max_speed *= multiplier;
+            config.max_reverse_speed *= multiplier;
+            config.acceleration *= multiplier;
+            config.max_yaw_rate *= 1.0 + (boost_cfg.steering_multiplier - 1.0) * fraction;
         }
 
         let result = compute_physics(state, scaled_input, dt, &config);

@@ -3503,6 +3503,7 @@ max_penalty = 0.8
 # Falling Skyway slice that follows.
 [umbilical]
 capacity = "reserve_fuel"
+allowed_resources = ["coolant"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2

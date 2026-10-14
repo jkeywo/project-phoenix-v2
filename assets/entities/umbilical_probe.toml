@@ -167,6 +167,7 @@ power_group = "energy-umbilical"
 # runs at.
 [umbilical]
 capacity = "reserve_fuel"
+allowed_resources = ["coolant"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2

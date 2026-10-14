@@ -5,7 +5,7 @@ use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
     BoostConfigResource, ImpulseConfigResource, ShipConfigComponent, ShipSystemControlSources,
 };
-use crate::ship::helm::{ImpulseCommand, SteeringInput, ThrustInput};
+use crate::ship::helm::ImpulseCommand;
 
 /// Hull-damage impulse auto-cancel (issue #695, reshaped by #824): writes an
 /// `Idle` `ImpulseCommand` intent when a ship's hull took damage this
@@ -66,12 +66,13 @@ pub fn tick_impulse(
             Option<&ImpulseConfigResource>,
             Option<&ShipSystemControlSources>,
             Option<&ShipConfigComponent>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
         With<Ship>,
     >,
 ) {
     let dt = time.delta_secs();
-    for (mut impulse, entity_cfg, sources, config) in ships_q.iter_mut() {
+    for (mut impulse, entity_cfg, sources, config, mut power) in ships_q.iter_mut() {
         if !drive_available(
             sources,
             config,
@@ -82,7 +83,15 @@ pub fn tick_impulse(
             continue;
         }
         let charge_duration = entity_cfg.cloned().unwrap_or_default().charge_duration;
-        impulse.0.tick(dt, charge_duration);
+        if impulse.0.phase == crate::ship::impulse::ImpulsePhase::Charging {
+            let fraction = crate::ship::energy_work::continuous_for_kind(
+                power.as_deref_mut().map(|p| &mut p.0),
+                crate::ship::system_registry::HELM_IMPULSE_KIND,
+                dt,
+                1.0,
+            );
+            impulse.0.tick(dt * fraction, charge_duration);
+        }
     }
 }
 
@@ -94,44 +103,41 @@ pub fn tick_impulse(
 // `ai_helm_boost` (#780) emits for a non-local `AiHighFidelity` NPC never
 // reached `BoostCommand`. `BoostCommand` now has exactly one writer.
 
-fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
-    thrust.clamp(-1.0, 1.0).abs() + steering.clamp(-1.0, 1.0).abs()
-}
-
-/// Boost depletion is authoritative for every ship replica. Local crew sessions
-/// and the HUD's LastHelmInput cache differ by host and cannot drive this fold.
-/// The admitted per-entity actuator latches are the same inputs physics consumes.
+/// The old boost battery field is a compatibility readout of the owning local
+/// reserve. Work is paid at physics integration; this observer neither recharges
+/// another battery nor clears the saved engagement intent on exhaustion.
 pub fn tick_boost(
-    time: Res<Time>,
     mut ships: Query<
         (
             Option<&BoostConfigResource>,
             &mut ShipBoost,
-            Option<&ThrustInput>,
-            Option<&SteeringInput>,
-            Option<&ShipImpulse>,
+            Option<&crate::ship::power::ShipPowerSystem>,
         ),
         With<Ship>,
     >,
 ) {
-    for (entity_cfg, mut boost, thrust, steering, impulse) in &mut ships {
+    for (entity_cfg, mut boost, power) in &mut ships {
         let config = entity_cfg.cloned().unwrap_or_default();
         if !config.enabled {
             continue;
         }
-        let drain_factor = if impulse.is_some_and(|state| state.0.is_active()) {
-            normalized_boost_drain_factor(1.0, 0.0)
-        } else {
-            normalized_boost_drain_factor(
-                thrust.map_or(0.0, |input| input.0),
-                steering.map_or(0.0, |input| input.0),
-            )
-        };
-        boost.0.tick_with_drain_factor(
-            time.delta_secs(),
-            config.active_duration,
-            config.recharge_duration,
-            drain_factor,
-        );
+        boost.0.battery = power
+            .and_then(|p| {
+                let id = &p
+                    .0
+                    .ship_config()
+                    .systems
+                    .iter()
+                    .find(|system| system.kind == crate::ship::system_registry::HELM_BOOST_KIND)?
+                    .id;
+                let state = p.0.network().consumers.get(id)?;
+                let profile =
+                    p.0.config()
+                        .consumers
+                        .iter()
+                        .find(|profile| &profile.system == id)?;
+                Some(state.energy / profile.reserve.capacity)
+            })
+            .unwrap_or(0.0);
     }
 }

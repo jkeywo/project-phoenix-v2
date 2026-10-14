@@ -983,7 +983,7 @@ pub fn publish_sensor_radar_blackboard(
                     power
                         .0
                         .has_group(&weapons)
-                        .then(|| power.0.is_group_cold(&weapons))
+                        .then(|| power.0.weapons_restrained())
                 })
         });
         bbs.0.insert(

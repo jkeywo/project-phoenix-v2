@@ -1,7 +1,23 @@
 use super::*;
 
+#[test]
+fn selected_resource_choices_preserve_default_and_refuse_ambiguous_definitions() {
+    let mut config = config(UmbilicalDirection::Collect, 2.0);
+    config.allowed_resources = vec!["coolant".into()];
+    assert!(config.validate().is_ok());
+    assert_eq!(config.resource_choices(), vec!["reserve_fuel", "coolant"]);
+    assert!(config.permits_resource("reserve_fuel"));
+    assert!(config.permits_resource("coolant"));
+    assert!(!config.permits_resource("antimatter"));
+    config.allowed_resources.push("coolant".into());
+    assert!(config.validate().is_err());
+    config.allowed_resources = vec!["reserve_fuel".into()];
+    assert!(config.validate().is_err());
+}
+
 fn config(direction: UmbilicalDirection, rate: f32) -> UmbilicalConfig {
     UmbilicalConfig {
+        allowed_resources: vec![],
         link: Default::default(),
         capacity: "reserve_fuel".into(),
         rate,

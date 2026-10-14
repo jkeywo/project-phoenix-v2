@@ -665,6 +665,7 @@ ceiling = 100
 # Deliver = operator → docked partner.
 [umbilical]
 capacity = "reserve_fuel"
+allowed_resources = ["coolant"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2

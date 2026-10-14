@@ -45,7 +45,7 @@ use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefus
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::ship::damage::DamageTier;
-use crate::ship::power::{power_level_for, ShipPowerSystem};
+use crate::ship::power::ShipPowerSystem;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::dock_system_id;
 use crate::world::server::WorldContentRuntime;
@@ -627,7 +627,7 @@ pub fn tick_dock(
             &DockControl,
             &Transform,
             Option<&DockMarkers>,
-            Option<&ShipPowerSystem>,
+            Option<&mut ShipPowerSystem>,
             Option<&EntitySystemHull>,
             &EntityUuid,
         )>,
@@ -661,15 +661,15 @@ pub fn tick_dock(
 
     // Decide each own ship without holding the write borrow.
     let mut outcomes: Vec<DockOutcome> = Vec::new();
-    for (entity, dock, transform, markers, power, hull, uuid) in set.p0().iter() {
+    for (entity, dock, transform, markers, mut power, hull, uuid) in set.p0().iter_mut() {
         let own_pose = Pose {
             translation: transform.translation,
             rotation: transform.rotation,
         };
         let own_markers: &[DockMarker] = markers.map(|m| m.markers.as_slice()).unwrap_or(&[]);
-        let power_level = power
-            .map(|p| power_level_for(&p.0, &dock.power_group))
-            .unwrap_or(0);
+        // Allocation is incoming flow, not equipment availability. Geometry is
+        // checked before paying, so impossible/idle attempts consume no energy.
+        let power_level = u8::MAX;
         let disabled = hull
             .map(|h| {
                 matches!(
@@ -679,7 +679,7 @@ pub fn tick_dock(
             })
             .unwrap_or(false);
 
-        outcomes.push(decide_dock(
+        let mut outcome = decide_dock(
             entity,
             &uuid.0,
             dock,
@@ -689,7 +689,50 @@ pub fn tick_dock(
             disabled,
             &candidates,
             dt,
-        ));
+        );
+        if outcome.new_pose.is_some() && !disabled {
+            let moving = outcome.new_pose.as_ref().is_some_and(|pose| {
+                pose.translation != own_pose.translation || pose.rotation != own_pose.rotation
+            });
+            let fraction = if moving {
+                power.as_deref_mut().map_or(0.0, |power| {
+                    power
+                        .0
+                        .work_continuous(&dock.system_id, dt, 1.0)
+                        .map_or(0.0, |grant| grant.fraction)
+                })
+            } else {
+                1.0
+            };
+            if fraction < 1.0 {
+                outcome = decide_dock(
+                    entity,
+                    &uuid.0,
+                    dock,
+                    own_pose,
+                    own_markers,
+                    power_level,
+                    disabled,
+                    &candidates,
+                    dt * fraction,
+                );
+                if fraction == 0.0 {
+                    outcome.new_pose = None;
+                    outcome.last_refusal = Some(DockRefusal::Unpowered);
+                }
+            }
+            if !dock.docked
+                && outcome.docked
+                && !power.as_deref_mut().is_some_and(|power| {
+                    power.0.try_work_discrete(&dock.system_id).unwrap_or(false)
+                })
+            {
+                outcome.docked = false;
+                outcome.new_pose = None;
+                outcome.last_refusal = Some(DockRefusal::Unpowered);
+            }
+        }
+        outcomes.push(outcome);
     }
 
     // Apply.

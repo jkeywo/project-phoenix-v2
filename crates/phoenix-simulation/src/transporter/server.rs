@@ -34,7 +34,7 @@ use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityId, EntityName, EntitySystemHull, EntityUuid};
 use crate::science::scan::scanned_flag;
 use crate::ship::damage::DamageTier;
-use crate::ship::power::{power_level_for, ShipPowerSystem};
+use crate::ship::power::ShipPowerSystem;
 use crate::ship::system_registry::{transporter_system_id, TRANSPORTER_SYSTEM_ID};
 use crate::transporter::coupling::{
     transport_status, TransportInputs, TransportRefusal, TransporterConfig,
@@ -389,6 +389,7 @@ pub fn reveal_civilian_contacts(
 /// transport's activation ends with the mapped terminal reason.
 #[allow(clippy::type_complexity)]
 pub fn tick_transport(
+    mut power_q: Query<&mut ShipPowerSystem>,
     time: Option<Res<Time>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
@@ -398,7 +399,6 @@ pub fn tick_transport(
             Entity,
             &Transporter,
             &Transform,
-            Option<&ShipPowerSystem>,
             Option<&EntitySystemHull>,
             Option<&EntityUuid>,
         )>,
@@ -431,11 +431,9 @@ pub fn tick_transport(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter(|(_, t, _, _, _, _)| t.transporting)
-        .map(|(entity, t, transform, power, hull, uuid)| {
-            let power_level = power
-                .map(|p| power_level_for(&p.0, &t.power_group))
-                .unwrap_or(0);
+        .filter(|(_, t, _, _, _)| t.transporting)
+        .map(|(entity, t, transform, hull, uuid)| {
+            let power_level = u8::MAX;
             let disabled = hull
                 .map(|h| {
                     matches!(
@@ -528,6 +526,15 @@ pub fn tick_transport(
         };
         match transport_status(&inputs) {
             Ok(()) => {
+                let fraction = power_q.get_mut(row.entity).ok().map_or(0.0, |mut power| {
+                    power
+                        .0
+                        .work_continuous(&transporter_system_id(), dt, 1.0)
+                        .map_or(0.0, |grant| grant.fraction)
+                });
+                if fraction == 0.0 {
+                    continue;
+                }
                 let contact = row.selected.clone().expect("Ok implies a selection");
                 // Open a fresh activation when the running transport begins, or
                 // re-target if the selection moved under a live transport.
@@ -553,7 +560,7 @@ pub fn tick_transport(
                 }
                 // Accrue and recover. `floor` is IEEE-exact, so two hosts recover
                 // the same number of souls on the same tick.
-                let mut progress = row.progress + dt / row.seconds_per_civilian;
+                let mut progress = row.progress + dt * fraction / row.seconds_per_civilian;
                 let mut recovered_now = 0u32;
                 let mut remaining = facts.remaining;
                 while progress >= 1.0 && remaining > 0 {

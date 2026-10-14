@@ -306,7 +306,11 @@ pub fn receive_shields_coordination(
 pub fn tick_shields(
     time: Res<Time>,
     mut shields_q: Query<
-        (&mut ShipShields, Option<&crate::modifiers::ShipModifiers>),
+        (
+            &mut ShipShields,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+        ),
         With<crate::server_app::Ship>,
     >,
 ) {
@@ -314,11 +318,41 @@ pub fn tick_shields(
     if dt <= 0.0 {
         return;
     }
-    for (mut shield, mods) in shields_q.iter_mut() {
+    for (mut shield, mods, mut power) in shields_q.iter_mut() {
         let regen_scale = mods
             .map(|m| m.get(&crate::core::messages::ModifierSlot::ShieldRegen))
             .unwrap_or(1.0);
-        shield.0.tick_with_regen_scale(dt, regen_scale);
+        let grants: Vec<_> = shield
+            .0
+            .facings
+            .iter()
+            .enumerate()
+            .map(|(index, facing)| {
+                let decaying = shield.0.focused_facing != Some(index) && facing.hp > facing.max_hp;
+                if !facing.is_online()
+                    || decaying
+                    || facing.hp >= facing.max_hp
+                    || facing.regen_per_sec <= 0.0
+                {
+                    return 0.0;
+                }
+                // At capacity stop spending immediately, including the fractional
+                // HP already paid in previous ticks. Shield upkeep is increment 9.
+                let wanted_hp = ((facing.max_hp - facing.hp) as f32 - facing.hp_frac()).max(0.0);
+                let activity = regen_scale
+                    .max(0.0)
+                    .min(wanted_hp / (facing.regen_per_sec * dt));
+                let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id)
+                else {
+                    return 0.0;
+                };
+                power.as_deref_mut().map_or(0.0, |p| {
+                    p.0.work_continuous(&id, dt, activity)
+                        .map_or(0.0, |grant| activity * grant.fraction)
+                })
+            })
+            .collect();
+        shield.0.tick_with_regen_scales(dt, &grants);
     }
 }
 

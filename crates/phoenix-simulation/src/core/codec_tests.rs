@@ -3108,6 +3108,8 @@ fn system_blackboard_umbilical_round_trips_and_is_additive() {
 
     // A running umbilical carries both ends' levels the console shows.
     let running = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+        selected_resource: "reserve_fuel".into(),
+        allowed_resources: vec!["reserve_fuel".into()],
         capacity: "reserve_fuel".into(),
         rate: 5.0,
         direction: "deliver".into(),
@@ -3124,6 +3126,8 @@ fn system_blackboard_umbilical_round_trips_and_is_additive() {
     // An idle umbilical writes no absent-field noise: the optional fields are
     // skipped, so a bare payload decodes to defaults.
     let idle = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+        selected_resource: "reserve_fuel".into(),
+        allowed_resources: vec!["reserve_fuel".into()],
         capacity: "reserve_fuel".into(),
         rate: 5.0,
         direction: "deliver".into(),

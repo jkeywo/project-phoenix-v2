@@ -521,6 +521,7 @@ enum TeamTransition {
 /// * **Return.** A withdrawing team that has arrived is available again.
 #[allow(clippy::type_complexity)]
 pub fn tick_security_teams(
+    mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
     time: Option<Res<Time>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
@@ -531,6 +532,7 @@ pub fn tick_security_teams(
         &SecurityTargetActions,
     )>,
     mut operators: Query<(
+        Entity,
         &EntityUuid,
         &Transform,
         Option<&EntitySystemHull>,
@@ -546,12 +548,14 @@ pub fn tick_security_teams(
     // Decide from read-only reads first, in UUID order, so the queued flags and
     // lifecycle reports are identical on two hosts.
     let mut decided: Vec<Transition> = Vec::new();
+    let mut work_steps = std::collections::BTreeMap::new();
     {
-        let mut operator_rows: Vec<(String, Vec3, bool, ShipSecurityTeams)> = operators
+        let mut operator_rows: Vec<(String, Entity, Vec3, bool, ShipSecurityTeams)> = operators
             .iter()
-            .map(|(uuid, transform, hull, security)| {
+            .map(|(entity, uuid, transform, hull, security)| {
                 (
                     uuid.0.clone(),
+                    entity,
                     transform.translation,
                     security_disabled(hull),
                     security.clone(),
@@ -560,7 +564,7 @@ pub fn tick_security_teams(
             .collect();
         operator_rows.sort_by(|a, b| a.0.cmp(&b.0));
 
-        for (operator_uuid, operator_pos, disabled, security) in &operator_rows {
+        for (operator_uuid, entity, operator_pos, disabled, security) in &operator_rows {
             for (index, team) in security.teams.iter().enumerate() {
                 let team_idx = index as u8;
                 // A knocked-out System takes every team off the board; one that
@@ -630,7 +634,20 @@ pub fn tick_security_teams(
                     }
                 }
 
-                if team.elapsed + dt < team.phase_duration {
+                let work_dt = if team.state == SecurityTeamState::Working {
+                    let requested_dt = dt.min((team.phase_duration - team.elapsed).max(0.0));
+                    let fraction = power_q.get_mut(*entity).ok().map_or(0.0, |mut power| {
+                        power
+                            .0
+                            .work_continuous(&security_system_id(), requested_dt, 1.0)
+                            .map_or(0.0, |grant| grant.fraction)
+                    });
+                    requested_dt * fraction
+                } else {
+                    dt
+                };
+                work_steps.insert((operator_uuid.clone(), index), work_dt);
+                if team.elapsed + work_dt < team.phase_duration {
                     continue;
                 }
                 match team.state {
@@ -686,11 +703,14 @@ pub fn tick_security_teams(
     }
 
     // Advance every committed clock and apply the decided transitions.
-    for (uuid, _, _, mut security) in operators.iter_mut() {
+    for (_, uuid, _, _, mut security) in operators.iter_mut() {
         let withdraw = security.config.withdraw_duration_secs;
-        for team in security.teams.iter_mut() {
+        for (index, team) in security.teams.iter_mut().enumerate() {
             if team.is_committed() {
-                team.elapsed += dt;
+                team.elapsed += work_steps
+                    .get(&(uuid.0.clone(), index))
+                    .copied()
+                    .unwrap_or(0.0);
             }
         }
         for transition in decided.iter().filter(|t| t.operator == uuid.0) {

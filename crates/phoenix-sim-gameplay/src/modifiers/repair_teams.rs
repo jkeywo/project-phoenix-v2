@@ -502,6 +502,17 @@ impl RepairPhases {
         config: Option<&ShipConfig>,
         enabled: &[bool],
     ) {
+        self.tick_with_repair_work(dt, hull, config, enabled, &vec![1.0; self.slots.len()]);
+    }
+
+    pub fn tick_with_repair_work(
+        &mut self,
+        dt: f32,
+        hull: &mut SystemHull,
+        config: Option<&ShipConfig>,
+        enabled: &[bool],
+        repair_work: &[f32],
+    ) {
         let travel_duration = self.timings.travel_duration;
         let repair_rate = self.timings.repair_rate_hp_per_sec;
         // Which system each team is standing on, indexed by slot. Snapshotted
@@ -624,7 +635,8 @@ impl RepairPhases {
                     // The console's one-shot pin: the row Engineering actually
                     // tapped (issue #1015). Outranks the ordinal at the hand-off.
                     let carried_pin = priority_system_id.clone();
-                    let hp_to_restore = dt * repair_rate;
+                    let hp_to_restore =
+                        dt * repair_rate * repair_work.get(team_idx).copied().unwrap_or(0.0);
                     // No tier gate: a Destroyed system is repaired like any
                     // other, and the first restored HP un-latches it because
                     // `tier_for` tests `current == 0.0` before anything else.

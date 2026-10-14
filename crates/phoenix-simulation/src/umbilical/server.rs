@@ -38,7 +38,7 @@ use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::InfrastructureCondition;
 use crate::ship::damage::DamageTier;
-use crate::ship::power::{power_level_for, ShipPowerSystem};
+use crate::ship::power::ShipPowerSystem;
 use crate::ship::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
 use crate::umbilical::flow::{
     plan_flow, CapacityEnd, FlowContext, FlowEnds, FlowVerdict, UmbilicalConfig,
@@ -64,6 +64,7 @@ use crate::umbilical::flow::{
 /// out.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TransferUmbilical {
+    pub selected_resource: String,
     /// The authored flow terms — capacity id, rate, direction, minimum power
     /// level.
     pub config: UmbilicalConfig,
@@ -105,6 +106,7 @@ impl TransferUmbilical {
     /// group.
     pub fn new(config: UmbilicalConfig, power_group: PowerGroupId) -> Self {
         Self {
+            selected_resource: config.capacity.clone(),
             config,
             power_group,
             running: false,
@@ -123,6 +125,7 @@ impl TransferUmbilical {
     /// recomputed on the first resumed tick.
     pub fn save_state(&self) -> UmbilicalSaveState {
         UmbilicalSaveState {
+            selected_resource: self.selected_resource.clone(),
             running: self.running,
             carry: self.carry,
         }
@@ -134,6 +137,7 @@ impl TransferUmbilical {
     /// rederived by the next tick from the resumed world.
     pub fn restore(&mut self, save: &UmbilicalSaveState) {
         self.running = save.running;
+        self.selected_resource = save.selected_resource.clone();
         self.carry = save.carry;
         self.last_refusal = None;
         self.operator_level = None;
@@ -150,6 +154,7 @@ impl TransferUmbilical {
 /// ship restores byte-identically and folds the same number.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UmbilicalSaveState {
+    pub selected_resource: String,
     #[serde(default)]
     pub running: bool,
     pub carry: f32,
@@ -197,6 +202,7 @@ impl Plugin for UmbilicalPlugin {
                 &[
                     crate::core::messages::SystemControlPayloadDiscriminants::StartTransfer,
                     crate::core::messages::SystemControlPayloadDiscriminants::StopTransfer,
+                    crate::core::messages::SystemControlPayloadDiscriminants::SetTransferResource,
                 ],
             ),
         )
@@ -262,6 +268,23 @@ pub fn handle_umbilical_commands(
     for (entity, admitted, mut umbilical, uuid) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
             match &cmd.payload {
+                SystemControlPayload::SetTransferResource { resource } => {
+                    let permitted = umbilical.config.permits_resource(resource);
+                    if permitted && umbilical.selected_resource != *resource {
+                        umbilical.selected_resource = resource.clone();
+                        umbilical.carry = 0.0;
+                        umbilical.last_refusal = None;
+                    }
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        if permitted {
+                            crate::core::messages::ActionFeedbackOutcome::Applied
+                        } else {
+                            crate::core::messages::ActionFeedbackOutcome::Refused
+                        },
+                    );
+                }
                 SystemControlPayload::StartTransfer => {
                     if !umbilical.running {
                         umbilical.running = true;
@@ -528,6 +551,7 @@ struct OperatorRow {
 /// shows both ends' levels the moment a berth is in reach.
 #[allow(clippy::type_complexity)]
 pub fn tick_umbilical(
+    mut power_q: Query<&mut ShipPowerSystem>,
     // The capacity-adjustment queue, extracted off `WorldContentRuntime` (issue
     // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
     // so a reduced test app that runs the umbilical systems without
@@ -542,7 +566,6 @@ pub fn tick_umbilical(
             &EntityUuid,
             &TransferUmbilical,
             &DockControl,
-            Option<&ShipPowerSystem>,
             Option<&EntitySystemHull>,
         )>,
         // Every entity's capacity ledger, to resolve both docked ends.
@@ -563,10 +586,8 @@ pub fn tick_umbilical(
     let rows: Vec<OperatorRow> = set
         .p0()
         .iter()
-        .map(|(entity, uuid, umbilical, dock, power, hull)| {
-            let power_level = power
-                .map(|p| power_level_for(&p.0, &umbilical.power_group))
-                .unwrap_or(0);
+        .map(|(entity, uuid, umbilical, dock, hull)| {
+            let power_level = u8::MAX;
             let disabled = hull
                 .map(|h| {
                     matches!(
@@ -582,7 +603,16 @@ pub fn tick_umbilical(
                 partner: dock.docked_partner().map(|s| s.to_string()),
                 power_level,
                 disabled,
-                config: umbilical.config.clone(),
+                config: {
+                    let mut config = umbilical.config.clone();
+                    config.capacity = umbilical.selected_resource.clone();
+                    // The explicit provider describes the original resource only.
+                    // Other authored choices use their exact named service.
+                    if config.capacity != umbilical.config.capacity {
+                        config.link = Default::default();
+                    }
+                    config
+                },
                 carry: umbilical.carry,
                 activation_target: umbilical.activation_target.clone(),
             }
@@ -664,7 +694,7 @@ pub fn tick_umbilical(
                 continue;
             }
 
-            let ctx = FlowContext {
+            let mut ctx = FlowContext {
                 docked: row.partner.is_some(),
                 powered: row.power_level >= row.config.min_power_level,
                 disabled: row.disabled,
@@ -675,6 +705,33 @@ pub fn tick_umbilical(
                 operator: operator_end,
                 partner: partner_end,
             };
+            if matches!(
+                plan_flow(&row.config, &ends, &ctx),
+                FlowVerdict::Flowing { .. }
+            ) {
+                let available = match (&operator_end, &partner_end, row.config.direction) {
+                    (Some(own), Some(remote), UmbilicalDirection::Deliver) => {
+                        own.level.min(remote.headroom)
+                    }
+                    (Some(own), Some(remote), UmbilicalDirection::Collect) => {
+                        remote.level.min(own.headroom)
+                    }
+                    _ => 0,
+                };
+                if available > 0 && dt > 0.0 {
+                    let activity =
+                        ((available as f32 - row.carry).max(0.0) / (row.config.rate * dt)).min(1.0);
+                    let fraction = power_q.get_mut(row.entity).ok().map_or(0.0, |mut power| {
+                        power
+                            .0
+                            .work_continuous(&umbilical_system_id(), dt, activity)
+                            .map_or(0.0, |grant| grant.fraction)
+                    });
+                    // Exhaustion pauses movement and preserves standing intent
+                    // and already funded fractional flow.
+                    ctx.dt *= fraction;
+                }
+            }
             match plan_flow(&row.config, &ends, &ctx) {
                 FlowVerdict::Refused(refusal) => {
                     // The task activation follows the flow actually moving
@@ -851,6 +908,8 @@ pub fn publish_umbilical_blackboard(
     let key = umbilical_system_id();
     for (umbilical, mut blackboards) in ships.iter_mut() {
         let blackboard = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+            selected_resource: umbilical.selected_resource.clone(),
+            allowed_resources: umbilical.config.resource_choices(),
             capacity: umbilical.config.capacity.clone(),
             rate: umbilical.config.rate,
             direction: match umbilical.config.direction {

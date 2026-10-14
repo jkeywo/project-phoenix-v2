@@ -4843,3 +4843,21 @@ describe('Shield operation Console knowledge and control', () => {
     expect(rawBuildShieldsConsoleState(state,['actual-port-system']).facings[0]).not.toHaveProperty('operation');
   });
 });
+
+
+it('keeps a human shield arc usable beside delegated aggregate and sibling controllers', () => {
+  const operation={raised:true,recovery_targets:[]};
+  const state={consoleSystems:{science:['shields-system','actual-port','actual-fore']},
+    systemConsoleFamilies:{'shields-system':'shields','actual-port':'shields','actual-fore':'shields'},
+    blackboards:{shields:{facings:[{arc_id:'port'},{arc_id:'fore'}]},'actual-port':{arc_id:'port',operation},'actual-fore':{arc_id:'fore',operation}},
+    blackboardKinds:{shields:'Shields','actual-port':'ShieldArc','actual-fore':'ShieldArc'},
+    controlSources:{'shields-system':'Ai','actual-port':'Human','actual-fore':'Simplified'}};
+  const view=rawBuildSystemStationConsoleState('science',state).systems['actual-port'];
+  expect(view.shields_auto).toBe(false);
+  expect(view.facings[0]).toMatchObject({controllable:true,delegated:false});
+  expect(view.facings[1]).toMatchObject({controllable:false,delegated:true});
+  state.controlSources['actual-port']='Offline';
+  expect(rawBuildSystemStationConsoleState('science',state).systems['actual-port'].facings[0].controllable).toBe(false);
+  state.controlSources['actual-port']='Ai';
+  expect(rawBuildSystemStationConsoleState('science',state).systems['actual-port'].shields_auto).toBe(true);
+});

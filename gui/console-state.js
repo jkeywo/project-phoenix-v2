@@ -1815,10 +1815,18 @@ function shieldOperationFacings(state, facings, systemIds) {
     if (!entry?.data.operation) return facing;
     return { ...facing, system_id: entry.systemId,
       operation: entry.data.operation, recent_damage: entry.data.recent_damage,
-      delegated: state.controlSources?.[entry.systemId] === 'Ai',
+      delegated: ['Ai', 'Simplified'].includes(state.controlSources?.[entry.systemId]),
       controllable: systemIds.includes(entry.systemId)
-        && state.controlSources?.[entry.systemId] !== 'Ai' };
+        && state.controlSources?.[entry.systemId] === 'Human' };
   });
+}
+
+function shieldsAreDelegated(state, systemIds) {
+  const arcs = systemIds.filter(id => state.blackboardKinds?.[id] === 'ShieldArc');
+  const controllers = arcs.length ? arcs : systemIds;
+  return controllers.length
+    ? controllers.every(id => ['Ai', 'Simplified'].includes(state.controlSources?.[id]))
+    : state.stationRatings?.shields === 'Backfill';
 }
 
 export function buildShieldsConsoleState(state, systemIds = []) {
@@ -1832,9 +1840,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
       threat_bearing:       bb.threat_bearing       ?? null,
       grid_status:          bb.grid_status          ?? 'GRID NOMINAL',
       own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
-      shields_auto: systemIds.length > 0
-        ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
-        : state.stationRatings?.['shields'] === 'Backfill',
+      shields_auto: shieldsAreDelegated(state, systemIds),
     };
   }
   // Legacy fallback: read from ShieldStatus broadcast fields. Predates the
@@ -1858,9 +1864,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
     grid_status:          (state.shieldFacings && state.shieldFacings.length > 0)
                             ? 'GRID NOMINAL' : 'GRID OFFLINE',
     own_hull: aggregateStationHull('shields', state.consoleHull, state.stationSystems),
-    shields_auto: systemIds.length > 0
-      ? systemIds.every(id => state.controlSources?.[id] === 'Ai')
-      : state.stationRatings?.['shields'] === 'Backfill',
+    shields_auto: shieldsAreDelegated(state, systemIds),
   };
 }
 
@@ -2446,7 +2450,7 @@ const FAMILY_BUILDERS = Object.freeze({
   sensors: Object.freeze({ build: buildSensorsConsoleState, autoField: 'sensors_auto' }),
   navigation: Object.freeze({ build: buildNavigationConsoleState, autoField: 'navigation_auto', autoScope: 'first' }),
   comms: Object.freeze({ build: buildCommsConsoleState, autoField: 'comms_auto', autoScope: 'first' }),
-  shields: Object.freeze({ build: buildShieldsConsoleState, autoField: 'shields_auto', autoScope: 'first' }),
+  shields: Object.freeze({ build: buildShieldsConsoleState }),
   power: Object.freeze({ build: buildPowerConsoleState, autoField: 'power_auto', autoScope: 'first' }),
   repair: Object.freeze({ build: buildRepairConsoleState, autoField: 'repair_auto', autoScope: 'first' }),
   // No `autoField` here: the per-card `command_auto` above (keyed by each

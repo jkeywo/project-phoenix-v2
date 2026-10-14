@@ -1,5 +1,5 @@
 import { familyView, familySystemId } from '../console-payload.js';
-import { t } from '../strings.js';
+import { t, wireText } from '../strings.js';
 import { UMBILICAL_RESOURCE_ACTION_ID } from './engineering-actions.js';
 import { activateEngineeringAction } from './engineering-action-control.js';
 
@@ -156,7 +156,8 @@ export function renderUmbilicalPanel(s, doc, tr) {
     const choices = um.allowed_resources || [], signature = JSON.stringify(choices);
     if (selector.dataset.choices !== signature) {
       selector.replaceChildren(...choices.map(resource => { const option = doc.createElement('option'); option.value = resource;
-        option.textContent = resource === 'coolant' ? tr('energy.coolant') : tr(resource); return option; }));
+        option.textContent = resource === 'coolant' ? tr('energy.coolant')
+          : resource === 'reserve_fuel' ? tr('console.umbilical.reserve_fuel') : wireText(resource); return option; }));
       selector.dataset.choices = signature;
     }
     selector.dataset.systemId = umbilicalSystemId;

@@ -24,6 +24,7 @@ describe('actual-stock transfer resource selection', () => {
   it('routes a rendered coolant selection through the exact owner without mutating stocks or running intent', () => {
     const f = fixture(), select = document.querySelector('[data-transfer-resource]');
     expect([...select.options].map(option => option.value)).toEqual(['reserve_fuel', 'coolant']);
+    expect(select.options[0].textContent).toBe(t('console.umbilical.reserve_fuel'));
     expect(select.options[1].textContent).toBe(t('energy.coolant'));
     select.value = 'coolant'; select.dispatchEvent(new Event('change'));
     expect(f.wire).toHaveBeenCalledWith('ControlSystemCorrelated', { correlation: 'resource-1', target: 'service-port',
@@ -39,6 +40,8 @@ describe('actual-stock transfer resource selection', () => {
     expect(f.actions.activate(UMBILICAL_RESOURCE_ACTION_ID, { context: 'engineering', detail: { resource: 'coolant' } })).toMatchObject({ handled: false });
     expect(document.querySelector('[data-transfer-resource]')).toBe(select); expect(f.wire).not.toHaveBeenCalled();
     f.update({ allowed_resources: [] }); expect(select.parentElement.hidden).toBe(true);
+    f.update({ allowed_resources: ['custom_resource'], selected_resource: 'custom_resource' });
+    expect(select.options[0].textContent).toBe('custom_resource');
   });
   it('projects the selected resource and choices alongside real levels from the actual System', () => {
     const bb = { capacity: 'reserve_fuel', selected_resource: 'coolant', allowed_resources: ['reserve_fuel', 'coolant'], operator_level: 12, partner_level: 14, running: true };

@@ -5008,3 +5008,6 @@ semantic_action.tactical.weapons_restraint.accessibility,Weapon restraint semant
 console.umbilical.resource,Transfer resource selector,Resource,Ressource,Resource,machine
 semantic_action.engineering.transfer_resource.label,Transfer resource semantic action,Select transfer resource,Transferressource auswählen,Select transfer resource,machine
 semantic_action.engineering.transfer_resource.accessibility,Transfer resource semantic action,Select transfer resource,Transferressource auswählen,Select transfer resource,machine
+console.umbilical.reserve_fuel,Transfer resource label,Reserve fuel,Reservetreibstoff,Reserve fuel,machine
+system.status.reason.overheated,Shared System status UI,Overheated,Überhitzt,Overheated,machine
+system.status.reason.intake_cut,Shared System status UI,Energy intake cut,Energiezufluss unterbrochen,Energy intake cut,machine

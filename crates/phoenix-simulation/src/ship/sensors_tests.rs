@@ -55,6 +55,34 @@ fn seed_viewscreen_from_selection(
     }
 }
 
+/// A publisher-only fixture records actual funded sensor work once. This uses
+/// finite authored local reserves; it does not run the reactor or synthesize
+/// free work when a required profile is absent.
+fn paid_sensor_machinery(
+    uuid: &str,
+) -> (
+    crate::entities::spawner::EntityUuid,
+    crate::ship::power::ShipPowerSystem,
+) {
+    let hull = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .unwrap();
+    let mut power = crate::modifiers::power_system::PowerSystem::from_energy(
+        hull.energy.unwrap(),
+        hull.ship_config.unwrap(),
+    )
+    .unwrap();
+    let id = crate::ship::system_registry::sensor_radar_system_id();
+    let before = power.network().consumers[&id].energy;
+    assert_eq!(power.work_continuous(&id, 0.2, 1.0).unwrap().fraction, 1.0);
+    assert!(power.network().consumers[&id].energy < before);
+    (
+        crate::entities::spawner::EntityUuid(uuid.into()),
+        crate::ship::power::ShipPowerSystem(power),
+    )
+}
+
 fn test_app() -> App {
     let mut app = App::new();
     crate::ai::host::register_ai_host_env(&mut app);
@@ -90,6 +118,7 @@ fn test_app() -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
+        paid_sensor_machinery("local-sensors-fixture"),
         crate::server_app::ShipSystemBlackboards::default(),
         crate::ship::components::load_ship_config_from_disk(),
         crate::ship_plugin::ShipSystemControlSources::default(),
@@ -854,6 +883,7 @@ fn sensors_ai_test_app() -> App {
 
     app.world_mut().spawn((
         crate::server_app::Ship,
+        paid_sensor_machinery("ai-sensors-fixture"),
         control_sources,
         crate::server_app::ShipSystemBlackboards::default(),
         SensorRadarSelection::default(),
@@ -1596,6 +1626,7 @@ fn publish_writes_sensors_blackboards_for_every_ship_not_just_local() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            paid_sensor_machinery("npc-sensors-fixture"),
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection(Some("npc-science-target".into())),
             crate::ai::server::AiProfile {
@@ -1650,6 +1681,7 @@ fn publish_npc_without_profile_falls_back_to_console_range() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            paid_sensor_machinery("npc-sensors-fixture"),
             crate::server_app::ShipSystemBlackboards::default(),
         ))
         .id();
@@ -2070,11 +2102,41 @@ fn alert_publisher_app() -> (App, Entity) {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            paid_sensor_machinery("radar-scanner-fixture"),
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection::default(),
         ))
         .id();
     (app, scanner)
+}
+
+#[test]
+fn an_unfunded_sensor_radar_keeps_its_previous_reading_without_refreshing() {
+    let (mut app, scanner) = alert_publisher_app();
+    let target = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("observed-target".into()),
+            crate::ship::state::ShipRedAlert(true),
+        ))
+        .id();
+    set_selection(&mut app, scanner, Some("observed-target"));
+    app.update();
+    assert_eq!(published_alert(&app, scanner), Some(true));
+    app.world_mut()
+        .entity_mut(scanner)
+        .remove::<crate::ship::power::ShipPowerSystem>();
+    app.world_mut()
+        .get_mut::<crate::ship::state::ShipRedAlert>(target)
+        .unwrap()
+        .0 = false;
+    app.update();
+    assert_eq!(
+        published_alert(&app, scanner),
+        Some(true),
+        "without physical funded machinery the old observation remains, not live world truth"
+    );
 }
 
 /// Read the `selected_target_alert` replica off a ship's sensor-radar blackboard.
@@ -2179,6 +2241,7 @@ fn velocity_publisher_app(own_physics: crate::ship::state::ShipPhysics) -> (App,
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            paid_sensor_machinery("radar-scanner-fixture"),
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection::default(),
             own_physics,
@@ -2327,6 +2390,7 @@ fn power_publisher_app() -> (App, Entity) {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            paid_sensor_machinery("radar-scanner-fixture"),
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection::default(),
         ))
@@ -2363,11 +2427,13 @@ fn spawn_ship_with_power(
     app: &mut App,
     uuid: &str,
     groups: &[crate::modifiers::power_system::AuthoredPowerGroup],
+    restrained: bool,
 ) {
-    let power = crate::modifiers::power_system::PowerSystem::from_authored_groups(
+    let mut power = crate::modifiers::power_system::PowerSystem::from_authored_groups(
         &crate::modifiers::power_system::PowerConfig::default(),
         groups,
     );
+    power.set_weapons_restrained(restrained);
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::entities::spawner::EntityUuid(uuid.into()),
@@ -2412,13 +2478,14 @@ fn sensor_radar_weapons_cold_reports_selected_ship_powered_down() {
             authored_group(crate::modifiers::power_system::WEAPONS_POWER_GROUP, 0, 0),
             authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
         ],
+        true,
     );
     set_selection(&mut app, scanner, Some("enemy-cold"));
     app.update();
     assert_eq!(
         published_weapons_cold(&app, scanner),
         Some(true),
-        "selected ship with its weapons group at level 0 → Some(true)"
+        "selected capable ship explicitly restrained → Some(true)"
     );
 }
 
@@ -2430,16 +2497,17 @@ fn sensor_radar_weapons_cold_reports_selected_ship_with_weapons_powered() {
         "enemy-armed",
         &[
             authored_group(crate::modifiers::power_system::HELM_POWER_GROUP, 2, 1),
-            authored_group(crate::modifiers::power_system::WEAPONS_POWER_GROUP, 2, 0),
+            authored_group(crate::modifiers::power_system::WEAPONS_POWER_GROUP, 0, 0),
             authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
         ],
+        false,
     );
     set_selection(&mut app, scanner, Some("enemy-armed"));
     app.update();
     assert_eq!(
         published_weapons_cold(&app, scanner),
         Some(false),
-        "selected ship with its weapons group powered → Some(false)"
+        "zero incoming flow with a local buffer does not mean restraint → Some(false)"
     );
 }
 
@@ -2473,6 +2541,7 @@ fn sensor_radar_weapons_cold_none_for_a_hull_with_no_weapons_bus() {
             authored_group(crate::modifiers::power_system::HELM_POWER_GROUP, 2, 1),
             authored_group(crate::modifiers::power_system::SHIELDS_POWER_GROUP, 2, 1),
         ],
+        true,
     );
     set_selection(&mut app, scanner, Some("unarmed-hull"));
     app.update();

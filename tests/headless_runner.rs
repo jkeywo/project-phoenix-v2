@@ -13750,20 +13750,8 @@ fn is_in_world(app: &mut bevy::prelude::App, name: &str) -> bool {
         .any(|entity_name| entity_name.0 == name)
 }
 
-/// The `weapons` power group, the one every restraint order in this section
-/// moves.
-fn weapons_group() -> project_phoenix::core::messages::PowerGroupId {
-    project_phoenix::core::messages::PowerGroupId(
-        project_phoenix::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-    )
-}
-
-/// Is the named ship's weapons group switched off (issue #1398)?
-///
-/// The state a `hold_fire` order writes since the captain's hold was retired —
-/// read off the ship's own reactor, which is the one thing the fire gate reads
-/// too.
-fn is_weapons_cold(app: &mut bevy::prelude::App, name: &str) -> bool {
+/// Read the same explicit intent used by ordinary AI and physical fire gates.
+fn weapons_are_restrained(app: &mut bevy::prelude::App, name: &str) -> bool {
     app.world_mut()
         .query::<(
             &project_phoenix::entities::spawner::EntityName,
@@ -13771,59 +13759,31 @@ fn is_weapons_cold(app: &mut bevy::prelude::App, name: &str) -> bool {
         )>()
         .iter(app.world())
         .find(|(entity_name, _)| entity_name.0 == name)
-        .map(|(_, power)| power.0.is_group_cold(&weapons_group()))
+        .map(|(_, power)| power.0.weapons_restrained())
         .unwrap_or_else(|| panic!("{name} is not in the world"))
 }
 
-/// Take the hull the crew fly cold, as an Engineering officer's
-/// `SetPowerGroupAllocation { group: "weapons", level: 0 }` would leave it.
-///
-/// Written straight onto the reactor rather than pushed as an admitted command,
-/// because a headless run has no console session to send one from — the command
-/// path itself is pinned by `ship::power`'s own tests. The destroyer the crew fly
-/// authors `[power_groups.weapons] min_level = 0`, so the order is legal; the
-/// assertion guards that rather than trusting it.
-fn power_the_local_ships_weapons_down(app: &mut bevy::prelude::App) {
-    let mut q = app
+/// Headless fixture equivalent of Tactical's admitted restraint command.
+/// The real command/authority path is covered by the owning Power tests.
+fn restrain_local_ship_weapons(app: &mut bevy::prelude::App) {
+    let mut query = app
         .world_mut()
         .query_filtered::<&mut project_phoenix::ship::power::ShipPowerSystem, With<LocalShip>>();
-    let mut power = q
-        .single_mut(app.world_mut())
-        .expect("the headless run flies one local ship");
-    power
-        .0
-        .set_group_allocation(&weapons_group(), 0)
-        .expect("the hull tracks a weapons group");
-    assert!(
-        power.0.is_group_cold(&weapons_group()),
-        "precondition: the crew's hull authors a weapons group that may be taken \
-         cold — otherwise nothing below is testing restraint"
+    let mut power = query.single_mut(app.world_mut()).expect("one local ship");
+    let before = power.0.network().clone();
+    power.0.set_weapons_restrained(true);
+    assert!(power.0.weapons_restrained());
+    assert_eq!(
+        power.0.network(),
+        &before,
+        "restraint does not cut flows or discard reserves"
     );
 }
 
-/// **Issues #1041/#1398, the lever.** Powering a hull's weapons group down
-/// suppresses an always-armed hull's fire, and powering it back up gives the
-/// fire back.
-///
-/// Every claim is a BEFORE and an AFTER on the SAME hull, in one run, with
-/// nothing else about the world moving: the picket stays hostile, stays in
-/// range and keeps its target throughout. What changes between the samples is
-/// one power level, applied through the same reactor an Engineering officer
-/// commands.
-///
-/// The subject is a Harrow patrol boat deliberately. Its gun line authors
-/// `min_alert_to_fire = 0` — always armed, no captain to call an alert — so it
-/// is the hull restraint has to beat the hard way. An implementation that seeded
-/// a plain `0.0` for a cold group would satisfy every Alliance hull and leave
-/// this one shooting.
-///
-/// It is also the hull that had to LEARN to go cold. Until #1398 this hull
-/// authored no `[power_groups.*]` block at all, so its weapons group sat at the
-/// default floor of 1 and `hold_fire` would have been clamped into a no-op. The
-/// enforcer's silence below is therefore a joint claim about the engine and
-/// about `ship_harrow_patrol.toml`'s authored `min_level = 0`.
+/// The same always-armed picket fires before hold, stops while held, then fires
+/// again after release. Its target and ordinary authored AI remain unchanged.
 #[test]
-fn powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_gives_the_fire_back() {
+fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() {
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
 
@@ -13839,9 +13799,9 @@ fn powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_give
     //
     // Done a moment in, not at tick zero: the game-start ship does not exist
     // until `spawn_game_start_entities` has run, and
-    // `power_the_local_ships_weapons_down` asserts on finding exactly one.
+    // `restrain_local_ship_weapons` asserts on finding exactly one.
     run(&mut app, ticks_for_sim_seconds(0.5, dt));
-    power_the_local_ships_weapons_down(&mut app);
+    restrain_local_ship_weapons(&mut app);
 
     // ── Powered: it shoots ──────────────────────────────────────────────────
     //
@@ -13862,7 +13822,7 @@ fn powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_give
         "precondition: the scenario has issued the hold"
     );
     assert!(
-        is_weapons_cold(&mut app, R_ENFORCER),
+        weapons_are_restrained(&mut app, R_ENFORCER),
         "the scripted `hold_fire` reached the reactor — the verb kept its name and \
          became a power order (issue #1398)"
     );
@@ -13878,11 +13838,10 @@ fn powering_the_weapons_down_silences_an_always_armed_hull_and_restoring_it_give
     //
     // The half that makes the middle sample mean something. A lever that could
     // not be released would be a ship that had disarmed itself. `release_fire`
-    // puts the group back at the hull's authored `default_level` rather than at
-    // a number the world file guessed.
+    // clears the explicit restraint without changing incoming flow or local energy.
     run(&mut app, ticks_for_sim_seconds(6.0, dt));
     assert!(restraint_flag(&app, "enforcer_released"));
-    assert!(!is_weapons_cold(&mut app, R_ENFORCER));
+    assert!(!weapons_are_restrained(&mut app, R_ENFORCER));
     let after_release = last_shot_secs(&mut app, R_ENFORCER).expect("still firing");
     assert!(
         after_release > during_hold,
@@ -13917,12 +13876,12 @@ fn the_crews_own_restraint_is_visible_to_the_scenario_and_something_answers_it()
          asking about one specific hull would use"
     );
 
-    // The crew's Engineering officer takes the guns cold. Written as the state
-    // the admitted `SetPowerGroupAllocation` command produces rather than pushed
+    // Tactical's explicit restraint is written as the state
+    // the admitted `SetWeaponsRestraint` command produces rather than pushed
     // as that command, because a headless run has no console session to send one
     // from — the command path itself is pinned by `ship::power`'s own tests. What
     // is under test HERE is everything downstream of the state.
-    power_the_local_ships_weapons_down(&mut app);
+    restrain_local_ship_weapons(&mut app);
     run(&mut app, ticks_for_sim_seconds(1.0, dt));
     assert!(
         restraint_flag(&app, "weapons_cold.own_ship"),
@@ -13975,7 +13934,7 @@ fn a_claimant_can_be_disabled_or_destroyed_and_each_writes_its_own_flags() {
          is out of the fight and it is not dead."
     );
     assert!(
-        is_weapons_cold(&mut app, R_DISABLED),
+        weapons_are_restrained(&mut app, R_DISABLED),
         "…silenced through the restraint lever — its weapons group taken cold \
          — rather than through a new combat state"
     );
@@ -14034,7 +13993,7 @@ fn falling_skyway_picket_sits_there_until_somebody_starts_something() {
     const PICKET: &str = "world.falling_skyway.entity.havelock_enforcer.name";
     assert!(is_in_world(&mut app, PICKET), "the picket is on station");
     assert!(
-        !is_weapons_cold(&mut app, PICKET),
+        !weapons_are_restrained(&mut app, PICKET),
         "…its weapons group powered, which is the state a hull nobody has \
          ordered anything is in"
     );
@@ -14407,7 +14366,7 @@ fn falling_skyway_authorised_force_stops_at_the_pickets_own_threshold() {
          wreckage"
     );
     assert!(
-        is_weapons_cold(&mut app, PICKET),
+        weapons_are_restrained(&mut app, PICKET),
         "…and silenced through the restraint lever rather than a new combat state"
     );
     assert_eq!(
@@ -14719,7 +14678,7 @@ fn security_teams_take_a_neutral_picket_without_a_shot_being_fired() {
          is answered and the boat is not wreckage"
     );
     assert!(
-        is_weapons_cold(&mut app, P_PICKET),
+        weapons_are_restrained(&mut app, P_PICKET),
         "…and silenced through the restraint lever rather than through a new combat \
          state"
     );
@@ -22385,30 +22344,43 @@ fn reengage_holding(app: &mut App, derelict_uuid: &str) {
     );
 }
 
-/// Drop the tractor power group below its authored `min_power_level` (2).
+/// Exhaust the tractor buffer and explicitly stop intake so work cannot be funded.
 fn cut_tractor_power(app: &mut App) {
     let op = tractor_operator(app);
     let mut ps = app
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the tug has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("tractor".into()),
-        1,
-    );
+    let system = project_phoenix::core::messages::SystemId("tractor".into());
+    ps.0.set_fine_flow(&system, Some(0.0)).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .expect("authored consumer")
+        .energy = 0.0;
 }
 
-/// Restore the tractor power group to its nominal level.
+/// Restore ordinary intake and a funded local buffer.
 fn restore_tractor_power(app: &mut App) {
     let op = tractor_operator(app);
     let mut ps = app
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the tug has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("tractor".into()),
-        2,
-    );
+    let system = project_phoenix::core::messages::SystemId("tractor".into());
+    let initial =
+        ps.0.config()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == system)
+            .expect("authored consumer")
+            .initial_energy;
+    ps.0.set_fine_flow(&system, None).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .unwrap()
+        .energy = initial;
 }
 
 /// Knock the tractor system's HP below its authored disabled threshold.
@@ -23319,17 +23291,20 @@ fn send_dock(app: &mut App, payload: project_phoenix::core::messages::SystemCont
     run(app, 2);
 }
 
-/// Drop the dock power group below its authored `min_power_level` (2).
+/// Exhaust the Dock buffer and explicitly stop intake so work cannot be funded.
 fn cut_dock_power(app: &mut App) {
     let op = dock_operator(app);
     let mut ps = app
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("dock".into()),
-        1,
-    );
+    let system = project_phoenix::core::messages::SystemId("dock".into());
+    ps.0.set_fine_flow(&system, Some(0.0)).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .expect("authored consumer")
+        .energy = 0.0;
 }
 
 fn restore_dock_power(app: &mut App) {
@@ -23338,10 +23313,20 @@ fn restore_dock_power(app: &mut App) {
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("dock".into()),
-        2,
-    );
+    let system = project_phoenix::core::messages::SystemId("dock".into());
+    let initial =
+        ps.0.config()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == system)
+            .expect("authored consumer")
+            .initial_energy;
+    ps.0.set_fine_flow(&system, None).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .unwrap()
+        .energy = initial;
 }
 
 fn disable_dock(app: &mut App) {
@@ -24139,10 +24124,13 @@ fn cut_umbilical_power(app: &mut App) {
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("umbilical".into()),
-        1,
-    );
+    let system = project_phoenix::core::messages::SystemId("umbilical".into());
+    ps.0.set_fine_flow(&system, Some(0.0)).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .expect("authored consumer")
+        .energy = 0.0;
 }
 
 fn restore_umbilical_power(app: &mut App) {
@@ -24151,10 +24139,20 @@ fn restore_umbilical_power(app: &mut App) {
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ = ps.0.set_group_allocation(
-        &project_phoenix::core::messages::PowerGroupId("umbilical".into()),
-        2,
-    );
+    let system = project_phoenix::core::messages::SystemId("umbilical".into());
+    let initial =
+        ps.0.config()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == system)
+            .expect("authored consumer")
+            .initial_energy;
+    ps.0.set_fine_flow(&system, None).unwrap();
+    ps.0.network_mut()
+        .consumers
+        .get_mut(&system)
+        .unwrap()
+        .energy = initial;
 }
 
 fn disable_umbilical(app: &mut App) {

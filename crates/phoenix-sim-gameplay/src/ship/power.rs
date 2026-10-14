@@ -367,60 +367,44 @@ fn reorder_energy_group(
 
 /// Map a power group to its explicit Coordination destination. Multi-instance
 /// Shields has no coarse System, so it resolves the shared `shield_arc` owner.
-fn address_for_power_group(
+fn addresses_for_power_group(
     config: &crate::ship::config::ShipConfig,
+    power: &PowerSystem,
     group: &str,
-) -> Option<crate::core::messages::CoordinationAddress> {
-    match group {
-        WEAPONS_POWER_GROUP => crate::ship::coordination::address_for_system(
-            config,
-            &crate::ship::system_registry::tactical_radar_system_id(),
-        ),
-        HELM_POWER_GROUP => crate::ship::coordination::address_for_system(
-            config,
-            &crate::ship::system_registry::helm_steering_system_id(),
-        ),
-        SHIELDS_POWER_GROUP => crate::ship::coordination::address_for_system_kind(
-            config,
-            crate::ship::system_registry::SHIELD_ARC_KIND,
-        ),
-        _ => None,
+) -> Vec<crate::core::messages::CoordinationAddress> {
+    let mut addresses = Vec::new();
+    for system in &config.systems {
+        let mut cursor = system.power_group.as_ref();
+        let mut affected = false;
+        for _ in 0..=power.config().groups.len() {
+            let Some(id) = cursor else {
+                break;
+            };
+            if id.0 == group {
+                affected = true;
+                break;
+            }
+            cursor = power
+                .config()
+                .groups
+                .iter()
+                .find(|row| &row.id == id)
+                .and_then(|row| row.parent.as_ref());
+        }
+        if affected {
+            if let Some(address) = crate::ship::coordination::address_for_system(config, &system.id)
+            {
+                if !addresses.contains(&address) {
+                    addresses.push(address);
+                }
+            }
+        }
     }
+    addresses
 }
 
-/// Emit power brownout coordination advisories when the reactor EXHAUSTS —
-/// battery charge hits zero and [`PowerSystem::tick`] takes every group DOWN to
-/// [`GROUP_LEVEL_MIN`] and locks the reactor.
-///
-/// This is the brownout, and the only one: the ship actually lost power and
-/// every system that was running reset to 1. (A group somebody had already
-/// switched off is left cold rather than raised — see `PowerSystem::tick`.) It is emphatically NOT a "reserve running low"
-/// warning — a draining-but-managed reactor (the AI shed ladder doing its job
-/// on the way down, which is the normal state of any ship holding elevated
-/// power in combat) is expected and says nothing. Firing on mere drain
-/// spammed every red-alert fight, loudest on the player's own ship, for a
-/// condition that never reached the lock the ladder exists to avoid.
-///
-/// Driven by [`PowerBrownoutState::locked_changed`] — the lock-changed edge
-/// [`tick_power_system`] forwards from [`PowerSystem::tick`]. The edge fires on
-/// BOTH lock and unlock; only the INTO-locked direction (`power.0.locked()`) is
-/// a brownout. On lock every group's owning station is told (helm → Helm,
-/// weapons → Tactical, shields → Shields) and the announced set is recorded in
-/// `notified_groups` for the intent narration to read while the lock persists;
-/// on recovery the set is cleared so a later exhaustion re-announces.
-///
-/// # `sender_origin`
-///
-/// Resolved from the ship's own `power-reactor` control source — the allocation
-/// surface, i.e. the system whose state *is* the brownout, and the same
-/// representative `handle_power_messages` admits against. Until issue #873 this
-/// was hardcoded to `ControlSource::Ai`, which is a routing-tag lie in the
-/// opposite direction from the emit-side branches that issue removed: a
-/// human-operated Power console's advisory claimed AI origin, so
-/// `route_coordination` raised a popup at a human Helm/Tactical where two humans
-/// on the same bridge should simply talk to each other (Suppress). Nothing here
-/// branches on the value — it is stamped and forgotten, exactly as
-/// `detect_damage_tier_crossings` stamps its own.
+/// Report new incoming-flow cuts to every affected Console, including fine
+/// groups and groups spanning several seats. Reserves and standing orders remain.
 pub fn tick_power_brownout_advisory(
     mut ships: Query<
         (
@@ -463,21 +447,34 @@ pub fn tick_power_brownout_advisory(
         for id in newly_cut {
             let group_id = crate::core::messages::PowerGroupId(id);
             let level = 0;
-            if let Some(address) = address_for_power_group(&ship_config.0, &group_id.0) {
+            for address in addresses_for_power_group(&ship_config.0, &power.0, &group_id.0) {
                 writer.write(CoordinationEnqueue {
                     source_entity: entity,
                     sender_origin,
                     address,
                     payload: CoordinationPayload::PowerBrownout {
                         group: group_id.0.clone(),
-                        label: power_group_label(&group_id.0).to_string(),
+                        label: ship_config
+                            .0
+                            .power_groups
+                            .get(&group_id)
+                            .map(|group| group.label.clone())
+                            .unwrap_or_else(|| power_group_label(&group_id.0).to_string()),
                         allocated_level: level,
                     },
                     presentation: crate::core::messages::CoordinationPresentation::new(
                         "coordination.power_brownout.title",
                         "coordination.power_brownout.body",
                     )
-                    .with_title_param("label", power_group_label(&group_id.0))
+                    .with_title_param(
+                        "label",
+                        ship_config
+                            .0
+                            .power_groups
+                            .get(&group_id)
+                            .map(|group| group.label.as_str())
+                            .unwrap_or_else(|| power_group_label(&group_id.0)),
+                    )
                     .with_body_param("level", level),
                     sender_label: crate::ship::coordination::CHATTER_SENDER_POWER.to_string(),
                     sender_system: crate::ship::system_registry::power_reactor_system_id(),

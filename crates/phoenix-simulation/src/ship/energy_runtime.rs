@@ -130,6 +130,29 @@ pub fn tick_power_system(
         if let Some(mut state) = brownout {
             state.locked_changed |= before != after;
         }
+        for kind in [
+            crate::ship::system_registry::HELM_RADAR_KIND,
+            crate::ship::system_registry::TACTICAL_RADAR_KIND,
+            crate::ship::system_registry::SENSOR_RADAR_KIND,
+            crate::ship::system_registry::NAVIGATION_KIND,
+        ] {
+            let ids: Vec<_> = candidate
+                .ship_config()
+                .systems
+                .iter()
+                .filter(|system| system.kind == kind)
+                .map(|system| system.id.clone())
+                .collect();
+            for id in ids {
+                // Disabled machinery performs no work; a restored setting can resume.
+                let activity = if sources.is_some_and(|sources| sources.0.is_offline(&id)) {
+                    0.0
+                } else {
+                    1.0
+                };
+                let _ = candidate.work_continuous(&id, time.delta_secs(), activity);
+            }
+        }
         power.0 = candidate;
     }
 }

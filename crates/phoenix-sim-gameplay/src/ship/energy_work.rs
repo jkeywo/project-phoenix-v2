@@ -23,6 +23,21 @@ pub fn continuous_for_kind(
         .map_or(0.0, |grant| grant.fraction)
 }
 
+/// Last funded processing fraction, recorded at the physical tick boundary.
+/// Publishers consume this without spending or advancing machinery themselves.
+pub fn fraction_for_kind(power: Option<&PowerSystem>, kind: &str) -> f32 {
+    power
+        .and_then(|power| {
+            power
+                .ship_config()
+                .systems
+                .iter()
+                .find(|system| system.kind == kind)
+                .and_then(|system| power.last_work_fraction(&system.id))
+        })
+        .unwrap_or(0.0)
+}
+
 #[cfg(test)]
 #[path = "energy_work_tests.rs"]
 mod tests;

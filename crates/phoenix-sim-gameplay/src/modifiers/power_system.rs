@@ -33,6 +33,7 @@ pub struct PowerState {
     pub weapons_restrained: bool,
     pub last_reactor_energy_delta_per_sec: f32,
     pub last_intake_per_sec: BTreeMap<SystemId, f32>,
+    pub last_work_fraction: BTreeMap<SystemId, f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strike_boost: Option<crate::modifiers::strike_reserve::StrikeBoost>,
 }
@@ -146,6 +147,7 @@ pub struct PowerSystem {
     weapons_restrained: bool,
     last_reactor_energy_delta_per_sec: f32,
     last_intake_per_sec: BTreeMap<SystemId, f32>,
+    last_work_fraction: BTreeMap<SystemId, f32>,
     strike_config: Option<StrikeReserveConfig>,
     strike_boost: Option<crate::modifiers::strike_reserve::StrikeBoost>,
 }
@@ -165,6 +167,11 @@ impl PowerSystem {
             .keys()
             .map(|id| (id.clone(), 0.0))
             .collect();
+        let last_work_fraction = network
+            .consumers
+            .keys()
+            .map(|id| (id.clone(), 0.0))
+            .collect();
         Ok(Self {
             hardware: std::sync::Arc::new(hardware),
             ship: std::sync::Arc::new(ship),
@@ -172,6 +179,7 @@ impl PowerSystem {
             coolant_credit: BTreeMap::new(),
             weapons_restrained: false,
             last_reactor_energy_delta_per_sec: 0.0,
+            last_work_fraction,
             last_intake_per_sec,
             strike_config: None,
             strike_boost: None,
@@ -277,7 +285,12 @@ impl PowerSystem {
             .find(|consumer| &consumer.system == system)
             .ok_or("unknown energy consumer")?
             .continuous_cost_per_sec;
-        self.spend_continuous(system, rate * dt * activity)
+        let grant = self.spend_continuous(system, rate * dt * activity)?;
+        self.last_work_fraction.insert(
+            system.clone(),
+            if activity > 0.0 { grant.fraction } else { 0.0 },
+        );
+        Ok(grant)
     }
 
     /// A simultaneous firing step commits every projectile's energy or none.
@@ -303,6 +316,9 @@ impl PowerSystem {
     pub fn try_work_discrete(&mut self, system: &SystemId) -> Result<bool, String> {
         self.try_work_discrete_count(system, 1)
     }
+    pub fn last_work_fraction(&self, system: &SystemId) -> Option<f32> {
+        self.last_work_fraction.get(system).copied()
+    }
     pub fn set_weapons_restrained(&mut self, restrained: bool) {
         self.weapons_restrained = restrained;
     }
@@ -317,6 +333,7 @@ impl PowerSystem {
             weapons_restrained: self.weapons_restrained,
             last_reactor_energy_delta_per_sec: self.last_reactor_energy_delta_per_sec,
             last_intake_per_sec: self.last_intake_per_sec.clone(),
+            last_work_fraction: self.last_work_fraction.clone(),
             strike_boost: self.strike_boost.clone(),
         }
     }
@@ -333,6 +350,17 @@ impl PowerSystem {
                 .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err("invalid saved energy observations".into());
+        }
+        if saved
+            .last_work_fraction
+            .keys()
+            .ne(self.network.consumers.keys())
+            || saved
+                .last_work_fraction
+                .values()
+                .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err("invalid saved work observations".into());
         }
         if saved.coolant_credit.iter().any(|(id, value)| {
             id.trim().is_empty() || !value.is_finite() || !(0.0..1.0).contains(value)
@@ -366,6 +394,7 @@ impl PowerSystem {
         self.weapons_restrained = saved.weapons_restrained;
         self.last_reactor_energy_delta_per_sec = saved.last_reactor_energy_delta_per_sec;
         self.last_intake_per_sec = saved.last_intake_per_sec.clone();
+        self.last_work_fraction = saved.last_work_fraction.clone();
         self.strike_boost = saved.strike_boost.clone();
         Ok(())
     }

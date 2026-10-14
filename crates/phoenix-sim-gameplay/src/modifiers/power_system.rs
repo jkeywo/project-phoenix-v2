@@ -7,7 +7,7 @@ use crate::core::messages::{PowerGroupId, SystemId};
 use crate::entities::config::{
     EnergyConfigSection, EnergyConsumerConfig, EnergyGroupConfig, EnergyReactorConfig,
 };
-use crate::resources::energy::{EnergyConfig, EnergyState};
+use crate::resources::energy::EnergyConfig;
 use crate::resources::energy_network::{
     CoolingUsage, EnergyAllocationMode, EnergyCoolantBindings, EnergyNetworkResult,
     EnergyNetworkState,

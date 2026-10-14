@@ -146,7 +146,7 @@ pub fn seed_power_facts(
 pub fn seed_strike_reserve_facts(facts: &mut crate::world::flags::AiFacts, power: &PowerSystem) {
     use crate::entities::ai_flag_hosts as fid;
     if let Some(boost) = power.strike_boost() {
-        facts.set_fact(fid::STRIKE_RESERVE_CHARGE, power.battery_charge as f64);
+        facts.set_fact(fid::STRIKE_RESERVE_CHARGE, power.battery_charge() as f64);
         facts.set_fact(
             fid::STRIKE_BOOST_ENABLED,
             if boost.enabled { 1.0 } else { 0.0 },
@@ -267,146 +267,48 @@ pub fn authored_power_group_seed(
     seed
 }
 
-/// Handle `SetPowerGroupAllocation` messages from the Power console.
-///
-/// Validates: sender holds the `power` station. Reads `ControlSystem` messages
-/// targeting the **reactor** fine system (`POWER_REACTOR_SYSTEM_ID`) with a
-/// `SetPowerGroupAllocation` payload, and calls `PowerSystem::increase` / `decrease`
-/// to reach the requested level. Per issue #513 the reactor OWNS the allocation
-/// surface — a Disabled/Destroyed reactor's `accept_human_input` policy
-/// (populated by `sync_console_damage_tiers`) refuses these messages at
-/// admission, so the coarse `power` id no longer receives allocation input.
-///
-/// After PR 6 (PRD #597): mutates the per-entity `ShipPowerSystem` component
-/// on the LocalShip entity when present, otherwise the global `ShipPowerSystem`
-/// resource. When both are present, dual-writes so legacy readers stay in sync.
+/// Apply admitted settings to the reactor owner. Ownership and knowledge remain
+/// Console-scoped; displaying another consumer never admits its commands.
 pub fn handle_power_messages(
-    mut ship_query: Query<
-        (
-            &crate::core::messages::AdmittedCommands,
-            Option<&mut ShipPowerSystem>,
-            Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-    power_res: Option<ResMut<ShipPowerSystem>>,
+    mut ships: Query<(&crate::core::messages::AdmittedCommands, &mut ShipPowerSystem)>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    let mut power_res = power_res;
-    // Iterate every ship (player + NPC) so the player's Power console commands
-    // AND NPC AI reallocation both re-allocate that ship's own power grid
-    // through the one applier. Since issue #831 the NPC AI path emits an
-    // admitted `SetPowerGroupAllocation` (from
-    // `console_ai::server::ai_power_allocation`) that lands in this same
-    // `AdmittedCommands` queue — there is no longer a separate
-    // `integrate_power_state` adapter mutating `ShipPowerSystem` directly.
-    for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
+    use crate::core::messages::SystemControlPayload as Control;
+    for (admitted, mut power) in &mut ships {
         for cmd in admitted.for_target(crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID) {
-            if let crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
-                group,
-                level,
-            } = &cmd.payload
-            {
-                let applied = if let Some(pc) = power_comp.as_deref_mut() {
-                    match pc.0.set_group_allocation(group, *level) {
-                        Ok(()) => true,
-                        Err(err) => {
-                            warn!("power.allocation_ignored={err:?}");
-                            false
-                        }
-                    }
-                } else if is_local {
-                    match power_res.as_deref_mut() {
-                        Some(pr) => match pr.0.set_group_allocation(group, *level) {
-                            Ok(()) => true,
-                            Err(err) => {
-                                warn!("power.allocation_ignored={err:?}");
-                                false
-                            }
-                        },
-                        None => false,
-                    }
-                } else {
-                    false
-                };
-                crate::command_admission::finish_admitted_action_feedback(
-                    &mut outbound,
-                    cmd,
-                    if applied {
-                        crate::core::messages::ActionFeedbackOutcome::Applied
-                    } else {
-                        crate::core::messages::ActionFeedbackOutcome::Refused
-                    },
-                );
-            }
-        }
-        // Dual-write: keep the Resource in sync with the LocalShip's
-        // Component when both exist (legacy Resource path for tests).
-        if is_local {
-            if let (Some(pc), Some(pr)) = (power_comp.as_deref(), power_res.as_deref_mut()) {
-                pr.0 = pc.0.clone();
-            }
+            let mut candidate = power.0.clone();
+            let result: Result<(), String> = match &cmd.payload {
+                Control::SetPowerGroupAllocation { group, level } => candidate.set_group_allocation(group, *level).map_err(|error| format!("{error:?}")),
+                Control::SetEnergyReactor { output_per_sec, cooling_per_sec } => candidate.set_output(*output_per_sec).and_then(|()| candidate.set_reactor_cooling(*cooling_per_sec)),
+                Control::SetEnergyGroup { group, flow_per_sec, cooling_per_sec } => candidate.set_flow(group, *flow_per_sec).and_then(|()| candidate.set_cooling(group, *cooling_per_sec)),
+                Control::SetEnergySystemFlow { system, flow_per_sec } => candidate.set_fine_flow(system, *flow_per_sec),
+                Control::SetEnergyMode { mode, cooling_usage } => { candidate.set_mode(*mode); candidate.set_cooling_usage(*cooling_usage); Ok(()) },
+                Control::SetEnergyPriority { group, priority } => reorder_energy_group(&mut candidate, group, *priority),
+                _ => continue,
+            };
+            if result.is_ok() { power.0 = candidate; }
+            crate::command_admission::finish_admitted_action_feedback(&mut outbound, cmd,
+                if result.is_ok() { crate::core::messages::ActionFeedbackOutcome::Applied }
+                else { crate::core::messages::ActionFeedbackOutcome::Refused });
         }
     }
 }
 
-/// Tick the power system battery charge each frame.
-///
-/// After PR 6 (PRD #597): iterates ALL ship entities with a `ShipPowerSystem`
-/// component so NPC ships tick their own power. Uses the per-entity
-/// `PowerConfigResource` component when present, else the global Resource
-/// fallback, so NPC ships without a `[power]` block still tick with defaults.
-/// The Resource fallback path is retained for test environments that only
-/// insert the resource without a ship entity.
-///
-/// Forwards [`PowerSystem::tick`]'s lock-changed edge into
-/// [`PowerBrownoutState::locked_changed`] on the same ship, for
-/// [`tick_power_brownout_advisory`] to consume later in the tick.
-pub fn tick_power_system(
-    time: Res<Time>,
-    mut power_res: Option<ResMut<ShipPowerSystem>>,
-    config_res: Option<Res<PowerConfigResource>>,
-    mut ships: Query<
-        (
-            &mut ShipPowerSystem,
-            Option<&PowerConfigResource>,
-            Option<&mut PowerBrownoutState>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-) {
-    let dt = time.delta_secs();
-    let mut ticked_any = false;
-    for (mut power, config_comp, brownout_state) in ships.iter_mut() {
-        let cfg_default;
-        let cfg: &PowerConfigResource = match config_comp {
-            Some(c) => c,
-            None => match config_res.as_deref() {
-                Some(c) => c,
-                None => {
-                    cfg_default = PowerConfigResource::default();
-                    &cfg_default
-                }
-            },
-        };
-        let locked_changed = power.0.tick(dt, &cfg.0);
-        if let Some(mut state) = brownout_state {
-            if locked_changed {
-                state.locked_changed = true;
-            }
-        }
-        ticked_any = true;
-    }
-    // Fallback: no ship entity with the component (test environments that only
-    // insert the Resource form). Tick the Resource directly. The lock edge is
-    // dropped here on purpose — there is no ship entity, so there is no
-    // `PowerBrownoutState` to carry it to and no advisory system to read it.
-    if !ticked_any {
-        if let (Some(power), Some(config)) = (power_res.as_deref_mut(), config_res.as_deref()) {
-            let _ = power.0.tick(dt, &config.0);
-        }
-    }
+/// A priority command moves one sibling in a stable list, rather than creating
+/// ambiguous equal priorities or silently reordering unrelated subgroups.
+fn reorder_energy_group(power: &mut PowerSystem, group: &PowerGroupId, requested: u16) -> Result<(), String> {
+    let parent = power.config().groups.iter().find(|entry| &entry.id == group)
+        .ok_or("unknown energy group")?.parent.clone();
+    let mut siblings: Vec<_> = power.config().groups.iter().filter(|entry| entry.parent == parent)
+        .map(|entry| entry.id.clone()).collect();
+    siblings.sort_by(|a, b| (power.network().groups[a].priority, a).cmp(&(power.network().groups[b].priority, b)));
+    siblings.retain(|id| id != group);
+    siblings.insert(usize::from(requested).min(siblings.len()), group.clone());
+    for (rank, id) in siblings.iter().enumerate() { power.set_priority(id, u16::try_from(rank).map_err(|_| "too many priority siblings")?)?; }
+    Ok(())
 }
+
+// Energy routing and real-stock integration live in Simulation's owning Power adapter.
 
 /// Map a power group to its explicit Coordination destination. Multi-instance
 /// Shields has no coarse System, so it resolves the shared `shield_arc` owner.
@@ -484,18 +386,19 @@ pub fn tick_power_brownout_advisory(
         if !std::mem::take(&mut brownout_state.locked_changed) {
             continue;
         }
-        if !power.0.locked() {
-            brownout_state.notified_groups.clear();
-            continue;
-        }
+        let cuts: std::collections::HashSet<_> = power.0.network().groups.iter()
+            .filter(|(_, group)| group.cut).map(|(id, _)| id.0.clone()).collect();
+        let mut newly_cut: Vec<_> = cuts.difference(&brownout_state.notified_groups).cloned().collect();
+        newly_cut.sort();
+        brownout_state.notified_groups = cuts;
 
         let sender_origin = control_sources
             .0
             .source_for(&crate::ship::system_registry::power_reactor_system_id());
 
-        brownout_state.notified_groups.clear();
-        for (group_id, level) in power.0.iter() {
-            brownout_state.notified_groups.insert(group_id.0.clone());
+        for id in newly_cut {
+            let group_id = crate::core::messages::PowerGroupId(id);
+            let level = 0;
             if let Some(address) = address_for_power_group(&ship_config.0, &group_id.0) {
                 writer.write(CoordinationEnqueue {
                     source_entity: entity,
@@ -694,7 +597,7 @@ pub fn publish_power_blackboard(
         groups: entries,
         total: power.0.total(),
         total_max: power.0.max_commanded_total(),
-        battery_charge: power.0.battery_charge,
+        battery_charge: power.0.battery_charge(),
         battery_max: config.0.capacity,
         draining: power.0.is_draining(&config.0),
         charging: power.0.is_charging(&config.0),
@@ -715,7 +618,7 @@ pub fn publish_power_blackboard(
         0.0
     };
     let battery_bb = PowerBatteryBlackboard {
-        charge: power.0.battery_charge,
+        charge: power.0.battery_charge(),
         capacity: config.0.capacity,
         is_online: battery_online,
         emergency_threshold,

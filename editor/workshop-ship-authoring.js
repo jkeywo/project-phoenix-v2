@@ -59,8 +59,15 @@ function tomlValue(value) {
   throw new Error('unsupported-ship-value');
 }
 
+// Scalar fields belong to the record header, before either a normal nested
+// table or an array table. AI definitions introduce both forms.
+function recordBodyEnd(source, block) {
+  const next = /^[ \t]*\[{1,2}[^\]\r\n]+\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/m.exec(source.slice(block.body, block.end));
+  return next ? block.body + next.index : block.end;
+}
+
 function setKey(source, block, key, value) {
-  const bodyEnd = headers(source).find(header => header.start >= block.body && header.start < block.end)?.start ?? block.end;
+  const bodyEnd = recordBodyEnd(source, block);
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`^[ \\t]*${escaped}[ \\t]*=[ \\t]*`, 'm').exec(source.slice(block.body, bodyEnd));
   if (match) {
@@ -72,7 +79,7 @@ function setKey(source, block, key, value) {
 }
 
 function removeKey(source, block, key) {
-  const bodyEnd = headers(source).find(header => header.start >= block.body && header.start < block.end)?.start ?? block.end;
+  const bodyEnd = recordBodyEnd(source, block);
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`^[ \\t]*${escaped}[ \\t]*=[^\\r\\n]*(?:\\r?\\n|$)`, 'm').exec(source.slice(block.body, bodyEnd));
   return match ? source.slice(0, block.body + match.index) + source.slice(block.body + match.index + match[0].length) : source;

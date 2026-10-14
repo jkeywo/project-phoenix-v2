@@ -189,3 +189,29 @@ it('creates and updates a complete composition through one accepted history entr
   await expect(applyShipOperation({ draft, runtime, operation: op({ type: 'system-composition-set', id: 'clamps', components: [changed[1]], channels }) })).rejects.toThrow();
   expect(draft.read(operationPath())).toBe(edited);
 });
+
+it.each(['\n', '\r\n'])('keeps System ownership scalars outside nested AI tables (%j)', nl => {
+  const draft = pack();
+  const text = source + `
+[system.config.ai]
+root = "idle"
+[[system.config.ai.tree]]
+id = "idle"
+initial = "wait"
+[[system.config.ai.tree.state]]
+id = "wait"
+`;
+  draft.edit(operationPath(), text.replace(/\r?\n/g, nl));
+  const before = parse(draft.read(operationPath())).system.at(-1).config.ai;
+  const update = prepareShipOperation(draft, dependencies, schema, op({ type: 'system-update', id: 'sensors',
+    fields: { console: 'flight-screen', ai_only: false, power_group: 'helm' } }));
+  const updated = parse(update.changes[0].after).system.at(-1);
+  expect(updated).toMatchObject({ console: 'flight-screen', ai_only: false, power_group: 'helm' });
+  expect(updated.config.ai).toEqual(before);
+  draft.apply(update.changes);
+  const cleared = prepareShipOperation(draft, dependencies, schema, op({ type: 'system-update', id: 'sensors',
+    fields: { power_group: undefined } }));
+  const final = parse(cleared.changes[0].after).system.at(-1);
+  expect(final).not.toHaveProperty('power_group');
+  expect(final.config.ai).toEqual(before);
+});

@@ -95,11 +95,11 @@ test('Workshop authors Consoles and Dock components through real validation, his
     await byId(page, 'systems').selectOption('dock');
     const ai = page.locator('#workshop-ai');
     await expect(ai.locator('#workshop-ai-resolved')).toContainText('operate: call');
-    await testInfo.attach('ai-state-tree-editor', { body: await ai.screenshot(), contentType: 'image/png' });
     await expect(ai.locator(':scope > [data-ai-action="apply"]')).toBeDisabled();
     await ai.locator('#workshop-ai-materialise').check();
     await ai.locator('[data-ai-action="flatten"]').click();
     await ai.locator('[data-ai-field="parameters.allow_start.value"]').uncheck();
+    await testInfo.attach('ai-state-tree-editor', { body: await page.screenshot(), contentType: 'image/png' });
     await ai.locator(':scope > [data-ai-action="apply"]').click();
     await expect(byId(page, 'status')).toHaveText(ts('workshop.ship.applied'));
     const afterAi = await sourceOf(page);

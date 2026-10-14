@@ -41,11 +41,11 @@ entities:
 
   - decision: component-damage-increment-eleven-adoption-draft
     core:
-      status: proposed
-      confidence: provisional
+      status: accepted
+      confidence: confirmed
       origin: ai
-      title: Draft the Smallest Complete Damage and Restoration Migration
-      summary: "The increment 11 implementation draft gives one authoritative compartment/condition owner, typed structural and component job targets, stable mechanism-bound component identities, stock-backed remedies and shared adapters for actual damage producers. Damage, availability, reports, parts, restoration, defeat, Workshop and continuation must land together. No runtime implementation or playable exit is claimed by this draft."
+      title: Adopt the Complete Damage and Restoration Migration Contracts
+      summary: "After increment 10 initial commit 22b31f57, adopt explicit System damage-component definitions with closed operation/intake/cooling bindings; physical/laser impact profiles; compartment HP and material distance resistance; conserved penetration/payload deposition; persisted amount-based fault dose; typed structural/component job targets; and bounded stages reserved and consumed against actual stocks. Damage, availability, reports, parts, restoration, defeat, Workshop and continuation land together. No completed runtime or playable exit is claimed."
       rationale:
-        - "[ai] Implementation specification and pending adoption choices: docs/gameplay-redesign/implementation/increment-11.md. Recommended penetration/deposition, component bindings and remedy transactions are explicit proposals; no physical coefficients or broad fault framework are adopted silently."
+        - "[ai] Concrete integration vocabulary is adopted in docs/gameplay-redesign/implementation/increment-11.md. Numerical coefficients remain explicit authored tuning to validate. The later user-authorized pipeline permits pinned validation after each initial commit while main advances; initial implementation does not establish verified exit."
         - "Remove interior.repair_placements, SystemHull/ShipArcHull primary ship damage and their repair/availability writers in this increment. Any retained asteroid or legacy wire projection has a named independent owner and no competing ship HP. Automatic deliveries/production stay increment 12; fitting 13; advanced sensing 14; broader personnel 20."

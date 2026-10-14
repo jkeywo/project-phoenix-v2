@@ -1,14 +1,16 @@
 # Increment 11: component damage and restoration
 
-Draft implementation contract prepared during increment 10 validation. **Not yet
-adopted for runtime implementation.** This document records no implementation,
+Implementation contract adopted after increment 10 initial commit `22b31f57`.
+This document records no completed implementation,
 verification or playable exit. Follow the later authorised pipeline: after
 increment 10's initial integrated commit, its pinned validation and fixes can
 continue while the next increment proceeds, with relevant fixes integrated in
 dependency order. An initial commit does not establish a verified exit.
 Increment 10's remaining evidence stays visible and is not discharged by this
 document. This preparation task changes design documents only, with no increment
-11 runtime edits before increment 10's initial commit.
+11 runtime edits before increment 10's initial commit. The concrete integration
+choices below are now adopted implementation judgments; coefficients remain
+authored tuning subject to evidence.
 
 ## Outcome and authority
 
@@ -27,6 +29,51 @@ required before exit. Keep existing networking, saves, System-addressed command
 admission, Console scopes, individual System AI and optional GM operation.
 
 ## State and authored contracts
+
+### Adopted initial integration vocabulary
+
+Use `phoenix_model::damage` for closed serializable definitions and readouts,
+and Gameplay `ship/compartment_damage.rs` for pure processing. `DamageType`
+initially supports `physical` and `laser`, each with actual producers. A common
+`DamageProfile { damage_type, penetration }` accompanies existing delivered hull
+and shield payloads; it does not duplicate their amount or shield-bypass rules.
+Author the profile beside each common weapon mount/delivery definition and carry
+the selected tube's profile with its launched projectile and continuation.
+
+`SystemInstanceConfig.damage_component` holds explicit mechanism-bound physical
+targets. `DamageComponentConfig` contains `id`, a closed `operation`, `intake`
+or `cooling` binding, susceptibility per type, positive `fault_dose_threshold`,
+`degraded_factor`, full/optional patch remedy IDs and `field_replaceable`.
+An operation binding affects its actual owning System; intake/cooling bindings
+require a real energy-network endpoint. Generated shield arcs carry the same
+definitions into their generated System exactly once. Component identity is
+`ComponentRef { system, component }`; no ID-string inference or second controller.
+
+Compartment definitions add `max_hp`, `recovery_fraction` and
+`structural_remedy`. The entity's `damage.materials` table defines supported
+type resistance and `residual_fraction`; `damage.remedies` defines bounded stage
+work, structural HP per stage when applicable, typed actual stock/link
+requirements and full/patch outcomes. Same-deck positive-area overlap is refused.
+The initial material and conserved-deposition formula recommended below is
+adopted. Deposited fault dose is divided among eligible occupants by authored
+susceptibility, retained fractionally, and applied at amount thresholds rather
+than one fault roll per simulation tick. Supported conditions start healthy,
+damaged, destroyed or indefinitely patched; compartment disablement is a separate
+source. Bindings combine conservatively, and structural restoration clears only
+the compartment source.
+
+`RepairWorkTarget` distinguishes compartment structure from an exact component.
+Existing team/job state retains stage progress and reservations. Reserve a whole
+bounded stage atomically from actual Infrastructure stock; consume on completion
+and release unconsumed claims on cancellation. Full restoration is selected when
+possible, otherwise an eligible stable patch. No stock copy authorizes work.
+Initially one team may work each structural compartment task, while other teams
+repair distinct components there. Intake faults alter actual incoming flow;
+charged local reserves continue ordinary operation.
+
+These choices adopt the draft's five bounded integration decisions. They do not
+authorize unsupported condition scripting, arbitrary Workshop code, automatic
+deliveries or new networking.
 
 Use the increment 10 interior, System placements, stable IDs and routed teams.
 Add no wall geometry, per-cell holes, precise component positions or second job

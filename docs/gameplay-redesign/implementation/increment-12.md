@@ -346,8 +346,12 @@ Dynasty Console gap, then passed against corrected data using the same compiled
 owner executable. Four integrated JS suites passed 42 tests.
 
 These are targeted results, not a whole-suite or browser/native human acceptance
-claim. Subsequent unmanaged-magazine correlated-refusal and maintained Human-target
-regressions, plus the updated exact Live schema pin, await their focused retry. Production, additional
+claim. The focused retry against runtime commit `06470cf1` passed all 12 cases:
+seven logistics cases, three retained resource transaction cases, strict shipped
+hull loading and the exact Live schema pin. New cases exercise correlated refusal,
+maintained Human targets, Human/AI missing-feed isolation, delegated-tree withholding
+and Offline cargo pause/resume. Log: `.phoenix/increment12-standing-owner-tests.log`.
+Production, additional
 local stores and the remaining increment 12 scope are still in progress.
 
 Enabled targets are standing machinery orders for a Human operator, so routine

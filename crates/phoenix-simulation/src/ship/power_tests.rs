@@ -209,7 +209,7 @@ fn feedback(
     assert_eq!(
         matching.len(),
         1,
-        "one final response for the actual request: {out:?}"
+        "one final response for the actual request"
     );
     assert!(
         matches!(&matching[0].msg, ServerMessage::ActionFeedback { outcome, .. } if *outcome == expected)

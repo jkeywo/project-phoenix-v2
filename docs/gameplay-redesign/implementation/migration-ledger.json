@@ -133,7 +133,11 @@
       "completion": "Existing phasers, blasters and torpedoes use common mounts, barrel patterns and delivery/effect machinery with equivalent combat behaviour.",
       "evidence": [
         "pasm/spec/design/configurable-weapons.yaml",
-        "docs/gameplay-redesign/implementation/increment-7.md"
+        "docs/gameplay-redesign/implementation/increment-7.md",
+        "docs/acceptance/1562-configurable-weapons.md",
+        "docs/gameplay-redesign/implementation/weapons-validation.json",
+        "docs/gameplay-redesign/implementation/weapons-baseline.json",
+        "docs/gameplay-redesign/implementation/weapons-baseline.md"
       ]
     },
     {

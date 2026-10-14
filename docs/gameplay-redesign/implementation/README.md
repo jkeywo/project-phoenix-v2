@@ -215,3 +215,24 @@ Workshop authoring journey. Preview also resolves inherited captured templates
 and waits for resident mesh geometry. Automated evidence passes; physical/device
 and human-workload acceptance remains separate, with this increment kept
 `in_progress`. The user authorised advancing with “do 6 then”.
+
+## Increment 7 — shared mounts and configurable weapons
+
+All 36 weapons in ten authored entities now use the supported common definition,
+compiling once into existing beam, bolt and guided strategies. Common geometry,
+delivery and barrel planning feed actual runtime consumers; stable System and
+strategy identities, ordinary AI and admitted controls remain intact. Workshop
+supports editing, creation, explicit inherited materialisation and its existing
+history/validation/export/Preview/Test journey.
+
+[Validation receipts](weapons-validation.json), [gameplay comparison](weapons-baseline.md)
+and the [acceptance kit](../../acceptance/1562-configurable-weapons.md) record the
+automated exit. Required gates, ten weapon/Operations browser cases and rendered
+Workshop acceptance pass. Both bounded scenario reports and the unchanged 20-run
+Cruiser matrix match Increment 6. Physical/device and human-workload acceptance
+remain pending, with the ledger kept `in_progress`.
+
+Under the user's subsequent explicit workflow, validation and fixes continue on
+a pinned worktree after initial implementation commits while main starts the
+next increment. Increment 7 matrix evidence pins `e848e2f3`; later implementation
+on main does not alter its inputs. Snapshot 42/rules 0.14/protocol 6 are unchanged.

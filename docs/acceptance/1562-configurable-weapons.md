@@ -1,8 +1,9 @@
 # Increment 7 — configurable weapons
 
-Automated implementation is under verification. Physical phone/native monitor
-and human-workload acceptance remains separate, including earlier increments.
-The user authorised serial advancement through increment 18 on 14 October 2026.
+Implementation and automated verification pass. Physical phone/native monitor
+and human-workload acceptance remains pending, including earlier increments.
+The user authorised advancement through increment 18, then explicitly requested
+validation and fixes on isolated worktrees while main continues the next increment.
 
 ## Implemented migration
 
@@ -52,10 +53,34 @@ headless balance runs as physical-device or human attention acceptance.
 
 - Independent audits preserve the 13 beam, 8 bolt and 15 guided definitions,
   ordered policies, markers, patterns and all other authored entity data.
-- Shared pure weapons owner: 248 tests passed; authoring: 8; Content merge: 36.
+- Shared pure weapons owner: 248 tests passed; initial authoring: 8; Content merge: 36.
+  The final compiler's nine tests, including the zero-cadence regression, pass
+  within the integrated native suite.
 - Integrated Simulation weapons owner: 282 passed; integrated Workshop: 64.
 - Shared mechanism and compiler/runtime/Workshop read-only reviews pass. The
   integrated validator preserves zero-delay simultaneous volleys; unknown
   pattern fields are refused rather than ignored.
 
-Integrated gate, rendered-browser and baseline receipts follow when verified.
+- Required integrated gates pass: 9,149 native tests with 102 existing ignored;
+  4,263 simulation tests without default features; 8,762 JavaScript tests across
+  442 files; format, strict Clippy, layout/string/LOD/layer and all three PASM gates.
+- Chromium acceptance passes ten Operations/weapon wire and UI cases. Rendered
+  Workshop acceptance passes inherited editing, materialisation, invalid-input
+  refusal, history, export/reload, actual Cruiser Preview geometry and disposable
+  Test. The inspected screenshot is hashed in the receipt. These checks do not
+  establish physical-device usability or station workload.
+- Combat Test and Falling Skyway reports match Increment 6 byte for byte;
+  repeated seeded runs, replay checkpoints and performance continuations agree.
+  The unchanged Cruiser matrix passes 20/20 victories and all 16 thresholds,
+  with identical merged results. Tick measurements and their limits are recorded
+  in the comparison; no balance thresholds or performance budgets changed.
+
+Runtime and gate revision is `5e7264d5`; capture revision `e848e2f3` adds only
+approved future planning documents. The matrix uses an isolated worktree pinned
+to that capture, allowing main to proceed without changing its inputs. No new
+authoritative state, save schema, simulation rules or transport was introduced.
+
+See [validation receipts](../gameplay-redesign/implementation/weapons-validation.json)
+and [baseline comparison](../gameplay-redesign/implementation/weapons-baseline.md).
+The ledger remains `in_progress` for physical/device and human acceptance; the
+user's later advancement instruction allows subsequent implementation to continue.

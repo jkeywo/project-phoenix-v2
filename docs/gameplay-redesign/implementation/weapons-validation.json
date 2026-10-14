@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "e848e2f353dc796de6149ea2989b6ec0aea4f6ea",
+  "automated_tested_revision": "5e7264d59058af0b05e1ed35edec3be3834cc45e",
+  "post_automated_changes": "Revision e848e2f3 adds only approved future increment 22-24 planning documents. Runtime, shipped content and tested browser bundles are unchanged from 5e7264d5.",
+  "snapshot_format": 42,
+  "simulation_rules": "0.14",
+  "protocol": 6,
+  "checks": [
+    {
+      "name": "fmt",
+      "command": "cargo fmt -- --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-fmt.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-clippy.log",
+      "raw_sha256": "b06170d943f63d923f39fddb216405a243ab521512c6e869c01decbdda03181e"
+    },
+    {
+      "name": "workspace",
+      "command": "PHOENIX_AMBIGUITY_BASE_REF=a950c824770eaa3f706fa6ed4446346d638fd309 cargo test --workspace --features headless",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-workspace.log",
+      "raw_sha256": "b424292fffa11cc2a832af9abe6478954ab3c2094a8a1392d070250be2e95e4e",
+      "passed_tests": 9149,
+      "ignored_tests": 102
+    },
+    {
+      "name": "simulation-owner",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-simulation-owner.log",
+      "raw_sha256": "832fd21d084fab8261c7273ab1bdaec14d15b2fbaaf0925e6db19e306759d7ef",
+      "passed_tests": 4263,
+      "ignored_tests": 0
+    },
+    {
+      "name": "debug-surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91"
+    },
+    {
+      "name": "live-layout",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-live-layout.log",
+      "raw_sha256": "eb34606158b98b8cbcb8e7ddc948dafd18654c85c109de731a154db9c1843042"
+    },
+    {
+      "name": "vitest",
+      "command": "npx --no-install vitest run",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-vitest.log",
+      "raw_sha256": "bc493b12d0ca90ee1a5884f88f7bb40d2e7d72ccd5a2643aafebcf5f86dc6a6a",
+      "passed_tests": 8762,
+      "passed_test_files": 442
+    },
+    {
+      "name": "strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-strings.log",
+      "raw_sha256": "cb0b9f7499e1928d104ee101f62434c1c2bd7c0381a86c83767c695e451015cb"
+    },
+    {
+      "name": "lods",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45"
+    },
+    {
+      "name": "lod-captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7"
+    },
+    {
+      "name": "layers",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-layers.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92"
+    },
+    {
+      "name": "dependency-tree",
+      "command": "node scripts/check-layers.mjs --dependency-tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-dependency-tree.log",
+      "raw_sha256": "cd9eaf91f97f04e7ba6d7df6b11b5268aeb649251fa07e0834ff8c7600ed8cbe"
+    },
+    {
+      "name": "pasm-validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-pasm-validate.log",
+      "raw_sha256": "a3b3ad1fd085137a9717a1a98192e82a0d284e1f079b961e7d169fec249cb6be"
+    },
+    {
+      "name": "pasm-scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-pasm-scan.log",
+      "raw_sha256": "81e0d91275f100aad562db4c9088fbc07742e89f81b7fee13912e132f0881518"
+    },
+    {
+      "name": "pasm-traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-final-pasm-traceability.log",
+      "raw_sha256": "1f981da799a0f97a20fe0abc81983cb92f9d8c44a9281b94a77618861e3dac45"
+    },
+    {
+      "name": "weapons-owner",
+      "command": "cargo test -p phoenix-simulation --lib console::weapons::",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-weapons-owner.log",
+      "raw_sha256": "e36ba1049d734174cf0343c2146470c9982993a315c9e4d6a02db9f848150a66",
+      "passed_tests": 282,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Workshop-owner",
+      "command": null,
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-workshop-owner.log",
+      "raw_sha256": "46e3b725642c130cc3a215f3e74bf593d19d75d2d4cf66328adde229cc7585ff",
+      "passed_tests": 64,
+      "passed_test_files": 3,
+      "command_recording": "Exact targeted filter arguments were not retained. The raw output records 64 passing tests across three files; the separately recorded full Vitest gate provides complete coverage."
+    },
+    {
+      "name": "WASM build",
+      "command": "NO_COLOR=true trunk build",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-wasm.log",
+      "raw_sha256": "12ace7db7a5f994f16b5b8cccae97463b1fdbc36aded80e2299305c14c0adeba"
+    },
+    {
+      "name": "Phone client",
+      "command": "node scripts/build-client.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-client-build.log",
+      "raw_sha256": "6cc1a2ad71feae49ee3e059b68b4051eb70b215f10708673507deff475249655"
+    },
+    {
+      "name": "Workshop bundle",
+      "command": "node scripts/build-workshop.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-workshop-build.log",
+      "raw_sha256": "31082d6554edf4c193d3f72a7ebfb3489b93f9ff96d51e8eaaa5bc4dd95033ac"
+    },
+    {
+      "name": "Workshop Viewer",
+      "command": "NO_COLOR=true trunk build --config workshop-preview-trunk.toml",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-workshop-viewer-build.log",
+      "raw_sha256": "798afad0bc9bc884cbe681fd6744b63e62131b2eb28be41b712c45a81c0d0809"
+    },
+    {
+      "name": "Viewer install",
+      "command": "node scripts/copy-workshop-preview.mjs dist",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-workshop-viewer-copy.log",
+      "raw_sha256": "bcc8e1947b3d25ecd919f64a191d5e1ff2eafc4c3824474c3e24d69e61e23c6a"
+    },
+    {
+      "name": "Weapons browser",
+      "command": "PHOENIX_SMOKE_PORT=3157 npx --no-install playwright test operations-dock-umbilical.spec.js weapons-cold-fire-gate.spec.js weapons-console.spec.js --project=chromium",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-browser-weapons.log",
+      "raw_sha256": "391bedc87f34ab8647883959646e118b74e6f6a0519b3b15174d4f142b2f9777",
+      "passed_tests": 10
+    },
+    {
+      "name": "Workshop browser",
+      "command": "PHOENIX_SMOKE_PORT=3158 npx --no-install playwright test workshop-resources.render.spec.js --project=render",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-browser-workshop.log",
+      "raw_sha256": "85652bfe41f7e8db5678061dc62b9caf48a50881f667e2de925712ee9fcfcd82",
+      "passed_tests": 1
+    },
+    {
+      "name": "Baseline",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-14-weapons-measure --profile measure",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-baseline-capture.log",
+      "raw_sha256": "9fd898ebbeeb7074dc29f1b14de5a16de159a5c9ef3a6c7e72645c1021c03159"
+    },
+    {
+      "name": "Cruiser matrix",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture C:/Coding/project-phoenix-v2/.phoenix/redesign-baseline/2026-10-14-weapons-measure/summary.json --out .phoenix/redesign-baseline/2026-10-14-weapons-cruiser",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-7-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa",
+      "execution_checkout": ".phoenix/worktrees/increment-7-validation (pinned e848e2f3)"
+    },
+    {
+      "name": "Wiki lint",
+      "command": "node C:/Coding/project-phoenix-v2/.phoenix/issue-closeout/wiki-lint.cjs",
+      "result": "passed",
+      "execution_checkout": ".phoenix/worktrees/increment-7-validation",
+      "raw_log": ".phoenix/increment-7-closeout-wiki.log",
+      "raw_sha256": "d65ec1f5c620861be55a27eb32c4a3d603e4af55caf7107685a4888728029062"
+    },
+    {
+      "name": "Ledger",
+      "command": "node scripts/redesign-ledger.mjs --check",
+      "result": "passed",
+      "execution_checkout": ".phoenix/worktrees/increment-7-validation",
+      "raw_log": ".phoenix/increment-7-closeout-ledger.log",
+      "raw_sha256": "bf8a8cf14646527fd8c15e099c9ad323c5f57ec5b8b58cdaf2c8e455abd02cfa"
+    }
+  ],
+  "review": "Independent read-only shared mechanism, compiler/runtime and Workshop reviews passed. All 36 migrated weapons preserve ordered parameters, AI declarations, markers and patterns; all other authored data in the ten migrated files is unchanged.",
+  "corrected_validation_failures": [
+    "Transient hit records capture DamageDelivery before owned strings move; Simulation exposes the shared Gameplay mount owner.",
+    "Zero bolt interval remains valid for the shipped simultaneous Warhawk volley; a regression preserves it. Unknown barrel-pattern fields now fail strict authored validation.",
+    "Workshop creation declares idle AI and uses the actual default guided speed/lifespan product. Missing required ship-level AI remains a validation error.",
+    "Clippy nonminimal boolean spelling was corrected without changing the accepted mount/delivery ranges."
+  ],
+  "evidence_scope": "Integrated native/client/PASM gates and browser bundles test 5e7264d5. Baseline and matrix pin e848e2f3, with identical runtime source. Matrix execution uses an isolated worktree so main can start increment 8 under the user-approved overlapping validation workflow; its exact source bytes and copied executable are verified.",
+  "visual": {
+    "path": ".phoenix/increment-7-resource-weapon-preview.png",
+    "sha256": "34b7c7ba17c2d4228ecb0cf75cb9083e5827fe3b257a837d01f247841516c1f1",
+    "result": "inspected",
+    "scope": "Actual composed Cruiser geometry in rendered Workshop Preview; independent of physical-device acceptance"
+  },
+  "manual_pending": [
+    "Physical phones",
+    "Native multi-monitor displays",
+    "Human station workload and usability"
+  ],
+  "boundaries": [
+    "No push requested/performed",
+    "Snapshot/rules/protocol unchanged; no new authoritative cycle state",
+    "Interception, traversing mounts and specialised combat payloads remain increment 15",
+    "Increment 8 begins independently on main under the later explicit user workflow; these receipts cover increment 7 only"
+  ]
+}

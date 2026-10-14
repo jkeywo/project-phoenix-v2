@@ -3,6 +3,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::{ecs::message::MessageCursor, prelude::*};
+use phoenix_model::damage::ComponentCondition;
 use project_phoenix::ship::console_publication::LastConsolePublications;
 use project_phoenix::{
     console::repair::{visibility::LastBroadcastHull, ShipRepairTeams},
@@ -14,13 +15,15 @@ use project_phoenix::{
             SystemControlPayload, SystemId, TeamSlot,
         },
     },
-    entities::spawner::{EntitySystemHull, EntityUuid},
+    entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
+    infrastructure::InfrastructureCondition,
     lobby::{
         server::{InboundMessage, OutboundMessage},
         Sessions, Target,
     },
     server_app::LocalShip,
+    ship::compartment_damage::ShipDamage,
     ship_plugin::{ActiveStationRatings, ShipSystemControlSources},
     sim_digest::world_digest,
     sim_rng::SimRng,
@@ -109,13 +112,10 @@ fn caches(app: &App) -> Value {
 
 fn state(app: &App, ship: Entity) -> Value {
     let world = app.world();
-    let hull = &world.get::<EntitySystemHull>(ship).unwrap().0;
-    let rows: Vec<_> = hull
-        .iter()
-        .map(|(id, entry)| (id, format!("{entry:?}")))
-        .collect();
     json!({"tick": world.resource::<SimTick>().0, "digest": world_digest(world),
-        "hull": rows, "teams": world.get::<ShipRepairTeams>(ship).unwrap().0.slots(),
+        "physical": world.get::<ShipDamage>(ship).unwrap().state,
+        "inventory": world.get::<InfrastructureCondition>(ship).unwrap().0,
+        "teams": world.get::<ShipRepairTeams>(ship).unwrap().0.save_state(),
         "admitted": format!("{:?}", world.get::<AdmittedCommands>(ship).unwrap().0),
         "caches": caches(app)})
 }
@@ -235,7 +235,7 @@ fn coherent_pair(extra: &[ServerMessage], target: &SystemId) -> bool {
     };
     assert_eq!(
         &repair[0].system_hull, entries,
-        "same fine-system visibility and HP"
+        "same fine-system visibility and physical structure projection"
     );
     assert_eq!(&repair[0].aggregate_hull_fraction, aggregate_fraction);
     assert_eq!(&repair[0].destroyed_hull_fraction, destroyed_fraction);
@@ -362,7 +362,7 @@ fn repair_identify_child() {
         assert!(workers > 1);
         bevy::ecs::schedule::ExecutorKind::MultiThreaded
     };
-    let target = SystemId("helm-engine-port".into());
+    let target = SystemId("phaser-fore".into());
     let mut setups = Vec::new();
     for (app, ship) in apps.iter_mut().zip(ships) {
         assert_human(app, ship);
@@ -376,33 +376,58 @@ fn repair_identify_child() {
             .unwrap()
             .0;
         assert!(config
-            .systems_for_station(&StationId("helm".into()))
+            .systems_for_station(&StationId("tactical".into()))
             .any(|system| system.id == target));
         let teams = &app.world().get::<ShipRepairTeams>(ship).unwrap().0;
         assert!(teams
             .slots()
             .iter()
             .all(|slot| matches!(slot, TeamSlot::Idle)));
-        let timings = teams.timings();
-        assert!(timings.travel_duration > 0.0 && timings.repair_rate_hp_per_sec > 0.0);
         let count = teams.slots().len();
         assert!(count > 0);
-        let maximum = app
+        let mut physical = app.world_mut().get_mut::<ShipDamage>(ship).unwrap();
+        let room = physical.definition.interior.placements[&target].clone();
+        let compartment = physical.definition.compartment(&room).unwrap();
+        let recipe = physical.definition.config.remedies[&compartment.structural_remedy].clone();
+        let maximum = compartment.max_hp as f64;
+        let initial_hp = maximum - recipe.structural_hp.unwrap() as f64;
+        assert!(initial_hp > 0.0);
+        // One actual physical incident: structure needs a single paid batch,
+        // while the destroyed mechanism remains available for on-site diagnosis.
+        // Crew counts, routes, recipes and part stocks stay authored.
+        physical.state.compartments.get_mut(&room).unwrap().hp = initial_hp;
+        let operation = physical
+            .state
+            .components
+            .get_mut(&target)
+            .unwrap()
+            .get_mut("operation")
+            .unwrap();
+        operation.condition = ComponentCondition::Destroyed;
+        operation.last_source = Some("reconnect-physical-incident".into());
+        let part_cost: i64 = recipe
+            .requirements
+            .iter()
+            .filter(|part| part.resource == "structural_parts")
+            .map(|part| part.amount)
+            .sum();
+        assert!(part_cost > 0);
+        drop(physical);
+        let initial_parts = app
             .world()
-            .get::<EntitySystemHull>(ship)
+            .get::<InfrastructureCondition>(ship)
             .unwrap()
             .0
-            .get(&target)
+            .capacities()
+            .iter()
+            .find(|capacity| capacity.id == "structural_parts")
             .unwrap()
-            .max;
-        // Damage only a real fine-system HP row; counts/timings/config/teams stay authored.
-        app.world_mut()
-            .get_mut::<EntitySystemHull>(ship)
-            .unwrap()
-            .0
-            .set_hp(&target, maximum * 0.5);
-        setups.push(json!({"count":count,"travel":timings.travel_duration,
-            "repair_rate":timings.repair_rate_hp_per_sec,"target":target,"initial_hp":maximum * 0.5}));
+            .stock
+            .level;
+        assert!(initial_parts >= part_cost);
+        setups.push(json!({"count":count,"target":target,"compartment":room,
+            "initial_structural_hp":initial_hp,"work_secs":recipe.work_secs,
+            "manual_work_fraction":recipe.manual_work_fraction,"initial_parts":initial_parts,"part_cost":part_cost}));
         // Let ordinary Repair publish and live recipient caches observe the damage.
         for _ in 0..3 {
             step(app);
@@ -438,7 +463,7 @@ fn repair_identify_child() {
     let due = apps[0].world().resource::<SimTick>().0 + delay;
     let payload = SystemControlPayload::DispatchRepairTeam {
         team_idx: 0,
-        target: RepairTarget::Station(StationId("helm".into())),
+        target: RepairTarget::Station(StationId("tactical".into())),
     };
     let correlation = ActionCorrelationId::new(CORRELATION).unwrap();
     for app in &mut apps {
@@ -463,14 +488,17 @@ fn repair_identify_child() {
         .resource::<Time<Fixed>>()
         .timestep()
         .as_secs_f32();
-    let travel = apps[0]
-        .world()
-        .get::<ShipRepairTeams>(ships[0])
-        .unwrap()
-        .0
-        .timings()
-        .travel_duration;
-    let limit = delay as usize + (travel / dt * 2.0).ceil() as usize + 12;
+    let teams = &apps[0].world().get::<ShipRepairTeams>(ships[0]).unwrap().0;
+    let layout = teams.layout().unwrap();
+    let destination = &layout.placements[&target];
+    assert!(layout.team_homes.iter().all(|home| home != destination));
+    let travel: f32 = layout.connections.iter().map(|edge| edge.travel_secs).sum();
+    assert!(travel > 0.0);
+    let work = setups[0]["work_secs"].as_f64().unwrap()
+        / setups[0]["manual_work_fraction"].as_f64().unwrap();
+    // Keep the travel/due seam and wait for an actual paid structural stage;
+    // physical restoration is discrete, unlike the former per-frame HP trickle.
+    let limit = delay as usize + ((travel as f64 * 2.0 + work) / dt as f64).ceil() as usize + 12;
     let mut trace = Vec::new();
     let mut pre_due_idle = 0;
     let (mut hidden, mut visible, mut travelling, mut on_site, mut repairs) = (0, 0, 0, 0, 0);
@@ -594,23 +622,53 @@ fn repair_identify_child() {
             "state":state(&apps[0],ships[0]),"reconnect_wire":wire(&messages[0]),
             "ordinary_wire":wire(&messages[1]),"repair_hp_events":restored[0]}),
         );
-        if on_site >= 4 && visible >= 3 {
+        if on_site >= 4 && visible >= 3 && repairs > 0 {
             break;
         }
     }
     assert!(pre_due_idle > 0, "observed real pre-due idle boundaries");
     assert_eq!(pre_due_idle, delay as usize);
     assert!(travelling > 0 && on_site >= 4 && repairs > 0 && hidden > 0 && visible >= 3);
+    let room = setups[0]["compartment"].as_str().unwrap();
     assert!(
         apps[0]
             .world()
-            .get::<EntitySystemHull>(ships[0])
+            .get::<ShipDamage>(ships[0])
+            .unwrap()
+            .state
+            .compartments[room]
+            .hp
+            > setups[0]["initial_structural_hp"].as_f64().unwrap()
+    );
+    let parts = |app: &App, ship: Entity| {
+        app.world()
+            .get::<InfrastructureCondition>(ship)
             .unwrap()
             .0
-            .get(&target)
+            .capacities()
+            .iter()
+            .find(|capacity| capacity.id == "structural_parts")
             .unwrap()
-            .current
-            > setups[0]["initial_hp"].as_f64().unwrap() as f32
+            .stock
+            .level
+    };
+    assert_eq!(parts(&apps[0], ships[0]), parts(&apps[1], ships[1]));
+    assert_eq!(
+        setups[0]["initial_parts"].as_i64().unwrap() - parts(&apps[0], ships[0]),
+        setups[0]["part_cost"].as_i64().unwrap(),
+        "one real structural stage consumes its exact finite parts"
+    );
+    assert!(
+        apps[0]
+            .world()
+            .get::<ShipRepairTeams>(ships[0])
+            .unwrap()
+            .0
+            .save_state()
+            .physical_work
+            .values()
+            .any(|work| work.progress > 0.0 || work.stage > 0),
+        "actual physical work must progress"
     );
     println!(
         "\n{PREFIX}{}",

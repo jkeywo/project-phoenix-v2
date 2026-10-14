@@ -301,30 +301,68 @@ fn power_continuation_frontier(
 fn power_continuation_resumes_the_next_tick_and_modifiers_over_a_different_bootstrap() {
     use bevy::ecs::system::RunSystemOnce;
     use project_phoenix::{
-        modifiers::coordination::translate_power_modifiers,
-        ship::power::{PowerConfigResource, ShipPowerSystem},
+        modifiers::coordination::translate_power_modifiers, ship::power::ShipPowerSystem,
     };
+    fn set_frontier(
+        power: &mut project_phoenix::modifiers::power_system::PowerSystem,
+        depleted: bool,
+    ) {
+        let hardware = power.config().clone();
+        power
+            .set_output(if depleted {
+                0.0
+            } else {
+                hardware.reactor.sustainable_output_per_sec
+            })
+            .unwrap();
+        for group in &hardware.groups {
+            power
+                .set_flow(
+                    &group.id,
+                    group.max_flow_per_sec * if depleted { 0.25 } else { 0.5 },
+                )
+                .unwrap();
+            power
+                .set_cooling(&group.id, group.max_cooling_per_sec * 0.5)
+                .unwrap();
+        }
+        let network = power.network_mut();
+        network.reactor.energy = if depleted {
+            0.0
+        } else {
+            hardware.reactor.reserve.capacity * 0.75
+        };
+        network.output_actual_per_sec = if depleted {
+            0.0
+        } else {
+            hardware.reactor.sustainable_output_per_sec
+        };
+        for group in network.groups.values_mut() {
+            group.cut = depleted;
+            group.effective_flow_per_sec = 0.0;
+            group.effective_cooling_per_sec = 0.0;
+            group.restore_ready_secs = 0.0;
+        }
+        for consumer in &hardware.consumers {
+            network.consumers.get_mut(&consumer.system).unwrap().energy = if depleted {
+                0.0
+            } else {
+                consumer.reserve.capacity * 0.5
+            };
+        }
+        power.set_weapons_restrained(depleted);
+    }
     for depleted in [false, true] {
         let mut live = duel();
         step(&mut live, CAPTURE_AT);
         {
             let world = live.world_mut();
-            let mut query = world.query::<(&mut ShipPowerSystem, &PowerConfigResource)>();
-            for (mut power, config) in query.iter_mut(world) {
-                let mut allocations: Vec<_> = power
-                    .0
-                    .iter()
-                    .map(|(id, _)| (id.clone(), if depleted { 1 } else { 2 }))
-                    .collect();
-                allocations.reverse();
-                power.0.restore(
-                    &allocations,
-                    if depleted { 0.0 } else { config.0.capacity },
-                    depleted,
-                );
+            let mut query = world.query::<&mut ShipPowerSystem>();
+            for mut power in query.iter_mut(world) {
+                set_frontier(&mut power.0, depleted);
             }
             // Settle the production modifier projection before taking a save,
-            // as the ordinary scheduled translator does after an allocation.
+            // as the ordinary scheduled translator does after a flow order.
             world.run_system_once(translate_power_modifiers).unwrap();
         }
         let payload = capture(live.world());
@@ -335,8 +373,7 @@ fn power_continuation_resumes_the_next_tick_and_modifiers_over_a_different_boots
             let world = resumed.world_mut();
             let mut query = world.query::<&mut ShipPowerSystem>();
             for mut power in query.iter_mut(world) {
-                let allocations: Vec<_> = power.0.iter().map(|(id, _)| (id.clone(), 4)).collect();
-                power.0.restore(&allocations, 13.0, !depleted);
+                set_frontier(&mut power.0, !depleted);
             }
             world.run_system_once(translate_power_modifiers).unwrap();
         }

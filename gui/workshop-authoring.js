@@ -1,3 +1,4 @@
+import { mountWorkshopResources } from './workshop-resource-panel.js';
 import { downloadBlob } from './blob-download.js';
 import { createWorkshopOperations } from './workshop-edit-session.js';
 /** Standalone browser Authoring adapter. Only user-selected pack bytes enter;
@@ -198,6 +199,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let entityPanel = null;
   let presetsPanel = null;
   let shipAuthoringPanel = null;
+  let resourcePanel = null;
   let slotAuthoringPanel = null;
   let scriptsPanel = null;
   let spatialPanel = null;
@@ -271,6 +273,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   shipAuthoringPanel = mountWorkshopShipAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  resourcePanel = mountWorkshopResources({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(),
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   slotAuthoringPanel = mountWorkshopSlotAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -284,7 +289,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, slotAuthoringPanel.node);
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, resourcePanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -452,6 +457,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     entityPanel?.refresh({ hidden: testing });
     presetsPanel?.refresh({ hidden: testing });
     shipAuthoringPanel?.refresh({ hidden: testing });
+    resourcePanel?.refresh({ hidden: testing });
     slotAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
@@ -1101,6 +1107,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     entityPanel?.dispose();
     presetsPanel?.dispose();
     shipAuthoringPanel?.dispose();
+    resourcePanel?.dispose();
     slotAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
     spatialPanel?.dispose();

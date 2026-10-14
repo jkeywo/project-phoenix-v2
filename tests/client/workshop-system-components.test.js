@@ -11,6 +11,16 @@ const system = { id: 'dock', kind: 'dock', local: true, component: [
 const change = (element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); };
 const el = name => document.getElementById(`workshop-component-${name}`);
 describe('staged component composition controls', () => {
+  it('offers a closed access-boundary starter and binds its shared seal channel', () => {
+    document.body.innerHTML = '<main></main>'; const editor = mountSystemComponents({ root: document.querySelector('main'), apply: vi.fn() });
+    editor.refresh({ id: null, kind: 'access-gate', local: true }, { component_fields: { ...schema.component_fields, access_boundary: [
+      { name: 'sealed_channel', kind: 'boolean_channel' }, { name: 'transition_secs', kind: 'number' }] } }, false);
+    expect(document.querySelector('fieldset').disabled).toBe(false);
+    expect([...el('kind').options].map(option => option.value)).toEqual(['access_boundary']);
+    expect(editor.value().components).toEqual([{ id: 'hatch', kind: 'access_boundary', sealed_channel: 'sealed', transition_secs: 1 }]);
+    change(el('channels').querySelector('input'), 'contain');
+    expect(editor.value().components[0].sealed_channel).toBe('contain');
+  });
   it('stages edits and shared bindings until a single Apply operation', () => {
     document.body.innerHTML = '<main></main>'; const apply = vi.fn();
     const editor = mountSystemComponents({ root: document.querySelector('main'), apply }); editor.refresh(system, schema, false);

@@ -3958,3 +3958,151 @@ kind = "Dossiers"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[interior]
+team_homes = [ "engineering", "engineering" ]
+
+[[interior.deck]]
+id = "upper"
+label = "interior.deck.upper.label"
+damage_weight = 1
+
+[[interior.deck]]
+id = "lower"
+label = "interior.deck.lower.label"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "bridge"
+deck = "upper"
+label = "interior.room.bridge.label"
+x = -10
+z = -20
+width = 20
+depth = 15
+material = "bulkhead"
+
+[[interior.compartment]]
+id = "support"
+deck = "upper"
+label = "interior.room.support.label"
+x = -10
+z = -5
+width = 20
+depth = 15
+material = "bulkhead"
+
+[[interior.compartment]]
+id = "engineering"
+deck = "lower"
+label = "interior.room.engineering.label"
+x = -10
+z = -10
+width = 20
+depth = 20
+material = "armour"
+
+[[interior.compartment]]
+id = "weapons"
+deck = "lower"
+label = "interior.room.weapons.label"
+x = -20
+z = 10
+width = 40
+depth = 15
+material = "armour"
+
+[[interior.connection]]
+id = "bridge-support"
+from = "bridge"
+to = "support"
+travel_secs = 2.5
+
+[[interior.connection]]
+id = "deck-stair"
+from = "support"
+to = "engineering"
+travel_secs = 2.5
+
+[[interior.connection]]
+id = "engineering-weapons"
+from = "engineering"
+to = "weapons"
+travel_secs = 2.5
+boundary = "weapons-access"
+
+[interior.placements]
+dock = "support"
+captain = "bridge"
+command = "bridge"
+red-alert = "bridge"
+viewscreen = "bridge"
+sensors = "bridge"
+sensor-radar = "bridge"
+helm-thrust = "engineering"
+helm-steering = "engineering"
+helm-joystick = "engineering"
+helm-engine-port = "engineering"
+helm-engine-starboard = "engineering"
+helm-radar = "bridge"
+tactical-radar = "bridge"
+phaser-control = "bridge"
+helm-impulse = "engineering"
+helm-boost = "engineering"
+helm-lateral-thrust = "engineering"
+phaser-omni = "weapons"
+torpedo-magazine = "weapons"
+torpedo-tube-fore = "weapons"
+torpedo-tube-aft = "weapons"
+blaster-port = "weapons"
+blaster-starboard = "weapons"
+navigation = "bridge"
+comms = "bridge"
+shields-system = "weapons"
+power-reactor = "engineering"
+power-battery = "engineering"
+repair = "engineering"
+tractor = "support"
+umbilical = "support"
+transporter = "support"
+security = "support"
+shield-arc-fore = "weapons"
+shield-arc-aft = "weapons"
+weapons-access = "engineering"
+
+# [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
+[[system]]
+id = "weapons-access"
+kind = "access-gate"
+console = "engineering"
+
+[[system.component]]
+kind = "access_boundary"
+id = "hatch"
+sealed_channel = "sealed"
+transition_secs = 1
+
+[[system.channel]]
+name = "sealed"
+kind = "boolean"
+
+[system.config.ai]
+root = "access-gate"
+
+[[system.config.ai.tree]]
+id = "access-gate"
+initial = "follow-order"
+
+[[system.config.ai.tree.state]]
+id = "follow-order"
+
+[[system.config.ai.tree.state.task]]
+id = "respect-seal"
+
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "sealed"
+
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "seal_requested"

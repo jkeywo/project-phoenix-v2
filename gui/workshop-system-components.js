@@ -20,6 +20,10 @@ export function mountSystemComponents({ root, apply }) {
   const button = (key, action) => { const el = node('button', key, { id: `workshop-component-${key}`, type: 'button' }); el.onclick = action; return el; };
   const option = value => { const el = node('option'); el.value = value; el.textContent = value; return el; };
   let owner = null, schema = null, draft = { components: [], channels: [] }, fingerprint = '';
+  const initial = system => ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
+    ? [{ id: 'hatch', kind: 'access_boundary', sealed_channel: 'sealed', transition_secs: 1 }] : []),
+    channels: structuredClone(system?.channel?.length ? system.channel : system?.kind === 'access-gate'
+      ? [{ name: 'sealed', kind: 'boolean' }] : [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }]) });
   const value = () => ({ ...structuredClone(draft), materialise: materialise.checked });
   const commit = button('apply', () => apply(() => ({ type: 'system-composition-set', id: owner.id, ...value() })));
   const selected = () => draft.components[Number(list.value)];
@@ -67,16 +71,17 @@ export function mountSystemComponents({ root, apply }) {
   const move = direction => { const index = Number(list.value), next = index + direction; if (next < 0 || next >= draft.components.length) return;
     [draft.components[index], draft.components[next]] = [draft.components[next], draft.components[index]]; paint(next); };
   const up = button('up', () => move(-1)), down = button('down', () => move(1));
-  const reset = button('reset', () => { draft = { components: structuredClone(owner?.component || []), channels: structuredClone(owner?.channel?.length ? owner.channel : [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }]) }; materialise.checked = false; paint(); });
+  const reset = button('reset', () => { draft = initial(owner); materialise.checked = false; paint(); });
   section.append(node('legend', 'title'), node('p', 'draft'), label(list, 'title'), list, label(id, 'id'), id, label(kind, 'kind'), kind,
     add, remove, up, down, fields, node('h4', 'channels'), channels, label(materialise, 'materialise'), materialise, reset, commit);
   root.append(section);
   return { value, refresh(system, currentSchema, disabled) {
     schema = currentSchema; owner = system;
-    const next = JSON.stringify([system?.id, system?.component, system?.channel, currentSchema?.component_fields]);
-    if (next !== fingerprint) { fingerprint = next; draft = { components: structuredClone(system?.component || []), channels: structuredClone(system?.channel?.length ? system.channel : [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }]) }; materialise.checked = false;
-      kind.replaceChildren(...Object.keys(schema?.component_fields || {}).map(option)); paint(); }
-    section.disabled = disabled || !system?.local || system.kind !== 'dock';
+    const next = JSON.stringify([system?.id, system?.kind, system?.component, system?.channel, currentSchema?.component_fields]);
+    if (next !== fingerprint) { fingerprint = next; draft = initial(system); materialise.checked = false;
+      const allowed = system?.kind === 'access-gate' ? ['access_boundary'] : ['dock_mating', 'power_input'];
+      kind.replaceChildren(...Object.keys(schema?.component_fields || {}).filter(key => allowed.includes(key)).map(option)); paint(); }
+    section.disabled = disabled || !system?.local || !['dock', 'access-gate'].includes(system.kind);
     commit.disabled = !system?.id;
   } };
 }

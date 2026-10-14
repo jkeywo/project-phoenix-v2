@@ -7,6 +7,7 @@ import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
 import { defaultEnergyConsumer, requiresEnergy, requireCoolantStore } from './workshop-energy-model.js';
 import { replaceEnergySource } from './workshop-energy.js';
+import { updateInteriorBindings } from './workshop-interiors.js';
 
 const quote = value => JSON.stringify(String(value));
 const newlineOf = source => source.includes('\r\n') ? '\r\n' : '\n';
@@ -249,8 +250,10 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     const system = inspection.systems.find(row => row.id === operation.id);
     if (!system?.local) throw new Error('Materialise the containing System before editing its components.');
     after = writeSystemComposition(before, operation.id, operation, system);
-    const oldChannel = system.component?.find(row => row.kind === 'dock_mating')?.enabled_channel;
-    const newChannel = operation.components?.find(row => row.kind === 'dock_mating')?.enabled_channel;
+    const oldChannel = system.component?.find(row => row.kind === 'dock_mating')?.enabled_channel
+      || system.component?.find(row => row.kind === 'access_boundary')?.sealed_channel;
+    const newChannel = operation.components?.find(row => row.kind === 'dock_mating')?.enabled_channel
+      || operation.components?.find(row => row.kind === 'access_boundary')?.sealed_channel;
     if (oldChannel && newChannel && oldChannel !== newChannel && system.config?.ai) {
       after = writeStateTrees(after, system, rebindStateTreeChannel(system.config.ai, oldChannel, newChannel), { materialise: true });
     }
@@ -292,6 +295,12 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     }
   }
   else if (operation.type === 'system-add') {
+    if (operation.kind === 'access-gate') {
+      const console = inspection.consoles.find(console => console.id === operation.console);
+      const ownsRepair = inspection.systems.some(system => system.id === 'repair' && system.kind === 'repair' && system.console === operation.console);
+      if (!ownsRepair && !console?.feed?.some(feed => feed.source === 'repair' && feed.kind === 'Repair'))
+        throw new Error('Choose the Repair Console, or add a typed Repair observation feed (source repair) to the selected Console before creating an access gate.');
+    }
     const added = { id: operation.id, kind: operation.kind,
     console: operation.console, ai_only: operation.ai_only === true,
     ...(operation.power_group ? { power_group: operation.power_group } : {}),
@@ -392,6 +401,19 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   }
   const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path),
     read: path => path === operation.path ? after : draft.read(path) };
+  if (operation.type === 'system-add') after = updateInteriorBindings(after, inspection, { add: { [operation.id]: operation.compartment }, materialise: operation.materialise === true });
+  else if (operation.type === 'system-remove') after = updateInteriorBindings(after, inspection, { remove: [operation.id], materialise: operation.materialise === true });
+  else if ((operation.type === 'system-set' && operation.field === 'id') || (operation.type === 'system-update' && operation.fields?.id)) {
+    const id = operation.type === 'system-set' ? operation.value : operation.fields.id;
+    if (id !== operation.id) after = updateInteriorBindings(after, inspection, { rename: { [operation.id]: id }, materialise: operation.materialise === true });
+  }
+  if (operation.type === 'system-update' && operation.compartment !== undefined
+    && inspection.composition.resolved.value.interior?.placements?.[operation.id] !== operation.compartment) {
+    const id = operation.fields?.id || operation.id;
+    const proposed = { ...inspection, composition: { ...inspection.composition, resolved: { value: { ...inspection.composition.resolved.value,
+      interior: parse(after).interior || inspection.composition.resolved.value.interior } } } };
+    after = updateInteriorBindings(after, proposed, { add: { [id]: operation.compartment }, materialise: operation.materialise === true });
+  }
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;
   if (operation.type === 'system-composition-set') {
     const resolved = effectiveValue.system.find(row => row.id === operation.id);

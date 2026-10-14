@@ -458,6 +458,8 @@ export function mountWorkshopEntity({ root, runtime, draft, busy, setBusy, chang
    * the runtime's own words as the detail. */
   async function commit(read, path, edits, focus = []) {
     let result;
+    if (edits.some(edit => edit.op === 'set' && edit.path?.join('.') === 'repair.repair_team_count'))
+      throw refused(t('workshop.interior.team_count_edit'));
     try { result = await runtime.editEntity(read.files, { document_path: path, expected_source: read.files[path], edits }); }
     catch (error) { throw refused(error); }
     return land(read, path, result, focus);

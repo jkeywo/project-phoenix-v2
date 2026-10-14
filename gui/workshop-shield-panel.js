@@ -13,6 +13,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
   const option = (select, value, text = value) => { const node = el('option'); node.value = value; node.textContent = text; select.append(node); };
   const node = el('section', 'panel'), template = el('select', 'template'), existing = el('select', 'existing');
   const materialise = input('materialise', 'checkbox'), targets = el('select', 'targets', null, { multiple: '', size: '4' });
+  const compartment = el('select', 'compartment');
   const resetAi = input('reset-ai', 'checkbox');
   const status = el('p', 'status', null, { role: 'status' }), create = el('button', 'new', 'workshop.shield.new', { type: 'button' });
   const save = el('button', 'save', 'workshop.shield.save', { type: 'button' }), remove = el('button', 'remove', 'workshop.shield.remove', { type: 'button' });
@@ -24,7 +25,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
     label(materialise, 'workshop.shield.materialise'), status,
     ...Object.entries(fields).map(([key, control]) => label(control, 'workshop.shield.' + key)),
     ...Object.entries(work).map(([key, control]) => label(control, 'workshop.shield.' + key)),
-    label(targets, 'workshop.shield.targets'), label(resetAi, 'workshop.shield.reset_ai'), save, remove);
+    label(targets, 'workshop.shield.targets'), label(compartment, 'workshop.interior.placement'), label(resetAi, 'workshop.shield.reset_ai'), save, remove);
   if (attach) root.append(node);
   let dependencies = null, inspection = null, selected = null, observed = null;
   let loading = false, disposed = false, generation = 0;
@@ -36,6 +37,9 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
     for (const [key, control] of Object.entries(fields)) control.value = arc[key] ?? '';
     for (const [key, control] of Object.entries(work)) control.value = arc.energy?.[key] ?? '';
     targets.replaceChildren();
+    compartment.replaceChildren();
+    for (const room of inspection?.resolved.value.interior?.compartment || []) option(compartment, room.id, room.label || room.id);
+    compartment.value = inspection?.resolved.value.interior?.placements?.[shieldArcSystemId(arc.id)] || compartment.options[0]?.value || '';
     for (const target of inspection?.arcs || []) { option(targets, shieldArcSystemId(target.id), target.label || target.id);
       targets.lastChild.selected = (arc.energy?.recovery_targets || []).includes(shieldArcSystemId(target.id)); }
     materialise.checked = false; resetAi.checked = false; controls();
@@ -75,7 +79,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
     arc.energy = Object.fromEntries(Object.entries(work).map(([key, control]) => [key, control.valueAsNumber]));
     arc.energy.recovery_targets = [...targets.selectedOptions].map(option => option.value);
     const token = ++generation, draft = getDraft(), operation = { path: template.value, arc, remove: deleting,
-      ...(selected ? { originalId: selected.id } : {}), materialise: materialise.checked, resetAi: resetAi.checked };
+      ...(selected ? { originalId: selected.id } : {}), materialise: materialise.checked, resetAi: resetAi.checked, compartment: compartment.value };
     return runWorkshopMutation({ setBusy, current: () => !disposed && token === generation, start: controls,
       invoke: () => applyShieldOperation({ draft, provider, runtime, dependencies, operation, current: () => !disposed && token === generation }),
       success: () => { selected = deleting ? null : arc; changed(operation.path); inspect(true); status.textContent = t('workshop.changed'); },

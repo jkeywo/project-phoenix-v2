@@ -39,6 +39,8 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const systemKind = el('select', null, { id: 'workshop-ship-system-kind' });
   const systemStation = el('select', null, { id: 'workshop-ship-system-station' });
   const systemPowerGroup = el('input', null, { id: 'workshop-ship-system-power-group' });
+  const systemCompartment = el('select', null, { id: 'workshop-ship-system-compartment' });
+  const interiorMaterialise = el('input', null, { id: 'workshop-ship-interior-materialise', type: 'checkbox' });
   const systemAiOnly = el('input', null, { id: 'workshop-ship-system-ai-only', type: 'checkbox' });
   const ratings = el('select', null, { id: 'workshop-ship-ratings', size: '4' });
   const ratingName = el('input', null, { id: 'workshop-ship-rating-name' });
@@ -75,12 +77,14 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const ownership = () => ({ console: systemStation.value || undefined, ai_only: systemAiOnly.checked });
   const systemAdd = button('workshop-ship-system-add', 'workshop.ship.add_system', () => ({ type: 'system-add', id: systemId.value,
     kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined,
-    ...(systemKind.value === 'dock' ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
+    compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
+    ...(['dock', 'access-gate'].includes(systemKind.value) ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
   const systemApply = button('workshop-ship-system-apply', 'workshop.ship.apply_system', () => ({ type: 'system-update', id: systems.value,
+    compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
     fields: { kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined } }));
   const systemUp = button('workshop-ship-system-up', 'workshop.ship.move_up', () => ({ type: 'system-move', id: systems.value, direction: -1 }));
   const systemDown = button('workshop-ship-system-down', 'workshop.ship.move_down', () => ({ type: 'system-move', id: systems.value, direction: 1 }));
-  const systemRemove = button('workshop-ship-system-remove', 'workshop.ship.remove_system', () => ({ type: 'system-remove', id: systems.value }));
+  const systemRemove = button('workshop-ship-system-remove', 'workshop.ship.remove_system', () => ({ type: 'system-remove', id: systems.value, materialise: interiorMaterialise.checked }));
   const ratingOwner = () => ratingScope.value === 'console' ? { console: consoles.value } : { station: stations.value };
   const ratingAdd = button('workshop-ship-rating-add', 'workshop.ship.add_rating', () => ({ type: 'rating-add', ...ratingOwner(), name: ratingName.value }));
   const ratingApply = button('workshop-ship-rating-apply', 'workshop.ship.apply_rating', () => ({ type: 'rating-update', ...ratingOwner(),
@@ -111,6 +115,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     label(feedKind, 'workshop.ship.feed_kind'), feedKind, feedAdd, feedRemove,
     el('h3', 'workshop.ship.systems'), label(systems, 'workshop.ship.systems'), systems, label(systemId, 'workshop.ship.id'), systemId,
     label(systemKind, 'workshop.ship.kind'), systemKind, label(systemStation, 'workshop.ship.console_owner'), systemStation, label(systemPowerGroup, 'workshop.ship.component.power_group'), systemPowerGroup, label(systemAiOnly, 'workshop.ship.ai_only'), systemAiOnly,
+    label(systemCompartment, 'workshop.interior.placement'), systemCompartment, label(interiorMaterialise, 'workshop.interior.materialise'), interiorMaterialise,
     systemAdd, systemApply, systemUp, systemDown, systemRemove,
     el('h3', 'workshop.ship.ratings'), label(ratingScope, 'workshop.ship.rating_scope'), ratingScope, label(ratings, 'workshop.ship.ratings'), ratings, label(ratingName, 'workshop.ship.rating_name'), ratingName,
     label(automated, 'workshop.ship.automated_systems'), automated, ratingAdd, ratingApply, ratingUp, ratingDown, ratingRemove,
@@ -183,6 +188,8 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     if (system?.kind) systemKind.value = system.kind;
     systemStation.replaceChildren(...(inspection?.consoles || []).map(row => option(row.id)));
     systemPowerGroup.value = system?.power_group || '';
+    systemCompartment.replaceChildren(...(inspection?.composition.resolved.value.interior?.compartment || []).map(room => option(room.id, room.label || room.id)));
+    systemCompartment.value = inspection?.composition.resolved.value.interior?.placements?.[system?.id] || systemCompartment.options[0]?.value || '';
     systemStation.value = system?.console || ''; systemAiOnly.checked = system?.ai_only === true;
     const scope = ratingScope.value; ratingScope.replaceChildren(option('station', t('workshop.ship.stations')), option('console', t('workshop.ship.consoles'))); ratingScope.value = scope || 'station';
     const owner = selectedRatingOwner();

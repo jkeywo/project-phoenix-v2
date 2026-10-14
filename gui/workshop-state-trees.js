@@ -1,11 +1,13 @@
 import { t } from './strings.js';
 import { resolveStateTree, idleStateTree } from '../editor/workshop-state-trees.js';
+import { initialAccessGateTree } from '../editor/workshop-interiors.js';
 
 /** Host vocabulary plus actual authored hardware bounds; never a simulation. */
 export function systemTreeVocabulary(owner, schema) {
   if (!schema) return schema;
   const host = schema.hosts?.[owner?.kind], vocabulary = { ...schema, ...host };
   const profile = owner?.energy_profile;
+  if (owner?.kind === 'access-gate') vocabulary.channels = [owner.component?.find(row => row.kind === 'access_boundary')?.sealed_channel || 'sealed'];
   if (['power_reactor', 'power_battery'].includes(owner?.kind)) {
     vocabulary.numeric_facts = []; vocabulary.numeric_channels = {};
   }
@@ -40,7 +42,8 @@ export function systemTreeVocabulary(owner, schema) {
 }
 export const systemTreeContext = {
   id: 'workshop-ai', schemaKey: 'ai_state_tree',
-  value: owner => owner?.config?.ai, defaultValue: () => idleStateTree(),
+  value: owner => owner?.config?.ai, defaultValue: (_, owner) => owner?.kind === 'access-gate'
+    ? initialAccessGateTree(owner.component?.find(row => row.kind === 'access_boundary')?.sealed_channel || 'sealed') : idleStateTree(),
   channels: (owner, schema) => [...new Set([...(schema?.channels || []), ...(owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel)])],
   vocabulary: systemTreeVocabulary,
   inherited: owner => owner?.ai_inherited === true || (owner?.local === false && !owner?.shield_arc_id),
@@ -212,14 +215,14 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
     field(section, 'root', draft.root, value => { draft.root = value; }, draft.tree.map(row => row.id));
     ordered(section, 'trees', draft.tree, () => { const id = unique(draft.tree, 'tree'); if (!draft.root) draft.root = id;
       return { id, initial: 'idle', parameters: {}, memory: {}, state: [{ id: 'idle', task: [], transition: [] }] }; }, treeEditor);
-    button(section, 'reset', () => { draft = structuredClone(context.value(owner) || context.defaultValue(schema)); materialise = false; selections.clear(); });
+    button(section, 'reset', () => { draft = structuredClone(context.value(owner) || context.defaultValue(schema, owner)); materialise = false; selections.clear(); });
     button(section, 'apply', () => apply(() => context.operation(owner, structuredClone(draft), materialise)), !context.available(owner) || (inherited && !materialise));
   };
   return { value: () => structuredClone(draft), refresh(system, metadata, disabled) {
     owner = system; schema = context.vocabulary ? context.vocabulary(system, metadata?.[context.schemaKey]) : metadata?.[context.schemaKey];
     inherited = context.inherited(system);
     const next = JSON.stringify([system?.id, context.value(system), inherited, system?.ai_owner, schema]);
-    if (next !== stamp) { stamp = next; draft = structuredClone(context.value(system) || context.defaultValue(schema)); selections.clear(); materialise = false; }
+    if (next !== stamp) { stamp = next; draft = structuredClone(context.value(system) || context.defaultValue(schema, system)); selections.clear(); materialise = false; }
     // The containing form resets descendant disabled flags; restore every draft
     // control boundary without discarding the staged edits.
     paint();

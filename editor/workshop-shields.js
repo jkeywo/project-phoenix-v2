@@ -5,6 +5,7 @@ import { defaultEnergyConsumer, defaultEnergyGroup, requireCoolantStore } from '
 import { replaceEnergySource } from './workshop-energy.js';
 import { initialShieldTree } from './workshop-shield-ai.js';
 import { shieldArcSystemId } from './workshop-generated-systems.js';
+import { updateInteriorBindings } from './workshop-interiors.js';
 
 export const SHIELD_ENERGY_FIELDS = Object.freeze(['upkeep_per_sec', 'recharge_energy_per_hp', 'recovery_energy_per_hp', 'discharge_hp_per_sec']);
 const clone = value => structuredClone(value);
@@ -124,6 +125,9 @@ export function prepareShieldOperation(draft, dependencies, operation) {
     after = writeArc(after, arc);
   }
   validate(value.shield_arc, value);
+  if (!selected || operation.remove || (operation.compartment !== undefined
+    && inspection.resolved.value.interior?.placements?.[systemId(arc)] !== operation.compartment)) after = updateInteriorBindings(after, inspection, {
+    ...(operation.remove ? { remove: [systemId(selected)] } : { add: { [systemId(arc)]: operation.compartment } }), materialise: operation.materialise === true });
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }

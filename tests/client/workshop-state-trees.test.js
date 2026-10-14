@@ -20,6 +20,15 @@ const change = (key, value) => { const field = el(key); if (field.type === 'chec
 const action = (key, list = null) => (list ? document.querySelector(`[data-ai-list="${list}"] > [data-ai-action="${key}"]`) : document.querySelector(`#workshop-ai > [data-ai-action="${key}"]`)).click();
 const setup = (system = owner()) => { document.body.innerHTML = '<main></main>'; const apply = vi.fn(); const editor = mountStateTrees({ root: document.querySelector('main'), apply }); editor.refresh(system, metadata, false); return { editor, apply }; };
 describe('visual typed System AI authoring', () => {
+  it('starts an access gate with its closed order-following tree and actual bound channel', () => {
+    document.body.innerHTML = '<main></main>';
+    const gate = { id: 'hatch', kind: 'access-gate', local: true, component: [{ kind: 'access_boundary', sealed_channel: 'contain' }] };
+    const schema = { ai_state_tree: { ...metadata.ai_state_tree, hosts: { 'access-gate': { facts: ['seal_requested', 'sealed'], channels: ['sealed'] } } } };
+    const apply = vi.fn(), editor = mountStateTrees({ root: document.querySelector('main'), apply }); editor.refresh(gate, schema, false);
+    expect(systemTreeVocabulary(gate, schema.ai_state_tree).channels).toEqual(['contain']);
+    expect(editor.value().tree[0].state[0].task[0].action).toEqual({ kind: 'write', channel: 'contain', value: { source: 'fact', name: 'seal_requested' } });
+    expect(document.querySelector('fieldset').disabled).toBe(false);
+  });
   it('inspects inherited order and explicitly materialises before a single atomic Apply', () => {
     const { editor, apply } = setup();
     expect(el('resolved').textContent).toContain('write: write');

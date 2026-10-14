@@ -36,10 +36,34 @@ atomically during composition.
 
 ## Evidence
 
-Command receipts and gameplay/performance comparison are recorded during final
-integration. Independent reviews passed the shared stock/magazine implementation,
-authored schema/Workshop and runtime transfer/continuation integration. Physical
-device and human-workload evidence is separate from automated tests.
+[Command receipts](../gameplay-redesign/implementation/resources-validation.json)
+and [gameplay/performance comparison](../gameplay-redesign/implementation/resources-baseline.md)
+record the automated exit. Native workspace coverage passes 9,131 tests (102
+existing ignored); renderer-independent Simulation passes 4,263; JavaScript passes
+8,748. Formatting, strict Clippy, generated surfaces, strings, LODs, layers and
+PASM validate/scan/traceability pass. Independent read-only reviews cover stocks,
+magazine stages, authoring, transactions, continuation and Preview prerequisites.
+
+Three operations browser cases pass: Destroyer/Cruiser capacity transfer and
+actual Cruiser magazine replenishment from a named facility store. The latter
+uses ordinary human Tactical/Helm/Engineering commands: a spent round is replaced,
+magazine stock returns from five to six, and provider stock falls from 100 to 99.
+Native tests additionally cover contention, protected claims, tube-held headroom,
+prior queued effects, missing endpoints and malformed restore before writes.
+
+The rendered Workshop case passes inherited materialisation, refusal, undo/redo,
+export/reload, measured mesh geometry, rendered pixels and disposable Test.
+Its inspected screenshot shows the composed Cruiser. This caught two existing
+Preview defects: unresolved includes and zero statistics frozen before scene
+meshes arrive. Preview now resolves captured source through the canonical Rust
+resolver, refuses missing/invalid fragments before boot, and measures resident
+geometry. All 35 shared Viewer owner tests pass. The separate viewer bundle was
+rebuilt; no render assertions were relaxed.
+
+Both bounded scenario reports match Increment 5 byte for byte; repeat, replay and
+continuation agree. The unchanged Cruiser matrix passes 20/20 victories and all 16 thresholds, with
+identical merged results. The comparison records tick timing and its limits.
+Physical devices and human-workload evidence remain separate.
 
 ## Playable configuration and human acceptance
 

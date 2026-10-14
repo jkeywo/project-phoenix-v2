@@ -170,7 +170,7 @@ retain existing behavior. Reports remain separate knowledge.
 Snapshot 41/rules 0.13 retain IDs, queued redirects and private continuation once.
 The existing Repair Console shows permitted assignment/outcome rows without
 additional controls or concealed diagnosis. Physical/device and human-workload
-acceptance remains open; Increment 6 has not started.
+acceptance remains open; the user subsequently authorised Increment 6.
 
 
 [Validation receipts](jobs-validation.json) and [gameplay comparison](jobs-baseline.md)
@@ -188,3 +188,11 @@ Shared stocks stay in magazine/infrastructure owners. Named services and explici
 links support real docked replenishment through ordinary controls and AI.
 Snapshot 42/rules 0.14 carry stock claims and fractional flow progress. No new
 consumable drains, internal stock targets, production or personnel inventory land.
+
+
+[Validation receipts](resources-validation.json) and [gameplay comparison](resources-baseline.md)
+record stock conservation, continuation, real replenishment and the complete
+Workshop authoring journey. Preview also resolves inherited captured templates
+and waits for resident mesh geometry. Automated evidence passes; physical/device
+and human-workload acceptance remains separate, with this increment kept
+`in_progress`. The user authorised advancing with “do 6 then”.

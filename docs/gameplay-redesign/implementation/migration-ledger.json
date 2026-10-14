@@ -116,7 +116,11 @@
       "completion": "Existing ammunition, transfer and facility stock use shared capacities, inventories, reservations and explicit links; replenishment works.",
       "evidence": [
         "pasm/spec/design/resource-stores.yaml",
-        "docs/gameplay-redesign/implementation/increment-6.md"
+        "docs/gameplay-redesign/implementation/increment-6.md",
+        "docs/acceptance/1562-resource-stores.md",
+        "docs/gameplay-redesign/implementation/resources-validation.json",
+        "docs/gameplay-redesign/implementation/resources-baseline.json",
+        "docs/gameplay-redesign/implementation/resources-baseline.md"
       ]
     },
     {

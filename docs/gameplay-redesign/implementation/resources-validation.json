@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "status": "automated_passed_manual_pending",
+  "runtime_revision": "4732431464dd17efb3911ace79b440ca807e13fe",
+  "native_tested_revision": "369bc646a7d5e0fdbee66a6f885a58f16ccd842b",
+  "post_native_changes": "Localisation completion, Workshop module packaging, rustdoc and RON dependency made cross-target; native dependency resolution and simulation logic unchanged. Additional corrections are confined to the Viewer feature, covered by its owner suite, rebuilt bundle, browser acceptance and strict Clippy. Independently reviewed; WASM and browser checks use final bundle.",
+  "snapshot_format": 42,
+  "simulation_rules": "0.14",
+  "protocol": 6,
+  "checks": [
+    {
+      "name": "fmt",
+      "command": "cargo fmt -- --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-fmt.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "clippy",
+      "command": "cargo clippy --workspace --all-targets --features server,viewer,debug,headless,perf,host,capture -- -D warnings",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-clippy.log",
+      "raw_sha256": "896d643b027efb8b55ae67f7dc283fc452dcdcfccbf158629f19cd7b3f67be85"
+    },
+    {
+      "name": "workspace",
+      "command": "PHOENIX_AMBIGUITY_BASE_REF=dc42aa20eeb23df31ac4ec47c58c19c3b8e54793 cargo test --workspace --features headless",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-workspace.log",
+      "raw_sha256": "3529e8e50ac9fb9276fe8fe11732730fb66af8065cda05e02c45166f50090e3c",
+      "passed_tests": 9131,
+      "ignored_tests": 102
+    },
+    {
+      "name": "simulation-owner",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-simulation-owner.log",
+      "raw_sha256": "52f5ba6120a85ce3b4d33bd2231dfdfeb43937a0ea70d2a1214795ea1c8ec6f1",
+      "passed_tests": 4263,
+      "ignored_tests": 0
+    },
+    {
+      "name": "debug-surfaces",
+      "command": "npm run debug-surfaces:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-debug-surfaces.log",
+      "raw_sha256": "5f45cf24483cf426992a1c483293f52fca550d21ca9f22a125ed6b383788aa91"
+    },
+    {
+      "name": "live-layout",
+      "command": "npm run live-layout:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-live-layout.log",
+      "raw_sha256": "a7be9f512a1b2b56a5369100e41c61433a609f9cd004d39fbae33b75f1121091"
+    },
+    {
+      "name": "vitest",
+      "command": "npx --no-install vitest run",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-vitest.log",
+      "raw_sha256": "896c716a4d63f64d8e1279ee82633fbb270063a7a645dab328767d3a6597b0b4",
+      "passed_tests": 8748
+    },
+    {
+      "name": "strings",
+      "command": "node scripts/check-strings.mjs --strict",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-strings.log",
+      "raw_sha256": "8e9deb164eedf166931f357837c83076870069ffffb24fe6892d26722950b6aa"
+    },
+    {
+      "name": "lods",
+      "command": "npm run lods:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-lods.log",
+      "raw_sha256": "2b930a02e553aeff96f0882e62ac17f38962828678b464d2cfb22824a7139d45"
+    },
+    {
+      "name": "lod-captures",
+      "command": "npm run lod-captures:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-lod-captures.log",
+      "raw_sha256": "684fbb16059b2f5405a620c2e3347dd7071ea1fa81d058bc4c116a6129ca59a7"
+    },
+    {
+      "name": "layers",
+      "command": "npm run layers:check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-layers.log",
+      "raw_sha256": "f6a295e8e40770d6f89300af8ee93db90a5ef6d65af4e21a0e7ad89bf2814d92"
+    },
+    {
+      "name": "dependency-tree",
+      "command": "node scripts/check-layers.mjs --dependency-tree",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-dependency-tree.log",
+      "raw_sha256": "cd9eaf91f97f04e7ba6d7df6b11b5268aeb649251fa07e0834ff8c7600ed8cbe"
+    },
+    {
+      "name": "pasm-validate",
+      "command": "uv run pasm validate",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-pasm-validate.log",
+      "raw_sha256": "243ab9bff6c28990bfb2cbf9b4121fd747cf51b99eb5a71a02895a53f8cbac42"
+    },
+    {
+      "name": "pasm-scan",
+      "command": "uv run pasm scan",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-pasm-scan.log",
+      "raw_sha256": "750358a264a605d6b4aae035c65aef1ecbc5e387ad31ce0cc38004496811ce52"
+    },
+    {
+      "name": "pasm-traceability",
+      "command": "uv run pasm traceability",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-final-pasm-traceability.log",
+      "raw_sha256": "1f981da799a0f97a20fe0abc81983cb92f9d8c44a9281b94a77618861e3dac45"
+    },
+    {
+      "name": "Endpoint strictness",
+      "command": "cargo test -p phoenix-sim-gameplay --lib resources::service",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-endpoint-targeted.log",
+      "raw_sha256": "2c0a3889367651cdffab001cb881fb9212eaa215802e31392223764bfedfdff5",
+      "passed_tests": 3,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Legacy artifact refusal",
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features -- format_17_without_apply_outcomes format_21_without_the_armed_direct_effects legacy_scalar_capacity_payload",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-artifact-targeted.log",
+      "raw_sha256": "45954f5df435b01de19a0eceda1501849d5f27d501f58ec547ba29edc025aece",
+      "passed_tests": 3,
+      "ignored_tests": 0
+    },
+    {
+      "name": "Workshop targeted client",
+      "command": "npx --no-install vitest run editor/tests/workshop-resources.test.js tests/client/workshop-resource-panel.test.js editor/tests/entity-includes.test.js",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-client-targeted.log",
+      "raw_sha256": "57ef0666548ab44187bf155792879d3d1dc5f6e4a53e11ff339f274a1fc87485",
+      "passed_tests": 43
+    },
+    {
+      "name": "Viewer owner",
+      "command": "cargo test -p phoenix-presentation --lib --features viewer viewer::",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-preview-owner.log",
+      "raw_sha256": "826ddaee8dd835745d95ee1ebc441d9e809c07e2ad37a20bd1efbaf9067afb72",
+      "passed_tests": 35,
+      "ignored_tests": 0
+    },
+    {
+      "name": "WASM build",
+      "command": "NO_COLOR=true trunk build",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-wasm.log",
+      "raw_sha256": "88f793db1589eb0e49d6c2a296b40867615f82e96bac7a41b767954a7bb80680"
+    },
+    {
+      "name": "Phone client",
+      "command": "node scripts/build-client.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-client-build.log",
+      "raw_sha256": "617733e4eb5cb70ed99cc3f92408d30ac885c8d30c8f4bd09bda100800acdf2f"
+    },
+    {
+      "name": "Workshop bundle",
+      "command": "node scripts/build-workshop.mjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-workshop-build.log",
+      "raw_sha256": "e43ce5eba6bbc4dbc50414f65cafb4dc6bf7062ee809e9fad986a4a2f2e38b64"
+    },
+    {
+      "name": "Workshop viewer",
+      "command": "NO_COLOR=true trunk build --config workshop-preview-trunk.toml",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-workshop-viewer-build.log",
+      "raw_sha256": "4a1184e2d12595fcefbc41162237111270be30884d7dd914b8d844d7f153d6f1"
+    },
+    {
+      "name": "Viewer install",
+      "command": "node scripts/copy-workshop-preview.mjs dist",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-workshop-viewer-copy.log",
+      "raw_sha256": "bcc8e1947b3d25ecd919f64a191d5e1ff2eafc4c3824474c3e24d69e61e23c6a"
+    },
+    {
+      "name": "Operations browser",
+      "command": "PHOENIX_SMOKE_PORT=3154 npx --no-install playwright test operations-dock-umbilical.spec.js --project=chromium",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-browser-operations.log",
+      "raw_sha256": "8185cf6dd22dd679fa395e9397c94d161068b9a02fc8c2730610b799dfe0bfa0",
+      "passed_tests": 3
+    },
+    {
+      "name": "Workshop browser",
+      "command": "PHOENIX_SMOKE_PORT=3155 npx --no-install playwright test workshop-resources.render.spec.js --project=render",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-browser-workshop.log",
+      "raw_sha256": "61235242da53873ea6f20bb2cf4350515f28f14e9bf48e5f324e90e38d2418d6",
+      "passed_tests": 1
+    },
+    {
+      "name": "Wiki lint",
+      "command": "node .phoenix/issue-closeout/wiki-lint.cjs",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-wiki.log",
+      "raw_sha256": "b818d62d17470aa0c04aa04bba8a200924468e944ff2c4da29469d1a6b92943d"
+    },
+    {
+      "name": "Ledger",
+      "command": "node scripts/redesign-ledger.mjs --check",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-ledger.log",
+      "raw_sha256": "bf8a8cf14646527fd8c15e099c9ad323c5f57ec5b8b58cdaf2c8e455abd02cfa"
+    },
+    {
+      "name": "Baseline",
+      "command": "node scripts/redesign-baseline.mjs --out .phoenix/redesign-baseline/2026-10-14-resources-final-measure --profile measure",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-baseline.log",
+      "raw_sha256": "3320522bcc941cf050053319b9dca25034646f545a50ecd8548f01734bc3f104"
+    },
+    {
+      "name": "Cruiser matrix",
+      "command": "node scripts/redesign-balance-baseline.mjs --capture .phoenix/redesign-baseline/2026-10-14-resources-final-measure/summary.json --out .phoenix/redesign-baseline/2026-10-14-resources-final-cruiser",
+      "result": "passed",
+      "raw_log": ".phoenix/increment-6-balance.log",
+      "raw_sha256": "6d863f6d5be25e862349d8722020c3436b8e78b2942e632bff5637caba171eaa"
+    }
+  ],
+  "review": "Independent read-only reviews passed shared stock/magazine arithmetic, authored schema/Workshop, transaction/continuation integration, old-save version refusal, strict endpoint validation, captured-template resolution and scene-measurement readiness",
+  "corrected_validation_failures": [
+    "Exact supported component inventory includes resource_services. Strict endpoint variant uses an empty struct so serde rejects leftover fields; authored fixture declares idle magazine AI for strict builds.",
+    "Workshop build module allowlist and all 24 German strings are complete. The existing RON dependency is shared across targets for browser save preflight, with native resolution unchanged.",
+    "Rendered Preview acceptance exposed inherited-template parsing and premature zero-geometry statistics. Existing Rust resolver now composes captured sources before boot; scene measurement waits for resident geometry. Native regression includes single-thread publication to observe the WASM thread-local contract. Missing mesh fixture fields were supplied without weakening validation.",
+    "Existing Vellum version envelope is checked before decoding incompatible stock schemas, so format 41 saves report version mismatch rather than corruption.",
+    "Owner lint findings corrected without changing behavior. Live Inspector classification/fingerprint and digest characterizations retain exact assertions with new canonical state.",
+    "The authoritative-state enumeration ratchet removes TorpedoSystemResource from unclassified debt after its explicit declaration; the guard remains intact.",
+    "Restore checks count ceilings, loading claims and timer bounds before writes. Partial-volley firing releases its unfinished loading claim; fractional flow progress survives continuation."
+  ],
+  "setup_recovery": "Managed worktree creation removed shared JavaScript dependency links. Locked npm dependencies and byte-identical tracked browser packages were restored; the stale smoke-suite junction was removed nonrecursively and replaced by its locked local dependencies; no networking source change remained.",
+  "evidence_scope": "Gates cover integrated production sources; later evidence/documentation changes do not alter runtime. Browser bundles, baseline and balance pin the recorded source revision.",
+  "visual": {
+    "path": ".phoenix/increment-6-resource-preview.png",
+    "sha256": "89fecaf5f2218061a987578ddfa2e32afc9d284b72f9dd6e52e5d845fd950a93",
+    "result": "inspected",
+    "scope": "Composed Cruiser with measured geometry and rendered pixels; separate from device acceptance"
+  },
+  "manual_pending": [
+    "Physical phones",
+    "Native multi-monitor displays",
+    "Human station workload and usability"
+  ],
+  "boundaries": [
+    "Increment 7 has not started",
+    "No push requested/performed",
+    "No new consumable drains, production or automatic internal logistics"
+  ]
+}

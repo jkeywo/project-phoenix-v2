@@ -1,0 +1,51 @@
+entities:
+  - decision: compartment-structure-and-component-conditions
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Compartments Own Structure; Components Own Conditions
+      summary: "G057 and AD39–50 replace primary System percentage damage with compartment structural HP and individually identified component conditions. A System and its components occupy its authored compartment independently of Console ownership. Components have no HP pool, precise internal position or path-proximity weighting. Damage events, deposited amount/type and susceptibility produce faults; structural thresholds are not a recurring fault generator."
+      rationale:
+        - "Selected G057 and architecture AD37–50 in docs/gameplay-redesign/system-review.md and docs/gameplay-redesign/architecture/index.html. Existing System IDs, command admission, individual AI and knowledge limits remain."
+        - "AD49–50: zero compartment HP applies a compartment-sourced disabling condition. It clears at an authored fraction strictly above zero and below full HP, and reapplies only at zero. Structural recovery removes only that source; unrelated faults persist."
+
+  - decision: planar-material-penetration-and-weighted-decks
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Trace Planar Hits Through a Weighted Selected Deck
+      summary: "AD39–46 select a weighted random deck independently of shot height, then trace the actual incoming planar direction through its compartments. Ordinary lines distribute across the facing profile; supported informed targeting aims toward the known equipment compartment without guaranteeing its deck or component. Penetration and payload are separate authored parameters. Compartment material resistance scales with traversed distance and weakens progressively with structural HP."
+      rationale:
+        - "No second hit/miss roll, wall HP, local hole grid, component coordinates or material overrides below compartment scope. Projectile arrival direction must not be replaced with its launcher's current bearing."
+        - "Payload deposition must conserve the incident budget across compartments and eligible components. Tick splitting and continuous beams must not manufacture extra faults through event-count probability. Exact formulas are implementation choices pending adoption, not selected tuning."
+
+  - decision: condition-appropriate-team-restoration-and-parts
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Components and Structure With Real Teams and Parts
+      summary: "G058, G064, S075–77 and AD48–51 require supported component restoration and structural work using actual access, teams, time and typed parts where required. One team works each component task; distinct components can be repaired concurrently, including while another team restores their compartment. The compartment disabling condition blocks operation, not repair by itself. Most destroyed components permit supported field replacement; explicitly catastrophic exceptions do not."
+      rationale:
+        - "Teams automatically choose full restoration when possible, otherwise a supported fallback patch. A patch remains indefinitely at reduced effectiveness without spreading or an expiry/rework timer; it does not prevent new damage. No routine patch-versus-full menu or compulsory restart puzzle."
+        - "Operators and individual AI use readings, symptoms and known faults. Ambiguous faults require supported observation-only diagnosis or arrival. A report or shared feed grants information, never control, and a component completion report must retain any known structural limitation."
+
+  - decision: repairable-disablement-distinct-from-physical-destruction
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Preserve Recoverable Disablement Without Automatic Ship Deletion
+      summary: "G064 and AD52 distinguish recoverable loss of operational propulsion and power from physical destruction. Compartment HP depletion alone does not destroy a ship. Supported catastrophe may destroy it; crew may abandon earlier. Ordinary actors assess the target using permitted evidence and objectives, with later recovery or hostility still relevant. Intentionally engineless entities and charged local reserves require appropriate interpretation."
+      rationale:
+        - "Increment 11 must remove old hull-is-zero destruction and wreck gates from migrated ship consumers together with introducing working restoration. Existing scenario catastrophe, destroyed events and loss continuation require explicit migration, not an invisible aggregate-HP compatibility latch."
+        - "Broader evacuation, boarding and capture execution remain their scheduled increments. AD53–55 authority and return-to-service selections remain intact; they are not claimed implemented by this milestone."
+
+  - decision: component-damage-increment-eleven-adoption-draft
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Draft the Smallest Complete Damage and Restoration Migration
+      summary: "The increment 11 implementation draft gives one authoritative compartment/condition owner, typed structural and component job targets, stable mechanism-bound component identities, stock-backed remedies and shared adapters for actual damage producers. Damage, availability, reports, parts, restoration, defeat, Workshop and continuation must land together. No runtime implementation or playable exit is claimed by this draft."
+      rationale:
+        - "[ai] Implementation specification and pending adoption choices: docs/gameplay-redesign/implementation/increment-11.md. Recommended penetration/deposition, component bindings and remedy transactions are explicit proposals; no physical coefficients or broad fault framework are adopted silently."
+        - "Remove interior.repair_placements, SystemHull/ShipArcHull primary ship damage and their repair/availability writers in this increment. Any retained asteroid or legacy wire projection has a named independent owner and no competing ship HP. Automatic deliveries/production stay increment 12; fitting 13; advanced sensing 14; broader personnel 20."

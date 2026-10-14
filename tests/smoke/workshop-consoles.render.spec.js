@@ -159,6 +159,9 @@ test('Workshop authors Consoles and Dock components through real validation, his
     await revealWorkshopPanel(page, 'composition');
     const workflow = page.locator('#workshop-repair-workflow');
     await expect(workflow).toBeEnabled();
+    // The shipped default now comes from a fragment; materialise explicitly.
+    await expect(workflow.locator(':scope > [data-ai-action="apply"]')).toBeDisabled();
+    await workflow.locator('[data-ai-field="materialise"]').check();
     await workflow.locator('[data-ai-map="memory"] > [data-ai-action="add"]').click();
     await workflow.locator('[data-ai-field="memory.value-1.name"]').fill('reviewed');
     await workflow.locator('[data-ai-field="memory.value-1.name"]').dispatchEvent('change');

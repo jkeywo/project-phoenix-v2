@@ -60,7 +60,7 @@ fn gm_scopes_resolve_shared_real_rooms_and_project_existing_arms() {
         totals.0 - 5.0
     );
     assert!(physical_scope_rooms(
-        &GmDirectEffectScope::System("missing".into()),
+        &GmDirectEffectScope::System(crate::core::messages::SystemId("missing".into())),
         &damage,
         Some(&config)
     )

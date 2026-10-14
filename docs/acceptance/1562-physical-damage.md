@@ -81,3 +81,16 @@ reload/Preview/Test. Compare combat and non-combat workload, balance and perform
 on supported 2/4/6/8-seat hulls. Record human acceptance separately. Run the required
 integrated gates once before any push. No push or final playable acceptance is
 claimed here.
+
+## Initial-pin owner follow-up
+
+At initial source 600327f8, the four-owner batch executed 32 passing cases and
+one expected schema-inventory pin failure. All three actual internal Repair
+adapter cases pass, as do 13 Gameplay stages/claim cases, eight World
+neutralization cases, the Workshop damage palette and the remaining seven
+Inspector cases. The strict owner-generated inventory reports domain counts
+[55, 71, 915, 51, 56] and fingerprint 14004827888913386031. New authored damage
+fields remain recreation-required, physical runtime detail derived, and actual
+checked effects named actions; exhaustive nested patterns and assertions passed.
+The numerical pin update is a separate follow-up requiring rerun; the failing
+batch is not recorded as a complete green batch.

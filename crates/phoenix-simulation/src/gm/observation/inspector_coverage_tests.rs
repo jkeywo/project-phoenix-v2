@@ -1329,6 +1329,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // Dock state-tree definitions add thirty authored ship schema leaves.
     // Repair workflows add sixteen authored Job-context leaves.
     // Resource services add one authored endpoint-kind leaf, recreate-required.
+    // Physical damage adds explicit materials/remedies/component/impact/layout
+    // leaves and checked physical System actions; owner output records 915 ship rows.
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
     for row in &inventory {
         let line = format!(
@@ -1347,11 +1349,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     println!("reviewed schema counts={counts:?}; fingerprint={fingerprint}");
     assert_eq!(
         counts,
-        [55, 71, 727, 51, 56],
+        [55, 71, 915, 51, 56],
         "update the reviewed inventory ratchet"
     );
     assert_eq!(
-        fingerprint, 9_607_254_471_899_802_894,
+        fingerprint, 14_004_827_888_913_386_031,
         "update the reviewed inventory fingerprint"
     );
 }

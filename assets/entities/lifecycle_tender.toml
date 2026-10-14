@@ -1,3 +1,5 @@
+includes = ["fragments/energy/lifecycle_tender.toml"]
+
 # Lifecycle tender — the probe-world operator for the continuous-task lifecycle
 # (issue #1341, PRD #1337).
 #
@@ -93,13 +95,13 @@ automated_systems = []
 id = "tractor"
 kind = "tractor"
 console = "engineering"
-power_group = "tractor"
+power_group = "energy-tractor"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
 console = "engineering"
-power_group = "survey"
+power_group = "energy-sensors"
 
 # ── The coupling terms ───────────────────────────────────────────────────────
 [tractor]
@@ -178,3 +180,276 @@ kind = "Tractor"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+console = "ai-energy-power"
+ai_only = true
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 3.1500000953674316
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-tractor"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-tractor"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-tractor"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-tractor"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-tractor"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-tractor"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-survey"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-survey"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-survey"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-survey"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-survey"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-survey"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-survey"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-survey"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-survey"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-survey"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tractor"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tractor"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tractor"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-tractor"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tractor"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-tractor"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensors"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensors"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensors"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-sensors"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensors"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-sensors"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+console = "ai-energy-power"
+ai_only = true
+
+[[console]]
+id = "ai-energy-power"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"

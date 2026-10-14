@@ -14,7 +14,7 @@
 # mate, so the probe needs no helm axes — the helm station exists only to OWN the
 # dock system and give the Dock/Undock commands a seat to be admitted against.
 
-includes = ["fragments/ai/dock_state_tree.toml"]
+includes = ["fragments/ai/dock_state_tree.toml", "fragments/energy/dock_probe.toml"]
 
 tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
@@ -78,7 +78,7 @@ automated_systems = []
 id = "dock"
 kind = "dock"
 console = "helm"
-power_group = "dock"
+power_group = "energy-dock"
 
 # ── The dock terms ───────────────────────────────────────────────────────────
 # All authored (AGENTS.md rule 11): the reach the control appears within and a
@@ -129,3 +129,176 @@ kind = "Dock"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+console = "ai-energy-power"
+ai_only = true
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-dock"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-dock"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-dock"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-dock"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-dock"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-dock"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-dock"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-dock"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+console = "ai-energy-power"
+ai_only = true
+
+[[console]]
+id = "ai-energy-power"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"

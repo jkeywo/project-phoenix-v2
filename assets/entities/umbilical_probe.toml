@@ -16,7 +16,7 @@
 # therefore no committed world's digest) moves for this slice. The demo destroyer
 # gains resupply in a later integration, not here.
 
-includes = ["fragments/ai/dock_state_tree.toml"]
+includes = ["fragments/ai/dock_state_tree.toml", "fragments/energy/umbilical_probe.toml"]
 
 tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
@@ -118,7 +118,7 @@ automated_systems = []
 id = "dock"
 kind = "dock"
 console = "helm"
-power_group = "dock"
+power_group = "energy-dock"
 
 # ── The umbilical system ─────────────────────────────────────────────────────
 # First-class, engineering-owned, power-grouped: the admitted target for
@@ -156,7 +156,7 @@ min_power_level = 2
 id = "umbilical"
 kind = "umbilical"
 console = "engineering"
-power_group = "umbilical"
+power_group = "energy-umbilical"
 
 # ── The dock terms ───────────────────────────────────────────────────────────
 
@@ -199,3 +199,276 @@ kind = "Umbilical"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+console = "ai-energy-power"
+ai_only = true
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 2.299999952316284
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-dock"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-dock"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-dock"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-dock"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-dock"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-dock"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-umbilical"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-umbilical"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-umbilical"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-umbilical"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-umbilical"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-umbilical"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-dock"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-dock"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-umbilical"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-umbilical"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-umbilical"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-umbilical"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-umbilical"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-umbilical"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+console = "ai-energy-power"
+ai_only = true
+
+[[console]]
+id = "ai-energy-power"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"

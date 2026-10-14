@@ -1,0 +1,90 @@
+# [ai] Increment 8 provisional normalized-work energy tuning.
+# Physical buffers, flows and coolant are shared by human and ordinary AI control.
+# Parent groups cap child sums; they contain no separate consumer/battery.
+
+[power_groups.support]
+label = "station.engineering.name"
+default_level = 2
+min_level = 0
+max_level = 4
+
+[power_groups.energy-repair]
+label = "energy.group.repair.label"
+default_level = 2
+min_level = 0
+max_level = 4
+
+[[infrastructure.capacity]]
+id = "coolant"
+amount = 100
+ceiling = 100
+label = "energy.coolant"
+
+[resource_services.coolant]
+kind = "capacity"
+id = "coolant"
+
+[energy.reactor]
+sustainable_output_per_sec = 1.15
+max_output_per_sec = 1.725
+ramp_per_sec = 0.2875
+initial_output_per_sec = 1.15
+initial_energy = 2.5875
+initial_heat = 0
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+
+[energy.reactor.reserve]
+capacity = 3.45
+max_intake_per_sec = 2.3
+passive_loss_at_full_per_sec = 0.0345
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "repair"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.group]]
+id = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 0
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-repair"
+parent = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 0
+restore_delay_secs = 0.5
+

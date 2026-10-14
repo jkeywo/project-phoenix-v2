@@ -30,13 +30,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
 # declares a policy" is satisfied by that document, not by this file.
-includes = [
-  "fragments/jobs/repair_workflow.toml",
-  "fragments/ai/dock_state_tree.toml",
-  "fragments/ai/fleet_baseline.toml",
-  "fragments/ai/captain_alliance.toml",
-  "fragments/ai/movement_attack_pass.toml",
-]
+includes = ["fragments/jobs/repair_workflow.toml", "fragments/ai/dock_state_tree.toml", "fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml", "fragments/ai/movement_attack_pass.toml", "fragments/energy/alliance_destroyer.toml"]
 
 [mesh]
 model = "assets/models/alliance_destroyer_recreated.glb"
@@ -1268,11 +1262,13 @@ console = "captain"
 
 [[system]]
 id = "sensors"
+power_group = "energy-sensors"
 kind = "sensors"
 console = "captain"
 
 [[system]]
 id = "sensor-radar"
+power_group = "energy-sensor-radar"
 kind = "sensor_radar"
 console = "captain"
 
@@ -1289,43 +1285,40 @@ console = "captain"
 id = "helm-thrust"
 kind = "helm_thrust"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-thrust"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-steering"
 
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
 console = "helm"
-power_group = "helm"
 
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
 console = "helm"
-power_group = "helm"
 
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
 console = "helm"
-power_group = "helm"
 
 [[system]]
 id = "helm-radar"
 kind = "helm_radar"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-radar"
 
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-tactical-radar"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
 # One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
@@ -1334,13 +1327,12 @@ power_group = "weapons"
 id = "phaser-control"
 kind = "phaser_control"
 console = "tactical"
-power_group = "weapons"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-impulse"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
 # system so ToggleBoost/SetBoost admission gates on its own declared system,
@@ -1350,49 +1342,49 @@ power_group = "helm"
 id = "helm-boost"
 kind = "helm_boost"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-boost"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
 console = "helm"
-power_group = "helm"
+power_group = "energy-helm-lateral-thrust"
 
 [[system]]
 id = "phaser-omni"
 kind = "phaser_bank"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-phaser-omni"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-torpedo-magazine"
 
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-torpedo-tube-fore"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-torpedo-tube-aft"
 
 [[system]]
 id = "blaster-port"
 kind = "blaster_bank"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-blaster-port"
 
 [[system]]
 id = "blaster-starboard"
 kind = "blaster_bank"
 console = "tactical"
-power_group = "weapons"
+power_group = "energy-blaster-starboard"
 
 # Navigation and Comms are both complete human-seeking Stations (issue #984,
 # #1097, #1098) and are each resolved by their own `[[station]] host_order`,
@@ -1416,11 +1408,13 @@ power_group = "weapons"
 # stations, so no seat is unreachable.
 [[system]]
 id = "navigation"
+power_group = "energy-navigation"
 kind = "navigation"
 console = "navigation"
 
 [[system]]
 id = "comms"
+power_group = "energy-comms"
 kind = "comms"
 console = "comms"
 
@@ -1428,12 +1422,1607 @@ console = "comms"
 id = "shields-system"
 kind = "shields"
 console = "engineering"
-power_group = "shields"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
 console = "engineering"
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 30.25
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 6.050000190734863
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 18.149999618530273
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-helm"
+value = 11.350000381469727
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-helm"
+value = 10
+
+[[system.config.ai.tree.state.task]]
+id = "fill-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-helm"
+value = 19
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-helm"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-helm"
+value = 50
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-helm"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-weapons"
+value = 7.300000190734863
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-weapons"
+value = 7
+
+[[system.config.ai.tree.state.task]]
+id = "fill-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-weapons"
+value = 9
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-weapons"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-weapons"
+value = 35
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-weapons"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-shields"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-shields"
+value = 2.299999952316284
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-shields"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-shields"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "fill-shields"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-shields"
+value = 4
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-shields"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-shields"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-shields"
+value = 10
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-shields"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-sensors"
+value = 3.1500000953674316
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-sensors"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "fill-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-sensors"
+value = 4
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-sensors"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-sensors"
+value = 10
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-sensors"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-comms"
+value = 3
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-comms"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "fill-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-comms"
+value = 3
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-comms"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-comms"
+value = 10
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-comms"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-support"
+value = 3.1500000953674316
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-support"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "fill-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-support"
+value = 4
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-support"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-support"
+value = 10
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-support"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-dock"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-dock"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-dock"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-dock"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-dock"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensors"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensors"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensors"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-sensors"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-sensors"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensors"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-sensors"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-sensor-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensor-radar"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-sensor-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensor-radar"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-sensor-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-sensor-radar"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-sensor-radar"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-sensor-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-sensor-radar"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-sensor-radar"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-thrust"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-thrust"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-thrust"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-thrust"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-thrust"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-thrust"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-steering"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-steering"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-steering"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-steering"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-steering"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-steering"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-radar"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-radar"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-radar"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-radar"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-radar"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-radar"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tactical-radar"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tactical-radar"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tactical-radar"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-tactical-radar"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tactical-radar"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-tactical-radar"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-impulse"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-impulse"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-impulse"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-impulse"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-impulse"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-impulse"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-boost"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-boost"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-boost"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-boost"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-boost"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-boost"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-boost"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-boost"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-boost"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-boost"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-lateral-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-lateral-thrust"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-lateral-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-lateral-thrust"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-lateral-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-lateral-thrust"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-lateral-thrust"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-lateral-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-lateral-thrust"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-lateral-thrust"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-phaser-omni"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-phaser-omni"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-phaser-omni"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-phaser-omni"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-phaser-omni"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-phaser-omni"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-phaser-omni"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-phaser-omni"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-phaser-omni"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-phaser-omni"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-torpedo-magazine"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-magazine"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-torpedo-magazine"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-magazine"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-torpedo-magazine"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-magazine"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-torpedo-magazine"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-torpedo-magazine"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-magazine"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-torpedo-magazine"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-torpedo-tube-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-tube-fore"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-torpedo-tube-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-tube-fore"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-torpedo-tube-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-tube-fore"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-torpedo-tube-fore"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-torpedo-tube-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-tube-fore"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-torpedo-tube-fore"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-torpedo-tube-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-tube-aft"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-torpedo-tube-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-tube-aft"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-torpedo-tube-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-torpedo-tube-aft"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-torpedo-tube-aft"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-torpedo-tube-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-torpedo-tube-aft"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-torpedo-tube-aft"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-blaster-port"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-blaster-port"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-blaster-port"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-blaster-port"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-blaster-port"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-blaster-port"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-blaster-port"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-blaster-port"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-blaster-port"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-blaster-port"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-blaster-starboard"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-blaster-starboard"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-blaster-starboard"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-blaster-starboard"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-blaster-starboard"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-blaster-starboard"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-blaster-starboard"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-blaster-starboard"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-blaster-starboard"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-blaster-starboard"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-navigation"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-navigation"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-navigation"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-navigation"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-navigation"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-navigation"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-navigation"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-navigation"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-navigation"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-navigation"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-comms"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-comms"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-comms"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-comms"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-comms"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-comms"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-comms"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-repair"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-repair"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-repair"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-repair"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-repair"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-repair"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tractor"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tractor"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tractor"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-tractor"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-tractor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tractor"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-tractor"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-umbilical"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-umbilical"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-umbilical"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-umbilical"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-umbilical"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-umbilical"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-umbilical"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-transporter"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-transporter"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-transporter"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-transporter"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-transporter"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-transporter"
+value = 1
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-transporter"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-transporter"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-transporter"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-transporter"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-security"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-security"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-security"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-security"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-security"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-security"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-security"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-security"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-security"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-security"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-shield-arc-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-shield-arc-fore"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-shield-arc-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-shield-arc-fore"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-shield-arc-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-shield-arc-fore"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-shield-arc-fore"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-shield-arc-fore"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-shield-arc-fore"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-shield-arc-fore"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-shield-arc-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-shield-arc-aft"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-shield-arc-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-shield-arc-aft"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-shield-arc-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-shield-arc-aft"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-shield-arc-aft"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-shield-arc-aft"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-shield-arc-aft"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-shield-arc-aft"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
 
 [[system]]
 id = "power-battery"
@@ -1442,6 +3031,7 @@ console = "engineering"
 
 [[system]]
 id = "repair"
+power_group = "energy-repair"
 kind = "repair"
 console = "engineering"
 
@@ -1470,19 +3060,19 @@ console = "engineering"
 id = "tractor"
 kind = "tractor"
 console = "engineering"
-power_group = "helm"
+power_group = "energy-tractor"
 
 [[system]]
 id = "umbilical"
 kind = "umbilical"
 console = "engineering"
-power_group = "helm"
+power_group = "energy-umbilical"
 
 [[system]]
 id = "dock"
 kind = "dock"
 console = "helm"
-power_group = "helm"
+power_group = "energy-dock"
 
 # The rescue transporter (issue #1348) — Engineering-owned, on the `helm` group
 # at `min_power_level = 2` like the tractor and umbilical it stands beside, for
@@ -1522,7 +3112,7 @@ min_power_level = 2
 id = "transporter"
 kind = "transporter"
 console = "engineering"
-power_group = "helm"
+power_group = "energy-transporter"
 
 # ── Security (issue #1346) ───────────────────────────────────────────────────
 #
@@ -1543,6 +3133,7 @@ power_group = "helm"
 # it.
 [[system]]
 id = "security"
+power_group = "energy-security"
 kind = "security"
 console = "tactical"
 

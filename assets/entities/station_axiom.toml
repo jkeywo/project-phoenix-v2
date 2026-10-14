@@ -1,3 +1,5 @@
+includes = ["fragments/energy/station_axiom.toml"]
+
 name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]
 
@@ -45,12 +47,14 @@ radius = 250.0
 [[system]]
 console = "ai-tactical-radar"
 id = "tactical-radar"
+power_group = "energy-tactical-radar"
 kind = "tactical_radar"
 ai_only = true
 
 [[system]]
 console = "ai-phaser-defence"
 id = "phaser-defence"
+power_group = "energy-phaser-defence"
 kind = "phaser_bank"
 ai_only = true
 
@@ -259,3 +263,226 @@ kind = "TacticalRadar"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+console = "ai-energy-power"
+ai_only = true
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 2.299999952316284
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-weapons"
+value = 2.299999952316284
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-weapons"
+value = 2
+
+[[system.config.ai.tree.state.task]]
+id = "fill-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-weapons"
+value = 4
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-weapons"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-weapons"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-weapons"
+value = 10
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-weapons"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tactical-radar"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tactical-radar"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-tactical-radar"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-tactical-radar"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-tactical-radar"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-tactical-radar"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-tactical-radar"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-phaser-defence"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-phaser-defence"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-phaser-defence"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-phaser-defence"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-phaser-defence"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-phaser-defence"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-phaser-defence"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-phaser-defence"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-phaser-defence"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-phaser-defence"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+console = "ai-energy-power"
+ai_only = true
+
+[[console]]
+id = "ai-energy-power"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"

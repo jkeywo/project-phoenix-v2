@@ -22,7 +22,7 @@ tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 mass = 9000.0
 
-includes = ["fragments/jobs/repair_workflow.toml"]
+includes = ["fragments/jobs/repair_workflow.toml", "fragments/energy/repair_tender.toml"]
 
 [mesh]
 model = "assets/models/alliance_courier.glb"
@@ -75,6 +75,7 @@ automated_systems = []
 
 [[system]]
 id = "repair"
+power_group = "energy-repair"
 kind = "repair"
 console = "engineering"
 
@@ -102,3 +103,176 @@ kind = "Repair"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+console = "ai-energy-power"
+ai_only = true
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-support"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-support"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-support"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-support"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-support"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-support"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-support"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-repair"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-repair"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-repair"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-repair"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-repair"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-repair"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-repair"
+comparison = "greater_or_equal"
+value = 0.5
+
+
+
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+console = "ai-energy-power"
+ai_only = true
+
+[[console]]
+id = "ai-energy-power"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"

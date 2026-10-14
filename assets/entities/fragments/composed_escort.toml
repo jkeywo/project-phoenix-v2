@@ -10,7 +10,7 @@
 # This is a mechanism fixture. Shipped hulls are NOT composed yet; migrating
 # them is issues #878 / #875.
 
-includes = ["npc_escort_core.toml"]
+includes = ["npc_escort_core.toml", "energy/composed_escort.toml"]
 
 class = "escort"
 hull_id = "FIXTURE-869"
@@ -23,3 +23,264 @@ icon = "destroyer"
 [[behaviour.doctrine]]
 id = "destroy-hostiles"
 base_priority = 90.0
+
+[[system]]
+id = "helm-thrust"
+power_group = "energy-helm-thrust"
+
+
+[[system]]
+id = "helm-steering"
+power_group = "energy-helm-steering"
+
+
+[[system]]
+id = "helm-impulse"
+power_group = "energy-helm-impulse"
+
+
+[[system]]
+id = "power-reactor"
+
+[system.config.ai]
+root = "power"
+
+[[system.config.ai.tree]]
+id = "power"
+initial = "balance"
+
+[[system.config.ai.tree.state]]
+id = "balance"
+
+[[system.config.ai.tree.state.task]]
+id = "output"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-output"
+value = 3.450000047683716
+
+[[system.config.ai.tree.state.task]]
+id = "reactor-cooling"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "cool-reactor"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "reactor-cooling"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reactor_heat_fraction"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-helm"
+value = 3.450000047683716
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-helm"
+value = 3
+
+[[system.config.ai.tree.state.task]]
+id = "fill-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-helm"
+value = 6
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-helm"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-helm"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-helm"
+value = 15
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-helm"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-thrust"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-thrust"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-thrust"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-thrust"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-thrust"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-thrust"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-thrust"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-steering"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-steering"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-steering"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-steering"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-steering"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-steering"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-steering"
+comparison = "greater_or_equal"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-impulse"
+value = 1.149999976158142
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-impulse"
+value = 1
+
+[[system.config.ai.tree.state.task]]
+id = "fill-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-helm-impulse"
+value = 2
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "reserve-energy-helm-impulse"
+comparison = "less"
+value = 0.5
+
+[[system.config.ai.tree.state.task]]
+id = "hot-energy-helm-impulse"
+
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-helm-impulse"
+value = 5
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "heat-energy-helm-impulse"
+comparison = "greater_or_equal"
+value = 0.5

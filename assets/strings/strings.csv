@@ -4915,3 +4915,52 @@ workshop.energy.field.restore_delay_secs,Workshop local energy authoring,Flow re
 workshop.ship.ai.comparison,Workshop supported numeric state tree editing,Numeric comparison,Numerischer Vergleich,Numeric comparison,machine
 workshop.ship.ai.number,Workshop supported numeric state tree editing,Numeric value,Numerischer Wert,Numeric value,machine
 energy.coolant,Finite coolant resource label,Coolant,Kühlmittel,Coolant,machine
+energy.group.helm-thrust.label,Local energy fine control group,Helm Thrust,Steuerung Schub,Helm Thrust,machine
+energy.group.helm-steering.label,Local energy fine control group,Helm Steering,Steuerung Kursregelung,Helm Steering,machine
+energy.group.helm-radar.label,Local energy fine control group,Helm Radar,Steuerungsradar,Helm Radar,machine
+energy.group.tactical-radar.label,Local energy fine control group,Tactical Radar,Taktisches Radar,Tactical Radar,machine
+energy.group.helm-impulse.label,Local energy fine control group,Helm Impulse,Steuerung Impulsantrieb,Helm Impulse,machine
+energy.group.helm-boost.label,Local energy fine control group,Helm Boost,Steuerung Schubverstärkung,Helm Boost,machine
+energy.group.helm-lateral-thrust.label,Local energy fine control group,Helm Lateral Thrust,Steuerung Seitenschub,Helm Lateral Thrust,machine
+energy.group.phaser-fore.label,Local energy fine control group,Phaser Fore,Phaser vorn,Phaser Fore,machine
+energy.group.phaser-aft.label,Local energy fine control group,Phaser Aft,Phaser hinten,Phaser Aft,machine
+energy.group.torpedo-magazine.label,Local energy fine control group,Torpedo Magazine,Torpedomagazin,Torpedo Magazine,machine
+energy.group.torpedo-tube-fore-port.label,Local energy fine control group,Torpedo Tube Fore Port,Torpedorohr vorn Backbord,Torpedo Tube Fore Port,machine
+energy.group.torpedo-tube-fore-starboard.label,Local energy fine control group,Torpedo Tube Fore Starboard,Torpedorohr vorn Steuerbord,Torpedo Tube Fore Starboard,machine
+energy.group.torpedo-tube-fore-centre.label,Local energy fine control group,Torpedo Tube Fore Centre,Torpedorohr vorn Mitte,Torpedo Tube Fore Centre,machine
+energy.group.torpedo-tube-aft-port.label,Local energy fine control group,Torpedo Tube Aft Port,Torpedorohr hinten Backbord,Torpedo Tube Aft Port,machine
+energy.group.torpedo-tube-aft-starboard.label,Local energy fine control group,Torpedo Tube Aft Starboard,Torpedorohr hinten Steuerbord,Torpedo Tube Aft Starboard,machine
+energy.group.blaster-heavy-fore.label,Local energy fine control group,Blaster Heavy Fore,Schwerer Blaster vorn,Blaster Heavy Fore,machine
+energy.group.repair.label,Local energy fine control group,Repair,Reparatur,Repair,machine
+energy.group.sensors.label,Local energy fine control group,Sensors,Sensoren,Sensors,machine
+energy.group.sensor-radar.label,Local energy fine control group,Sensor Radar,Sensorradar,Sensor Radar,machine
+energy.group.navigation.label,Local energy fine control group,Navigation,Navigation,Navigation,machine
+energy.group.comms.label,Local energy fine control group,Comms,Kommunikation,Comms,machine
+energy.group.shield-arc-fore.label,Local energy fine control group,Shield Arc Fore,Schildsektor vorn,Shield Arc Fore,machine
+energy.group.shield-arc-starboard.label,Local energy fine control group,Shield Arc Starboard,Schildsektor Steuerbord,Shield Arc Starboard,machine
+energy.group.shield-arc-aft.label,Local energy fine control group,Shield Arc Aft,Schildsektor hinten,Shield Arc Aft,machine
+energy.group.shield-arc-port.label,Local energy fine control group,Shield Arc Port,Schildsektor Backbord,Shield Arc Port,machine
+energy.group.shield-arc-omni.label,Local energy fine control group,Shield Arc Omni,Schildsektor Rundum,Shield Arc Omni,machine
+energy.group.blaster-fore.label,Local energy fine control group,Blaster Fore,Blaster vorn,Blaster Fore,machine
+energy.group.dock.label,Local energy fine control group,Dock,Andockung,Dock,machine
+energy.group.torpedo-tube-aft.label,Local energy fine control group,Torpedo Tube Aft,Torpedorohr hinten,Torpedo Tube Aft,machine
+energy.group.tractor.label,Local energy fine control group,Tractor,Traktorstrahl,Tractor,machine
+energy.group.umbilical.label,Local energy fine control group,Umbilical,Versorgungsleitung,Umbilical,machine
+energy.group.security.label,Local energy fine control group,Security,Sicherheit,Security,machine
+energy.group.phaser-omni.label,Local energy fine control group,Phaser Omni,Phaser Rundum,Phaser Omni,machine
+energy.group.torpedo-tube-fore.label,Local energy fine control group,Torpedo Tube Fore,Torpedorohr vorn,Torpedo Tube Fore,machine
+energy.group.blaster-port.label,Local energy fine control group,Blaster Port,Blaster Backbord,Blaster Port,machine
+energy.group.blaster-starboard.label,Local energy fine control group,Blaster Starboard,Blaster Steuerbord,Blaster Starboard,machine
+energy.group.transporter.label,Local energy fine control group,Transporter,Transporter,Transporter,machine
+energy.group.torpedo-tube-bow-port.label,Local energy fine control group,Torpedo Tube Bow Port,Torpedorohr Bug Backbord,Torpedo Tube Bow Port,machine
+energy.group.torpedo-tube-bow-starboard.label,Local energy fine control group,Torpedo Tube Bow Starboard,Torpedorohr Bug Steuerbord,Torpedo Tube Bow Starboard,machine
+energy.group.shield-arc-all.label,Local energy fine control group,Shield Arc All,Schildsektor alle,Shield Arc All,machine
+energy.group.blaster-harrow-lance-port.label,Local energy fine control group,Blaster Harrow Lance Port,Blaster Harrow Lanze Backbord,Blaster Harrow Lance Port,machine
+energy.group.blaster-harrow-lance-starboard.label,Local energy fine control group,Blaster Harrow Lance Starboard,Blaster Harrow Lanze Steuerbord,Blaster Harrow Lance Starboard,machine
+energy.group.phaser-port.label,Local energy fine control group,Phaser Port,Phaser Backbord,Phaser Port,machine
+energy.group.phaser-starboard.label,Local energy fine control group,Phaser Starboard,Phaser Steuerbord,Phaser Starboard,machine
+energy.group.blaster-bow-artillery.label,Local energy fine control group,Blaster Bow Artillery,Bugartillerie-Blaster,Blaster Bow Artillery,machine
+energy.group.phaser-defence.label,Local energy fine control group,Phaser Defence,Phaser Verteidigung,Phaser Defence,machine
+energy.group.phaser-lash.label,Local energy fine control group,Phaser Lash,Phaser Peitsche,Phaser Lash,machine
+energy.group.blaster-spike.label,Local energy fine control group,Blaster Spike,Blaster Dorn,Blaster Spike,machine
+energy.group.torpedo-tube-lance.label,Local energy fine control group,Torpedo Tube Lance,Torpedorohr Lanze,Torpedo Tube Lance,machine

@@ -2304,3 +2304,37 @@ fn release(ctx) {
     assert_eq!(refs.len(), 1, "{refs:?}");
     assert_eq!(refs[0].template_path, "assets/entities/patroller.toml");
 }
+
+#[test]
+fn a_world_selected_included_template_is_validated_as_a_complete_entry() {
+    use crate::entities::include_resolve::ParseEntityTemplate as _;
+    const INCLUDED: &str = "assets/entities/included.toml";
+    let source = fragments(&[
+        (
+            "assets/entities/leaf.toml",
+            "[hull]\nhull_integrity='incomplete'\n",
+        ),
+        (INCLUDED, "includes=['leaf.toml']\n"),
+        (
+            "assets/entities/consumer.toml",
+            "includes=['included.toml']\n[hull]\nhull_integrity=100.0\n",
+        ),
+    ]);
+    assert!(crate::entities::include_resolve::resolve_template(
+        "assets/entities/consumer.toml",
+        &source
+    )
+    .unwrap()
+    .parse()
+    .is_ok());
+    let world_toml = one_entity_world(INCLUDED, "standalone");
+    let config = cfg(&world_toml);
+    let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+    let findings = validate_composition_with_fragments(&src, &[], &blind_templates(), &source);
+    assert!(
+        findings.iter().any(|finding| finding.is_error()
+            && finding.category == "include-invalid-template"
+            && finding.message.contains("standalone")),
+        "{findings:?}"
+    );
+}

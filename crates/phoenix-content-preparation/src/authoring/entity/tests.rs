@@ -1423,3 +1423,64 @@ fn provenance_addresses_parse_back_into_steps() {
         assert_eq!(parse_address(malformed), None, "{malformed}");
     }
 }
+
+#[test]
+fn nested_partial_members_are_checked_as_complete_consuming_roots() {
+    use crate::entities::include_resolve::ParseEntityTemplate as _;
+    const LEAF: &str = "assets/entities/leaf.toml";
+    const PARTIAL: &str = "assets/entities/nested.toml";
+    const COMPLETE: &str = "assets/entities/complete.toml";
+    let mut files = BTreeMap::from([
+        (LEAF.into(), "[hull]\nhull_integrity='incomplete'\n".into()),
+        (PARTIAL.into(), "includes=['leaf.toml']\n".into()),
+        (
+            COMPLETE.into(),
+            "includes=['nested.toml']\n[hull]\nhull_integrity=100.0\n".into(),
+        ),
+    ]);
+    assert!(findings(&files, &BTreeMap::new()).is_empty());
+    // Direct selection does not borrow the consuming hull's missing fields.
+    assert!(resolve_template(PARTIAL, &files).unwrap().parse().is_err());
+    // Complete roots still have the exact runtime refusal, including failures
+    // originating several include levels down.
+    files.insert(COMPLETE.into(), "includes=['nested.toml']\n".into());
+    let invalid = findings(&files, &BTreeMap::new());
+    assert_eq!(invalid.len(), 1, "{invalid:?}");
+    assert_eq!(invalid[0].file, COMPLETE);
+    assert_eq!(invalid[0].category, "entity-unresolvable");
+    // Intermediate include entries keep structural checks even when a complete
+    // consumer overrides the leaf's incomplete data.
+    files.insert(PARTIAL.into(), "includes=['missing.toml']\n".into());
+    assert!(findings(&files, &BTreeMap::new())
+        .iter()
+        .any(|finding| finding.file == PARTIAL && finding.category == "include-missing"));
+}
+
+#[test]
+fn a_draft_fragment_revalidates_its_read_only_consuming_root() {
+    const PARTIAL: &str = "assets/entities/nested.toml";
+    const COMPLETE: &str = "assets/entities/complete.toml";
+    let beneath = BTreeMap::from([
+        (
+            "assets/entities/leaf.toml".into(),
+            "[hull]\nhull_integrity=100.0\n".into(),
+        ),
+        (COMPLETE.into(), "includes=['nested.toml']\n".into()),
+        (
+            "assets/entities/unrelated.toml".into(),
+            "includes=['absent.toml']\n".into(),
+        ),
+    ]);
+    let mut draft = BTreeMap::from([(PARTIAL.into(), "includes=['leaf.toml']\n".into())]);
+    assert!(findings(&draft, &beneath).is_empty());
+    draft.insert(
+        PARTIAL.into(),
+        "includes=['leaf.toml']\nunsupported_equipment=true\n".into(),
+    );
+    let invalid = findings(&draft, &beneath);
+    assert_eq!(invalid.len(), 1, "{invalid:?}");
+    assert_eq!(invalid[0].file, COMPLETE);
+    assert_eq!(invalid[0].category, "entity-unresolvable");
+    assert!(invalid[0].message.contains("unsupported_equipment"));
+    assert!(invalid[0].message.contains(PARTIAL));
+}

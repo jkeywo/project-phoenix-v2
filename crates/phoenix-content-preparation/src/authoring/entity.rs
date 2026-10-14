@@ -1235,10 +1235,11 @@ pub fn materialise(
 /// `entity-unresolvable` follows the runtime's own asymmetry exactly: a
 /// template that composed NOTHING and is not a valid entity is an ordinary
 /// partial fragment, reported (if at all) by the source gate with its own
-/// location, while a COMPOSED document that does not parse is this module's,
-/// because that combination exists in no single authored file. Which member
-/// includes which makes no difference to that rule — a hull is checked whether
-/// or not some other template composes it.
+/// location. Full entity checks apply to include-graph roots: an included
+/// member can itself compose other fragments without being a complete entity.
+/// Every include entry remains structurally checked, and each consuming root
+/// is parsed strictly. Selecting a member for Preview/Test or spawning it from
+/// a world still uses the runtime's strict entry validation independently.
 pub fn findings(
     candidate: &BTreeMap<String, String>,
     beneath: &BTreeMap<String, String>,
@@ -1246,26 +1247,43 @@ pub fn findings(
     let mut sources = beneath.clone();
     sources.extend(candidate.clone());
     let graph = include_graph(&sources);
+    let candidate_paths: BTreeSet<_> = candidate
+        .keys()
+        .filter(|path| is_entity_path(path))
+        .map(|path| canonical_template_path(path))
+        .collect();
+    let included: BTreeSet<_> = graph.values().flatten().cloned().collect();
     let mut findings = Vec::new();
+    let mut located = BTreeSet::new();
     for (path, source) in candidate {
         if !is_entity_path(path) {
             continue;
         }
         let canonical = canonical_template_path(path);
         let issues = include_issues(&canonical, source, &sources, &graph);
-        let located = !issues.is_empty();
+        if !issues.is_empty() {
+            located.insert(canonical);
+        }
         for issue in issues {
             findings.push(finding(issue.category, path, issue.line, issue.message));
         }
-        // One report per member: an entry the rules already named is not
-        // restated as a whole-closure failure.
-        if located {
+    }
+    // A fragment may compose another fragment and still need fields from its
+    // consumer. Parse affected complete roots, including read-only consumers
+    // from dependencies: editing a draft fragment can break those roots too.
+    // Unrelated dependency roots are not findings against this candidate.
+    for root in graph.keys().filter(|root| !included.contains(*root)) {
+        if located.contains(root)
+            || !candidate_paths
+                .iter()
+                .any(|member| reaches(&graph, root, member))
+        {
             continue;
         }
-        if let Some(issue) = runtime_issue(&canonical, &sources, includes_line(source), true) {
+        if let Some(issue) = runtime_issue(root, &sources, includes_line(&sources[root]), true) {
             findings.push(finding(
                 "entity-unresolvable",
-                path,
+                root,
                 issue.line,
                 issue.message,
             ));

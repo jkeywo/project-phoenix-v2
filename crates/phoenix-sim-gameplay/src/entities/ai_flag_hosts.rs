@@ -65,7 +65,7 @@
 //! cannot degrade to the empty chain the drift lint policed. Those two tests —
 //! and the `eval_sites` table they re-derived against — retired with #1212;
 //! `flag_chain` is now an ordinary data property, exercised through the real
-//! validators by `tests::every_host_reads_world_flags_today` and the
+//! validators by `tests::policy_grammars_remain_world_flag_capable` and the
 //! load-rejection tests below.
 
 use crate::world::flags::{FactContext, FactId, Predicate};
@@ -116,9 +116,10 @@ pub struct AiHost {
     pub block: &'static str,
     /// Whether the host's runtime evaluation receives a real world-flag chain,
     /// and therefore whether `flag(...)`/`counter(...)` in its guards can ever
-    /// read true. Every shipped host is [`FlagChain::Plumbed`]; the
-    /// load-rejection in [`check_world_state`](Self::check_world_state) keeps a
-    /// future [`FlagChain::Empty`] host from reviving the silent-nothing trap.
+    /// read true. The policy/selector grammar descriptors in [`AI_HOSTS`] are
+    /// [`FlagChain::Plumbed`]; closed System tree hosts use [`FlagChain::Empty`]
+    /// and their separate supported-observation bindings. The load-rejection in
+    /// [`check_world_state`](Self::check_world_state) prevents silent missing reads.
     pub flag_chain: FlagChain,
     /// Where this host advances its bounded history windows, or `None` when
     /// nothing does (issue #890).
@@ -145,7 +146,7 @@ pub struct AiHost {
     pub facts: &'static [FactDescriptor],
 }
 
-// ── The twenty hosts ─────────────────────────────────────────────────────────
+// ── Policy/selector validation descriptors ─────────────────────────────
 //
 // Fifteen policy hosts, then five selector hosts, grouped by the console each
 // belongs to. (The fifteenth policy host is [`WEAPONS_DOCTRINE`], added by issue
@@ -272,8 +273,10 @@ pub const TORPEDO_MAGAZINE: AiHost = AiHost {
     facts: TORPEDO_MAGAZINE_FACTS,
 };
 
+/// Legacy policy-schema validator only. Physical shield arcs execute closed
+/// System trees with Console observations, not this historical world-flag grammar.
 pub const SHIELDS_FOCUS: AiHost = AiHost {
-    system: "Shields focus",
+    system: "Legacy Shields focus policy (validation only)",
     block: "[shields_console.ai_policy]",
     flag_chain: FlagChain::Plumbed,
     history_fold: None,
@@ -338,8 +341,10 @@ pub const COMMS_SELECTOR: AiHost = AiHost {
     facts: COMMS_SELECTOR_FACTS,
 };
 
-/// Roll call. The tests below iterate this, so a host added above but left out
-/// here loses its load-time flag/history/fact validation.
+/// Policy/selector grammar validation roll call, including the historical
+/// Power and Shields grammars. This is not the production controller list:
+/// `ai_declaration_manifest::FINE_SYSTEM_KINDS` describes current controllers,
+/// and closed System trees publish their own supported observation bindings.
 pub const AI_HOSTS: &[AiHost] = &[
     CAPTAIN_RED_ALERT,
     HELM_ENGINES,

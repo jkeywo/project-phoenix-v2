@@ -275,3 +275,7 @@ fn preferred_arc(
 #[cfg(test)]
 #[path = "shields_tree_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shields_tree_migration_tests.rs"]
+mod migration_tests;

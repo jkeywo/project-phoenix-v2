@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "migration": "Increment 9 retargets the Shields producer to the closed per-arc state-tree host; original audit provenance and conflict candidates are retained.",
   "source_census_sha256": "AFB8E64538203DAC8A8C64130F97925AAC8B074C6B2C7686807CD7D9AEDFA7A9",
   "scope": "Exact reviewed foreign-consumer candidates; inclusion is not behavioral proof or an ambiguity annotation.",
   "pairs": [
@@ -48,51 +49,51 @@
       "consumer": "project_phoenix::ship::shields::handle_shields_messages"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::navigation::server::handle_navigation_waypoint"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::repair::dispatch::handle_dispatch_repair_team"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::repair::dispatch::handle_recall_repair_team"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_priority"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::repair::dispatch::handle_set_repair_target_priority"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::weapons::beam::handle_fire_phaser"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::weapons::torpedo::handle_fire_torpedo"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::weapons::torpedo::handle_load_tube"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::console::weapons::torpedo::handle_unload_tube"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::ship::helm_admission::process_helm_inputs"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::ship::power::handle_power_messages"
     },
     {
-      "producer": "project_phoenix::console_ai::server::ai_shield_focus",
+      "producer": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
       "consumer": "project_phoenix::ship::sensors::handle_sensors_messages"
     },
     {

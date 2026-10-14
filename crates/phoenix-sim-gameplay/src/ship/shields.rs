@@ -12,7 +12,7 @@ use bevy::prelude::*;
 /// Pending Sensors->Shields threat bearing, delivered via the channel-3
 /// coordination bus (issue #683). Set by [`receive_shields_coordination`] after
 /// the generic lag router delivers a `CoordinationPayload::ThreatBearing` to
-/// AI-controlled Shields; read by `console_ai::server::ai_shield_focus` to bias
+/// AI-controlled Shields; read by `console_ai::server::shields_tree::ai_shields` to bias
 /// facing toward the threat.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingShieldsThreatBearing(pub Option<f32>);
@@ -103,9 +103,7 @@ pub struct ShieldsDamageHistory {
 }
 
 impl ShieldsDamageHistory {
-    /// `pub`: called from `console_ai::server::ai_shield_focus`
-    /// (issue #692 split the old fused `operate_shields_ai` out of this
-    /// module).
+    /// Used by the independent physical damage-history producer.
     pub fn ensure_len(&mut self, n: usize) {
         if self.arcs.len() < n {
             self.arcs.resize(n, Vec::new());
@@ -159,7 +157,7 @@ impl ShieldsDamageHistory {
 /// used when the section is absent.
 ///
 /// Dual `Resource + Component`. Since issue #738 **every production read goes
-/// through the per-entity Component** — `ai_shield_focus` and
+/// through the per-entity Component** — the individual arc-tree host and
 /// `emit_shields_coordination` both query it, and the spawner always attaches
 /// one. The `Resource` form survives only as `server_app`'s dual-write of the
 /// PLAYER ship's tuning; nothing reads it. Do not reintroduce a `Res<_>` read:
@@ -192,24 +190,6 @@ impl Default for ShieldsAiConfigResource {
         }
     }
 }
-
-/// Per-ship inline stateless AI policy for the Shields focus fine system
-/// (issue #783), the shields twin of the helm axes' authored policies (the
-/// [`crate::ship::helm_ai::FineSystemAiPolicies`] map)
-/// / [`crate::console::captain::server::CaptainAiPolicy`].
-///
-/// Built at spawn from `[shields_console.ai_policy]` if authored, else the
-/// canonical [`crate::entities::config::default_shields_focus_ai_config`] (the
-/// default reproduces today's decisions — see that fn). Read by
-/// [`crate::console_ai::server::ai_shield_focus`]: the host seeds bounded per-arc
-/// recent-damage facts ([`crate::console_ai::seed_shields_focus_facts`]) and
-/// resolves this policy on the `shield_focus` channel. On `focus_shield_arc`
-/// (act) the retained arc-ranking kernel picks and emits the arc; on `None`
-/// (idle/hold) the host emits nothing. The authored windows/thresholds flow into
-/// the kernel from this policy's `param` map, so the policy owns the authored
-/// numbers while the kernel owns the 4-way argmax.
-#[derive(Component, Default, Clone, Debug)]
-pub struct ShieldsFocusAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-facing notification state for the shields coordination emitter.
 ///
@@ -446,7 +426,7 @@ pub fn tick_shields(
 /// Handle `SetShieldArcFocus` messages from every ship's Shields console.
 ///
 /// Iterates every ship (player + NPC) so both the player's Shields console
-/// commands and the AI's admitted `ai_shield_focus` emissions (issue #826)
+/// commands and the AI's admitted the individual arc-tree host emissions (issue #826)
 /// flip each ship's own shield focus — one applier, no origin branching.
 ///
 /// Per-arc dispatch (#514): each `[[shield_arc]]` synthesises a
@@ -774,7 +754,7 @@ pub fn shields_delta_projection(
 /// `combat_lock` (issue #829, spec §3), not a live targeting component.
 /// `threat_bearing` reads this ship's OWN `ship::sensors::SensorsThreatState`
 /// (issue #926) — the same authoritative fact
-/// `console_ai::server::ai_shield_focus` reads (delayed, via the channel-3
+/// `console_ai::server::shields_tree::ai_shields` reads (delayed, via the channel-3
 /// `PendingShieldsThreatBearing` inbox) to override the damage-based focus
 /// decision. Reading the live component here, rather than the AI's one-shot
 /// coordination inbox, is deliberate: `PendingShieldsThreatBearing` is
@@ -865,7 +845,7 @@ pub fn publish_shields_blackboard(
             Some(bearing_rad.to_degrees())
         });
 
-        // Same conversion `console_ai::server::ai_shield_focus` applies to
+        // Same conversion `console_ai::server::shields_tree::ai_shields` applies to
         // the delayed copy of this same fact, so the console marker and the
         // AI's decision agree numerically, not just in source.
         let threat_bearing = sensors_threat

@@ -23,7 +23,7 @@ use std::{
 
 pub const PRODUCERS: [&str; 4] = [
     "phoenix_simulation::console_ai::server::ai_power_allocation",
-    "phoenix_simulation::console_ai::server::ai_shield_focus",
+    "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
     "phoenix_simulation::console::navigation::server::operate_navigation_ai",
     "phoenix_simulation::console::repair::server::operate_repair_ai",
 ];
@@ -54,13 +54,19 @@ pub fn candidates() -> Vec<Candidate> {
         for b in &PRODUCERS[i + 1..] {
             let mut systems = [a.to_string(), b.to_string()];
             systems.sort();
-            expected.push(Candidate {
-                systems,
-                access: vec![std::any::type_name::<
-                    project_phoenix::core::messages::AdmittedCommands,
-                >()
-                .to_owned()],
-            });
+            let mut access = vec![std::any::type_name::<
+                project_phoenix::core::messages::AdmittedCommands,
+            >()
+            .to_owned()];
+            if systems.contains(&PRODUCERS[0].to_owned())
+                && systems.contains(&PRODUCERS[1].to_owned())
+            {
+                // Independent System frames share one physical component map.
+                // Keep that real container conflict in the exact ordering proof.
+                access.push(std::any::type_name::<project_phoenix::ai::state_tree_runtime::ShipAiTreeRuntime>().to_owned());
+            }
+            access.sort();
+            expected.push(Candidate { systems, access });
         }
     }
     expected.sort();

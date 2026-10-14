@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "migration": "Increment 9 retargets the Shields producer to the closed per-arc state-tree host; original audit provenance and six candidate pairs are retained; the Power/Shield pair also shares the actual private TreeRuntime component map.",
   "scope": "Four actual producers, six pairs only. Historical source inventory; live raw vectors and paths must still match. No annotations.",
   "historicalAudit": {
     "path": "C:\\Coding\\project-phoenix-v2\\.claude\\worktrees\\t2-tactical-baseline-1400\\.t2-batch\\admitted-commands-only-audit-r1\\classified-pairs-and-paths.json",
@@ -9,10 +10,11 @@
     {
       "systems": [
         "project_phoenix::console_ai::server::ai_power_allocation",
-        "project_phoenix::console_ai::server::ai_shield_focus"
+        "phoenix_simulation::console_ai::server::shields_tree::ai_shields"
       ],
       "access": [
-        "project_phoenix::core::messages::AdmittedCommands"
+        "project_phoenix::core::messages::AdmittedCommands",
+        "phoenix_simulation::ai::state_tree_runtime::ShipAiTreeRuntime"
       ]
     },
     {
@@ -36,7 +38,7 @@
     {
       "systems": [
         "project_phoenix::console::navigation::server::operate_navigation_ai",
-        "project_phoenix::console_ai::server::ai_shield_focus"
+        "phoenix_simulation::console_ai::server::shields_tree::ai_shields"
       ],
       "access": [
         "project_phoenix::core::messages::AdmittedCommands"
@@ -45,7 +47,7 @@
     {
       "systems": [
         "project_phoenix::console::repair::server::operate_repair_ai",
-        "project_phoenix::console_ai::server::ai_shield_focus"
+        "phoenix_simulation::console_ai::server::shields_tree::ai_shields"
       ],
       "access": [
         "project_phoenix::core::messages::AdmittedCommands"

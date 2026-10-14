@@ -281,13 +281,11 @@ fn the_per_axis_actuator_hosts_reject_history() {
     }
 }
 
-/// EVERY host reads world flags since #891 stage 2 — pinned as a property
-/// rather than a name list, so adding a twentieth plumbed host needs no
-/// edit here while a host that declares `FlagChain::Empty` still fails,
-/// its authored `flag()`/`counter()` guards rejected at load by
-/// [`AiHost::check_world_state`].
+/// The policy/selector grammar inventory includes historical validation-only
+/// Power and Shields descriptors. Closed System trees are a different family
+/// and never inherit this grammar's world-flag access.
 #[test]
-fn every_host_reads_world_flags_today() {
+fn policy_grammars_remain_world_flag_capable() {
     let unplumbed: Vec<&str> = AI_HOSTS
         .iter()
         .filter(|h| h.flag_chain != FlagChain::Plumbed)
@@ -296,10 +294,29 @@ fn every_host_reads_world_flags_today() {
     assert_eq!(
         unplumbed,
         Vec::<&str>::new(),
-        "a host lost its world-flag chain: authored flag()/counter() \
-             guards on it now reject at load, and #891 stage 2 promised the \
-             feature works everywhere the grammar says it does."
+        "a legacy policy/selector grammar lost its promised flag()/counter() capability; closed System trees use their separate finite binding schema"
     );
+}
+
+#[test]
+fn physical_power_and_shields_use_closed_console_tree_hosts() {
+    use crate::entities::ai_declaration_manifest::{
+        DeclarationController, FineSystemKey, FINE_SYSTEM_KINDS,
+    };
+    for key in [FineSystemKey::Power, FineSystemKey::ShieldsFocus] {
+        let kind = FINE_SYSTEM_KINDS
+            .iter()
+            .find(|kind| kind.key == key)
+            .unwrap();
+        assert_eq!(kind.controller, DeclarationController::SystemStateTree);
+        assert_eq!(
+            kind.host.flag_chain,
+            FlagChain::Empty,
+            "physical System trees cannot inherit legacy world-flag visibility"
+        );
+    }
+    assert!(SHIELDS_FOCUS.system.contains("validation only"));
+    assert!(POWER_ALLOCATION.system.contains("validation only"));
 }
 
 #[test]

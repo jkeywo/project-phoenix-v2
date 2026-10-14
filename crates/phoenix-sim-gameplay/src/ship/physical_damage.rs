@@ -154,14 +154,20 @@ impl ShipDamage {
         mut hit: DamageHit,
         rng: &mut vellum_rng::Pcg32,
     ) -> Result<DamageOutcome, String> {
-        let (sin, cos) = (crate::simmath::sin(yaw), crate::simmath::cos(yaw));
-        let incoming = hit.incoming;
-        hit.incoming = [
-            incoming[0] * cos - incoming[1] * sin,
-            incoming[0] * sin + incoming[1] * cos,
-        ];
+        hit.incoming = local_hit_direction(yaw, hit.incoming);
         self.state.apply_hit(&self.definition, &hit, rng)
     }
+}
+
+/// Simulation yaw turns local forward -Z into [sin(yaw), -cos(yaw)].
+/// Invert that orientation for physical planar travel; render Euler signs are
+/// deliberately absent from this calculation.
+fn local_hit_direction(yaw: f32, incoming: [f32; 2]) -> [f32; 2] {
+    let (sin, cos) = (crate::simmath::sin(yaw), crate::simmath::cos(yaw));
+    [
+        incoming[0] * cos + incoming[1] * sin,
+        incoming[1] * cos - incoming[0] * sin,
+    ]
 }
 
 /// Existing wire hull summaries may use this derived view. It cannot determine
@@ -180,6 +186,18 @@ pub fn structural_fraction(
             }
         })
     })
+}
+
+pub fn structural_totals(
+    damage: Option<&ShipDamage>,
+    prop: Option<&crate::entities::spawner::EntitySystemHull>,
+) -> Option<(f32, f32)> {
+    damage
+        .map(|damage| {
+            let (current, maximum) = damage.structural_totals();
+            (current as f32, maximum as f32)
+        })
+        .or_else(|| prop.map(|hull| (hull.0.total_current(), hull.0.total_max())))
 }
 
 /// Explicit branching between the physical equipment owner and legacy props.

@@ -153,3 +153,25 @@ fn structure_zero_is_recoverable_and_never_uses_an_old_hull_as_a_death_oracle() 
     damage.state.catastrophic = true;
     assert!(is_catastrophic(Some(&damage), None));
 }
+
+#[test]
+fn incoming_world_travel_uses_inverse_simulation_yaw() {
+    for yaw in [
+        0.0,
+        core::f32::consts::FRAC_PI_2,
+        -core::f32::consts::FRAC_PI_2,
+        core::f32::consts::PI,
+    ] {
+        let (sin, cos) = (crate::simmath::sin(yaw), crate::simmath::cos(yaw));
+        let local = super::local_hit_direction(yaw, [sin, -cos]);
+        assert!(
+            local[0].abs() < 0.000001 && (local[1] + 1.0).abs() < 0.000001,
+            "world forward travel must remain local forward at yaw {yaw}: {local:?}"
+        );
+        let local = super::local_hit_direction(yaw, [cos, sin]);
+        assert!(
+            (local[0] - 1.0).abs() < 0.000001 && local[1].abs() < 0.000001,
+            "world starboard travel must remain local starboard at yaw {yaw}: {local:?}"
+        );
+    }
+}

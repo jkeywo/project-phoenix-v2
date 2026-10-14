@@ -68,3 +68,7 @@ network protocol 6 is unchanged because ordinary game messages are unchanged.
 AI memory remains suspended on human/offline takeover, including nested call state.
 Definitions resolve once at spawn and are reconstructed from pinned content on
 restore; a reused asset never shares runtime state between Systems.
+
+Successful Dock tree evaluation publishes its private runtime at the existing
+deferred controller flush, preserving the declared FixedUpdate scheduling
+boundary. No failed or suspended evaluation changes private state.

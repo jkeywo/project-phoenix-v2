@@ -467,6 +467,7 @@ fn resolve_dock_target(name: &str, runtime: Option<&WorldContentRuntime>) -> Str
 /// appears for a human then. Decides ONLY on the shared AI cadence (rule 7).
 #[allow(clippy::type_complexity)]
 pub fn operate_dock_ai(
+    mut commands: Commands,
     tick: Res<crate::sim_tick::SimTick>,
     sessions: Res<crate::lobby::Sessions>,
     runtime: Option<Res<WorldContentRuntime>>,
@@ -479,11 +480,11 @@ pub fn operate_dock_ai(
         &DockControl,
         &crate::server_app::ShipSystemBlackboards,
         &ShipAiTreePrograms,
-        &mut ShipAiTreeRuntime,
+        &ShipAiTreeRuntime,
         &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
-    for (_entity, uuid, sources, config, dock, blackboards, programs, mut runtimes, mut admitted) in
+    for (entity, uuid, sources, config, dock, blackboards, programs, runtimes, mut admitted) in
         ships.iter_mut()
     {
         if !sources.0.policy_for(&dock.system_id).operate_ai {
@@ -514,7 +515,8 @@ pub fn operate_dock_ai(
         let Some(program) = programs.0.get(&dock.system_id) else {
             continue;
         };
-        let Some(tree) = runtimes.0.get_mut(&dock.system_id) else {
+        let mut next_runtimes = runtimes.clone();
+        let Some(tree) = next_runtimes.0.get_mut(&dock.system_id) else {
             continue;
         };
         let was_owned = tree.memory("owned").unwrap_or(false);
@@ -543,6 +545,9 @@ pub fn operate_dock_ai(
                 continue;
             }
         };
+        // Retain the controller's existing deferred boundary: publish successful
+        // private memory at the same flush that previously applied Dock ownership.
+        commands.entity(entity).insert(next_runtimes);
         let payload = match result.intents.get(&dock.enabled_channel).copied() {
             Some(true) if !dock.engaged() => Some(SystemControlPayload::Dock),
             Some(false) if active => {

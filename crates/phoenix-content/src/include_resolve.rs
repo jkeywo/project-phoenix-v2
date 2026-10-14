@@ -105,7 +105,7 @@
 use std::collections::BTreeMap;
 
 use crate::entity_override::{ArrayRule, MergePolicy};
-use crate::findings::{Severity, SourceLocation, WorldFinding, line_of};
+use crate::findings::{line_of, Severity, SourceLocation, WorldFinding};
 
 /// The authored key that lists a template's ordered includes.
 pub const INCLUDES_KEY: &str = "includes";

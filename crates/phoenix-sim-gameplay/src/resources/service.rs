@@ -96,11 +96,9 @@ mod tests {
             service: Some("absent".into()),
             provider: None,
         };
-        assert!(
-            resolve_endpoint("fuel", &services, &missing)
-                .unwrap_err()
-                .contains("not declared")
-        );
+        assert!(resolve_endpoint("fuel", &services, &missing)
+            .unwrap_err()
+            .contains("not declared"));
         let override_ = ResourceLink {
             provider: Some(ResourceEndpoint::Capacity { id: "other".into() }),
             ..missing
@@ -109,17 +107,15 @@ mod tests {
             resolve_endpoint("fuel", &services, &override_).unwrap(),
             ResourceEndpoint::Capacity { id: "other".into() }
         );
-        assert!(
-            resolve_endpoint(
-                "fuel",
-                &services,
-                &ResourceLink {
-                    provider: Some(ResourceEndpoint::TorpedoMagazine),
-                    service: None
-                }
-            )
-            .is_err()
-        );
+        assert!(resolve_endpoint(
+            "fuel",
+            &services,
+            &ResourceLink {
+                provider: Some(ResourceEndpoint::TorpedoMagazine),
+                service: None
+            }
+        )
+        .is_err());
     }
     #[test]
     fn tagged_endpoints_reject_unknown_fields() {

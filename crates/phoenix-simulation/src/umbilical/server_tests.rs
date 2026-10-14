@@ -138,11 +138,10 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
         ),
         1
     );
-    assert!(
-        app.world()
-            .get::<TransferUmbilical>(operator)
-            .is_some_and(|umbilical| umbilical.running)
-    );
+    assert!(app
+        .world()
+        .get::<TransferUmbilical>(operator)
+        .is_some_and(|umbilical| umbilical.running));
 
     app.world_mut()
         .entity_mut(operator)
@@ -188,7 +187,7 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
 }
 
 #[test]
-fn save_state_carries_the_running_intent_only() {
+fn save_state_carries_running_intent_and_fractional_progress() {
     let mut u = umbilical();
     u.running = true;
     u.carry = 0.4;
@@ -196,6 +195,7 @@ fn save_state_carries_the_running_intent_only() {
     u.operator_level = Some(50);
     let save = u.save_state();
     assert!(save.running);
+    assert_eq!(save.carry, 0.4);
 }
 
 #[test]
@@ -209,9 +209,12 @@ fn restore_reseeds_running_and_clears_the_projections() {
     u.carry = 0.7;
     u.last_refusal = Some(UmbilicalRefusal::Disabled);
     u.operator_level = Some(12);
-    u.restore(&UmbilicalSaveState { running: true });
+    u.restore(&UmbilicalSaveState {
+        running: true,
+        carry: 0.4,
+    });
     assert!(u.running);
-    assert_eq!(u.carry, 0.0);
+    assert_eq!(u.carry, 0.4);
     assert_eq!(u.last_refusal, None);
     assert_eq!(u.operator_level, None);
     assert_eq!(u.activation_target, None);

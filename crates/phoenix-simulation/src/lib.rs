@@ -200,6 +200,7 @@ pub mod recipients;
 /// `server::reference_grid` and exists only under `SimPluginOptions::render`.
 pub mod reference_grid;
 pub mod regions;
+pub mod resources;
 /// The science scan (issue #1032): the pure derivation that turns a structure's
 /// live condition track into a fidelity-banded sensor reading, and its Bevy
 /// adapter. There is no authored scan text anywhere behind it — see

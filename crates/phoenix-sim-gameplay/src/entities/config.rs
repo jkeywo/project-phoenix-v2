@@ -701,7 +701,7 @@ impl EntityConfig {
 
         // Explicit services and overrides must name real local equipment. An
         // unconfigured direct umbilical may be supplied by a scenario override.
-        use crate::resources::service::{ResourceEndpoint, resolve_endpoint};
+        use crate::resources::service::{resolve_endpoint, ResourceEndpoint};
         let validate_endpoint = |endpoint: &ResourceEndpoint| -> Result<(), String> {
             match endpoint {
                 ResourceEndpoint::Capacity { id } => {

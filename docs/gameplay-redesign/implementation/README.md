@@ -177,3 +177,14 @@ acceptance remains open; Increment 6 has not started.
 record the automated exit. Required native/client/PASM gates and real Workshop
 browser journeys pass. The ledger remains `in_progress` for physical/device and
 human-workload acceptance; the user authorised this increment with “Do 5”.
+
+
+## Increment 6 — stores, transfers and service links
+
+The user explicitly authorised advancing with “do 6 then” while prior human/device
+checks remain open. See the [implementation contract](increment-6.md), adopted
+`pasm/spec/design/resource-stores.yaml`, and [acceptance record](../../acceptance/1562-resource-stores.md).
+Shared stocks stay in magazine/infrastructure owners. Named services and explicit
+links support real docked replenishment through ordinary controls and AI.
+Snapshot 42/rules 0.14 carry stock claims and fractional flow progress. No new
+consumable drains, internal stock targets, production or personnel inventory land.

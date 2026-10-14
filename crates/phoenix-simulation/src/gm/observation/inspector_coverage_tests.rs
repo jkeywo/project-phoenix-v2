@@ -379,6 +379,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         ship_config: _,
         cinematic_camera: _,
         shield_arcs: _,
+        resource_services: _,
     } = crate::entities::config::EntityConfig::default();
     // These patterns are intentionally separate from the maximal active
     // hull union above. The union proves that shipped combinations map to
@@ -863,6 +864,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         umbilical_schema,
         crate::umbilical::UmbilicalConfig,
+        link,
         capacity,
         rate,
         direction,
@@ -1112,9 +1114,10 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // component/channel leaves; the other four domains remain unchanged.
     // Dock state-tree definitions add thirty authored ship schema leaves.
     // Repair workflows add sixteen authored Job-context leaves.
+    // Resource services add one authored endpoint-kind leaf, recreate-required.
     assert_eq!(
         counts,
-        [55, 71, 726, 51, 56],
+        [55, 71, 727, 51, 56],
         "update the reviewed inventory ratchet"
     );
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
@@ -1133,7 +1136,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         }
     }
     assert_eq!(
-        fingerprint, 1_904_063_536_524_666_692,
+        fingerprint, 9_607_254_471_899_802_894,
         "update the reviewed inventory fingerprint"
     );
 }

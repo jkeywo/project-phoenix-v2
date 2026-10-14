@@ -166,6 +166,15 @@ impl Plugin for WeaponsPlugin {
                     ],
                 ),
         );
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            // Inventory and tube commitments fold in the resource namespace.
+            // Projectile/firing machinery remains the existing deferred boundary.
+            app.declare_state::<TorpedoSystemResource>(
+                StateClass::DeferredFold,
+                "ammunition-stock-state",
+            );
+        }
         app.init_resource::<crate::core::messages::InterSystemQueue>();
         // The ONE shared AI decision cadence (issue #889): the three AI
         // deciders registered below (`ai_phaser_auto_fire`,

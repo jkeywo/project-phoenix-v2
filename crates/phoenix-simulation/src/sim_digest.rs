@@ -452,6 +452,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("dock", fold_dock_namespace),
     ("system-ai-trees", fold_ai_trees_namespace),
     ("umbilical", fold_umbilical_namespace),
+    ("resource-stocks", fold_resource_stocks_namespace),
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
     ("security", fold_security_namespace),
@@ -2098,8 +2099,11 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
         world,
         acc,
         "umbilical-namespace",
-        |umbilical: &TransferUmbilical| umbilical.running.then_some(()),
-        |acc, ()| acc,
+        |umbilical: &TransferUmbilical| {
+            (umbilical.running || umbilical.carry != 0.0)
+                .then_some((umbilical.running, umbilical.carry))
+        },
+        |acc, (running, carry)| fold_f32(fold_u64(acc, u64::from(running)), carry),
     )
 }
 
@@ -2210,7 +2214,7 @@ fn fold_infrastructure_namespace(world: &World, acc: u64) -> u64 {
             acc = fold_u64(acc, state.capacities().len() as u64);
             for capacity in state.capacities() {
                 acc = fold_str(acc, &capacity.id);
-                acc = fold_u64(acc, capacity.level as u64);
+                acc = fold_resource_stock(acc, &capacity.stock);
             }
             acc
         },
@@ -2405,5 +2409,48 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
             Some(state)
         },
         |acc, state| fold_serde(acc, &state),
+    )
+}
+
+/// Canonical stock/claims in the retained owner; labels and bindings are content.
+fn fold_resource_stock(mut acc: u64, stock: &crate::resources::Stock) -> u64 {
+    acc = fold_u64(acc, stock.level as u64);
+    acc = fold_u64(acc, stock.ceiling as u64);
+    acc = fold_u64(acc, stock.reserved.len() as u64);
+    for (claim, amount) in &stock.reserved {
+        acc = fold_str(acc, claim);
+        acc = fold_u64(acc, *amount as u64);
+    }
+    acc
+}
+
+/// Magazine inventory and tube commitments; weapon effect physics remains deferred.
+fn fold_resource_stocks_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "resource-stocks",
+        |system: &crate::console::weapons::TorpedoSystemResource| Some(&system.0),
+        |mut acc, system| {
+            acc = fold_resource_stock(acc, &system.magazine);
+            acc = fold_u64(acc, system.tubes.len() as u64);
+            for tube in &system.tubes {
+                acc = fold_str(acc, &tube.id);
+                acc = fold_u64(acc, tube.loaded_count as u64);
+                acc = fold_u64(acc, tube.target_count as u64);
+                let (phase, remaining, total) = match tube.load_state {
+                    crate::weapons::torpedo::TubeLoadState::Unloaded => (0, 0.0, 0.0),
+                    crate::weapons::torpedo::TubeLoadState::Loading { remaining, total } => {
+                        (1, remaining, total)
+                    }
+                    crate::weapons::torpedo::TubeLoadState::Loaded => (2, 0.0, 0.0),
+                    crate::weapons::torpedo::TubeLoadState::Unloading { remaining, total } => {
+                        (3, remaining, total)
+                    }
+                };
+                acc = fold_f32(fold_f32(fold_u64(acc, phase), remaining), total);
+            }
+            acc
+        },
     )
 }

@@ -38,22 +38,18 @@ fn a_valid_config_passes_and_the_unrunnable_ones_are_named() {
         ..config(UmbilicalDirection::Deliver, 5.0)
     };
     assert!(blank.validate().unwrap_err().contains("capacity"));
-    assert!(
-        config(UmbilicalDirection::Deliver, 0.0)
-            .validate()
-            .unwrap_err()
-            .contains("rate")
-    );
+    assert!(config(UmbilicalDirection::Deliver, 0.0)
+        .validate()
+        .unwrap_err()
+        .contains("rate"));
     let unpowered = UmbilicalConfig {
         min_power_level: 0,
         ..config(UmbilicalDirection::Deliver, 5.0)
     };
-    assert!(
-        unpowered
-            .validate()
-            .unwrap_err()
-            .contains("min_power_level")
-    );
+    assert!(unpowered
+        .validate()
+        .unwrap_err()
+        .contains("min_power_level"));
 }
 
 // ── The gates ────────────────────────────────────────────────────────────

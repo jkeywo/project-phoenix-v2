@@ -61,7 +61,16 @@ impl Plugin for InfrastructurePlugin {
         // every fold/snapshot boundary — so `ClearedAtFold`. They key distinctly
         // in the census by full type path (`EffectQueue<ConditionAdjustment>` vs
         // `EffectQueue<CapacityAdjustment>`).
-        app.init_resource::<EffectQueue<ConditionAdjustment>>()
+        app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
+            .declare_state::<EffectQueue<crate::resources::server::ResourceTransfer>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            )
+            .declare_state::<crate::resources::server::ResourceServices>(
+                StateClass::Derived,
+                "infrastructure-condition-state",
+            )
+            .init_resource::<EffectQueue<ConditionAdjustment>>()
             .init_resource::<EffectQueue<CapacityAdjustment>>()
             .declare_state::<EffectQueue<ConditionAdjustment>>(
                 StateClass::ClearedAtFold,
@@ -71,6 +80,13 @@ impl Plugin for InfrastructurePlugin {
                 StateClass::ClearedAtFold,
                 "digest-exclusion-classes",
             );
+        app.add_systems(
+            FixedUpdate,
+            crate::resources::server::tick_resource_transfers
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(crate::umbilical::tick_umbilical)
+                .before(tick_infrastructure_condition),
+        );
         app.add_systems(
             FixedUpdate,
             tick_infrastructure_condition

@@ -784,7 +784,7 @@ pub fn handle_torpedo_magazine_inter_system(
                     continue;
                 };
                 let facts = seed_torpedo_magazine_facts(
-                    torpedo_sys.0.torpedoes_remaining,
+                    torpedo_sys.0.torpedoes_remaining(),
                     torpedo_sys.0.in_flight.len() as u32,
                 );
                 // The scenario flag chain, anchored at the layer that spawned
@@ -793,12 +793,12 @@ pub fn handle_torpedo_magazine_inter_system(
                 if !torpedo_magazine_grant_policy_fires(mag_policy, &facts, &flag_chain) {
                     continue; // authored policy refuses this claim.
                 }
-                if !torpedo_sys.0.claim_magazine_round() {
+                if !torpedo_sys.0.claim_magazine_round(&tube_id) {
                     continue; // magazine empty — refuse this claim.
                 }
                 if !torpedo_sys.0.start_load_reserved(&tube_id) {
                     // Tube already loaded / unknown — return the round to the magazine.
-                    torpedo_sys.0.torpedoes_remaining += 1;
+                    torpedo_sys.0.release_magazine_round(&tube_id);
                 }
                 continue;
             }
@@ -807,11 +807,11 @@ pub fn handle_torpedo_magazine_inter_system(
         if source_entity.is_some() || !ships.is_empty() {
             continue;
         }
-        if !torpedo_sys_res.0.claim_magazine_round() {
+        if !torpedo_sys_res.0.claim_magazine_round(&tube_id) {
             continue;
         }
         if !torpedo_sys_res.0.start_load_reserved(&tube_id) {
-            torpedo_sys_res.0.torpedoes_remaining += 1;
+            torpedo_sys_res.0.release_magazine_round(&tube_id);
         }
     }
 }

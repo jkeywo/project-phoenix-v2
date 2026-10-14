@@ -8,6 +8,133 @@ use crate::gm::actions::action::{
     GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionOrder, SimulationPaused,
 };
 
+fn resource_row(system: &TorpedoSystemResource) -> EntityState {
+    EntityState {
+        uuid: "resource-ship".into(),
+        weapons: Some(super::capture::weapon_state(
+            None,
+            None,
+            Some(system),
+            None,
+            None,
+            None,
+        )),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn reserved_ammunition_and_fractional_flow_resume_from_ron_without_reset() {
+    let config = crate::weapons::torpedo::TorpedoConfig {
+        count: 4,
+        load_time: 2.0,
+        ..Default::default()
+    };
+    let mut original =
+        TorpedoSystemResource(crate::weapons::torpedo::TorpedoSystem::new(config.clone()));
+    assert!(original.0.start_load("fore_port"));
+    original
+        .0
+        .tick(0.5, &std::collections::HashMap::new(), &mut || {
+            "unused".into()
+        });
+    let stored: EntityState =
+        ron::from_str(&ron::to_string(&resource_row(&original)).unwrap()).unwrap();
+    let mut world = World::new();
+    let entity = world
+        .spawn(TorpedoSystemResource(
+            crate::weapons::torpedo::TorpedoSystem::new(config),
+        ))
+        .id();
+    super::preflight::validate_entity_resources(&world, entity, &stored).unwrap();
+    super::application::apply_weapons(
+        &mut world.entity_mut(entity),
+        stored.weapons.as_ref().unwrap(),
+    );
+    let mut resumed = world.get::<TorpedoSystemResource>(entity).unwrap().clone();
+    assert_eq!(original.0.magazine, resumed.0.magazine);
+    assert_eq!(resumed.0.torpedoes_remaining(), 3);
+    for _ in 0..4 {
+        original
+            .0
+            .tick(0.5, &std::collections::HashMap::new(), &mut || {
+                "unused".into()
+            });
+        resumed
+            .0
+            .tick(0.5, &std::collections::HashMap::new(), &mut || {
+                "unused".into()
+            });
+        assert_eq!(
+            resource_row(&original).weapons,
+            resource_row(&resumed).weapons
+        );
+    }
+    let flow = crate::umbilical::UmbilicalSaveState {
+        running: true,
+        carry: 0.75,
+    };
+    let flow: crate::umbilical::UmbilicalSaveState =
+        ron::from_str(&ron::to_string(&flow).unwrap()).unwrap();
+    let mut restored = crate::umbilical::TransferUmbilical::new(
+        crate::umbilical::UmbilicalConfig {
+            capacity: "torpedoes".into(),
+            link: Default::default(),
+            rate: 1.0,
+            direction: crate::umbilical::UmbilicalDirection::Collect,
+            min_power_level: 1,
+        },
+        crate::core::messages::PowerGroupId("umbilical".into()),
+    );
+    restored.restore(&flow);
+    assert_eq!(restored.save_state(), flow);
+}
+
+#[test]
+fn resource_preflight_refuses_orphan_overfilled_and_missing_claim_state_before_writes() {
+    let system = TorpedoSystemResource(crate::weapons::torpedo::TorpedoSystem::new(
+        crate::weapons::torpedo::TorpedoConfig {
+            count: 10,
+            ..Default::default()
+        },
+    ));
+    let mut world = World::new();
+    let entity = world.spawn((system.clone(), ShipRedAlert(false))).id();
+    for failure in 0..5 {
+        let mut row = resource_row(&system);
+        row.red_alert = Some(true);
+        let weapons = row.weapons.as_mut().unwrap();
+        match failure {
+            0 => {
+                weapons.magazine.as_mut().unwrap().level = 5;
+                weapons.tubes[0].loaded_count = 5;
+            }
+            1 => weapons.tubes[0].target_count = 5,
+            2 => {
+                weapons
+                    .magazine
+                    .as_mut()
+                    .unwrap()
+                    .reserved
+                    .insert("orphan".into(), 1);
+            }
+            3 => weapons.magazine = None,
+            _ => weapons.tubes[0].load_timer = [2.0, 1.0],
+        }
+        assert!(super::preflight::validate_entity_resources(&world, entity, &row).is_err());
+        apply_entity_state(&mut world, entity, &row, 0);
+        assert!(!world.get::<ShipRedAlert>(entity).unwrap().0);
+        assert_eq!(
+            world
+                .get::<TorpedoSystemResource>(entity)
+                .unwrap()
+                .0
+                .magazine,
+            system.0.magazine
+        );
+    }
+}
+
 #[test]
 fn repair_jobs_resume_return_queue_and_external_commitment_from_ron() {
     use crate::modifiers::repair_teams::{RepairTeams, RepairTimings};

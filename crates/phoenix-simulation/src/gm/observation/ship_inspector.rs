@@ -289,6 +289,15 @@ pub fn projection<'a>(
                     }
                 }
             }
+            for (name, endpoint) in &authored.resource_services {
+                flatten(
+                    &serde_json::to_value(endpoint).expect("ResourceEndpoint serializes"),
+                    &format!("resource_services[{name}]"),
+                    &mut values,
+                    &mut fields,
+                    LiveMutability::RecreateRequired,
+                );
+            }
             // EntityConfig intentionally skips these parsed authoring blocks
             // during ordinary serde serialization. They are still first-class
             // hull schema and must stay inside the Live coverage ratchet.

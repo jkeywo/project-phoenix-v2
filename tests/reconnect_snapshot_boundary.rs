@@ -458,7 +458,7 @@ fn weapons_source(app: &mut App) -> Value {
         _ => None,
     };
     json!({"lock":lock,"selection":world.get::<TacticalRadarSelection>(entity).unwrap().0,
-        "magazine":torpedoes.torpedoes_remaining,"torpedoes":format!("{torpedoes:?}")})
+        "magazine":torpedoes.torpedoes_remaining(),"torpedoes":format!("{torpedoes:?}")})
 }
 
 fn control(app: &mut App, target: &str, payload: SystemControlPayload) {

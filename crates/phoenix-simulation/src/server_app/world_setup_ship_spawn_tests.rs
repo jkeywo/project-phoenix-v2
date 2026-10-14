@@ -176,7 +176,7 @@ count = 13
             e.get::<TorpedoSystemResource>()
                 .unwrap()
                 .0
-                .torpedoes_remaining,
+                .torpedoes_remaining(),
             13
         );
     }
@@ -188,7 +188,7 @@ count = 13
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         13
     );
 }
@@ -441,7 +441,7 @@ regen_per_sec = 0.0
             .get::<TorpedoSystemResource>()
             .unwrap()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         7
     );
     assert_eq!(

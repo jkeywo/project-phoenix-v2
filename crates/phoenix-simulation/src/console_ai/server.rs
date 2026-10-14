@@ -1221,7 +1221,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         // Reported, not a gate: `torpedoes_remaining` is the rounds left to
         // RELOAD with — the ones in the tubes were drawn from it when their load
         // started — so it must never veto a launch. See `auto_fire_torpedo`.
-        let magazine = torpedo_sys.torpedoes_remaining;
+        let magazine = torpedo_sys.torpedoes_remaining();
         // Ship-wide "every tube is at its volley capacity" (issue #791). A
         // doctrine that spends a shield gap on one full salvo needs this rather
         // than the per-tube `loaded` (which is `loaded_count > 0`), and it is a
@@ -1442,7 +1442,7 @@ pub(crate) fn ai_torpedo_load(
                 tube_ref.map(|t| t.loaded_count).unwrap_or(0),
                 tube_ref.map(|t| t.target_count).unwrap_or(0),
                 count,
-                torpedo_sys.0.torpedoes_remaining,
+                torpedo_sys.0.torpedoes_remaining(),
                 true,
             );
             if !crate::console::weapons::torpedo_tube_load_policy_fires(policy, &facts, &flag_chain)

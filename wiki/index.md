@@ -47,6 +47,7 @@ Current implementation orientation only. For intended design use
 - [Damage and Repair Runtime](./concepts/damage-and-repair-intent.md)
 - [Repair Plugin](./concepts/repair-plugin.md)
 - [Recorded Observations](./concepts/recorded-observations.md)
+- [Resource Stores and Service Links](./concepts/resource-stores.md) — shared stock/claims, docked replenishment and Workshop authoring
 - [Weapons Runtime](./concepts/weapons-intent.md)
 - [Weapons Plugin](./concepts/weapons-plugin.md)
 - [Shields Runtime](./concepts/shields-intent.md)

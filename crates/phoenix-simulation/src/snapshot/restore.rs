@@ -60,6 +60,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         .unwrap_or_default();
     for row in &snapshot.entities {
         if let Some((entity, _)) = present.iter().find(|(_, uuid)| *uuid == row.uuid) {
+            if let Err(reason) = super::preflight::validate_entity_resources(world, *entity, row) {
+                report.gaps.push(RestoreGap::ResourceStateInvalid {
+                    uuid: row.uuid.clone(),
+                    reason,
+                });
+            }
             if let Err(reason) = validate_entity_repair_jobs(world, *entity, row) {
                 report.gaps.push(RestoreGap::RepairJobsInvalid {
                     uuid: row.uuid.clone(),
@@ -72,11 +78,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         return report;
     }
     restore_entities(world, snapshot, &mut report);
-    if report
-        .gaps
-        .iter()
-        .any(|gap| matches!(gap, RestoreGap::RepairJobsInvalid { .. }))
-    {
+    if report.gaps.iter().any(|gap| {
+        matches!(
+            gap,
+            RestoreGap::RepairJobsInvalid { .. } | RestoreGap::ResourceStateInvalid { .. }
+        )
+    }) {
         return report;
     }
     restore_npc_frequency_matches(world, snapshot, &mut report);

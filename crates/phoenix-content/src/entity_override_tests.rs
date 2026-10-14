@@ -124,13 +124,11 @@ fn compose_layer_empty_tags_still_clears() {
     let over: toml::Value = toml::from_str(r#"tags = []"#).unwrap();
     let result = merge_entity_config_toml_with(&template, &over, MergePolicy::ComposeFragments)
         .expect("ComposeFragments honours the tombstone, so it never rejects one");
-    assert!(
-        result
-            .get("tags")
-            .and_then(|v| v.as_array())
-            .unwrap()
-            .is_empty()
-    );
+    assert!(result
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

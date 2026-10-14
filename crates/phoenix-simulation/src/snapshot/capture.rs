@@ -744,7 +744,7 @@ pub(super) fn weapon_state(
                     .collect()
             })
             .unwrap_or_default(),
-        torpedoes_remaining: system.map(|s| s.torpedoes_remaining),
+        magazine: system.map(|s| s.magazine.clone()),
         torpedoes_in_flight: system
             .map(|s| {
                 s.in_flight

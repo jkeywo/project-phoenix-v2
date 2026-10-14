@@ -2539,7 +2539,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
         .world()
         .resource::<TorpedoSystemResource>()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
 
     let ai_token = format!("ai:{}", npc_uuid);
     push(
@@ -2564,7 +2564,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
         .world()
         .resource::<TorpedoSystemResource>()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     assert_eq!(
         player_torpedoes_before, player_torpedoes_after,
         "NPC fire must draw from its own per-entity TorpedoSystemResource, \
@@ -2621,7 +2621,7 @@ fn torpedo_system_resource_reflects_battleship_toml_torpedoes_block() {
     let sys = crate::weapons::torpedo::TorpedoSystem::new(runtime.clone());
     // Magazine size matches TOML — changing `count = 30` to `count = 99`
     // in alliance_battleship.toml would fail this assertion.
-    assert_eq!(sys.torpedoes_remaining, tc.count);
+    assert_eq!(sys.torpedoes_remaining(), tc.count);
     assert_eq!(sys.config.damage_hull, tc.damage_hull);
     assert_eq!(sys.config.load_time, tc.load_time);
     assert!((sys.config.turn_rate - tc.turn_rate_deg_per_sec.to_radians()).abs() < 1e-5);
@@ -7019,7 +7019,7 @@ fn cold_torpedo_system() -> crate::console::weapons::TorpedoSystemResource {
     let mut system = crate::weapons::torpedo::TorpedoSystem::new(
         crate::weapons::torpedo::TorpedoConfig::default(),
     );
-    system.torpedoes_remaining = 0;
+    system.magazine.level = (0) as i64 + system.magazine.reserved_total();
     assert!(
         !system.tubes.is_empty(),
         "fixture must actually carry tubes or the test asserts nothing"
@@ -10923,7 +10923,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
     };
     let mut torp =
         crate::weapons::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
-    torp.torpedoes_remaining -= 2;
+    torp.magazine.adjust(-(2 as i64));
     torp.tube_mut("fore-centre").unwrap().loaded_count = 2;
 
     // Distinct barrel-marker positions (identity base) so the origin's X
@@ -11668,7 +11668,7 @@ fn magazine_claim_decrements_counter_by_one_when_online() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
     assert!(before > 0, "test precondition: magazine must have stock");
 
@@ -11690,7 +11690,7 @@ fn magazine_claim_decrements_counter_by_one_when_online() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
     assert_eq!(
         after,
@@ -11735,7 +11735,7 @@ fn magazine_claim_refused_when_magazine_offline() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
 
     // End-to-end: LoadTube tries to emit a claim — the tube gate passes
@@ -11756,7 +11756,7 @@ fn magazine_claim_refused_when_magazine_offline() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
     assert_eq!(
         after, before,
@@ -11775,7 +11775,7 @@ fn magazine_claim_refused_when_empty() {
             .world_mut()
             .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
         let mut ts = q.single_mut(app.world_mut()).unwrap();
-        ts.0.torpedoes_remaining = 0;
+        ts.0.magazine.level = (0) as i64 + ts.0.magazine.reserved_total();
     }
 
     push(
@@ -11826,7 +11826,7 @@ fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
                 .world_mut()
                 .get_mut::<TorpedoSystemResource>(ship)
                 .unwrap();
-            ts.0.torpedoes_remaining = 1;
+            ts.0.magazine.level = (1) as i64 + ts.0.magazine.reserved_total();
         }
 
         // Two competing claims, in a fixed queue order.
@@ -11854,7 +11854,8 @@ fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
 
         let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
         assert_eq!(
-            ts.0.torpedoes_remaining, 0,
+            ts.0.torpedoes_remaining(),
+            0,
             "the single round must be reserved exactly once — one writer, no double-spend"
         );
         assert!(
@@ -11889,7 +11890,7 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
         .get::<TorpedoSystemResource>(ship)
         .unwrap()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     assert!(before > 0, "precondition: magazine has stock");
 
     // Attach an idle magazine grant policy.
@@ -11919,7 +11920,8 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
 
     let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
     assert_eq!(
-        ts.0.torpedoes_remaining, before,
+        ts.0.torpedoes_remaining(),
+        before,
         "an idle magazine grant policy must refuse the claim — counter unchanged"
     );
     assert_eq!(
@@ -11946,7 +11948,7 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
         .get::<TorpedoSystemResource>(ship)
         .unwrap()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     assert!(before > 0, "precondition: magazine has stock");
 
     // A grant policy whose ONLY rule is guarded on the world flag.
@@ -11985,7 +11987,8 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
         .expect("magazine consumer runs");
     let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
     assert_eq!(
-        ts.0.torpedoes_remaining, before,
+        ts.0.torpedoes_remaining(),
+        before,
         "with the world flag clear the grant guard must refuse the claim"
     );
 
@@ -12000,7 +12003,7 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
         .expect("magazine consumer runs");
     let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
     assert_eq!(
-        ts.0.torpedoes_remaining,
+        ts.0.torpedoes_remaining(),
         before - 1,
         "with the world flag set the same grant guard must grant the claim"
     );
@@ -12080,13 +12083,13 @@ fn conservation_fixture(
         // Rounds already out of the magazine and in the tubes. Solved for
         // rather than assumed, so this fixture keeps saying what it means if
         // the fixture hull ever parks a different volley.
-        let parked = sys.0.rounds_aboard() - sys.0.torpedoes_remaining;
+        let parked = sys.0.rounds_aboard() - sys.0.torpedoes_remaining();
         assert!(
             rounds_aboard >= parked,
             "this fixture parks {parked} round(s) in tubes, so it cannot describe a \
              ship carrying only {rounds_aboard}"
         );
-        sys.0.torpedoes_remaining = rounds_aboard - parked;
+        sys.0.magazine.level = (rounds_aboard - parked) as i64 + sys.0.magazine.reserved_total();
     }
     app.world_mut()
         .entity_mut(ship)
@@ -12201,7 +12204,7 @@ fn torpedo_conservation_counts_the_rounds_parked_in_the_tubes() {
             .get::<TorpedoSystemResource>(ship)
             .expect("fixture ship carries a torpedo system")
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         0,
         "precondition: the whole round must be in the tube, or this is not the \
          case where the two measures disagree"
@@ -13782,7 +13785,7 @@ fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine
         .world()
         .resource::<TorpedoSystemResource>()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
 
     let npc_uuid = "cc000000-0000-0000-0000-0000000000ff";
     let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
@@ -13834,7 +13837,8 @@ fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine
         "the player ship's loaded tube must be untouched by an NPC's fire command"
     );
     assert_eq!(
-        res.0.torpedoes_remaining, player_torpedoes_before,
+        res.0.torpedoes_remaining(),
+        player_torpedoes_before,
         "the player ship's magazine must be untouched by an NPC's fire command"
     );
 }
@@ -13857,7 +13861,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
 
     // Spawn a second Ship (NOT LocalShip) that also has a magazine. Give
@@ -13938,7 +13942,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         .world_mut()
         .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>()
         .single(app.world())
-        .map(|ts| ts.0.torpedoes_remaining)
+        .map(|ts| ts.0.torpedoes_remaining())
         .unwrap();
     assert_eq!(
         localship_after, localship_before,
@@ -13952,7 +13956,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         .get::<TorpedoSystemResource>(npc_entity)
         .unwrap()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     assert_eq!(
         npc_after,
         npc_before - 1,

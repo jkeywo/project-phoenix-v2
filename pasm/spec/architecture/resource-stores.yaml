@@ -1,0 +1,37 @@
+entities:
+  - component: ammunition-stock-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ammunition Stock State
+      summary: "Gameplay TorpedoSystem owns one Stock magazine. Tube loading reserves a named round, cancellation releases it and completion consumes it into ready tube contents. Replenishment accounts for those physical commitments. Snapshot and resource digest carry stocks, claims and loading continuation; ordinary grant AI and admitted commands remain. Projectile effects remain the existing deferred digest boundary."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/snapshot/schema.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [Stock, TorpedoSystem, reserve_requirements, validate_magazine]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/torpedo_tests.rs, crates/phoenix-simulation/src/resources/server_tests.rs]
+  - component: resource-service-bindings
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Resource Service Bindings
+      summary: "Authored named capacity/magazine endpoints and consumer-owned service/provider links resolve without provider search. Workshop uses shared validation and exact-source history. Services are rederived content, not another inventory or information/command authority."
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-gameplay/src/umbilical/flow.rs, crates/phoenix-content/src/entity_override.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js]
+      symbols: [ResourceEndpoint, ResourceLink, resolve_endpoint]
+      tests: [editor/tests/workshop-resources.test.js, tests/client/workshop-resource-panel.test.js]
+  - component: resource-transfer-transactions
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Conservative Resource Transfer Transactions
+      summary: "Simulation drains each admitted docked flow in stable operator/endpoint order against current stock and earlier queued adjustments. Both endpoints commit together; capacity updates retain the infrastructure counter/threshold publication boundary. Fractional flow carry is saved and folded. No new transfer controller, stock mirror, resource drain or transport is added."
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs]
+      symbols: [ResourceTransfer, tick_resource_transfers, endpoint_stock]
+      tests: [crates/phoenix-simulation/src/resources/server_tests.rs, crates/phoenix-simulation/src/umbilical/server_tests.rs]

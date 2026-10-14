@@ -90,7 +90,7 @@ fn observe(app: &App, ship: Entity) -> Value {
         .collect();
     rounds.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
     json!({"rounds":rounds,"physics":[physics.x,physics.y,physics.z,physics.yaw,physics.forward_speed,physics.lateral_speed,physics.vertical_speed],
-        "magazine":torp.torpedoes_remaining,"loaded":torp.tubes.iter().map(|t| t.loaded_count).collect::<Vec<_>>(),
+        "magazine":torp.torpedoes_remaining(),"loaded":torp.tubes.iter().map(|t| t.loaded_count).collect::<Vec<_>>(),
         "loading":torp.tubes.iter().map(|t| format!("{:?}",t.load_state)).collect::<Vec<_>>(),"bursts":format!("{:?}",torp.burst_states),"blaster_cycle":format!("{:?}",blaster.volley),
         "mint":world.resource::<WorldIdMint>().state()})
 }
@@ -153,7 +153,7 @@ fn observe_simultaneous_projectile_identity_assignment() {
             ..Default::default()
         },
     );
-    torp.torpedoes_remaining -= 3;
+    torp.magazine.adjust(-(3 as i64));
     for (id, count) in [("fore_port", 2), ("fore_starboard", 1)] {
         let tube = torp.tube_mut(id).unwrap();
         tube.loaded_count = count;

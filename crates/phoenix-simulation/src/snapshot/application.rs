@@ -947,6 +947,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused repair job restore for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
+        bevy::log::error!("refused resource restore for {}: {}", row.uuid, reason);
+        return;
+    }
     let restored_at = fixed_elapsed_secs(world).unwrap_or_default();
     let restored_alert_tick = bevy::ecs::change_detection::Tick::new(
         world
@@ -1654,36 +1658,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
     }
     if let Some(mut torpedoes) = entity.get_mut::<TorpedoSystemResource>() {
         let system = &mut torpedoes.0;
-        if let Some(remaining) = stored.torpedoes_remaining {
-            system.torpedoes_remaining = remaining;
-        }
-        for tube in system.tubes.iter_mut() {
-            let Some(row) = stored.tubes.iter().find(|t| t.id == tube.id) else {
-                // A tube the save does not mention is left alone rather than
-                // emptied, for `apply_hull`'s reason: an unmentioned tube is a
-                // save written against a different hull, and the content digest
-                // is what refuses that.
-                continue;
-            };
-            tube.load_state = match row.load_phase {
-                1 => TubeLoadState::Loading {
-                    remaining: row.load_timer[0],
-                    total: row.load_timer[1],
-                },
-                2 => TubeLoadState::Loaded,
-                3 => TubeLoadState::Unloading {
-                    remaining: row.load_timer[0],
-                    total: row.load_timer[1],
-                },
-                // Including anything this build does not recognise — see
-                // `TubeState::load_phase`.
-                _ => TubeLoadState::Unloaded,
-            };
-            tube.loaded_count = row.loaded_count;
-            tube.target_count = row.target_count;
-            tube.active_barrels = row.active_barrels.clone();
-            tube.pattern_step = row.pattern_step;
-        }
+        apply_torpedo_inventory(system, stored);
         system.in_flight = stored
             .torpedoes_in_flight
             .iter()
@@ -1898,5 +1873,42 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
                 last.0.insert(target, ai);
             }
         }
+    }
+}
+
+/// Shared by actual restore and its non-mutating preflight.
+pub(super) fn apply_torpedo_inventory(
+    system: &mut crate::weapons::torpedo::TorpedoSystem,
+    stored: &WeaponState,
+) {
+    if let Some(magazine) = &stored.magazine {
+        system.magazine = magazine.clone();
+    }
+    for tube in system.tubes.iter_mut() {
+        let Some(row) = stored.tubes.iter().find(|t| t.id == tube.id) else {
+            // A tube the save does not mention is left alone rather than
+            // emptied, for `apply_hull`'s reason: an unmentioned tube is a
+            // save written against a different hull, and the content digest
+            // is what refuses that.
+            continue;
+        };
+        tube.load_state = match row.load_phase {
+            1 => TubeLoadState::Loading {
+                remaining: row.load_timer[0],
+                total: row.load_timer[1],
+            },
+            2 => TubeLoadState::Loaded,
+            3 => TubeLoadState::Unloading {
+                remaining: row.load_timer[0],
+                total: row.load_timer[1],
+            },
+            // Including anything this build does not recognise — see
+            // `TubeState::load_phase`.
+            _ => TubeLoadState::Unloaded,
+        };
+        tube.loaded_count = row.loaded_count;
+        tube.target_count = row.target_count;
+        tube.active_barrels = row.active_barrels.clone();
+        tube.pattern_step = row.pattern_step;
     }
 }

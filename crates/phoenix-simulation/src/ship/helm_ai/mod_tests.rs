@@ -9852,7 +9852,8 @@ fn fill_the_tubes(app: &mut App) {
         tube.loaded_count = tube.volley_max;
         tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
     }
-    torpedoes.0.torpedoes_remaining = torpedoes.0.torpedoes_remaining.saturating_sub(drawn);
+    torpedoes.0.magazine.level = (torpedoes.0.torpedoes_remaining().saturating_sub(drawn)) as i64
+        + torpedoes.0.magazine.reserved_total();
 }
 
 /// Empty every tube without touching the magazine — the tube half of the
@@ -10035,7 +10036,7 @@ fn spend_the_magazine(app: &mut App) {
     let mut torpedoes = entity
         .get_mut::<crate::console::weapons::TorpedoSystemResource>()
         .expect("the cruiser carries a torpedo system");
-    torpedoes.0.torpedoes_remaining = 0;
+    torpedoes.0.magazine.level = (0) as i64 + torpedoes.0.magazine.reserved_total();
     for tube in &mut torpedoes.0.tubes {
         tube.loaded_count = 0;
         tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
@@ -10050,7 +10051,7 @@ fn restock_the_magazine(app: &mut App, rounds: u32) {
     let mut torpedoes = entity
         .get_mut::<crate::console::weapons::TorpedoSystemResource>()
         .expect("the cruiser carries a torpedo system");
-    torpedoes.0.torpedoes_remaining = rounds;
+    torpedoes.0.magazine.level = (rounds) as i64 + torpedoes.0.magazine.reserved_total();
 }
 
 /// Mark one of the cruiser's fine systems damage-offline, the way

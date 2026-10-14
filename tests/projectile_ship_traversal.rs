@@ -76,7 +76,7 @@ fn observe(app: &App, ships: [Entity; 2]) -> Value {
                 "target":round.target_uuid,"position":[round.x,round.y,round.z],
                 "heading":round.heading,"life":round.lifespan_remaining
             })).collect::<Vec<_>>(),
-            "magazine":torpedo.torpedoes_remaining,
+            "magazine":torpedo.torpedoes_remaining(),
             "tubes":torpedo.tubes.iter().map(|tube|json!([tube.id,tube.loaded_count,tube.target_count,format!("{:?}",tube.load_state)])).collect::<Vec<_>>(),
             "bursts":format!("{:?}",torpedo.burst_states),
             "blasters":blasters.iter().map(|bank|json!({
@@ -218,8 +218,8 @@ fn prepare(pinned: bool) -> (App, [Entity; 2]) {
         let tube = torpedo.0.tube("fore").unwrap();
         assert_eq!(tube.loaded_count, 0);
         assert_eq!(tube.load_state, TubeLoadState::Unloaded);
-        assert!(torpedo.0.torpedoes_remaining > 0);
-        torpedo.0.torpedoes_remaining -= 1;
+        assert!(torpedo.0.torpedoes_remaining() > 0);
+        torpedo.0.magazine.adjust(-(1 as i64));
         let tube = torpedo.0.tube_mut("fore").unwrap();
         tube.loaded_count = 1;
         tube.target_count = 1;

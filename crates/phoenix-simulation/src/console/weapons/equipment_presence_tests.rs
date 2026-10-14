@@ -20,7 +20,7 @@ fn absent_equipment_publishes_no_mounts_or_ammo_including_reconnect() {
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining
+            .torpedoes_remaining()
             > 0
     );
     let current = compute_current_weapons_update(app.world_mut());
@@ -112,13 +112,13 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         .world()
         .resource::<TorpedoSystemResource>()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     let armed_before = app
         .world()
         .get::<TorpedoSystemResource>(armed)
         .unwrap()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     for entity in [player, npc] {
         let commands = [
             ("phaser-port", SystemControlPayload::FirePhaser),
@@ -185,7 +185,7 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         global_before
     );
     let global = &app.world().resource::<TorpedoSystemResource>().0;
@@ -199,7 +199,7 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         assert_eq!(tube.target_count, 1);
     }
     let torpedoes = &app.world().get::<TorpedoSystemResource>(armed).unwrap().0;
-    assert_eq!(torpedoes.torpedoes_remaining, armed_before);
+    assert_eq!(torpedoes.torpedoes_remaining(), armed_before);
     assert!(torpedoes.in_flight.is_empty());
     for entity in [player, npc] {
         assert!(!app.world().get::<ActiveBeam>(entity).unwrap().is_firing());
@@ -215,7 +215,7 @@ fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
         .world()
         .resource::<TorpedoSystemResource>()
         .0
-        .torpedoes_remaining;
+        .torpedoes_remaining();
     app.world_mut()
         .resource_mut::<InterSystemQueue>()
         .0
@@ -233,7 +233,7 @@ fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         before
     );
     app.world_mut().despawn(player);
@@ -245,7 +245,7 @@ fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         before
     );
     app.world_mut().resource_mut::<InterSystemQueue>().0[0].source_entity = None;
@@ -256,7 +256,7 @@ fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
         app.world()
             .resource::<TorpedoSystemResource>()
             .0
-            .torpedoes_remaining,
+            .torpedoes_remaining(),
         before - 1
     );
 }

@@ -67,10 +67,19 @@ pub enum RestoreGap {
     /// A captured `EntityUuid` no entity in the target world carries.
     MissingEntity(String),
     /// Canonical assignments cannot resume against the authored crew/workflow.
-    RepairJobsInvalid { uuid: String, reason: String },
+    RepairJobsInvalid {
+        uuid: String,
+        reason: String,
+    },
+    ResourceStateInvalid {
+        uuid: String,
+        reason: String,
+    },
     /// The payload carries unread Coordination enqueues but the target app did
     /// not register the message buffers/cursor that own that staging seam.
-    CoordinationStagingUnavailable { pending: usize },
+    CoordinationStagingUnavailable {
+        pending: usize,
+    },
     /// A captured `AsteroidUuid` no asteroid in the target world carries.
     MissingAsteroid(String),
     /// A supporting world present at capture has not finished loading in the
@@ -105,15 +114,22 @@ pub enum RestoreGap {
     /// therefore not a table whose rows shifted; it is a world that loaded a
     /// different layer set, and writing fired-state into it by position would
     /// arm and disarm triggers at random.
-    ScenarioTriggersMoved { saved: usize, found: usize },
+    ScenarioTriggersMoved {
+        saved: usize,
+        found: usize,
+    },
     /// A stored index is out of range or duplicated; no latches were written.
-    ScenarioTriggerIndexInvalid { index: u32 },
+    ScenarioTriggerIndexInvalid {
+        index: u32,
+    },
     /// The capture was waiting on scripted `after(n, |ctx| …)` callbacks and the
     /// bootstrapped world has no `WorldScriptRuntime` to queue them on — a save
     /// from a scripted world being restored into one whose scripts did not
     /// compile. The content dimension is what should have refused this; the gap
     /// is here so it is never silent if it does not.
-    ScriptRuntimeAbsent { pending_callbacks: usize },
+    ScriptRuntimeAbsent {
+        pending_callbacks: usize,
+    },
     /// The capture was holding scripted comms state — queued `open_comms`
     /// requests, or live scripted dialogues — and the bootstrapped world has no
     /// `WorldScriptRuntime` to run them against.
@@ -132,6 +148,7 @@ pub enum RestoreGap {
 impl std::fmt::Display for RestoreGap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RestoreGap::ResourceStateInvalid { uuid, reason } => write!(f, "resource state for {uuid} cannot be restored: {reason}"),
             RestoreGap::RepairJobsInvalid { uuid, reason } => write!(f, "repair jobs for {uuid} cannot be restored: {reason}"),
             RestoreGap::MissingEntity(uuid) => {
                 write!(f, "the world has no entity `{uuid}` to restore into")
@@ -420,4 +437,90 @@ pub(super) fn belt_ready(world: &World, snapshot: &PhoenixSnapshot) -> bool {
         })
         .collect();
     crate::asteroids::lifecycle::composition_key(&contributions) == stored.composition_key
+}
+
+/// Validate the canonical inventory and its actual committed activities before writes.
+pub(super) fn validate_entity_resources(
+    world: &World,
+    entity: Entity,
+    row: &EntityState,
+) -> Result<(), String> {
+    if row.infrastructure.is_none()
+        && world
+            .get::<crate::infrastructure::InfrastructureCondition>(entity)
+            .is_some()
+    {
+        return Err("infrastructure provider is missing its canonical inventory".into());
+    }
+    if row.weapons.is_none()
+        && world
+            .get::<crate::console::weapons::torpedo::TorpedoSystemResource>(entity)
+            .is_some()
+    {
+        return Err("torpedo provider is missing its canonical inventory".into());
+    }
+    if let Some(infrastructure) = &row.infrastructure {
+        infrastructure.validate_stocks()?;
+        let live = world
+            .get::<crate::infrastructure::InfrastructureCondition>(entity)
+            .ok_or("inventory has no authored infrastructure provider")?;
+        if live.0.capacities().len() != infrastructure.capacities().len()
+            || infrastructure
+                .capacities()
+                .iter()
+                .zip(live.0.capacities())
+                .any(|(saved, authored)| {
+                    saved.id != authored.id
+                        || saved.ceiling != authored.ceiling
+                        || saved.label != authored.label
+                        || !saved.stock.reserved.is_empty()
+                })
+        {
+            return Err(
+                "infrastructure inventory disagrees with authored stores or has unsupported claims"
+                    .into(),
+            );
+        }
+    }
+    if let Some(flow) = &row.umbilical {
+        if !flow.carry.is_finite()
+            || !(0.0..1.0).contains(&flow.carry)
+            || (!flow.running && flow.carry != 0.0)
+        {
+            return Err("invalid fractional resource-flow continuation".into());
+        }
+    }
+    if let Some(stored) = &row.weapons {
+        if let Some(live) =
+            world.get::<crate::console::weapons::torpedo::TorpedoSystemResource>(entity)
+        {
+            if stored.magazine.is_none() {
+                return Err("torpedo-equipped ship is missing its canonical magazine".into());
+            }
+            let mut candidate = live.0.clone();
+            let mut ids = std::collections::BTreeSet::new();
+            if stored.tubes.len() != candidate.tubes.len()
+                || stored.tubes.iter().any(|tube| {
+                    !ids.insert(&tube.id)
+                        || !candidate.tubes.iter().any(|live| {
+                            live.id == tube.id
+                                && tube.loaded_count <= live.volley_max
+                                && tube.target_count <= live.volley_max
+                        })
+                        || tube.load_phase > 3
+                        || tube.load_timer.iter().any(|t| !t.is_finite() || *t < 0.0)
+                        || tube.load_timer[0] > tube.load_timer[1]
+                })
+            {
+                return Err(
+                    "torpedo inventory has missing, duplicate or invalid tube activities".into(),
+                );
+            }
+            super::application::apply_torpedo_inventory(&mut candidate, stored);
+            candidate.validate_magazine()?;
+        } else if stored.magazine.is_some() {
+            return Err("magazine has no authored torpedo provider".into());
+        }
+    }
+    Ok(())
 }

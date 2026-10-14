@@ -16,7 +16,7 @@
 //! docked ([`crate::dock::DockControl::docked_partner`]), so resupply requires
 //! Helm to have achieved the dock first — two seats on two ships, or two seats on
 //! one. The capacity itself moves through the SAME queue the arrest (#1158) and
-//! the operations `transfer` use — a [`CapacityAdjustment`] on each end drained
+//! the operations `transfer` use — a `CapacityAdjustment` on each end drained
 //! by [`crate::infrastructure::tick_infrastructure_condition`] — so the moved
 //! goods cross the docked partner's own authored ceiling and re-publish onto the
 //! counter a scenario predicate reads, rather than being written onto the
@@ -38,7 +38,7 @@ use crate::core::task_lifecycle::{
 use crate::dock::DockControl;
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
+use crate::infrastructure::InfrastructureCondition;
 use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
@@ -61,8 +61,8 @@ use crate::umbilical::flow::{
 /// snapshotted. `carry` is the sub-unit remainder the flow arithmetic meters a
 /// per-second rate through; `last_refusal` is why the flow last stopped; and
 /// `operator_level`/`partner_level` are this tick's ledger readings for the
-/// console. All four are projections the next tick re-derives — not folded, not
-/// snapshotted — exactly as the dock leaves its `available_target`/`undock_target`
+/// console. The fractional carry is authoritative continuation; refusal and level readings
+/// are projections the next tick re-derives — exactly as the dock leaves its `available_target`/`undock_target`
 /// out.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TransferUmbilical {
@@ -78,8 +78,7 @@ pub struct TransferUmbilical {
     pub power_group: PowerGroupId,
     /// The sub-unit remainder the flow arithmetic carries between ticks so a
     /// per-second rate finer than one unit per tick still moves at the authored
-    /// rate. A live projection: reset on start/stop and on restore, never folded
-    /// or saved.
+    /// rate. Reset on start/stop; authoritative continuation, folded and saved.
     pub carry: f32,
     /// Why the last flow could not start or was stopped — the reason the console
     /// shows, retained until the operator acts again. `None` while the flow is
@@ -122,22 +121,22 @@ impl TransferUmbilical {
     /// The persistable half — the running intent — for the snapshot payload. The
     /// authored config and power group ride the template and are re-derived on
     /// spawn, exactly as the tractor leaves its coupling terms out of
-    /// `TractorSaveState`. The carry, the refusal and the level projections are
-    /// deliberately left out: all are re-derived on the first resumed tick.
+    /// `TractorSaveState`. Fractional carry is retained; refusal and level projections are
+    /// recomputed on the first resumed tick.
     pub fn save_state(&self) -> UmbilicalSaveState {
         UmbilicalSaveState {
             running: self.running,
+            carry: self.carry,
         }
     }
 
     /// Reseed the running intent from a restored snapshot, onto an umbilical that
     /// already carries its authored config and resolved power group from the
-    /// fresh spawn. The carry, the last refusal and the level projections are NOT
-    /// restored — the next `tick_umbilical` re-derives them from the resumed
-    /// world, so a stored one would only ever be stale.
+    /// fresh spawn. Fractional carry is restored. Last refusal and level projections are
+    /// rederived by the next tick from the resumed world.
     pub fn restore(&mut self, save: &UmbilicalSaveState) {
         self.running = save.running;
-        self.carry = 0.0;
+        self.carry = save.carry;
         self.last_refusal = None;
         self.operator_level = None;
         self.partner_level = None;
@@ -146,7 +145,7 @@ impl TransferUmbilical {
 }
 
 /// The snapshot-carried half of a [`TransferUmbilical`] (issue #1160): the
-/// running intent, and nothing else.
+/// running intent and fractional flow carry.
 ///
 /// `Default` is the idle umbilical — not running — which is what a hull that
 /// authored an umbilical and never started it captures, so a resume of such a
@@ -155,6 +154,7 @@ impl TransferUmbilical {
 pub struct UmbilicalSaveState {
     #[serde(default)]
     pub running: bool,
+    pub carry: f32,
 }
 
 /// Transient correlation carried from the start intent to the same tick's
@@ -498,7 +498,7 @@ struct Outcome {
     /// The two capacity moves to queue this tick:
     /// `(capacity_id, operator_uuid, partner_uuid, operator_delta, partner_delta)`.
     /// `None` on a tick that moved nothing.
-    queue: Option<(String, String, String, i64, i64)>,
+    queue: Option<crate::resources::server::ResourceTransfer>,
 }
 
 /// One operator read once per tick into plain values so the borrow of the world
@@ -524,7 +524,7 @@ struct OperatorRow {
 /// docked partner (#1159's `docked_partner`), the umbilical's power level and
 /// damage tier, both docked ends' capacity ledgers for the authored id, and the
 /// stored carry — and applies the verdict. On a refusal the running intent clears
-/// and the reason is retained; on a flow the two [`CapacityAdjustment`]s are
+/// and the reason is retained; on a flow the two `CapacityAdjustment`s are
 /// queued for the infrastructure tick. The operator's own level and the partner's
 /// are projected onto the component every tick, running or not, so the console
 /// shows both ends' levels the moment a berth is in reach.
@@ -534,7 +534,7 @@ pub fn tick_umbilical(
     // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
     // so a reduced test app that runs the umbilical systems without
     // `InfrastructurePlugin` is a no-op rather than a panic.
-    capacity_queue: Option<ResMut<EffectQueue<CapacityAdjustment>>>,
+    transfer_queue: Option<ResMut<EffectQueue<crate::resources::server::ResourceTransfer>>>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     time: Res<Time>,
     mut set: ParamSet<(
@@ -548,7 +548,12 @@ pub fn tick_umbilical(
             Option<&EntitySystemHull>,
         )>,
         // Every entity's capacity ledger, to resolve both docked ends.
-        Query<(&EntityUuid, &InfrastructureCondition)>,
+        Query<(
+            &EntityUuid,
+            Option<&InfrastructureCondition>,
+            Option<&crate::console::weapons::torpedo::TorpedoSystemResource>,
+            Option<&crate::resources::server::ResourceServices>,
+        )>,
         // Apply the verdict and the projections.
         Query<&mut TransferUmbilical>,
     )>,
@@ -589,30 +594,58 @@ pub fn tick_umbilical(
         return;
     }
 
-    // Resolve both ends' capacity readings for each operator's authored id.
-    let read_end = |conditions: &Query<(&EntityUuid, &InfrastructureCondition)>,
+    // Consumer-owned binding at the operator; the remote end uses its exact
+    // authored resource default. Neither binding selects another dock partner.
+    let empty_services = std::collections::BTreeMap::new();
+    let read_end = |conditions: &Query<(
+        &EntityUuid,
+        Option<&InfrastructureCondition>,
+        Option<&crate::console::weapons::torpedo::TorpedoSystemResource>,
+        Option<&crate::resources::server::ResourceServices>,
+    )>,
                     uuid: &str,
-                    capacity: &str|
-     -> Option<CapacityEnd> {
-        conditions
-            .iter()
-            .find(|(id, _)| id.0 == uuid)
-            .and_then(|(_, condition)| condition.0.capacity_reading(capacity))
-            .map(|reading| CapacityEnd {
-                level: reading.level,
-                headroom: reading.headroom(),
-            })
+                    resource: &str,
+                    link: &crate::resources::service::ResourceLink|
+     -> Option<(CapacityEnd, crate::resources::service::ResourceEndpoint)> {
+        let (_, infrastructure, torpedoes, services) =
+            conditions.iter().find(|(id, _, _, _)| id.0 == uuid)?;
+        let endpoint = crate::resources::service::resolve_endpoint(
+            resource,
+            services.map(|s| &s.0).unwrap_or(&empty_services),
+            link,
+        )
+        .ok()?;
+        let (stock, held) =
+            crate::resources::server::endpoint_stock(&endpoint, infrastructure, torpedoes)?;
+        Some((
+            CapacityEnd {
+                level: stock.available(),
+                headroom: stock.headroom().saturating_sub(held),
+            },
+            endpoint,
+        ))
     };
 
     let mut outcomes: Vec<Outcome> = Vec::with_capacity(rows.len());
     {
         let conditions = set.p1();
         for row in &rows {
-            let operator_end = read_end(&conditions, &row.uuid, &row.config.capacity);
-            let partner_end = row
-                .partner
-                .as_deref()
-                .and_then(|p| read_end(&conditions, p, &row.config.capacity));
+            let operator_binding = read_end(
+                &conditions,
+                &row.uuid,
+                &row.config.capacity,
+                &row.config.link,
+            );
+            let operator_end = operator_binding.as_ref().map(|(end, _)| *end);
+            let partner_binding = row.partner.as_deref().and_then(|p| {
+                read_end(
+                    &conditions,
+                    p,
+                    &row.config.capacity,
+                    &crate::resources::service::ResourceLink::default(),
+                )
+            });
+            let partner_end = partner_binding.as_ref().map(|(end, _)| *end);
             let operator_level = operator_end.map(|e| e.level);
             let partner_level = partner_end.map(|e| e.level);
 
@@ -681,7 +714,7 @@ pub fn tick_umbilical(
                 }
                 FlowVerdict::Flowing {
                     operator_delta,
-                    partner_delta,
+                    partner_delta: _,
                     carry,
                 } => {
                     // Flowing always implies a docked partner (the `docked` gate
@@ -708,14 +741,43 @@ pub fn tick_umbilical(
                     // A move only reaches the queue when it is non-zero and there
                     // is a partner to move it to — a depleted source or a full
                     // destination keeps the flow running but queues nothing.
-                    let queue = match (&row.partner, operator_delta) {
-                        (Some(partner), delta) if delta != 0 => Some((
-                            row.config.capacity.clone(),
-                            row.uuid.clone(),
-                            partner.clone(),
-                            operator_delta,
-                            partner_delta,
-                        )),
+                    let queue = match (
+                        &row.partner,
+                        &operator_binding,
+                        &partner_binding,
+                        operator_delta,
+                    ) {
+                        (
+                            Some(partner),
+                            Some((_, own_endpoint)),
+                            Some((_, remote_endpoint)),
+                            delta,
+                        ) if delta != 0 => {
+                            let (source, source_endpoint, destination, destination_endpoint) =
+                                if delta < 0 {
+                                    (
+                                        row.uuid.clone(),
+                                        own_endpoint.clone(),
+                                        partner.clone(),
+                                        remote_endpoint.clone(),
+                                    )
+                                } else {
+                                    (
+                                        partner.clone(),
+                                        remote_endpoint.clone(),
+                                        row.uuid.clone(),
+                                        own_endpoint.clone(),
+                                    )
+                                };
+                            Some(crate::resources::server::ResourceTransfer {
+                                operator: row.uuid.clone(),
+                                source,
+                                source_endpoint,
+                                destination,
+                                destination_endpoint,
+                                amount: delta.abs(),
+                            })
+                        }
                         _ => None,
                     };
                     outcomes.push(Outcome {
@@ -735,22 +797,10 @@ pub fn tick_umbilical(
 
     // Collect the capacity moves in UUID order, so two hosts queue identically —
     // the walk-order rule the infrastructure and operations ticks both keep.
-    let mut adjustments: Vec<CapacityAdjustment> = Vec::new();
-    for out in &outcomes {
-        if let Some((capacity, op_uuid, partner_uuid, op_delta, partner_delta)) = &out.queue {
-            adjustments.push(CapacityAdjustment {
-                uuid: op_uuid.clone(),
-                capacity: capacity.clone(),
-                delta: *op_delta,
-            });
-            adjustments.push(CapacityAdjustment {
-                uuid: partner_uuid.clone(),
-                capacity: capacity.clone(),
-                delta: *partner_delta,
-            });
-        }
-    }
-    adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid).then(a.capacity.cmp(&b.capacity)));
+    let transfers: Vec<_> = outcomes
+        .iter()
+        .filter_map(|out| out.queue.clone())
+        .collect();
 
     // Apply the verdicts and projections.
     {
@@ -776,13 +826,13 @@ pub fn tick_umbilical(
 
     // Queue the moves only when there is something to move, so a world whose
     // umbilicals are idle never marks the capacity queue changed on a quiet tick.
-    if adjustments.is_empty() {
+    if transfers.is_empty() {
         return;
     }
-    let Some(mut capacity_queue) = capacity_queue else {
+    let Some(mut transfer_queue) = transfer_queue else {
         return;
     };
-    capacity_queue.0.extend(adjustments);
+    transfer_queue.0.extend(transfers);
 }
 
 // ── The wire ─────────────────────────────────────────────────────────────────

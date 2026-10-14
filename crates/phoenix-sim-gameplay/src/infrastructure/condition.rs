@@ -205,10 +205,8 @@ pub struct ResolvedCapacity {
     /// The authored id — the scenario's namespace, and the world-flag counter
     /// name this capacity is mirrored onto.
     pub id: String,
-    /// How much is there now.
-    pub level: i64,
-    /// The most it can hold.
-    pub ceiling: i64,
+    /// Canonical stock and stage claims; no parallel level/ceiling ledger.
+    pub stock: crate::resources::Stock,
     /// `strings.csv` id for a crew-facing label, carried through from
     /// [`CapacityConfig::label`] so the dossier projection (issue #1030) reads
     /// the LIVE capacity without a side-trip back to the authored table.
@@ -216,12 +214,16 @@ pub struct ResolvedCapacity {
     pub label: Option<String>,
 }
 
+impl std::ops::Deref for ResolvedCapacity {
+    type Target = crate::resources::Stock;
+    fn deref(&self) -> &Self::Target {
+        &self.stock
+    }
+}
+
 impl ResolvedCapacity {
-    /// How much more the ceiling would still admit. Never negative, so a
-    /// structure authored above its own ceiling reads as simply full rather
-    /// than as owing capacity.
     pub fn headroom(&self) -> i64 {
-        self.ceiling.saturating_sub(self.level).max(0)
+        self.stock.headroom()
     }
 }
 
@@ -511,12 +513,15 @@ impl InfrastructureState {
             .iter()
             .map(|c| ResolvedCapacity {
                 id: c.id.clone(),
-                level: c.amount,
+                stock: crate::resources::Stock::new(
+                    c.amount,
+                    c.ceiling.unwrap_or(c.amount).max(c.amount),
+                )
+                .expect("validated infrastructure capacity"),
                 // An unauthored ceiling is the starting amount: every
                 // capacity written before transfers existed means "this is
                 // what the depot holds", and that reading has to keep
                 // working unchanged.
-                ceiling: c.ceiling.unwrap_or(c.amount).max(c.amount),
                 label: c.label.clone(),
             })
             .collect();
@@ -622,13 +627,32 @@ impl InfrastructureState {
     /// like a condition-backed threshold does.
     pub fn adjust_capacity(&mut self, id: &str, delta: i64) -> Option<(i64, Vec<FlagChange>)> {
         let capacity = self.capacities.iter_mut().find(|c| c.id == id)?;
-        capacity.level = capacity
-            .level
-            .saturating_add(delta)
-            .clamp(0, capacity.ceiling);
+        capacity.stock.adjust(delta);
         let level = capacity.level;
         let changes = self.recompute_flags();
         Some((level, changes))
+    }
+
+    /// Read the one canonical inventory endpoint for a resource transaction.
+    pub fn capacity_stock(&self, id: &str) -> Option<&crate::resources::Stock> {
+        self.capacities
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| &c.stock)
+    }
+
+    /// Validate continuation before it reaches the infrastructure owner.
+    pub fn validate_stocks(&self) -> Result<(), String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for capacity in &self.capacities {
+            if capacity.id.trim().is_empty() || !ids.insert(&capacity.id) {
+                return Err(
+                    "infrastructure inventory has an empty or duplicate capacity id".into(),
+                );
+            }
+            capacity.stock.validate()?;
+        }
+        Ok(())
     }
 
     /// The resolved thresholds, in authored order.

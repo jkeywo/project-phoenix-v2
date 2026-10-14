@@ -766,7 +766,7 @@ pub struct WeaponState {
     /// which is how a hull with no tubes stays distinguishable from one that
     /// has shot itself dry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub torpedoes_remaining: Option<u32>,
+    pub magazine: Option<crate::resources::Stock>,
     /// Torpedoes in the air, which are authoritative in the plainest sense —
     /// they are moving, steering and about to detonate on somebody.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

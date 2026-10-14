@@ -108,6 +108,7 @@ const SPAWN_SECTIONS: &[&dyn SpawnSection] = &[
     &CommsSpawn,
     &ShieldsDamageHistorySpawn,
     &InfrastructureSpawn,
+    &ResourceServicesSpawn,
     &TractorSpawn,
     &ExternalRepairDispatchSpawn,
     &HeldResponseSpawn,
@@ -471,6 +472,17 @@ impl SpawnSection for ShieldsDamageHistorySpawn {
         // Shields damage history — per-ship Component tracking HP deltas for the
         // AI damage-concentration algorithm. Initialised empty; resized lazily.
         cmds.insert(crate::ship::shields::ShieldsDamageHistory::default());
+    }
+}
+
+struct ResourceServicesSpawn;
+impl SpawnSection for ResourceServicesSpawn {
+    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        if !config.resource_services.is_empty() {
+            cmds.insert(crate::resources::server::ResourceServices(
+                config.resource_services.clone(),
+            ));
+        }
     }
 }
 

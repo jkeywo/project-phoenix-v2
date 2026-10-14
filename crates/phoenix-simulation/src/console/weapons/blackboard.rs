@@ -304,7 +304,7 @@ impl WeaponsProjectionInputs<'_, '_> {
             let q = &self.torpedoes;
             q.single()
                 .ok()
-                .map(|ts| ts.0.torpedoes_remaining)
+                .map(|ts| ts.0.torpedoes_remaining())
                 .unwrap_or_default()
         };
         let phaser_mode = self
@@ -1074,7 +1074,7 @@ pub(crate) fn publish_weapons_core_blackboard(
             target_name,
             banks,
             tubes,
-            torpedo_count: torpedo_sys.map_or(0, |sys| sys.0.torpedoes_remaining),
+            torpedo_count: torpedo_sys.map_or(0, |sys| sys.0.torpedoes_remaining()),
             phaser_mode: mode,
             phaser_arcs,
             torpedo_arcs,
@@ -1464,7 +1464,7 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
             magazine_sysid,
             SystemBlackboard::TorpedoMagazine(crate::core::messages::TorpedoMagazineBlackboard {
                 is_online: magazine_online,
-                torpedoes_remaining: torpedo_sys.0.torpedoes_remaining,
+                torpedoes_remaining: torpedo_sys.0.torpedoes_remaining(),
                 capacity: torpedo_sys.0.config.count,
                 // AC5: publish the in-flight count as a public authoritative fact
                 // so other policies read it on the next AI tick.

@@ -67,6 +67,12 @@ pub(super) fn restore_entities(
     report.entities_restored = writes.len();
 
     for (entity, row) in &writes {
+        if let Err(reason) = super::preflight::validate_entity_resources(world, *entity, row) {
+            report.gaps.push(RestoreGap::ResourceStateInvalid {
+                uuid: row.uuid.clone(),
+                reason,
+            });
+        }
         if let Err(reason) = validate_entity_repair_jobs(world, *entity, row) {
             report.gaps.push(RestoreGap::RepairJobsInvalid {
                 uuid: row.uuid.clone(),

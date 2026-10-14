@@ -2670,3 +2670,7 @@ kind = "Dossiers"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+# Canonical ammunition endpoint for configured docked replenishment.
+[resource_services.torpedoes]
+kind = "torpedo_magazine"

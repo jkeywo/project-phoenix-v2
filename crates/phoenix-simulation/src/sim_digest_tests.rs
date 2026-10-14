@@ -80,7 +80,7 @@ fn optional_namespace_exact_fold_characterization() {
             2604905312334251123,
             2045009351732382248,
             7322358685363040768,
-            11779916052664557949,
+            4609971591295840796,
             10771667353891034293,
         ]
     );
@@ -98,11 +98,12 @@ fn optional_namespace_exact_fold_characterization() {
             ("tractor", 3412975283742167187),
             ("dock", 196895128352095218),
             ("system-ai-trees", 196895128352095218),
-            ("umbilical", 15491268977310092478),
-            ("asteroid", 1294415633813107063),
-            ("collisions", 16065284320352777755),
-            ("security", 14226133757962437551),
-            ("internal-repair", 12585372360240408742),
+            ("umbilical", 9470254417540384327),
+            ("resource-stocks", 9470254417540384327),
+            ("asteroid", 808843215005956282),
+            ("collisions", 1181279844596788338),
+            ("security", 12919174898061707866),
+            ("internal-repair", 17219695052010668043),
         ]
     );
 }
@@ -800,7 +801,7 @@ fn spawn_umbilical(world: &mut World, uuid: &str, running: bool) {
 /// the carry/level projections never do, because they are re-derived every
 /// tick and a resume forgives the sub-tick debt.
 #[test]
-fn only_a_running_umbilical_moves_the_digest_and_the_carry_does_not() {
+fn fractional_umbilical_progress_moves_the_digest_but_readouts_do_not() {
     let id = "00000000-0000-8000-8000-000000000001";
 
     let mut idle = fold_world();
@@ -821,8 +822,7 @@ fn only_a_running_umbilical_moves_the_digest_and_the_carry_does_not() {
          tick's capacity move, folded nowhere else"
     );
 
-    // Two hosts mid-flow with different sub-tick carries still agree: the
-    // carry is a projection the fold ignores.
+    // Fractional progress changes the next transfer and is authoritative.
     let mut running_again = fold_world();
     spawn_umbilical(&mut running_again, id, true);
     if let Some(mut u) = running_again
@@ -833,10 +833,22 @@ fn only_a_running_umbilical_moves_the_digest_and_the_carry_does_not() {
         u.carry = 0.91;
         u.operator_level = Some(7);
     }
-    assert_eq!(
+    assert_ne!(
         world_digest(&running),
         world_digest(&running_again),
-        "two hosts running the same flow with different carries must fold the same"
+        "fractional flow progress must be folded"
+    );
+    let before_readouts = world_digest(&running_again);
+    running_again
+        .query::<&mut TransferUmbilical>()
+        .iter_mut(&mut running_again)
+        .next()
+        .unwrap()
+        .operator_level = Some(100);
+    assert_eq!(
+        before_readouts,
+        world_digest(&running_again),
+        "readouts are derived"
     );
 }
 
@@ -2866,16 +2878,14 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
         station_alert,
         fold_internal_repair_namespace(&alerts, FOLD_SEED)
     );
-    assert!(
-        FOLD_STAGES
-            .iter()
-            .any(|(name, _)| *name == "internal-repair")
-    );
+    assert!(FOLD_STAGES
+        .iter()
+        .any(|(name, _)| *name == "internal-repair"));
 }
 
 #[test]
 fn system_tree_digest_covers_private_calls_and_stable_system_identity() {
-    use crate::ai::state_tree_runtime::{ShipAiTreeRuntime, continued_tree};
+    use crate::ai::state_tree_runtime::{continued_tree, ShipAiTreeRuntime};
     use crate::core::messages::SystemId;
     let make = |reverse: bool, progressed: bool| {
         let mut world = fold_world();
@@ -2985,4 +2995,33 @@ fn repair_evidence_and_resolved_watermarks_participate_in_digest() {
     world.get_mut::<RepairRequestQueue>(entity).unwrap().entries[0].observations[0].observed_tick =
         Some(9);
     assert_ne!(sampled, fold_internal_repair_namespace(&world, FOLD_SEED));
+}
+
+#[test]
+fn canonical_magazine_claims_and_physical_tube_state_move_the_resource_digest() {
+    let mut world = fold_world();
+    let entity = world
+        .spawn((
+            EntityUuid("ammo".into()),
+            crate::console::weapons::TorpedoSystemResource(
+                crate::weapons::torpedo::TorpedoSystem::new(Default::default()),
+            ),
+        ))
+        .id();
+    let before = fold_resource_stocks_namespace(&world, FOLD_SEED);
+    world
+        .get_mut::<crate::console::weapons::TorpedoSystemResource>(entity)
+        .unwrap()
+        .0
+        .start_load("fore_port");
+    let claimed = fold_resource_stocks_namespace(&world, FOLD_SEED);
+    assert_ne!(before, claimed);
+    world
+        .get_mut::<crate::console::weapons::TorpedoSystemResource>(entity)
+        .unwrap()
+        .0
+        .tick(0.5, &std::collections::HashMap::new(), &mut || {
+            "unused".into()
+        });
+    assert_ne!(claimed, fold_resource_stocks_namespace(&world, FOLD_SEED));
 }

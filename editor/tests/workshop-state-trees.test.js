@@ -78,6 +78,15 @@ describe('state-tree authoring source and inheritance', () => {
     expect(next.tree[0].parameters).toHaveProperty('enabled');
     expect(ai.tree[0].state[0].task[0].action.channel).toBe('enabled');
   });
+  it('rebinds numeric outputs without renaming numeric facts or memory', () => {
+    const ai = library(); ai.tree[0].state[0].task[0] = { id: 'power', when: [{ equals: true,
+      value: { source: 'number_compare', name: 'flow-main', comparison: 'less', value: 0.5 } }],
+    action: { kind: 'write_number', channel: 'flow-main', value: 10 } };
+    const next = rebindStateTreeChannel(ai, 'flow-main', 'flow-engine');
+    expect(next.tree[0].state[0].task[0].action.channel).toBe('flow-engine');
+    expect(next.tree[0].state[0].task[0].when[0].value.name).toBe('flow-main');
+    expect(ai.tree[0].state[0].task[0].action.channel).toBe('flow-main');
+  });
   it('renames a component output and inherited AI references in one accepted history edit', async () => {
     const path = 'assets/entities/ship.toml', basePath = 'assets/entities/ai.toml';
     const owned = system(); delete owned.config.ai;

@@ -46,4 +46,10 @@ describe('Workshop energy form', () => {
     control('create').click(); await settle(); expect(parse(current.read(path)).energy.consumer.map(item => item.system)).toEqual(['impulse']);
     expect(control('create').disabled).toBe(true); expect(control('apply').disabled).toBe(false); panel.dispose();
   });
+  it('refuses creating profiles for machinery without authored groups without changing the draft', async () => {
+    const before = stringify({ ...hardware, system: [{ id: 'drive', kind: 'helm_thrust' }] });
+    const { current, runtime, panel } = fixture(before); await settle(); control('create').click(); await settle();
+    expect(current.read(path)).toBe(before); expect(runtime.validate).not.toHaveBeenCalled();
+    expect(control('status').textContent).toContain('Assign authored power groups'); panel.dispose();
+  });
 });

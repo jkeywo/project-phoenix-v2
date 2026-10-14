@@ -88,7 +88,9 @@ export function mountWorkshopEnergy({ root, provider, runtime, draft: getDraft, 
   }
   async function save(initial = false) {
     if (busy() || loading || !inspection || (!initial && !selected)) return;
-    const model = structuredClone(initial ? createEnergyModel(inspection.resolved.value) : energy);
+    let model;
+    try { model = structuredClone(initial ? createEnergyModel(inspection.resolved.value) : energy); }
+    catch (error) { status.textContent = t('workshop.energy.refused', { reason: error.message }); return; }
     if (!initial) {
       const [kind, id] = subjectParts(subject.value), row = structuredClone(selected);
       for (const [key, control] of Object.entries(controlsByName)) row[key] = control.valueAsNumber;

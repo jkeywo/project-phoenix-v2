@@ -130,7 +130,7 @@ function provenanceFinding(inspection, prefix, token, message) {
   return finding(owner, source, token, message);
 }
 
-function authoredAndGeneratedSystems(value) {
+export function authoredAndGeneratedSystems(value) {
   const systems = [...(value.system || [])];
   const shields = systems.find(system => system.kind === 'shields');
   if (shields) for (const arc of value.shield_arc || []) {
@@ -225,7 +225,7 @@ export function inspectShipAuthoring(draft, dependencies, path) {
     ai_inherited: repairFields.some(field => field.owner !== path),
     ai_owner: [...new Set(repairFields.map(field => field.owner))].join(', ') } : null, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated].map(system => {
     const fields = composition.fields.filter(field => field.path.startsWith(`system[id=${system.id}].config.ai`));
-    return { ...system, ai_inherited: fields.some(field => field.owner !== path),
+    return { ...system, energy_profile: structuredClone(composition.resolved.value.energy), ai_inherited: fields.some(field => field.owner !== path),
       ai_owner: [...new Set(fields.map(field => field.owner))].join(', ') };
   }), doctrines, composition };
 }

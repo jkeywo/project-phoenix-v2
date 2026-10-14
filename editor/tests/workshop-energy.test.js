@@ -14,6 +14,13 @@ describe('Workshop energy authoring', () => {
     expect(model.group.map(item => item.id)).toEqual(['propulsion', 'reactor']);
     expect(model.reactor.coolant).toEqual({ service: 'coolant' }); expect(model.consumer[0].coolant).toEqual({ service: 'coolant' });
   });
+  it('refuses mandatory machinery without groups, including generated physical shield arcs', () => {
+    expect(() => createEnergyModel({ system: [{ id: 'drive', kind: 'helm_thrust' }] })).toThrow(/Assign authored power groups.*drive/);
+    expect(() => createEnergyModel({ system: [{ id: 'shields', kind: 'shields' }], shield_arc: [{ id: 'fore' }] })).toThrow(/shield-arc-fore/);
+    const model = createEnergyModel({ system: [{ id: 'shields', kind: 'shields', power_group: 'protection' },
+      { id: 'shield-arc-fore', kind: 'shield_arc', power_group: 'protection' }], shield_arc: [{ id: 'fore' }], power_groups: { protection: {} } });
+    expect(model.consumer.map(row => row.system)).toEqual(['shield-arc-fore']);
+  });
   it.each(['\n', '\r\n'])('replaces a full energy profile preserving unrelated exact source %j', nl => {
     const before = source.replace(/\n/g, nl), current = draft(before), energy = inspectEnergy(current, deps, path).energy;
     energy.consumer[0].reserve.capacity = 200;

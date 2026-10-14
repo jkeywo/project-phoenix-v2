@@ -4912,3 +4912,6 @@ workshop.energy.field.max_cooling_per_sec,Workshop local energy authoring,Maximu
 workshop.energy.field.default_cooling_per_sec,Workshop local energy authoring,Initial cooling per second,Anfängliche Kühlung pro Sekunde,Initial cooling per second,machine
 workshop.energy.field.priority,Workshop local energy authoring,Group priority (lower first),Gruppenpriorität (niedrigere zuerst),Group priority (lower first),machine
 workshop.energy.field.restore_delay_secs,Workshop local energy authoring,Flow restoration feasibility delay (seconds),Verzögerung für möglichen Zuflusswiederanlauf (Sekunden),Flow restoration feasibility delay (seconds),machine
+workshop.ship.ai.comparison,Workshop supported numeric state tree editing,Numeric comparison,Numerischer Vergleich,Numeric comparison,machine
+workshop.ship.ai.number,Workshop supported numeric state tree editing,Numeric value,Numerischer Wert,Numeric value,machine
+energy.coolant,Finite coolant resource label,Coolant,Kühlmittel,Coolant,machine

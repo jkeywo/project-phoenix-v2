@@ -62,7 +62,7 @@ export function rebindStateTreeChannel(ai, before, after) {
   const next = clone(ai);
   const visit = value => {
     if (!value || typeof value !== 'object') return;
-    if ((value.kind === 'write' || value.source === 'pending') && value.channel === before) value.channel = after;
+    if ((value.kind === 'write' || value.kind === 'write_number' || value.source === 'pending') && value.channel === before) value.channel = after;
     for (const child of Object.values(value)) if (typeof child === 'object') visit(child);
   };
   visit(next); return next;

@@ -1,6 +1,7 @@
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
+import { authoredAndGeneratedSystems } from './workshop-ship-authoring.js';
 
 export const ENERGY_RESERVE_FIELDS = Object.freeze(['capacity', 'max_intake_per_sec', 'passive_loss_at_full_per_sec',
   'charge_heat_per_unit', 'discharge_heat_per_unit', 'passive_cooling_per_sec', 'coolant_heat_per_unit', 'trip_heat', 'recover_heat']);
@@ -8,7 +9,11 @@ export const ENERGY_REACTOR_FIELDS = Object.freeze(['sustainable_output_per_sec'
 export const ENERGY_CONSUMER_FIELDS = Object.freeze(['initial_energy', 'initial_heat', 'continuous_cost_per_sec', 'discrete_cost']);
 export const ENERGY_GROUP_FIELDS = Object.freeze(['max_flow_per_sec', 'default_flow_per_sec', 'max_cooling_per_sec', 'default_cooling_per_sec', 'priority', 'restore_delay_secs']);
 const clone = value => structuredClone(value);
-export const energyAliases = kind => ['power', 'power_reactor', 'power_battery'].includes(kind);
+export const energyAliases = kind => ['power', 'power_reactor', 'power_battery', 'shields', 'phaser_control', 'command', 'captain', 'red_alert', 'viewscreen'].includes(kind);
+const mandatoryKinds = new Set(['helm_thrust', 'helm_steering', 'lateral_thrust', 'vertical_thrust', 'helm_impulse', 'helm_boost', 'helm_radar',
+  'tactical_radar', 'sensor_radar', 'sensors', 'navigation', 'comms', 'repair', 'tractor', 'dock', 'umbilical', 'transporter', 'security',
+  'torpedo_magazine', 'phaser_bank', 'blaster_bank', 'torpedo_tube', 'shield_arc']);
+const requiresEnergy = system => !energyAliases(system.kind) && (system.power_group || mandatoryKinds.has(system.kind));
 const reserve = () => ({ capacity: 100, max_intake_per_sec: 20, passive_loss_at_full_per_sec: 1, charge_heat_per_unit: 0.1,
   discharge_heat_per_unit: 0.1, passive_cooling_per_sec: 0.2, coolant_heat_per_unit: 10, trip_heat: 50, recover_heat: 30 });
 export const defaultEnergyConsumer = system => ({ system, initial_energy: 50, initial_heat: 0, continuous_cost_per_sec: 1,
@@ -16,16 +21,19 @@ export const defaultEnergyConsumer = system => ({ system, initial_energy: 50, in
 export const defaultEnergyGroup = id => ({ id, max_flow_per_sec: 20, default_flow_per_sec: 10,
   max_cooling_per_sec: 5, default_cooling_per_sec: 1, priority: 0, restore_delay_secs: 0.5 });
 export function createEnergyModel(value) {
+  const systems = authoredAndGeneratedSystems(value).filter(requiresEnergy);
+  const missing = systems.filter(system => !system.power_group || !Object.hasOwn(value.power_groups || {}, system.power_group));
+  if (missing.length) throw new Error(`Assign authored power groups to machinery first: ${missing.map(system => system.id).join(', ')}.`);
   return { reactor: { sustainable_output_per_sec: 100, max_output_per_sec: 200, ramp_per_sec: 20, initial_output_per_sec: 100,
     initial_energy: 50, initial_heat: 0, max_cooling_per_sec: 5, default_cooling_per_sec: 1, reserve: reserve(), coolant: { service: 'coolant' } },
-  consumer: (value.system || []).filter(system => system.power_group && !energyAliases(system.kind)).map(system => defaultEnergyConsumer(system.id)),
+  consumer: systems.map(system => defaultEnergyConsumer(system.id)),
   group: Object.keys(value.power_groups || {}).sort().map(defaultEnergyGroup) };
 }
 export function inspectEnergy(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);
   const profile = inspection.resolved.value.energy;
   return { ...inspection, energy: profile ? { ...clone(profile), consumer: clone(profile.consumer || []), group: clone(profile.group || []) } : null,
-    systems: clone((inspection.resolved.value.system || []).filter(system => !energyAliases(system.kind))),
+    systems: clone(authoredAndGeneratedSystems(inspection.resolved.value).filter(system => !energyAliases(system.kind))),
     groups: Object.keys(inspection.resolved.value.power_groups || {}).sort(),
     services: clone(inspection.resolved.value.resource_services || {}),
     capacities: clone(inspection.resolved.value.infrastructure?.capacity || []) };

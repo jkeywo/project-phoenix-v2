@@ -1,12 +1,38 @@
 import { t } from './strings.js';
 import { resolveStateTree, idleStateTree } from '../editor/workshop-state-trees.js';
 
+/** Host vocabulary plus actual authored hardware bounds; never a simulation. */
+export function systemTreeVocabulary(owner, schema) {
+  if (!schema) return schema;
+  const host = schema.hosts?.[owner?.kind], vocabulary = { ...schema, ...host };
+  const profile = owner?.energy_profile;
+  if (['power_reactor', 'power_battery'].includes(owner?.kind)) {
+    vocabulary.numeric_facts = []; vocabulary.numeric_channels = {};
+  }
+  if (['power_reactor', 'power_battery'].includes(owner?.kind) && profile?.reactor) {
+    const reactor = profile.reactor;
+    vocabulary.numeric_facts = ['reactor_reserve_fraction', 'reactor_heat_fraction', 'output_actual'];
+    vocabulary.numeric_channels = {
+      'reactor-output': { min: 0, max: reactor.max_output_per_sec },
+      'reactor-cooling': { min: 0, max: reactor.max_cooling_per_sec },
+    };
+    for (const group of profile.group || []) {
+      vocabulary.numeric_facts.push('reserve-' + group.id, 'heat-' + group.id);
+      vocabulary.numeric_channels['flow-' + group.id] = { min: 0, max: group.max_flow_per_sec };
+      vocabulary.numeric_channels['cooling-' + group.id] = { min: 0, max: group.max_cooling_per_sec };
+    }
+  }
+  if (!vocabulary.numeric_facts?.length) vocabulary.sources = (vocabulary.sources || []).filter(source => source !== 'number_compare');
+  if (!Object.keys(vocabulary.numeric_channels || {}).length) vocabulary.actions = (vocabulary.actions || []).filter(action => action !== 'write_number');
+  return vocabulary;
+}
 export const systemTreeContext = {
   id: 'workshop-ai', schemaKey: 'ai_state_tree',
   value: owner => owner?.config?.ai, defaultValue: () => idleStateTree(),
-  channels: owner => (owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel),
+  channels: (owner, schema) => [...new Set([...(schema?.channels || []), ...(owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel)])],
+  vocabulary: systemTreeVocabulary,
   inherited: owner => owner?.ai_inherited === true || owner?.local === false,
-  available: owner => !!owner?.id, supported: (owner, schema) => schema.system_kinds?.includes(owner?.kind),
+  available: owner => !!owner?.id, supported: (owner, schema) => !!schema.hosts?.[owner?.kind] || schema.system_kinds?.includes(owner?.kind),
   operation: (owner, ai, materialise) => ({ type: 'system-ai-set', id: owner.id, ai, materialise }),
 };
 export const repairJobTreeContext = {
@@ -39,10 +65,12 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
     el.onchange = () => { change(type === 'checkbox' ? el.checked : el.value); if (choices || type === 'checkbox') paint(); }; return el;
   };
   const channels = () => context.channels(owner, schema);
+  const numericChannels = () => Object.keys(schema?.numeric_channels || {});
   const unique = (rows, prefix) => { let n = 1; while (rows.some(row => row.id === `${prefix}-${n}`)) n += 1; return `${prefix}-${n}`; };
   const resolved = tree => { try { return resolveStateTree(draft, tree.id); } catch { return tree; } };
   const sourceDefault = source => ({ source, ...(source === 'literal' ? { value: false } : source === 'pending' ? { channel: channels()[0] || '' }
-    : source === 'call_result' ? { task: '', result: 'success' } : { name: '' }) });
+    : source === 'call_result' ? { task: '', result: 'success' }
+      : source === 'number_compare' ? { name: schema?.numeric_facts?.[0] || '', comparison: 'less_or_equal', value: 0 } : { name: '' }) });
   const sourceEditor = (parent, prefix, value, assign, tree) => {
     const box = node('fieldset'); parent.append(box);
     field(box, `${prefix}.source`, value?.source || 'literal', kind => assign(sourceDefault(kind)), schema?.sources || []);
@@ -53,6 +81,11 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
       const calls = (context.state || []).flatMap(state => (state.task || []).filter(task => task.action?.kind === 'call').map(task => `${state.id}/${task.id}`));
       field(box, `${prefix}.task`, current.task, next => { current.task = next; assign(current); }, calls);
       field(box, `${prefix}.result`, current.result, next => { current.result = next; assign(current); }, schema?.results || []);
+    } else if (current.source === 'number_compare') {
+      field(box, `${prefix}.name`, current.name, next => { current.name = next; assign(current); }, schema?.numeric_facts || []);
+      field(box, `${prefix}.comparison`, current.comparison, next => { current.comparison = next; assign(current); }, ['less', 'less_or_equal', 'equal', 'greater_or_equal', 'greater']);
+      const threshold = field(box, `${prefix}.number`, current.value, next => { current.value = Number(next); assign(current); }, null, 'number');
+      threshold.step = 'any';
     } else {
       const choices = current.source === 'fact' ? schema?.facts || [] : Object.keys(context[current.source === 'parameter' ? 'parameters' : 'memory'] || {});
       field(box, `${prefix}.name`, current.name, next => { current.name = next; assign(current); }, choices);
@@ -82,7 +115,7 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
     button(box, 'add', () => { let n = 1; while (Object.hasOwn(values, `value-${n}`)) n += 1; values[`value-${n}`] = false; });
   };
   const conditions = (parent, key, rows, tree) => {
-    const box = node('fieldset'); box.append(node('legend', word('conditions'))); parent.append(box);
+    const box = node('fieldset'); box.dataset.aiConditions = key; box.append(node('legend', word('conditions'))); parent.append(box);
     rows.forEach((condition, index) => {
       const line = node('div'); line.dataset.aiCondition = String(index); box.append(line);
       sourceEditor(line, `${key}.${index}`, condition.value, value => { condition.value = value; }, tree);
@@ -94,7 +127,8 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
     button(box, 'add', () => rows.push({ value: sourceDefault('literal'), equals: true }));
   };
   const actionDefault = kind => ({ kind, ...(kind === 'write' ? { channel: channels()[0] || '', value: sourceDefault('literal') }
-    : kind === 'remember' ? { key: '', value: sourceDefault('literal') } : kind === 'call' ? { tree: '', parameters: {} } : { result: 'success' }) });
+    : kind === 'write_number' ? { channel: numericChannels()[0] || '', value: schema?.numeric_channels?.[numericChannels()[0]]?.min ?? 0 }
+      : kind === 'remember' ? { key: '', value: sourceDefault('literal') } : kind === 'call' ? { tree: '', parameters: {} } : { result: 'success' }) });
   const taskEditor = (parent, task, tree) => {
     field(parent, 'task.id', task.id, value => { task.id = value; });
     conditions(parent, 'task.when', task.when ||= [], tree);
@@ -104,6 +138,11 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
       const target = action.kind === 'write' ? 'channel' : 'key';
       field(parent, `action.${target}`, action[target], value => { action[target] = value; }, target === 'channel' ? channels() : Object.keys(resolved(tree).memory || {}));
       sourceEditor(parent, 'action.value', action.value, value => { action.value = value; }, tree);
+    } else if (action.kind === 'write_number') {
+      field(parent, 'action.channel', action.channel, value => { action.channel = value; }, numericChannels());
+      const control = field(parent, 'action.number', action.value, value => { action.value = Number(value); }, null, 'number');
+      const bounds = schema?.numeric_channels?.[action.channel]; control.step = 'any';
+      if (bounds) { control.min = String(bounds.min); control.max = String(bounds.max); }
     } else if (action.kind === 'complete') field(parent, 'action.result', action.result, value => { action.result = value; }, schema?.results || []);
     else if (action.kind === 'call') {
       field(parent, 'action.tree', action.tree, value => { action.tree = value; }, draft.tree.map(row => row.id));
@@ -165,7 +204,7 @@ export function mountStateTrees({ root, apply, context = systemTreeContext }) {
     button(section, 'apply', () => apply(() => context.operation(owner, structuredClone(draft), materialise)), !context.available(owner) || (inherited && !materialise));
   };
   return { value: () => structuredClone(draft), refresh(system, metadata, disabled) {
-    owner = system; schema = metadata?.[context.schemaKey];
+    owner = system; schema = context.vocabulary ? context.vocabulary(system, metadata?.[context.schemaKey]) : metadata?.[context.schemaKey];
     inherited = context.inherited(system);
     const next = JSON.stringify([system?.id, context.value(system), inherited, system?.ai_owner, schema]);
     if (next !== stamp) { stamp = next; draft = structuredClone(context.value(system) || context.defaultValue(schema)); selections.clear(); materialise = false; }

@@ -910,15 +910,13 @@ pub fn publish_sensor_radar_blackboard(
         // Funding is performed once by the Power tick, not by a publisher.
         // Retain the previous observation while dark rather than refreshing
         // target details from authoritative state without a working scanner.
-        let funded = uuid
+        let own_power = uuid
             .and_then(|own| power_q.iter().find(|(id, _)| id.0 == own.0))
-            .and_then(|(_, power)| {
-                power
-                    .0
-                    .last_work_fraction(&crate::ship::system_registry::sensor_radar_system_id())
-            })
-            .unwrap_or(0.0)
-            > 0.0;
+            .map(|(_, power)| &power.0);
+        let funded = phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+            own_power,
+            crate::ship::system_registry::SENSOR_RADAR_KIND,
+        ) > 0.0;
         if !funded {
             continue;
         }

@@ -1,5 +1,75 @@
 use super::*;
 
+fn transfer_power() -> ShipPowerSystem {
+    let base = crate::modifiers::power_system::PowerSystem::default();
+    let mut hardware = base.config().clone();
+    let mut ship = base.ship_config().clone();
+    let previous = hardware.consumers[0].system.clone();
+    hardware.consumers[0].system = umbilical_system_id();
+    let system = ship
+        .systems
+        .iter_mut()
+        .find(|system| system.id == previous)
+        .unwrap();
+    system.id = umbilical_system_id();
+    system.kind = crate::ship::system_registry::UMBILICAL_KIND.into();
+    ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship).unwrap(),
+    )
+}
+
+#[test]
+fn partial_energy_near_source_limit_pays_only_the_resource_actually_moved() {
+    let (mut app, operator) = docked_world();
+    app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>();
+    app.world_mut().entity_mut(operator).insert((
+        InfrastructureCondition(InfrastructureState::from_config(&capacity_config(2, 200))),
+        transfer_power(),
+    ));
+    let mut power = app
+        .world_mut()
+        .get_mut::<ShipPowerSystem>(operator)
+        .unwrap();
+    power
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&umbilical_system_id())
+        .unwrap()
+        .energy = 0.05;
+    drop(power);
+    let mut flow = app
+        .world_mut()
+        .get_mut::<TransferUmbilical>(operator)
+        .unwrap();
+    flow.config.rate = 20.0;
+    flow.running = true;
+    drop(flow);
+    app.update();
+    let transfers = &app
+        .world()
+        .resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
+        .0;
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].amount, 1);
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(operator)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&umbilical_system_id()]
+            .energy,
+        0.0
+    );
+    assert!(
+        app.world()
+            .get::<TransferUmbilical>(operator)
+            .unwrap()
+            .running
+    );
+}
+
 fn correlated_umbilical_command(
     correlation: &str,
     payload: SystemControlPayload,
@@ -74,18 +144,7 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
     dock.set_engaged(true);
     dock.docked = true;
     dock.set_docking_target(Some("partner-1".into()));
-    let power_config = crate::modifiers::power_system::PowerConfig::default();
-    let power = ShipPowerSystem(
-        crate::modifiers::power_system::PowerSystem::from_authored_groups(
-            &power_config,
-            &[
-                crate::modifiers::power_system::AuthoredPowerGroup::at_default_floor(
-                    PowerGroupId("umbilical".into()),
-                    2,
-                ),
-            ],
-        ),
-    );
+    let power = transfer_power();
     let operator = app
         .world_mut()
         .spawn((
@@ -350,6 +409,7 @@ fn docked_world() -> (App, Entity) {
         .spawn((
             EntityUuid(OPERATOR.into()),
             umbilical_with(flow_config()),
+            transfer_power(),
             dock(Some(PARTNER)),
             InfrastructureCondition(InfrastructureState::from_config(&capacity_config(100, 200))),
             crate::core::messages::AdmittedCommands::default(),

@@ -729,7 +729,9 @@ pub fn tick_umbilical(
                     });
                     // Exhaustion pauses movement and preserves standing intent
                     // and already funded fractional flow.
-                    ctx.dt *= fraction;
+                    ctx.dt *= activity * fraction;
+                } else {
+                    ctx.dt = 0.0;
                 }
             }
             match plan_flow(&row.config, &ends, &ctx) {
@@ -772,6 +774,7 @@ pub fn tick_umbilical(
                     partner_delta: _,
                     carry,
                 } => {
+                    let worked = operator_delta != 0 || carry > row.carry;
                     // Flowing always implies a docked partner (the `docked` gate
                     // above is the only way to reach here), so `row.partner` is
                     // always `Some`. Open the activation the moment it starts
@@ -780,18 +783,20 @@ pub fn tick_umbilical(
                     // change requires an undock, which refuses the flow first),
                     // but kept symmetric with the tractor's own re-designation
                     // handling rather than assumed away.
-                    for report in physical_work_reports(
-                        flow_slot(&row.uuid),
-                        PriorActivation {
-                            active: row.activation_target.is_some(),
-                            target: row.activation_target.as_deref(),
-                        },
-                        PhysicalWork::Formed {
-                            target: row.partner.as_deref(),
-                            follow_subject: true,
-                        },
-                    ) {
-                        push_lifecycle(lifecycle.as_deref_mut(), report);
+                    if worked {
+                        for report in physical_work_reports(
+                            flow_slot(&row.uuid),
+                            PriorActivation {
+                                active: row.activation_target.is_some(),
+                                target: row.activation_target.as_deref(),
+                            },
+                            PhysicalWork::Formed {
+                                target: row.partner.as_deref(),
+                                follow_subject: true,
+                            },
+                        ) {
+                            push_lifecycle(lifecycle.as_deref_mut(), report);
+                        }
                     }
                     // A move only reaches the queue when it is non-zero and there
                     // is a partner to move it to — a depleted source or a full
@@ -842,7 +847,11 @@ pub fn tick_umbilical(
                         last_refusal: None,
                         operator_level,
                         partner_level,
-                        activation_target: row.partner.clone(),
+                        activation_target: if worked {
+                            row.partner.clone()
+                        } else {
+                            row.activation_target.clone()
+                        },
                         queue,
                     });
                 }

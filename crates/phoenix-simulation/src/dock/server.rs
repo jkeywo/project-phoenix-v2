@@ -716,6 +716,17 @@ pub fn tick_dock(
                     &candidates,
                     dt * fraction,
                 );
+                // The mate snap has no travel-time term. Partially funded
+                // equipment must not complete that snap at full strength.
+                if outcome.docked && fraction < 1.0 {
+                    if let Some(pose) = outcome.new_pose.as_mut() {
+                        pose.translation = own_pose.translation.lerp(pose.translation, fraction);
+                        pose.rotation = own_pose.rotation.slerp(pose.rotation, fraction);
+                    }
+                    if !dock.docked {
+                        outcome.docked = false;
+                    }
+                }
                 if fraction == 0.0 {
                     outcome.new_pose = None;
                     outcome.last_refusal = Some(DockRefusal::Unpowered);

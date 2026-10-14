@@ -71,7 +71,7 @@ fn reserved_ammunition_and_fractional_flow_resume_from_ron_without_reset() {
         );
     }
     let flow = crate::umbilical::UmbilicalSaveState {
-        selected_resource: "reserve_fuel".into(),
+        selected_resource: "torpedoes".into(),
         running: true,
         carry: 0.75,
     };

@@ -34,6 +34,52 @@ pub struct BarrelPatternStep {
 /// An ordered, timed sequence of barrel-firing steps for one volley.
 pub type BarrelPattern = Vec<BarrelPatternStep>;
 
+/// Resolve a timed volley. Equal offsets retain authored step and barrel order.
+/// With no authored pattern, the strategy's uniform count/cadence is retained.
+pub fn firing_schedule(
+    pattern: &[BarrelPatternStep],
+    uniform_count: u32,
+    uniform_interval_secs: f32,
+) -> Vec<(Vec<u32>, f32)> {
+    if !pattern.is_empty() {
+        let mut steps: Vec<(Vec<u32>, f32)> = pattern
+            .iter()
+            .map(|s| (s.barrels.clone(), s.offset_secs.max(0.0)))
+            .collect();
+        steps.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        steps
+    } else {
+        (0..uniform_count)
+            .map(|i| (vec![0u32], i as f32 * uniform_interval_secs))
+            .collect()
+    }
+}
+
+/// Resolve origins for an ammunition-counted burst. Offset order determines
+/// barrel order, never round count or cadence. The tube owns both of those.
+/// The step number is one-based; implicit single-origin fire reports step zero.
+pub fn barrel_sequence(pattern: &[BarrelPatternStep]) -> Vec<(u32, u32)> {
+    if pattern.is_empty() {
+        return vec![(0, 0)];
+    }
+    let mut steps: Vec<&BarrelPatternStep> = pattern.iter().collect();
+    steps.sort_by(|a, b| {
+        a.offset_secs
+            .partial_cmp(&b.offset_secs)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut seq = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        for &b in &step.barrels {
+            seq.push((b, (i + 1) as u32));
+        }
+    }
+    if seq.is_empty() {
+        seq.push((0, 0));
+    }
+    seq
+}
+
 /// Validate a barrel list + timed pattern for one weapon instance.
 ///
 /// `barrel_count` is the number of authored barrels (callers pass `1` for the

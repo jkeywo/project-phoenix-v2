@@ -21,6 +21,7 @@
 //! A target is "in arc" for a bank with `facing_deg` and `arc_deg` when
 //! `angle_diff(bearing, facing_rad).abs() <= arc_deg.to_radians() / 2`.
 
+#[cfg(test)]
 use crate::simmath;
 
 /// String identifier for a phaser bank (matches the `id` field in TOML).
@@ -56,6 +57,15 @@ pub struct PhaserBank {
 }
 
 impl PhaserBank {
+    /// Borrow the bank's resolved mount parameters without another state store.
+    pub fn mount(&self) -> super::mount::MountConfig {
+        super::mount::MountConfig {
+            facing_deg: self.facing_deg,
+            fire_arc_deg: self.fire_arc_deg,
+            range: self.beam_range,
+        }
+    }
+
     /// Returns `true` if the bank is not on cooldown.
     pub fn is_ready(&self) -> bool {
         self.cooldown_remaining <= 0.0
@@ -162,12 +172,13 @@ impl PhaserSystem {
         let Some(bank) = self.bank(id) else {
             return false;
         };
+        let mount = bank.mount();
         let range_sq = (target_x - ship_x).powi(2) + (target_z - ship_z).powi(2);
-        if range_sq > bank.beam_range.powi(2) {
+        if range_sq > mount.range.powi(2) {
             return false;
         }
         let (rx, ry) = ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
-        in_arc(rx, ry, bank.facing_deg, bank.fire_arc_deg)
+        in_arc(rx, ry, mount.facing_deg, mount.fire_arc_deg)
     }
 
     /// Check whether a target is within a bank's **auto-fire** arc and range.
@@ -234,68 +245,8 @@ impl PhaserSystem {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-/// Convert a world-space target to ship-local (radar) coordinates.
-pub fn ship_local(
-    target_x: f32,
-    target_z: f32,
-    ship_x: f32,
-    ship_z: f32,
-    ship_yaw: f32,
-) -> (f32, f32) {
-    let dx = target_x - ship_x;
-    let dz = target_z - ship_z;
-    let cos_y = simmath::cos(ship_yaw);
-    let sin_y = simmath::sin(ship_yaw);
-    let radar_x = dx * cos_y + dz * sin_y;
-    let radar_y = dx * sin_y - dz * cos_y;
-    (radar_x, radar_y)
-}
-
-/// True if `(radar_x, radar_y)` is within `arc_deg/2` of the bank's facing.
-pub fn in_arc(radar_x: f32, radar_y: f32, facing_deg: f32, arc_deg: f32) -> bool {
-    let bearing = simmath::atan2(radar_x, radar_y);
-    let facing = facing_deg.to_radians();
-    let half = arc_deg.to_radians() * 0.5;
-    angle_diff(bearing, facing).abs() <= half
-}
-
-/// Compute the shared [`crate::core::messages::WeaponTargetGeometry`] for one weapon
-/// instance from a world-space target, the shooter's physics, and the weapon's
-/// effective range + fire arc (issue #764).
-///
-/// Pure and Bevy-free: reuses `ship_local` + the same sq-dist range test and
-/// `in_arc` bearing math the phaser/blaster fire paths already use, so the
-/// readiness projection can never diverge from the authoritative fire gate.
-#[allow(clippy::too_many_arguments)]
-pub fn target_geometry(
-    target_x: f32,
-    target_z: f32,
-    ship_x: f32,
-    ship_z: f32,
-    ship_yaw: f32,
-    effective_range: f32,
-    facing_deg: f32,
-    fire_arc_deg: f32,
-) -> crate::core::messages::WeaponTargetGeometry {
-    let (rx, ry) = ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
-    let dx = target_x - ship_x;
-    let dz = target_z - ship_z;
-    let range = (dx * dx + dz * dz).sqrt();
-    let in_range = dx * dx + dz * dz <= effective_range * effective_range;
-    let bearing = simmath::atan2(rx, ry);
-    let facing = facing_deg.to_radians();
-    let arc_offset = angle_diff(bearing, facing).abs();
-    let in_arc = arc_offset <= fire_arc_deg.to_radians() * 0.5;
-    crate::core::messages::WeaponTargetGeometry {
-        range,
-        arc_offset_deg: arc_offset.to_degrees(),
-        in_range,
-        in_arc,
-    }
-}
-
-/// Signed angular difference `a − b` wrapped to `[−π, π]`.
-use super::arc_geometry::signed_difference as angle_diff;
+// Compatibility names now resolve to the family-independent mount owner.
+pub use super::mount::{in_arc, ship_local, target_geometry};
 
 #[cfg(test)]
 #[path = "phaser_tests.rs"]

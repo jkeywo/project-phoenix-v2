@@ -120,6 +120,14 @@ impl Default for BlasterBankConfig {
 }
 
 impl BlasterBankConfig {
+    pub fn mount(&self) -> super::mount::MountConfig {
+        super::mount::MountConfig {
+            facing_deg: self.facing_deg,
+            fire_arc_deg: self.fire_arc_deg,
+            range: self.range,
+        }
+    }
+
     /// Effective barrel count: the authored barrel-marker count, or `1` (the
     /// implicit single barrel = `marker`) when none are authored.
     pub fn barrel_count(&self) -> usize {
@@ -139,19 +147,7 @@ impl BlasterBankConfig {
     /// falls back to the uniform volley: `volley_count` shots of barrel `0`
     /// spaced `volley_interval_secs` apart — exactly the pre-#765 behaviour.
     pub fn firing_schedule(&self) -> Vec<(Vec<u32>, f32)> {
-        if !self.pattern.is_empty() {
-            let mut steps: Vec<(Vec<u32>, f32)> = self
-                .pattern
-                .iter()
-                .map(|s| (s.barrels.clone(), s.offset_secs.max(0.0)))
-                .collect();
-            steps.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            steps
-        } else {
-            (0..self.volley_count)
-                .map(|i| (vec![0u32], i as f32 * self.volley_interval_secs))
-                .collect()
-        }
+        super::pattern::firing_schedule(&self.pattern, self.volley_count, self.volley_interval_secs)
     }
 }
 
@@ -527,7 +523,7 @@ impl BlasterSystem {
     /// `target` is the shooter's frozen combat-lock target position (world XZ),
     /// or `None` when no target is locked. Range/arc/no-target blocking is
     /// derived here from the bank's own `range`/`facing_deg`/`fire_arc_deg`
-    /// config using the same [`crate::weapons::phaser::target_geometry`] the
+    /// config using the same [`crate::weapons::mount::target_geometry`] the
     /// fire path uses, so the readiness contract cannot diverge from the fire
     /// gate (issue #764). `is_online` reflects hull-damage offline state.
     pub fn bank_state(
@@ -539,16 +535,9 @@ impl BlasterSystem {
         is_online: bool,
     ) -> crate::core::messages::BlasterBankState {
         let geometry = target.map(|(tx, tz)| {
-            crate::weapons::phaser::target_geometry(
-                tx,
-                tz,
-                ship_x,
-                ship_z,
-                ship_yaw,
-                self.config.range,
-                self.config.facing_deg,
-                self.config.fire_arc_deg,
-            )
+            self.config
+                .mount()
+                .geometry(tx, tz, ship_x, ship_z, ship_yaw)
         });
         // "Loading" for a blaster is the charge phase or an in-progress volley:
         // both mean the bank cannot accept a fresh fire command yet.
@@ -607,6 +596,17 @@ pub struct HitData {
     /// system can attribute the hit — it has no other route back to the
     /// shooter once the projectile is consumed.
     pub source_uuid: String,
+}
+
+impl HitData {
+    /// Equal shield/hull damage is the straight bolt's existing delivery rule.
+    pub fn delivery(&self) -> super::mount::DamageDelivery {
+        super::mount::DamageDelivery {
+            damage_hull: self.damage as f32,
+            damage_shields: self.damage as f32,
+            shield_pierce: self.shield_pierce,
+        }
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

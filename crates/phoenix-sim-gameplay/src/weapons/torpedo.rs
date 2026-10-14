@@ -383,34 +383,13 @@ impl TorpedoTube {
     /// An empty pattern yields a single implicit barrel `0` at step `0`, so the
     /// backward-compat single-barrel tube resolves every round to `marker`.
     pub fn barrel_sequence(&self) -> Vec<(u32, u32)> {
-        if self.pattern.is_empty() {
-            return vec![(0, 0)];
-        }
-        let mut steps: Vec<&crate::weapons::pattern::BarrelPatternStep> =
-            self.pattern.iter().collect();
-        steps.sort_by(|a, b| {
-            a.offset_secs
-                .partial_cmp(&b.offset_secs)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let mut seq = Vec::new();
-        for (i, step) in steps.iter().enumerate() {
-            for &b in &step.barrels {
-                seq.push((b, (i + 1) as u32));
-            }
-        }
-        if seq.is_empty() {
-            seq.push((0, 0));
-        }
-        seq
+        super::pattern::barrel_sequence(&self.pattern)
     }
 
     /// True if `bearing_rad` (radians from ship-forward, +right = positive)
     /// is within this tube's fire arc.
     pub fn is_in_arc(&self, bearing_rad: f32) -> bool {
-        let half = (self.fire_arc_deg.to_radians()) * 0.5;
-        let facing = self.facing_deg.to_radians();
-        angle_diff(bearing_rad, facing).abs() <= half
+        super::mount::bearing_in_arc(bearing_rad, self.facing_deg, self.fire_arc_deg)
     }
 }
 
@@ -1230,6 +1209,18 @@ pub struct TorpedoDetonation {
     /// engagements.
     pub impact_y: f32,
     pub impact_z: f32,
+}
+
+impl TorpedoDetonation {
+    /// Preserve the guided round's distinct shields-up/down payloads and the
+    /// launch-time pierce snapshot, after its existing strike bonus is applied.
+    pub fn delivery(&self) -> super::mount::DamageDelivery {
+        super::mount::DamageDelivery {
+            damage_hull: self.damage_hull as f32,
+            damage_shields: self.damage_shields as f32,
+            shield_pierce: self.shield_pierce,
+        }
+    }
 }
 
 impl TorpedoSystem {

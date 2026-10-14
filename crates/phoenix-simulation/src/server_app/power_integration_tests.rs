@@ -138,6 +138,7 @@ fn power_host_numeric_command_reaches_the_owner_and_next_scoped_snapshot() {
     let out = tick(&mut app);
     let projection = out
         .iter()
+        .rev()
         .find_map(|message| match (&message.target, &message.msg) {
             (
                 Target::Token(token),

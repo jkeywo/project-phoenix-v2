@@ -207,7 +207,7 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
 }
 
 #[test]
-fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
+fn resource_only_magazine_refuses_unfunded_work_even_without_ships() {
     let mut app = test_app();
     let player = local_ship_entity(&mut app);
     unarm(&mut app, player);
@@ -257,7 +257,8 @@ fn resource_only_magazine_requires_no_ships_and_an_unaddressed_claim() {
             .resource::<TorpedoSystemResource>()
             .0
             .torpedoes_remaining(),
-        before - 1
+        before,
+        "a resource-only magazine has no local energy to fund a transfer"
     );
 }
 
@@ -306,7 +307,7 @@ fn absent_phaser_equipment_cannot_apply_damage_from_leftover_beam_state() {
 }
 
 #[test]
-fn resource_only_lifecycle_requires_no_ship_entities() {
+fn resource_only_lifecycle_preserves_unfunded_loading_without_ship_entities() {
     use crate::weapons::torpedo::TubeLoadState;
     let mut app = test_app();
     let player = local_ship_entity(&mut app);
@@ -337,10 +338,7 @@ fn resource_only_lifecycle_requires_no_ship_entities() {
         .unwrap();
     assert_eq!(
         app.world().resource::<TorpedoSystemResource>().0.tubes[0].load_state,
-        TubeLoadState::Loading {
-            remaining: 1.75,
-            total: 2.0
-        },
-        "resource-only harness behavior remains supported"
+        loading,
+        "a resource-only lifecycle advances flight but cannot perform unfunded loading"
     );
 }

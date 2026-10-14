@@ -1,5 +1,26 @@
 use super::*;
 
+fn funded_radar_power() -> crate::ship::power::ShipPowerSystem {
+    let content = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .unwrap();
+    let mut power = crate::modifiers::power_system::PowerSystem::from_energy(
+        content.energy.unwrap(),
+        content.ship_config.unwrap(),
+    )
+    .unwrap();
+    let grant = power
+        .work_continuous(
+            &crate::ship::system_registry::tactical_radar_system_id(),
+            0.2,
+            1.0,
+        )
+        .unwrap();
+    assert_eq!(grant.fraction, 1.0);
+    crate::ship::power::ShipPowerSystem(power)
+}
+
 #[test]
 fn tactical_radar_projection_is_independent_of_snapshot_and_ecs_storage_order() {
     use crate::entities::spawner::EntityUuid;
@@ -42,6 +63,7 @@ fn tactical_radar_projection_is_independent_of_snapshot_and_ecs_storage_order() 
             .spawn((
                 crate::server_app::Ship,
                 crate::server_app::LocalShip,
+                funded_radar_power(),
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
             .id();
@@ -111,6 +133,7 @@ fn tactical_objective_annotations_and_regions_use_the_observing_ship_scope() {
         .spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
+            funded_radar_power(),
             EntityUuid("ship-b".into()),
             crate::server_app::ShipSystemBlackboards::default(),
         ))

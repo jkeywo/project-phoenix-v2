@@ -118,7 +118,17 @@ fn commands(app: &App, entity: Entity) -> Vec<SystemControlPayload> {
         .iter()
         .map(|command| {
             assert_eq!(command.target, reactor());
-            assert!(command.response_token.is_none());
+            assert_eq!(
+                command.response_token.as_deref(),
+                Some(
+                    crate::command_admission::ai_emit::ai_token_for(
+                        app.world()
+                            .get::<crate::entities::spawner::EntityUuid>(entity)
+                    )
+                    .as_str()
+                )
+            );
+            assert!(command.feedback_correlation.is_none());
             command.payload.clone()
         })
         .collect()

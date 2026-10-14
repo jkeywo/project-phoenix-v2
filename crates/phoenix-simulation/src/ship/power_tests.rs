@@ -389,6 +389,22 @@ fn console_handoff_rejects_previous_host_without_resetting_system_work() {
         .find(|host| host.console == console)
         .unwrap()
         .host = Some(StationId("captain".into()));
+    // This reduced fixture skips the placement resolver. Publish its derived
+    // System authority at the same time as the Console placement, as that
+    // production resolver does for every System hosted by the Console.
+    let bindings = app
+        .world()
+        .get::<ShipConfigComponent>(entity)
+        .unwrap()
+        .0
+        .systems
+        .iter()
+        .filter(|system| system.console.as_ref() == Some(&console) && !system.ai_only)
+        .map(|system| (system.id.clone(), StationId("captain".into())))
+        .collect();
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::ship_plugin::HumanSeekingHosts(bindings));
     assert_eq!(state(&app, entity), before);
     let out = command(&mut app, "power", "stale-host", request("helm", 0.0, 0.0));
     feedback(&out, "power", "stale-host", ActionFeedbackOutcome::Refused);

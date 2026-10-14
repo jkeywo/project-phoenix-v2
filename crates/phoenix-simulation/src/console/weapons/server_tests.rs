@@ -567,6 +567,36 @@ fn prepare_fixture_weapon_energy(world: &mut World) {
             attach_fixture_weapon_energy_world(world, ship);
         }
     }
+    // This Weapons-only harness omits the Power physical tick. Fund the same
+    // cached readout work explicitly; publishers never invent a free scan.
+    let dt = world.resource::<Time>().delta_secs();
+    let mut powers = world.query::<(
+        &mut crate::ship::power::ShipPowerSystem,
+        Option<&crate::ship_plugin::ShipSystemControlSources>,
+    )>();
+    for (mut power, sources) in powers.iter_mut(world) {
+        let ids: Vec<_> = power
+            .0
+            .ship_config()
+            .systems
+            .iter()
+            .filter(|system| {
+                matches!(
+                    system.kind.as_str(),
+                    "helm_radar" | "tactical_radar" | "sensor_radar" | "navigation"
+                )
+            })
+            .map(|system| system.id.clone())
+            .collect();
+        for id in ids {
+            let activity = if sources.is_some_and(|sources| sources.0.is_offline(&id)) {
+                0.0
+            } else {
+                1.0
+            };
+            power.0.work_continuous(&id, dt, activity).unwrap();
+        }
+    }
 }
 
 fn attach_fixture_weapon_energy_world(world: &mut World, ship: Entity) {
@@ -600,6 +630,22 @@ fn attach_fixture_weapon_energy_world(world: &mut World, ship: Entity) {
             "torpedo_magazine",
         ));
     }
+    if let Some(shields) = world.get::<crate::ship::shields::ShipShields>(ship) {
+        equipment.extend(shields.0.facings.iter().filter_map(|facing| {
+            crate::ship::system_registry::shield_arc_system_id(&facing.id)
+                .map(|id| (id, "shield_arc"))
+        }));
+    }
+    let declared = world
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .map(|config| config.0.systems.clone())
+        .unwrap_or_default();
+    equipment.extend(
+        declared
+            .iter()
+            .filter(|system| crate::entities::config::requires_energy_profile(&system.kind))
+            .map(|system| (system.id.clone(), system.kind.as_str())),
+    );
     if equipment.is_empty() {
         return;
     }
@@ -5048,8 +5094,19 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
 
 // ── NPC as shooter: handle_fire_phaser (unified) / tick_beams ────────────
 
-/// Set up `AiTokenRegistry`, an NPC entity with
-/// `ActiveBeam`/`PhaserCooldown` (unified per-entity phaser state), and a target entity.
+/// Named physical equipment matching the former empty-bank baseline tuning.
+fn fixture_baseline_phaser() -> PhaserCombatConfigResource {
+    PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+        banks: vec![crate::entities::config::PhaserBankConfig {
+            beam_range: crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE,
+            beam_duration_secs:
+                crate::entities::config::PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS,
+            ..wide_bank("port", 0.0)
+        }],
+    })
+}
+
+/// Set up an AI operator, explicit powered bank and target.
 fn setup_npc_shooter(
     app: &mut App,
     npc_uuid: &str,
@@ -5126,7 +5183,7 @@ console = "tactical-console"
             EntityUuid(npc_uuid.to_string()),
             // This fixture intentionally models authored legacy phasers.
             // Ships without equipment no longer gain implicit beams.
-            PhaserCombatConfigResource::default(),
+            fixture_baseline_phaser(),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
@@ -5217,7 +5274,7 @@ fn npc_beam_tick_applies_damage_to_target_hull() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 10.0, 0.0);
+        beam.start("port", target_uuid_str.to_string(), 10.0, 0.0);
     }
 
     let hp_before = app
@@ -5271,7 +5328,7 @@ fn npc_beam_tick_records_shooter_as_last_attacker() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 10.0, 0.0);
+        beam.start("port", target_uuid_str.to_string(), 10.0, 0.0);
     }
 
     // Tick enough for the beam to reach and hit the target.
@@ -5342,7 +5399,7 @@ fn sustained_beam_marks_last_attacker_changed_exactly_once() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 100.0, 0.0);
+        beam.start("port", target_uuid_str.to_string(), 100.0, 0.0);
     }
 
     // Many ticks of one continuous beam from one shooter.
@@ -5402,7 +5459,7 @@ fn npc_beam_tick_damages_npc_target_not_player() {
             .world_mut()
             .get_mut::<ActiveBeam>(shooter_entity)
             .unwrap();
-        beam.start("", npc_target_uuid.to_string(), 10.0, 0.0);
+        beam.start("port", npc_target_uuid.to_string(), 10.0, 0.0);
     }
 
     let hp_before = app
@@ -5555,7 +5612,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
-                PhaserCombatConfigResource::default(),
+                fixture_baseline_phaser(),
                 // The NPC's Tactical lock. Was seeded on the private
                 // `ShipAiMemory.target` mirror until #702 deleted it;
                 // `TacticalRadarSelection` is the surface every firing path reads.
@@ -5595,7 +5652,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     // Activate the beam directly targeting the player ship.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", player_uuid.to_string(), 10.0, 0.0);
+        beam.start("port", player_uuid.to_string(), 10.0, 0.0);
     }
 
     for _ in 0..10 {
@@ -5658,7 +5715,7 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 0.001, 0.0); // expires on first tick
+        beam.start("port", target_uuid_str.to_string(), 0.001, 0.0); // expires on first tick
     }
 
     app.update(); // beam expires
@@ -5704,13 +5761,13 @@ fn a_beam_cycle_serves_the_cooldown_it_drew_rather_than_the_authored_one() {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
         // A burn that expires on the first tick, carrying a cooldown that could
         // only have come from a draw.
-        beam.start("", target_uuid_str.to_string(), 0.001, DRAWN);
+        beam.start("port", target_uuid_str.to_string(), 0.001, DRAWN);
     }
 
     app.update();
 
     let cooldown = app.world().get::<PhaserCooldown>(npc_entity).unwrap();
-    let served = cooldown.bank_remaining_secs("");
+    let served = cooldown.bank_remaining_secs("port");
     assert!(
         (served - DRAWN).abs() < 0.1,
         "the ended cycle must serve the {DRAWN}s cooldown it drew, not the bank's \
@@ -6016,10 +6073,10 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            PhaserCombatConfigResource::default(),
+            fixture_baseline_phaser(),
             {
                 let mut beam = ActiveBeam::default();
-                beam.start("", target_uuid, 10.0, 0.0);
+                beam.start("port", target_uuid, 10.0, 0.0);
                 beam
             },
             PhaserCooldown::default(),
@@ -8246,10 +8303,9 @@ fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
     setup_harrow_ship_hostile_to_alliance(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let config = crate::entities::config::EntityConfig::from_toml(include_str!(
-        "../../../../../assets/entities/station_axiom.toml"
-    ))
-    .expect("station_axiom.toml must parse");
+    let config =
+        crate::entities::include_resolve::load_entity_config("assets/entities/station_axiom.toml")
+            .expect("station_axiom.toml must resolve and parse");
     let station_uuid = uuid::Uuid::new_v4().to_string();
     let mut cmds = app.world_mut().commands();
     // station_axiom.toml's own `faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"`
@@ -10504,6 +10560,8 @@ fn spawn_warhawk_shield_target(app: &mut App, uuid: &str, x: f32, z: f32, arcs_o
 fn torpedo_launch_targets(app: &mut App, ship: Entity) -> Vec<SystemId> {
     use bevy::ecs::system::RunSystemOnce;
 
+    attach_fixture_weapon_energy(app, ship);
+
     app.world_mut()
         .run_system_once(seed_viewscreen_from_selection)
         .expect("seed viewscreen");
@@ -11184,6 +11242,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
         ))
         .id();
 
+    attach_fixture_weapon_energy(&mut app, ship);
     app.world_mut()
         .run_system_once(handle_fire_torpedo)
         .expect("handle_fire_torpedo should run");
@@ -14253,6 +14312,10 @@ fn los_test_app() -> App {
             crate::entities::config_cache::get_faction_registry(),
         ))
         .add_plugins(WeaponsPlugin)
+        .add_systems(
+            FixedUpdate,
+            prepare_fixture_weapon_energy.before(crate::sim_sets::SimSet::Input),
+        )
         .insert_resource(PhaserCombatConfigResource(
             crate::entities::config::PhaserCombatConfig {
                 banks: vec![crate::entities::config::PhaserBankConfig {
@@ -15104,6 +15167,13 @@ fn handle_fire_blaster_reports_the_actual_charge_consumer_outcome() {
         ))
         .id();
 
+    attach_fixture_weapon_energy(&mut app, npc_entity);
+    // Preserve this probe's direct pre-admitted queue: installing physical
+    // Power does not opt this reduced actor into the network admission sweep.
+    app.world_mut()
+        .entity_mut(npc_entity)
+        .remove::<crate::ship_plugin::ShipConfigComponent>();
+
     // Spawn target entity at (0, -10) — directly ahead of NPC at origin,
     // within the 35-unit range and inside the 360° fire arc.
     app.world_mut().spawn((
@@ -15244,6 +15314,13 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
             Transform::default(),
         ))
         .id();
+
+    attach_fixture_weapon_energy(&mut app, npc_entity);
+    // Preserve this probe's direct pre-admitted queue: installing physical
+    // Power does not opt this reduced actor into the network admission sweep.
+    app.world_mut()
+        .entity_mut(npc_entity)
+        .remove::<crate::ship_plugin::ShipConfigComponent>();
 
     // Deliberately BEYOND the bank's 35-unit range: `tick_blaster_auto_fire`
     // would skip the bank (out of range) and emit nothing, so the injected
@@ -16344,6 +16421,11 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
             Transform::default(),
         ))
         .id();
+    attach_fixture_weapon_energy(&mut app, npc);
+    app.world_mut()
+        .entity_mut(npc)
+        .remove::<crate::ship_plugin::ShipConfigComponent>();
+
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
         EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
@@ -17023,6 +17105,11 @@ fn spawn_player_hull_firing_all_banks_at(
             Transform::default(),
         ))
         .id();
+
+    attach_fixture_weapon_energy(app, ship);
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<crate::ship_plugin::ShipConfigComponent>();
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),

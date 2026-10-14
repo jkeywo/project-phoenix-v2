@@ -111,9 +111,30 @@ shipped-world override corpus found a real migration gap: Falling Skyway's playe
 capacity override omitted the inherited repair stores. Read-only inventory found
 the same replacement pattern on Skyway Control and the operations probe player.
 Reviewed source correction `b2153a72` retains each hull's exact existing finite
-parts quantities. Parsed comparison proves all other world data, including scripts
-and scenario cargo, unchanged. The corpus retry and physical reconnect acceptance
-remain pending; the source correction alone is not passing execution evidence.
+parts quantities. The next strict traversal exposed four equipped legacy durability
+overrides. After reading the PASM design digest, `0a9ac6b3` preserves their exact
+400/20,000/900 totals in complete atomic template Interior profiles. Parsed
+comparison proves all other layout, world and script data unchanged. An initial
+incomplete profile attempt was correctly refused and remains recorded.
+
+The strict corpus retry then passed: 70 worlds, 248 entity instances, 115 overrides,
+172 layouts and 84 zero-team layouts. It reused the exact hashed `3ecd8909`
+executable against corrected authored data `0a9ac6b3`, with no runtime rebuild;
+this distinction and every intermediate failure remain explicit in the receipt.
+The physical reconnect acceptance also passed: the explicitly selected ignored
+parent case reports one pass, zero failures and zero ignored cases (25.20 seconds).
+Its source runs and compares three fresh default/default/pinned children, including
+command timing, hidden-to-on-site visibility, actual repair work, complete wire/state
+continuation and exact finite parts use. Successful child traces are checked inside
+the parent; the outer raw log retains its summary.
+
+The first attempt failed because the fixture required `phaser-fore` as the exact
+representative of a Tactical station order. Actual physical routing legitimately
+selected `phaser-aft` in the same damaged Weapons compartment. Reviewed test-only
+correction `f09b20d5` requires actual Tactical ownership and that exact canonical
+compartment, retaining the fore target visibility and all other acceptance checks.
+The retry used unchanged pinned libraries plus that test diff, subsequently committed
+byte-identically. Both the initial failure and successful retry remain in the receipt.
 
 Exact commands, pins, raw log hashes, source provenance, diagnostics and pending
 boundaries are in [the targeted native receipt](../gameplay-redesign/implementation/physical-native-targeted-validation.json).

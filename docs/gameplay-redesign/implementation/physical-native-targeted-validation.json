@@ -1,7 +1,7 @@
 {
   "increment": 11,
   "recorded_date": "2026-10-15",
-  "status": "targeted_followup_in_progress",
+  "status": "selected_native_followups_pass_final_integration_pending",
   "runtime_base": "672bf376",
   "tested_revision": "3ecd8909768e9d3f4ba952d11a41f89efc1eb891",
   "compatibility": {
@@ -96,7 +96,7 @@
   },
   "corpus_followup": {
     "fix_commit": "b2153a726f143a4bac28b017d64ac4f02fb9849a",
-    "status": "source_reviewed_retry_pending",
+    "status": "strict_corpus_confirmed_with_pinned_executable_and_corrected_authored_data",
     "changes": [
       "Retain exact Destroyer structural_parts39 and machinery_parts111 in Falling Skyway and probe_operations replacing capacity arrays.",
       "Retain exact Axiom structural_parts10000 and machinery_parts10000 in Skyway Control replacing capacity array.",
@@ -109,11 +109,126 @@
       "method": "Parse before/after with CRLF-to-LF normalization on both sources. Remove only six newly retained rows and require complete parsed worlds equal; compare added rows exactly with their hull templates.",
       "actors": 3,
       "parts_rows": 6
-    }
+    },
+    "additional_fix_commit": "0a9ac6b3261fc08acee12ca587206a1175490b5f",
+    "durability_conversion": {
+      "actors": 4,
+      "budgets": [
+        {
+          "actor": "lyra_ascending",
+          "total": 400,
+          "rooms": [
+            200,
+            200
+          ]
+        },
+        {
+          "actor": "probe_picket brawler",
+          "total": 20000,
+          "rooms": [
+            10000,
+            10000
+          ]
+        },
+        {
+          "actor": "probe_radiation storm hulk",
+          "total": 900,
+          "rooms": [
+            450,
+            450
+          ]
+        },
+        {
+          "actor": "probe_radiation clear hulk",
+          "total": 900,
+          "rooms": [
+            450,
+            450
+          ]
+        }
+      ],
+      "method": "Replace legacy equipped hull_integrity with a complete atomic copy of the actual template Interior, changing only proportional room HP budgets. No other geometry, material, routes, placement, script, stock, clock or scenario consequence changes.",
+      "independent_source_review": "PASS: weapon_workshop, no gates/edits.",
+      "design_digest": {
+        "command": "uv run pasm design digest --json --workspace-root C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-11-validation pasm/spec",
+        "exit_code": 0,
+        "artifact": ".phoenix/increment-11-worker-scenario-design-digest.json",
+        "sha256": "20ada671831f74e42373bced8ee7d826b6b257e0051499db9e103bbbe919945d",
+        "reviewed": "Read before durability edits; Lyra768s rescue failure and tow prerequisite unchanged."
+      },
+      "comparison": {
+        "artifact": ".phoenix/increment-11-world-durability-comparison.json",
+        "sha256": "8857a145208c72454e824068dee8e81e564bd9d9a9ce13da3d064da4a05b9dbe",
+        "method": "Normalize CRLF on both source reads; require complete template Interior equality except explicit room HP, exact original total budgets and otherwise complete parsed-world equality."
+      }
+    },
+    "data_retries": [
+      {
+        "command": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe --exact all_shipped_world_entity_overrides_retain_valid_physical_ownership --test-threads=1 --nocapture",
+        "executable": {
+          "path": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe",
+          "sha256": "83b871827095627bedd9f94a593c83747400a922e53efa9bf55f1568e3521988",
+          "compiled_revision": "3ecd8909768e9d3f4ba952d11a41f89efc1eb891",
+          "runtime_base": "672bf376",
+          "note": "No Cargo or runtime rebuild. The original strict corpus body reads actual filesystem templates/worlds. Its first-error refusal implementation predates the later diagnostic-only error aggregation; a passing traversal still requires every instance to resolve. Verify artifact SHA before reuse because the Cargo target path can later be overwritten."
+        },
+        "authored_data_revision": "b2153a726f143a4bac28b017d64ac4f02fb9849a",
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0,
+        "filtered_out": 2,
+        "test_seconds": 0.56,
+        "log": ".phoenix/increment-11-physical-corpus-data-retry.log",
+        "sha256": "9746a883fc98106863c2445a65bf171adebf6122db3b9bfc76aee1c3f01bc391",
+        "finding": "Missing-store correction exposed the next real refusal: Lyra still authored equipped legacy hull_integrity400."
+      },
+      {
+        "command": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe --exact all_shipped_world_entity_overrides_retain_valid_physical_ownership --test-threads=1 --nocapture",
+        "executable": {
+          "path": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe",
+          "sha256": "83b871827095627bedd9f94a593c83747400a922e53efa9bf55f1568e3521988",
+          "compiled_revision": "3ecd8909768e9d3f4ba952d11a41f89efc1eb891",
+          "runtime_base": "672bf376",
+          "note": "No Cargo or runtime rebuild. The original strict corpus body reads actual filesystem templates/worlds. Its first-error refusal implementation predates the later diagnostic-only error aggregation; a passing traversal still requires every instance to resolve. Verify artifact SHA before reuse because the Cargo target path can later be overwritten."
+        },
+        "authored_data_revision": "uncommitted incomplete Interior override attempt; not retained as valid source",
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0,
+        "filtered_out": 2,
+        "test_seconds": 0.57,
+        "log": ".phoenix/increment-11-physical-corpus-durability-retry.log",
+        "sha256": "2bf283798c3d1ea5b70f771f1790b77fb944c7db5567bba39881a909af0872e3",
+        "finding": "Supplying only compartment rows violated the adopted atomic Interior rule; missing deck/layout data was correctly refused. Corrected by restating the complete template profile."
+      },
+      {
+        "command": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe --exact all_shipped_world_entity_overrides_retain_valid_physical_ownership --test-threads=1 --nocapture",
+        "executable": {
+          "path": "target/debug/deps/physical_damage_routes-423b7df00d4054c2.exe",
+          "sha256": "83b871827095627bedd9f94a593c83747400a922e53efa9bf55f1568e3521988",
+          "compiled_revision": "3ecd8909768e9d3f4ba952d11a41f89efc1eb891",
+          "runtime_base": "672bf376",
+          "note": "No Cargo or runtime rebuild. The original strict corpus body reads actual filesystem templates/worlds. Its first-error refusal implementation predates the later diagnostic-only error aggregation; a passing traversal still requires every instance to resolve. Verify artifact SHA before reuse because the Cargo target path can later be overwritten."
+        },
+        "authored_data_revision": "0a9ac6b3261fc08acee12ca587206a1175490b5f",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "filtered_out": 2,
+        "test_seconds": 3.24,
+        "log": ".phoenix/increment-11-physical-corpus-confirmed.log",
+        "sha256": "c5c228059b5cacfd45a802176d9a4f004bdc531e029fed36f0425eb00bc52352",
+        "evidence": {
+          "worlds": 70,
+          "entity_instances": 248,
+          "overrides": 115,
+          "layouts": 172,
+          "zero_team_layouts": 84
+        }
+      }
+    ]
   },
   "pending": [
-    "Strict shipped-world corpus retry after the finite-parts override correction.",
-    "Physical reconnect admission/Identify full-wire/default-vs-pinned acceptance migration and execution.",
     "Final integrated repository gates and independent renderer configuration coverage.",
     "Matching browser/native/Workshop artifacts and human acceptance.",
     "Balance, performance and station workload evidence; no complete playable exit claimed."
@@ -121,6 +236,61 @@
   "receipt_review": {
     "status": "PASS",
     "reviewer": "weapon_workshop",
-    "scope": "Read-only review of the two receipt/acceptance files; parsed JSON and recomputed all four referenced actual SHA256 values, matching exact results and pending boundaries. No gates/edits."
+    "scope": "PASS for the initial four referenced SHA256 values, separate PASS for all six corpus-follow-up references (digest, parsed profile comparison, three retries and exact executable), and separate PASS for all three reconnect log/provenance references. Independently parsed JSON and recomputed exact hashes; checked selected counts/timings, separate compiled/data pins, initial failures and correction history, internal child-check versus outer-summary limitation and pending boundaries. No gates/edits."
+  },
+  "reconnect_followup": {
+    "command": "cargo test -p project-phoenix --no-default-features --features headless --test reconnect_repair_boundary admitted_repair_and_identify_preserve_coherent_snapshots -- --exact --ignored --test-threads=1",
+    "runtime_base": "672bf376",
+    "initial_source_revision": "0a9ac6b3261fc08acee12ca587206a1175490b5f",
+    "fix_commit": "f09b20d5633632c5012c5e29f78f089f0c5a849f",
+    "tested_source": "0a9ac6b3 plus the reviewed test-only diff subsequently committed byte-identically as f09b20d5; receipt documents dirty. No runtime/library changes between attempts.",
+    "initial_run": {
+      "passed": 0,
+      "failed": 1,
+      "ignored": 0,
+      "filtered_out": 1,
+      "build_seconds": 126,
+      "test_seconds": 1.41,
+      "log": ".phoenix/increment-11-reconnect-physical.log",
+      "sha256": "17adb612cba7c8030c37d13d0b21eca37822be26a0d4b7edf2c2b3fda1e8096e",
+      "finding": "Station(Tactical) legitimately selected phaser-aft instead of phaser-fore within their shared damaged Weapons compartment. The fixture required an unnecessarily exact representative ID."
+    },
+    "correction": "Keep the real correlated Station(Tactical) command; require its selected destination to be an actual Tactical-owned System in the same canonical physical compartment as the damaged fore target. Retain fore visibility, admission, due timing, restoration, exact finite parts and continuation assertions; no thresholds or runtime changes.",
+    "independent_source_review": "PASS: weapon_workshop, no gates/edits.",
+    "retry": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 1,
+      "build_seconds": 6.54,
+      "test_seconds": 25.2,
+      "log": ".phoenix/increment-11-reconnect-physical-retry.log",
+      "sha256": "bd852fe4e49988239f2c034f9ae36d96972a09a01fe41566709fd75f3e252a83"
+    },
+    "evidence": [
+      "Explicitly executed the ignored parent acceptance case. Its source runs three fresh children (default-1, default-2 and pinned), requires each to pass, and compares complete traces, wire, state, cache and digests.",
+      "Retains positive command admission, hidden-to-on-site target visibility, actual structural RepairApplied work and exact once-only finite structural-parts debit.",
+      "The successful parent captured and checked child outputs internally. This outer log retains the parent summary, not separate raw successful child traces."
+    ],
+    "source_provenance": {
+      "artifact": ".phoenix/increment-11-reconnect-library-provenance.json",
+      "sha256": "287a0e4be5a5e4c548e16f01723ffd9ff10e2f6ce32d984c64c91a52964802c1",
+      "libraries_refreshed_without_byte_changes": [
+        "phoenix-model",
+        "phoenix-content",
+        "phoenix-sim-contracts",
+        "phoenix-sim-gameplay",
+        "phoenix-sim-session",
+        "phoenix-sim-world",
+        "phoenix-preparation",
+        "phoenix-simulation"
+      ],
+      "root_library_refreshed_without_byte_changes": true,
+      "compiler_log_paths_match_worktree": true,
+      "note": "Provenance was recorded at the initial attempt with receipt documents only dirty. Retry adds the owned representative test correction, with the same linked library bytes."
+    },
+    "non_gating_diagnostics": [
+      "The same two no-default root-library warnings remain; this command is not clippy or a full gate."
+    ]
   }
 }

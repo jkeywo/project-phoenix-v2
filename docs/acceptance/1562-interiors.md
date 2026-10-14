@@ -13,7 +13,7 @@ are retained. Five player hulls have multiple decks. The visual editor uses the
 existing accepted-source, inheritance, history and export path; System/shield
 creation and team-count edits preserve layout references atomically.
 
-Initial runtime integration is committed as `22b31f57`. Model defines the authored layout
+The initial runtime integration is committed at `22b31f57`. Model defines the authored layout
 and permitted positions. Gameplay compiles the graph and stores actual positions
 inside the existing RepairJobState. RepairPhases remains the work executor;
 physical arrival gates its transitions, spending and on-site knowledge. Routing
@@ -80,12 +80,47 @@ Broader validation is pinned to `22b31f57` in the isolated increment-10-validati
 worktree. Later implementation proceeds under the user's authorised pipeline;
 fixes and evidence return in dependency order. No verified exit is claimed.
 
+## Pinned native follow-up
+
+The [targeted validation receipt](../gameplay-redesign/implementation/interiors-native-targeted-validation.json)
+records exact commands, revisions, log hashes and corrections. These checks use
+historical increment 10 runtime `22b31f57` (protocol 7, snapshot 45, rules 0.17),
+with test-only follow-ups through `fd464568`. They do not certify later increment
+11 changes or a complete playable exit.
+
+- Authoritative Workshop composition passes 32 owner tests. Explicit zero-team
+  geometry loads without invented homes. Adding a System without physical
+  placement is refused; the atomic System/placement edit succeeds and preserves
+  dependency bytes. The first run found a missing-key error in the new test setup;
+  correcting that setup retains the actual refusal and success assertions.
+- The production resolver accepts all 248 entity instances across 70 shipped
+  world files, including 115 instance overrides, 172 physical layouts and 84
+  zero-team layouts. References and team homes remain consistent after includes
+  and overrides.
+- Ordinary AI dispatches repair work to a real remote compartment. Capture occurs
+  during an actual crossing, before any remote repair. JSON restore into a fresh,
+  different bootstrap retains identical full-world digests, jobs, routes and
+  access for 360 steps, followed by positive funded on-site repair progress.
+- Two peers with different LocalShip owners exchange actual Mesh frames for 720
+  steps. Both ships physically cross and repair on both peers while full-world
+  digests match. The first fleet run correctly failed its two-hull precondition:
+  the fixture had authored only one ship. Adding the second real fleet slot fixes
+  that fixture; the selected case passes without changing runtime or assertions.
+- The admitted Repair/reconnect proof passes its fresh default/default/pinned
+  child processes. It now targets a Tactical phaser in a remote compartment and
+  derives its travel allowance from authored connections. Existing command-delay,
+  correlation, visibility, complete-wire and shared-state assertions remain.
+  Its first invocation reported the intentionally ignored parent; the explicit
+  `--ignored` invocation executed and passed.
+
+These are selected native checks. No full repository gate, push, browser build,
+performance comparison or human acceptance is claimed by this follow-up.
+
 ## Remaining evidence
 
-Load every scenario override through the real loader. Exercise full ordinary AI
-and human dispatch journeys, crossing/blocked routes,
-handoff, real save/resume, deterministic peers and reconnect. Build matching
-browser/Workshop artifacts and run actual edit/undo/export/reload/Preview/Test
+Exercise broader human dispatch, blocked-route, handoff and workload journeys.
+Build matching browser/Workshop artifacts and run actual
+edit/undo/export/reload/Preview/Test
 journeys. Compare combat and non-combat activity, performance and supported
 2/4/6/8-seat hull journeys. Record phone/native-monitor and human workload
 acceptance separately. Complete the pinned PASM checks.

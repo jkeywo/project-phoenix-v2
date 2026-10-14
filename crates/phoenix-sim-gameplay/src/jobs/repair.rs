@@ -47,6 +47,9 @@ impl RepairTeams {
     pub fn timings(&self) -> RepairTimings {
         self.timings
     }
+    pub fn owner(&self) -> &SystemId {
+        &self.state.owner
+    }
     pub fn slots(&self) -> &[TeamSlot] {
         &self.readout
     }
@@ -343,7 +346,21 @@ impl RepairTeams {
                     system_id: Some(id),
                     ..
                 } if *enabled && !hull.is_at_max(id) => {
-                    grant(&self.state.owner, dt).clamp(0.0, 1.0)
+                    let work_dt = hull.get(id).map_or(0.0, |entry| {
+                        if self.timings.repair_rate_hp_per_sec > 0.0 {
+                            dt.min(
+                                (entry.max - entry.current).max(0.0)
+                                    / self.timings.repair_rate_hp_per_sec,
+                            )
+                        } else {
+                            0.0
+                        }
+                    });
+                    if dt > 0.0 && work_dt > 0.0 {
+                        (work_dt / dt) * grant(&self.state.owner, work_dt).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    }
                 }
                 _ => 0.0,
             })

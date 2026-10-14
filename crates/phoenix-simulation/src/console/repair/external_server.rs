@@ -585,7 +585,11 @@ pub fn apply_external_repair(
     // defensiveness the former `Option<ResMut<WorldContentRuntime>>` had.
     condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
     time: Option<Res<Time>>,
-    mut operators: Query<(&ExternalRepairDispatch, &mut ShipRepairTeams)>,
+    mut operators: Query<(
+        &ExternalRepairDispatch,
+        &mut ShipRepairTeams,
+        Option<&mut crate::ship::power::ShipPowerSystem>,
+    )>,
     targets: Query<(&EntityUuid, &InfrastructureCondition)>,
 ) {
     // Advance each job's private workflow while collecting effects. Take the
@@ -593,15 +597,31 @@ pub fn apply_external_repair(
     let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
     let mut adjustments: Vec<ConditionAdjustment> = operators
         .iter_mut()
-        .filter_map(|(dispatch, mut teams)| {
+        .filter_map(|(dispatch, mut teams, power)| {
             if !teams.0.step_external() {
                 return None;
             }
-            let target_uuid = teams.0.external_target()?;
+            let target_uuid = teams.0.external_target()?.to_string();
             // Only a target that carries a condition track can be worked; a
             // dispatch to something without one holds the team but banks nothing.
-            targets.iter().find(|(uuid, _)| uuid.0 == target_uuid)?;
-            let delta = dispatch.config.repair_rate * dt;
+            let (_, condition) = targets.iter().find(|(uuid, _)| uuid.0 == target_uuid)?;
+            if condition.0.condition() >= condition.0.condition_max() {
+                return None;
+            }
+            if dispatch.config.repair_rate <= 0.0 {
+                return None;
+            }
+            let work_dt = dt.min(
+                (condition.0.condition_max() - condition.0.condition())
+                    / dispatch.config.repair_rate,
+            );
+            let fraction = power.map_or(0.0, |mut power| {
+                power
+                    .0
+                    .work_continuous(teams.0.owner(), work_dt, 1.0)
+                    .map_or(0.0, |grant| grant.fraction)
+            });
+            let delta = dispatch.config.repair_rate * work_dt * fraction;
             if delta == 0.0 {
                 return None;
             }

@@ -250,7 +250,16 @@ pub fn integrate_ship_physics(
         };
 
         let mut power = power_q.get_mut(_entity).ok();
-        let impulse_requested = impulse.is_some_and(|i| i.0.is_active());
+        let impulse_requested = impulse.is_some_and(|i| i.0.is_active())
+            && !sources
+                .0
+                .is_offline(&crate::ship::system_registry::helm_thrust_system_id())
+            && !(sources
+                .0
+                .is_offline(&crate::ship::system_registry::helm_engine_port_system_id())
+                && sources
+                    .0
+                    .is_offline(&crate::ship::system_registry::helm_engine_starboard_system_id()));
         let impulse_fraction = if impulse_requested {
             crate::ship::energy_work::continuous_for_kind(
                 power.as_deref_mut().map(|p| &mut p.0),

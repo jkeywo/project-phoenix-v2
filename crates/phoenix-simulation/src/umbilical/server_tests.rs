@@ -201,7 +201,59 @@ fn save_state_carries_running_intent_and_fractional_progress() {
 
 #[test]
 fn an_idle_umbilical_saves_as_default() {
-    assert_eq!(umbilical().save_state(), UmbilicalSaveState::default());
+    let saved = umbilical().save_state();
+    assert!(!saved.running);
+    assert_eq!(saved.carry, 0.0);
+    assert_eq!(saved.selected_resource, "reserve_fuel");
+}
+
+#[test]
+fn selected_resource_is_authorised_and_saved_without_changing_transfer_intent() {
+    let mut app = App::new();
+    app.add_systems(Update, handle_umbilical_commands);
+    let mut flow = umbilical();
+    flow.config.allowed_resources = vec!["coolant".into()];
+    flow.running = true;
+    flow.carry = 0.75;
+    let entity = app
+        .world_mut()
+        .spawn((
+            flow,
+            crate::core::messages::AdmittedCommands(vec![correlated_umbilical_command(
+                "choose-coolant",
+                SystemControlPayload::SetTransferResource {
+                    resource: "coolant".into(),
+                },
+            )]),
+        ))
+        .id();
+    app.update();
+    let flow = app.world().get::<TransferUmbilical>(entity).unwrap();
+    assert_eq!(flow.selected_resource, "coolant");
+    assert!(flow.running);
+    assert_eq!(flow.carry, 0.0);
+    let saved = flow.save_state();
+    let mut restored = umbilical();
+    restored.config.allowed_resources = vec!["coolant".into()];
+    restored.restore(&saved);
+    assert_eq!(restored.selected_resource, "coolant");
+    app.world_mut()
+        .get_mut::<crate::core::messages::AdmittedCommands>(entity)
+        .unwrap()
+        .0 = vec![correlated_umbilical_command(
+        "refuse-other",
+        SystemControlPayload::SetTransferResource {
+            resource: "antimatter".into(),
+        },
+    )];
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<TransferUmbilical>(entity)
+            .unwrap()
+            .save_state(),
+        saved
+    );
 }
 
 #[test]

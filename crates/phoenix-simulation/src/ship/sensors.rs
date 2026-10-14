@@ -907,6 +907,21 @@ pub fn publish_sensor_radar_blackboard(
     >,
 ) {
     for (uuid, sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
+        // Funding is performed once by the Power tick, not by a publisher.
+        // Retain the previous observation while dark rather than refreshing
+        // target details from authoritative state without a working scanner.
+        let funded = uuid
+            .and_then(|own| power_q.iter().find(|(id, _)| id.0 == own.0))
+            .and_then(|(_, power)| {
+                power
+                    .0
+                    .last_work_fraction(&crate::ship::system_registry::sensor_radar_system_id())
+            })
+            .unwrap_or(0.0)
+            > 0.0;
+        if !funded {
+            continue;
+        }
         let selected_target = sensors_target.and_then(|st| st.0.clone()).filter(|target| {
             uuid.and_then(|uuid| {
                 content.as_ref().map(|content| {

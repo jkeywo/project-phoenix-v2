@@ -57,6 +57,8 @@ const COMPOSE_KEYED_ARRAYS = {
   'console.rating': 'name',
   system: 'id',
   'system.component': 'id',
+  'system.damage_component': 'id',
+  'shield_arc.damage_component': 'id',
   'system.channel': 'name',
   'repair.workflow.tree': 'id',
   'repair.workflow.tree.state': 'id',
@@ -120,7 +122,7 @@ function joinPath(prefix, key) {
 
 // ── Merge (MergePolicy::ComposeFragments) ────────────────────────────────────
 
-const atomicResourceEndpoint = path => path === 'interior' || path === 'energy' || path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider' || /^weapon(?:\[.*?\])?\.delivery$/.test(path);
+const atomicResourceEndpoint = path => path === 'damage' || path === 'interior' || path === 'energy' || path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider' || /^weapon(?:\[.*?\])?\.(?:delivery|impact)$/.test(path);
 
 function mergeAt(path, template, override) {
   if (atomicResourceEndpoint(path) && isPlainObject(override)) return deepClone(override);

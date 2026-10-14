@@ -1,0 +1,357 @@
+[
+  {
+    "file": "assets/entities/alliance_battleship.toml",
+    "baseline_hp": 800,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 150
+      },
+      {
+        "id": "support",
+        "max_hp": 150
+      },
+      {
+        "id": "engineering",
+        "max_hp": 200
+      },
+      {
+        "id": "weapons",
+        "max_hp": 300
+      }
+    ],
+    "systems": 37
+  },
+  {
+    "file": "assets/entities/alliance_courier.toml",
+    "baseline_hp": 200,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 37.5
+      },
+      {
+        "id": "support",
+        "max_hp": 37.5
+      },
+      {
+        "id": "engineering",
+        "max_hp": 50
+      },
+      {
+        "id": "weapons",
+        "max_hp": 75
+      }
+    ],
+    "systems": 24
+  },
+  {
+    "file": "assets/entities/alliance_cruiser.toml",
+    "baseline_hp": 590,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 110.625
+      },
+      {
+        "id": "support",
+        "max_hp": 110.625
+      },
+      {
+        "id": "engineering",
+        "max_hp": 147.5
+      },
+      {
+        "id": "weapons",
+        "max_hp": 221.25
+      }
+    ],
+    "systems": 38
+  },
+  {
+    "file": "assets/entities/alliance_destroyer.toml",
+    "baseline_hp": 390,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 73.125
+      },
+      {
+        "id": "support",
+        "max_hp": 73.125
+      },
+      {
+        "id": "engineering",
+        "max_hp": 97.5
+      },
+      {
+        "id": "weapons",
+        "max_hp": 146.25
+      }
+    ],
+    "systems": 37
+  },
+  {
+    "file": "assets/entities/alliance_tender.toml",
+    "baseline_hp": 184,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 92
+      },
+      {
+        "id": "engineering",
+        "max_hp": 92
+      }
+    ],
+    "systems": 8
+  },
+  {
+    "file": "assets/entities/dock_probe.toml",
+    "baseline_hp": 30,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 15
+      },
+      {
+        "id": "engineering",
+        "max_hp": 15
+      }
+    ],
+    "systems": 3
+  },
+  {
+    "file": "assets/entities/dynasty_player_cruiser.toml",
+    "baseline_hp": 590,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 110.625
+      },
+      {
+        "id": "support",
+        "max_hp": 110.625
+      },
+      {
+        "id": "engineering",
+        "max_hp": 147.5
+      },
+      {
+        "id": "weapons",
+        "max_hp": 221.25
+      }
+    ],
+    "systems": 37
+  },
+  {
+    "file": "assets/entities/fragments/composed_escort.toml",
+    "baseline_hp": 400,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 200
+      },
+      {
+        "id": "engineering",
+        "max_hp": 200
+      }
+    ],
+    "systems": 6
+  },
+  {
+    "file": "assets/entities/lifecycle_tender.toml",
+    "baseline_hp": 60,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 30
+      },
+      {
+        "id": "engineering",
+        "max_hp": 30
+      }
+    ],
+    "systems": 4
+  },
+  {
+    "file": "assets/entities/repair_tender.toml",
+    "baseline_hp": 100,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 50
+      },
+      {
+        "id": "engineering",
+        "max_hp": 50
+      }
+    ],
+    "systems": 3
+  },
+  {
+    "file": "assets/entities/ship_civilian_hauler.toml",
+    "baseline_hp": 60,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 30
+      },
+      {
+        "id": "engineering",
+        "max_hp": 30
+      }
+    ],
+    "systems": 7
+  },
+  {
+    "file": "assets/entities/ship_harrow_cruiser.toml",
+    "baseline_hp": 300,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 150
+      },
+      {
+        "id": "engineering",
+        "max_hp": 150
+      }
+    ],
+    "systems": 16
+  },
+  {
+    "file": "assets/entities/ship_harrow_destroyer.toml",
+    "baseline_hp": 200,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 100
+      },
+      {
+        "id": "engineering",
+        "max_hp": 100
+      }
+    ],
+    "systems": 12
+  },
+  {
+    "file": "assets/entities/ship_harrow_patrol.toml",
+    "baseline_hp": 300,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 150
+      },
+      {
+        "id": "engineering",
+        "max_hp": 150
+      }
+    ],
+    "systems": 13
+  },
+  {
+    "file": "assets/entities/ship_harrow_tug.toml",
+    "baseline_hp": 154,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 77
+      },
+      {
+        "id": "engineering",
+        "max_hp": 77
+      }
+    ],
+    "systems": 8
+  },
+  {
+    "file": "assets/entities/ship_harrow_warhawk.toml",
+    "baseline_hp": 400,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 200
+      },
+      {
+        "id": "engineering",
+        "max_hp": 200
+      }
+    ],
+    "systems": 17
+  },
+  {
+    "file": "assets/entities/ship_requiem_courier.toml",
+    "baseline_hp": 40,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 20
+      },
+      {
+        "id": "engineering",
+        "max_hp": 20
+      }
+    ],
+    "systems": 9
+  },
+  {
+    "file": "assets/entities/station_axiom.toml",
+    "baseline_hp": 1600,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 800
+      },
+      {
+        "id": "engineering",
+        "max_hp": 800
+      }
+    ],
+    "systems": 4
+  },
+  {
+    "file": "assets/entities/test/rng_coverage_lancer.toml",
+    "baseline_hp": 800,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 400
+      },
+      {
+        "id": "engineering",
+        "max_hp": 400
+      }
+    ],
+    "systems": 15
+  },
+  {
+    "file": "assets/entities/tractor_tug.toml",
+    "baseline_hp": 30,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 15
+      },
+      {
+        "id": "engineering",
+        "max_hp": 15
+      }
+    ],
+    "systems": 3
+  },
+  {
+    "file": "assets/entities/umbilical_probe.toml",
+    "baseline_hp": 60,
+    "compartments": [
+      {
+        "id": "bridge",
+        "max_hp": 30
+      },
+      {
+        "id": "engineering",
+        "max_hp": 30
+      }
+    ],
+    "systems": 4
+  }
+]

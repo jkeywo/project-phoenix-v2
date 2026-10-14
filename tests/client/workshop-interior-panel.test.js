@@ -18,14 +18,13 @@ function fixture(source = interiorSource()) {
   return { source, draft, runtime, changed, panel };
 }
 describe('Workshop physical layout form', () => {
-  it('edits a legacy repair bucket without inventing an installed System', async () => {
-    const source = interiorSource() + '\n[[hull.system_hull]]\nsystem_id="core"\nmax_hp=50\n';
-    const { draft, panel } = fixture(source); await settle();
-    expect([...control('repair-target').options].map(option => option.value)).toEqual(['core']);
-    expect([...control('system').options].map(option => option.value)).not.toContain('core');
-    change('repair-placement', 'engineering'); control('save').click(); await settle();
-    expect(parse(draft.read(path)).interior.repair_placements).toEqual({ core: 'engineering' });
-    expect(parse(draft.read(path)).system).toEqual(parse(source).system); panel.dispose();
+  it('edits explicit structural recovery data without legacy repair buckets', async () => {
+    const { draft, panel } = fixture(); await settle();
+    expect(control('repair-target')).toBeNull();
+    change('max_hp', '75', 'input'); change('recovery_fraction', '0.3', 'input');
+    control('save').click(); await settle();
+    expect(parse(draft.read(path)).interior.compartment[0]).toMatchObject({ max_hp: 75, recovery_fraction: 0.3, structural_remedy: 'structural' });
+    panel.dispose();
   });
   it('labels every property and stages precise geometry, material, connections and placements as one edit', async () => {
     const { source, draft, runtime, changed, panel } = fixture(); await settle();

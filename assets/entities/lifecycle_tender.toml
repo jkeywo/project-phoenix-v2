@@ -1,4 +1,4 @@
-includes = ["fragments/energy/lifecycle_tender.toml"]
+includes = ["fragments/energy/lifecycle_tender.toml","fragments/damage/common.toml"]
 
 # Lifecycle tender — the probe-world operator for the continuous-task lifecycle
 # (issue #1341, PRD #1337).
@@ -62,19 +62,6 @@ max_level = 4
 # ── Damage entries ───────────────────────────────────────────────────────────
 # So either system can be knocked out — the interruption the probe drives by
 # damaging one of them.
-[[hull.system_hull]]
-system_id = "tractor"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "sensors"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
 
 # ── One station owns both systems ────────────────────────────────────────────
 # A lean fixture, not a crewing statement: what matters to the lifecycle is that
@@ -96,7 +83,44 @@ id = "tractor"
 kind = "tractor"
 console = "engineering"
 power_group = "energy-tractor"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "sensors"
 kind = "sensors"
@@ -104,6 +128,44 @@ console = "engineering"
 power_group = "energy-sensors"
 
 # ── The coupling terms ───────────────────────────────────────────────────────
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [tractor]
 range = 600.0
 coupling_offset = [0.0, 0.0, -120.0]
@@ -429,16 +491,61 @@ source = "number_compare"
 name = "heat-energy-sensors"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-battery"
 kind = "power_battery"
 console = "ai-energy-power"
 ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[console]]
 id = "ai-energy-power"
 
@@ -471,6 +578,9 @@ z = -10
 width = 10
 depth = 10
 material = "light"
+max_hp = 30
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -481,6 +591,9 @@ z = 0
 width = 10
 depth = 10
 material = "bulkhead"
+max_hp = 30
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-engineering"
@@ -494,4 +607,20 @@ sensors = "bridge"
 power-reactor = "engineering"
 power-battery = "engineering"
 
-[interior.repair_placements]
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 6
+ceiling = 6
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 12
+ceiling = 12
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

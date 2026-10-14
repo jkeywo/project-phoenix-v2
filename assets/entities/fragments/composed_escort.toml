@@ -10,7 +10,7 @@
 # This is a mechanism fixture. Shipped hulls are NOT composed yet; migrating
 # them is issues #878 / #875.
 
-includes = ["npc_escort_core.toml", "energy/composed_escort.toml"]
+includes = ["npc_escort_core.toml","energy/composed_escort.toml","damage/common.toml"]
 
 class = "escort"
 hull_id = "FIXTURE-869"
@@ -27,18 +27,126 @@ base_priority = 90.0
 [[system]]
 id = "helm-thrust"
 power_group = "energy-helm-thrust"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-steering"
 power_group = "energy-helm-steering"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-impulse"
 power_group = "energy-helm-impulse"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-reactor"
 
@@ -284,7 +392,44 @@ source = "number_compare"
 name = "heat-energy-helm-impulse"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [interior]
 team_homes = []
 
@@ -302,6 +447,9 @@ z = -10
 width = 10
 depth = 10
 material = "light"
+max_hp = 200
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -312,6 +460,9 @@ z = 0
 width = 10
 depth = 10
 material = "bulkhead"
+max_hp = 200
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-engineering"
@@ -326,6 +477,59 @@ helm-steering = "engineering"
 helm-impulse = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
+[[console]]
+id = "ai-damage-alert"
 
-[interior.repair_placements]
-captain = "bridge"
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+console = "ai-damage-alert"
+ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+[[system]]
+console = "ai-power-battery"
+id = "power-battery"
+kind = "power_battery"
+ai_only = true
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 40
+ceiling = 40
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 18
+ceiling = 18
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

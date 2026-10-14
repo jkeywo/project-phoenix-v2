@@ -5125,3 +5125,60 @@ interior.boundary.sealed,Interior access boundary,Sealed,Versiegelt,Sealed,machi
 interior.boundary.opening,Interior access boundary,Opening,Wird geöffnet,Opening,machine
 interior.boundary.seal,Interior access boundary,Seal passage,Durchgang versiegeln,Seal passage,machine
 interior.boundary.release,Interior access boundary,Release seal,Versiegelung aufheben,Release seal,machine
+workshop.interior.max_hp,Component damage and restoration authoring,Structural HP,Strukturelle Trefferpunkte,Structural HP,machine
+workshop.interior.recovery_fraction,Component damage and restoration authoring,Structural recovery fraction,Schwelle zur strukturellen Wiederherstellung,Structural recovery fraction,machine
+workshop.interior.structural_remedy,Component damage and restoration authoring,Structural repair recipe,Rezept für Strukturreparatur,Structural repair recipe,machine
+workshop.damage.title,Component damage and restoration authoring,Damage and restoration,Schäden und Wiederherstellung,Damage and restoration,machine
+workshop.damage.hint,Component damage and restoration authoring,"Configure physical materials, bounded repair recipes and real machinery component bindings. Parts are finite stocks edited in Resources. Coefficients are provisional tuning.","Materialien, begrenzte Reparaturrezepte und Bindungen an echte Systemkomponenten einrichten. Teile sind endliche Vorräte unter Ressourcen. Die Werte sind vorläufig.","Configure physical materials, bounded repair recipes and real machinery component bindings. Parts are finite stocks edited in Resources. Coefficients are provisional tuning.",machine
+workshop.damage.template,Component damage and restoration authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.damage.materialise,Component damage and restoration authoring,Materialise inherited settings,Geerbte Einstellungen lokal übernehmen,Materialise inherited settings,machine
+workshop.damage.create,Component damage and restoration authoring,Create damage profile and finite parts stores,Schadensprofil und endliche Teilevorräte erstellen,Create damage profile and finite parts stores,machine
+workshop.damage.refused,Component damage and restoration authoring,Damage edit refused: {reason},Schadensänderung abgelehnt: {reason},Damage edit refused: {reason},machine
+workshop.damage.damage_type,Component damage and restoration authoring,Damage type,Schadensart,Damage type,machine
+workshop.damage.penetration,Component damage and restoration authoring,Penetration strength,Durchschlagskraft,Penetration strength,machine
+workshop.damage.type.physical,Component damage and restoration authoring,Physical,Physisch,Physical,machine
+workshop.damage.type.laser,Component damage and restoration authoring,Laser,Laser,Laser,machine
+workshop.damage.materials,Component damage and restoration authoring,Compartment materials,Abteilungsmaterialien,Compartment materials,machine
+workshop.damage.material,Component damage and restoration authoring,Material,Material,Material,machine
+workshop.damage.id,Component damage and restoration authoring,Stable ID,Stabile Kennung,Stable ID,machine
+workshop.damage.resistance.physical,Component damage and restoration authoring,Physical resistance per metre,Physischer Widerstand pro Meter,Physical resistance per metre,machine
+workshop.damage.resistance.laser,Component damage and restoration authoring,Laser resistance per metre,Laserwiderstand pro Meter,Laser resistance per metre,machine
+workshop.damage.residual,Component damage and restoration authoring,Resistance fraction at zero structure,Widerstandsanteil bei zerstörter Struktur,Resistance fraction at zero structure,machine
+workshop.damage.new,Component damage and restoration authoring,New,Neu,New,machine
+workshop.damage.remove,Component damage and restoration authoring,Remove,Entfernen,Remove,machine
+workshop.damage.save_material,Component damage and restoration authoring,Apply material,Material anwenden,Apply material,machine
+workshop.damage.remedies,Component damage and restoration authoring,Repair recipes,Reparaturrezepte,Repair recipes,machine
+workshop.damage.remedy,Component damage and restoration authoring,Recipe,Rezept,Recipe,machine
+workshop.damage.outcome,Component damage and restoration authoring,Result,Ergebnis,Result,machine
+workshop.damage.outcome.structural,Component damage and restoration authoring,Restore structure,Struktur wiederherstellen,Restore structure,machine
+workshop.damage.outcome.full,Component damage and restoration authoring,Full component restoration,Komponente vollständig wiederherstellen,Full component restoration,machine
+workshop.damage.outcome.patch,Component damage and restoration authoring,Indefinite reduced-capability patch,Dauerhafte Notreparatur mit verringerter Leistung,Indefinite reduced-capability patch,machine
+workshop.damage.work_secs,Component damage and restoration authoring,Seconds per work stage,Sekunden pro Arbeitsschritt,Seconds per work stage,machine
+workshop.damage.structural_hp,Component damage and restoration authoring,Structural HP per stage,Strukturpunkte pro Arbeitsschritt,Structural HP per stage,machine
+workshop.damage.patch_factor,Component damage and restoration authoring,Patched capability fraction,Leistungsanteil nach Notreparatur,Patched capability fraction,machine
+workshop.damage.resource,Component damage and restoration authoring,Part resource,Teileressource,Part resource,machine
+workshop.damage.service,Component damage and restoration authoring,Local stock service,Lokaler Vorratsdienst,Local stock service,machine
+workshop.damage.amount,Component damage and restoration authoring,Units per stage,Einheiten pro Arbeitsschritt,Units per stage,machine
+workshop.damage.add_part,Component damage and restoration authoring,Add part requirement,Teilebedarf hinzufügen,Add part requirement,machine
+workshop.damage.save_remedy,Component damage and restoration authoring,Apply recipe,Rezept anwenden,Apply recipe,machine
+workshop.damage.components,Component damage and restoration authoring,Damageable machinery,Beschädigbare Ausrüstung,Damageable machinery,machine
+workshop.damage.system,Component damage and restoration authoring,System,System,System,machine
+workshop.damage.component,Component damage and restoration authoring,Component,Komponente,Component,machine
+workshop.damage.binding,Component damage and restoration authoring,Affected mechanism,Betroffener Mechanismus,Affected mechanism,machine
+workshop.damage.binding.operation,Component damage and restoration authoring,System operation,Systembetrieb,System operation,machine
+workshop.damage.binding.intake,Component damage and restoration authoring,Incoming energy flow,Eingehender Energiefluss,Incoming energy flow,machine
+workshop.damage.binding.cooling,Component damage and restoration authoring,Cooling,Kühlung,Cooling,machine
+workshop.damage.susceptibility.physical,Component damage and restoration authoring,Physical fault susceptibility,Anfälligkeit für physische Schäden,Physical fault susceptibility,machine
+workshop.damage.susceptibility.laser,Component damage and restoration authoring,Laser fault susceptibility,Anfälligkeit für Laserschäden,Laser fault susceptibility,machine
+workshop.damage.threshold,Component damage and restoration authoring,Deposited fault-dose threshold,Schwelle für eingetragene Schadensdosis,Deposited fault-dose threshold,machine
+workshop.damage.degraded,Component damage and restoration authoring,Damaged capability fraction,Leistungsanteil bei Beschädigung,Damaged capability fraction,machine
+workshop.damage.full_remedy,Component damage and restoration authoring,Full restoration recipe,Rezept zur vollständigen Wiederherstellung,Full restoration recipe,machine
+workshop.damage.patch_remedy,Component damage and restoration authoring,Fallback patch recipe,Rezept für Ersatz-Notreparatur,Fallback patch recipe,machine
+workshop.damage.field_replaceable,Component damage and restoration authoring,Replaceable in the field,Im Einsatz austauschbar,Replaceable in the field,machine
+workshop.damage.save_component,Component damage and restoration authoring,Apply component,Komponente anwenden,Apply component,machine
+damage.resource.structural_parts,Component damage and restoration authoring,Structural parts,Strukturteile,Structural parts,machine
+damage.resource.machinery_parts,Component damage and restoration authoring,Machinery parts,Maschinenteile,Machinery parts,machine
+workshop.damage.manual_work_fraction,Component repair tooling,Manual work fraction,Manueller Arbeitsanteil,Manual work fraction,machine
+workshop.weapon.console,Weapon ownership,Controlling Console,Steuerkonsole,Controlling Console,machine
+workshop.weapon.group,Weapon ownership,Power allocation group,Stromversorgungsgruppe,Power allocation group,machine
+workshop.weapon.compartment,Weapon ownership,Physical compartment,Physischer Raum,Physical compartment,machine

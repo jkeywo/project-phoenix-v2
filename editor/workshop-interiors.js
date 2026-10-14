@@ -6,27 +6,19 @@ import { acceptWorkshopChanges } from './workshop-acceptance.js';
 const clone = value => structuredClone(value);
 export const initialAccessGateTree = (channel = 'sealed') => ({ root: 'access-gate', tree: [{ id: 'access-gate', initial: 'follow-order', state: [{ id: 'follow-order',
   task: [{ id: 'respect-seal', action: { kind: 'write', channel, value: { source: 'fact', name: 'seal_requested' } } }] }] }] });
-/** Increment 10 compatibility only; compartment damage retires these rows in 11. */
-export function legacyRepairTargets(value, systems = authoredAndGeneratedSystems(value)) {
-  const installed = new Set(systems.map(system => system.id));
-  const rows = value.hull?.system_hull?.length ? value.hull.system_hull
-    : value.hull?.hull_integrity > 0 ? [{ system_id: 'captain' }] : [];
-  return rows.filter(row => !installed.has(row.system_id)).map(row => ({ id: row.system_id, label: row.display_name || row.system_id }));
-}
 export function inspectInterior(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);
   return { ...inspection, interior: clone(inspection.resolved.value.interior || null),
     systems: clone(authoredAndGeneratedSystems(inspection.resolved.value)),
-    repairTargets: clone(legacyRepairTargets(inspection.resolved.value)),
     teamCount: inspection.resolved.value.repair?.repair_team_count || 0 };
 }
 /** An explicit starter, never a production parser fallback. */
-export function initialInterior(systems, teamCount = 0, repairTargets = []) {
+export function initialInterior(systems, teamCount = 0) {
   return { team_homes: Array.from({ length: teamCount }, () => 'bridge'),
     deck: [{ id: 'main', label: 'interior.deck.main.label', damage_weight: 1 }],
-    compartment: [{ id: 'bridge', deck: 'main', label: 'interior.room.bridge.label', x: -5, z: -5, width: 10, depth: 10, material: 'bulkhead' }],
-    connection: [], placements: Object.fromEntries(systems.map(system => [system.id, 'bridge'])),
-    repair_placements: Object.fromEntries(repairTargets.map(target => [target.id, 'bridge'])) };
+    compartment: [{ id: 'bridge', deck: 'main', label: 'interior.room.bridge.label', x: -5, z: -5, width: 10, depth: 10, material: 'bulkhead',
+      max_hp: 100, recovery_fraction: 0.2, structural_remedy: 'structural' }],
+    connection: [], placements: Object.fromEntries(systems.map(system => [system.id, 'bridge'])) };
 }
 export function replaceInteriorSource(source, interior) {
   const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)]
@@ -49,7 +41,7 @@ export function replaceInteriorSource(source, interior) {
   return after.slice(0, spans[0].start) + text + after.slice(spans[0].start);
 }
 /** Cheap form feedback. Accepted content still passes the real runtime validator. */
-export function validateInterior(interior, systems, teamCount, repairTargets = []) {
+export function validateInterior(interior, systems, teamCount) {
   const id = value => typeof value === 'string' && /^[a-z0-9-]+$/.test(value);
   if (!interior || !Array.isArray(interior.deck) || !interior.deck.length || !Array.isArray(interior.compartment)
     || !interior.compartment.length || !Array.isArray(interior.connection) || !interior.placements
@@ -64,8 +56,14 @@ export function validateInterior(interior, systems, teamCount, repairTargets = [
   for (const deck of interior.deck) if (typeof deck.label !== 'string' || !deck.label.trim() || !Number.isFinite(deck.damage_weight) || deck.damage_weight <= 0)
     throw new Error('Deck damage weights must be finite and positive.');
   for (const room of interior.compartment) if (!decks.has(room.deck) || !id(room.material) || typeof room.label !== 'string' || !room.label.trim()
-    || ['x', 'z', 'width', 'depth'].some(key => !Number.isFinite(room[key])) || room.width <= 0 || room.depth <= 0)
-    throw new Error('Compartments require a known deck, material id and finite rectangle with positive dimensions.');
+    || ['x', 'z', 'width', 'depth', 'max_hp', 'recovery_fraction'].some(key => !Number.isFinite(room[key])) || room.width <= 0 || room.depth <= 0
+    || room.max_hp <= 0 || room.recovery_fraction <= 0 || room.recovery_fraction >= 1 || !id(room.structural_remedy))
+    throw new Error('Compartments require a known deck/material, positive finite dimensions/HP, recovery fraction in (0,1) and a structural remedy.');
+  for (let i = 0; i < interior.compartment.length; i++) for (const b of interior.compartment.slice(i + 1)) {
+    const a = interior.compartment[i];
+    if (a.deck === b.deck && Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x)
+      && Math.min(a.z + a.depth, b.z + b.depth) > Math.max(a.z, b.z)) throw new Error('Physical compartments on one deck cannot overlap.');
+  }
   const known = new Set(systems.map(system => system.id));
   const boundaries = new Set(systems.filter(system => system.kind === 'access-gate').map(system => system.id));
   for (const connection of interior.connection) if (!rooms.has(connection.from) || !rooms.has(connection.to)
@@ -75,10 +73,7 @@ export function validateInterior(interior, systems, teamCount, repairTargets = [
   if (Object.keys(interior.placements).length !== known.size || [...known].some(system => !rooms.has(interior.placements[system]))
     || Object.keys(interior.placements).some(system => !known.has(system)))
     throw new Error('Place every resolved and generated System in exactly one known compartment.');
-  const legacy = new Set(repairTargets.map(target => target.id)), repairPlacements = interior.repair_placements || {};
-  if (Object.keys(repairPlacements).length !== legacy.size || [...legacy].some(id => !rooms.has(repairPlacements[id]))
-    || Object.keys(repairPlacements).some(id => !legacy.has(id)))
-    throw new Error('Place each legacy repair target outside the installed System set in one known compartment.');
+  if (interior.repair_placements !== undefined) throw new Error('Convert retired repair placements to compartment structure (increment 11).');
   if (interior.team_homes.length !== teamCount || interior.team_homes.some(home => !rooms.has(home)))
     throw new Error('Choose one known home compartment for every repair team.');
   const reached = new Set([interior.compartment[0].id]);
@@ -97,7 +92,7 @@ export function prepareInteriorOperation(draft, dependencies, operation) {
   const interior = clone(operation.interior);
   const teamCount = operation.teamCount ?? inspection.teamCount;
   if (!Number.isSafeInteger(teamCount) || teamCount < 0) throw new Error('Choose a non-negative whole repair team count.');
-  validateInterior(interior, inspection.systems, teamCount, inspection.repairTargets);
+  validateInterior(interior, inspection.systems, teamCount);
   let after = replaceInteriorSource(before, interior);
   if (teamCount !== inspection.teamCount) {
     if (!inspection.resolved.value.repair) throw new Error('Configure the Repair capability before changing its team count.');
@@ -122,25 +117,18 @@ export function updateInteriorBindings(source, inspection, { add = {}, remove = 
   const fields = inspection.fields || inspection.composition?.fields || [];
   if (fields.some(field => (field.path === 'interior' || field.path.startsWith('interior.')) && field.owner !== inspection.path) && !materialise)
     throw new Error('Explicitly materialise inherited interior settings before changing fitted equipment.');
-  const oldPlacements = clone(interior.placements), nextSystems = authoredAndGeneratedSystems(value).map(system => ({ ...system }));
   for (const id of remove) {
     if (interior.connection.some(edge => edge.boundary === id)) throw new Error('Reassign boundary connections in Interiors before removing this System.');
     delete interior.placements[id];
-    const index = nextSystems.findIndex(system => system.id === id); if (index >= 0) nextSystems.splice(index, 1);
   }
   for (const [oldId, newId] of Object.entries(rename)) {
     if (interior.placements[oldId] !== undefined) { interior.placements[newId] = interior.placements[oldId]; delete interior.placements[oldId]; }
     for (const edge of interior.connection) if (edge.boundary === oldId) edge.boundary = newId;
-    const system = nextSystems.find(system => system.id === oldId); if (system) system.id = newId;
   }
   for (const [id, compartment] of Object.entries(add)) {
     if (!interior.compartment.some(room => room.id === compartment)) throw new Error('Choose an existing physical compartment in Interiors before adding equipment.');
     interior.placements[id] = compartment;
-    if (!nextSystems.some(system => system.id === id)) nextSystems.push({ id });
   }
-  const previousRepairs = interior.repair_placements || {};
-  interior.repair_placements = Object.fromEntries(legacyRepairTargets(value, nextSystems).map(target => [target.id,
-    previousRepairs[target.id] ?? oldPlacements[target.id]]));
   return replaceInteriorSource(source, interior);
 }
 export async function applyInteriorOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {

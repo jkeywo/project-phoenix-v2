@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { parse } from 'smol-toml';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
-import { inspectInterior, initialInterior, initialAccessGateTree, legacyRepairTargets, validateInterior, prepareInteriorOperation, applyInteriorOperation } from '../workshop-interiors.js';
+import { inspectInterior, initialInterior, initialAccessGateTree, validateInterior, prepareInteriorOperation, applyInteriorOperation } from '../workshop-interiors.js';
 import { resolveTemplate } from '../entity-includes.js';
 import { interiorProfile, interiorSource } from './interior-fixture.js';
 import { stringify } from 'smol-toml';
@@ -14,16 +14,9 @@ const draft = (source = interiorSource()) => new WorkshopDocument(createStoreZip
   { path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text: source }]));
 const prepare = (current, interior, extra = {}, deps = dependencies) => prepareInteriorOperation(current, deps, { path, interior, ...extra }).changes[0].after;
 describe('explicit physical interior authoring', () => {
-  it('locates legacy hull buckets separately, including the existing captain hull fallback', () => {
-    const value = parse(interiorSource()); value.hull = { system_hull: [{ system_id: 'core' }, { system_id: 'helm' }] };
-    const current = draft(stringify(value)), read = inspectInterior(current, dependencies, path);
-    expect(read.repairTargets.map(row => row.id)).toEqual(['core']);
-    expect(() => prepare(current, interiorProfile())).toThrow(/legacy repair target/);
+  it('rejects the retired legacy placement adapter', () => {
     const profile = interiorProfile(); profile.repair_placements = { core: 'engineering' };
-    expect(parse(prepare(current, profile)).interior.repair_placements).toEqual({ core: 'engineering' });
-    profile.repair_placements.helm = 'bridge'; expect(() => prepare(current, profile)).toThrow(/legacy repair target/);
-    value.hull = { hull_integrity: 100 }; expect(legacyRepairTargets(value).map(row => row.id)).toEqual(['captain']);
-    expect(initialInterior(read.systems, 1, legacyRepairTargets(value)).repair_placements).toEqual({ captain: 'bridge' });
+    expect(() => prepare(draft(), profile)).toThrow(/retired repair placements/);
   });
   it('includes generated equipment and leaves control/knowledge declarations unchanged', () => {
     const current = draft(), read = inspectInterior(current, dependencies, path);
@@ -70,9 +63,9 @@ describe('explicit physical interior authoring', () => {
     const current = draft(), before = current.read(path), profile = interiorProfile(); change(profile);
     expect(() => prepare(current, profile)).toThrow(); expect(current.read(path)).toBe(before);
   });
-  it('permits overlapping footprints and explicit interdeck connections independently of geometry', () => {
+  it('rejects overlapping footprints on the same physical deck', () => {
     const current = draft(), profile = interiorProfile(); profile.compartment[1].deck = 'upper'; profile.compartment[1].x = -10;
-    expect(() => validateInterior(profile, inspectInterior(current, dependencies, path).systems, 1)).not.toThrow();
+    expect(() => validateInterior(profile, inspectInterior(current, dependencies, path).systems, 1)).toThrow(/overlap/);
   });
   it('accepts through runtime validation with undo/redo/export, and preserves source on refusal', async () => {
     const current = draft(), before = current.read(path), runtime = { dependencies: async () => dependencies, validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
@@ -112,9 +105,6 @@ describe('explicit physical interior authoring', () => {
     expect(parse(renamed).interior.placements).toEqual({ helm: 'bridge', monitor: 'engineering' });
     const removed = prepareShipOperation(draft(renamed), dependencies, schema, op({ type: 'system-remove', id: 'monitor' })).changes[0].after;
     expect(parse(removed).interior.placements).toEqual({ helm: 'bridge' });
-    const legacy = parse(added); legacy.hull = { system_hull: [{ system_id: 'display', max_hp: 10 }] };
-    const removedLegacy = prepareShipOperation(draft(stringify(legacy)), dependencies, schema, op({ type: 'system-remove', id: 'display' })).changes[0].after;
-    expect(parse(removedLegacy).interior.repair_placements).toEqual({ display: 'engineering' });
     value.interior.connection[0].boundary = 'helm';
     expect(() => prepareShipOperation(draft(stringify(value)), dependencies, schema, op({ type: 'system-remove', id: 'helm' }))).toThrow(/boundary connections/);
   });

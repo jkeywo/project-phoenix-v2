@@ -29,7 +29,7 @@
 # is the SOURCE; the stranded ship carries the empty receiving ledger. It is NOT a
 # shipped combat hull and flies in no scenario.
 
-includes = ["fragments/ai/dock_state_tree.toml", "fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml", "fragments/energy/alliance_tender.toml"]
+includes = ["fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/energy/alliance_tender.toml","fragments/damage/common.toml"]
 
 class = "courier"  # picker badge / scan subtitle — a light support hull
 tags = ["ship", "npc"]
@@ -100,14 +100,88 @@ id = "helm-thrust"
 power_group = "energy-helm-thrust"
 kind = "helm_thrust"
 ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-helm-steering"
 id = "helm-steering"
 power_group = "energy-helm-steering"
 kind = "helm_steering"
 ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-helm-impulse"
 id = "helm-impulse"
@@ -116,6 +190,44 @@ kind = "helm_impulse"
 ai_only = true
 
 # Fine power (reactor + battery).
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-power-reactor"
 id = "power-reactor"
@@ -564,10 +676,44 @@ source = "number_compare"
 name = "heat-energy-umbilical"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-power-battery"
 id = "power-battery"
@@ -582,6 +728,18 @@ ai_only = true
 # wholesale, so the policy's channels must be re-declared) — and `ops` is added
 # beside them for the resupply systems. It rests at its seeded level 2, at or
 # above each `min_power_level`.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-dock"
 id = "dock"
@@ -616,7 +774,44 @@ approach_speed = 60.0
 mate_tolerance = 4.0
 undock_clear_distance = 120.0
 min_power_level = 2
+[[system.damage_component]]
+id = "mating"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "power"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-umbilical"
 id = "umbilical"
@@ -627,6 +822,44 @@ power_group = "energy-umbilical"
 # ── Power groups ──────────────────────────────────────────────────────────────
 # `helm` + `weapons` re-declare the canonical groups `fleet_baseline`'s power
 # policy manages; `ops` is the resupply systems' own bus. All seeded at level 2.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [power_groups.helm]
 label = "entity.alliance_tender.power_groups.helm.label"
 default_level = 2
@@ -665,67 +898,12 @@ ceiling = 100
 # Deliver = operator → docked partner.
 [umbilical]
 capacity = "reserve_fuel"
-allowed_resources = ["coolant"]
+allowed_resources = ["coolant","structural_parts","machinery_parts"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2
 
 # ── Per-system hull ───────────────────────────────────────────────────────────
-[[hull.system_hull]]
-system_id = "core"
-max_hp = 24
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.10
-
-[[hull.system_hull]]
-system_id = "dock"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "umbilical"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "helm-thrust"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-steering"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-impulse"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-reactor"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-battery"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
 
 # Explicit control surfaces and permitted observation publications.
 [[console]]
@@ -897,6 +1075,9 @@ z = -10
 width = 10
 depth = 10
 material = "light"
+max_hp = 92
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -907,6 +1088,9 @@ z = 0
 width = 10
 depth = 10
 material = "bulkhead"
+max_hp = 92
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-engineering"
@@ -923,6 +1107,41 @@ helm-impulse = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
 umbilical = "engineering"
+[[console]]
+id = "ai-damage-alert"
 
-[interior.repair_placements]
-core = "engineering"
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+console = "ai-damage-alert"
+ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 19
+ceiling = 19
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 24
+ceiling = 24
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

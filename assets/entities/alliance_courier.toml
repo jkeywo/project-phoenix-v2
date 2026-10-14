@@ -1,4 +1,4 @@
-includes = ["fragments/energy/alliance_courier.toml"]
+includes = ["fragments/energy/alliance_courier.toml","fragments/damage/common.toml"]
 
 # Alliance Courier — a compact two-player hull.
 #
@@ -106,61 +106,6 @@ target_speed  = 0.0
 # a downed radar (weapons-console arc gating, the helm radar overlay, the
 # captain's repair targeting) is untouched and still fires for any hull that
 # authors those entries; these four simply never trigger it.
-[[hull.system_hull]]
-system_id = "core"
-display_name = "system_hull.core.display_name"
-max_hp = 32
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.10
-
-[[hull.system_hull]]
-system_id = "helm-engine-port"
-display_name = "entity.alliance_courier.hull.system_hull.helm_engine_port.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-engine-starboard"
-display_name = "entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-lateral-thrust"
-display_name = "entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "blaster-fore"
-display_name = "weapon.blaster_fore.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-reactor"
-display_name = "system_hull.power_reactor.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-battery"
-display_name = "system_hull.power_battery.display_name"
-max_hp = 28
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
 
 # ── Repair ───────────────────────────────────────────────────────────────────
 # One team for the whole ship. The Captain dispatches it to either station;
@@ -237,6 +182,10 @@ shield_pierce = 0.1
 
 # ── Sensors ──────────────────────────────────────────────────────────────────
 # Gives Tactical's sensor panel its range and set_sensors_target home.
+
+[weapon.impact]
+damage_type = "physical"
+penetration = 25
 
 [sensors_console]
 
@@ -345,7 +294,6 @@ center_deg = 0
 width_deg = 180
 # [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
 energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-aft"] }
-hull_max_hp = 4
 
 [shield_arc.ai]
 root = "shields"
@@ -390,8 +338,44 @@ action = { kind = "write", channel = "recover-shield-arc-aft", value = { source 
 id = "stop-0-2"
 when = [{ value = { source = "fact", name = "target-ready-shield-arc-aft" }, equals = false }]
 action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[shield_arc]]
 id = "aft"
 label = "shield_arc.aft.label"
@@ -399,7 +383,6 @@ center_deg = 180
 width_deg = 180
 # [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
 energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore"] }
-hull_max_hp = 4
 
 [shield_arc.ai]
 root = "shields"
@@ -448,6 +431,44 @@ action = { kind = "write", channel = "recover-shield-arc-fore", value = { source
 
 # ── Power ────────────────────────────────────────────────────────────────────
 # Small-hull values are authored here rather than inferred from ship class.
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
 [power]
 capacity = 35
 sustainable_total = 6
@@ -576,22 +597,93 @@ console = "captain"
 # The wire target of set_view is `viewscreen`, but authorisation resolves
 # through source_system_for_view_mode to `captain` for both Camera and
 # Cinematic. The Fore/Cinematic buttons need both systems present.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
 console = "captain"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "red-alert"
 kind = "red_alert"
 console = "captain"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "sensors"
 power_group = "energy-sensors"
 kind = "sensors"
 console = "tactical"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "sensor-radar"
 power_group = "energy-sensor-radar"
@@ -603,33 +695,178 @@ console = "tactical"
 # This hull declares five axes: helm-thrust, helm-steering, helm-impulse,
 # helm-boost and helm-lateral-thrust, all owned by Tactical. An unmanned
 # Tactical station gets Backfill, which automates every owned System.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
 console = "tactical"
 power_group = "energy-helm-thrust"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
 console = "tactical"
 power_group = "energy-helm-steering"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
 console = "tactical"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
 console = "tactical"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
 console = "tactical"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
@@ -640,12 +877,87 @@ power_group = "energy-helm-impulse"
 # system so ToggleBoost/SetBoost admission gates on its own declared system,
 # like every other helm axis. Listed in no rating's `automated_systems` —
 # Backfill automates it with the rest of the station.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
 console = "tactical"
 power_group = "energy-helm-boost"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
@@ -654,41 +966,275 @@ power_group = "energy-helm-lateral-thrust"
 
 # tactical_radar is one of the kinds ShipConfig::weapons_station() uses to
 # resolve Tactical as the weapons owner.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "tactical-radar"
 kind = "tactical_radar"
 console = "tactical"
 power_group = "energy-tactical-radar"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
 console = "tactical"
 power_group = "energy-blaster-fore"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "navigation"
 power_group = "energy-navigation"
 kind = "navigation"
 console = "navigation-service"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "comms"
 power_group = "energy-comms"
 kind = "comms"
 console = "comms-service"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "shields-system"
 kind = "shields"
 console = "captain"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "repair"
 power_group = "energy-repair"
 kind = "repair"
 console = "captain"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
@@ -1736,10 +2282,44 @@ source = "number_compare"
 name = "heat-energy-shield-arc-aft"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-battery"
 kind = "power_battery"
@@ -1753,7 +2333,18 @@ console = "captain"
 #
 # No [audio.phaser_loop]: the courier has no phaser bank, so that sound would
 # never play — same tuning as the crewed hulls otherwise.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [audio.ambient]
 file   = "assets/sounds/Ambient.mp3"
 volume = 0.25
@@ -2479,6 +3070,9 @@ z = -20
 width = 20
 depth = 15
 material = "bulkhead"
+max_hp = 37.5
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "support"
@@ -2489,6 +3083,9 @@ z = -5
 width = 20
 depth = 15
 material = "bulkhead"
+max_hp = 37.5
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -2499,6 +3096,9 @@ z = -10
 width = 20
 depth = 20
 material = "armour"
+max_hp = 50
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "weapons"
@@ -2509,6 +3109,9 @@ z = 10
 width = 40
 depth = 15
 material = "armour"
+max_hp = 75
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-support"
@@ -2554,9 +3157,6 @@ power-battery = "engineering"
 shield-arc-fore = "weapons"
 shield-arc-aft = "weapons"
 weapons-access = "engineering"
-
-[interior.repair_placements]
-core = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"
@@ -2593,3 +3193,33 @@ channel = "sealed"
 [system.config.ai.tree.state.task.action.value]
 source = "fact"
 name = "seal_requested"
+[[system.damage_component]]
+id = "hatch"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 20
+ceiling = 20
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 72
+ceiling = 72
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

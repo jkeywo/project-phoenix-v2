@@ -37,7 +37,7 @@
 # the #1163 headless tests put a beam on. Kept out of every shipped hull so no
 # committed world's digest moves for this slice.
 
-includes = ["fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml", "fragments/energy/ship_harrow_tug.toml"]
+includes = ["fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/energy/ship_harrow_tug.toml","fragments/damage/common.toml"]
 
 class = "courier"  # picker badge / scan subtitle — a light salvage hull
 tags = ["ship", "npc"]
@@ -118,14 +118,88 @@ id = "helm-thrust"
 power_group = "energy-helm-thrust"
 kind = "helm_thrust"
 ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-helm-steering"
 id = "helm-steering"
 power_group = "energy-helm-steering"
 kind = "helm_steering"
 ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-helm-impulse"
 id = "helm-impulse"
@@ -135,6 +209,44 @@ ai_only = true
 
 # Tactical radar — the surface the weapons selector's `objective-operate` source
 # resolves the tow target's lock onto.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-tactical-radar"
 id = "tactical-radar"
@@ -143,6 +255,44 @@ kind = "tactical_radar"
 ai_only = true
 
 # Fine power (reactor + battery) for per-instance damage and the group allocator.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-power-reactor"
 id = "power-reactor"
@@ -591,10 +741,44 @@ source = "number_compare"
 name = "heat-energy-tractor"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-power-battery"
 id = "power-battery"
@@ -612,6 +796,18 @@ ai_only = true
 # so the policy's channels must be re-declared) — and `ops` is added beside them
 # for the tractor. It rests at its seeded level 2, at or above the
 # `min_power_level` below.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 console = "ai-tractor"
 id = "tractor"
@@ -624,6 +820,44 @@ power_group = "energy-tractor"
 # policy manages (authoring any group replaces the defaults, so these must be
 # restated); `ops` is the tractor's own bus. All seeded at level 2 by
 # `authored_power_group_seed`.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [power_groups.helm]
 label = "entity.ship_harrow_tug.power_groups.helm.label"
 default_level = 2
@@ -657,54 +891,6 @@ max_penalty = 0.8
 # So the tractor can be knocked out (the "tractor destroyed" interruption) and the
 # tug can be killed. "core" is the ownerless bucket RepairTarget::Core dispatches
 # to. Radar carries no hull, matching fleet convention.
-[[hull.system_hull]]
-system_id = "core"
-max_hp = 24
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.10
-
-[[hull.system_hull]]
-system_id = "tractor"
-max_hp = 30
-damaged_threshold_pct = 0.5
-disabled_threshold_pct = 0.15
-debuff_magnitude = 0.15
-
-[[hull.system_hull]]
-system_id = "helm-thrust"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-steering"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "helm-impulse"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-reactor"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
-
-[[hull.system_hull]]
-system_id = "power-battery"
-max_hp = 20
-damaged_threshold_pct = 0.75
-disabled_threshold_pct = 0.25
-debuff_magnitude = 0.20
 
 # Explicit control surfaces and permitted observation publications.
 [[console]]
@@ -908,6 +1094,9 @@ z = -10
 width = 10
 depth = 10
 material = "light"
+max_hp = 77
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -918,6 +1107,9 @@ z = 0
 width = 10
 depth = 10
 material = "bulkhead"
+max_hp = 77
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-engineering"
@@ -934,6 +1126,41 @@ tactical-radar = "bridge"
 power-reactor = "engineering"
 power-battery = "engineering"
 tractor = "engineering"
+[[console]]
+id = "ai-damage-alert"
 
-[interior.repair_placements]
-core = "engineering"
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+console = "ai-damage-alert"
+ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 16
+ceiling = 16
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 24
+ceiling = 24
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

@@ -6,11 +6,13 @@ import { replaceEnergySource } from './workshop-energy.js';
 import { initialShieldTree } from './workshop-shield-ai.js';
 import { shieldArcSystemId } from './workshop-generated-systems.js';
 import { updateInteriorBindings } from './workshop-interiors.js';
+import { defaultDamageComponent } from './workshop-damage-model.js';
 
 export const SHIELD_ENERGY_FIELDS = Object.freeze(['upkeep_per_sec', 'recharge_energy_per_hp', 'recovery_energy_per_hp', 'discharge_hp_per_sec']);
 const clone = value => structuredClone(value);
 const systemId = arc => shieldArcSystemId(arc.id);
 export const defaultShieldArc = () => ({ id: '', label: '', center_deg: 0, width_deg: 90, ai: initialShieldTree([]),
+  damage_component: ['operation', 'intake', 'cooling'].map(binding => defaultDamageComponent(binding)),
   energy: { upkeep_per_sec: 0.05, recharge_energy_per_hp: 0.5, recovery_energy_per_hp: 0.25, discharge_hp_per_sec: 5, recovery_targets: [] } });
 export function inspectShields(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);

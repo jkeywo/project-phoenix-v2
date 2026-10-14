@@ -1,0 +1,60 @@
+# [ai] Increment 11 initial physical coefficients and bounded repair recipes.
+# Provisional tuning; actual finite stores remain on each fitted entity.
+[damage.materials.light]
+residual_fraction = 0.1
+
+[damage.materials.light.resistance]
+physical = 0.2
+laser = 0.15
+
+[damage.materials.bulkhead]
+residual_fraction = 0.1
+
+[damage.materials.bulkhead.resistance]
+physical = 1
+laser = 0.7
+
+[damage.materials.armour]
+residual_fraction = 0.1
+
+[damage.materials.armour.resistance]
+physical = 2
+laser = 1.4
+
+[damage.remedies.structural]
+work_secs = 2
+manual_work_fraction = 0.25
+structural_hp = 10
+
+[damage.remedies.structural.outcome]
+kind = "structural"
+
+[[damage.remedies.structural.requirements]]
+resource = "structural_parts"
+service = "structural_parts"
+amount = 1
+
+[damage.remedies.machinery-full]
+work_secs = 4
+manual_work_fraction = 0.25
+
+[damage.remedies.machinery-full.outcome]
+kind = "full"
+
+[[damage.remedies.machinery-full.requirements]]
+resource = "machinery_parts"
+service = "machinery_parts"
+amount = 1
+
+[damage.remedies.machinery-patch]
+work_secs = 3
+manual_work_fraction = 0.5
+
+[damage.remedies.machinery-patch.outcome]
+kind = "patch"
+factor = 0.5
+
+[[damage.remedies.machinery-patch.requirements]]
+resource = "structural_parts"
+service = "structural_parts"
+amount = 1

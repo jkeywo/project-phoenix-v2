@@ -18,9 +18,6 @@ includes = ["ai/captain_red_alert_aggressive.toml", "ai/fleet_baseline.toml"]
 
 tags = ["ship", "npc", "enemy"]
 
-[hull]
-hull_integrity = 400.0
-
 [collider]
 shape = "Capsule"
 radius = 4.0

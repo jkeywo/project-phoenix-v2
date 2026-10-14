@@ -13,17 +13,16 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
   const button = (id, action) => { const n = el('button', id, id.replaceAll('-', '_'), { type: 'button' }); n.addEventListener('click', action); return n; };
   const node = el('section', 'panel'), template = el('select', 'template'), decks = el('select', 'decks'), rooms = el('select', 'rooms');
   const connections = el('select', 'connections'), system = el('select', 'system'), placement = el('select', 'placement');
-  const repairTarget = el('select', 'repair-target'), repairPlacement = el('select', 'repair-placement');
   const materialise = input('materialise', 'checkbox'), status = el('p', 'status', null, { role: 'status' });
   const deckLabel = input('deck-label'), weight = input('damage-weight', 'number');
   const roomDeck = el('select', 'room-deck');
-  const roomFields = Object.fromEntries(['label', 'x', 'z', 'width', 'depth', 'material'].map(key => [key, input(key, ['label', 'material'].includes(key) ? 'text' : 'number')]));
+  const roomFields = Object.fromEntries(['label', 'x', 'z', 'width', 'depth', 'material', 'max_hp', 'recovery_fraction', 'structural_remedy'].map(key => [key, input(key, ['label', 'material', 'structural_remedy'].includes(key) ? 'text' : 'number')]));
   const from = el('select', 'from'), to = el('select', 'to'), travel = input('travel-secs', 'number'), boundary = el('select', 'boundary');
   const homes = el('div', 'homes');
   const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'workshop-interior-map';
   svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', t('workshop.interior.map')); svg.style.cssText = 'width:100%;height:320px;touch-action:none;border:1px solid currentColor';
   const save = button('save', () => void apply());
-  const create = button('create', () => { if (!inspection) return; form = initialInterior(inspection.systems, inspection.teamCount, inspection.repairTargets); deckId = form.deck[0].id; roomId = form.compartment[0].id; connectionId = null; paint(); });
+  const create = button('create', () => { if (!inspection) return; form = initialInterior(inspection.systems, inspection.teamCount); deckId = form.deck[0].id; roomId = form.compartment[0].id; connectionId = null; paint(); });
   const freshId = (rows, prefix) => { let i = 1; while (rows.some(row => row.id === prefix + i)) i += 1; return prefix + i; };
   const addDeck = button('add-deck', () => { if (!form) return; deckId = freshId(form.deck, 'deck-'); form.deck.push({ id: deckId, label: deckId, damage_weight: 1 }); roomId = null; paint(); });
   const removeDeck = button('remove-deck', () => {
@@ -32,10 +31,10 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
   });
   const addRoom = button('add-room', () => { if (!form || !deckId) return; roomId = freshId(form.compartment, 'room-');
     const sameDeck = form.compartment.filter(room => room.deck === deckId), x = sameDeck.length ? Math.max(...sameDeck.map(room => room.x + room.width)) : 0;
-    form.compartment.push({ id: roomId, deck: deckId, label: roomId, x, z: 0, width: 10, depth: 10, material: 'bulkhead' }); paint(); });
+    form.compartment.push({ id: roomId, deck: deckId, label: roomId, x, z: 0, width: 10, depth: 10, material: 'bulkhead', max_hp: 100, recovery_fraction: 0.2, structural_remedy: 'structural' }); paint(); });
   const removeRoom = button('remove-room', () => {
     if (!form || !roomId) return;
-    if (Object.values(form.placements).includes(roomId) || Object.values(form.repair_placements || {}).includes(roomId) || form.team_homes.includes(roomId) || form.connection.some(c => c.from === roomId || c.to === roomId)) {
+    if (Object.values(form.placements).includes(roomId) || form.team_homes.includes(roomId) || form.connection.some(c => c.from === roomId || c.to === roomId)) {
       status.textContent = t('workshop.interior.room_used'); return;
     }
     form.compartment = form.compartment.filter(room => room.id !== roomId); roomId = null; paint();
@@ -49,7 +48,7 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
     label(decks, 'decks'), label(deckLabel, 'deck_label'), label(weight, 'damage_weight'), addDeck, removeDeck,
     svg, label(rooms, 'rooms'), label(roomDeck, 'room_deck'), ...Object.entries(roomFields).map(([key, control]) => label(control, key)), addRoom, removeRoom,
     label(connections, 'connections'), label(from, 'from'), label(to, 'to'), label(travel, 'travel_secs'), label(boundary, 'boundary'), addConnection, removeConnection,
-    label(system, 'system'), label(placement, 'placement'), label(repairTarget, 'repair_target'), label(repairPlacement, 'repair_placement'), el('h4', null, 'homes'), homes, addTeam, removeTeam, save);
+    label(system, 'system'), label(placement, 'placement'), el('h4', null, 'homes'), homes, addTeam, removeTeam, save);
   if (attach) root.append(node);
   let dependencies = null, inspection = null, form = null, observed = null, deckId = null, roomId = null, connectionId = null;
   let disposed = false, loading = false, generation = 0, drag = null;
@@ -60,7 +59,6 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
     for (const control of [from, to, travel, boundary, removeConnection]) control.disabled ||= !connection();
     removeRoom.disabled ||= !room(); removeDeck.disabled ||= !form || form.deck.length < 2;
     addConnection.disabled ||= !form || form.compartment.length < 2;
-    repairTarget.disabled ||= !inspection?.repairTargets.length; repairPlacement.disabled ||= !inspection?.repairTargets.length;
     svg.setAttribute('aria-disabled', String(disposed || loading || busy() || !form));
   }
   function fill(select, rows, selected) { select.replaceChildren(); for (const row of rows) option(select, row.id, wireText(row.label || row.id)); select.value = selected || ''; }
@@ -100,8 +98,6 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
     fill(connections, form.connection, connectionId); fill(from, form.compartment, connection()?.from); fill(to, form.compartment, connection()?.to); travel.value = connection()?.travel_secs ?? '';
     boundary.replaceChildren(); option(boundary, '', t('workshop.interior.fixed')); for (const s of inspection.systems.filter(s => s.kind === 'access-gate')) option(boundary, s.id); boundary.value = connection()?.boundary || '';
     const previous = system.value; fill(system, inspection.systems, previous || inspection.systems[0]?.id); fill(placement, form.compartment, form.placements[system.value]);
-    fill(repairTarget, inspection.repairTargets, repairTarget.value || inspection.repairTargets[0]?.id);
-    fill(repairPlacement, form.compartment, form.repair_placements?.[repairTarget.value]);
     homes.replaceChildren(); form.team_homes.forEach((home, index) => { const select = el('select', 'home-' + index); fill(select, [{ id: '', label: 'workshop.interior.choose_home' }, ...form.compartment], home); select.addEventListener('change', () => { form.team_homes[index] = select.value; }); const row = label(select, 'home'); row.prepend(`${index + 1} `); homes.append(row); }); controls();
   }
   function inspect(force = false) {
@@ -136,8 +132,6 @@ export function mountWorkshopInterior({ root, provider, runtime, draft: getDraft
   for (const [control, key] of [[from, 'from'], [to, 'to'], [travel, 'travel_secs'], [boundary, 'boundary']]) control.addEventListener('change', () => { if (!connection()) return;
     if (key === 'boundary' && !control.value) delete connection()[key]; else connection()[key] = key === 'travel_secs' ? control.valueAsNumber : control.value; paintMap(); });
   system.addEventListener('change', () => { placement.value = form?.placements[system.value] || ''; }); placement.addEventListener('change', () => { if (form) form.placements[system.value] = placement.value; });
-  repairTarget.addEventListener('change', () => { repairPlacement.value = form?.repair_placements?.[repairTarget.value] || ''; });
-  repairPlacement.addEventListener('change', () => { if (form && repairTarget.value) { form.repair_placements ||= {}; form.repair_placements[repairTarget.value] = repairPlacement.value; } });
   svg.addEventListener('pointerdown', event => { if (busy() || !form || !event.target.dataset.room) return; const selected = form.compartment.find(r => r.id === event.target.dataset.room); if (!selected) return;
     roomId = selected.id; paintProperties(); const bounds = svg.getBoundingClientRect(), view = svg.getAttribute('viewBox').split(' ').map(Number);
     if (!bounds.width || !bounds.height) return; const scale = Math.min(bounds.width / view[2], bounds.height / view[3]);

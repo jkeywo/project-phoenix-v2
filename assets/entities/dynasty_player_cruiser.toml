@@ -2,7 +2,7 @@
 # composes the proven player-cruiser equipment baseline rather than exposing or
 # changing ship_harrow_cruiser.toml: the latter remains the NPC encounter hull.
 # The six-role bridge uses an authored generation-backed strike reserve.
-includes = ["alliance_cruiser.toml", "fragments/energy/dynasty_player_cruiser.toml"]
+includes = ["alliance_cruiser.toml","fragments/energy/dynasty_player_cruiser.toml","fragments/damage/common.toml"]
 
 name = "entity.dynasty_player_cruiser.name"
 display_name = "entity.dynasty_player_cruiser.display_name"
@@ -310,111 +310,917 @@ trigger = { kind = "first_visit" }
 [[system]]
 id = "captain"
 console = "command"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "command"
 _remove = true
 [[system]]
 id = "red-alert"
 console = "command"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "comms"
 power_group = "energy-comms"
 console = "comms-service"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "viewscreen"
 console = "command"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "security"
 power_group = "energy-security"
 console = "command"
 
 # Helm: movement and Navigation.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-thrust"
 power_group = "energy-helm-thrust"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-steering"
 power_group = "energy-helm-steering"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-joystick"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-engine-port"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-engine-starboard"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-radar"
 power_group = "energy-helm-radar"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-impulse"
 power_group = "energy-helm-impulse"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-boost"
 power_group = "energy-helm-boost"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "helm-lateral-thrust"
 power_group = "energy-helm-lateral-thrust"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "navigation"
 power_group = "energy-navigation"
 console = "helm"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "dock"
 power_group = "energy-dock"
 console = "helm"
 
 # Gunnery: every weapon and its targeting radar.
+[[system.damage_component]]
+id = "mating"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "power"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "tactical-radar"
 power_group = "energy-tactical-radar"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "phaser-control"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "phaser-fore"
 power_group = "energy-phaser-fore"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "phaser-aft"
 power_group = "energy-phaser-aft"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "torpedo-magazine"
 power_group = "energy-torpedo-magazine"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "torpedo-tube-fore-port"
 power_group = "energy-torpedo-tube-fore-port"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "torpedo-tube-fore-starboard"
 power_group = "energy-torpedo-tube-fore-starboard"
 console = "gunnery"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "torpedo-tube-aft"
 power_group = "energy-torpedo-tube-aft"
 console = "gunnery"
 
 # Sensors: detection and scanning only.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "sensors"
 power_group = "energy-sensors"
 console = "sensors"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "sensor-radar"
 power_group = "energy-sensor-radar"
 console = "sensors"
 
 # Power: energy generation and allocation only.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-reactor"
 console = "power"
@@ -2111,25 +2917,160 @@ source = "number_compare"
 name = "heat-energy-shield-arc-starboard"
 comparison = "greater_or_equal"
 value = 0.5
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
 
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "power-battery"
 console = "power"
 
 # Damage Control: shields, repair, and recovery/coupling gear.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "shields-system"
 console = "damage-control"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "repair"
 power_group = "energy-repair"
 console = "damage-control"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "tractor"
 power_group = "energy-tractor"
 console = "damage-control"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [[system]]
 id = "umbilical"
 power_group = "energy-umbilical"
@@ -2137,6 +3078,44 @@ console = "damage-control"
 
 # Charging is a fourth explicit allocation competing for the SAME eight pips.
 # Unallocated generation is not captured. Turning charging to zero holds charge.
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
 [power]
 capacity = 90
 sustainable_total = 6
@@ -2693,6 +3672,9 @@ z = -20
 width = 20
 depth = 15
 material = "bulkhead"
+max_hp = 110.625
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "support"
@@ -2703,6 +3685,9 @@ z = -5
 width = 20
 depth = 15
 material = "bulkhead"
+max_hp = 110.625
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "engineering"
@@ -2713,6 +3698,9 @@ z = -10
 width = 20
 depth = 20
 material = "armour"
+max_hp = 147.5
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.compartment]]
 id = "weapons"
@@ -2723,6 +3711,9 @@ z = 10
 width = 40
 depth = 15
 material = "armour"
+max_hp = 221.25
+recovery_fraction = 0.2
+structural_remedy = "structural"
 
 [[interior.connection]]
 id = "bridge-support"
@@ -2781,10 +3772,6 @@ shield-arc-port = "weapons"
 shield-arc-aft = "weapons"
 shield-arc-starboard = "weapons"
 weapons-access = "engineering"
-
-[interior.repair_placements]
-science = "bridge"
-core = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"
@@ -2821,3 +3808,2441 @@ channel = "sealed"
 [system.config.ai.tree.state.task.action.value]
 source = "fact"
 name = "seal_requested"
+[[system.damage_component]]
+id = "hatch"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc]]
+id = "fore"
+label = "shield_arc.fore.label"
+center_deg = 0
+width_deg = 90
+
+[shield_arc.energy]
+upkeep_per_sec = 0.05
+recharge_energy_per_hp = 0.5
+recovery_energy_per_hp = 0.25
+discharge_hp_per_sec = 5
+recovery_targets = [ "shield-arc-port", "shield-arc-aft", "shield-arc-starboard" ]
+
+[shield_arc.ai]
+root = "shields"
+
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+
+[[shield_arc.ai.tree.state]]
+id = "operate"
+
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "raised"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "focus"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-port"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-1"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-aft"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-2"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-starboard"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc]]
+id = "port"
+label = "shield_arc.port.label"
+center_deg = 270
+width_deg = 90
+
+[shield_arc.energy]
+upkeep_per_sec = 0.05
+recharge_energy_per_hp = 0.5
+recovery_energy_per_hp = 0.25
+discharge_hp_per_sec = 5
+recovery_targets = [ "shield-arc-fore", "shield-arc-aft", "shield-arc-starboard" ]
+
+[shield_arc.ai]
+root = "shields"
+
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+
+[[shield_arc.ai.tree.state]]
+id = "operate"
+
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "raised"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "focus"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-fore"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-1"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-aft"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-2"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-starboard"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc]]
+id = "aft"
+label = "shield_arc.aft.label"
+center_deg = 180
+width_deg = 90
+
+[shield_arc.energy]
+upkeep_per_sec = 0.05
+recharge_energy_per_hp = 0.5
+recovery_energy_per_hp = 0.25
+discharge_hp_per_sec = 5
+recovery_targets = [ "shield-arc-fore", "shield-arc-port", "shield-arc-starboard" ]
+
+[shield_arc.ai]
+root = "shields"
+
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+
+[[shield_arc.ai.tree.state]]
+id = "operate"
+
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "raised"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "focus"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-fore"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-1"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-port"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-2"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-starboard"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-starboard"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-starboard"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc]]
+id = "starboard"
+label = "shield_arc.starboard.label"
+center_deg = 90
+width_deg = 90
+
+[shield_arc.energy]
+upkeep_per_sec = 0.05
+recharge_energy_per_hp = 0.5
+recovery_energy_per_hp = 0.25
+discharge_hp_per_sec = 5
+recovery_targets = [ "shield-arc-fore", "shield-arc-port", "shield-arc-aft" ]
+
+[shield_arc.ai]
+root = "shields"
+
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+
+[[shield_arc.ai.tree.state]]
+id = "operate"
+
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "raised"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "focus"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-fore"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-fore"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-fore"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-1"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-port"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-port"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-1-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-port"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "retain-2"
+when = []
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovering-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task]]
+id = "recover-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "preferred_focus"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "greater_or_equal"
+value = 0.85
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "less"
+value = 0.4
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-reserve-shield-arc-aft"
+comparison = "less"
+value = 0.75
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = true
+
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "strength_fraction"
+comparison = "less_or_equal"
+value = 0.6
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "restored-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = true
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "number_compare"
+name = "target-strength-shield-arc-aft"
+comparison = "greater_or_equal"
+value = 0.8
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-0"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-visible-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-1"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-preferred-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.ai.tree.state.task]]
+id = "stop-2-2"
+
+[[shield_arc.ai.tree.state.task.when]]
+equals = false
+
+[shield_arc.ai.tree.state.task.when.value]
+source = "fact"
+name = "target-ready-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action]
+kind = "write"
+channel = "recover-shield-arc-aft"
+
+[shield_arc.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
+[[shield_arc.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[shield_arc.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[shield_arc.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 59
+ceiling = 59
+label = "damage.resource.structural_parts"
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 111
+ceiling = 111
+label = "damage.resource.machinery_parts"
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

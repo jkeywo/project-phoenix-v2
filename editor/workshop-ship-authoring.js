@@ -8,6 +8,7 @@ import { acceptWorkshopChanges } from './workshop-acceptance.js';
 import { defaultEnergyConsumer, requiresEnergy, requireCoolantStore } from './workshop-energy-model.js';
 import { replaceEnergySource } from './workshop-energy.js';
 import { updateInteriorBindings } from './workshop-interiors.js';
+import { defaultSystemDamage } from './workshop-damage-model.js';
 
 const quote = value => JSON.stringify(String(value));
 const newlineOf = source => source.includes('\r\n') ? '\r\n' : '\n';
@@ -207,7 +208,7 @@ function rowsWithOwners(inspection, section) {
 export function inspectShipAuthoring(draft, dependencies, path) {
   const composition = inspectEntityComposition(draft, dependencies, path);
   const tags = composition.resolved.value.tags || [];
-  if (!tags.includes('ship')) throw new Error('entity-is-not-a-ship');
+  if (!tags.includes('ship') && !(composition.resolved.value.system || []).length) throw new Error('entity-is-not-a-ship');
   const own = parse(draft.read(path)), localDoctrine = new Set((own.behaviour?.doctrine || []).map(row => String(row.id)));
   const doctrines = (composition.resolved.value.behaviour?.doctrine || []).map(row => {
     const owner = composition.fields.find(field => field.path === `behaviour.doctrine[id=${row.id}].id`
@@ -306,9 +307,14 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     ...(operation.power_group ? { power_group: operation.power_group } : {}),
     ...(operation.components ? { component: operation.components, channel: operation.channels || [] } : {}),
     ...(operation.ai ? { config: { ai: operation.ai } } : {}) };
+    const damageValue = inspection.composition.resolved.value;
+    if (damageValue.damage) added.damage_component = defaultSystemDamage(added, requiresEnergy(added)
+      ? { ...damageValue, energy: { ...damageValue.energy, consumer: [...(damageValue.energy?.consumer || []), { system: added.id }] } } : damageValue);
     after = append(after, { system: [added] });
     const value = inspection.composition.resolved.value;
     if (value.energy && requiresEnergy(added)) {
+      if (!operation.materialise && inspection.composition.fields.some(field => (field.path === 'energy' || field.path.startsWith('energy.')) && field.owner !== operation.path))
+        throw new Error('Explicitly materialise inherited energy settings before fitting powered equipment.');
       if (!added.power_group || !(value.energy.group || []).some(group => group.id === added.power_group))
         throw new Error('Assign this machinery to an existing authored energy control group before adding it.');
       const energy = structuredClone(value.energy), coolant = structuredClone(energy.reactor.coolant || { service: 'coolant' });

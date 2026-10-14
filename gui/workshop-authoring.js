@@ -1,6 +1,7 @@
 import { mountWorkshopEnergy } from './workshop-energy-panel.js';
 import { mountWorkshopShields } from './workshop-shield-panel.js';
 import { mountWorkshopInterior } from './workshop-interior-panel.js';
+import { mountWorkshopDamage } from './workshop-damage-panel.js';
 import { mountWorkshopWeapons } from './workshop-weapon-panel.js';
 import { mountWorkshopResources } from './workshop-resource-panel.js';
 import { downloadBlob } from './blob-download.js';
@@ -208,6 +209,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let energyPanel = null;
   let shieldPanel = null;
   let interiorPanel = null;
+  let damagePanel = null;
   let slotAuthoringPanel = null;
   let scriptsPanel = null;
   let spatialPanel = null;
@@ -296,6 +298,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   interiorPanel = mountWorkshopInterior({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  damagePanel = mountWorkshopDamage({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(),
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   slotAuthoringPanel = mountWorkshopSlotAuthoring({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -309,7 +314,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, resourcePanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, slotAuthoringPanel.node);
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, resourcePanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -482,6 +487,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     energyPanel?.refresh({ hidden: testing });
     shieldPanel?.refresh({ hidden: testing });
     interiorPanel?.refresh({ hidden: testing });
+    damagePanel?.refresh({ hidden: testing });
     slotAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
@@ -1136,6 +1142,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     energyPanel?.dispose();
     shieldPanel?.dispose();
     interiorPanel?.dispose();
+    damagePanel?.dispose();
     slotAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
     spatialPanel?.dispose();

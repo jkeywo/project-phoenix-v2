@@ -1,6 +1,6 @@
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
-import { inspectWeapons, applyWeaponOperation, defaultWeapon, guidedWeaponRange, WEAPON_PARAMETERS } from '../editor/workshop-weapons.js';
+import { inspectWeapons, applyWeaponOperation, defaultWeapon, guidedWeaponRange, WEAPON_PARAMETERS, weaponSystemAddress } from '../editor/workshop-weapons.js';
 
 /** Supported weapon data forms, accepted through authoritative validation. */
 export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft, busy, setBusy, changed = () => {}, attach = true }) {
@@ -16,6 +16,9 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   const node = el('section', 'panel'), template = el('select', 'template'), existing = el('select', 'existing');
   const materialise = input('materialise', 'checkbox'), id = input('id'), strategy = input('strategy-id'), kind = el('select', 'kind');
   const marker = input('marker'), barrels = input('barrels'), status = el('p', 'status', null, { role: 'status' });
+  const damageType = el('select', 'damage-type'), penetration = input('penetration', 'number');
+  const console = el('select', 'console'), group = el('select', 'group'), compartment = el('select', 'compartment');
+  for (const type of ['physical', 'laser']) { const option = el('option'); option.value = type; option.textContent = t('workshop.damage.type.' + type); damageType.append(option); }
   const parameters = el('fieldset', 'parameters'), pattern = el('fieldset', 'pattern'), color = input('color');
   const mount = Object.fromEntries(['facing_deg', 'fire_arc_deg', 'range'].map(key => [key, input(key, 'number')]));
   const save = el('button', 'save', 'workshop.weapon.save', { type: 'button' });
@@ -28,6 +31,8 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     label(existing, 'workshop.weapon.existing'), create, label(materialise, 'workshop.weapon.materialise'), status,
     label(id, 'workshop.weapon.id'), label(strategy, 'workshop.weapon.strategy_id'), label(kind, 'workshop.weapon.delivery'),
     ...Object.entries(mount).map(([key, control]) => label(control, 'workshop.weapon.' + key)),
+    label(damageType, 'workshop.damage.damage_type'), label(penetration, 'workshop.damage.penetration'),
+    label(console, 'workshop.weapon.console'), label(group, 'workshop.weapon.group'), label(compartment, 'workshop.weapon.compartment'),
     label(marker, 'workshop.weapon.marker'), label(barrels, 'workshop.weapon.barrels'), label(color, 'workshop.weapon.color'), parameters, pattern, save);
   if (attach) root.append(node);
   function controls() {
@@ -39,6 +44,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     barrels.disabled ||= kind.value === 'beam';
     color.disabled ||= kind.value !== 'beam';
     pattern.hidden = kind.value === 'beam';
+    for (const control of [console, group, compartment]) control.disabled ||= !!selected;
   }
   function addPatternStep(value = { offset_secs: 0, barrels: [0] }) {
     const index = stepSerial++, row = el('div'), offset = input('step-offset-' + index, 'number'), indices = input('step-barrels-' + index);
@@ -51,6 +57,15 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   }
   function paint(value) {
     id.value = value.id; strategy.value = value.strategy_id || ''; kind.value = value.delivery.kind;
+    damageType.value = value.impact?.damage_type || ''; penetration.value = value.impact?.penetration ?? '';
+    const definition = inspection?.resolved.value || {};
+    for (const [control, values] of [[console, (definition.console || []).map(row => row.id)], [group, (definition.energy?.group || []).map(row => row.id)], [compartment, (definition.interior?.compartment || []).map(row => row.id)]]) {
+      const previous = control.value; control.replaceChildren(); for (const value of values) option(control, value, value); control.value = values.includes(previous) ? previous : values[0] || '';
+    }
+    if (selected) {
+      const id = weaponSystemAddress(value).id, owner = definition.system?.find(system => system.id === id);
+      console.value = owner?.console || ''; group.value = owner?.power_group || ''; compartment.value = definition.interior?.placements?.[id] || '';
+    }
     for (const [key, control] of Object.entries(mount)) control.value = value.mount[key];
     marker.value = value.marker || ''; barrels.value = (value.barrels || []).join(', '); color.value = (value.delivery.color || []).join(', ');
     parameters.replaceChildren(el('legend', null, 'workshop.weapon.parameters')); paramInputs = {};
@@ -96,6 +111,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     if (busy() || loading || !inspection) return;
     const value = structuredClone(selected?.weapon || defaultWeapon(kind.value));
     value.id = id.value; value.mount = Object.fromEntries(Object.entries(mount).map(([key, control]) => [key, control.valueAsNumber]));
+    value.impact = { damage_type: damageType.value, penetration: penetration.valueAsNumber };
     if (strategy.value) value.strategy_id = strategy.value; else delete value.strategy_id;
     value.delivery = { kind: kind.value };
     for (const [key, control] of Object.entries(paramInputs)) if (control.value !== '') value.delivery[key] = control.valueAsNumber;
@@ -104,6 +120,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     value.barrels = kind.value === 'beam' ? [] : names(barrels.value);
     value.pattern = kind.value === 'beam' ? [] : steps.map(step => ({ offset_secs: step.offset.valueAsNumber, barrels: names(step.indices.value).map(Number) }));
     const token = ++generation, draft = getDraft(), operation = { path: template.value, section: selected?.section,
+      console: console.value, power_group: group.value, compartment: compartment.value,
       ...(selected ? { originalId: selected.weapon.id } : {}), weapon: value, materialise: materialise.checked };
     return runWorkshopMutation({ setBusy, current: () => !disposed && token === generation, start: controls,
       invoke: () => applyWeaponOperation({ draft, provider, runtime, dependencies, operation, current: () => !disposed && token === generation }),

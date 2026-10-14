@@ -24,6 +24,7 @@ use crate::world::validate::{
 
 pub mod archive;
 pub mod composition;
+pub mod damage;
 pub mod definitions;
 pub mod document;
 pub mod entity;
@@ -94,6 +95,7 @@ pub struct WorkshopValidation {
 /// cannot drift into offering a System or Directive spelling the build rejects.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WorkshopShipSchema {
+    pub damage: damage::WorkshopDamageSchema,
     pub console_feed_kinds: Vec<String>,
     pub console_feed_sources: Vec<String>,
     pub console_publication_kinds:
@@ -169,6 +171,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
         numeric_facts: prefixes(&shield_target_numbers.facts),
     };
     WorkshopShipSchema {
+        damage: damage::schema(),
         console_feed_sources,
         console_publication_kinds,
         console_instance_publication_kinds:

@@ -49,6 +49,63 @@ pub struct EnergyCoolantBindings {
     pub consumers: BTreeMap<SystemId, String>,
 }
 
+/// Transient machinery effectiveness for one tick. Never persisted or written
+/// into authored hardware; omitted equipment remains intact for pure fixtures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnergyLinkEffects {
+    pub intake: f32,
+    pub cooling: f32,
+}
+impl Default for EnergyLinkEffects {
+    fn default() -> Self {
+        Self {
+            intake: 1.0,
+            cooling: 1.0,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnergyHardwareEffects {
+    pub reactor_operation: f32,
+    pub reactor: EnergyLinkEffects,
+    pub consumers: BTreeMap<SystemId, EnergyLinkEffects>,
+}
+impl Default for EnergyHardwareEffects {
+    fn default() -> Self {
+        Self {
+            reactor_operation: 1.0,
+            reactor: EnergyLinkEffects::default(),
+            consumers: BTreeMap::new(),
+        }
+    }
+}
+impl EnergyHardwareEffects {
+    fn validate(&self, config: &EnergyConfigSection) -> Result<(), String> {
+        for value in std::iter::once(self.reactor_operation)
+            .chain([self.reactor.intake, self.reactor.cooling])
+            .chain(
+                self.consumers
+                    .values()
+                    .flat_map(|effects| [effects.intake, effects.cooling]),
+            )
+        {
+            bounded("hardware effectiveness", value, 1.0)?;
+        }
+        if self.consumers.keys().any(|id| {
+            !config
+                .consumers
+                .iter()
+                .any(|consumer| &consumer.system == id)
+        }) {
+            return Err("hardware effects name an uninstalled energy consumer".into());
+        }
+        Ok(())
+    }
+    fn consumer(&self, id: &SystemId) -> EnergyLinkEffects {
+        self.consumers.get(id).copied().unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EnergyNetworkResult {
     pub generation_accepted: f32,
@@ -424,6 +481,30 @@ impl EnergyNetworkState {
         coolant: &BTreeMap<String, f32>,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<EnergyNetworkResult, String> {
+        self.tick_with_effects(
+            config,
+            ship,
+            dt,
+            bindings,
+            coolant,
+            &EnergyHardwareEffects::default(),
+            choose,
+        )
+    }
+
+    // The processor receives authored hardware, routing, finite stock and one transient effect view.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_effects(
+        &mut self,
+        config: &EnergyConfigSection,
+        ship: &ShipConfig,
+        dt: f32,
+        bindings: &EnergyCoolantBindings,
+        coolant: &BTreeMap<String, f32>,
+        effects: &EnergyHardwareEffects,
+        choose: &mut impl FnMut(usize) -> usize,
+    ) -> Result<EnergyNetworkResult, String> {
+        effects.validate(config)?;
         self.validate_against(config, ship)?;
         nonnegative("dt", dt)?;
         if bindings.reactor.trim().is_empty()
@@ -461,12 +542,17 @@ impl EnergyNetworkState {
         } else {
             (actual - ramp).max(target) as f32
         };
+        next.output_actual_per_sec = next
+            .output_actual_per_sec
+            .min(config.reactor.max_output_per_sec * effects.reactor_operation);
         let generation = if !next.generation_enabled || next.reactor.thermal_stopped {
             0.0
         } else {
             budget(
                 next.output_actual_per_sec
-                    .min(config.reactor.sustainable_output_per_sec) as f64
+                    .min(config.reactor.sustainable_output_per_sec * effects.reactor_operation)
+                    as f64
+                    * effects.reactor.intake as f64
                     * dt as f64,
             )
         };
@@ -515,7 +601,9 @@ impl EnergyNetworkState {
         consumers.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.system.cmp(&b.1.system)));
         for (_, consumer) in consumers {
             let offer = budget(
-                (routed.get(&consumer.system).copied().unwrap_or(0.0) as f64 * dt as f64)
+                (routed.get(&consumer.system).copied().unwrap_or(0.0) as f64
+                    * effects.consumer(&consumer.system).intake as f64
+                    * dt as f64)
                     .min(remaining_supply),
             );
             let provider = &bindings.consumers[&consumer.system];
@@ -529,7 +617,8 @@ impl EnergyNetworkState {
                         dt,
                         offered_energy: offer,
                         demands: &[],
-                        cooling_rate: cooling_rates.get(&consumer.system).copied().unwrap_or(0.0),
+                        cooling_rate: cooling_rates.get(&consumer.system).copied().unwrap_or(0.0)
+                            * effects.consumer(&consumer.system).cooling,
                         coolant_available: budget(remaining_coolant[provider]),
                     },
                 )?;
@@ -572,7 +661,7 @@ impl EnergyNetworkState {
                 dt,
                 offered_energy: generation,
                 demands: &work,
-                cooling_rate: reactor_cooling,
+                cooling_rate: reactor_cooling * effects.reactor.cooling,
                 coolant_available: budget(remaining_coolant[&bindings.reactor]),
             },
         )?;

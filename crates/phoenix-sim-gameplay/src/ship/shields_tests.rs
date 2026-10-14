@@ -209,3 +209,147 @@ fn static_equipment_applies_the_same_admitted_arc_commands() {
     assert!(!shields.0.facings[0].raised);
     assert_eq!(shields.0.facings[0].recovery_target.as_ref(), Some(&ids[1]));
 }
+
+#[test]
+fn operation_damage_reduces_paid_protection_and_recharge_without_erasing_strength() {
+    let run = |condition: Option<phoenix_model::damage::ComponentCondition>| {
+        let (mut app, actor, ids) = physical_actor();
+        let config =
+            crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml")
+                .unwrap();
+        let mut damage = crate::ship::physical_damage::ShipDamage::from_config(&config)
+            .unwrap()
+            .unwrap();
+        if let Some(condition) = condition {
+            let component = damage
+                .state
+                .components
+                .get_mut(&ids[0])
+                .unwrap()
+                .get_mut("operation")
+                .unwrap();
+            component.condition = condition;
+            component.last_source = Some("fixture-hit".into());
+            damage.state.validate(&damage.definition).unwrap();
+        }
+        app.world_mut().entity_mut(actor).insert(damage);
+        {
+            let mut shields = app.world_mut().get_mut::<ShipShields>(actor).unwrap();
+            shields.0.facings[0].hp -= 20;
+        }
+        let before_hp =
+            app.world().get::<ShipShields>(actor).unwrap().0.facings[0].stored_strength();
+        let before_energy = app
+            .world()
+            .get::<ShipPowerSystem>(actor)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&ids[0]]
+            .energy;
+        app.world_mut().run_system_once(tick_shields).unwrap();
+        let after = app.world().get::<ShipShields>(actor).unwrap();
+        let energy = app
+            .world()
+            .get::<ShipPowerSystem>(actor)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&ids[0]]
+            .energy;
+        (
+            after.0.facings[0].stored_strength() - before_hp,
+            before_energy - energy,
+            after.0.facings[0].protection_fraction,
+            after.0.facings[0].raised,
+        )
+    };
+    let intact = run(None);
+    let partial = run(Some(phoenix_model::damage::ComponentCondition::Damaged));
+    let zero = run(Some(phoenix_model::damage::ComponentCondition::Destroyed));
+    assert!(intact.0 > 0.0 && intact.1 > 0.0);
+    assert!((partial.0 - intact.0 * 0.5).abs() < 0.0001);
+    assert_eq!(partial.1, intact.1);
+    assert_eq!(partial.2, intact.2 * 0.5);
+    assert_eq!(zero, (0.0, 0.0, 0.0, true));
+}
+
+#[test]
+fn recovery_respects_recipient_intake_damage_and_donor_conversion_loss() {
+    let run = |broken_intake: bool, damaged_donor: bool| {
+        let (mut app, actor, ids) = physical_actor();
+        let config =
+            crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml")
+                .unwrap();
+        let mut damage = crate::ship::physical_damage::ShipDamage::from_config(&config)
+            .unwrap()
+            .unwrap();
+        for (id, component, condition) in [
+            (
+                ids[0].clone(),
+                "operation",
+                damaged_donor.then_some(phoenix_model::damage::ComponentCondition::Damaged),
+            ),
+            (
+                ids[1].clone(),
+                "intake",
+                broken_intake.then_some(phoenix_model::damage::ComponentCondition::Destroyed),
+            ),
+        ] {
+            if let Some(condition) = condition {
+                let part = damage
+                    .state
+                    .components
+                    .get_mut(&id)
+                    .unwrap()
+                    .get_mut(component)
+                    .unwrap();
+                part.condition = condition;
+                part.last_source = Some("fixture-hit".into());
+            }
+        }
+        damage.state.validate(&damage.definition).unwrap();
+        app.world_mut().entity_mut(actor).insert(damage);
+        let (before, yield_per_hp) = {
+            let mut shields = app.world_mut().get_mut::<ShipShields>(actor).unwrap();
+            for facing in &mut shields.0.facings {
+                facing.raised = false;
+            }
+            shields.0.facings[0].recovery_target = Some(ids[1].clone());
+            (
+                shields.0.facings[0].stored_strength(),
+                shields.0.facings[0].energy_config.recovery_energy_per_hp as f64,
+            )
+        };
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(actor)
+            .unwrap()
+            .0
+            .network_mut()
+            .consumers
+            .get_mut(&ids[1])
+            .unwrap()
+            .energy = 0.0;
+        app.world_mut().run_system_once(tick_shields).unwrap();
+        let removed =
+            before - app.world().get::<ShipShields>(actor).unwrap().0.facings[0].stored_strength();
+        let credited = app
+            .world()
+            .get::<ShipPowerSystem>(actor)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&ids[1]]
+            .energy as f64;
+        (removed, credited, yield_per_hp)
+    };
+    let intact = run(false, false);
+    let partial = run(false, true);
+    let blocked = run(true, false);
+    assert!(intact.0 > 0.0 && intact.1 > 0.0);
+    assert!((intact.0 - partial.0).abs() < 0.0001);
+    assert!((partial.1 - intact.1 * 0.5).abs() < 0.0001);
+    assert!((partial.1 - partial.0 * partial.2 * 0.5).abs() < 0.0001);
+    assert_eq!(blocked.0, 0.0);
+    assert_eq!(blocked.1, 0.0);
+}

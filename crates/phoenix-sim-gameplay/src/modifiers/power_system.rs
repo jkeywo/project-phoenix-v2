@@ -332,6 +332,19 @@ impl PowerSystem {
         dt: f32,
         offered: f32,
     ) -> Result<f32, String> {
+        self.accept_recovered_energy_with_intake_factor(system, dt, offered, 1.0)
+    }
+
+    pub fn accept_recovered_energy_with_intake_factor(
+        &mut self,
+        system: &SystemId,
+        dt: f32,
+        offered: f32,
+        intake_factor: f32,
+    ) -> Result<f32, String> {
+        if !intake_factor.is_finite() || !(0.0..=1.0).contains(&intake_factor) {
+            return Err("recovery intake effectiveness must be finite in [0,1]".into());
+        }
         if !dt.is_finite() || dt <= 0.0 || !offered.is_finite() || offered < 0.0 {
             return Err(
                 "recovered energy requires positive time and finite nonnegative charge".into(),
@@ -352,7 +365,9 @@ impl PowerSystem {
             return Ok(0.0);
         }
         let previous = self.last_intake_per_sec.get(system).copied().unwrap_or(0.0);
-        let budget = (((consumer.reserve.max_intake_per_sec as f64 - previous as f64).max(0.0)
+        let budget = (((consumer.reserve.max_intake_per_sec as f64 * intake_factor as f64
+            - previous as f64)
+            .max(0.0)
             * dt as f64)
             .min(f32::MAX as f64)) as f32;
         let accepted = state.accept_charge(&consumer.reserve, offered, budget)?;
@@ -458,6 +473,23 @@ impl PowerSystem {
         available_stock: &BTreeMap<String, i64>,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<PowerTickResult, String> {
+        self.tick_energy_with_effects(
+            dt,
+            bindings,
+            available_stock,
+            &crate::resources::energy_network::EnergyHardwareEffects::default(),
+            choose,
+        )
+    }
+
+    pub fn tick_energy_with_effects(
+        &mut self,
+        dt: f32,
+        bindings: &EnergyCoolantBindings,
+        available_stock: &BTreeMap<String, i64>,
+        effects: &crate::resources::energy_network::EnergyHardwareEffects,
+        choose: &mut impl FnMut(usize) -> usize,
+    ) -> Result<PowerTickResult, String> {
         if available_stock.values().any(|value| *value < 0) {
             return Err("coolant stocks cannot be negative".into());
         }
@@ -474,9 +506,15 @@ impl PowerSystem {
         }
         let mut next = self.clone();
         let before = next.battery_charge();
-        let energy =
-            next.network
-                .tick(&next.hardware, &next.ship, dt, bindings, &budgets, choose)?;
+        let energy = next.network.tick_with_effects(
+            &next.hardware,
+            &next.ship,
+            dt,
+            bindings,
+            &budgets,
+            effects,
+            choose,
+        )?;
         let mut withdrawals = BTreeMap::new();
         for (id, used) in &energy.coolant_used {
             let old = next.coolant_credit.get(id).copied().unwrap_or(0.0);

@@ -283,13 +283,19 @@ pub fn tick_shields(
         Option<&mut crate::ship::power::ShipPowerSystem>,
         Option<&ShipSystemControlSources>,
         Option<&mut ShieldsDamageHistory>,
+        Option<&crate::ship::physical_damage::ShipDamage>,
     )>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
         return;
     }
-    for (mut shield, mods, mut power, sources, mut history) in shields_q.iter_mut() {
+    for (mut shield, mods, mut power, sources, mut history, physical) in shields_q.iter_mut() {
+        let operation = |id: &SystemId| {
+            physical.map_or(1.0, |damage| {
+                damage.factor(id, phoenix_model::damage::DamageBinding::Operation)
+            })
+        };
         let before_work: Vec<_> = shield.0.facings.iter().map(|facing| facing.hp).collect();
         let regen_scale = mods
             .map(|m| m.get(&crate::core::messages::ModifierSlot::ShieldRegen))
@@ -303,13 +309,14 @@ pub fn tick_shields(
                 facing.protection_fraction = 0.0;
                 continue;
             };
-            let available = sources.is_none_or(|sources| !sources.0.is_offline(&id));
+            let available =
+                sources.is_none_or(|sources| !sources.0.is_offline(&id)) && operation(&id) > 0.0;
             facing.protection_fraction = if available && facing.raised && facing.is_online() {
                 power.as_deref_mut().map_or(0.0, |power| {
                     power
                         .0
                         .spend_continuous(&id, facing.energy_config.upkeep_per_sec * dt)
-                        .map_or(0.0, |grant| grant.fraction)
+                        .map_or(0.0, |grant| grant.fraction * operation(&id))
                 })
             } else {
                 0.0
@@ -327,7 +334,9 @@ pub fn tick_shields(
             let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id) else {
                 continue;
             };
-            if !config.recovery_targets.contains(target)
+            let efficiency = operation(&id);
+            if efficiency <= 0.0
+                || !config.recovery_targets.contains(target)
                 || sources.is_some_and(|sources| sources.0.is_offline(&id))
                 || !facing.is_online()
                 || config.recovery_energy_per_hp <= 0.0
@@ -338,7 +347,8 @@ pub fn tick_shields(
             let wanted = facing
                 .stored_strength()
                 .min(config.discharge_hp_per_sec as f64 * dt as f64);
-            let exact_offer = (wanted * config.recovery_energy_per_hp as f64).min(f32::MAX as f64);
+            let conversion = config.recovery_energy_per_hp as f64 * efficiency as f64;
+            let exact_offer = (wanted * conversion).min(f32::MAX as f64);
             let mut offered = exact_offer as f32;
             if offered as f64 > exact_offer {
                 offered = f32::from_bits(offered.to_bits() - 1);
@@ -358,10 +368,15 @@ pub fn tick_shields(
             // Stage both owners: malformed numerical state cannot credit the
             // recipient and then fail to debit its donor.
             let mut staged = power.0.clone();
-            let Ok(accepted) = staged.accept_recovered_energy(target, dt, offered) else {
+            let intake = physical.map_or(1.0, |damage| {
+                damage.factor(target, phoenix_model::damage::DamageBinding::Intake)
+            });
+            let Ok(accepted) =
+                staged.accept_recovered_energy_with_intake_factor(target, dt, offered, intake)
+            else {
                 continue;
             };
-            let removal = accepted as f64 / config.recovery_energy_per_hp as f64;
+            let removal = accepted as f64 / conversion;
             if removal > wanted || facing.discharge_strength(removal).is_err() {
                 continue;
             }
@@ -388,14 +403,15 @@ pub fn tick_shields(
                 else {
                     return 0.0;
                 };
-                if sources.is_some_and(|sources| sources.0.is_offline(&id)) {
+                if sources.is_some_and(|sources| sources.0.is_offline(&id)) || operation(&id) <= 0.0
+                {
                     return 0.0;
                 }
                 let wanted_hp = wanted_hp.min(facing.regen_per_sec * dt * regen_scale.max(0.0));
                 let cost = wanted_hp * facing.energy_config.recharge_energy_per_hp;
                 power.as_deref_mut().map_or(0.0, |p| {
                     p.0.spend_continuous(&id, cost).map_or(0.0, |grant| {
-                        wanted_hp * grant.fraction / (facing.regen_per_sec * dt)
+                        wanted_hp * grant.fraction * operation(&id) / (facing.regen_per_sec * dt)
                     })
                 })
             })

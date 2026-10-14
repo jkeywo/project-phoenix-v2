@@ -351,3 +351,33 @@ fn control_setters_validate_before_changing_canonical_requests() {
     ));
     assert_eq!(power.capture_continuation(), original);
 }
+
+#[test]
+fn recovered_charge_shares_the_damaged_intake_budget_with_actual_prior_delivery() {
+    let mut power = PowerSystem::default();
+    let id = power.config().consumers[0].system.clone();
+    let maximum = power.config().consumers[0].reserve.max_intake_per_sec;
+    power.network_mut().consumers.get_mut(&id).unwrap().energy = 0.0;
+    power.last_intake_per_sec.insert(id.clone(), maximum * 0.25);
+    let accepted = power
+        .accept_recovered_energy_with_intake_factor(&id, 1.0, maximum, 0.5)
+        .unwrap();
+    assert!((accepted - maximum * 0.25).abs() < 0.0001);
+    assert_eq!(
+        power
+            .accept_recovered_energy_with_intake_factor(&id, 1.0, maximum, 0.5)
+            .unwrap(),
+        0.0
+    );
+    assert_eq!(
+        power
+            .accept_recovered_energy_with_intake_factor(&id, 1.0, maximum, 0.0)
+            .unwrap(),
+        0.0
+    );
+    let before = power.capture_continuation();
+    assert!(power
+        .accept_recovered_energy_with_intake_factor(&id, 1.0, maximum, f32::NAN)
+        .is_err());
+    assert_eq!(power.capture_continuation(), before);
+}

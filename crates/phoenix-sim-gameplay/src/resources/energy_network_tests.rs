@@ -592,3 +592,129 @@ fn disabled_generation_still_exports_finite_reserve_and_preserves_cooling_and_co
     state.generation_enabled = true;
     assert!(run(&mut state, &cfg, &ship, &bindings, &coolant, 0.5).generation_accepted > 0.0);
 }
+
+#[test]
+fn damaged_intake_preserves_requests_and_charged_local_work() {
+    let (cfg, ship, bindings, coolant) = fixture(vec![group("drive", None, 10.0, 0)]);
+    let id = cfg.consumers[0].system.clone();
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.generation_enabled = false;
+    state.consumers.get_mut(&id).unwrap().energy = 50.0;
+    let mut effects = EnergyHardwareEffects::default();
+    effects.consumers.insert(
+        id.clone(),
+        EnergyLinkEffects {
+            intake: 0.5,
+            cooling: 1.0,
+        },
+    );
+    let report = state
+        .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &effects, &mut |_| 0)
+        .unwrap();
+    close(report.delivered_energy, 5.0);
+    close(state.consumers[&id].energy, 55.0);
+    close(state.reactor.energy, 195.0);
+    close(
+        state.groups[&PowerGroupId("drive".into())].desired_flow_per_sec,
+        10.0,
+    );
+    effects.consumers.get_mut(&id).unwrap().intake = 0.0;
+    let report = state
+        .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &effects, &mut |_| 0)
+        .unwrap();
+    close(report.delivered_energy, 0.0);
+    assert!(state.try_spend_discrete(&cfg, &id).unwrap());
+    close(state.consumers[&id].energy, 53.0);
+    run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+    close(state.consumers[&id].energy, 63.0);
+}
+
+#[test]
+fn cooling_link_damage_reduces_actual_cooling_and_real_coolant_debit() {
+    let (cfg, ship, bindings, coolant) = fixture(vec![group("drive", None, 0.0, 0)]);
+    let id = cfg.consumers[0].system.clone();
+    let mut original = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    original.reactor.heat = 20.0;
+    original.consumers.get_mut(&id).unwrap().heat = 20.0;
+    for factor in [1.0, 0.5, 0.0] {
+        let mut state = original.clone();
+        let effects = EnergyHardwareEffects {
+            reactor: EnergyLinkEffects {
+                intake: 1.0,
+                cooling: factor,
+            },
+            consumers: BTreeMap::from([(
+                id.clone(),
+                EnergyLinkEffects {
+                    intake: 1.0,
+                    cooling: factor,
+                },
+            )]),
+            ..Default::default()
+        };
+        let report = state
+            .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &effects, &mut |_| 0)
+            .unwrap();
+        close(state.reactor.heat, 20.0 - factor);
+        close(state.consumers[&id].heat, 20.0 - 2.0 * factor);
+        close(report.coolant_used["coolant"], 0.3 * factor);
+        close(state.reactor_cooling_per_sec, 1.0);
+        close(
+            state.groups[&PowerGroupId("drive".into())].desired_cooling_per_sec,
+            2.0,
+        );
+    }
+}
+
+#[test]
+fn reactor_operation_caps_actual_generation_and_export_without_changing_intent() {
+    let (mut cfg, ship, bindings, coolant) = fixture(vec![group("drive", None, 5.0, 0)]);
+    cfg.reactor.max_output_per_sec = 20.0;
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.reactor.energy = 0.0;
+    let effects = EnergyHardwareEffects {
+        reactor_operation: 0.5,
+        ..Default::default()
+    };
+    let report = state
+        .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &effects, &mut |_| 0)
+        .unwrap();
+    close(report.generation_accepted, 10.0);
+    close(report.delivered_energy, 5.0);
+    close(state.output_actual_per_sec, 10.0);
+    close(state.output_target_per_sec, 20.0);
+    let reserve = state.reactor.energy;
+    let stopped = EnergyHardwareEffects {
+        reactor_operation: 0.0,
+        ..Default::default()
+    };
+    let report = state
+        .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &stopped, &mut |_| 0)
+        .unwrap();
+    close(report.delivered_energy, 0.0);
+    close(report.generation_accepted, 0.0);
+    close(state.reactor.energy, reserve);
+    close(state.output_target_per_sec, 20.0);
+    run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+    close(state.output_actual_per_sec, 20.0);
+}
+
+#[test]
+fn invalid_transient_effects_refuse_before_state_or_randomness_changes() {
+    let (cfg, ship, bindings, coolant) = fixture(vec![group("drive", None, 5.0, 0)]);
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    let before = state.clone();
+    let effects = EnergyHardwareEffects {
+        reactor_operation: f32::NAN,
+        ..Default::default()
+    };
+    let mut draws = 0;
+    assert!(state
+        .tick_with_effects(&cfg, &ship, 1.0, &bindings, &coolant, &effects, &mut |_| {
+            draws += 1;
+            0
+        })
+        .is_err());
+    assert_eq!(state, before);
+    assert_eq!(draws, 0);
+}

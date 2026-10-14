@@ -31,6 +31,58 @@ pub fn coolant_bindings(
     })
 }
 
+/// Derive one ephemeral view of physical links. Authored limits and operator
+/// requests remain unchanged; repaired machinery resumes those same requests.
+fn hardware_effects(
+    power: &crate::modifiers::power_system::PowerSystem,
+    physical: Option<&crate::ship::compartment_damage::ShipDamage>,
+    sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+) -> crate::resources::energy_network::EnergyHardwareEffects {
+    use crate::resources::energy_network::{EnergyHardwareEffects, EnergyLinkEffects};
+    use phoenix_model::damage::DamageBinding;
+    let factor = |id: &crate::core::messages::SystemId, binding| {
+        physical.map_or(1.0, |damage| damage.factor(id, binding))
+    };
+    let mut effects = EnergyHardwareEffects::default();
+    for system in power
+        .ship_config()
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+    {
+        effects.reactor_operation = effects.reactor_operation.min(
+            if sources.is_some_and(|sources| sources.0.is_offline(&system.id)) {
+                0.0
+            } else {
+                factor(&system.id, DamageBinding::Operation)
+            },
+        );
+        effects.reactor.intake = effects
+            .reactor
+            .intake
+            .min(factor(&system.id, DamageBinding::Intake));
+        effects.reactor.cooling = effects
+            .reactor
+            .cooling
+            .min(factor(&system.id, DamageBinding::Cooling));
+    }
+    effects.consumers = power
+        .config()
+        .consumers
+        .iter()
+        .map(|consumer| {
+            (
+                consumer.system.clone(),
+                EnergyLinkEffects {
+                    intake: factor(&consumer.system, DamageBinding::Intake),
+                    cooling: factor(&consumer.system, DamageBinding::Cooling),
+                },
+            )
+        })
+        .collect();
+    effects
+}
+
 /// A queued stock change is part of the transaction view. World applies it once
 /// and publishes threshold edges through its existing capacity owner.
 pub fn tick_power_system(
@@ -45,6 +97,7 @@ pub fn tick_power_system(
         Option<&InfrastructureCondition>,
         Option<&crate::ship_plugin::ShipSystemControlSources>,
         Option<&mut PowerBrownoutState>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
     let mut order: Vec<_> = ships
@@ -53,7 +106,7 @@ pub fn tick_power_system(
         .collect();
     order.sort_by(|a, b| a.0.cmp(&b.0));
     for (_, entity) in order {
-        let Ok((_, uuid, mut power, services, infrastructure, sources, brownout)) =
+        let Ok((_, uuid, mut power, services, infrastructure, sources, brownout, physical)) =
             ships.get_mut(entity)
         else {
             continue;
@@ -93,24 +146,19 @@ pub fn tick_power_system(
             .map(|(id, _)| id.clone())
             .collect();
         let mut candidate = power.0.clone();
-        let requested_output = candidate.network().output_target_per_sec;
-        if sources.is_some_and(|sources| {
-            sources
-                .0
-                .is_offline(&crate::ship::system_registry::power_reactor_system_id())
-        }) {
-            candidate.network_mut().output_actual_per_sec = 0.0;
-            candidate.network_mut().output_target_per_sec = 0.0;
-        }
+        let effects = hardware_effects(&candidate, physical, sources);
         let result = crate::sim_rng::with_live_stream(rng.as_deref(), |generator| {
-            candidate.tick_energy(time.delta_secs(), &bindings, &stocks, &mut |count| {
-                generator.below(count as u32) as usize
-            })
+            candidate.tick_energy_with_effects(
+                time.delta_secs(),
+                &bindings,
+                &stocks,
+                &effects,
+                &mut |count| generator.below(count as u32) as usize,
+            )
         });
         let Ok(result) = result else {
             continue;
         };
-        candidate.network_mut().output_target_per_sec = requested_output;
         for (id, amount) in result.coolant_withdrawals {
             if amount > 0 {
                 adjustments.0.push(CapacityAdjustment {
@@ -156,3 +204,7 @@ pub fn tick_power_system(
         power.0 = candidate;
     }
 }
+
+#[cfg(test)]
+#[path = "energy_runtime_effects_tests.rs"]
+mod effects_tests;

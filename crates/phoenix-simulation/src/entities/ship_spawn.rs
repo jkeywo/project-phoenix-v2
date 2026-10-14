@@ -84,6 +84,7 @@ pub(super) fn install(
             cmds.insert(access);
         }
     }
+    crate::resources::logistics_server::install(config, cmds);
     insert_shield_tuning(config, cmds);
     install_weapons(config, cmds);
     install_torpedoes(config, cmds);

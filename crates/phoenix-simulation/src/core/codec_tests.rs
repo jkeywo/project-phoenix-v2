@@ -5413,6 +5413,7 @@ fn system_blackboard_torpedo_magazine_serde_fields() {
         torpedoes_remaining: 3,
         capacity: 10,
         torpedoes_in_flight: 0,
+        ..Default::default()
     });
     let json = serde_json::to_string(&bb).unwrap();
     assert!(json.contains("\"kind\":\"TorpedoMagazine\""), "got: {json}");

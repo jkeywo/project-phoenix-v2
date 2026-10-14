@@ -9,6 +9,7 @@ entities:
         - "Selected in docs/gameplay-redesign/system-review.md; detailed Engineering exposes main-store goals, reserves and external supply priorities. Simplest and middle delegate those decisions without mandatory policy setup. Local targets remain with their own operators."
         - "Actual stocks stay in their existing canonical capacity/magazine owners. Hold stock and local stock are different physical quantities, not mirrored views. A target does not guarantee supply, change another System's settings or authorise a protected allocation."
         - "Inventory reads permitted demand reports, source readings and reserve policy through explicit typed Console bindings. Co-hosted tabs do not pool knowledge; no central omniscient planner or second temporary-Backfill policy is introduced."
+        - "For a Human controller, enabled targets are standing machinery orders: routine eligible batches do not require repeated dispatch presses. Delegated/Backfill controllers use the ordinary authored tree to choose their dispatch/start intent. Both consume the same permitted candidate view and shared physical executor; no AI runs beside a Human controller. Execution rechecks current targets, actual incoming/held occupancy and floors before committing."
 
   - decision: located-delivery-batches-and-receiving-claims
     core:

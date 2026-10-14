@@ -23,4 +23,5 @@ pub mod interior;
 pub mod job;
 pub mod logistics;
 
+pub mod logistics_ui;
 pub mod umbilical;

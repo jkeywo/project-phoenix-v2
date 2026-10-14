@@ -426,7 +426,7 @@ use super::*;
 /// 45: persistent physical repair-team positions and shared access-boundary state.
 /// 46: physical damage, retained impact profiles/samples, typed parts-backed
 /// repair stages and reversible actor defeat frontiers replace primary ship HP.
-pub const SNAPSHOT_FORMAT: u32 = 46;
+pub const SNAPSHOT_FORMAT: u32 = 47;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -510,7 +510,8 @@ pub const SNAPSHOT_FORMAT: u32 = 46;
 /// access boundaries retain actual transitions separately from protected orders.
 /// "0.18" — directional compartment damage, component conditions, finite-parts
 /// restoration and recoverable neutralization replace aggregate ship destruction.
-pub const SIMULATION_RULES: &str = "0.18";
+/// "0.19" adds timed cargo and conserved destination-space claims.
+pub const SIMULATION_RULES: &str = "0.19";
 
 /// The authored data, computed rather than remembered.
 ///

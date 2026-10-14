@@ -1,0 +1,689 @@
+//! Fitted logistics: ordinary System commands, permitted reports and real stocks.
+use crate::console::weapons::torpedo::TorpedoSystemResource;
+use crate::core::messages::{AdmittedCommands, SystemBlackboard, SystemControlPayload as Control};
+use crate::infrastructure::{FlagChange, InfrastructureCondition};
+use crate::resources::logistics::{
+    apply_stock_action, CompiledLogistics, EndpointStock, LogisticsState, LogisticsStockAction,
+    ResourceEndpoint,
+};
+use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
+use bevy::prelude::*;
+use phoenix_model::logistics::StoreRole;
+use phoenix_model::logistics_ui::*;
+use std::collections::BTreeMap;
+
+pub(crate) fn register(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    app.declare_state::<CompiledShipLogistics>(
+        StateClass::Derived,
+        "located-delivery-batches-and-receiving-claims",
+    )
+    .declare_state::<ShipLogistics>(
+        StateClass::Folded,
+        "located-delivery-batches-and-receiving-claims",
+    )
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::LOGISTICS_KIND).with_feedback(
+            FeedbackAddress::DeclaredKindOrCanonical("logistics"),
+            &[
+                Payload::SetLogisticsEnabled,
+                Payload::SetStockTarget,
+                Payload::SetStockReserve,
+                Payload::DispatchDelivery,
+                Payload::ReturnDelivery,
+            ],
+        ),
+    );
+    app.register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::TORPEDO_MAGAZINE_KIND).with_feedback(
+            FeedbackAddress::DeclaredKindOrCanonical("torpedo-magazine"),
+            &[Payload::SetStockTarget],
+        ),
+    );
+    app.add_systems(
+        FixedUpdate,
+        operate_ai
+            .in_set(crate::sim_sets::SimSet::Input)
+            .after(crate::sim_sets::FixedStep::ApplyConsoleViews)
+            .run_if(crate::ai::cadence::ai_tick_ready),
+    );
+    app.add_systems(
+        FixedUpdate,
+        (tick, refuse_unmanaged_stock_controls)
+            .chain()
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(crate::infrastructure::server::tick_infrastructure_condition),
+    );
+    app.add_systems(
+        FixedUpdate,
+        publish
+            .in_set(crate::sim_sets::SimSet::Publish)
+            .after(crate::console::weapons::blackboard::publish_torpedo_magazine_blackboard),
+    );
+}
+
+#[derive(Component, Clone)]
+pub struct CompiledShipLogistics(pub CompiledLogistics);
+
+#[derive(Component, Clone, Debug)]
+pub struct ShipLogistics(pub LogisticsState);
+
+// Other shipped magazines still expose the same admitted System boundary, but
+// only fitted logistics owns a stock goal. Complete a correlated refusal rather
+// than advertising support and silently dropping an unsupported local setting.
+fn refuse_unmanaged_stock_controls(
+    ships: Query<&AdmittedCommands, Without<ShipLogistics>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+) {
+    for admitted in &ships {
+        for command in &admitted.0 {
+            if matches!(command.payload, Control::SetStockTarget { .. }) {
+                crate::command_admission::finish_admitted_action_feedback(
+                    &mut outbound,
+                    command,
+                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                );
+            }
+        }
+    }
+}
+
+/// Install from the same validated definition for players, NPCs and restores.
+pub(crate) fn install(
+    config: &crate::entities::config::EntityConfig,
+    commands: &mut EntityCommands,
+) {
+    if let Some(profile) = crate::resources::logistics_profile::compile_entity_logistics(config)
+        .expect("validated logistics profile")
+    {
+        let state = LogisticsState::new(&profile);
+        commands.insert((CompiledShipLogistics(profile), ShipLogistics(state)));
+    }
+}
+
+/// Temporary transaction projection. Canonical quantities remain with their
+/// existing Infrastructure and magazine owners, including tube commitments.
+pub fn endpoint_view(
+    profile: &CompiledLogistics,
+    inventory: Option<&InfrastructureCondition>,
+    torpedoes: Option<&TorpedoSystemResource>,
+) -> Result<BTreeMap<ResourceEndpoint, EndpointStock>, String> {
+    profile
+        .config()
+        .stores
+        .iter()
+        .map(|store| {
+            let (stock, held) =
+                crate::resources::server::endpoint_stock(&store.endpoint, inventory, torpedoes)
+                    .ok_or("managed stock owner is unavailable")?;
+            Ok((store.endpoint.clone(), EndpointStock { stock, held }))
+        })
+        .collect()
+}
+
+/// Validate every changed owner before publishing any of them. Returned flag
+/// edges and capacity levels are mirrored by the normal infrastructure adapter.
+fn transact(
+    profile: &CompiledLogistics,
+    action: &LogisticsStockAction,
+    inventory: Option<&mut InfrastructureCondition>,
+    torpedoes: Option<&mut TorpedoSystemResource>,
+) -> Result<(i64, Vec<FlagChange>), String> {
+    let mut stocks = endpoint_view(profile, inventory.as_deref(), torpedoes.as_deref())?;
+    let moved = apply_stock_action(profile, action, &mut stocks)?;
+    let mut next_inventory = inventory.as_deref().map(|owner| owner.0.clone());
+    let mut next_torpedoes = torpedoes.as_deref().map(|owner| owner.0.clone());
+    let mut flags = Vec::new();
+    for (endpoint, value) in stocks {
+        match endpoint {
+            ResourceEndpoint::Capacity { id } => {
+                flags.extend(
+                    next_inventory
+                        .as_mut()
+                        .ok_or("missing capacity owner")?
+                        .replace_capacity_stock(&id, value.stock)?,
+                );
+            }
+            ResourceEndpoint::TorpedoMagazine {} => {
+                next_torpedoes
+                    .as_mut()
+                    .ok_or("missing magazine owner")?
+                    .magazine = value.stock;
+            }
+        }
+    }
+    if let (Some(owner), Some(next)) = (inventory, next_inventory) {
+        owner.0 = next;
+    }
+    if let (Some(owner), Some(next)) = (torpedoes, next_torpedoes) {
+        owner.0 = next;
+    }
+    Ok((moved, flags))
+}
+
+/// Execute a maintained/local order against the current real deficit. Both
+/// direct requests and controller-maintained requests use this same boundary;
+/// a stale report or another request this tick cannot reserve the deficit twice.
+fn dispatch_order(
+    profile: &CompiledLogistics,
+    state: &mut LogisticsState,
+    tick: u64,
+    request: &DeliveryRequest,
+    mut inventory: Option<&mut InfrastructureCondition>,
+    mut torpedoes: Option<&mut TorpedoSystemResource>,
+    flags: &mut Vec<FlagChange>,
+) -> Result<(), String> {
+    let stocks = endpoint_view(profile, inventory.as_deref(), torpedoes.as_deref())?;
+    let destination = profile.store(&request.destination)?;
+    let current = &stocks[&destination.endpoint];
+    let occupied = current
+        .stock
+        .level
+        .checked_add(current.stock.incoming_total())
+        .and_then(|amount| amount.checked_add(current.held))
+        .ok_or("local occupancy overflows")?;
+    let deficit = state.goals[&destination.id].saturating_sub(occupied).max(0);
+    let amount = request.amount.min(deficit);
+    if amount <= 0 {
+        return Err("local stock target has no remaining deficit".into());
+    }
+    state
+        .dispatch(
+            profile,
+            tick,
+            &request.source,
+            &request.destination,
+            amount,
+            |action| {
+                let (quantity, edges) = transact(
+                    profile,
+                    action,
+                    inventory.as_deref_mut(),
+                    torpedoes.as_deref_mut(),
+                )?;
+                flags.extend(edges);
+                Ok(quantity)
+            },
+        )
+        .map(|_| ())
+}
+
+/// Additional load room after all capacity and shared-compartment commitments.
+pub fn receiving_room(
+    profile: Option<&CompiledShipLogistics>,
+    endpoint: &ResourceEndpoint,
+    stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
+) -> Result<i64, String> {
+    let Some(profile) = profile else {
+        return Ok(i64::MAX);
+    };
+    let Some(store) = profile
+        .0
+        .config()
+        .stores
+        .iter()
+        .find(|store| &store.endpoint == endpoint)
+    else {
+        return Ok(i64::MAX);
+    };
+    profile.0.receiving_headroom(stocks, &store.id)
+}
+
+fn operate_ai(
+    tick: Res<crate::sim_tick::SimTick>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
+        &ShipSystemControlSources,
+        &ShipConfigComponent,
+        &ShipLogistics,
+        &crate::server_app::ShipSystemBlackboards,
+        &crate::ai::state_tree_runtime::ShipAiTreePrograms,
+        &mut crate::ai::state_tree_runtime::ShipAiTreeRuntime,
+        &mut AdmittedCommands,
+    )>,
+) {
+    use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
+    for (uuid, sources, config, logistics, boards, programs, mut runtimes, mut admitted) in
+        &mut ships
+    {
+        let owner = &logistics.0.owner;
+        if !crate::ai::host::ai_operates(&sources.0, owner) {
+            continue;
+        }
+        let permitted = config.0.observations_for_system(owner, &boards.0);
+        let Some(SystemBlackboard::Logistics(board)) = permitted.get(owner) else {
+            continue;
+        };
+        let Some(runtime) = runtimes.0.get_mut(owner) else {
+            continue;
+        };
+        let facts = BTreeMap::from([
+            ("enabled".into(), board.enabled),
+            ("delivery_available".into(), board.next_delivery.is_some()),
+        ]);
+        let channels = BTreeMap::from([("dispatch".into(), false)]);
+        let Ok(TreeHostOutcome::Evaluated(result)) = decide_tree(
+            &sources.0,
+            owner,
+            programs.0.get(owner),
+            &facts,
+            &channels,
+            runtime,
+            tick.0,
+        ) else {
+            continue;
+        };
+        if result.intents.get("dispatch") == Some(&true) {
+            if let Some(request) = &board.next_delivery {
+                crate::command_admission::ai_emit::emit_ai_command(
+                    uuid,
+                    owner.clone(),
+                    Control::DispatchDelivery {
+                        source: request.source.clone(),
+                        destination: request.destination.clone(),
+                        amount: request.amount,
+                    },
+                    sources,
+                    &sessions,
+                    Some(config),
+                    &mut admitted,
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn tick(
+    tick: Res<crate::sim_tick::SimTick>,
+    time: Res<Time>,
+    mut runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+    mut ships: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &CompiledShipLogistics,
+        &mut ShipLogistics,
+        &AdmittedCommands,
+        &ShipSystemControlSources,
+        &ShipConfigComponent,
+        &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
+        Option<&crate::ship::access::InteriorAccess>,
+        Option<&mut InfrastructureCondition>,
+        Option<&mut TorpedoSystemResource>,
+        Option<&mut crate::ship::power::ShipPowerSystem>,
+    )>,
+) {
+    let mut order: Vec<_> = ships.iter().map(|(uuid, ..)| uuid.0.clone()).collect();
+    order.sort();
+    for uuid in order {
+        let Some((
+            _,
+            profile,
+            mut owner,
+            admitted,
+            sources,
+            config,
+            boards,
+            damage,
+            access,
+            mut inventory,
+            mut torpedoes,
+            mut power,
+        )) = ships.iter_mut().find(|(id, ..)| id.0 == uuid)
+        else {
+            continue;
+        };
+        let mut next = owner.0.clone();
+        let mut next_inventory = inventory.as_deref().cloned();
+        let mut next_torpedoes = torpedoes.as_deref().cloned();
+        let mut next_power = power.as_deref().cloned();
+        let mut flags = Vec::new();
+        let blocked = access
+            .map(|access| access.blocked_connections(&profile.0.graph().config))
+            .unwrap_or_default();
+        let factor = damage.map_or(1.0, |damage| {
+            damage.factor(&next.owner, phoenix_model::damage::DamageBinding::Operation)
+        });
+        let policy = sources.0.policy_for(&next.owner);
+        let offline = !sources.0.entries().any(|(id, _)| id == &next.owner)
+            || !(policy.accept_human_input || policy.operate_ai);
+        // Return intent is applied before advancing, so a cancellation can never
+        // deliver to the destination during the same tick it was recalled.
+        let mut recalls = BTreeMap::new();
+        let control_owner = next.owner.clone();
+        for command in admitted.for_target(&control_owner.0) {
+            if let Control::ReturnDelivery { job } = &command.payload {
+                recalls.insert(
+                    *job,
+                    next.request_return(phoenix_model::job::JobId(*job)).is_ok(),
+                );
+            }
+            if let Control::SetLogisticsEnabled { enabled } = &command.payload {
+                next.set_enabled(*enabled);
+            }
+        }
+        let advanced = next.tick(
+            &profile.0,
+            tick.0,
+            time.delta_secs(),
+            &blocked,
+            |action| {
+                let (quantity, edges) = transact(
+                    &profile.0,
+                    action,
+                    next_inventory.as_mut(),
+                    next_torpedoes.as_mut(),
+                )?;
+                flags.extend(edges);
+                Ok(quantity)
+            },
+            |system, dt| {
+                if offline || factor <= 0.0 {
+                    return Ok(0.0);
+                }
+                next_power.as_mut().map_or(Ok(0.0), |power| {
+                    power
+                        .0
+                        .work_continuous(system, dt, 1.0)
+                        .map(|grant| grant.fraction * factor)
+                })
+            },
+        );
+        if let Err(error) = advanced {
+            warn!(%uuid, %error, "Logistics step refused; staged stock and energy discarded");
+            continue;
+        }
+        if offline || factor <= 0.0 {
+            next.blocked = next
+                .batches
+                .keys()
+                .map(|id| (*id, crate::resources::logistics::DeliveryBlock::Disabled))
+                .collect();
+        }
+        // New requests are committed after existing work. A newly dispatched
+        // batch cannot advance in the same tick and no queued request owns stock.
+        for command in &admitted.0 {
+            let target = &command.target;
+            let result = match &command.payload {
+                Control::SetLogisticsEnabled { enabled } if target == &next.owner => {
+                    next.set_enabled(*enabled);
+                    Ok(())
+                }
+                Control::SetStockTarget { store, amount } => {
+                    profile.0.store(store).and_then(|binding| {
+                        let expected = binding.system.as_ref().unwrap_or(&next.owner);
+                        if target != expected {
+                            return Err("stock target belongs to another System".into());
+                        }
+                        next.set_target(&profile.0, store, *amount)
+                    })
+                }
+                Control::SetStockReserve { store, amount } if target == &next.owner => {
+                    profile.0.store(store).and_then(|binding| {
+                        if binding.role != StoreRole::Main {
+                            return Err("local stores do not own main reserve floors".into());
+                        }
+                        next.set_reserve(&profile.0, store, *amount)
+                    })
+                }
+                Control::DispatchDelivery {
+                    source,
+                    destination,
+                    amount,
+                } if target == &next.owner => {
+                    if offline || factor <= 0.0 {
+                        Err("handling machinery unavailable".into())
+                    } else {
+                        dispatch_order(
+                            &profile.0,
+                            &mut next,
+                            tick.0,
+                            &DeliveryRequest {
+                                source: source.clone(),
+                                destination: destination.clone(),
+                                amount: *amount,
+                            },
+                            next_inventory.as_mut(),
+                            next_torpedoes.as_mut(),
+                            &mut flags,
+                        )
+                    }
+                }
+                Control::ReturnDelivery { job } if target == &next.owner => {
+                    if recalls.get(job) == Some(&true) {
+                        Ok(())
+                    } else {
+                        Err("unknown active delivery".into())
+                    }
+                }
+                _ => continue,
+            };
+            crate::command_admission::finish_admitted_action_feedback(
+                &mut outbound,
+                command,
+                if result.is_ok() {
+                    crate::core::messages::ActionFeedbackOutcome::Applied
+                } else {
+                    crate::core::messages::ActionFeedbackOutcome::Refused
+                },
+            );
+        }
+        // A Human's enabled stock targets are standing machinery orders. AI
+        // controllers instead supply their own ordinary authored tree intent.
+        // Missing/Offline/Simplified sources must never select this Human path.
+        let human = sources.0.entries().any(|(id, source)| {
+            id == &next.owner && *source == crate::ship::control_source::ControlSource::Human
+        });
+        if human && !offline && factor > 0.0 && next.enabled {
+            let permitted = config.0.observations_for_system(&next.owner, &boards.0);
+            if let Some(SystemBlackboard::Logistics(board)) = permitted.get(&next.owner) {
+                if let Some(request) = &board.next_delivery {
+                    let _ = dispatch_order(
+                        &profile.0,
+                        &mut next,
+                        tick.0,
+                        request,
+                        next_inventory.as_mut(),
+                        next_torpedoes.as_mut(),
+                        &mut flags,
+                    );
+                }
+            }
+        }
+        owner.0 = next;
+        if let (Some(owner), Some(next)) = (inventory.as_deref_mut(), next_inventory) {
+            *owner = next;
+        }
+        if let (Some(owner), Some(next)) = (torpedoes.as_deref_mut(), next_torpedoes) {
+            *owner = next;
+        }
+        if let (Some(owner), Some(next)) = (power.as_deref_mut(), next_power) {
+            *owner = next;
+        }
+        if let Some(runtime) = runtime.as_deref_mut() {
+            if let Some(inventory) = inventory.as_deref() {
+                for capacity in inventory.0.capacities() {
+                    runtime.flags.set_flag_value(&capacity.id, capacity.level);
+                }
+            }
+            crate::infrastructure::server::mirror_flags(runtime, &flags, &uuid, &None);
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn publish(
+    mut ships: Query<(
+        &CompiledShipLogistics,
+        &ShipLogistics,
+        &ShipConfigComponent,
+        Option<&InfrastructureCondition>,
+        &mut crate::server_app::ShipSystemBlackboards,
+    )>,
+) {
+    for (profile, state, config, inventory, mut boards) in &mut ships {
+        let permitted = config.0.observations_for_system(&state.0.owner, &boards.0);
+        let mut stores = Vec::new();
+        for binding in &profile.0.config().stores {
+            let (level, available, incoming, held, target) =
+                match (&binding.role, &binding.endpoint) {
+                    (StoreRole::Main, ResourceEndpoint::Capacity { id }) => {
+                        let Some(stock) = inventory.and_then(|owner| owner.0.capacity_stock(id))
+                        else {
+                            continue;
+                        };
+                        (
+                            stock.level,
+                            stock.available(),
+                            stock.incoming_total(),
+                            0,
+                            state.0.goals[&binding.id],
+                        )
+                    }
+                    (StoreRole::Local, ResourceEndpoint::TorpedoMagazine {}) => {
+                        let Some(SystemBlackboard::TorpedoMagazine(board)) =
+                            binding.system.as_ref().and_then(|id| permitted.get(id))
+                        else {
+                            continue;
+                        };
+                        let Some(target) = board.stock_target else {
+                            continue;
+                        };
+                        (
+                            board.stock_level,
+                            i64::from(board.torpedoes_remaining),
+                            board.stock_incoming,
+                            board.stock_held,
+                            target,
+                        )
+                    }
+                    _ => continue,
+                };
+            stores.push(LogisticsStoreView {
+                id: binding.id.clone(),
+                resource: binding.resource.clone(),
+                role: if binding.role == StoreRole::Main {
+                    "main"
+                } else {
+                    "local"
+                }
+                .into(),
+                system: binding.system.clone(),
+                level,
+                available,
+                held,
+                ceiling: profile.0.endpoints()[&binding.endpoint].ceiling,
+                incoming,
+                target,
+                reserve: state.0.floors[&binding.id],
+                compartment: binding.compartment.clone(),
+            });
+        }
+        let next_delivery = if state.0.enabled
+            && state.0.batches.len() < usize::from(profile.0.handling().max_active)
+        {
+            stores
+                .iter()
+                .filter(|s| s.role == "local")
+                .find_map(|local| {
+                    let binding = profile.0.store(&local.id).ok()?;
+                    let source = stores
+                        .iter()
+                        .find(|source| Some(&source.id) == binding.source.as_ref())?;
+                    let deficit = local
+                        .target
+                        .saturating_sub(
+                            local
+                                .level
+                                .saturating_add(local.incoming)
+                                .saturating_add(local.held),
+                        )
+                        .max(0);
+                    let amount = deficit
+                        .min(source.available)
+                        .min(source.level.saturating_sub(source.reserve).max(0))
+                        .min(profile.0.handling().max_batch);
+                    (amount > 0).then(|| DeliveryRequest {
+                        source: source.id.clone(),
+                        destination: local.id.clone(),
+                        amount,
+                    })
+                })
+        } else {
+            None
+        };
+        let deliveries = state
+            .0
+            .batches
+            .values()
+            .map(|batch| {
+                use phoenix_model::interior::RouteLocation;
+                let compartment = match &batch.navigation.location {
+                    RouteLocation::Compartment { compartment } => compartment.clone(),
+                    RouteLocation::Crossing { to, .. } => to.clone(),
+                    RouteLocation::External { .. } => String::new(),
+                };
+                let duration = batch.amount as f32 / profile.0.handling().units_per_sec;
+                DeliveryView {
+                    id: batch.id.0,
+                    source: batch.source.clone(),
+                    destination: batch.destination.clone(),
+                    quantity: batch.amount,
+                    stage: match batch.stage {
+                        crate::resources::logistics::DeliveryStage::Loading => "loading",
+                        crate::resources::logistics::DeliveryStage::Travelling => "travelling",
+                        crate::resources::logistics::DeliveryStage::Unloading => "unloading",
+                    }
+                    .into(),
+                    compartment,
+                    progress: if duration > 0.0 {
+                        batch.work_progress / duration
+                    } else {
+                        0.0
+                    },
+                    return_requested: batch.return_requested,
+                    blocked: state
+                        .0
+                        .blocked
+                        .get(&batch.id)
+                        .map(|reason| blocked_key(*reason).to_owned()),
+                }
+            })
+            .collect();
+        boards.0.insert(
+            state.0.owner.clone(),
+            SystemBlackboard::Logistics(LogisticsBlackboard {
+                enabled: state.0.enabled,
+                max_batch: profile.0.handling().max_batch,
+                max_active: profile.0.handling().max_active,
+                stores,
+                deliveries,
+                next_delivery,
+                refusal: state
+                    .0
+                    .blocked
+                    .values()
+                    .next()
+                    .map(|reason| blocked_key(*reason).to_owned()),
+            }),
+        );
+    }
+}
+
+fn blocked_key(reason: crate::resources::logistics::DeliveryBlock) -> &'static str {
+    use crate::resources::logistics::DeliveryBlock;
+    match reason {
+        DeliveryBlock::Disabled => "logistics.blocked.disabled",
+        DeliveryBlock::Access => "logistics.blocked.access",
+        DeliveryBlock::ReturnCapacity => "logistics.blocked.return_capacity",
+        DeliveryBlock::Receiving => "logistics.blocked.receiving",
+    }
+}
+
+#[cfg(test)]
+#[path = "logistics_server_tests.rs"]
+mod tests;

@@ -458,6 +458,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("security", fold_security_namespace),
     ("internal-repair", fold_internal_repair_namespace),
     ("interior-access", fold_access_namespace),
+    ("logistics", fold_logistics_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2520,6 +2521,16 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
 }
 
 /// Canonical stock/claims in the retained owner; labels and bindings are content.
+fn fold_logistics_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "logistics",
+        |owner: &crate::resources::logistics_server::ShipLogistics| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
 fn fold_access_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
@@ -2560,6 +2571,11 @@ fn fold_resource_stock(mut acc: u64, stock: &crate::resources::Stock) -> u64 {
     acc = fold_u64(acc, stock.level as u64);
     acc = fold_u64(acc, stock.ceiling as u64);
     acc = fold_u64(acc, stock.reserved.len() as u64);
+    acc = fold_u64(acc, stock.incoming.len() as u64);
+    for (claim, amount) in &stock.incoming {
+        acc = fold_str(acc, claim);
+        acc = fold_u64(acc, *amount as u64);
+    }
     for (claim, amount) in &stock.reserved {
         acc = fold_str(acc, claim);
         acc = fold_u64(acc, *amount as u64);

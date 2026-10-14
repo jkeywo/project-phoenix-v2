@@ -1410,6 +1410,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .then(|| capture_arc_requests(entity))
                         .flatten(),
                     power: capture_power(entity),
+                    logistics: entity
+                        .get::<crate::resources::logistics_server::ShipLogistics>()
+                        .map(|owner| owner.0.clone()),
                     access: entity
                         .get::<crate::ship::access::InteriorAccess>()
                         .map(|access| access.statuses()),

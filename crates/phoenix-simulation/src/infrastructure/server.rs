@@ -61,6 +61,7 @@ impl Plugin for InfrastructurePlugin {
         // every fold/snapshot boundary — so `ClearedAtFold`. They key distinctly
         // in the census by full type path (`EffectQueue<ConditionAdjustment>` vs
         // `EffectQueue<CapacityAdjustment>`).
+        crate::resources::logistics_server::register(app);
         app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
             .declare_state::<EffectQueue<crate::resources::server::ResourceTransfer>>(
                 StateClass::ClearedAtFold,
@@ -85,6 +86,7 @@ impl Plugin for InfrastructurePlugin {
             crate::resources::server::tick_resource_transfers
                 .in_set(crate::sim_sets::SimSet::Modifiers)
                 .after(crate::umbilical::tick_umbilical)
+                .after(crate::console::repair::external_server::apply_external_repair)
                 .before(tick_infrastructure_condition),
         );
         app.add_systems(
@@ -128,6 +130,8 @@ pub fn tick_infrastructure_condition(
         Option<&EntitySystemHull>,
         Option<&crate::ship::compartment_damage::ShipDamage>,
         &mut InfrastructureCondition,
+        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+        Option<&crate::console::weapons::TorpedoSystemResource>,
     )>,
     log: Option<Res<LogFilterConfig>>,
 ) {
@@ -151,12 +155,14 @@ pub fn tick_infrastructure_condition(
 
     let mut rows: Vec<(String, Entity)> = structures
         .iter()
-        .map(|(entity, uuid, _, _, _)| (uuid.0.clone(), entity))
+        .map(|(entity, uuid, ..)| (uuid.0.clone(), entity))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (uuid, entity) in rows {
-        let Ok((_, _, hull, damage, mut condition)) = structures.get_mut(entity) else {
+        let Ok((_, _, hull, damage, mut condition, logistics, torpedoes)) =
+            structures.get_mut(entity)
+        else {
             continue;
         };
         let first_tick = condition.is_added();
@@ -197,6 +203,30 @@ pub fn tick_infrastructure_condition(
                 changes.extend(state.initial_flags());
             }
             for (id, delta) in capacity_moves {
+                let delta = if delta > 0 {
+                    if let Some(profile) = logistics {
+                        let inventory = InfrastructureCondition(state.clone());
+                        crate::resources::logistics_server::endpoint_view(
+                            &profile.0,
+                            Some(&inventory),
+                            torpedoes,
+                        )
+                        .and_then(|stocks| {
+                            crate::resources::logistics_server::receiving_room(
+                                Some(profile),
+                                &crate::resources::service::ResourceEndpoint::Capacity {
+                                    id: id.into(),
+                                },
+                                &stocks,
+                            )
+                        })
+                        .map_or(0, |room| delta.min(room))
+                    } else {
+                        delta
+                    }
+                } else {
+                    delta
+                };
                 match state.adjust_capacity(id, delta) {
                     Some((_, capacity_changes)) => changes.extend(capacity_changes),
                     None => {

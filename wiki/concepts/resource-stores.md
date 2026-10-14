@@ -2,8 +2,8 @@
 title: Resource Stores and Service Links
 type: concept
 tags: [resources, inventory, torpedoes, infrastructure, umbilical, workshop, continuation]
-sources: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js]
-updated: 2026-10-14
+sources: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js]
+updated: 2026-10-15
 ---
 
 # Resource Stores and Service Links
@@ -32,11 +32,11 @@ commits both ends conservatively. Infrastructure adjustments retain their
 existing drain, counter publication and threshold events; ammunition movement
 uses the magazine owner. The transaction view lasts only for that drain.
 
-Snapshot 44/rules 0.16 preserve stocks, claims and fractional flow carry.
+Snapshot 47/rules 0.19 preserve stocks, claims, timed cargo and fractional flow carry.
 Preflight validates tube identity, capacity, timers and claim relationships
 before writes. Resource digests include magazine/tube commitments and facility
 stocks. Other weapon effect state retains its existing deferred fold boundary.
-Services are rederived authored configuration. Protocol and transport are unchanged.
+Services are rederived authored configuration. Protocol 9 adds typed logistics controls/readouts; the existing transport and delivery classes remain.
 
 Umbilical resource selection is an admitted setting limited to authored choices;
 its selected service and fractional progress survive continuation. Coolant uses
@@ -49,3 +49,20 @@ and consumer links through ordinary validation, source history, export/reload,
 Preview and disposable Test. Inherited data requires explicit materialisation;
 endpoint variants and complete link bindings replace atomically. Resource
 definitions in Live Inspector require recreation and expose no new actions.
+
+Located logistics binds managed main/local stores to existing capacity or magazine
+owners and physical compartments. `Stock.incoming` reserves destination room; it
+is separate from held source reservations. Departed deliveries own actual cargo
+and one exact destination claim until arrival or a routed return. Shared bay space
+counts held and incoming occupancy. Team travel and cargo reuse the same route
+cursor, without consuming repair teams.
+
+The fitted Logistics System has its own Console, local-energy reserve, ordinary
+state tree and admitted controls. Local goals remain commands to the actual
+consuming System. Inventory reads local magazine demand through an explicit
+typed feed; receiving that feed does not confer control. Saved goals, delivery
+stages, committed crossings and encountered blockage reports are folded and
+validated against the actual endpoint owners before restore writes. Workshop
+edits bindings, finite bays and handling through ordinary source history and
+validation. Finite fabrication and broader acquisition are subsequent slices of
+the same increment.

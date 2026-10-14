@@ -925,6 +925,7 @@ pub(super) fn validate_entity_repair_jobs(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    validate_entity_logistics(world, entity, row)?;
     match (
         world.get::<crate::ship::compartment_damage::ShipDamage>(entity),
         row.physical_damage.as_ref(),
@@ -962,6 +963,110 @@ pub(super) fn validate_entity_repair_jobs(
         }
         (None, None) => Ok(()),
         _ => Err("saved team owner is missing or disagrees with the authored crew".into()),
+    }
+}
+
+/// Check cargo conservation against the saved endpoint owners, before any live
+/// owner is written. Bootstrap quantities are not substitutes for saved stocks.
+fn validate_entity_logistics(
+    world: &World,
+    entity: Entity,
+    row: &EntityState,
+) -> Result<(), String> {
+    use crate::resources::logistics::{EndpointStock, ResourceEndpoint};
+    use crate::resources::logistics_server::{CompiledShipLogistics, ShipLogistics};
+    match (
+        world.get::<CompiledShipLogistics>(entity),
+        world.get::<ShipLogistics>(entity),
+        &row.logistics,
+    ) {
+        (Some(profile), Some(_), Some(state)) => {
+            if row.infrastructure.as_ref().is_some_and(|owner| {
+                owner.capacities().iter().any(|capacity| {
+                    !capacity.stock.incoming.is_empty()
+                        && !profile.0.config().stores.iter().any(|store| {
+                            store.endpoint
+                                == (ResourceEndpoint::Capacity {
+                                    id: capacity.id.clone(),
+                                })
+                        })
+                })
+            }) || row
+                .weapons
+                .as_ref()
+                .and_then(|owner| owner.magazine.as_ref())
+                .is_some_and(|stock| {
+                    !stock.incoming.is_empty()
+                        && !profile
+                            .0
+                            .config()
+                            .stores
+                            .iter()
+                            .any(|store| store.endpoint == (ResourceEndpoint::TorpedoMagazine {}))
+                })
+            {
+                return Err("saved incoming claim names an unmanaged endpoint".into());
+            }
+            let mut stocks = std::collections::BTreeMap::new();
+            for binding in &profile.0.config().stores {
+                let value = match &binding.endpoint {
+                    ResourceEndpoint::Capacity { id } => EndpointStock {
+                        stock: row
+                            .infrastructure
+                            .as_ref()
+                            .and_then(|owner| owner.capacity_stock(id))
+                            .ok_or("saved logistics is missing its capacity stock")?
+                            .clone(),
+                        held: 0,
+                    },
+                    ResourceEndpoint::TorpedoMagazine {} => {
+                        let weapons = row
+                            .weapons
+                            .as_ref()
+                            .ok_or("saved logistics has no weapon owner")?;
+                        let held = weapons
+                            .tubes
+                            .iter()
+                            .try_fold(0i64, |sum, tube| {
+                                sum.checked_add(i64::from(tube.loaded_count))
+                            })
+                            .and_then(|sum| {
+                                weapons.bursts.iter().try_fold(sum, |sum, burst| {
+                                    sum.checked_add(i64::from(burst.pending))
+                                })
+                            })
+                            .ok_or("saved local magazine occupancy overflows")?;
+                        EndpointStock {
+                            stock: weapons
+                                .magazine
+                                .clone()
+                                .ok_or("saved logistics has no magazine stock")?,
+                            held,
+                        }
+                    }
+                };
+                stocks.insert(binding.endpoint.clone(), value);
+            }
+            state.validate(&profile.0, &stocks)
+        }
+        (None, None, None) => {
+            let incoming = row.infrastructure.as_ref().is_some_and(|owner| {
+                owner
+                    .capacities()
+                    .iter()
+                    .any(|capacity| !capacity.stock.incoming.is_empty())
+            }) || row
+                .weapons
+                .as_ref()
+                .and_then(|owner| owner.magazine.as_ref())
+                .is_some_and(|stock| !stock.incoming.is_empty());
+            if incoming {
+                Err("saved incoming claims have no fitted logistics owner".into())
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err("saved logistics owner disagrees with authored equipment".into()),
     }
 }
 
@@ -1071,6 +1176,12 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut logistics), Some(state)) = (
+        entity_mut.get_mut::<crate::resources::logistics_server::ShipLogistics>(),
+        row.logistics.as_ref(),
+    ) {
+        logistics.0 = state.clone();
+    }
     if let (Some(mut damage), Some(stored)) = (
         entity_mut.get_mut::<crate::ship::compartment_damage::ShipDamage>(),
         row.physical_damage.as_ref(),

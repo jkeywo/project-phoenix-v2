@@ -178,6 +178,7 @@ pub const TRACTOR_KIND: &str = "tractor";
 pub const DOCK_SYSTEM_ID: &str = "dock";
 pub const DOCK_KIND: &str = "dock";
 pub const ACCESS_GATE_KIND: &str = "access-gate";
+pub const LOGISTICS_KIND: &str = "logistics";
 
 /// Wire `SystemId` for the transfer umbilical (issue #1160).
 ///
@@ -539,6 +540,7 @@ impl SystemKindRegistry {
         // Dock is rendered by Helm regardless of either instance/station id.
         registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;
+        registry.register_commandable(LOGISTICS_KIND, ConsoleFamily::Logistics)?;
         // Transfer umbilical (issue #1160).
         registry.register_commandable(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
         // Security teams (issue #1346). Its OWN presentation family, the way the
@@ -569,7 +571,7 @@ impl SystemKindRegistry {
         // Fine-grained Tactical systems (issue #512)
         registry.register_commandable(PHASER_BANK_KIND, ConsoleFamily::Tactical)?;
         registry.register_commandable(TORPEDO_TUBE_KIND, ConsoleFamily::Tactical)?;
-        registry.register(TORPEDO_MAGAZINE_KIND, ConsoleFamily::Tactical)?;
+        registry.register_commandable(TORPEDO_MAGAZINE_KIND, ConsoleFamily::Tactical)?;
         // Blaster bank fine system (issue #631)
         registry.register_commandable(BLASTER_BANK_KIND, ConsoleFamily::Tactical)?;
         // Phaser control fine system (issue #801)
@@ -1003,6 +1005,7 @@ pub fn instance_publication_kinds(
         (TORPEDO_TUBE_KIND, Kind::TorpedoTube),
         (SHIELD_ARC_KIND, Kind::ShieldArc),
         (DOCK_KIND, Kind::Dock),
+        (LOGISTICS_KIND, Kind::Logistics),
     ]
     .into_iter()
     .map(|(kind, observation)| (kind.to_owned(), observation))

@@ -152,6 +152,7 @@ fn supported_components_are_serdes_own_field_list() {
             "effects",
             "infrastructure",
             "resource_services",
+            "logistics",
             "scan",
             "debris",
             "tractor",

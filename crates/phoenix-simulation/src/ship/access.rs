@@ -59,10 +59,12 @@ fn tick_access(
     mut owners: Query<(
         &mut InteriorAccess,
         Option<&crate::console::repair::server::ShipRepairTeams>,
+        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+        Option<&crate::resources::logistics_server::ShipLogistics>,
         &crate::ship_plugin::ShipSystemControlSources,
     )>,
 ) {
-    for (mut access, teams, sources) in &mut owners {
+    for (mut access, teams, logistics_profile, logistics, sources) in &mut owners {
         let mut crossing = BTreeSet::new();
         if let Some(teams) = teams {
             if let (Some(layout), Some(navigation)) = (teams.0.layout(), teams.0.navigation()) {
@@ -78,6 +80,25 @@ fn tick_access(
                         {
                             crossing.insert(id.clone());
                         }
+                    }
+                }
+            }
+        }
+        if let (Some(profile), Some(logistics)) = (logistics_profile, logistics) {
+            for batch in logistics.0.batches.values() {
+                if let phoenix_model::interior::RouteLocation::Crossing { connection, .. } =
+                    &batch.navigation.location
+                {
+                    if let Some(id) = profile
+                        .0
+                        .graph()
+                        .config
+                        .connections
+                        .iter()
+                        .find(|link| &link.id == connection)
+                        .and_then(|link| link.boundary.as_ref())
+                    {
+                        crossing.insert(id.clone());
                     }
                 }
             }

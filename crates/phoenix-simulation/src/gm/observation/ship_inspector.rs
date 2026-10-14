@@ -274,6 +274,7 @@ pub fn projection<'a>(
                 for name in [
                     "damage",
                     "interior",
+                    "logistics",
                     "hull",
                     "helm_console",
                     "helm_capability",

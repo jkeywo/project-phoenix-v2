@@ -89,6 +89,8 @@ pub struct EntityConfig {
     pub energy: Option<EnergyConfigSection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interior: Option<crate::ship::interior::InteriorConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logistics: Option<phoenix_model::logistics::LogisticsConfig>,
     pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
@@ -845,6 +847,9 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
         }
 
+        crate::resources::logistics_profile::compile_entity_logistics(&config)
+            .map_err(SerdeError::custom)?;
+
         if config.interior.is_none()
             && config
                 .ship_config
@@ -1041,6 +1046,19 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::LOGISTICS_KIND {
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom("Logistics requires an explicit config.ai state tree")
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(SerdeError::custom)?;
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::resources::logistics_ai::bindings(),
+                    )
+                    .map_err(SerdeError::custom)?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::ACCESS_GATE_KIND {
                     let source = crate::core::messages::SystemId("repair".into());
                     let publications = std::collections::HashMap::from([(
@@ -1455,6 +1473,7 @@ impl EntityConfig {
         // guards, and undeclared parameter references fail the entity load here,
         // before any live tick — mirroring the weapon-bank validation above.
         if let Some(tc) = config.torpedoes.as_ref() {
+            tc.validate_initial_stock().map_err(SerdeError::custom)?;
             for tube in &tc.tubes {
                 if let Some(ai) = tube.ai.as_ref() {
                     validate_fine_system_ai_policy_for(

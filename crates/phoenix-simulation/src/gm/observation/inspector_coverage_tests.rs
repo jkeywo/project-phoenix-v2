@@ -343,6 +343,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         power: _,
         energy: _,
         interior: _,
+        logistics: _,
         damage: _,
         sensors_console: _,
         navigation_console: _,
@@ -400,6 +401,41 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
                 let _ = $name as fn($type);
             };
         }
+    exhaustive_struct!(
+        logistics_schema,
+        phoenix_model::logistics::LogisticsConfig,
+        stores,
+        storage,
+        handling
+    );
+    exhaustive_struct!(
+        managed_store_schema,
+        phoenix_model::logistics::ManagedStoreConfig,
+        id,
+        endpoint,
+        resource,
+        compartment,
+        role,
+        system,
+        source,
+        target,
+        reserve
+    );
+    exhaustive_struct!(
+        storage_bay_schema,
+        phoenix_model::logistics::StorageBayConfig,
+        compartment,
+        space,
+        unit_space
+    );
+    exhaustive_struct!(
+        handling_schema,
+        phoenix_model::logistics::HandlingConfig,
+        system,
+        max_active,
+        max_batch,
+        units_per_sec
+    );
     // Physical definitions are authored structure, never generic Live setters.
     // The descriptor walk classifies their leaves RecreateRequired. Explicit
     // nested patterns also catch optional future leaves absent from today's hulls.
@@ -805,6 +841,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         torpedoes_schema,
         crate::entities::config::TorpedoesConfig,
         count,
+        initial_count,
         damage_hull,
         damage_shields,
         speed,
@@ -1349,11 +1386,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     println!("reviewed schema counts={counts:?}; fingerprint={fingerprint}");
     assert_eq!(
         counts,
-        [55, 71, 915, 51, 56],
+        [55, 71, 934, 51, 56],
         "update the reviewed inventory ratchet"
     );
     assert_eq!(
-        fingerprint, 14_004_827_888_913_386_031,
+        fingerprint, 10_004_267_929_305_317_709,
         "update the reviewed inventory fingerprint"
     );
 }

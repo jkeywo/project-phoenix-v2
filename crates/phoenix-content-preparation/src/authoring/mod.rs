@@ -225,9 +225,16 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 crate::ship::system_registry::POWER_REACTOR_KIND.into(),
                 crate::ship::system_registry::SHIELD_ARC_KIND.into(),
                 crate::ship::system_registry::ACCESS_GATE_KIND.into(),
+                crate::ship::system_registry::LOGISTICS_KIND.into(),
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::LOGISTICS_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::resources::logistics_ai::bindings(),
+                    ),
+                ),
                 (
                     crate::ship::system_registry::ACCESS_GATE_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

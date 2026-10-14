@@ -1,8 +1,8 @@
 # Increment 12: automatic logistics and production
 
 Adopted implementation contract prepared against main `c7909634`. Runtime starts
-only after increment 11's initial integrated pin. No increment 12 runtime, native
-validation or playable exit is claimed. The authorised
+only after increment 11's initial integrated pin. The first timed-delivery slice now has runtime, authored data, phone controls and
+Workshop support. The complete increment 12 playable exit is not yet claimed. The authorised
 pipeline permits preparation and later implementation after the preceding
 initial integrated commit while pinned validation continues. Earlier validation
 and fixes remain required; an initial commit does not establish an exit.
@@ -327,3 +327,32 @@ supported new-version definition or preserve its stated supported capability.
 Use focused owner tests while developing, independently review source, and run the
 required integrated gates once before a push. Keep automated results separate
 from browser/native/manual acceptance and earlier pinned-increment evidence.
+
+## Initial timed-delivery implementation evidence
+
+The first slice uses actual Cruiser ammunition: local initial stock 2 plus hold
+stock 4 retains the previous 6 rounds. Magazine capacity remains 6; a new hold
+capacity 6 increases the combined authored storage ceiling to 12. This capacity
+change and the initial local-readiness delay are explicit provisional tuning.
+The inherited Dynasty cruiser binds the same machinery to its existing Damage
+Control Console, own energy definition and complete layout; no seat is added.
+
+Pure stock/delivery owner tests passed 23 cases after aggregate handling-budget
+and saved-blockage follow-ups. Integrated renderer-free compilation passed.
+Three Simulation logistics cases passed actual admitted target ownership, explicit
+foreign-feed gating of ordinary AI, and conservative timed recall; three retained
+resource transaction tests passed. Strict hull loading first exposed the inherited
+Dynasty Console gap, then passed against corrected data using the same compiled
+owner executable. Four integrated JS suites passed 42 tests.
+
+These are targeted results, not a whole-suite or browser/native human acceptance
+claim. Subsequent unmanaged-magazine correlated-refusal and maintained Human-target
+regressions, plus the updated exact Live schema pin, await their focused retry. Production, additional
+local stores and the remaining increment 12 scope are still in progress.
+
+Enabled targets are standing machinery orders for a Human operator, so routine
+batches require no repeated dispatch presses. Delegated controllers retain their
+ordinary authored tree decision. Both use the permitted candidate and the same
+physical executor; current actual targets, incoming/held stock and protected floors
+are rechecked before committing. Manual dispatch also respects the current local
+target; raise that target first when requesting additional reserve.

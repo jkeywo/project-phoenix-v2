@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
 /// Revision 7 separates incoming energy flow from explicit weapons restraint;
 /// an older client's level-zero control would otherwise suggest hold fire.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1970,6 +1970,25 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    SetLogisticsEnabled {
+        enabled: bool,
+    },
+    SetStockTarget {
+        store: String,
+        amount: i64,
+    },
+    SetStockReserve {
+        store: String,
+        amount: i64,
+    },
+    DispatchDelivery {
+        source: String,
+        destination: String,
+        amount: i64,
+    },
+    ReturnDelivery {
+        job: u64,
+    },
     /// Protect or release an explicit access seal through its owning System.
     SetAccessSeal {
         sealed: bool,
@@ -4295,6 +4314,18 @@ pub struct TorpedoTubeBlackboard {
 /// tick into the ship blackboard (issue #512).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct TorpedoMagazineBlackboard {
+    #[serde(default)]
+    pub stock_level: i64,
+    #[serde(default)]
+    pub stock_incoming: i64,
+    #[serde(default)]
+    pub stock_reserved: i64,
+    #[serde(default)]
+    pub stock_held: i64,
+    #[serde(default)]
+    pub stock_target: Option<i64>,
+    #[serde(default)]
+    pub stock_store: Option<String>,
     /// True when the magazine is operational. When `false`, tube-load claims
     /// are refused (see [`InterSystemPayload::ClaimTorpedoRound`]) and the
     /// fire path is also blocked so loaded tubes cannot launch.
@@ -4485,6 +4516,7 @@ pub struct WeaponsBlackboard {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data")]
 pub enum SystemBlackboard {
+    Logistics(crate::logistics_ui::LogisticsBlackboard),
     Helm(HelmBlackboard),
     Weapons(WeaponsBlackboard),
     Power(PowerBlackboard),

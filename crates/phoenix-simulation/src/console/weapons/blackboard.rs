@@ -1466,19 +1466,36 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
         (
             &TorpedoSystemResource,
             Option<&ShipSystemControlSources>,
+            Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+            Option<&crate::resources::logistics_server::ShipLogistics>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (torpedo_sys, control_sources, mut entity_bbs) in ship_q.iter_mut() {
+    for (torpedo_sys, control_sources, logistics_profile, logistics, mut entity_bbs) in
+        ship_q.iter_mut()
+    {
         let magazine_sysid = crate::ship::system_registry::torpedo_magazine_system_id();
+        let local_store = logistics_profile.and_then(|profile| {
+            profile.0.config().stores.iter().find(|store| {
+                store.endpoint == (phoenix_model::logistics::ResourceEndpoint::TorpedoMagazine {})
+            })
+        });
         let magazine_online = control_sources
             .map(|cs| !cs.0.is_offline(&magazine_sysid))
             .unwrap_or(true);
         entity_bbs.0.insert(
             magazine_sysid,
             SystemBlackboard::TorpedoMagazine(crate::core::messages::TorpedoMagazineBlackboard {
+                stock_level: torpedo_sys.0.magazine.level,
+                stock_incoming: torpedo_sys.0.magazine.incoming_total(),
+                stock_reserved: torpedo_sys.0.magazine.reserved_total(),
+                stock_held: torpedo_sys.0.magazine.headroom() - torpedo_sys.0.magazine_headroom(),
+                stock_target: local_store.and_then(|store| {
+                    logistics.and_then(|state| state.0.goals.get(&store.id).copied())
+                }),
+                stock_store: local_store.map(|store| store.id.clone()),
                 is_online: magazine_online,
                 torpedoes_remaining: torpedo_sys.0.torpedoes_remaining(),
                 capacity: torpedo_sys.0.config.count,

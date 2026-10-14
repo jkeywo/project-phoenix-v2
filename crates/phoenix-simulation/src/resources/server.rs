@@ -50,6 +50,7 @@ pub fn tick_resource_transfers(
         &EntityUuid,
         Option<&InfrastructureCondition>,
         Option<&mut TorpedoSystemResource>,
+        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
     )>,
 ) {
     let mut requests = std::mem::take(&mut transfers.0);
@@ -75,6 +76,32 @@ pub fn tick_resource_transfers(
     let mut projected: BTreeMap<(String, ResourceEndpoint), (Stock, i64)> = BTreeMap::new();
     // Earlier queued script effects have the same order the publication drain uses.
     // This is a temporary transaction view, not another simulation inventory.
+    let involved: std::collections::BTreeSet<_> = requests
+        .iter()
+        .flat_map(|request| [&request.source, &request.destination])
+        .collect();
+    for (uuid, infrastructure, torpedoes, profile) in endpoints.iter() {
+        if !involved.contains(&uuid.0) {
+            continue;
+        }
+        let Some(profile) = profile else { continue };
+        for store in &profile.0.config().stores {
+            if let Some((mut stock, held)) =
+                endpoint_stock(&store.endpoint, infrastructure, torpedoes)
+            {
+                if let ResourceEndpoint::Capacity { id } = &store.endpoint {
+                    for delta in capacities
+                        .0
+                        .iter()
+                        .filter(|delta| delta.uuid == uuid.0 && delta.capacity == *id)
+                    {
+                        stock.adjust(delta.delta);
+                    }
+                }
+                projected.insert((uuid.0.clone(), store.endpoint.clone()), (stock, held));
+            }
+        }
+    }
     for request in &requests {
         for (uuid, endpoint) in [
             (&request.source, &request.source_endpoint),
@@ -84,8 +111,8 @@ pub fn tick_resource_transfers(
             if projected.contains_key(&key) {
                 continue;
             }
-            let Some((_, infrastructure, torpedoes)) =
-                endpoints.iter().find(|(id, _, _)| id.0 == *uuid)
+            let Some((_, infrastructure, torpedoes, _)) =
+                endpoints.iter().find(|(id, ..)| id.0 == *uuid)
             else {
                 continue;
             };
@@ -117,10 +144,33 @@ pub fn tick_resource_transfers(
         else {
             continue;
         };
+        let profile = endpoints
+            .iter()
+            .find(|(id, ..)| id.0 == request.destination)
+            .and_then(|(_, _, _, profile)| profile);
+        let destination_stocks = projected
+            .iter()
+            .filter(|((uuid, _), _)| uuid == &request.destination)
+            .map(|((_, endpoint), (stock, held))| {
+                (
+                    endpoint.clone(),
+                    crate::resources::logistics::EndpointStock {
+                        stock: stock.clone(),
+                        held: *held,
+                    },
+                )
+            })
+            .collect();
+        let room = crate::resources::logistics_server::receiving_room(
+            profile,
+            &request.destination_endpoint,
+            &destination_stocks,
+        )
+        .unwrap_or(0);
         let moved = plan_transfer(
             request.amount,
             source.available(),
-            destination.headroom().saturating_sub(*held),
+            destination.headroom().saturating_sub(*held).min(room),
         );
         if moved == 0 {
             continue;
@@ -147,8 +197,8 @@ pub fn tick_resource_transfers(
                     delta,
                 }),
                 ResourceEndpoint::TorpedoMagazine {} => {
-                    if let Some((_, _, Some(mut system))) =
-                        endpoints.iter_mut().find(|(id, _, _)| id.0 == *uuid)
+                    if let Some((_, _, Some(mut system), _)) =
+                        endpoints.iter_mut().find(|(id, ..)| id.0 == *uuid)
                     {
                         if delta < 0 {
                             system.0.magazine.adjust(delta);

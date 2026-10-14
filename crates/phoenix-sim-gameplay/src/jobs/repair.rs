@@ -12,6 +12,9 @@ use std::collections::{BTreeMap, BTreeSet};
 #[path = "repair_physical.rs"]
 mod physical;
 pub use physical::{PhysicalRepairWork, RepairStockAction};
+#[path = "repair_external_physical.rs"]
+mod external_physical;
+pub use external_physical::ExternalPhysicalRepairWork;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RepairActivity {
@@ -24,6 +27,8 @@ pub struct RepairJobState {
     pub navigation: Option<Vec<crate::ship::interior::TeamNavigation>>,
     /// Typed bounded work owned by the existing assignment, keyed by JobId.
     pub physical_work: BTreeMap<u64, PhysicalRepairWork>,
+    /// Physical work on a visited actor remains owned by this same external Job.
+    pub external_physical_work: BTreeMap<u64, ExternalPhysicalRepairWork>,
 }
 impl std::ops::Deref for RepairJobState {
     type Target = TeamJobs<RepairActivity>;
@@ -64,6 +69,7 @@ impl RepairTeams {
                 jobs: TeamJobs::new(count, owner),
                 navigation: None,
                 physical_work: BTreeMap::new(),
+                external_physical_work: BTreeMap::new(),
             },
             timings,
             program: repair_workflow::compile_workflow(workflow)?,
@@ -162,6 +168,7 @@ impl RepairTeams {
     }
     pub fn restore_state(&mut self, state: &RepairJobState) -> Result<(), String> {
         self.validate_physical_work(state)?;
+        self.validate_external_physical_shape(state)?;
         match (&self.layout, &state.navigation) {
             (Some(layout), Some(navigation)) => layout.validate_navigation(navigation)?,
             (None, None) => {}
@@ -667,21 +674,49 @@ impl RepairTeams {
                         .state
                         .physical_work
                         .get(&job.id.0)
-                        .and_then(|work| work.target.clone()),
-                    work_progress: self.state.physical_work.get(&job.id.0).and_then(|work| {
-                        let recipe = self
-                            .damage_definition
-                            .as_ref()?
-                            .config
-                            .remedies
-                            .get(work.recipe.as_ref()?)?;
-                        Some(((work.progress / recipe.work_secs).clamp(0.0, 1.0) * 1000.0) as u16)
-                    }),
+                        .and_then(|work| work.target.clone())
+                        .or_else(|| {
+                            self.state
+                                .external_physical_work
+                                .get(&job.id.0)
+                                .and_then(|work| work.target.clone())
+                        }),
+                    work_progress: self
+                        .state
+                        .physical_work
+                        .get(&job.id.0)
+                        .and_then(|work| {
+                            let recipe = self
+                                .damage_definition
+                                .as_ref()?
+                                .config
+                                .remedies
+                                .get(work.recipe.as_ref()?)?;
+                            Some(
+                                ((work.progress / recipe.work_secs).clamp(0.0, 1.0) * 1000.0)
+                                    as u16,
+                            )
+                        })
+                        .or_else(|| {
+                            self.state
+                                .external_physical_work
+                                .get(&job.id.0)
+                                .and_then(|work| {
+                                    work.work_secs.map(|secs| {
+                                        ((work.progress / secs).clamp(0.0, 1.0) * 1000.0) as u16
+                                    })
+                                })
+                        }),
                     waiting_parts: self
                         .state
                         .physical_work
                         .get(&job.id.0)
-                        .is_some_and(|work| work.waiting_parts),
+                        .is_some_and(|work| work.waiting_parts)
+                        || self
+                            .state
+                            .external_physical_work
+                            .get(&job.id.0)
+                            .is_some_and(|work| work.waiting_parts),
                 })
             })
             .collect()

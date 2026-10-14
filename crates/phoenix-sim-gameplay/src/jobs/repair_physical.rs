@@ -201,6 +201,17 @@ impl RepairTeams {
         dt: f32,
         state: &mut DamageState,
         blocked: &BTreeSet<String>,
+        stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
+        tools: impl FnMut(&SystemId, f32) -> f32,
+    ) {
+        self.tick_physical_with_claims(dt, state, blocked, &BTreeSet::new(), stock, tools);
+    }
+    pub fn tick_physical_with_claims(
+        &mut self,
+        dt: f32,
+        state: &mut DamageState,
+        blocked: &BTreeSet<String>,
+        foreign_claims: &BTreeSet<RepairWorkTarget>,
         mut stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
         mut tools: impl FnMut(&SystemId, f32) -> f32,
     ) {
@@ -300,6 +311,7 @@ impl RepairTeams {
             .values()
             .filter_map(|w| w.target.clone())
             .collect();
+        claimed.extend(foreign_claims.iter().cloned());
         for (team, slot) in slots.iter_mut().enumerate() {
             let Some(job) = self.state.jobs.teams[team]
                 .as_ref()
@@ -372,6 +384,16 @@ impl RepairTeams {
                 .physical_work
                 .entry(id)
                 .or_insert_with(|| PhysicalRepairWork::new(system.clone()));
+            if work
+                .requested_target
+                .as_ref()
+                .or(work.target.as_ref())
+                .is_some_and(|target| foreign_claims.contains(target))
+            {
+                // Pending intent does not preempt a foreign crew's active work.
+                // It may wait, but cannot reserve, progress or consume this task.
+                continue;
+            }
             if let Some(requested) = work.requested_target.take() {
                 if work.target.as_ref() != Some(&requested) {
                     release(work, id, &definition, &mut stock);
@@ -428,6 +450,7 @@ impl RepairTeams {
                 }
                 work.target = candidates.into_iter().find(|target| {
                     !claimed.contains(target)
+                        && !foreign_claims.contains(target)
                         && needs_work(&definition, state, target)
                         && (!is_patched(state, target)
                             || recipes(&definition, target)
@@ -583,7 +606,7 @@ fn target_room<'a>(
         }
     }
 }
-fn is_patched(state: &DamageState, target: &RepairWorkTarget) -> bool {
+pub(super) fn is_patched(state: &DamageState, target: &RepairWorkTarget) -> bool {
     match target {
         RepairWorkTarget::Component { system, component } => state
             .components
@@ -593,7 +616,10 @@ fn is_patched(state: &DamageState, target: &RepairWorkTarget) -> bool {
         _ => false,
     }
 }
-fn validate_target(definition: &DamageDefinition, target: &RepairWorkTarget) -> Result<(), String> {
+pub(super) fn validate_target(
+    definition: &DamageDefinition,
+    target: &RepairWorkTarget,
+) -> Result<(), String> {
     match target {
         RepairWorkTarget::Compartment { compartment }
             if definition.compartment(compartment).is_some() =>
@@ -613,7 +639,7 @@ fn validate_target(definition: &DamageDefinition, target: &RepairWorkTarget) -> 
         _ => Err("repair target is absent from physical definition".into()),
     }
 }
-fn needs_work(
+pub(super) fn needs_work(
     definition: &DamageDefinition,
     state: &DamageState,
     target: &RepairWorkTarget,
@@ -645,7 +671,7 @@ fn needs_work(
             }),
     }
 }
-fn recipes(definition: &DamageDefinition, target: &RepairWorkTarget) -> Vec<String> {
+pub(super) fn recipes(definition: &DamageDefinition, target: &RepairWorkTarget) -> Vec<String> {
     match target {
         RepairWorkTarget::Compartment { compartment } => definition
             .compartment(compartment)

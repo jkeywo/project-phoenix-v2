@@ -800,3 +800,6 @@ fn repeated_admitted_external_dispatch_keeps_job_identity_and_one_commitment() {
     assert_eq!(teams.free_team_indices(None), vec![1]);
     assert!(drain_lifecycle(&mut app).is_empty());
 }
+
+#[path = "external_physical_server_tests.rs"]
+mod physical_tests;

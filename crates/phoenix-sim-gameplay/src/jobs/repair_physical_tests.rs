@@ -300,3 +300,50 @@ fn same_anchor_retarget_to_another_compartment_remains_saveable_before_departure
     teams.clone().restore_state(&saved).unwrap();
     assert_eq!(damage.compartments["rear"].hp, 50.0);
 }
+
+#[test]
+fn a_foreign_active_stage_blocks_explicit_internal_work_without_preempting_it() {
+    let (mut teams, mut damage, mut stock, services) = fixture(8);
+    damage.compartments.get_mut("front").unwrap().hp = 50.0;
+    let target = RepairWorkTarget::Compartment {
+        compartment: "front".into(),
+    };
+    assert!(teams.dispatch_physical(
+        0,
+        SystemId("engine".into()),
+        Some(target.clone()),
+        "Front".into()
+    ));
+    let mut tool_calls = 0;
+    for _ in 0..12 {
+        teams.tick_physical_with_claims(
+            0.5,
+            &mut damage,
+            &BTreeSet::new(),
+            &BTreeSet::from([target.clone()]),
+            |action, claim, recipe| stock.repair_parts(action, claim, recipe, &services).is_ok(),
+            |_, _| {
+                tool_calls += 1;
+                1.0
+            },
+        );
+    }
+    assert_eq!(tool_calls, 0);
+    assert_eq!(damage.compartments["front"].hp, 50.0);
+    assert!(stock
+        .capacities
+        .iter()
+        .all(|capacity| capacity.stock.reserved.is_empty()));
+    assert!(teams
+        .save_state()
+        .physical_work
+        .values()
+        .all(|work| work.progress == 0.0 && !work.reserved));
+    for _ in 0..20 {
+        advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
+    }
+    assert!(
+        damage.compartments["front"].hp > 50.0,
+        "the same waiting order resumes after foreign claim release"
+    );
+}

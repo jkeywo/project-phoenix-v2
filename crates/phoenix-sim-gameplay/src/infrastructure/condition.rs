@@ -695,6 +695,29 @@ impl InfrastructureState {
         Ok(self.recompute_flags())
     }
 
+    /// Release this job stage's actual requirement claims even if the remote
+    /// target and its recipe no longer exist. A trailing path separator prevents
+    /// one stage from releasing another stage with a longer numeric ID.
+    pub fn release_repair_claim(&mut self, claim: &str) {
+        let prefix = format!("{claim}/");
+        for capacity in &mut self.capacities {
+            let keys: Vec<_> = capacity
+                .stock
+                .reserved
+                .keys()
+                .filter(|key| {
+                    key.strip_prefix(&prefix).is_some_and(|suffix| {
+                        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                })
+                .cloned()
+                .collect();
+            for key in keys {
+                capacity.stock.release(&key);
+            }
+        }
+    }
+
     /// Validate continuation before it reaches the infrastructure owner.
     pub fn validate_stocks(&self) -> Result<(), String> {
         let mut ids = std::collections::BTreeSet::new();
@@ -893,3 +916,7 @@ fn threshold_fraction(
 #[cfg(test)]
 #[path = "condition_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "repair_claim_tests.rs"]
+mod repair_claim_tests;

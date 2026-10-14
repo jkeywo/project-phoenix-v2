@@ -577,70 +577,318 @@ fn terminal_reason_for(refusal: ExternalRepairRefusal) -> TaskTerminalReason {
 /// them. Going through the queue rather than onto the component is what keeps the
 /// repaired condition crossing the target's OWN authored thresholds, by the one
 /// system that owns the flag edges.
+#[allow(clippy::type_complexity)]
 pub fn apply_external_repair(
-    // The condition-adjustment queue, extracted off `WorldContentRuntime` (issue
-    // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
-    // so a reduced test app that runs the repair systems without
-    // `InfrastructurePlugin` is a no-op rather than a panic — the same
-    // defensiveness the former `Option<ResMut<WorldContentRuntime>>` had.
-    condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
+    mut condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
     time: Option<Res<Time>>,
-    mut operators: Query<(
-        &ExternalRepairDispatch,
-        &mut ShipRepairTeams,
-        Option<&mut crate::ship::power::ShipPowerSystem>,
+    mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
+    mut runtime: Option<ResMut<WorldContentRuntime>>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    mut balance: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
+    mut set: ParamSet<(
+        Query<(
+            Entity,
+            Option<&EntityUuid>,
+            &ExternalRepairDispatch,
+            &mut ShipRepairTeams,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&mut InfrastructureCondition>,
+            Option<&crate::resources::server::ResourceServices>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+        )>,
+        Query<(
+            Entity,
+            &EntityUuid,
+            Option<&mut crate::ship::compartment_damage::ShipDamage>,
+            Option<&InfrastructureCondition>,
+        )>,
+        Query<(&EntityUuid, &ShipRepairTeams)>,
     )>,
-    targets: Query<(&EntityUuid, &InfrastructureCondition)>,
 ) {
-    // Advance each job's private workflow while collecting effects. Take the
-    // condition queue mutably only when there is an actual adjustment to deliver.
-    let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
-    let mut adjustments: Vec<ConditionAdjustment> = operators
-        .iter_mut()
-        .filter_map(|(dispatch, mut teams, power)| {
-            if !teams.0.step_external() {
-                return None;
-            }
-            let target_uuid = teams.0.external_target()?.to_string();
-            // Only a target that carries a condition track can be worked; a
-            // dispatch to something without one holds the team but banks nothing.
-            let (_, condition) = targets.iter().find(|(uuid, _)| uuid.0 == target_uuid)?;
-            if condition.0.condition() >= condition.0.condition_max() {
-                return None;
-            }
-            if dispatch.config.repair_rate <= 0.0 {
-                return None;
-            }
-            let work_dt = dt.min(
-                (condition.0.condition_max() - condition.0.condition())
-                    / dispatch.config.repair_rate,
-            );
-            let fraction = power.map_or(0.0, |mut power| {
-                power
-                    .0
-                    .work_continuous(teams.0.owner(), work_dt, 1.0)
-                    .map_or(0.0, |grant| grant.fraction)
-            });
-            let delta = dispatch.config.repair_rate * work_dt * fraction;
-            if delta == 0.0 {
-                return None;
-            }
-            Some(ConditionAdjustment {
-                uuid: target_uuid.to_string(),
-                delta,
-            })
-        })
-        .collect();
-    if adjustments.is_empty() {
+    use crate::jobs::repair::RepairStockAction;
+    use phoenix_model::damage::{DamageBinding, RepairWorkTarget};
+    use std::collections::{BTreeMap, BTreeSet};
+    let dt = time.map_or(0.0, |time| time.delta_secs());
+    if !dt.is_finite() || dt <= 0.0 {
         return;
     }
-    // UUID order so two hosts queue identically — the walk-order rule the
-    // infrastructure and tractor ticks all keep.
+    struct Row {
+        entity: Entity,
+        uuid: Option<EntityUuid>,
+        config: ExternalRepairConfig,
+        teams: crate::jobs::repair::RepairTeams,
+        power: Option<crate::ship::power::ShipPowerSystem>,
+        inventory: Option<InfrastructureCondition>,
+        services: Option<crate::resources::server::ResourceServices>,
+        operation: f32,
+        tools_available: bool,
+    }
+    // Clone only this synchronous transaction's source owners. No second store
+    // survives the call, and source + target work commits in stable UUID order.
+    let mut rows: Vec<_> = set
+        .p0()
+        .iter_mut()
+        .map(
+            |(entity, uuid, dispatch, teams, power, inventory, services, damage, sources)| Row {
+                entity,
+                uuid: uuid.cloned(),
+                config: dispatch.config.clone(),
+                teams: teams.0.clone(),
+                power: power.map(|power| power.clone()),
+                inventory: inventory.map(|stock| stock.clone()),
+                services: services.cloned(),
+                operation: damage.map_or(1.0, |damage| {
+                    damage.factor(teams.0.owner(), DamageBinding::Operation)
+                }),
+                tools_available: sources
+                    .is_none_or(|sources| !sources.0.is_offline(teams.0.owner())),
+            },
+        )
+        .collect();
+    rows.sort_by(|a, b| {
+        a.uuid
+            .as_ref()
+            .map(|id| &id.0)
+            .cmp(&b.uuid.as_ref().map(|id| &id.0))
+            .then(a.entity.index().cmp(&b.entity.index()))
+    });
+    let physical_targets: BTreeSet<_> = set
+        .p1()
+        .iter()
+        .filter(|(_, _, damage, _)| damage.as_ref().is_some_and(|damage| !damage.catastrophic()))
+        .map(|(_, uuid, _, _)| uuid.0.clone())
+        .collect();
+    // Claims are reconstructed from the SAME saved jobs, including target-local
+    // teams. There is no mutable global claim registry or shared crew pool.
+    let mut claims: BTreeMap<(String, RepairWorkTarget), BTreeSet<(String, u64)>> = BTreeMap::new();
+    for (source, teams) in set.p2().iter() {
+        let saved = teams.0.save_state();
+        for (id, work) in &saved.physical_work {
+            let active = saved
+                .teams
+                .iter()
+                .flatten()
+                .any(|job| job.id.0 == *id && job.outcome.is_none());
+            if active {
+                for target in &work.target {
+                    claims
+                        .entry((source.0.clone(), target.clone()))
+                        .or_default()
+                        .insert((source.0.clone(), *id));
+                }
+            }
+        }
+        for (id, work) in &saved.external_physical_work {
+            let active=saved.teams.iter().flatten().any(|job|job.id.0==*id && job.outcome.is_none() &&
+                matches!(&job.activity,crate::jobs::repair::RepairActivity::External{target} if target==&work.target_uuid));
+            if active {
+                if let Some(target) = &work.target {
+                    claims
+                        .entry((work.target_uuid.clone(), target.clone()))
+                        .or_default()
+                        .insert((source.0.clone(), *id));
+                }
+            }
+        }
+    }
+    let mut adjustments = Vec::new();
+    for mut row in rows {
+        row.teams.cleanup_external_physical(
+            |uuid| physical_targets.contains(uuid),
+            |claim| {
+                if let Some(inventory) = &mut row.inventory {
+                    inventory.0.release_repair_claim(claim);
+                }
+            },
+        );
+        let before_target = row.teams.external_target().map(str::to_owned);
+        let mut flags = Vec::new();
+        let mut terminal_reason = TaskTerminalReason::Completed;
+        if let Some(target_uuid) = before_target.as_deref() {
+            let target_entity = set
+                .p1()
+                .iter()
+                .find(|(_, uuid, _, _)| uuid.0 == target_uuid)
+                .map(|(entity, _, _, _)| entity);
+            if let Some(target_entity) = target_entity {
+                let mut targets = set.p1();
+                if let Ok((_, _, damage, condition)) = targets.get_mut(target_entity) {
+                    if let Some(mut damage) = damage {
+                        // Physical self-repair must use internal routes, not an
+                        // external dispatch shortcut around compartment access.
+                        if row.uuid.as_ref().is_some_and(|uuid| uuid.0 == target_uuid)
+                            || damage.catastrophic()
+                        {
+                            terminal_reason = if damage.catastrophic() {
+                                TaskTerminalReason::TargetDestroyed
+                            } else {
+                                TaskTerminalReason::NotCapable
+                            };
+                            row.teams.release_external();
+                        } else if let Some(source) = &row.uuid {
+                            let job_id = row
+                                .teams
+                                .external_team()
+                                .and_then(|team| {
+                                    row.teams.save_state().teams[team]
+                                        .as_ref()
+                                        .map(|job| job.id.0)
+                                })
+                                .expect("external job");
+                            let owner = (source.0.clone(), job_id);
+                            let blocked: BTreeSet<_> = claims
+                                .iter()
+                                .filter(|((uuid, _), owners)| {
+                                    uuid == target_uuid
+                                        && owners.iter().any(|other| other != &owner)
+                                })
+                                .map(|((_, target), _)| target.clone())
+                                .collect();
+                            let before = damage.structural_totals().0;
+                            let crate::ship::compartment_damage::ShipDamage { definition, state } =
+                                &mut *damage;
+                            row.teams.tick_external_physical(
+                                dt,
+                                target_uuid,
+                                definition,
+                                state,
+                                &blocked,
+                                |action, claim, recipe| {
+                                    if action == RepairStockAction::Release {
+                                        if let Some(stock) = &mut row.inventory {
+                                            stock.0.release_repair_claim(claim);
+                                        }
+                                        return true;
+                                    }
+                                    let Some(recipe) = recipe else {
+                                        return false;
+                                    };
+                                    if recipe.requirements.is_empty() {
+                                        return true;
+                                    }
+                                    let (Some(stock), Some(services)) =
+                                        (&mut row.inventory, &row.services)
+                                    else {
+                                        return false;
+                                    };
+                                    match stock.0.repair_parts(action, claim, recipe, &services.0) {
+                                        Ok(changes) => {
+                                            flags.extend(changes);
+                                            true
+                                        }
+                                        Err(_) => false,
+                                    }
+                                },
+                                |owner, work_dt| {
+                                    if !row.tools_available || row.operation <= 0.0 {
+                                        return 0.0;
+                                    }
+                                    row.power.as_mut().map_or(0.0, |power| {
+                                        power
+                                            .0
+                                            .work_continuous(owner, work_dt, 1.0)
+                                            .map_or(0.0, |grant| grant.fraction * row.operation)
+                                    })
+                                },
+                            );
+                            let restored = damage.structural_totals().0 - before;
+                            if restored > 0.0 {
+                                if let Some(events) = balance.as_mut() {
+                                    events.write(
+                                        crate::core::balance::BalanceEvent::RepairApplied {
+                                            ship: target_uuid.into(),
+                                            hp: restored as f32,
+                                        },
+                                    );
+                                }
+                            }
+                            // Replace this operator's logical claim with its
+                            // newly selected stage before another crew is served.
+                            for owners in claims.values_mut() {
+                                owners.remove(&owner);
+                            }
+                            if let Some(work) =
+                                row.teams.save_state().external_physical_work.get(&job_id)
+                            {
+                                if let Some(target) = &work.target {
+                                    claims
+                                        .entry((target_uuid.into(), target.clone()))
+                                        .or_default()
+                                        .insert(owner);
+                                }
+                            }
+                        }
+                    } else if let Some(condition) = condition {
+                        // Non-equipped legacy condition tracks keep their one
+                        // existing adjustment owner; physical actors never heal it.
+                        if row.teams.step_external()
+                            && condition.0.condition() < condition.0.condition_max()
+                            && row.config.repair_rate > 0.0
+                        {
+                            let work_dt = dt.min(
+                                (condition.0.condition_max() - condition.0.condition())
+                                    / row.config.repair_rate,
+                            );
+                            let funded = if row.tools_available && row.operation > 0.0 {
+                                row.power.as_mut().map_or(0.0, |power| {
+                                    power
+                                        .0
+                                        .work_continuous(row.teams.owner(), work_dt, 1.0)
+                                        .map_or(0.0, |grant| grant.fraction * row.operation)
+                                })
+                            } else {
+                                0.0
+                            };
+                            let delta = row.config.repair_rate * work_dt * funded;
+                            if delta > 0.0 {
+                                adjustments.push(ConditionAdjustment {
+                                    uuid: target_uuid.into(),
+                                    delta,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Invalid external physical targets close the same lifecycle identity
+        // as ordinary recall/range maintenance. Completed stages stay aboard.
+        if before_target.is_some() && row.teams.external_target().is_none() {
+            push_lifecycle(
+                lifecycle.as_deref_mut(),
+                row.uuid.as_ref(),
+                TaskLifecycleRequest::End {
+                    slot: dispatch_slot(row.uuid.as_ref()),
+                    reason: terminal_reason,
+                },
+            );
+        }
+        row.teams.cleanup_external_physical(
+            |uuid| physical_targets.contains(uuid),
+            |claim| {
+                if let Some(inventory) = &mut row.inventory {
+                    inventory.0.release_repair_claim(claim);
+                }
+            },
+        );
+        if let (Some(runtime), Some(source)) = (runtime.as_deref_mut(), row.uuid.as_ref()) {
+            crate::infrastructure::server::mirror_flags(runtime, &flags, &source.0, &log);
+        }
+        if let Ok((_, _, _, mut teams, power, inventory, _, _, _)) = set.p0().get_mut(row.entity) {
+            teams.0 = row.teams;
+            if let (Some(mut current), Some(next)) = (power, row.power) {
+                *current = next;
+            }
+            if let (Some(mut current), Some(next)) = (inventory, row.inventory) {
+                *current = next;
+            }
+        }
+    }
     adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
-    let Some(mut condition_queue) = condition_queue else {
-        return;
-    };
-    condition_queue.0.extend(adjustments);
+    if let Some(queue) = condition_queue.as_mut() {
+        queue.0.extend(adjustments);
+    }
 }
 
 /// Marks a ship whose external repair team the backfill host DISPATCHED to serve

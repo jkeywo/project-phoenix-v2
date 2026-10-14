@@ -3,6 +3,26 @@ use super::*;
 fn group(id: &str) -> PowerGroupId {
     PowerGroupId(id.into())
 }
+#[test]
+fn fractional_coolant_credit_survives_json_continuation_bit_for_bit() {
+    let mut state = PowerState::default();
+    // Observed in a real seeded duel. The non-roundtrip JSON parser changes
+    // the final binary bits even though its decimal output appears similar.
+    for value in [
+        0.9667950463481249_f64,
+        0.1_f64,
+        f64::from_bits(0x3fefffffffffffff),
+    ] {
+        state.coolant_credit.insert("fixture-coolant".into(), value);
+        let restored: PowerState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(
+            restored.coolant_credit["fixture-coolant"].to_bits(),
+            value.to_bits()
+        );
+        assert_eq!(restored, state);
+    }
+}
 fn bindings(power: &PowerSystem) -> EnergyCoolantBindings {
     EnergyCoolantBindings {
         reactor: "fixture-coolant".into(),

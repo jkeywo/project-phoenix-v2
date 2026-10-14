@@ -1482,6 +1482,8 @@ fn simulate_low_lod_ships(
             // Needed only to keep this ship's own snapshot entry out of its own
             // hazard picture — see `low_lod_avoid_yaw`.
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -1518,8 +1520,11 @@ fn simulate_low_lod_ships(
         collider_section,
         behaviour_section,
         entity_uuid,
+        mut power,
+        control_sources,
     ) in &mut ships
     {
+        let before = *physics;
         // No Helm console means no engine: this hull cannot propel itself, so
         // its top speed is 0, not a fabricated default. That is the difference
         // between "a mover whose authored max_speed we couldn't read" and "a
@@ -1668,12 +1673,23 @@ fn simulate_low_lod_ships(
                     behaviour,
                     world_snapshot.as_deref(),
                 );
+                fund_low_lod_motion(
+                    &before,
+                    &mut physics,
+                    power.as_deref_mut().map(|power| &mut power.0),
+                    control_sources,
+                    dt,
+                    max_speed,
+                    max_yaw_rate,
+                    true,
+                );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
                 physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
                 continue;
             }
             // Route flown to its end: the ship is where its objective sent it.
             if crate::ai::patrol_cursor::route_completed(index, &waypoints, loop_path) {
+                let mut propelled = false;
                 // The `ai_profile` test is the OUTER one, and `and_then` is
                 // lazy, so a hull with no `AiProfile` never pays for
                 // `resolve_destroy_target`'s snapshot scan: it has no authored
@@ -1683,6 +1699,7 @@ fn simulate_low_lod_ships(
                 if let Some((profile, target_pos)) =
                     ai_profile.and_then(|p| resolve_destroy_target().map(|pos| (p, pos)))
                 {
+                    propelled = true;
                     // …but arriving is not the same as being done. A scored
                     // `Destroy` outranks a finished run-in: the route was the
                     // approach, the Destroy is the point of it, and parking on
@@ -1712,6 +1729,16 @@ fn simulate_low_lod_ships(
                     self_uuid,
                     behaviour,
                     world_snapshot.as_deref(),
+                );
+                fund_low_lod_motion(
+                    &before,
+                    &mut physics,
+                    power.as_deref_mut().map(|power| &mut power.0),
+                    control_sources,
+                    dt,
+                    max_speed,
+                    max_yaw_rate,
+                    propelled,
                 );
                 physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
                 physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
@@ -1757,9 +1784,11 @@ fn simulate_low_lod_ships(
         // and a bare test entity with no `AiProfile` at all is left alone
         // either way, preserving existing coverage that never opted into
         // low-LOD authoring:
+        let mut propelled = false;
         if let Some(profile) = ai_profile {
             let destroy_target_pos = resolve_destroy_target();
             if lod_timer.is_some() || destroy_target_pos.is_some() {
+                propelled = true;
                 low_lod_objective_steer(
                     &mut physics,
                     destroy_target_pos,
@@ -1780,10 +1809,96 @@ fn simulate_low_lod_ships(
             behaviour,
             world_snapshot.as_deref(),
         );
+        fund_low_lod_motion(
+            &before,
+            &mut physics,
+            power.as_deref_mut().map(|power| &mut power.0),
+            control_sources,
+            dt,
+            max_speed,
+            max_yaw_rate,
+            propelled,
+        );
         physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
         physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
     }
 }
+
+/// Fund only work proposed by the coarse planner; unchanged drift and passive
+/// speed reduction remain free. Fidelity changes neither the physical reserve
+/// nor the right to actuate a destroyed or unpowered capability.
+#[allow(clippy::too_many_arguments)]
+fn fund_low_lod_motion(
+    before: &ShipPhysics,
+    proposed: &mut ShipPhysics,
+    mut power: Option<&mut crate::modifiers::power_system::PowerSystem>,
+    sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+    dt: f32,
+    max_speed: f32,
+    max_yaw_rate: f32,
+    propelled: bool,
+) {
+    use crate::ship::system_registry::*;
+    let offline = |id: crate::core::messages::SystemId| {
+        sources.is_some_and(|sources| sources.0.is_offline(&id))
+    };
+    if propelled && max_speed > 0.0 && proposed.forward_speed != 0.0 {
+        let engine_fraction = match (
+            offline(helm_engine_port_system_id()),
+            offline(helm_engine_starboard_system_id()),
+        ) {
+            (true, true) => 0.0,
+            (true, false) | (false, true) => 0.5,
+            (false, false) => 1.0,
+        };
+        let activity = (proposed.forward_speed.abs() / max_speed).min(1.0) * engine_fraction;
+        let fraction = if offline(helm_thrust_system_id()) || engine_fraction == 0.0 {
+            0.0
+        } else {
+            engine_fraction
+                * phoenix_sim_gameplay::ship::energy_work::continuous_for_kind(
+                    power.as_deref_mut(),
+                    HELM_THRUST_KIND,
+                    dt,
+                    activity,
+                )
+        };
+        if proposed.forward_speed * before.forward_speed < 0.0 {
+            // Passive deceleration may reach rest, but crossing rest and
+            // accelerating the other way is new actuator work.
+            proposed.forward_speed *= fraction;
+        } else if proposed.forward_speed.abs() > before.forward_speed.abs() {
+            proposed.forward_speed =
+                before.forward_speed + (proposed.forward_speed - before.forward_speed) * fraction;
+        }
+    }
+    if proposed.yaw != before.yaw {
+        let desired =
+            crate::ai::lod::step_yaw_toward(before.yaw, proposed.yaw, max_yaw_rate.max(0.0) * dt);
+        let delta = (desired - before.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        let activity = if max_yaw_rate > 0.0 && dt > 0.0 {
+            (delta.abs() / (max_yaw_rate * dt)).min(1.0)
+        } else {
+            0.0
+        };
+        let fraction = if offline(helm_steering_system_id()) {
+            0.0
+        } else {
+            phoenix_sim_gameplay::ship::energy_work::continuous_for_kind(
+                power,
+                HELM_STEERING_KIND,
+                dt,
+                activity,
+            )
+        };
+        proposed.yaw = before.yaw + delta * fraction;
+    }
+}
+
+#[cfg(test)]
+#[path = "energy_tests.rs"]
+mod energy_tests;
 
 /// The low-LOD "carry out the standing order" correction: bring `forward_speed`
 /// to this hull's authored cruise fraction and, when a scored `Destroy` target

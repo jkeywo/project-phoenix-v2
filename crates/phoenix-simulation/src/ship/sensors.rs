@@ -289,6 +289,7 @@ pub fn handle_sensors_messages(
 /// and `sender_origin` below is a routing tag stamped after that decision, never
 /// an input to it.
 pub fn tick_sensors_frequency_hint(
+    funded: Query<&crate::ship::power::ShipPowerSystem>,
     contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<
         (
@@ -322,6 +323,13 @@ pub fn tick_sensors_frequency_hint(
         // re-add an `operate_ai` conjunct here: it would put the emission of a
         // coordination fact back under the control of who holds the console.
         if is_high_fidelity {
+            continue;
+        }
+        if phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+            funded.get(entity).ok().map(|power| &power.0),
+            crate::ship::system_registry::SENSOR_RADAR_KIND,
+        ) <= 0.0
+        {
             continue;
         }
 
@@ -534,6 +542,7 @@ pub struct SensorScanSurfaces<'w, 's> {
 /// (> configured `threat_bearing_epsilon_rad`, default ~10°). Iterates every ship
 /// (player + NPC) so AI sensors feed AI shields through the coordination bus.
 pub fn tick_sensors_threat_warning(
+    funded: Query<&crate::ship::power::ShipPowerSystem>,
     content: Option<Res<crate::world::server::WorldContentRuntime>>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
@@ -607,6 +616,13 @@ pub fn tick_sensors_threat_warning(
         ai_profile,
     ) in ships.iter_mut()
     {
+        if phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
+            funded.get(entity).ok().map(|power| &power.0),
+            crate::ship::system_registry::SENSOR_RADAR_KIND,
+        ) <= 0.0
+        {
+            continue;
+        }
         let sensor_range = effective_sensor_range(ai_profile, cfg.sensors_radar_range, modifiers);
         if sensor_range <= 0.0 {
             continue;

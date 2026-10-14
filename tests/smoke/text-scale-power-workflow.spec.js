@@ -58,7 +58,7 @@ test('Energy native flow controls remain keyboard operable at 200% text', async 
   await page.locator('ph-energy-controls #flow-helm').focus(); await page.keyboard.press('ArrowRight');
   expect(await page.evaluate(() => window.__commands)).toEqual([{ actionId: 'power.energy-group', source: 'control', detail: { group: 'helm', flow_per_sec: 5, cooling_per_sec: 1 } }]);
   await page.locator('ph-energy-controls #depth').selectOption('min');
-  await page.locator('ph-energy-controls [data-energy-group="helm"] .row button:last-child').focus(); await page.keyboard.press('Enter');
+  await page.locator('ph-energy-controls [data-energy-group="helm"] > .row button:last-child').focus(); await page.keyboard.press('Enter');
   expect(await page.evaluate(() => window.__commands.at(-1))).toMatchObject({ actionId: 'power.energy-priority', detail: { group: 'helm', priority: 1 } });
 });
 

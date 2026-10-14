@@ -33,7 +33,7 @@ test('Power controls use exact-owner correlated energy actions at each visible c
   expect(await sent(page)).toContainEqual(expect.objectContaining({ action: 'set_energy_group', control_system_id: 'main-reactor',
     group: 'helm', flow_per_sec: 6, cooling_per_sec: 1, correlation: expect.any(String) }));
   await page.locator('ph-energy-controls #depth').selectOption('min');
-  await page.locator('ph-energy-controls [data-energy-group="helm"] .row button:last-child').click();
+  await page.locator('ph-energy-controls [data-energy-group="helm"] > .row button:last-child').click();
   expect(await sent(page)).toContainEqual(expect.objectContaining({ action: 'set_energy_priority', group: 'helm', priority: 1 }));
   await page.locator('ph-energy-controls #mode').selectOption('minimal');
   expect(await sent(page)).toContainEqual(expect.objectContaining({ action: 'set_energy_mode', mode: 'minimal', cooling_usage: 'low' }));

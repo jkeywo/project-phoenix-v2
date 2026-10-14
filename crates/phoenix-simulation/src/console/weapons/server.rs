@@ -227,7 +227,10 @@ impl Plugin for WeaponsPlugin {
                         .in_set(crate::sim_sets::SimSet::Input)
                         .before(ai_phaser_auto_fire)
                         .before(tick_blaster_auto_fire)
-                        .before(tick_weapons_arc_request),
+                        .before(tick_weapons_arc_request)
+                        .before(ai_target_selection)
+                        .before(super::strike::ai_strike_boost)
+                        .before(super::strike::handle_set_strike_boost),
                     handle_set_target
                         .in_set(crate::sim_sets::FixedStep::HandleSetTarget)
                         .in_set(crate::sim_sets::SimSet::Input)

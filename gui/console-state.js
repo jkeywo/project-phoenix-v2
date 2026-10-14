@@ -1805,11 +1805,27 @@ export function buildPowerConsoleState(state, systemIds = []) {
  * Shields console. Returns an object of {@link ShieldsConsolePayload}.
  * @param {{ blackboards, shieldFacings, hullIntegrity, shieldFocusedFacing }} state
  */
+function shieldOperationFacings(state, facings, systemIds) {
+  // These are already Console-scoped publications. Reading an explicit feed
+  // never makes its System part of this Console's command ownership.
+  const readings = blackboardsOfKind(state, 'ShieldArc', systemIds);
+  return facings.map(facing => {
+    if (!facing || typeof facing !== 'object' || !facing.arc_id) return facing;
+    const entry = readings.find(({ data }) => data.arc_id === facing.arc_id);
+    if (!entry?.data.operation) return facing;
+    return { ...facing, system_id: entry.systemId,
+      operation: entry.data.operation, recent_damage: entry.data.recent_damage,
+      delegated: state.controlSources?.[entry.systemId] === 'Ai',
+      controllable: systemIds.includes(entry.systemId)
+        && state.controlSources?.[entry.systemId] !== 'Ai' };
+  });
+}
+
 export function buildShieldsConsoleState(state, systemIds = []) {
   const bb = blackboardOfKind(state, 'Shields')?.data;
   if (bb) {
     return {
-      facings:              bb.facings              ?? [],
+      facings: shieldOperationFacings(state, bb.facings ?? [], systemIds),
       hull_integrity_pct:   bb.hull_integrity_pct   ?? 100,
       focused_facing:       bb.focused_facing       ?? null,
       combat_lock_bearing:  bb.combat_lock_bearing  ?? null,
@@ -1834,7 +1850,7 @@ export function buildShieldsConsoleState(state, systemIds = []) {
     }
   }
   return {
-    facings:              state.shieldFacings      || [],
+    facings: shieldOperationFacings(state, state.shieldFacings || [], systemIds),
     hull_integrity_pct:   state.hullIntegrity       || 100,
     focused_facing:       state.shieldFocusedFacing || null,
     combat_lock_bearing:  targetBearing,

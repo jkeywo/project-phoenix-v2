@@ -623,8 +623,29 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: `shield-arc-${a.arc_id}`,
+      target: controlSystemId(a, `shield-arc-${a.arc_id.replaceAll('_', '-')}`),
       payload: { type: 'SetShieldArcFocus', data: { focused } },
+    });
+  },
+
+  set_shield_raised: (a, send) => {
+    if (typeof a.control_system_id !== 'string' || !a.control_system_id
+        || typeof a.raised !== 'boolean') return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: a.control_system_id,
+      payload: { type: 'SetShieldRaised', data: { raised: a.raised } },
+    });
+  },
+  set_shield_recovery: (a, send) => {
+    if (typeof a.control_system_id !== 'string' || !a.control_system_id
+        || !(a.target === null || (typeof a.target === 'string' && a.target))) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: a.control_system_id,
+      payload: { type: 'SetShieldRecovery', data: { target: a.target } },
     });
   },
 

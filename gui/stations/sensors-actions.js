@@ -18,6 +18,8 @@ export const SENSORS_SCAN_ACTION_ID = 'sensors.scan';
 export const SENSORS_VIEWSCREEN_ACTION_ID = 'sensors.viewscreen';
 export const SENSORS_CANCEL_IMPULSE_ACTION_ID = 'sensors.cancel-impulse';
 export const SCIENCE_SHIELD_FOCUS_ACTION_ID = 'science.shield-focus';
+export const SCIENCE_SHIELD_RAISED_ACTION_ID = 'science.shield-raised';
+export const SCIENCE_SHIELD_RECOVERY_ACTION_ID = 'science.shield-recovery';
 
 const SENSOR_BEARING_CONTEXTS = Object.freeze(['sensors', 'science', 'captain', 'tactical']);
 const SHIELD_FOCUS_CONTEXTS = Object.freeze(['science', 'captain', 'engineering', 'shields']);
@@ -83,12 +85,23 @@ export const SCIENCE_SHIELD_FOCUS_ACTION = action(
   'left-shoulder',
 );
 
+export const SCIENCE_SHIELD_RAISED_ACTION = defineStationAction({
+  id: SCIENCE_SHIELD_RAISED_ACTION_ID, contexts: SHIELD_FOCUS_CONTEXTS,
+  labelKey: 'science.shield_raised', bindings: [null, null],
+});
+export const SCIENCE_SHIELD_RECOVERY_ACTION = defineStationAction({
+  id: SCIENCE_SHIELD_RECOVERY_ACTION_ID, contexts: SHIELD_FOCUS_CONTEXTS,
+  labelKey: 'science.shield_recovery', bindings: [null, null],
+});
+
 export const SENSOR_SCIENCE_ACTIONS = Object.freeze([
   SENSORS_TARGET_ACTION,
   SENSORS_SCAN_ACTION,
   SENSORS_VIEWSCREEN_ACTION,
   SENSORS_CANCEL_IMPULSE_ACTION,
   SCIENCE_SHIELD_FOCUS_ACTION,
+  SCIENCE_SHIELD_RAISED_ACTION,
+  SCIENCE_SHIELD_RECOVERY_ACTION,
 ]);
 
 /**
@@ -191,17 +204,38 @@ export function registerSensorScienceActions(registry, options = {}) {
     const view = shieldsActionView(getState());
     if (!view || view.shields_auto || view.auto) return false;
     const facing = facingChoice(view, detail && detail.arc_id);
-    if (!facing) return false;
+    if (!facing || (facing.operation && !facing.controllable)) return false;
     const isFocused = view.focused_facing === facing.id
       || view.focused_facing === facing.label;
     const focused = detail && typeof detail.focused === 'boolean'
       ? detail.focused : detail && detail.arc_id ? !isFocused : true;
     return send(actionId, correlation, inputMs, 'set_shield_focus', {
       arc_id: facing.id,
+      ...(facing.system_id ? { control_system_id: facing.system_id } : {}),
       focused,
     });
   });
 
+  for (const [definition, name] of [
+    [SCIENCE_SHIELD_RAISED_ACTION, 'set_shield_raised'],
+    [SCIENCE_SHIELD_RECOVERY_ACTION, 'set_shield_recovery'],
+  ]) {
+    registry.register(definition, ({ actionId, correlation, inputMs, detail } = {}) => {
+      const view = shieldsActionView(getState());
+      if (!view || view.shields_auto || view.auto) return false;
+      const facing = view.facings?.find(f => f.system_id === detail?.system_id);
+      if (!facing?.controllable || facing.delegated || !facing.operation) return false;
+      const payload = { control_system_id: facing.system_id };
+      if (name === 'set_shield_raised') {
+        if (typeof detail?.raised !== 'boolean') return false;
+        payload.raised = detail.raised;
+      } else {
+        if (detail?.target !== null && !facing.operation.recovery_targets?.includes(detail?.target)) return false;
+        payload.target = detail.target;
+      }
+      return send(actionId, correlation, inputMs, name, payload);
+    });
+  }
   return registry;
 }
 

@@ -9,6 +9,8 @@ import { createSemanticActionRegistry } from '../../gui/semantic-action-registry
 import {
   SCIENCE_SHIELD_FOCUS_ACTION,
   SCIENCE_SHIELD_FOCUS_ACTION_ID,
+  SCIENCE_SHIELD_RAISED_ACTION_ID,
+  SCIENCE_SHIELD_RECOVERY_ACTION_ID,
   SENSOR_SCIENCE_ACTIONS,
   SENSORS_SCAN_ACTION,
   SENSORS_CANCEL_IMPULSE_ACTION_ID,
@@ -62,13 +64,15 @@ describe('Sensors and Science semantic definitions', () => {
       SENSORS_VIEWSCREEN_ACTION_ID,
       SENSORS_CANCEL_IMPULSE_ACTION_ID,
       SCIENCE_SHIELD_FOCUS_ACTION_ID,
+      SCIENCE_SHIELD_RAISED_ACTION_ID,
+      SCIENCE_SHIELD_RECOVERY_ACTION_ID,
     ]);
     for (const action of SENSOR_SCIENCE_ACTIONS) {
       expect(action.contexts.length).toBeGreaterThan(0);
       expect(action.authoritativeFeedback).toBe(true);
       expect(action.bindings).toHaveLength(2);
-      expect(action.bindings[0]).toMatchObject({ type: 'keyboard' });
-      expect(action.bindings[1]).toMatchObject({ type: 'gamepad' });
+      if (action.bindings[0]) expect(action.bindings[0]).toMatchObject({ type: 'keyboard' });
+      if (action.bindings[1]) expect(action.bindings[1]).toMatchObject({ type: 'gamepad' });
     }
     expect(SENSOR_SCIENCE_ACTIONS[0].contexts).toEqual([
       'sensors', 'science', 'captain', 'tactical',
@@ -270,5 +274,28 @@ describe('Sensors authority-preserving adapters', () => {
       arc_id: 'unpublished', focused: true,
     })).toMatchObject({ handled: false });
     expect(sendAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('Shield operation actions', () => {
+  it('uses the current exact donor authority, validates destinations, and supports cancel', () => {
+    const sendAction = vi.fn();
+    const facing = { arc_id:'port_aux', system_id:'shield-arc-port-aux', controllable:true,
+      operation:{raised:true,recovery_targets:['shield-arc-fore']} };
+    const view = {facings:[facing]};
+    const registry = sensorRegistry({ getState:()=>keyedState({shields:view}), sendAction });
+    activate(registry, SCIENCE_SHIELD_RAISED_ACTION_ID, 'science', {system_id:facing.system_id,raised:false});
+    expect(sendAction).toHaveBeenLastCalledWith('set_shield_raised', expect.objectContaining({control_system_id:facing.system_id,raised:false,correlation:expect.any(String)}));
+    activate(registry, SCIENCE_SHIELD_RECOVERY_ACTION_ID, 'science', {system_id:facing.system_id,target:'shield-arc-fore'});
+    expect(sendAction).toHaveBeenLastCalledWith('set_shield_recovery', expect.objectContaining({target:'shield-arc-fore'}));
+    activate(registry, SCIENCE_SHIELD_RECOVERY_ACTION_ID, 'science', {system_id:facing.system_id,target:null});
+    expect(sendAction).toHaveBeenLastCalledWith('set_shield_recovery', expect.objectContaining({target:null}));
+    sendAction.mockClear();
+    activate(registry, SCIENCE_SHIELD_RECOVERY_ACTION_ID, 'science', {system_id:facing.system_id,target:'private-battery'});
+    facing.controllable=false;
+    activate(registry, SCIENCE_SHIELD_RAISED_ACTION_ID, 'science', {system_id:facing.system_id,raised:true});
+    activate(registry, SCIENCE_SHIELD_FOCUS_ACTION_ID, 'science', {arc_id:'port_aux',focused:true});
+    expect(sendAction).not.toHaveBeenCalled();
   });
 });

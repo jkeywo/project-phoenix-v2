@@ -5036,3 +5036,17 @@ semantic_action.engineering.transfer_resource.accessibility,Transfer resource se
 console.umbilical.reserve_fuel,Transfer resource label,Reserve fuel,Reservetreibstoff,Reserve fuel,machine
 system.status.reason.overheated,Shared System status UI,Overheated,Überhitzt,Overheated,machine
 system.status.reason.intake_cut,Shared System status UI,Energy intake cut,Energiezufluss unterbrochen,Energy intake cut,machine
+shield.operation.strength,Shield operation controls,Stored strength,Gespeicherte Schildstärke,Stored strength,machine
+shield.operation.battery,Shield operation controls,Local battery,Lokale Batterie,Local battery,machine
+shield.operation.heat,Shield operation controls,Heat,Wärme,Heat,machine
+shield.operation.protection,Shield operation controls,Funded protection,Versorgte Schutzleistung,Funded protection,machine
+shield.operation.recover_to,Shield operation controls,Discharge into battery,In Batterie entladen,Discharge into battery,machine
+shield.operation.cancel,Shield operation controls,Cancel discharge,Entladung abbrechen,Cancel discharge,machine
+shield.operation.lower,Shield operation controls,Lower shield,Schild senken,Lower shield,machine
+shield.operation.raise,Shield operation controls,Raise shield,Schild aktivieren,Raise shield,machine
+shield.operation.no_recovery,Shield operation controls,No discharge,Keine Entladung,No discharge,machine
+shield.operation.recovering,Shield operation controls,Discharging into,Entladung in,Discharging into,machine
+semantic_action.science.shield_raised.label,Shield operation controls,Raise or lower shield,Schild aktivieren oder senken,Raise or lower shield,machine
+semantic_action.science.shield_raised.accessibility,Shield operation controls,Raise or lower this shield arc,Diesen Schildsektor aktivieren oder senken,Raise or lower this shield arc,machine
+semantic_action.science.shield_recovery.label,Shield operation controls,Shield energy recovery,Schildenergie zurückgewinnen,Shield energy recovery,machine
+semantic_action.science.shield_recovery.accessibility,Shield operation controls,Discharge this shield into an eligible battery or cancel discharge,Diesen Schild in eine geeignete Batterie entladen oder Entladung abbrechen,Discharge this shield into an eligible battery or cancel discharge,machine

@@ -62,6 +62,8 @@ describe('ACTION_MAP', () => {
       'set_repair_target_priority',
       'set_sensors_target',
       'set_shield_focus',
+      'set_shield_raised',
+      'set_shield_recovery',
       'set_station_stance',
       'set_strike_boost',
       'set_target',
@@ -1443,6 +1445,23 @@ describe('set_torpedo_volley_target', () => {
   it('does nothing when count is null', () => {
     const send = mkSend();
     ACTION_MAP.set_torpedo_volley_target({ tube: 'fore_port', count: null }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('exact shield operation wire commands', () => {
+  it('carries correlation to the donor System for raised intent, recovery and cancellation', () => {
+    const send=mkSend();
+    ACTION_MAP.set_shield_raised({control_system_id:'shield-arc-port-aux',raised:false,correlation:'lower-1'},send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystemCorrelated', {correlation:'lower-1',target:'shield-arc-port-aux',payload:{type:'SetShieldRaised',data:{raised:false}}});
+    ACTION_MAP.set_shield_recovery({control_system_id:'shield-arc-port-aux',target:'shield-arc-fore',correlation:'recover-1'},send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystemCorrelated', {correlation:'recover-1',target:'shield-arc-port-aux',payload:{type:'SetShieldRecovery',data:{target:'shield-arc-fore'}}});
+    ACTION_MAP.set_shield_recovery({control_system_id:'shield-arc-port-aux',target:null},send);
+    expect(send).toHaveBeenLastCalledWith('ControlSystem', {target:'shield-arc-port-aux',payload:{type:'SetShieldRecovery',data:{target:null}}});
+    send.mockClear();
+    ACTION_MAP.set_shield_raised({arc_id:'fore',raised:true},send);
+    ACTION_MAP.set_shield_recovery({control_system_id:'shield-arc-fore'},send);
     expect(send).not.toHaveBeenCalled();
   });
 });

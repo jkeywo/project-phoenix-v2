@@ -3,6 +3,7 @@
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
+import './ph-shield-operations.js';
 import { t } from '../strings.js';
 import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
@@ -83,6 +84,7 @@ export class PhShieldFacings extends PhElement {
     <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" id="facing-svg" style="display:none"><g id="facing-arcs"></g></svg>
     <div class="auto-hint" id="auto-hint" role="status"></div>
   </div>
+  <ph-shield-operations id="operations"></ph-shield-operations>
 `;
   }
 
@@ -103,6 +105,7 @@ export class PhShieldFacings extends PhElement {
   }
 
   #onKeyDown = (event) => {
+    if (event.composedPath()[0] !== this) return;
     const s = this.state || {};
     const facings = Array.isArray(s.facings) ? s.facings : [];
     if (facings.length === 0) return;
@@ -175,6 +178,7 @@ export class PhShieldFacings extends PhElement {
 
   render(state) {
     const s = state || {};
+    this.$('operations').state = s;
     const facings = Array.isArray(s.facings) ? s.facings : [];
     const focused = s.focused_facing || null;
     const auto = !!s.auto;

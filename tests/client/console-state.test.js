@@ -4823,3 +4823,23 @@ describe('departed Objective history target projection', () => {
     expect(buildRadarRegions(entities, [{ ...objective, unassigned: true }])[0].objective_target).toBe(false);
   });
 });
+
+
+describe('Shield operation Console knowledge and control', () => {
+  it('joins permitted fine observations by arc identity and keeps explicit feeds read-only', () => {
+    const operation={raised:false,protection_fraction:0,reserve:{energy:8,capacity:10},recovery_targets:['shield-arc-aft']};
+    const state={blackboards:{
+      shields:{facings:[{arc_id:'port_aux',hp:80,max_hp:100},{arc_id:'aft',hp:40,max_hp:100}]},
+      'actual-port-system':{arc_id:'port_aux',operation,recent_damage:7},
+      'shield-arc-aft':{arc_id:'aft',operation},
+    },blackboardKinds:{shields:'Shields','actual-port-system':'ShieldArc','shield-arc-aft':'ShieldArc'},
+    controlSources:{'actual-port-system':'Human','shield-arc-aft':'Human'}};
+    const result=rawBuildShieldsConsoleState(state,['actual-port-system']);
+    expect(result.facings[0]).toMatchObject({arc_id:'port_aux',system_id:'actual-port-system',operation,recent_damage:7,controllable:true});
+    expect(result.facings[1]).toMatchObject({system_id:'shield-arc-aft',controllable:false});
+    state.controlSources['actual-port-system']='Ai';
+    expect(rawBuildShieldsConsoleState(state,['actual-port-system']).facings[0]).toMatchObject({delegated:true,controllable:false});
+    delete state.blackboards['actual-port-system'];
+    expect(rawBuildShieldsConsoleState(state,['actual-port-system']).facings[0]).not.toHaveProperty('operation');
+  });
+});

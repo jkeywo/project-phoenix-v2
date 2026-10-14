@@ -146,3 +146,40 @@ fn replacing_offline_systems_clears_bootstrap_entries() {
     assert!(resolver.is_offline(&captured));
     assert_eq!(resolver.offline_entries().count(), 1);
 }
+
+#[test]
+fn crew_planning_uses_ordinary_controller_despite_failed_tools() {
+    let id = SystemId("repair-orders".into());
+    let mut resolver = ControlSourceResolver::new();
+    resolver.set_offline(id.clone(), true);
+    assert!(!resolver.policy_for(&id).accept_human_input);
+    assert!(resolver.crew_order_policy_for(&id).accept_human_input);
+    resolver.set(id.clone(), ControlSource::Ai);
+    assert!(!resolver.policy_for(&id).operate_ai);
+    assert!(resolver.crew_order_policy_for(&id).operate_ai);
+    resolver.set(id.clone(), ControlSource::Simplified);
+    let policy = resolver.crew_order_policy_for(&id);
+    assert!(policy.operate_ai && policy.accept_summary_input && !policy.accept_human_input);
+}
+
+#[test]
+fn crew_orders_do_not_override_gm_explicit_offline_or_catastrophe() {
+    let id = SystemId("repair-orders".into());
+    let mut resolver = ControlSourceResolver::new();
+    resolver.set(id.clone(), ControlSource::Ai);
+    resolver.set_offline(id.clone(), true);
+    resolver.set_gm_disabled(id.clone(), true);
+    assert!(!resolver.crew_order_policy_for(&id).operate_ai);
+    resolver.set_gm_disabled(id.clone(), false);
+    resolver.set(id.clone(), ControlSource::Offline);
+    assert!(!resolver.crew_order_policy_for(&id).coordinate);
+    resolver.set(id.clone(), ControlSource::Human);
+    resolver.set_destroyed(true);
+    assert!(!resolver.crew_order_policy_for(&id).accept_human_input);
+    resolver.set_destroyed(false);
+    assert!(resolver.crew_order_policy_for(&id).accept_human_input);
+    assert!(
+        !resolver.policy_for(&id).accept_human_input,
+        "planning availability never makes the failed physical tools operational"
+    );
+}

@@ -40,3 +40,6 @@ pub mod helm_planner;
 pub mod access;
 pub mod composition;
 pub mod interior;
+
+pub mod compartment_damage;
+pub mod physical_damage;

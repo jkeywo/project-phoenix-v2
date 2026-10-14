@@ -1,4 +1,38 @@
 use crate::core::messages::{StationId, SystemControlPayload};
+/// Closed crew orders, distinct from powered repair-tool actuation. This does
+/// not grant another Console authority or alter the ordinary individual AI.
+pub fn is_repair_crew_order(
+    config: &crate::ship::config::ShipConfig,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+) -> bool {
+    config
+        .system(target)
+        .is_some_and(|system| system.kind == crate::ship::system_registry::REPAIR_KIND)
+        && matches!(
+            payload,
+            SystemControlPayload::DispatchRepairTeam { .. }
+                | SystemControlPayload::RecallRepairTeam { .. }
+                | SystemControlPayload::SetRepairPriority { .. }
+                | SystemControlPayload::SetRepairTargetPriority { .. }
+                | SystemControlPayload::DispatchExternalRepair
+                | SystemControlPayload::RecallExternalRepair
+        )
+}
+
+pub fn command_policy(
+    config: &crate::ship::config::ShipConfig,
+    sources: &crate::ship::control_source::ControlSourceResolver,
+    target: &crate::core::messages::SystemId,
+    payload: &SystemControlPayload,
+) -> crate::ship::control_source::ControlTickPolicy {
+    if is_repair_crew_order(config, target, payload) {
+        sources.crew_order_policy_for(target)
+    } else {
+        sources.policy_for(target)
+    }
+}
+
 /// Resolve authority through the System's Console and current hosting Station.
 /// Generated equipment must carry the same explicit ownership as authored gear;
 /// an unknown target never acquires authority from its spelling.
@@ -106,7 +140,7 @@ pub fn authorize_station_command(
     if station_for_system(config, hosts, &effective_target).as_ref() != Some(station) {
         return Err(StationCommandPolicyFailure::SystemOutsideStation);
     }
-    if !control_sources.0.policy_for(&effective_target).coordinate {
+    if !command_policy(config, &control_sources.0, &effective_target, payload).coordinate {
         return Err(StationCommandPolicyFailure::SystemUnavailable);
     }
     Ok(effective_target)

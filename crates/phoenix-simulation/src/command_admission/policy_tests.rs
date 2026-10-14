@@ -186,19 +186,110 @@ fn dispatch_to_an_offline_rated_system_is_rejected() {
     ));
 }
 
-/// Rejection class 3 — damaged: `offline_systems` (driven by damage tier)
-/// overrides the station rating, so even the rightful holder is denied.
+/// Crew orders remain possible when powered repair tools fail; ownership and
+/// the ordinary per-System controller still determine who may issue them.
 #[test]
-fn dispatch_to_a_damaged_system_is_rejected() {
+fn damaged_repair_tools_preserve_crew_orders_without_changing_authority() {
+    let id = SystemId("repair".into());
+    let config = config();
+    let sessions = sessions_with_repair_holder("t1");
+    let mut human = sources(ControlSource::Human, true);
+    assert!(is_command_authorized(
+        "t1",
+        &id,
+        &dispatch(),
+        &human,
+        &sessions,
+        &config,
+        None
+    ));
+    assert!(!is_command_authorized(
+        "other",
+        &id,
+        &dispatch(),
+        &human,
+        &sessions,
+        &config,
+        None
+    ));
+    assert!(!is_command_authorized(
+        "ai:backfill",
+        &id,
+        &dispatch(),
+        &human,
+        &sessions,
+        &config,
+        None
+    ));
+    assert!(
+        !command_policy(
+            &config,
+            &human.0,
+            &id,
+            &SystemControlPayload::SetShieldRaised { raised: true }
+        )
+        .accept_human_input,
+        "the exception is closed to repair crew-order payloads"
+    );
+    let ai = sources(ControlSource::Ai, true);
+    assert!(is_command_authorized(
+        "ai:backfill",
+        &id,
+        &dispatch(),
+        &ai,
+        &sessions,
+        &config,
+        None
+    ));
     assert!(!is_command_authorized(
         "t1",
-        &SystemId("repair".into()),
+        &id,
         &dispatch(),
-        &sources(ControlSource::Human, true),
-        &sessions_with_repair_holder("t1"),
-        &config(),
-        None,
+        &ai,
+        &sessions,
+        &config,
+        None
     ));
+    assert!(authorize_station_command(
+        &StationId("repair".into()),
+        &id,
+        &dispatch(),
+        &human,
+        &config,
+        None,
+        None
+    )
+    .is_ok());
+    assert!(authorize_station_command(
+        &StationId("helm".into()),
+        &id,
+        &dispatch(),
+        &human,
+        &config,
+        None,
+        None
+    )
+    .is_err());
+    human.0.set_gm_disabled(id.clone(), true);
+    assert!(!is_command_authorized(
+        "t1",
+        &id,
+        &dispatch(),
+        &human,
+        &sessions,
+        &config,
+        None
+    ));
+    assert!(authorize_station_command(
+        &StationId("repair".into()),
+        &id,
+        &dispatch(),
+        &human,
+        &config,
+        None,
+        None
+    )
+    .is_err());
 }
 
 /// Rejection class 4 — AI-controlled: while the system is under AI

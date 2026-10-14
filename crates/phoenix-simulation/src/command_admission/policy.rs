@@ -25,7 +25,7 @@ pub fn is_command_authorized(
 ) -> bool {
     let effective_target = effective_target_for_command(config, target, payload);
 
-    let policy = control_sources.0.policy_for(&effective_target);
+    let policy = command_policy(config, &control_sources.0, &effective_target, payload);
     // Summary intent never shares an actuator with the AI. Repair priority
     // changes the ordinary sweep's policy input; dispatch/recall remain AI-only.
     let summary = config

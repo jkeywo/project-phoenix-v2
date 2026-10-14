@@ -101,6 +101,16 @@ impl ControlSourceResolver {
         control_tick_policy(self.source_for(system_id))
     }
 
+    /// Ordinary crew planning survives loss of powered repair tools. The closed
+    /// payload policy applies this only to Repair assignment/recall/priority;
+    /// GM latches, explicit Offline, ownership and catastrophic loss still gate it.
+    pub fn crew_order_policy_for(&self, system_id: &SystemId) -> ControlTickPolicy {
+        if self.destroyed || self.is_gm_disabled(system_id) {
+            return control_tick_policy(ControlSource::Offline);
+        }
+        control_tick_policy(self.source_for(system_id))
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&SystemId, &ControlSource)> {
         self.sources.iter()
     }

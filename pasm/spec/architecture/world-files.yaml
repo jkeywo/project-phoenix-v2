@@ -414,7 +414,7 @@ entities:
     architecture:
       kind: subsystem
       authority: authoritative
-      owns: [external-repair-dispatch-state]
+      writes: [external-repair-dispatch-state]
       reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state, repair-team-state, tactical-radar-blackboard-state, infrastructure-condition-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
@@ -465,7 +465,7 @@ entities:
         - "[ai] Increment 5 captures the commitment once in RepairState.jobs and folds it once with the internal-repair job namespace, including identity and private workflow continuation. Derived TeamSlot and external publication fields are readouts. Releasing a job retains its bounded last outcome/allocator rather than erasing history. Snapshot 41/rules 0.13 reject unsupported older state."
     architecture:
       classification: authoritative
-      owner: shared-job-execution-state
+      owner: host-repair-team-state
       writers: [external-repair-dispatcher, named-external-repair-claim]
       replicas: [external-repair-published-state]
     implementation:

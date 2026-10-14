@@ -660,6 +660,7 @@ entities:
       authority: authoritative
       owns:
         - repair-team-state
+        - external-repair-dispatch-state
       runs_in:
         - host-browser-runtime
     implementation:

@@ -1,4 +1,5 @@
 {
+  "phoenix_sim_gameplay::ship::power::publish_power_blackboard": "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
   "phoenix_simulation::ai::server::AiEntityAttacked": "phoenix_sim_gameplay::ai::server::AiEntityAttacked",
   "phoenix_simulation::ai::server::AiEntityDestroyed": "phoenix_sim_gameplay::ai::server::AiEntityDestroyed",
   "phoenix_simulation::ai::server::AiProfile": "phoenix_sim_gameplay::ai::server::AiProfile",
@@ -760,7 +761,7 @@
   "phoenix_simulation::ship::power::PowerMultiplierResource": "phoenix_sim_gameplay::ship::power::PowerMultiplierResource",
   "phoenix_simulation::ship::power::ShipPowerSystem": "phoenix_sim_gameplay::ship::power::ShipPowerSystem",
   "phoenix_simulation::ship::power::handle_power_messages": "phoenix_sim_gameplay::ship::power::handle_power_messages",
-  "phoenix_simulation::ship::power::publish_power_blackboard": "phoenix_sim_gameplay::ship::power::publish_power_blackboard",
+  "phoenix_simulation::ship::power::publish_power_blackboard": "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
   "phoenix_simulation::ship::power::tick_power_brownout_advisory": "phoenix_sim_gameplay::ship::power::tick_power_brownout_advisory",
   "phoenix_simulation::ship::power::tick_power_system": "phoenix_sim_gameplay::ship::power::tick_power_system",
   "phoenix_simulation::ship::sensors::SensorsAiConfigResource": "phoenix_sim_gameplay::ship::sensors::SensorsAiConfigResource",
@@ -1358,7 +1359,7 @@
   "project_phoenix::ship::power::drain_scripted_power_orders": "phoenix_simulation::ship::power::drain_scripted_power_orders",
   "project_phoenix::ship::power::handle_power_messages": "phoenix_sim_gameplay::ship::power::handle_power_messages",
   "project_phoenix::ship::power::mirror_weapons_cold_flags": "phoenix_simulation::ship::power::mirror_weapons_cold_flags",
-  "project_phoenix::ship::power::publish_power_blackboard": "phoenix_sim_gameplay::ship::power::publish_power_blackboard",
+  "project_phoenix::ship::power::publish_power_blackboard": "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
   "project_phoenix::ship::power::tick_power_brownout_advisory": "phoenix_sim_gameplay::ship::power::tick_power_brownout_advisory",
   "project_phoenix::ship::power::tick_power_system": "phoenix_sim_gameplay::ship::power::tick_power_system",
   "project_phoenix::ship::rating_systems::handle_station_rating_change": "phoenix_simulation::ship::rating_systems::handle_station_rating_change",

@@ -290,7 +290,10 @@ fn phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers() {
             .collect()
     }
     let mut hosts = [host(HostSlot(1), false), host(HostSlot(2), false)];
-    for frame in 0..120 {
+    // Fleet manoeuvring and finite local reserve startup are real work.
+    // Use the existing sustained-gameplay window rather than assuming both
+    // ships are already in firing position within two seconds of joining.
+    for frame in 0..12_000 {
         step(&mut hosts);
         let left = cycles(&mut hosts[0]);
         let right = cycles(&mut hosts[1]);

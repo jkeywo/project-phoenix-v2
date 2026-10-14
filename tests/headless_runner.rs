@@ -22907,11 +22907,13 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
     assert!(beam.engaged && beam.coupled_target.as_deref() == Some(&derelict));
     assert_eq!(beam.work_fraction, 0.0, "exhaustion pauses physical work");
     assert_eq!(beam.last_refusal, Some(TractorRefusal::Unpowered));
-    place_operator(&mut app, Vec3::new(4000.0, 0.0, 0.0));
+    // Keep the existing target within the authored 600-unit range: range
+    // loss is a separate interruption, already exercised above.
+    place_operator(&mut app, held_operator + Vec3::X * 20.0);
     run(&mut app, 3);
     assert!(
         position_of(&mut app, DERELICT).distance(parted) < 50.0,
-        "an unpowered beam has let go"
+        "an unpowered beam performs no tow movement"
     );
 
     // Funding resumes the standing hold without issuing another engage order.
@@ -23417,8 +23419,15 @@ fn repair_dock(app: &mut App) {
 /// starts from.
 fn redock(app: &mut App) {
     use project_phoenix::core::messages::SystemControlPayload;
-    // Clear any prior state and settle the two hulls back into their start pose.
+    // Finish the previous paid backing manoeuvre before teleporting the
+    // fixture. Dock is unavailable during Undock; resetting the pose first
+    // would leave that manoeuvre live when the next Dock command is sent.
     send_dock(app, SystemControlPayload::Undock);
+    run(app, 160);
+    assert!(
+        dock_control_of(app).undock_target.is_none(),
+        "precondition: the previous undock has actually completed"
+    );
     place_dock_operator(app, Vec3::ZERO);
     move_berth(app, Vec3::new(100.0, 0.0, 0.0));
     run(app, 1);

@@ -588,8 +588,8 @@ pub fn apply_external_repair(
     mut operators: Query<(&ExternalRepairDispatch, &mut ShipRepairTeams)>,
     targets: Query<(&EntityUuid, &InfrastructureCondition)>,
 ) {
-    // Collect from read-only queries first, so a world with no live dispatch
-    // never takes the queue mutably and marks it changed on a quiet tick.
+    // Advance each job's private workflow while collecting effects. Take the
+    // condition queue mutably only when there is an actual adjustment to deliver.
     let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
     let mut adjustments: Vec<ConditionAdjustment> = operators
         .iter_mut()
@@ -842,7 +842,10 @@ pub fn register_external_repair(app: &mut App) {
                 .in_set(crate::sim_sets::SimSet::Input),
             tick_external_repair
                 .in_set(crate::sim_sets::FixedStep::TickExternalRepair)
-                .in_set(crate::sim_sets::SimSet::Modifiers),
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                // Coordination projects the physical onsite view first; external
+                // job maintenance and its gated effect then advance the shared owner.
+                .after(crate::ship::coordination_systems::process_coordination_lag),
             apply_external_repair
                 .in_set(crate::sim_sets::FixedStep::ApplyExternalRepair)
                 .in_set(crate::sim_sets::SimSet::Modifiers)

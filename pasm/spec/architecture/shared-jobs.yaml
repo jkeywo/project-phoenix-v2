@@ -8,6 +8,7 @@ entities:
       rationale:
         - "[ai] Repair is the first real consumer. The same closed state-tree compiler/evaluator/editor supports Job facts and final effect channels; once-per-step stage execution preserves existing travel, repair, sweep and return boundaries. There is no additional AI controller or child-job hierarchy."
         - "[ai] Snapshot 41/rules 0.13 carry canonical jobs once. Restore validates crew identity and private continuation before writing existing rows; digest folds canonical assignments and timers, not derived slots. Permitted work lists expose issued assignments/outcomes without hidden diagnosis or command authority."
+        - "[ai] Coordination's physical onsite projection precedes external job maintenance in Modifiers; the gated external effect follows maintenance and still precedes infrastructure condition processing. Explicit ordering covers the shared team owner's new mutable access without growing schedule debt."
     architecture:
       kind: subsystem
       authority: authoritative

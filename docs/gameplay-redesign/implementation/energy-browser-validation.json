@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "recorded_workspace": "C:/Coding/project-phoenix-v2",
+  "relative_paths_base": "recorded_workspace; browser command working directories are cwd",
+  "status": "bounded_browser_passed_integrated_and_manual_pending",
+  "runtime_revision": "8bb63e1ae8f291c542784149e0e78170051699d4",
+  "harness_revision": "54cbdc3b6b7a2b8294efab76ec8508c2a2893f93",
+  "runtime_source_patch": "",
+  "recorded_utc": "2026-10-14T19:59:58.120Z",
+  "compatibility": {
+    "tested_protocol": 6,
+    "tested_content_id": "phoenix-base",
+    "tested_content_epoch": 1,
+    "final_target_protocol": 7,
+    "final_target_content_epoch": 2,
+    "final_bundle_acceptance": "pending",
+    "note": "Historical increment 8 pin; no claim that these runs validate the later integrated compatibility stamp or increment 9 runtime."
+  },
+  "build_receipt": {
+    "file": "energy-browser-build.json",
+    "sha256": "f23c391b226860cad8442a67767a6092d85aef98ab9c6c6484bd30c8d1c1385b",
+    "bundle_file_count": 1791,
+    "wasm_sha256": {
+      "assets/texture-codecs/basis/basis_transcoder.wasm": "6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a",
+      "preview/project-phoenix-f45b2edef5577bba_bg.wasm": "297536406378af7e96d7f204dc84ebdc0a063e387fd58741ca573e320e2806ab",
+      "project-phoenix-22ab2d79d58296b9_bg.wasm": "6d2ab1160e6b027a4014f89e2a3615393b0a94ceb2b87c0cfdaea13d479b3c6c"
+    },
+    "source_revision": "8bb63e1ae8f291c542784149e0e78170051699d4"
+  },
+  "browser_coverage": {
+    "distinct_passing_cases": 19,
+    "runs": "16 + 2 corrected crew + 1 render",
+    "note": "Not a single unchanged all-green suite invocation. Material fixture fixes were independently reviewed; no runtime/content changes."
+  },
+  "harness_corrections": [
+    "Observe WorldSetup before launch; the observer holds and readies the other Station.",
+    "Read the blank client handshake stamp from the PHOENIX_SMOKE_DIST bundle selected by the server."
+  ],
+  "browser_checks": [
+    {
+      "name": "pinned-chromium-initial",
+      "tested_revision": "8bb63e1ae8f291c542784149e0e78170051699d4",
+      "cwd": ".phoenix/worktrees/increment-8-browser-acceptance",
+      "command": "node tests/smoke/node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.js --project=chromium power-console.spec.js energy-crew-journeys.spec.js weapons-cold-fire-gate.spec.js sensors-weapons-cold.spec.js text-scale-power-workflow.spec.js --reporter=list",
+      "environment": {
+        "PHOENIX_SMOKE_DIST": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-8-browser-acceptance/dist",
+        "PHOENIX_SMOKE_PORT": "3140"
+      },
+      "result": "16_passed_2_fixture_failures",
+      "passed": 16,
+      "failed": 2,
+      "scope": "Actual sensing/restraint and all isolated Energy, Tactical and presentation controls passed. Crew fixture subscribed after launch.",
+      "raw_log": ".phoenix/worktrees/increment-8-browser-acceptance/.phoenix/pinned-host-chromium.log",
+      "raw_sha256": "f3b861db28fb65cb1b7666b18dd3d6eea1791842a779bed18e2e7c240022a9b4"
+    },
+    {
+      "name": "corrected-live-crew",
+      "tested_revision": "54cbdc3b6b7a2b8294efab76ec8508c2a2893f93",
+      "runtime_revision": "8bb63e1ae8f291c542784149e0e78170051699d4",
+      "cwd": ".phoenix/worktrees/increment-8-browser-followups",
+      "command": "node tests/smoke/node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.js --project=chromium energy-crew-journeys.spec.js --reporter=list",
+      "environment": {
+        "PHOENIX_SMOKE_DIST": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-8-browser-acceptance/dist",
+        "PHOENIX_SMOKE_PORT": "3143"
+      },
+      "result": "passed",
+      "passed": 2,
+      "failed": 0,
+      "scope": "Destroyer Engineering and Courier Captain: real flow, human-seeking tabs and Console working-view tab/reload continuity.",
+      "raw_log": ".phoenix/worktrees/increment-8-browser-followups/.phoenix/crew-followup-seated.log",
+      "raw_sha256": "77587909963e7ef0d636e9fbd1a1baf6091927a0a453a96777130c0dd27f6edb"
+    },
+    {
+      "name": "rendered-workshop-preview-test",
+      "tested_revision": "54cbdc3b6b7a2b8294efab76ec8508c2a2893f93",
+      "runtime_revision": "8bb63e1ae8f291c542784149e0e78170051699d4",
+      "cwd": ".phoenix/worktrees/increment-8-browser-followups",
+      "command": "node tests/smoke/node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.js --project=render workshop-resources.render.spec.js --reporter=list",
+      "environment": {
+        "PHOENIX_SMOKE_DIST": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-8-browser-acceptance/dist",
+        "PHOENIX_SMOKE_PORT": "3144"
+      },
+      "result": "passed",
+      "passed": 1,
+      "failed": 0,
+      "scope": "Source materialisation/refusal, stores/weapon/Energy edits, undo/redo, export/reimport, actual mesh/pixel Preview and disposable ordinary simulation Test/source preservation.",
+      "raw_log": ".phoenix/worktrees/increment-8-browser-followups/.phoenix/workshop-preview-test.log",
+      "raw_sha256": "0182ec189357925589a593dc6fa0f30e606239d0adec37b32847f459b10356fa"
+    }
+  ],
+  "bounded_native_checks": [
+    {
+      "name": "power",
+      "tested_revision": "bb6054786311385b811bb12b43d4287edc4f3564",
+      "result": "passed",
+      "passed": 14,
+      "reproduction_command": "cargo test -p phoenix-simulation --lib --no-default-features ship::power::tests::",
+      "raw_log": ".phoenix/increment-8-power-owner-retry.log",
+      "raw_sha256": "ed4a46f903f89c7aad5da9b11e09cec906f2a6e42636d578d00151945312034f"
+    },
+    {
+      "name": "power-ai",
+      "tested_revision": "bb6054786311385b811bb12b43d4287edc4f3564",
+      "result": "passed",
+      "passed": 8,
+      "reproduction_command": "cargo test -p phoenix-simulation --lib --no-default-features console_ai::server::tests::power_ai_tests::",
+      "raw_log": ".phoenix/increment-8-power-ai-owner-retry.log",
+      "raw_sha256": "4e43a1390c7c7f871c9c9a5dd4806893b67487afe4b9dc97de323e3ffdd694e5"
+    },
+    {
+      "name": "whole-host-power",
+      "tested_revision": "bb6054786311385b811bb12b43d4287edc4f3564",
+      "result": "passed",
+      "passed": 4,
+      "reproduction_command": "cargo test -p phoenix-simulation --lib --no-default-features server_app::tests::power_integration_tests::",
+      "raw_log": ".phoenix/increment-8-power-host-owner-retry.log",
+      "raw_sha256": "7980a582f60b2c3597d81f1d4ee879e8bc82cf0311d2f27cf4f5a29c595ae0b0"
+    },
+    {
+      "name": "equipment-status",
+      "tested_revision": "bb6054786311385b811bb12b43d4287edc4f3564",
+      "result": "passed",
+      "passed": 4,
+      "reproduction_command": "cargo test -p phoenix-simulation --lib --no-default-features server_app::system_status::tests::",
+      "raw_log": ".phoenix/increment-8-status-owner-retry.log",
+      "raw_sha256": "aef18dc753b6c1f2b43c3612cd8173998d4c84736e35d1ef6880bb2c842c08b5"
+    }
+  ],
+  "incomplete_native_batch": {
+    "tested_revision": "bb6054786311385b811bb12b43d4287edc4f3564",
+    "passed": 282,
+    "failed": 6,
+    "correction_revision": "7b89ed85ab873f8fa82ab64c804c9e967663428f",
+    "correction_rerun": "pending",
+    "raw_log": ".phoenix/increment-8-weapons-owner-retry.log",
+    "raw_sha256": "1dccdd79b6f38ccf432ed8e2b96df0312735c48ed2c4bfe3cddad4cbadeaf643"
+  },
+  "pending": [
+    "Required integrated native/JavaScript/PASM gates on the final combined source.",
+    "Remaining corrected native fixtures and broader headless Power/continuation batch.",
+    "Combat/non-combat balance and performance evidence against increment 7 with unchanged published thresholds.",
+    "Matching final protocol 7/content epoch 2 bundle acceptance.",
+    "Actual physical phone/native-monitor interaction and human station workload acceptance."
+  ],
+  "review": "Independent bounded read-only review passed for smoke migration and harness correction; no review gates or push performed."
+}

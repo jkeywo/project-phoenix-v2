@@ -160,6 +160,70 @@ pub fn scope_totals(
     )
 }
 
+/// Resolve GM scope to unique ACTUAL compartments. Co-located equipment shares
+/// structure; a System scope cannot invent component HP or a private room.
+pub fn physical_scope_rooms(
+    scope: &GmDirectEffectScope,
+    damage: &crate::ship::compartment_damage::ShipDamage,
+    config: Option<&crate::ship::config::ShipConfig>,
+) -> Result<Vec<String>, GmDirectEffectScopeError> {
+    let rooms: std::collections::BTreeSet<String> = match scope {
+        GmDirectEffectScope::Entity => damage.state.compartments.keys().cloned().collect(),
+        GmDirectEffectScope::System(system) => [damage
+            .definition
+            .interior
+            .placements
+            .get(system)
+            .cloned()
+            .ok_or(GmDirectEffectScopeError::UnknownSystem)?]
+        .into_iter()
+        .collect(),
+        GmDirectEffectScope::Station(station) => {
+            let config = config.ok_or(GmDirectEffectScopeError::UnknownStation)?;
+            if config.station(station).is_none() {
+                return Err(GmDirectEffectScopeError::UnknownStation);
+            }
+            config
+                .systems_for_station(station)
+                .filter_map(|system| {
+                    damage
+                        .definition
+                        .interior
+                        .placements
+                        .get(&system.id)
+                        .cloned()
+                })
+                .collect()
+        }
+    };
+    if rooms.is_empty() {
+        Err(GmDirectEffectScopeError::NotDamageable)
+    } else {
+        Ok(rooms.into_iter().collect())
+    }
+}
+pub fn physical_scope_totals(
+    damage: &crate::ship::compartment_damage::ShipDamage,
+    rooms: &[String],
+) -> (f32, f32) {
+    (
+        rooms
+            .iter()
+            .map(|room| damage.state.compartments[room].hp)
+            .sum::<f64>() as f32,
+        rooms
+            .iter()
+            .map(|room| {
+                damage
+                    .definition
+                    .compartment(room)
+                    .expect("resolved room")
+                    .max_hp
+            })
+            .sum(),
+    )
+}
+
 /// Whether two resolved scopes can touch the same System.
 ///
 /// `None` is the whole hull and therefore overlaps everything. Used only by
@@ -464,6 +528,39 @@ impl PendingGmDirectEffects {
         totals
     }
 
+    pub fn project_physical_totals(
+        &self,
+        target: &str,
+        rooms: &[String],
+        damage: &crate::ship::compartment_damage::ShipDamage,
+        config: Option<&crate::ship::config::ShipConfig>,
+        kind: GmDirectEffectKind,
+        mut totals: (f32, f32),
+    ) -> (f32, f32) {
+        for armed in self.0.iter().filter(|effect| effect.target == target) {
+            let Ok(scope) = physical_scope_rooms(&armed.scope, damage, config) else {
+                continue;
+            };
+            if !scope.iter().any(|room| rooms.contains(room)) {
+                continue;
+            }
+            if !scope.iter().all(|room| rooms.contains(room)) && armed.kind != kind {
+                continue;
+            }
+            totals = totals_after(
+                &GmDirectEffectResult {
+                    kind: armed.kind,
+                    applied_milli_hp: armed.amount_milli_hp,
+                    discarded_milli_hp: 0,
+                    destroyed: false,
+                },
+                totals.0,
+                totals.1,
+            );
+        }
+        totals
+    }
+
     /// Take every effect due at or before `tick`, in canonical order.
     ///
     /// Sorted by `(tick, order)` rather than by push order for
@@ -543,8 +640,8 @@ pub fn apply_gm_direct_effects(
     mut targets: Query<(
         Entity,
         &crate::entities::spawner::EntityUuid,
-        &mut EntitySystemHull,
-        Option<&mut crate::entities::spawner::EntityShipArcHull>,
+        Option<&mut EntitySystemHull>,
+        Option<&mut crate::ship::compartment_damage::ShipDamage>,
         Has<crate::lockstep::FleetSlotOf>,
         Has<crate::server_app::LocalShip>,
         Option<&AsteroidUuid>,
@@ -578,7 +675,7 @@ pub fn apply_gm_direct_effects(
             entity,
             uuid,
             mut hull,
-            mut arc_hull,
+            mut physical_damage,
             is_fleet_ship,
             is_local,
             asteroid,
@@ -606,18 +703,23 @@ pub fn apply_gm_direct_effects(
         // (its config replaced, its systems gone) is treated exactly as a
         // vanished target: the resolved result already said what was promised,
         // and there is nothing left to land it on.
-        let scope = match scope_systems(&effect.scope, &hull.0, ship_config.map(|config| &config.0))
-        {
-            Ok(scope) => scope,
-            Err(reason) => {
-                crate::pwarn!(
-                    log_cfg,
-                    crate::logging::LogCat::Damage,
-                    "GM direct effect scope on {} no longer resolves ({:?})",
-                    effect.target,
-                    reason
-                );
+        let physical_rooms = if let Some(damage) = physical_damage.as_deref() {
+            match physical_scope_rooms(&effect.scope, damage, ship_config.map(|config| &config.0)) {
+                Ok(rooms) => Some(rooms),
+                Err(_) => continue,
+            }
+        } else {
+            None
+        };
+        let scope = if physical_rooms.is_some() {
+            None
+        } else {
+            let Some(hull) = hull.as_deref() else {
                 continue;
+            };
+            match scope_systems(&effect.scope, &hull.0, ship_config.map(|config| &config.0)) {
+                Ok(scope) => scope,
+                Err(_) => continue,
             }
         };
         let amount = milli_to_hp(effect.amount_milli_hp);
@@ -626,36 +728,58 @@ pub fn apply_gm_direct_effects(
             sim_rng.as_deref(),
             crate::sim_rng::GM_DIRECT_EFFECT_EVENT,
             effect.order.sequence,
-            |rng| match effect.kind {
-                GmDirectEffectKind::Damage => {
-                    // Straight to `apply_hull_damage_within`: no shield split
-                    // and no pierce fraction. "Direct/internal" is exactly the
-                    // absence of that ROUTING, not a new formula — so the
-                    // applied amount still mirrors into the per-arc pool (issue
-                    // #514) the way every other hull-damage source mirrors it,
-                    // from inside this one keyed generator so both draws stay
-                    // on it. The arc pool tracks TOTAL hull damage and has no
-                    // Station map of its own, so a narrowed scope mirrors the
-                    // same way a whole-hull hit does.
-                    let result = crate::ship::damage::apply_hull_damage_within(
-                        &mut hull.0,
-                        scope.as_deref(),
-                        amount,
-                        rng,
-                    );
-                    if let Some(arc_hull) = arc_hull.as_mut() {
-                        arc_hull.0.apply_damage(result.0, rng);
+            |rng| {
+                if let (Some(damage), Some(rooms)) =
+                    (physical_damage.as_deref_mut(), physical_rooms.as_deref())
+                {
+                    let applied = match effect.kind {
+                        GmDirectEffectKind::Damage => damage
+                            .state
+                            .apply_internal(
+                                &damage.definition,
+                                rooms,
+                                amount as f64,
+                                "gm.direct",
+                                rng,
+                            )
+                            .unwrap_or_else(|error| {
+                                warn!("GM physical incident refused: {error}");
+                                0.0
+                            }) as f32,
+                        GmDirectEffectKind::Heal => {
+                            let mut remaining = amount;
+                            let mut applied = 0.0;
+                            for room in rooms {
+                                let restored = damage
+                                    .state
+                                    .restore_structure(&damage.definition, room, remaining)
+                                    .unwrap_or(0.0);
+                                applied += restored;
+                                remaining = (remaining - restored).max(0.0);
+                            }
+                            applied
+                        }
+                    };
+                    (applied, damage.catastrophic())
+                } else if let Some(hull) = hull.as_deref_mut() {
+                    match effect.kind {
+                        GmDirectEffectKind::Damage => {
+                            crate::ship::damage::apply_hull_damage_within(
+                                &mut hull.0,
+                                scope.as_deref(),
+                                amount,
+                                rng,
+                            )
+                        }
+                        GmDirectEffectKind::Heal => (
+                            hull.0
+                                .restore_distributed_within(scope.as_deref(), amount, rng),
+                            false,
+                        ),
                     }
-                    result
+                } else {
+                    (0.0, false)
                 }
-                // No arc mirror: see this system's doc comment — arc hull has
-                // no distributed restore, and no repair path the crew can reach
-                // refills it either.
-                GmDirectEffectKind::Heal => (
-                    hull.0
-                        .restore_distributed_within(scope.as_deref(), amount, rng),
-                    false,
-                ),
             },
         );
         let uuid = uuid.0.clone();
@@ -794,3 +918,7 @@ pub fn reset(world: &mut World) {
 #[cfg(test)]
 #[path = "effect_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "effect_physical_tests.rs"]
+mod physical_tests;

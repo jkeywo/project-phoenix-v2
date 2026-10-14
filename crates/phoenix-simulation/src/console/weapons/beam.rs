@@ -1101,6 +1101,7 @@ pub(crate) fn tick_beams_prepare(
     // plugin still pass) + the blocker-classification lookup.
     los: LineOfSightInputs,
     mut beam_context: ResMut<BeamContext>,
+    physical: Query<&crate::ship::compartment_damage::ShipDamage>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -1276,6 +1277,12 @@ pub(crate) fn tick_beams_prepare(
             else {
                 continue;
             };
+            let operation_factor = physical.get(shooter_entity).ok().map_or(1.0, |damage| {
+                damage.factor(&system, phoenix_model::damage::DamageBinding::Operation)
+            });
+            if operation_factor <= 0.0 {
+                continue;
+            }
             let Some(power) = power
                 .as_deref_mut()
                 .filter(|power| !power.0.weapons_restrained())
@@ -1310,6 +1317,7 @@ pub(crate) fn tick_beams_prepare(
             let damage_to_apply = match beam.bank_slot_mut(&active_bank) {
                 Some(slot) => {
                     slot.damage_accumulator += damage_per_sec
+                        * operation_factor
                         * modifiers.get(&ModifierSlot::PhaserDamage)
                         * (1.0 + slot.strike_damage_bonus)
                         * funded_dt;
@@ -1527,25 +1535,32 @@ pub(crate) fn tick_beams_apply_damage(
     // `Transform` is `Option` because test fixtures sometimes spawn hull-only
     // entities without a Transform; production entities always have one and
     // are still matched by UUID.
-    mut hull_q: Query<(
-        Entity,
-        Option<&AsteroidUuid>,
-        Option<&crate::entities::spawner::EntityUuid>,
-        Option<&Transform>,
-        Option<&ShipPhysics>,
-        &mut EntitySystemHull,
-        Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::server_app::ShipAttackedThisTick>,
-        Option<&mut LastShipAttacker>,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        // Whether the target is a CREWED hull in the fleet, which every host in
-        // that fleet agrees about — unlike `LocalShip`, which is a different
-        // ship on each of them (issue #1116).
-        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
-        Option<&mut crate::entities::spawner::EntityShipArcHull>,
-        Option<&crate::entities::spawner::ColliderSection>,
-    )>,
+    mut hull_q: Query<
+        (
+            Entity,
+            Option<&AsteroidUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&Transform>,
+            Option<&ShipPhysics>,
+            Option<&mut EntitySystemHull>,
+            Option<&mut crate::ship::shields::ShipShields>,
+            Option<&mut crate::server_app::ShipAttackedThisTick>,
+            Option<&mut LastShipAttacker>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            // Whether the target is a CREWED hull in the fleet, which every host in
+            // that fleet agrees about — unlike `LocalShip`, which is a different
+            // ship on each of them (issue #1116).
+            bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
+            Option<&mut crate::ship::compartment_damage::ShipDamage>,
+            Option<&crate::entities::spawner::ColliderSection>,
+        ),
+        Or<(
+            With<crate::ship::compartment_damage::ShipDamage>,
+            With<crate::entities::spawner::EntitySystemHull>,
+        )>,
+    >,
     mut beam_context: ResMut<BeamContext>,
+    mut shooters: Query<(&PhaserCombatConfigResource, &mut ActiveBeam)>,
     // The write-side outputs (world, outbox, game-over latch, destruction event
     // writers, balance sink, tracked registry) bundled as one `SystemParam`
     // (issue #1185); `SimOutbox` / latch / balance / tracked stay `Option` for
@@ -1655,6 +1670,33 @@ pub(crate) fn tick_beams_apply_damage(
             continue;
         }
 
+        let Ok((combat, mut active)) = shooters.get_mut(state.shooter_entity) else {
+            continue;
+        };
+        let Some(profile) = combat
+            .0
+            .bank_by_id(&state.active_bank)
+            .map(|bank| bank.impact)
+        else {
+            continue;
+        };
+        let Some(slot) = active.bank_slot_mut(&state.active_bank) else {
+            continue;
+        };
+        if slot.impact_sample_target.as_deref() != Some(state.effective_target_uuid.as_str()) {
+            slot.impact_sample_target = Some(state.effective_target_uuid.clone());
+            slot.impact_sample = None;
+        }
+        let delta = [
+            state.effective_target_x - state.shooter_x,
+            state.effective_target_z - state.shooter_z,
+        ];
+        // Coincident centres have no ray azimuth: retain a deterministic forward incident.
+        let incoming = if delta == [0.0, 0.0] {
+            [0.0, -1.0]
+        } else {
+            delta
+        };
         let mut target_asteroid_destroyed = false;
         let mut target_ship_destroyed_non_local = false;
         let mut damage_applied = false;
@@ -1664,7 +1706,7 @@ pub(crate) fn tick_beams_apply_damage(
             target_entity,
             ast_uuid,
             ent_uuid,
-            target_tf,
+            _target_tf,
             target_physics_opt,
             mut hull_comp,
             mut ship_shields_comp,
@@ -1672,7 +1714,7 @@ pub(crate) fn tick_beams_apply_damage(
             _last_attacker_opt,
             target_is_local,
             target_is_fleet_ship,
-            mut target_arc_hull,
+            mut physical_damage,
             collider_opt,
         ) in hull_q.iter_mut()
         {
@@ -1728,50 +1770,20 @@ pub(crate) fn tick_beams_apply_damage(
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
                 let delivery = crate::weapons::mount::DamageDelivery {
+                    impact: profile,
                     damage_hull: base_damage as f32,
                     damage_shields: base_damage as f32,
                     shield_pierce: state.shield_pierce,
                 };
-                // Which facing takes the hit.
-                //
-                // A CREWED hull routes by the shooter's bearing to the
-                // appropriate facing; anything else takes it on arc zero,
-                // which is what a shield with one facing means anyway.
-                //
-                // The predicate used to be `target_is_local` and is now
-                // `target_is_fleet_ship` (issue #1116). That is a spelling
-                // fix rather than a rule change: the rule was always "a
-                // player hull routes by bearing", and `LocalShip` spelled it
-                // as "the hull THIS host projects". With two hosts running
-                // one mission that is a different ship on each, so a peer's
-                // four-facing player hull took every hit on one arc here and
-                // on the bearing arc there — the two leaked different
-                // amounts through to hull and the fleet split over a single
-                // point of damage. `FleetSlotOf` says "a hull some host in
-                // this fleet flies", which every host agrees about.
-                //
-                // Solo it is the same ship and the same answer, so no
-                // engagement moved; NPC durability is untouched, which
-                // `the_composed_player_cruiser_rings_its_target_and_breaks_
-                // off_to_bear_its_tubes` is sensitive enough to have caught.
-                //
-                // Falls back to 0.0 when the target has no Transform, as it
-                // always did.
-                let bearing = if target_is_fleet_ship {
-                    let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
-                    match target_tf {
-                        Some(tf) => crate::weapons::shield::attacker_bearing_relative(
-                            state.shooter_x,
-                            state.shooter_z,
-                            tf.translation.x,
-                            tf.translation.z,
-                            target_yaw,
-                        ),
-                        None => 0.0,
-                    }
-                } else {
-                    0.0
-                };
+                // Every equipped hull routes by the actual ray arrival,
+                // independent of controller, fleet membership or host projection.
+                let bearing = crate::weapons::shield::attacker_bearing_relative(
+                    -incoming[0],
+                    -incoming[1],
+                    0.0,
+                    0.0,
+                    target_physics_opt.map_or(0.0, |p| p.yaw),
+                );
                 let impact = shields.0.apply_delivery(delivery, bearing, true);
                 (impact.hull_damage, impact.shield_absorbed)
             } else {
@@ -1782,18 +1794,34 @@ pub(crate) fn tick_beams_apply_damage(
             let ship_destroyed = if damage_to_hull > 0.0 {
                 let (hull_applied, destroyed) =
                     crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
-                        let result = crate::ship::damage::apply_hull_damage(
-                            &mut hull_comp.0,
-                            damage_to_hull,
-                            rng,
-                        );
-                        // Distribute the same absorbed amount across per-arc
-                        // hull (issue #514). Skipped when the target has no
-                        // `EntityShipArcHull` (NPCs, asteroids).
-                        if let Some(ref mut arc_hull) = target_arc_hull {
-                            arc_hull.0.apply_damage(result.0, rng);
+                        if let Some(damage) = physical_damage.as_deref_mut() {
+                            let hit = phoenix_model::damage::DamageHit {
+                                incoming,
+                                profile,
+                                payload: damage_to_hull as f64,
+                                aim: None,
+                                source: format!("beam:{}", state.active_bank),
+                                sample: slot.impact_sample.clone(),
+                            };
+                            match damage.apply_hit(
+                                target_physics_opt.map_or(0.0, |p| p.yaw),
+                                hit,
+                                rng,
+                            ) {
+                                Ok(result) => {
+                                    slot.impact_sample = Some(result.sample);
+                                    (result.structural_loss as f32, damage.catastrophic())
+                                }
+                                Err(error) => {
+                                    warn!("physical beam hit refused: {error}");
+                                    (0.0, false)
+                                }
+                            }
+                        } else if let Some(hull) = hull_comp.as_deref_mut() {
+                            crate::ship::damage::apply_hull_damage(&mut hull.0, damage_to_hull, rng)
+                        } else {
+                            (0.0, false)
                         }
-                        result
                     });
                 hull_applied_total = hull_applied;
                 // A crewed hull: GameOver on kill, and never despawned — the
@@ -2204,3 +2232,7 @@ pub(crate) fn handle_set_phaser_frequency(
 }
 
 pub use phoenix_sim_gameplay::console::weapons::beam::*;
+
+#[cfg(test)]
+#[path = "physical_delivery_tests.rs"]
+mod physical_delivery_tests;

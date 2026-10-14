@@ -3181,6 +3181,7 @@ pub fn apply_due_actions(
         // carries no ship config: a Station scope aimed at one is refused with
         // `UnknownStation` rather than silently widened to the whole hull.
         Option<&crate::ship::components::ShipConfigComponent>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
     // Capability checks inspect the complete target entity. Borrow them apart
     // from the System latch writer, even though each action uses only one arm.
@@ -3744,20 +3745,47 @@ pub fn apply_due_actions(
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::UnknownEntity),
                     ),
+                    (Some(pending), Some((_, _, ship_config, Some(damage)))) => {
+                        let config = ship_config.map(|config| &config.0);
+                        match crate::gm::operations::effect::physical_scope_rooms(scope, damage, config) {
+                            Err(error) => (GmActionOutcome::Refused, Some(match error {
+                                crate::gm::operations::effect::GmDirectEffectScopeError::UnknownStation => GmActionRefusalReason::UnknownStation,
+                                crate::gm::operations::effect::GmDirectEffectScopeError::UnknownSystem => GmActionRefusalReason::UnknownSystem,
+                                crate::gm::operations::effect::GmDirectEffectScopeError::NotDamageable => GmActionRefusalReason::TargetNotDamageable,
+                            })),
+                            Ok(rooms) => {
+                                let totals = crate::gm::operations::effect::physical_scope_totals(damage, &rooms);
+                                let (current, maximum) = pending.project_physical_totals(target, &rooms, damage, config, *effect, totals);
+                                let mut resolution = crate::gm::operations::effect::resolve_direct_effect(*effect, *amount_milli_hp, current, maximum);
+                                // Structural zero disables equipment recoverably. Only an
+                                // explicit catastrophic action is a terminal destruction.
+                                resolution.destroyed = false;
+                                resolved_effect = Some(resolution);
+                                if resolution.applied_milli_hp == 0 { (GmActionOutcome::NoOp, None) }
+                                else {
+                                    pending.push(crate::gm::operations::effect::PendingGmDirectEffect {
+                                        tick: grant.apply_tick, order: grant.order, target: target.clone(), scope: scope.clone(),
+                                        kind: *effect, amount_milli_hp: resolution.applied_milli_hp,
+                                    });
+                                    (GmActionOutcome::Applied, None)
+                                }
+                            }
+                        }
+                    }
                     // The entity is right there and simply has nothing to
                     // damage: a beacon or a planet with no `[hull]` section at
                     // all, or an authored `[hull]` that declares no systems.
                     // Two spellings of one fact, and both owe the operator the
                     // same answer — which is not "that does not exist".
-                    (Some(_), Some((_, None, _))) => (
+                    (Some(_), Some((_, None, _, None))) => (
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::TargetNotDamageable),
                     ),
-                    (Some(_), Some((_, Some(hull), _))) if hull.0.is_empty() => (
+                    (Some(_), Some((_, Some(hull), _, None))) if hull.0.is_empty() => (
                         GmActionOutcome::Refused,
                         Some(GmActionRefusalReason::TargetNotDamageable),
                     ),
-                    (Some(pending), Some((_, Some(hull), ship_config))) => {
+                    (Some(pending), Some((_, Some(hull), ship_config, None))) => {
                         let config = ship_config.map(|config| &config.0);
                         // The scope becomes a System allow-list at the AGREED
                         // APPLY TICK, against the hull and the ship config the

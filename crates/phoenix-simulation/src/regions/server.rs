@@ -151,12 +151,12 @@ fn apply_damage_zone_damage(
     mut ship_query: Query<
         (
             Entity,
-            &mut crate::entities::spawner::EntitySystemHull,
+            Option<&mut crate::entities::spawner::EntitySystemHull>,
             Option<&mut crate::server_app::ShipShields>,
             Option<&EntityUuid>,
             Has<LocalShip>,
             Has<crate::lockstep::FleetSlotOf>,
-            Option<&mut crate::entities::spawner::EntityShipArcHull>,
+            Option<&mut crate::ship::compartment_damage::ShipDamage>,
         ),
         With<Ship>,
     >,
@@ -225,7 +225,7 @@ fn apply_damage_zone_damage(
             ship_uuid,
             is_local,
             is_fleet_ship,
-            mut arc_hull_opt,
+            mut physical_damage,
         )) = ship_query.get_mut(ship_entity)
         else {
             continue;
@@ -274,15 +274,38 @@ fn apply_damage_zone_damage(
 
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
                     crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
-                        let result =
-                            crate::ship::damage::apply_hull_damage(&mut hull.0, hull_amount, rng);
-                        // Distribute the same absorbed amount across
-                        // per-arc hull (issue #514). Skipped for NPCs (no
-                        // `EntityShipArcHull`).
-                        if let Some(ref mut arc_hull) = arc_hull_opt {
-                            arc_hull.0.apply_damage(result.0, rng);
+                        if let Some(damage) = physical_damage.as_deref_mut() {
+                            // A region has no projectile azimuth. Four equal,
+                            // local cardinal exposures preserve the total field
+                            // budget without inventing a moving attacker.
+                            let mut applied = 0.0;
+                            for incoming in [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
+                                let hit = phoenix_model::damage::DamageHit {
+                                    incoming,
+                                    profile: phoenix_model::damage::DamageProfile {
+                                        damage_type: phoenix_model::damage::DamageType::Laser,
+                                        penetration: 0.0,
+                                    },
+                                    payload: hull_amount as f64 * 0.25,
+                                    aim: None,
+                                    source: uuid_opt
+                                        .map(|u| format!("region:{}", u.0))
+                                        .unwrap_or_else(|| "region:damage-zone".into()),
+                                    sample: None,
+                                };
+                                match damage.apply_hit(0.0, hit, rng) {
+                                    Ok(result) => applied += result.structural_loss as f32,
+                                    Err(error) => {
+                                        warn!("physical region exposure refused: {error}")
+                                    }
+                                }
+                            }
+                            (applied, damage.catastrophic())
+                        } else if let Some(hull) = hull.as_deref_mut() {
+                            crate::ship::damage::apply_hull_damage(&mut hull.0, hull_amount, rng)
+                        } else {
+                            (0.0, false)
                         }
-                        result
                     })
                 } else {
                     (0.0, false)

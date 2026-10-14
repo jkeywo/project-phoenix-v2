@@ -612,30 +612,46 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &ShipPhysics,
         Option<&EntityName>,
         Option<&EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     ), With<LocalShip>>();
-    let ship = ship_q.single(app.world()).ok().map(|(phys, name, hull)| {
-        let mut summary = ShipSummary {
-            name: name.map(|n| n.0.clone()),
-            x: phys.x,
-            z: phys.z,
-            yaw: phys.yaw,
-            forward_speed: phys.forward_speed,
-            ..Default::default()
-        };
-        if let Some(hull) = hull {
-            summary.hull_current = hull.0.total_current();
-            summary.hull_max = hull.0.total_max();
-            for (sid, _entry) in hull.0.iter() {
-                let tier = hull.0.tier_for(sid);
-                if tier != DamageTier::Operational {
-                    summary
-                        .damaged_systems
-                        .insert(sid.0.clone(), format!("{tier:?}"));
+    let ship = ship_q
+        .single(app.world())
+        .ok()
+        .map(|(phys, name, hull, damage)| {
+            let mut summary = ShipSummary {
+                name: name.map(|n| n.0.clone()),
+                x: phys.x,
+                z: phys.z,
+                yaw: phys.yaw,
+                forward_speed: phys.forward_speed,
+                ..Default::default()
+            };
+            if let Some(damage) = damage {
+                let (current, maximum) = damage.structural_totals();
+                summary.hull_current = current as f32;
+                summary.hull_max = maximum as f32;
+                for system in damage.definition.interior.placements.keys() {
+                    let tier = damage.operating_tier(system);
+                    if tier != DamageTier::Operational {
+                        summary
+                            .damaged_systems
+                            .insert(system.0.clone(), format!("{tier:?}"));
+                    }
+                }
+            } else if let Some(hull) = hull {
+                summary.hull_current = hull.0.total_current();
+                summary.hull_max = hull.0.total_max();
+                for (sid, _entry) in hull.0.iter() {
+                    let tier = hull.0.tier_for(sid);
+                    if tier != DamageTier::Operational {
+                        summary
+                            .damaged_systems
+                            .insert(sid.0.clone(), format!("{tier:?}"));
+                    }
                 }
             }
-        }
-        summary
-    });
+            summary
+        });
 
     let outcome_report = build_outcome_report(
         app,
@@ -830,19 +846,23 @@ fn build_outcome_report(
 
     // Surviving ships: (uuid, hull_current, hull_max, faction). Collected into
     // an owned Vec so the world borrow is released before the registry read.
-    let mut ship_q = app
-        .world_mut()
-        .query_filtered::<(&EntityUuid, &EntitySystemHull, Option<&FactionComponent>), With<Ship>>(
-        );
+    let mut ship_q = app.world_mut().query_filtered::<(
+        &EntityUuid,
+        Option<&EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
+        Option<&FactionComponent>,
+    ), With<Ship>>();
     let surviving: Vec<(String, f32, f32, Option<Uuid>)> = ship_q
         .iter(app.world())
-        .map(|(uuid, hull, fac)| {
-            (
-                uuid.0.clone(),
-                hull.0.total_current(),
-                hull.0.total_max(),
-                fac.map(|f| f.0),
-            )
+        .map(|(uuid, hull, damage, fac)| {
+            let (current, maximum) = damage
+                .map(|damage| {
+                    let (c, m) = damage.structural_totals();
+                    (c as f32, m as f32)
+                })
+                .or_else(|| hull.map(|hull| (hull.0.total_current(), hull.0.total_max())))
+                .unwrap_or((0.0, 0.0));
+            (uuid.0.clone(), current, maximum, fac.map(|f| f.0))
         })
         .collect();
 

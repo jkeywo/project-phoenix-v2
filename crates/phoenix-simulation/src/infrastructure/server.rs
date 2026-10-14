@@ -126,6 +126,7 @@ pub fn tick_infrastructure_condition(
         Entity,
         &EntityUuid,
         Option<&EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         &mut InfrastructureCondition,
     )>,
     log: Option<Res<LogFilterConfig>>,
@@ -150,16 +151,18 @@ pub fn tick_infrastructure_condition(
 
     let mut rows: Vec<(String, Entity)> = structures
         .iter()
-        .map(|(entity, uuid, _, _)| (uuid.0.clone(), entity))
+        .map(|(entity, uuid, _, _, _)| (uuid.0.clone(), entity))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (uuid, entity) in rows {
-        let Ok((_, _, hull, mut condition)) = structures.get_mut(entity) else {
+        let Ok((_, _, hull, damage, mut condition)) = structures.get_mut(entity) else {
             continue;
         };
         let first_tick = condition.is_added();
-        let hull_total = hull.map(|h| h.0.total_current());
+        let hull_total = damage
+            .map(|damage| damage.structural_totals().0 as f32)
+            .or_else(|| hull.map(|h| h.0.total_current()));
         // Immutable reads through `Mut`'s `Deref`, so deciding there is nothing
         // to do costs no change-detection mark.
         let hull_moved = hull_total.is_some() && condition.0.last_observed_hull() != hull_total;

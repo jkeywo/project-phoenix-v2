@@ -537,6 +537,7 @@ pub(crate) fn tick_blaster_auto_fire(
 /// dropping `&mut ShipPhysics` would take recoil with it.
 pub(crate) fn tick_blaster_system(
     time: Res<Time>,
+    physical: Query<&crate::ship::compartment_damage::ShipDamage>,
     mut ship_qs: ParamSet<(
         // p0 — the firing pass: every ship that carries blaster banks.
         Query<
@@ -666,7 +667,12 @@ pub(crate) fn tick_blaster_system(
         for bank in blaster_res.0.iter_mut() {
             let bank_id = bank.config.id.clone();
             let bank_system = crate::ship::system_registry::blaster_bank_system_id(&bank_id);
-            let charge_dt = if bank.volley.charging {
+            let operation_factor = physical.get(shooter).ok().map_or(1.0, |damage| {
+                bank_system.as_ref().map_or(0.0, |system| {
+                    damage.factor(system, phoenix_model::damage::DamageBinding::Operation)
+                })
+            });
+            let charge_dt = if bank.volley.charging && operation_factor > 0.0 {
                 let charge_work_dt =
                     dt.min((bank.config.charge_time_secs - bank.volley.charge_elapsed).max(0.0));
                 bank_system
@@ -723,15 +729,16 @@ pub(crate) fn tick_blaster_system(
                 target_vz,
                 &source_uuid,
                 &mut |count| {
-                    bank_system.as_ref().is_some_and(|system| {
-                        power_opt.as_deref_mut().is_some_and(|power| {
-                            !power.0.weapons_restrained()
-                                && matches!(
-                                    power.0.try_work_discrete_count(system, count),
-                                    Ok(true)
-                                )
+                    operation_factor > 0.0
+                        && bank_system.as_ref().is_some_and(|system| {
+                            power_opt.as_deref_mut().is_some_and(|power| {
+                                !power.0.weapons_restrained()
+                                    && matches!(
+                                        power.0.try_work_discrete_count(system, count),
+                                        Ok(true)
+                                    )
+                            })
                         })
-                    })
                 },
                 // Was OS randomness, then a draw off the seeded RNG stream —
                 // both of which gave two instances different ids for the same
@@ -745,10 +752,11 @@ pub(crate) fn tick_blaster_system(
                 },
             );
             for ev in &events {
-                let multiplier = power_opt.as_deref_mut().map_or(1.0, |p| {
-                    crate::ship::system_registry::blaster_bank_system_id(&bank_id)
-                        .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
-                });
+                let multiplier = operation_factor
+                    * power_opt.as_deref_mut().map_or(1.0, |p| {
+                        crate::ship::system_registry::blaster_bank_system_id(&bank_id)
+                            .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
+                    });
                 if let Some(projectile) =
                     bank.in_flight.iter_mut().find(|p| p.id == ev.projectile_id)
                 {
@@ -854,16 +862,23 @@ pub(crate) fn handle_blaster_hits(
     // The two live-position lookups bundled as one `SystemParam` (issue #1185);
     // destructured back to `asteroid_q` / `entity_q` at entry.
     geometry: DirectFireGeometry,
-    mut hit_target_q: Query<(
-        Entity,
-        Option<&AsteroidUuid>,
-        Option<&crate::entities::spawner::EntityUuid>,
-        &mut crate::entities::spawner::EntitySystemHull,
-        Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::entities::spawner::EntityShipArcHull>,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
-    )>,
+    mut hit_target_q: Query<
+        (
+            Entity,
+            Option<&AsteroidUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&mut crate::entities::spawner::EntitySystemHull>,
+            Option<&mut crate::ship::shields::ShipShields>,
+            Option<&mut crate::ship::compartment_damage::ShipDamage>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
+            Option<&ShipPhysics>,
+        ),
+        Or<(
+            With<crate::ship::compartment_damage::ShipDamage>,
+            With<crate::entities::spawner::EntitySystemHull>,
+        )>,
+    >,
     // `Entity` + `EntityUuid` ride along so the shooter walk below can be
     // sorted into a stable order (issue #1052) rather than taken in archetype
     // order; `EntityUuid` is `Option` because minimal test-only ship spawns
@@ -942,6 +957,7 @@ pub(crate) fn handle_blaster_hits(
         projectile_id: String,
         target_uuid: String,
         damage: i32,
+        incoming: [f32; 2],
         delivery: crate::weapons::mount::DamageDelivery,
         /// Who fired it — needed for balance attribution, since the firing
         /// ship is long out of scope by the time damage is applied. `None`
@@ -984,6 +1000,7 @@ pub(crate) fn handle_blaster_hits(
                         projectile_id: proj_id,
                         target_uuid,
                         damage: hit_data.damage,
+                        incoming: hit_data.incoming,
                         delivery: hit_data.delivery(),
                         source_uuid: Some(hit_data.source_uuid).filter(|u| !u.is_empty()),
                     });
@@ -1009,9 +1026,10 @@ pub(crate) fn handle_blaster_hits(
             ent_uuid,
             mut hull_comp,
             mut shield_comp,
-            mut arc_hull,
+            mut physical_damage,
             is_local,
             is_fleet,
+            target_physics,
         ) in hit_target_q.iter_mut()
         {
             let uuid_matches = ast_uuid.map(|u| u.0.as_str()) == Some(det.target_uuid.as_str())
@@ -1047,7 +1065,14 @@ pub(crate) fn handle_blaster_hits(
                 .unwrap_or_default();
 
             let shield_amount = if let Some(ref mut shields) = shield_comp {
-                let impact = shields.0.apply_delivery(det.delivery, 0.0, true);
+                let bearing = crate::weapons::shield::attacker_bearing_relative(
+                    -det.incoming[0],
+                    -det.incoming[1],
+                    0.0,
+                    0.0,
+                    target_physics.map_or(0.0, |p| p.yaw),
+                );
+                let impact = shields.0.apply_delivery(det.delivery, bearing, true);
                 hull_damage = impact.hull_damage;
                 impact.shield_absorbed
             } else {
@@ -1064,15 +1089,30 @@ pub(crate) fn handle_blaster_hits(
             if hull_damage > 0.0 {
                 let (hull_applied, destroyed) =
                     crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
-                        let result = crate::ship::damage::apply_hull_damage(
-                            &mut hull_comp.0,
-                            hull_damage,
-                            rng,
-                        );
-                        if let Some(ref mut ah) = arc_hull {
-                            ah.0.apply_damage(result.0, rng);
+                        if let Some(damage) = physical_damage.as_deref_mut() {
+                            let hit = phoenix_model::damage::DamageHit {
+                                incoming: det.incoming,
+                                profile: det.delivery.impact,
+                                payload: hull_damage as f64,
+                                aim: None,
+                                source: format!("blaster:{}", det.bank_id),
+                                sample: None,
+                            };
+                            match damage.apply_hit(target_physics.map_or(0.0, |p| p.yaw), hit, rng)
+                            {
+                                Ok(result) => {
+                                    (result.structural_loss as f32, damage.catastrophic())
+                                }
+                                Err(error) => {
+                                    warn!("physical blaster hit refused: {error}");
+                                    (0.0, false)
+                                }
+                            }
+                        } else if let Some(hull) = hull_comp.as_deref_mut() {
+                            crate::ship::damage::apply_hull_damage(&mut hull.0, hull_damage, rng)
+                        } else {
+                            (0.0, false)
                         }
-                        result
                     });
                 hull_applied_total = hull_applied;
                 ship_destroyed = destroyed;

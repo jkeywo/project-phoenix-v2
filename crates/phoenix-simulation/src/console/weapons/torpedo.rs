@@ -326,6 +326,7 @@ pub(crate) fn handle_fire_torpedo(
         ),
         With<crate::server_app::Ship>,
     >,
+    physical: Query<&crate::ship::compartment_damage::ShipDamage>,
     mut outbox: ResMut<SimOutbox>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
@@ -563,7 +564,9 @@ pub(crate) fn handle_fire_torpedo(
                 );
                 continue;
             }
-            if !power_opt
+            if physical.get(shooter).is_ok_and(|damage| {
+                damage.factor(&cmd.target, phoenix_model::damage::DamageBinding::Operation) <= 0.0
+            }) || !power_opt
                 .as_deref_mut()
                 .is_some_and(|power| matches!(power.0.try_work_discrete(&cmd.target), Ok(true)))
             {
@@ -638,14 +641,20 @@ pub(crate) fn handle_fire_torpedo(
                     ..
                 } => {
                     super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
-                    let multiplier = power_opt
-                        .as_deref_mut()
-                        .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
+                    let operation_factor = physical.get(shooter).ok().map_or(1.0, |damage| {
+                        damage.factor(&cmd.target, phoenix_model::damage::DamageBinding::Operation)
+                    });
+                    let multiplier = operation_factor
+                        * power_opt
+                            .as_deref_mut()
+                            .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
                     if let Some(torpedo) = torpedo_sys
                         .in_flight
                         .iter_mut()
                         .find(|t| t.uuid == launched_uuid)
                     {
+                        // One immutable launch multiplier snapshots paid strike bonus
+                        // together with machinery Operation loss; finite and >= -1.
                         torpedo.strike_damage_bonus = multiplier - 1.0;
                     }
                     any_fired = true;
@@ -1045,25 +1054,31 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut world_tracked: crate::server_app::WorldAndTracked,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
-    mut hull_query: Query<(
-        Entity,
-        Option<&AsteroidUuid>,
-        Option<&crate::entities::spawner::EntityUuid>,
-        &mut EntitySystemHull,
-        Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::entities::spawner::EntityShipArcHull>,
-        Option<&crate::entities::spawner::ColliderSection>,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        // Whether this hull is one some host in the FLEET flies — a fact every
-        // host in it agrees about, unlike `LocalShip` (issue #1116).
-        bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
-        // Where the victim is and which way it is pointing — shield arcs are
-        // authored in the victim's own frame, so routing the hit to an arc
-        // needs both. `Option` because asteroids and bare-`App` test fixtures
-        // carry neither.
-        Option<&Transform>,
-        Option<&ShipPhysics>,
-    )>,
+    mut hull_query: Query<
+        (
+            Entity,
+            Option<&AsteroidUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&mut EntitySystemHull>,
+            Option<&mut crate::ship::shields::ShipShields>,
+            Option<&mut crate::ship::compartment_damage::ShipDamage>,
+            Option<&crate::entities::spawner::ColliderSection>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            // Whether this hull is one some host in the FLEET flies — a fact every
+            // host in it agrees about, unlike `LocalShip` (issue #1116).
+            bevy::ecs::query::Has<crate::lockstep::FleetSlotOf>,
+            // Where the victim is and which way it is pointing — shield arcs are
+            // authored in the victim's own frame, so routing the hit to an arc
+            // needs both. `Option` because asteroids and bare-`App` test fixtures
+            // carry neither.
+            Option<&Transform>,
+            Option<&ShipPhysics>,
+        ),
+        Or<(
+            With<crate::ship::compartment_damage::ShipDamage>,
+            With<crate::entities::spawner::EntitySystemHull>,
+        )>,
+    >,
     mut death_latch: crate::server_app::PlayerDeathLatch,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
@@ -1108,6 +1123,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     #[derive(Clone, Debug)]
     struct Detonation {
         target_uuid: String,
+        incoming: [f32; 2],
         delivery: crate::weapons::mount::DamageDelivery,
         /// Who launched it — the firing ship is out of scope by phase 2, so
         /// balance attribution has to ride along with the detonation.
@@ -1115,17 +1131,6 @@ pub(crate) fn tick_torpedo_lifecycle(
         /// Which tube fired it, for the same reason — the balance contract
         /// wants a configured weapon id, not a generic kind label.
         tube_id: String,
-        /// Where the torpedo was when it detonated. Shield routing is
-        /// directional, and the torpedo is gone from `in_flight` by phase 2,
-        /// so its impact point has to travel with the detonation the same way
-        /// `source_uuid` does.
-        impact_x: f32,
-        impact_z: f32,
-        // NB: the torpedo's vertical impact position rides on the pure-model
-        // `TorpedoDetonation.impact_y` (issue #768). It is deliberately NOT
-        // re-plumbed here: shield-arc routing is a horizontal-plane bearing
-        // (`attacker_bearing_relative` is XZ), and the explosion VFX messages
-        // carry only x/z, so this internal struct has no consumer for it.
     }
     let mut detonations: Vec<Detonation> = Vec::new();
     let mut any_ship_component = false;
@@ -1157,6 +1162,12 @@ pub(crate) fn tick_torpedo_lifecycle(
             continue;
         };
         any_ship_component = true;
+        let machinery = hull_query.get(shooter).ok().and_then(|row| row.5);
+        let can_work = |system: &crate::core::messages::SystemId| {
+            machinery.is_none_or(|damage| {
+                damage.factor(system, phoenix_model::damage::DamageBinding::Operation) > 0.0
+            })
+        };
         let result = torpedo_sys.0.tick_with_work(
             dt,
             target_positions,
@@ -1168,20 +1179,25 @@ pub(crate) fn tick_torpedo_lifecycle(
                 match work {
                     TorpedoWork::Progress { tube, dt } => {
                         crate::ship::system_registry::torpedo_tube_system_id(tube)
+                            .filter(|id| can_work(id))
                             .and_then(|id| power.0.work_continuous(&id, dt, 1.0).ok())
                             .map_or(0.0, |grant| grant.fraction)
                     }
-                    TorpedoWork::Transfer => u8::from(matches!(
-                        power.0.try_work_discrete(
-                            &crate::ship::system_registry::torpedo_magazine_system_id()
-                        ),
-                        Ok(true)
-                    )) as f32,
+                    TorpedoWork::Transfer => u8::from(
+                        can_work(&crate::ship::system_registry::torpedo_magazine_system_id())
+                            && matches!(
+                                power.0.try_work_discrete(
+                                    &crate::ship::system_registry::torpedo_magazine_system_id()
+                                ),
+                                Ok(true)
+                            ),
+                    ) as f32,
                     TorpedoWork::Launch { tube } => u8::from(
                         !power.0.weapons_restrained()
                             && crate::ship::system_registry::torpedo_tube_system_id(tube)
                                 .is_some_and(|id| {
-                                    matches!(power.0.try_work_discrete(&id), Ok(true))
+                                    can_work(&id)
+                                        && matches!(power.0.try_work_discrete(&id), Ok(true))
                                 }),
                     ) as f32,
                 }
@@ -1200,11 +1216,29 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
         }
         for (tube, uuid, x, y, z, heading) in result.burst_launched {
-            let multiplier = power.as_deref_mut().map_or(1.0, |p| {
-                crate::ship::system_registry::torpedo_tube_system_id(&tube)
-                    .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
-            });
+            let operation_factor =
+                hull_query
+                    .get(shooter)
+                    .ok()
+                    .and_then(|row| row.5)
+                    .map_or(1.0, |damage| {
+                        crate::ship::system_registry::torpedo_tube_system_id(&tube).map_or(
+                            0.0,
+                            |system| {
+                                damage.factor(
+                                    &system,
+                                    phoenix_model::damage::DamageBinding::Operation,
+                                )
+                            },
+                        )
+                    });
+            let multiplier = operation_factor
+                * power.as_deref_mut().map_or(1.0, |p| {
+                    crate::ship::system_registry::torpedo_tube_system_id(&tube)
+                        .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
+                });
             if let Some(torpedo) = torpedo_sys.0.in_flight.iter_mut().find(|t| t.uuid == uuid) {
+                // Snapshot the same combined strike/Operation multiplier for burst rounds.
                 torpedo.strike_damage_bonus = multiplier - 1.0;
             }
             outbox.push_reliable((
@@ -1230,11 +1264,10 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
             detonations.push(Detonation {
                 target_uuid,
+                incoming: det.incoming,
                 delivery: det.delivery(),
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
-                impact_x: det.impact_x,
-                impact_z: det.impact_z,
             });
         }
     }
@@ -1281,11 +1314,10 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
             detonations.push(Detonation {
                 target_uuid,
+                incoming: det.incoming,
                 delivery: det.delivery(),
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
-                impact_x: det.impact_x,
-                impact_z: det.impact_z,
             });
         }
     }
@@ -1308,7 +1340,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             entity_uuid,
             mut hull_comp,
             mut shield_comp,
-            mut target_arc_hull,
+            mut physical_damage,
             collider_opt,
             // The torpedo path's destruction handling is entirely about whether
             // a hull is CREWED, which is a fleet fact rather than a projection
@@ -1316,7 +1348,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             // reads as "who is looking at this, and who flies it".
             _target_is_local,
             target_is_fleet_ship,
-            target_tf,
+            _target_tf,
             target_physics,
         ) in hull_query.iter_mut()
         {
@@ -1326,7 +1358,10 @@ pub(crate) fn tick_torpedo_lifecycle(
                 continue;
             }
             let is_asteroid = asteroid_uuid.is_some();
-            let was_alive = !hull_comp.0.is_destroyed();
+            let was_alive = !crate::ship::compartment_damage::is_catastrophic(
+                physical_damage.as_deref(),
+                hull_comp.as_deref(),
+            );
 
             // ── The struck arc decides which payload the round delivers ──────
             //
@@ -1377,42 +1412,15 @@ pub(crate) fn tick_torpedo_lifecycle(
                         .collect()
                 })
                 .unwrap_or_default();
-            // Route the hit to the arc the torpedo actually flew into, by
-            // handing `apply_damage` the bearing the torpedo arrived on rather
-            // than a hardcoded 0.0.
-            //
-            // # Why this matters
-            //
-            // `ShieldSystem::apply_damage` resolves the facing with
-            // `facing_index_for_bearing`, so a constant 0.0 put every torpedo —
-            // from every direction — on whichever arc contains bearing 0 (fore,
-            // on a four-arc Alliance hull). `ai_torpedo_auto_fire`'s doctrine
-            // gate asks the same resolver which arc is in the way before it
-            // shoots; with the hit hardcoded to fore, a shot green-lit against a
-            // collapsed AFT arc was absorbed by the healthy FORE arc. Gate and
-            // hit now share one resolver, so they agree — and since #929's
-            // second pass the same bearing also picks the PAYLOAD, so a
-            // disagreement would now decide how much damage lands, not merely
-            // where it lands.
-            //
-            // Attacker position is the *torpedo's* impact point, not the firing
-            // ship's: the gate predicts from the launcher, but a homing torpedo
-            // curves, and the arc it meets is the one it is nose-on to when it
-            // goes off.
-            //
-            // Bearing falls back to 0.0 for a victim with no `Transform` (the
-            // degenerate case the beam path also takes) — nothing better is
-            // knowable there.
-            let bearing = match target_tf {
-                Some(tf) => crate::weapons::shield::attacker_bearing_relative(
-                    det.impact_x,
-                    det.impact_z,
-                    tf.translation.x,
-                    tf.translation.z,
-                    target_physics.map(|p| p.yaw).unwrap_or(0.0),
-                ),
-                None => 0.0,
-            };
+            // Final projectile travel gives the actual arrival arc even when
+            // the detonation centre is inside the victim's collider.
+            let bearing = crate::weapons::shield::attacker_bearing_relative(
+                -det.incoming[0],
+                -det.incoming[1],
+                0.0,
+                0.0,
+                target_physics.map_or(0.0, |p| p.yaw),
+            );
             let struck_arc_hp = shield_comp
                 .as_ref()
                 .map(|s| s.0.hp_facing_bearing(bearing))
@@ -1448,16 +1456,28 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
             let mut hull_applied = 0.0f32;
             if hull_damage > 0.0 {
-                let before = hull_comp.0.total_current();
                 hull_applied = crate::sim_rng::with_live_stream(sim_rng.as_deref(), |rng| {
-                    hull_comp.0.apply_damage(hull_damage, rng);
-                    let absorbed = before - hull_comp.0.total_current();
-                    // Distribute the same absorbed amount across per-arc
-                    // hull (issue #514).
-                    if let Some(ref mut arc_hull) = target_arc_hull {
-                        arc_hull.0.apply_damage(absorbed, rng);
+                    if let Some(damage) = physical_damage.as_deref_mut() {
+                        let hit = phoenix_model::damage::DamageHit {
+                            incoming: det.incoming,
+                            profile: det.delivery.impact,
+                            payload: hull_damage as f64,
+                            aim: None,
+                            source: format!("torpedo:{}", det.tube_id),
+                            sample: None,
+                        };
+                        match damage.apply_hit(target_physics.map_or(0.0, |p| p.yaw), hit, rng) {
+                            Ok(result) => result.structural_loss as f32,
+                            Err(error) => {
+                                warn!("physical torpedo hit refused: {error}");
+                                0.0
+                            }
+                        }
+                    } else if let Some(hull) = hull_comp.as_deref_mut() {
+                        crate::ship::damage::apply_hull_damage(&mut hull.0, hull_damage, rng).0
+                    } else {
+                        0.0
                     }
-                    absorbed
                 });
             }
 
@@ -1479,7 +1499,11 @@ pub(crate) fn tick_torpedo_lifecycle(
                 attacker_label,
                 det.tube_id
             );
-            if hull_comp.0.is_destroyed() && !is_asteroid {
+            if crate::ship::compartment_damage::is_catastrophic(
+                physical_damage.as_deref(),
+                hull_comp.as_deref(),
+            ) && !is_asteroid
+            {
                 crate::pinfo!(
                     log,
                     crate::logging::LogCat::Damage,
@@ -1538,7 +1562,10 @@ pub(crate) fn tick_torpedo_lifecycle(
                 }
             }
 
-            if hull_comp.0.is_destroyed() {
+            if crate::ship::compartment_damage::is_catastrophic(
+                physical_damage.as_deref(),
+                hull_comp.as_deref(),
+            ) {
                 // A crewed hull is never despawned on death — the run ends
                 // instead, and the report still needs the wreck to read from.
                 // Same rule the beam and blaster kill sites follow.

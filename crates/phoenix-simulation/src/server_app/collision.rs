@@ -85,7 +85,7 @@ pub(crate) struct CollisionBodies<'w, 's> {
             Entity,
             &'static mut ShipPhysicsComponent,
             &'static mut CollisionCooldown,
-            &'static mut crate::entities::spawner::EntitySystemHull,
+            Option<&'static mut crate::entities::spawner::EntitySystemHull>,
             Option<&'static mut ShipShields>,
             Option<&'static ShipModifiers>,
             Option<&'static EntityUuid>,
@@ -95,7 +95,7 @@ pub(crate) struct CollisionBodies<'w, 's> {
             // every host in it agrees about, unlike `LocalShip` (issue #1116).
             Has<crate::lockstep::FleetSlotOf>,
             Option<&'static mut ShipImpulse>,
-            Option<&'static mut crate::entities::spawner::EntityShipArcHull>,
+            Option<&'static mut crate::ship::compartment_damage::ShipDamage>,
         ),
         With<Ship>,
     >,
@@ -200,7 +200,7 @@ pub(crate) fn handle_collisions(
             is_local,
             is_fleet_ship,
             mut impulse_opt,
-            mut arc_hull_opt,
+            mut physical_damage,
         )) = ship_query.get_mut(ship_entity)
         else {
             // NOT reachable via an earlier iteration of this same loop
@@ -260,6 +260,31 @@ pub(crate) fn handle_collisions(
             continue;
         };
 
+        // Capture the arrival direction BEFORE de-overlap moves the receiver.
+        let contact = body_query.get(attacker_entity).ok();
+        let (incoming, bearing) = contact
+            .map(|(transform, ..)| {
+                let delta = [
+                    physics.x - transform.translation.x,
+                    physics.z - transform.translation.z,
+                ];
+                (
+                    if delta == [0.0, 0.0] {
+                        [-simmath::sin(physics.yaw), simmath::cos(physics.yaw)]
+                    } else {
+                        delta
+                    },
+                    attacker_bearing_relative(
+                        transform.translation.x,
+                        transform.translation.z,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
+                    ),
+                )
+            })
+            .unwrap_or(([-simmath::sin(physics.yaw), simmath::cos(physics.yaw)], 0.0));
+
         // GEOMETRY, by contrast, is resolved against every contact, every tick,
         // ahead of the damage cooldown (issue #968).
         //
@@ -315,18 +340,6 @@ pub(crate) fn handle_collisions(
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
         let asteroid_info = asteroid_query.get(attacker_entity).ok();
-        let bearing = asteroid_info
-            .map(|(t, _, _)| {
-                attacker_bearing_relative(
-                    t.translation.x,
-                    t.translation.z,
-                    physics.x,
-                    physics.z,
-                    physics.yaw,
-                )
-            })
-            .unwrap_or(0.0);
-
         let source_label = asteroid_info
             .map(|(_, uuid, _)| format!("asteroid:{}", uuid.0))
             .unwrap_or_else(|| "collision".to_string());
@@ -405,16 +418,37 @@ pub(crate) fn handle_collisions(
         let mut ship_destroyed = false;
         let hull_applied = if total_hull > 0.0 {
             crate::sim_rng::with_live_stream(ambient.rng.as_deref(), |rng| {
-                let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
-                // Distribute the same absorbed amount across the per-arc
-                // hull pool (issue #514) so arc tier tracking follows
-                // overall hull damage. Skipped when the ship has no
-                // `EntityShipArcHull` (NPCs).
-                if let Some(ref mut arc_hull) = arc_hull_opt {
-                    arc_hull.0.apply_damage(applied, rng);
+                if let Some(damage) = physical_damage.as_deref_mut() {
+                    // Collision is a blunt physical incident: existing collision HP
+                    // is the full offered budget, with zero additional penetration.
+                    let hit = phoenix_model::damage::DamageHit {
+                        incoming,
+                        profile: phoenix_model::damage::DamageProfile {
+                            damage_type: phoenix_model::damage::DamageType::Physical,
+                            penetration: 0.0,
+                        },
+                        payload: total_hull as f64,
+                        aim: None,
+                        source: source_label.clone(),
+                        sample: None,
+                    };
+                    match damage.apply_hit(physics.yaw, hit, rng) {
+                        Ok(result) => {
+                            ship_destroyed = damage.catastrophic();
+                            result.structural_loss as f32
+                        }
+                        Err(error) => {
+                            warn!("physical collision refused: {error}");
+                            0.0
+                        }
+                    }
+                } else if let Some(hull) = hull_comp.as_deref_mut() {
+                    let (applied, destroyed) = apply_hull_damage(&mut hull.0, total_hull, rng);
+                    ship_destroyed = destroyed;
+                    applied
+                } else {
+                    0.0
                 }
-                ship_destroyed = destroyed;
-                applied
             })
         } else {
             0.0

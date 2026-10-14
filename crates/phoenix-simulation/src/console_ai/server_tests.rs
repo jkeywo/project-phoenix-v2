@@ -1406,7 +1406,7 @@ fn set_battery(app: &mut App, e: Entity, charge: f32) {
         .get_mut::<crate::ship::power::ShipPowerSystem>()
         .unwrap()
         .0
-        .battery_charge = charge;
+        .network_mut().reactor.energy = charge;
 }
 
 fn power_tick_with_dt(app: &mut App, dt_secs: f32) {
@@ -2017,7 +2017,7 @@ fn battery_pct(app: &App, e: Entity) -> f64 {
         .get::<crate::ship::power::ShipPowerSystem>()
         .unwrap()
         .0
-        .battery_charge;
+        .battery_charge();
     let capacity = app
         .world()
         .entity(e)

@@ -77,7 +77,7 @@
   },
   "limits": [
     "This is historical Increment 8 source, protocol6/content epoch1/snapshot43/rules0.15; current integrated protocol7/content epoch2 requires its own evidence.",
-    "The four fixture/ordering failures pass in the recorded follow-up. Original Dynasty activity remains pending with the new generation mechanism. No full-suite, final default-feature, native visual/human, balance, or complete playable-exit claim is made.",
+    "All eight originally selected top-level failures/passes now have passing evidence in the scoped chronological follow-ups. This is not a fresh combined full suite or final integrated7/2 build. Default-feature gates, native visual/human acceptance, balance and complete playable exit remain outside this receipt.",
     "Original authored Dynasty 12000-frame/two-enable/depletion/recovery requirements and service motion/damage assertions remain. The new jitter regression startup assumption changed from120 frames to the existing12000-frame gameplay window, retaining positive two-ship live-cycle evidence and exact equality; this is explicitly a fixture correction."
   ],
   "follow_up_runs": [
@@ -135,6 +135,21 @@
         "warnings": 0,
         "log": ".phoenix/increment-8-generation-strings.log",
         "log_sha256": "cb430b6f2fbe42bd32480e852754da3b672e997ced9233538cf735d5f555c354"
+      },
+      {
+        "tested_revision": "3f669e97bd7f13cf7177b1095f52306e2c03d725",
+        "runtime_source_revision": "1a620420f7b31fb0347bd2664ac996fa9fe331b0",
+        "source_status_at_execution": "clean",
+        "command": "cargo test -p project-phoenix --no-default-features --features headless --test dynasty_backfill -- --test-threads=1",
+        "exit_code": 0,
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "log": ".phoenix/increment-8-generation-dynasty-proof.log",
+        "log_sha256": "95bcd22329dff713011aba8712bf4226b4d747d7c0f49836527e4c7bbfb180c6",
+        "scope": "Original authored Dynasty activity proof passes both uncrewed and three-human branches with two differently projected peers, retaining two strike enables, actual depletion/recovery, authority assertions and exact full-state comparisons within the original12000-frame allowance. Its early success condition remains unchanged. The positive two-live-ship first-cycle equality regression also passes.",
+        "source_switch": "Refreshed unchanged Model, Contracts, Gameplay, Session, World and Simulation library mtimes after parent main used the shared target; compiler log identifies all packages from this pinned worktree.",
+        "environment": "After this build reached actual test execution, an unrelated release Cargo build was observed for experiments/console-ui/bevy/Cargo.toml using separate experiments/console-ui/target/bevy. It was identified read-only and not interrupted. This run supplies deterministic correctness/activity evidence, not performance measurements."
       }
     ],
     "earlier_attempts": [
@@ -149,6 +164,6 @@
         "log_sha256": "bcd8c11d343bc74f15c8be14dd108341fa7e167266c924a54b36aada26985569"
       }
     ],
-    "pending": "The original 12000-frame Dynasty activity/two-peer proof must be rerun with the generation intent. No passing activity/complete exit is claimed yet."
+    "pending": "Original Dynasty activity is now passed as recorded. Final integrated compatibility, full/default-feature gates, balance, browser/native visuals and human acceptance remain separate."
   }
 }

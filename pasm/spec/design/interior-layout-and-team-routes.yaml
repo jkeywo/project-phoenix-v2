@@ -1,0 +1,26 @@
+entities:
+  - decision: interior-physical-home-and-console-ownership
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Physical System Placement Is Separate From Console Ownership
+      summary: "Every installed System has one compartment and one controlling Console. Components inherit their System physical home without precise positions. Multiple weighted decks use planar compartments and compartment materials; deck choice for incoming damage does not use projectile height. Layout grants no command authority or pooled knowledge."
+      rationale:
+        - "Selected architecture AD37–51 and approved increment 10. Damage and restoration arrive together in increment 11."
+  - decision: interior-routes-share-actual-boundary-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Route Teams Through Shared Physical Access Boundaries
+      summary: "Repair teams retain actual locations and travel through authored same-deck and inter-deck connections. Access planning reads actual boundary state, separately from requested state. Deliberate seals are not automatically overridden. Work and on-site knowledge require arrival, including between systems in one repair sweep. Existing individual AI and admitted controls remain authoritative."
+      rationale:
+        - "Selected architecture AD75–76; extend existing RepairJobs rather than create competing team state."
+  - decision: interior-layout-increment-ten-integration
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Authored Planar Layout and Deterministic Team Continuation
+      summary: "Increment 10 uses stable deck/compartment/connection IDs, rectangular x/z metre footprints, positive travel costs, explicit placements and team homes. Routes choose minimum cost with full stable connection-path tie breaking. A seal request blocks new entrants while committed crossings clear. Redirects replan at endpoints without resetting progress. Idle and externally committed teams retain explicit locations. Canonical boundary and navigation state joins snapshots, digests and permitted Console views immediately."
+      rationale:
+        - "[ai] Concrete integration judgments for the user-authorized milestone. Immutable graph compilation is derived state, not another simulation authority. Supported component controls and Workshop composition land with actual consumers; no damage or repair-rate changes are adopted here."

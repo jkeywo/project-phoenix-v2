@@ -40,3 +40,13 @@ entities:
       summary: "Increment 8 includes validated authored coefficients, human controls and shared local status, ordinary individual System AI using supported reusable state trees, Workshop editing/preview/Test, and deterministic authoritative continuation. Each reserve, heat, ramp, requested/effective allocation, coolant remainder and AI memory participates in snapshots, restore and digests. Existing transport and knowledge limits remain unchanged."
       rationale:
         - "[ai] Extend the closed state-tree input/output vocabulary for numeric readings, comparisons and bounded allocation actions, without Workshop programming or a second controller. Initial implementation commits may precede isolated validation under the user's worktree workflow; completion requires evidence and dependency-order integration of fixes."
+  - decision: reactor-generation-independent-of-capacitor-export
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Generation Intent Does Not Disconnect Stored Reactor Energy
+      summary: "A reactor has an explicit admitted generation-enable intent independent of its requested export rate. Turning generation off stops new energy production while its existing capacitor can continue funding ordinary export, losses, thermal accounting and cooling. The same per-System Power state tree and human Console controls operate this intent; no ship-specific controller or additional energy store is introduced."
+      rationale:
+        - "[ai] Increment 8 validation found the retained Dynasty charge/strike/recovery cycle could not run when generation and capacitor export were coupled. Its authored ordinary Power tree stops generation during an enabled strike, spending the actual shared reserve, and resumes generation when that strike depletes. Existing costs, activity thresholds and knowledge boundaries remain unchanged."
+        - "[ai] Publish the generation intent and existing strike-enabled reading through the permitted Power Console view. The closed tree exposes a boolean generation command channel and the numeric strike-enabled fact; current-operator admission, continuation and deterministic digest include the canonical intent."

@@ -55,3 +55,9 @@ to increment 9. Physical placement/routes, component damage and automatic local
 deliveries remain increments 10–12. Coolant recycling remains provisional. New
 gameplay requires combat and non-combat activity and balance evidence, rather
 than claiming the structural equivalence used for increment 7.
+
+### Validation reconciliation: reactor generation and stored export
+
+The reactor's admitted generation-enable intent is independent of its export-rate request. Disabling generation stops new energy production while the same finite capacitor can still supply export; passive losses, cooling, thermal limits and ordinary upkeep continue. The Console exposes this control and the ordinary Power tree can write the boolean `reactor-generation` channel. Its numeric `strike_boost_enabled` fact comes only from the existing permitted Power observation.
+
+Dynasty authors this supported tree behavior to stop generation during an enabled strike and resume it after depletion, retaining its existing charge/strike/recovery activity requirements and actual weapon costs. This corrects the provisional energy migration's empty historical charge group without adding a special controller or another battery. The canonical generation intent is saved, restored, folded and published with the rest of the reactor.

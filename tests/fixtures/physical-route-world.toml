@@ -1,0 +1,11 @@
+# Isolated integration fixture: ordinary shipped Cruiser AI and its actual interior.
+[global]
+seed = 156210
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"

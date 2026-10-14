@@ -1,0 +1,19 @@
+# Isolated two-host route fixture: two authored fleet slots, no hostile actors.
+[global]
+seed = 156210
+command_delay_ticks = 2
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-1"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "fleet-ship-2"
+transform = { position = [60.0, 0.0, 0.0] }
+spawn_on = "game_start"

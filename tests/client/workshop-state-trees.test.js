@@ -74,6 +74,10 @@ describe('visual typed System AI authoring', () => {
     expect(systemTreeVocabulary({ kind: 'dock' }, schema).sources).not.toContain('number_compare');
     expect(systemTreeVocabulary({ kind: 'dock' }, schema).actions).not.toContain('write_number');
     expect(systemTreeVocabulary({ kind: 'power_reactor' }, schema).actions).not.toContain('write_number');
+    profile.reactor.max_output_per_sec = 18.24; profile.group[0].max_flow_per_sec = 35.04;
+    const fractional = systemTreeVocabulary({ kind: 'power_reactor', energy_profile: profile }, schema);
+    expect(fractional.numeric_channels['reactor-output'].max).toBe(Math.fround(18.24));
+    expect(fractional.numeric_channels['flow-engine'].max).toBe(Math.fround(35.04));
   });
   it('authors typed numeric conditions and outputs through controlled UI, accepted source and history', async () => {
     const path = 'assets/entities/power-ship.toml';

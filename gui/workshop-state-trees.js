@@ -13,13 +13,13 @@ export function systemTreeVocabulary(owner, schema) {
     const reactor = profile.reactor;
     vocabulary.numeric_facts = ['reactor_reserve_fraction', 'reactor_heat_fraction', 'output_actual'];
     vocabulary.numeric_channels = {
-      'reactor-output': { min: 0, max: reactor.max_output_per_sec },
-      'reactor-cooling': { min: 0, max: reactor.max_cooling_per_sec },
+      'reactor-output': { min: 0, max: Math.fround(reactor.max_output_per_sec) },
+      'reactor-cooling': { min: 0, max: Math.fround(reactor.max_cooling_per_sec) },
     };
     for (const group of profile.group || []) {
       vocabulary.numeric_facts.push('reserve-' + group.id, 'heat-' + group.id);
-      vocabulary.numeric_channels['flow-' + group.id] = { min: 0, max: group.max_flow_per_sec };
-      vocabulary.numeric_channels['cooling-' + group.id] = { min: 0, max: group.max_cooling_per_sec };
+      vocabulary.numeric_channels['flow-' + group.id] = { min: 0, max: Math.fround(group.max_flow_per_sec) };
+      vocabulary.numeric_channels['cooling-' + group.id] = { min: 0, max: Math.fround(group.max_cooling_per_sec) };
     }
   }
   if (!vocabulary.numeric_facts?.length) vocabulary.sources = (vocabulary.sources || []).filter(source => source !== 'number_compare');

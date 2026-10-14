@@ -150,3 +150,55 @@ fn unaffordable_discrete_remainder_cannot_indefinitely_hide_power_loss() {
         "exactly affordable work disproves total power loss"
     );
 }
+
+#[test]
+fn charged_domain_reserve_with_zero_generic_costs_still_disproves_power_loss() {
+    let (mut damage, ship, power) = fixture();
+    let mut hardware = power.0.config().clone();
+    let profile = hardware
+        .consumers
+        .iter_mut()
+        .find(|profile| profile.system.0 == "radio")
+        .unwrap();
+    profile.continuous_cost_per_sec = 0.0;
+    profile.discrete_cost = 0.0;
+    let mut power = crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship.clone()).unwrap(),
+    );
+    destroy(&mut damage, "engine");
+    destroy(&mut damage, "reactor");
+    power
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&SystemId("radio".into()))
+        .unwrap()
+        .energy = 0.5;
+    assert!(
+        !damage.disabled(&ship, Some(&power)),
+        "domain-specific costs do not make an actual charged reserve imaginary"
+    );
+    power
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&SystemId("radio".into()))
+        .unwrap()
+        .thermal_stopped = true;
+    assert!(
+        damage.disabled(&ship, Some(&power)),
+        "a thermally unavailable buffer is not usable"
+    );
+    power
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&SystemId("radio".into()))
+        .unwrap()
+        .thermal_stopped = false;
+    destroy(&mut damage, "radio");
+    assert!(
+        damage.disabled(&ship, Some(&power)),
+        "Operation loss also makes the charged buffer unusable"
+    );
+}

@@ -180,6 +180,11 @@ impl ShipDamage {
                         profile.continuous_cost_per_sec > 0.0
                             || (profile.discrete_cost > 0.0
                                 && state.energy >= profile.discrete_cost)
+                            // Some owning domains (notably shield upkeep and
+                            // recharge) spend this same reserve outside the
+                            // generic work-cost pair. Its charge is still usable.
+                            || (profile.continuous_cost_per_sec == 0.0
+                                && profile.discrete_cost == 0.0)
                     })
         })
     }

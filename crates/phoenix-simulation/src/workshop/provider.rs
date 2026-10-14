@@ -190,7 +190,7 @@ pub struct WorkshopResponse {
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum Response {
     ShipSchema {
-        schema: super::WorkshopShipSchema,
+        schema: Box<super::WorkshopShipSchema>,
     },
     Sources {
         kind: WorkspaceKind,
@@ -480,7 +480,7 @@ impl NativeWorkshopProvider {
     fn apply(&mut self, operation: Operation) -> Result<Response, String> {
         Ok(match operation {
             Operation::ShipSchema => Response::ShipSchema {
-                schema: super::ship_schema(),
+                schema: Box::new(super::ship_schema()),
             },
             Operation::LoadSources => Response::Sources {
                 kind: self.kind,

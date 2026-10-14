@@ -499,13 +499,18 @@ impl EnergyNetworkState {
         let mut remaining_supply = supply_preview.energy as f64;
         let mut delivered = 0.0f64;
         // Priority is an authored allocation policy, not an engine privilege.
-        let mut consumers: Vec<_> = config.consumers.iter().collect();
-        consumers.sort_by(|a, b| {
-            consumer_priority(ship, &next.groups, b)
-                .cmp(&consumer_priority(ship, &next.groups, a))
-                .then_with(|| a.system.cmp(&b.system))
-        });
-        for consumer in consumers {
+        let mut consumers: Vec<_> = config
+            .consumers
+            .iter()
+            .map(|consumer| {
+                (
+                    consumer_priority(config, ship, &next.groups, consumer),
+                    consumer,
+                )
+            })
+            .collect();
+        consumers.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.system.cmp(&b.1.system)));
+        for (_, consumer) in consumers {
             let offer = budget(
                 (routed.get(&consumer.system).copied().unwrap_or(0.0) as f64 * dt as f64)
                     .min(remaining_supply),
@@ -573,10 +578,21 @@ impl EnergyNetworkState {
         }
         *coolant_spent.entry(bindings.reactor.clone()).or_default() +=
             reactor_report.coolant_used as f64;
-        result.coolant_used = coolant_spent
-            .into_iter()
-            .map(|(id, amount)| (id, amount as f32))
-            .collect();
+        // Sum actual shared-provider reports in wide arithmetic, then round
+        // the debit upward. Rounding down would manufacture fractional stock
+        // credit in the integer-inventory adapter over repeated cooling ticks.
+        for (id, amount) in coolant_spent {
+            let lower = budget(amount);
+            let debit = if (lower as f64) < amount {
+                f32::from_bits(lower.to_bits() + 1)
+            } else {
+                lower
+            };
+            if !debit.is_finite() || debit > coolant[&id] {
+                return Err("aggregate cooling exceeds its provider budget".into());
+            }
+            result.coolant_used.insert(id, debit);
+        }
         result.generation_accepted = reactor_report.accepted_energy;
         result.generation_rejected = reactor_report.rejected_energy;
         result.delivered_energy = export;
@@ -627,9 +643,9 @@ impl EnergyNetworkState {
         let mut cooling_left = self.groups[parent].effective_cooling_per_sec as f64;
         let mut ordered = children.clone();
         ordered.sort_by(|a, b| {
-            self.groups[b]
+            self.groups[a]
                 .priority
-                .cmp(&self.groups[a].priority)
+                .cmp(&self.groups[b].priority)
                 .then_with(|| a.cmp(b))
         });
         for child in &ordered {
@@ -657,9 +673,9 @@ impl EnergyNetworkState {
             let mut remaining = available as f64;
             let mut ordered = ids.to_vec();
             ordered.sort_by(|a, b| {
-                self.groups[b]
+                self.groups[a]
                     .priority
-                    .cmp(&self.groups[a].priority)
+                    .cmp(&self.groups[b].priority)
                     .then_with(|| a.cmp(b))
             });
             for id in ordered {
@@ -871,17 +887,32 @@ impl EnergyNetworkState {
     }
 }
 
-fn consumer_priority(
+/// Sibling list rank is meaningful within its parent. Resolve the whole path
+/// so a low-ranked branch cannot take scarce stock ahead of a preferred root.
+/// A directly mounted parent consumer sorts before its descendants; its route
+/// already contains only the budget left after those child allocations.
+fn consumer_priority<'a>(
+    config: &'a EnergyConfigSection,
     ship: &ShipConfig,
     groups: &BTreeMap<PowerGroupId, EnergyGroupState>,
     consumer: &EnergyConsumerConfig,
-) -> u16 {
-    ship.systems
+) -> Vec<(u16, &'a PowerGroupId)> {
+    let mut current = ship
+        .systems
         .iter()
         .find(|system| system.id == consumer.system)
         .and_then(|system| system.power_group.as_ref())
-        .and_then(|group| groups.get(group))
-        .map_or(0, |group| group.priority)
+        .and_then(|id| config.groups.iter().find(|group| &group.id == id));
+    let mut path = Vec::new();
+    while let Some(group) = current {
+        path.push((groups[&group.id].priority, &group.id));
+        current = group
+            .parent
+            .as_ref()
+            .and_then(|id| config.groups.iter().find(|parent| &parent.id == id));
+    }
+    path.reverse();
+    path
 }
 
 #[cfg(test)]

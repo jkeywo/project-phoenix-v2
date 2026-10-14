@@ -178,7 +178,7 @@ fn recovery_requires_sustained_headroom_without_evicting_served_groups() {
 fn minimal_priorities_share_real_supply_and_do_not_modify_manual_requests() {
     let (cfg, ship, bindings, coolant) = fixture(vec![
         group("low", None, 8.0, 1),
-        group("high", None, 8.0, 10),
+        group("high", None, 8.0, 0),
     ]);
     let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
     state.mode = EnergyAllocationMode::Minimal;
@@ -410,4 +410,157 @@ fn saved_child_budget_and_nonzero_tripped_output_are_refused() {
         .validate_against(&cfg, &ship)
         .unwrap_err()
         .contains("actual output"));
+}
+
+#[test]
+fn first_list_rank_receives_unequal_scarce_flow_and_shared_coolant_first() {
+    // The command applier/UI rerank sibling list indexes with zero first.
+    let (mut cfg, ship, bindings, _) = fixture(vec![
+        group("last-alphabetically", None, 3.0, 0),
+        group("first-alphabetically", None, 8.0, 1),
+    ]);
+    cfg.reactor.default_cooling_per_sec = 0.0;
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.mode = EnergyAllocationMode::Minimal;
+    state.set_output(&cfg, 5.0).unwrap();
+    for consumer in state.consumers.values_mut() {
+        consumer.heat = 10.0;
+    }
+    let result = run(
+        &mut state,
+        &cfg,
+        &ship,
+        &bindings,
+        &BTreeMap::from([("coolant".into(), 0.1)]),
+        1.0,
+    );
+    assert_eq!(
+        state.groups[&PowerGroupId("last-alphabetically".into())].effective_flow_per_sec,
+        3.0
+    );
+    assert_eq!(
+        state.groups[&PowerGroupId("first-alphabetically".into())].effective_flow_per_sec,
+        2.0
+    );
+    close(
+        state.consumers[&SystemId("consumer-last-alphabetically".into())].heat,
+        9.0,
+    );
+    close(
+        state.consumers[&SystemId("consumer-first-alphabetically".into())].heat,
+        10.0,
+    );
+    assert_eq!(result.coolant_used["coolant"], 0.1);
+}
+
+#[test]
+fn nested_first_list_rank_gets_parent_flow_and_cooling_without_double_counting() {
+    let (mut cfg, ship, bindings, coolant) = fixture(vec![
+        group("root", None, 7.0, 0),
+        group("z-first", Some("root"), 3.0, 0),
+        group("a-second", Some("root"), 8.0, 1),
+    ]);
+    cfg.groups[0].default_cooling_per_sec = 3.0;
+    cfg.groups[1].default_cooling_per_sec = 5.0;
+    cfg.groups[2].default_cooling_per_sec = 5.0;
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.mode = EnergyAllocationMode::Minimal;
+    state.set_output(&cfg, 7.0).unwrap();
+    state
+        .consumers
+        .get_mut(&SystemId("consumer-z-first".into()))
+        .unwrap()
+        .heat = 10.0;
+    state
+        .consumers
+        .get_mut(&SystemId("consumer-a-second".into()))
+        .unwrap()
+        .heat = 10.0;
+    let result = run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+    let first = &state.groups[&PowerGroupId("z-first".into())];
+    let second = &state.groups[&PowerGroupId("a-second".into())];
+    assert_eq!(
+        (first.effective_flow_per_sec, second.effective_flow_per_sec),
+        (3.0, 4.0)
+    );
+    assert_eq!(
+        (
+            first.effective_cooling_per_sec,
+            second.effective_cooling_per_sec
+        ),
+        (3.0, 0.0)
+    );
+    assert_eq!(result.delivered_energy, 7.0);
+    assert_eq!(
+        result.consumer_reports[&SystemId("consumer-root".into())].accepted_energy,
+        0.0
+    );
+    close(
+        state.consumers[&SystemId("consumer-z-first".into())].heat,
+        7.0,
+    );
+    close(
+        state.consumers[&SystemId("consumer-a-second".into())].heat,
+        10.0,
+    );
+    state.validate_against(&cfg, &ship).unwrap();
+}
+
+#[test]
+fn repeated_shared_fractional_cooling_never_rounds_its_debit_down_or_above_budget() {
+    for available in [1.0, 100.0] {
+        let (mut cfg, ship, bindings, _) = fixture(
+            (0..5)
+                .map(|n| group(&format!("g{n}"), None, 0.0, n))
+                .collect(),
+        );
+        cfg.reactor.default_cooling_per_sec = 0.0;
+        let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+        let coolant = BTreeMap::from([("coolant".into(), available)]);
+        for _ in 0..20 {
+            for consumer in state.consumers.values_mut() {
+                consumer.heat = 10.0;
+            }
+            let result = run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+            let actual_reports = result
+                .consumer_reports
+                .values()
+                .map(|report| report.coolant_used as f64)
+                .sum::<f64>();
+            let debit = result.coolant_used["coolant"];
+            assert!(debit as f64 >= actual_reports);
+            assert!(debit <= available);
+            assert!(debit.is_finite());
+        }
+    }
+}
+
+#[test]
+fn scarce_shared_coolant_respects_root_rank_before_equal_child_ranks() {
+    let (mut cfg, ship, bindings, _) = fixture(vec![
+        group("z-first-root", None, 0.0, 0),
+        group("a-second-root", None, 0.0, 1),
+        group("z-first-leaf", Some("z-first-root"), 0.0, 0),
+        group("a-second-leaf", Some("a-second-root"), 0.0, 0),
+    ]);
+    cfg.reactor.default_cooling_per_sec = 0.0;
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.mode = EnergyAllocationMode::Minimal;
+    let first = SystemId("consumer-z-first-leaf".into());
+    let second = SystemId("consumer-a-second-leaf".into());
+    state.consumers.get_mut(&first).unwrap().heat = 10.0;
+    state.consumers.get_mut(&second).unwrap().heat = 10.0;
+    let result = run(
+        &mut state,
+        &cfg,
+        &ship,
+        &bindings,
+        &BTreeMap::from([("coolant".into(), 0.1)]),
+        1.0,
+    );
+    close(state.consumers[&first].heat, 9.0);
+    close(state.consumers[&second].heat, 10.0);
+    assert_eq!(result.coolant_used["coolant"], 0.1);
+    assert_eq!(result.delivered_energy, 0.0);
+    state.validate_against(&cfg, &ship).unwrap();
 }

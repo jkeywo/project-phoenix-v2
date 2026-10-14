@@ -1,0 +1,197 @@
+import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { parse } from 'smol-toml';
+import { createStoreZip, readStoreZip } from '../../editor/mod-pack-export.js';
+import { WORKSHOP_MANIFEST } from '../fixtures/workshop-pack.js';
+import { revealWorkshopPanel } from './dock-helpers.js';
+import { ts } from './strings';
+
+const HULL = 'assets/entities/workshop_resource_hull.toml';
+const BASE = 'assets/entities/workshop_resource_base.toml';
+const DEPOT = 'assets/entities/workshop_resource_depot.toml';
+const WORLD = 'assets/worlds/workshop.toml';
+const HULL_TEXT = 'includes=["workshop_resource_base.toml"]\n# Keep inherited ship equipment.\n';
+const BASE_TEXT = `includes=["alliance_cruiser.toml"]
+[umbilical]
+capacity="torpedoes"
+direction="collect"
+[[infrastructure.capacity]]
+id="ammo"
+amount=4
+ceiling=20
+[resource_services.torpedoes]
+kind="capacity"
+id="ammo"
+[umbilical.link.provider]
+kind="capacity"
+id="ammo"
+`;
+const DEPOT_TEXT = `includes=["umbilical_berth.toml"]
+[[infrastructure.capacity]]
+id="ammo"
+amount=50
+ceiling=50
+[resource_services.torpedoes]
+kind="capacity"
+id="ammo"
+`;
+const WORLD_TEXT = `[global]
+title="Resource Workshop acceptance"
+seed=6
+[[available_ships]]
+template_path="${HULL}"
+[[entity]]
+template_path="${HULL}"
+id="player-ship"
+spawn_on="game_start"
+[[entity]]
+template_path="${DEPOT}"
+id="ammunition-depot"
+spawn_on="game_start"
+transform={position=[1000.0,0.0,0.0]}
+`;
+const byId = (page, id) => page.locator('#workshop-resource-' + id);
+const options = locator => locator.evaluate(select => [...select.options].map(option => option.value));
+async function sourceOf(page, member = HULL) {
+  await revealWorkshopPanel(page, 'files'); await page.locator('#workshop-files').selectOption(member);
+  await revealWorkshopPanel(page, 'source'); return page.locator('#workshop-source').inputValue();
+}
+async function resourceForm(page) {
+  await revealWorkshopPanel(page, 'composition'); await byId(page, 'template').selectOption(HULL);
+  await expect(byId(page, 'capacity-apply')).toBeEnabled();
+}
+async function importPack(page, bytes) {
+  const chooser = page.waitForEvent('filechooser'); await page.locator('#workshop-import').click();
+  await (await chooser).setFiles({ name: 'resource-workshop.zip', mimeType: 'application/zip', buffer: Buffer.from(bytes) });
+  await expect(page.locator('.workshop-findings')).toContainText(ts('workshop.imported'));
+  await resourceForm(page);
+}
+async function applied(page, id) {
+  await byId(page, id).click(); await expect(byId(page, 'status')).toHaveText(ts('workshop.changed'));
+  await expect(byId(page, id)).toBeEnabled();
+}
+
+async function previewColours(page) {
+  const box = await page.frameLocator('.workshop-model-preview-frame').locator('#canvas').boundingBox();
+  expect(box).toBeTruthy();
+  const png = await page.screenshot({ clip: { x: Math.round(box.x + box.width * 0.25),
+    y: Math.round(box.y + box.height * 0.25), width: Math.round(box.width * 0.5), height: Math.round(box.height * 0.5) } });
+  return page.evaluate(async value => {
+    const image = new Image(); image.src = `data:image/png;base64,${value}`; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data, colours = new Set();
+    for (let i = 0; i < pixels.length && colours.size < 64; i += 4) colours.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
+    return colours.size;
+  }, png.toString('base64'));
+}
+
+test('Workshop edits inherited stores and service links, then reloads and exercises the authored hull',
+  { tag: '@core' }, async ({ page }, testInfo) => {
+    test.setTimeout(360_000);
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => false }));
+    // Use the real providers and WASM validator. Bound only the asset preflight
+    // to the two hulls used by this disposable fixture.
+    await page.route('**/workshop-base.json', async route => {
+      const response = await route.fetch(), source = await response.json(), all = source.base_asset_manifest;
+      const selected = new Set(Object.keys(all).filter(name => name.endsWith('.wgsl')
+        || /^assets\/(pfx|radar_icons|skybox)\//.test(name)
+        || name.includes('alliance_cruiser_recreated') || name.includes('alliance_courier_recreated_dock_probe')));
+      for (const name of selected) for (const dependency of all[name]?.requires || []) selected.add(dependency);
+      source.base_asset_manifest = Object.fromEntries([...selected].map(name => [name, all[name]]));
+      await route.fulfill({ response, json: source });
+    });
+    await page.goto('/workshop.html');
+    await importPack(page, createStoreZip([
+      { path: 'scenarios.toml', text: WORKSHOP_MANIFEST }, { path: WORLD, text: WORLD_TEXT },
+      { path: HULL, text: HULL_TEXT }, { path: BASE, text: BASE_TEXT }, { path: DEPOT, text: DEPOT_TEXT },
+    ]));
+    await byId(page, 'capacities').selectOption('ammo');
+    await byId(page, 'amount').fill('6'); await byId(page, 'ceiling').fill('24');
+    await byId(page, 'capacity-apply').click();
+    await expect(byId(page, 'status')).toContainText('materialise');
+    expect(await sourceOf(page)).toBe(HULL_TEXT);
+    await resourceForm(page); await byId(page, 'capacities').selectOption('ammo');
+    await byId(page, 'materialise').check();
+    await byId(page, 'amount').fill('6'); await byId(page, 'ceiling').fill('24');
+    await applied(page, 'capacity-apply');
+    const afterStock = await sourceOf(page);
+    expect(parse(afterStock).infrastructure.capacity[0]).toEqual({ id: 'ammo', amount: 6, ceiling: 24 });
+    await page.locator('#workshop-undo').click(); await expect.poll(() => sourceOf(page)).toBe(HULL_TEXT);
+    await page.locator('#workshop-redo').click(); await expect.poll(() => sourceOf(page)).toBe(afterStock);
+
+    // A named service can be switched between supported endpoint kinds. No
+    // inherited capacity id may survive a switch to the magazine variant.
+    await resourceForm(page); await byId(page, 'services').selectOption('torpedoes');
+    await byId(page, 'materialise').check(); await byId(page, 'service-kind').selectOption('torpedo_magazine');
+    await applied(page, 'service-apply');
+    expect(parse(await sourceOf(page)).resource_services.torpedoes).toEqual({ kind: 'torpedo_magazine' });
+    await resourceForm(page); await byId(page, 'materialise').check();
+    await byId(page, 'link-kind').selectOption('service'); await byId(page, 'link-service').selectOption('torpedoes');
+    await applied(page, 'link-apply');
+    expect(parse(await sourceOf(page)).umbilical.link).toEqual({ service: 'torpedoes' });
+
+    // The real runtime rejects a missing service reference; its refused source
+    // must never replace the last accepted draft.
+    const beforeRefusal = await sourceOf(page);
+    await resourceForm(page);
+    // Exercise the authoritative validator with an invalid requested service.
+    // The ordinary select only offers known services, so inject this negative
+    // test value without bypassing the panel's accepted-source route.
+    await byId(page, 'link-kind').selectOption('service');
+    await byId(page, 'link-service').evaluate(select => {
+      const option = document.createElement('option'); option.value = 'absent-service'; option.textContent = 'Absent service';
+      select.append(option); select.value = option.value;
+    });
+    await byId(page, 'link-apply').click();
+    await expect(byId(page, 'status')).toContainText('not declared');
+    expect(await sourceOf(page)).toBe(beforeRefusal);
+    await resourceForm(page); await byId(page, 'count').fill('32'); await byId(page, 'materialise').check();
+    await applied(page, 'magazine-apply');
+    const edited = await sourceOf(page);
+    expect(parse(edited).torpedoes.count).toBe(32);
+    expect(await sourceOf(page, BASE)).toBe(BASE_TEXT);
+
+    const download = page.waitForEvent('download'); await page.locator('#workshop-export').click();
+    const bytes = new Uint8Array(readFileSync(await (await download).path()));
+    expect(readStoreZip(bytes)[HULL].replace(/\r\n/g, '\n')).toBe(edited);
+    expect(readStoreZip(bytes)[BASE].replace(/\r\n/g, '\n')).toBe(BASE_TEXT);
+    await importPack(page, bytes); expect(await sourceOf(page)).toBe(edited);
+    await resourceForm(page); await expect(byId(page, 'count')).toHaveValue('32');
+    await expect(byId(page, 'amount')).toHaveValue('6'); await expect(byId(page, 'ceiling')).toHaveValue('24');
+    await expect(byId(page, 'link-service')).toHaveValue('torpedoes');
+
+    // Preview reads the edited entity through the existing capture/viewer path.
+    await revealWorkshopPanel(page, 'composition');
+    await page.locator('#workshop-entity-template').selectOption(HULL);
+    await expect(page.locator('#workshop-entity-preview')).toBeEnabled();
+    await page.locator('#workshop-entity-preview').click();
+    await expect(page.locator('#workshop-preview-subject')).toHaveValue(HULL);
+    await expect(page.locator('#workshop-model-preview-refresh')).toBeEnabled();
+    await page.locator('#workshop-model-preview-refresh').click();
+    await expect.poll(() => page.locator('#workshop-model-preview-stats').textContent(), { timeout: 180_000 }).toMatch(/\d/);
+    await expect(page.frameLocator('.workshop-model-preview-frame').locator('#canvas')).toBeVisible();
+    await expect.poll(() => previewColours(page), { timeout: 60_000 }).toBeGreaterThan(1);
+    await testInfo.attach('resource-preview', { body: await page.screenshot(), contentType: 'image/png' });
+
+    // Disposable Test installs the same exported/reloaded source in ordinary
+    // simulation; stopping it must leave every authored resource edit intact.
+    await revealWorkshopPanel(page, 'composition'); await page.locator('#workshop-entity-template').selectOption(HULL);
+    await page.locator('#workshop-entity-test').click();
+    await page.locator('#workshop-test-world').selectOption(WORLD);
+    await expect.poll(() => options(page.locator('#workshop-test-ship')), { timeout: 60_000 }).toContain(HULL);
+    await page.locator('#workshop-test-ship').selectOption(HULL); await page.locator('#workshop-test-seed').fill('6');
+    await page.locator('#workshop-test-start').click();
+    try {
+      await expect.poll(async () => await page.locator('#workshop-test-pause').isEnabled() ? 'running'
+        : await page.locator('#workshop-test-status').getAttribute('role') === 'alert'
+          ? await page.locator('#workshop-test-status').textContent() : 'starting', { timeout: 120_000 }).toBe('running');
+      const frame = page.frames().find(item => /\/workshop-test(?:\.html)?$/.test(new URL(item.url() || 'about:blank').pathname));
+      expect(frame).toBeTruthy();
+      expect(await frame.evaluate(async () => JSON.parse((await import('/phoenix.js')).wasm_workshop_test_status())))
+        .toMatchObject({ running: true, selection: { ship: HULL } });
+    } finally { await page.locator('#workshop-test-stop').click(); }
+    await expect(page.locator('.workshop-test-viewscreen')).toHaveCount(0);
+    expect(await sourceOf(page)).toBe(edited); expect(errors).toEqual([]);
+  });

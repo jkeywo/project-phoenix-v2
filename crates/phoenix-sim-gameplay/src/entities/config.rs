@@ -24,6 +24,8 @@ mod helm;
 pub use helm::*;
 mod weapons;
 pub use weapons::*;
+mod weapon_definition;
+pub use weapon_definition::*;
 mod consoles;
 pub use consoles::*;
 mod power;
@@ -367,6 +369,9 @@ impl EntityConfig {
         // composed document, so a fragment that still carries one is caught
         // too.
         reject_relocated_mesh_lod(&value)?;
+        // Generic equipment is compiled once into the existing delivery
+        // strategies. There is no additional live weapon store or controller.
+        weapon_definition::compile_weapons(&mut value).map_err(SerdeError::custom)?;
         // Extract [[shield_arc]] blocks BEFORE stripping so we can populate
         // `EntityConfig.shield_arcs` and synthesise matching `[[system]]`
         // entries during ship-config parsing.

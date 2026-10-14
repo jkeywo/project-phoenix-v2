@@ -156,6 +156,7 @@ pub enum MergePolicy {
 const COMPOSE_KEYED_ARRAYS: &[(&str, &str)] = &[
     ("behaviour.doctrine", "id"),
     ("shield_arc", "id"),
+    ("weapon", "id"),
     ("station", "id"),
     ("console", "id"),
     ("station.rating", "name"),
@@ -348,6 +349,12 @@ pub fn is_atomic_resource_endpoint(path: &str) -> bool {
         || path == "umbilical.link.provider"
 }
 
+/// Delivery alternatives carry complete typed parameter sets. Replacing the
+/// tagged strategy must not leave fields from the previous alternative.
+pub fn is_atomic_weapon_delivery(path: &str) -> bool {
+    path == "weapon.delivery"
+}
+
 fn merge_at(
     path: &str,
     template: &toml::Value,
@@ -355,7 +362,9 @@ fn merge_at(
     policy: MergePolicy,
 ) -> toml::Value {
     match (template, override_) {
-        (toml::Value::Table(_), toml::Value::Table(_)) if is_atomic_resource_endpoint(path) => {
+        (toml::Value::Table(_), toml::Value::Table(_))
+            if is_atomic_resource_endpoint(path) || is_atomic_weapon_delivery(path) =>
+        {
             override_.clone()
         }
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {

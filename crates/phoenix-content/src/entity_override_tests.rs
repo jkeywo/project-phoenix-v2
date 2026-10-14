@@ -1,5 +1,88 @@
 use super::*;
 
+#[test]
+fn weapon_fragments_preserve_identity_order_and_replace_tagged_delivery() {
+    let base: toml::Value = toml::from_str(
+        r#"
+[[weapon]]
+id='fore'
+[weapon.mount]
+facing_deg=0.0
+fire_arc_deg=90.0
+range=40.0
+[weapon.delivery]
+kind='beam'
+damage_per_sec=5.0
+[[weapon]]
+id='aft'
+[weapon.delivery]
+kind='guided'
+volley_max=2
+"#,
+    )
+    .unwrap();
+    let overlay: toml::Value = toml::from_str(
+        r#"
+[[weapon]]
+id='fore'
+[weapon.mount]
+range=35.0
+[weapon.delivery]
+kind='bolt'
+damage=20
+[[weapon]]
+id='aft'
+_remove=true
+[[weapon]]
+id='port'
+[weapon.delivery]
+kind='beam'
+damage_per_sec=2.0
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+    let weapons = merged["weapon"].as_array().unwrap();
+    assert_eq!(
+        weapons
+            .iter()
+            .map(|weapon| weapon["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["fore", "port"]
+    );
+    assert_eq!(weapons[0]["mount"]["range"].as_float(), Some(35.0));
+    assert_eq!(weapons[0]["mount"]["fire_arc_deg"].as_float(), Some(90.0));
+    assert!(weapons[0]["delivery"].get("damage_per_sec").is_none());
+    assert_eq!(weapons[0]["delivery"]["damage"].as_integer(), Some(20));
+    assert!(merge_entity_config_toml_with(&base, &overlay, MergePolicy::InstanceOverride).is_err());
+}
+
+#[test]
+fn weapon_delivery_provenance_discards_the_replaced_variant() {
+    let source = std::collections::HashMap::from([
+        ("assets/entities/base.toml".to_owned(), "[[weapon]]\nid='fore'\n[weapon.delivery]\nkind='beam'\ndamage_per_sec=5.0\n".to_owned()),
+        ("assets/entities/hull.toml".to_owned(), "includes=['base.toml']\n[[weapon]]\nid='fore'\n[weapon.delivery]\nkind='bolt'\ndamage=20\n".to_owned()),
+    ]);
+    let resolved =
+        crate::include_resolve::resolve_template("assets/entities/hull.toml", &source).unwrap();
+    assert!(resolved.value["weapon"][0]["delivery"]
+        .get("damage_per_sec")
+        .is_none());
+    assert!(!resolved
+        .provenance
+        .fields()
+        .any(|(key, _)| key.contains("damage_per_sec")));
+    assert_eq!(
+        resolved
+            .provenance
+            .origin("weapon[id=fore].delivery.kind")
+            .unwrap()
+            .source,
+        "assets/entities/hull.toml"
+    );
+}
+
 /// [`merge_entity_config_toml`] for the tests whose override is expected to
 /// be ACCEPTED. The merge is fallible only for a `_remove` tombstone
 /// (issue #911); `an_instance_override_is_rejected_for_a_tombstone` covers
@@ -522,6 +605,7 @@ fn the_two_layers_disagree_only_where_they_are_meant_to() {
         ("station", Replace, Keyed("id")),
         ("station.rating", Replace, Keyed("name")),
         ("shield_arc", Replace, Keyed("id")),
+        ("weapon", Replace, Keyed("id")),
         ("weapons_console.phaser_banks", Replace, Keyed("id")),
         ("weapons_console.blaster_banks", Replace, Keyed("id")),
         ("torpedoes.tubes", Replace, Keyed("id")),
@@ -536,6 +620,7 @@ fn the_two_layers_disagree_only_where_they_are_meant_to() {
         // = []` idiom `world/dispatch.rs` documents relies on this.
         ("behaviour.doctrine.directive_anchors", Replace, Replace),
         ("weapons_console.blaster_banks.pattern", Replace, Replace),
+        ("weapon.pattern", Replace, Replace),
     ];
     for (path, instance, compose) in cases {
         assert_eq!(

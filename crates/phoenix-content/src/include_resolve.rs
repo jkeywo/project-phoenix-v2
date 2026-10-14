@@ -375,7 +375,9 @@ fn record_leaves(
     };
     match value {
         toml::Value::Table(table) => {
-            if crate::entity_override::is_atomic_resource_endpoint(merge_path) {
+            if crate::entity_override::is_atomic_resource_endpoint(merge_path)
+                || crate::entity_override::is_atomic_weapon_delivery(merge_path)
+            {
                 out.retain(|address, _| address != prefix && !is_descendant(address, prefix));
             }
             if table.is_empty() {

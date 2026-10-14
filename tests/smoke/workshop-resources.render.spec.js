@@ -163,7 +163,8 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await expect(byId(page, 'link-service')).toHaveValue('torpedoes');
 
     // Preview reads the edited entity through the existing capture/viewer path.
-    await revealWorkshopPanel(page, 'composition');
+    await revealWorkshopPanel(page, 'entity');
+    await expect(page.locator('#workshop-entity-template')).toBeVisible();
     await page.locator('#workshop-entity-template').selectOption(HULL);
     await expect(page.locator('#workshop-entity-preview')).toBeEnabled();
     await page.locator('#workshop-entity-preview').click();
@@ -177,8 +178,7 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
 
     // Disposable Test installs the same exported/reloaded source in ordinary
     // simulation; stopping it must leave every authored resource edit intact.
-    await revealWorkshopPanel(page, 'composition'); await page.locator('#workshop-entity-template').selectOption(HULL);
-    await page.locator('#workshop-entity-test').click();
+    await page.locator('#workshop-open-test').click();
     await page.locator('#workshop-test-world').selectOption(WORLD);
     await expect.poll(() => options(page.locator('#workshop-test-ship')), { timeout: 60_000 }).toContain(HULL);
     await page.locator('#workshop-test-ship').selectOption(HULL); await page.locator('#workshop-test-seed').fill('6');

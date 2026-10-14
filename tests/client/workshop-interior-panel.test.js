@@ -8,9 +8,9 @@ import { mountWorkshopInterior } from '../../gui/workshop-interior-panel.js';
 const path = 'assets/entities/ship.toml', control = id => document.getElementById('workshop-interior-' + id);
 async function settle() { for (let i = 0; i < 15; i++) await new Promise(resolve => setTimeout(resolve, 1)); }
 const change = (id, value, type = 'change') => { control(id).value = value; control(id).dispatchEvent(new Event(type, { bubbles: true })); };
-function fixture() {
+function fixture(source = interiorSource()) {
   document.body.innerHTML = '<main></main>';
-  const source = interiorSource(), draft = new WorkshopDocument(createStoreZip([
+  const draft = new WorkshopDocument(createStoreZip([
     { path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text: source }]));
   const runtime = { dependencies: async () => ({ base_files: {}, packs: [] }), validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
   const changed = vi.fn(), panel = mountWorkshopInterior({ root: document.querySelector('main'), runtime, draft: () => draft,
@@ -18,6 +18,15 @@ function fixture() {
   return { source, draft, runtime, changed, panel };
 }
 describe('Workshop physical layout form', () => {
+  it('edits a legacy repair bucket without inventing an installed System', async () => {
+    const source = interiorSource() + '\n[[hull.system_hull]]\nsystem_id="core"\nmax_hp=50\n';
+    const { draft, panel } = fixture(source); await settle();
+    expect([...control('repair-target').options].map(option => option.value)).toEqual(['core']);
+    expect([...control('system').options].map(option => option.value)).not.toContain('core');
+    change('repair-placement', 'engineering'); control('save').click(); await settle();
+    expect(parse(draft.read(path)).interior.repair_placements).toEqual({ core: 'engineering' });
+    expect(parse(draft.read(path)).system).toEqual(parse(source).system); panel.dispose();
+  });
   it('labels every property and stages precise geometry, material, connections and placements as one edit', async () => {
     const { source, draft, runtime, changed, panel } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

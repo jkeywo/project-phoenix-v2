@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { parse } from 'smol-toml';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
-import { inspectInterior, initialInterior, initialAccessGateTree, validateInterior, prepareInteriorOperation, applyInteriorOperation } from '../workshop-interiors.js';
+import { inspectInterior, initialInterior, initialAccessGateTree, legacyRepairTargets, validateInterior, prepareInteriorOperation, applyInteriorOperation } from '../workshop-interiors.js';
 import { resolveTemplate } from '../entity-includes.js';
 import { interiorProfile, interiorSource } from './interior-fixture.js';
 import { stringify } from 'smol-toml';
@@ -14,6 +14,17 @@ const draft = (source = interiorSource()) => new WorkshopDocument(createStoreZip
   { path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text: source }]));
 const prepare = (current, interior, extra = {}, deps = dependencies) => prepareInteriorOperation(current, deps, { path, interior, ...extra }).changes[0].after;
 describe('explicit physical interior authoring', () => {
+  it('locates legacy hull buckets separately, including the existing captain hull fallback', () => {
+    const value = parse(interiorSource()); value.hull = { system_hull: [{ system_id: 'core' }, { system_id: 'helm' }] };
+    const current = draft(stringify(value)), read = inspectInterior(current, dependencies, path);
+    expect(read.repairTargets.map(row => row.id)).toEqual(['core']);
+    expect(() => prepare(current, interiorProfile())).toThrow(/legacy repair target/);
+    const profile = interiorProfile(); profile.repair_placements = { core: 'engineering' };
+    expect(parse(prepare(current, profile)).interior.repair_placements).toEqual({ core: 'engineering' });
+    profile.repair_placements.helm = 'bridge'; expect(() => prepare(current, profile)).toThrow(/legacy repair target/);
+    value.hull = { hull_integrity: 100 }; expect(legacyRepairTargets(value).map(row => row.id)).toEqual(['captain']);
+    expect(initialInterior(read.systems, 1, legacyRepairTargets(value)).repair_placements).toEqual({ captain: 'bridge' });
+  });
   it('includes generated equipment and leaves control/knowledge declarations unchanged', () => {
     const current = draft(), read = inspectInterior(current, dependencies, path);
     expect(read.systems.map(system => system.id)).toEqual(['helm', 'shield-arc-fore']);
@@ -22,6 +33,8 @@ describe('explicit physical interior authoring', () => {
     expect(parse(after).interior.compartment[0]).toMatchObject({ x: -22, material: 'unusual-alloy' });
     expect(after.slice(0, after.indexOf('[interior]'))).toBe(current.read(path).slice(0, current.read(path).indexOf('[interior]')));
     expect(after.slice(after.indexOf('[health]'))).toBe(current.read(path).slice(current.read(path).indexOf('[health]')));
+    const annotated = draft(current.read(path).replace('[health]', '# unrelated next component\n[health]'));
+    expect(prepare(annotated, interior)).toContain('# unrelated next component\n[health]');
   });
   it('creates an explicit complete starter without introducing a parser fallback', () => {
     const current = draft(interiorSource().slice(0, interiorSource().indexOf('[interior]'))), read = inspectInterior(current, dependencies, path);
@@ -99,6 +112,9 @@ describe('explicit physical interior authoring', () => {
     expect(parse(renamed).interior.placements).toEqual({ helm: 'bridge', monitor: 'engineering' });
     const removed = prepareShipOperation(draft(renamed), dependencies, schema, op({ type: 'system-remove', id: 'monitor' })).changes[0].after;
     expect(parse(removed).interior.placements).toEqual({ helm: 'bridge' });
+    const legacy = parse(added); legacy.hull = { system_hull: [{ system_id: 'display', max_hp: 10 }] };
+    const removedLegacy = prepareShipOperation(draft(stringify(legacy)), dependencies, schema, op({ type: 'system-remove', id: 'display' })).changes[0].after;
+    expect(parse(removedLegacy).interior.repair_placements).toEqual({ display: 'engineering' });
     value.interior.connection[0].boundary = 'helm';
     expect(() => prepareShipOperation(draft(stringify(value)), dependencies, schema, op({ type: 'system-remove', id: 'helm' }))).toThrow(/boundary connections/);
   });

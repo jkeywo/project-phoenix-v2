@@ -410,8 +410,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   if (operation.type === 'system-update' && operation.compartment !== undefined
     && inspection.composition.resolved.value.interior?.placements?.[operation.id] !== operation.compartment) {
     const id = operation.fields?.id || operation.id;
-    const proposed = { ...inspection, composition: { ...inspection.composition, resolved: { value: { ...inspection.composition.resolved.value,
-      interior: parse(after).interior || inspection.composition.resolved.value.interior } } } };
+    const proposed = { ...inspection, composition: inspectShipAuthoring(candidate, dependencies, operation.path).composition };
     after = updateInteriorBindings(after, proposed, { add: { [id]: operation.compartment }, materialise: operation.materialise === true });
   }
   const effectiveValue = inspectShipAuthoring(candidate, dependencies, operation.path).composition.resolved.value;

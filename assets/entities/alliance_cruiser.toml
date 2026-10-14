@@ -4879,6 +4879,9 @@ shield-arc-aft = "weapons"
 shield-arc-starboard = "weapons"
 weapons-access = "engineering"
 
+[interior.repair_placements]
+science = "bridge"
+core = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"

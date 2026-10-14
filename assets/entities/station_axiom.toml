@@ -526,3 +526,6 @@ tactical-radar = "bridge"
 phaser-defence = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
+
+[interior.repair_placements]
+captain = "bridge"

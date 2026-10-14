@@ -315,3 +315,5 @@ travel_secs = 5
 repair = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
+
+[interior.repair_placements]

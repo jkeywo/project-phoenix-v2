@@ -1392,3 +1392,6 @@ phaser-starboard = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
 shield-arc-all = "engineering"
+
+[interior.repair_placements]
+captain = "bridge"

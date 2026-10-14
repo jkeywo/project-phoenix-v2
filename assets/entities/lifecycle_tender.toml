@@ -493,3 +493,5 @@ tractor = "engineering"
 sensors = "bridge"
 power-reactor = "engineering"
 power-battery = "engineering"
+
+[interior.repair_placements]

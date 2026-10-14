@@ -4,7 +4,7 @@ import path from 'node:path';
 import { parse } from 'smol-toml';
 import { resolveTemplate } from '../entity-includes.js';
 import { authoredAndGeneratedSystems } from '../workshop-generated-systems.js';
-import { validateInterior } from '../workshop-interiors.js';
+import { legacyRepairTargets, validateInterior } from '../workshop-interiors.js';
 const root = path.resolve(import.meta.dirname, '../..');
 const walk = directory => fs.readdirSync(path.join(root, directory), { withFileTypes: true })
   .flatMap(entry => entry.isDirectory() ? walk(directory + '/' + entry.name) : [directory + '/' + entry.name]);
@@ -15,7 +15,7 @@ describe('authored ship interiors', () => {
       const resolved = resolveTemplate(file, { read: file => fs.existsSync(path.join(root, file)) ? fs.readFileSync(path.join(root, file), 'utf8') : null }, parse);
       expect(resolved.ok, file).toBe(true); const value = resolved.resolved.value, fitted = authoredAndGeneratedSystems(value);
       if (!fitted.length) continue;
-      expect(() => validateInterior(value.interior, fitted, value.repair?.repair_team_count || 0), file).not.toThrow();
+      expect(() => validateInterior(value.interior, fitted, value.repair?.repair_team_count || 0, legacyRepairTargets(value)), file).not.toThrow();
       for (const gate of fitted.filter(system => system.kind === 'access-gate')) {
         expect(gate.console).toBe(fitted.find(system => system.kind === 'repair').console);
         expect(value.interior.connection.some(connection => connection.boundary === gate.id), file).toBe(true);

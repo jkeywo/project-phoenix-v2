@@ -933,3 +933,6 @@ tactical-radar = "bridge"
 power-reactor = "engineering"
 power-battery = "engineering"
 tractor = "engineering"
+
+[interior.repair_placements]
+core = "engineering"

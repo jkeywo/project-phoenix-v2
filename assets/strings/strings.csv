@@ -5112,3 +5112,5 @@ shield.error.invalid_charge,Shield state validation,Invalid saved shield charge 
 "workshop.interior.remove_team","Workshop interior authoring","Remove last repair team","Letztes Reparaturteam entfernen","Remove last repair team","machine"
 "workshop.interior.choose_home","Workshop interior authoring","Choose a team home","Team-Heimatabteil wählen","Choose a team home","machine"
 "workshop.interior.team_count_edit","Workshop interior authoring","Change repair team count and explicit team homes together in Interiors.","Anzahl der Reparaturteams und explizite Team-Heimatabteile gemeinsam unter Innenräume ändern.","Change repair team count and explicit team homes together in Interiors.","machine"
+"workshop.interior.repair_target","Workshop interior authoring","Legacy repair target","Bisheriges Reparaturziel","Legacy repair target","machine"
+"workshop.interior.repair_placement","Workshop interior authoring","Repair target compartment","Abteil des Reparaturziels","Repair target compartment","machine"

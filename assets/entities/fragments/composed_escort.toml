@@ -325,3 +325,6 @@ helm-steering = "engineering"
 helm-impulse = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
+
+[interior.repair_placements]
+captain = "bridge"

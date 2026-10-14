@@ -4243,6 +4243,8 @@ shield-arc-port = "weapons"
 shield-arc-omni = "weapons"
 weapons-access = "engineering"
 
+[interior.repair_placements]
+core = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"

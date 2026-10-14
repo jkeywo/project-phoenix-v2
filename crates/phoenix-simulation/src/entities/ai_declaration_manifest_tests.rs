@@ -40,7 +40,7 @@ fn every_controller_family_has_exact_declaration_and_host_coverage() {
     assert_eq!(
         trees.len(),
         1,
-        "every migrated tree family is explicitly counted"
+        "the Power policy family has migrated to an explicitly counted System tree"
     );
     assert_eq!(trees[0].key, FineSystemKey::Power);
     assert_eq!(trees[0].component, "ShipAiTreePrograms");

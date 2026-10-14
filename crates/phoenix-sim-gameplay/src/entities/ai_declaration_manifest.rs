@@ -127,9 +127,11 @@ pub enum IdleLever {
 /// Two groups:
 ///
 /// * The **twenty declaration-tracked kinds** (Captain … CommsSelector). Each
-///   has a matching [`FineSystemKind`] in [`FINE_SYSTEM_KINDS`], an owning
-///   [`ai_flag_hosts::AiHost`], and a per-hull authored block whose presence the
-///   manifest counts. The twentieth is [`FineSystemKey::WeaponsDoctrine`], added
+///   has a matching [`FineSystemKind`] in [`FINE_SYSTEM_KINDS`] and a per-hull
+///   authored declaration whose presence the manifest counts. Policy/selector
+///   hosts share [`ai_flag_hosts::AiHost`] metadata; Power instead binds its
+///   closed System tree. This historical catalogue does not enumerate unrelated
+///   composition trees such as Dock. The twentieth is [`FineSystemKey::WeaponsDoctrine`], added
 ///   by issue #956.
 /// * The **operate kinds** (Tractor, Umbilical, ExternalRepair), added by
 ///   issue #1162. These are AI-capable — a backfilled crew works them — but

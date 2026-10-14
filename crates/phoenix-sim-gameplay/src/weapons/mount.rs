@@ -20,11 +20,12 @@ pub struct MountConfig {
 
 impl MountConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if !self.facing_deg.is_finite()
-            || !self.fire_arc_deg.is_finite()
-            || !(0.0 < self.fire_arc_deg && self.fire_arc_deg <= 360.0)
-            || !self.range.is_finite()
-            || self.range <= 0.0
+        if !(self.facing_deg.is_finite()
+            && self.fire_arc_deg.is_finite()
+            && 0.0 < self.fire_arc_deg
+            && self.fire_arc_deg <= 360.0
+            && self.range.is_finite()
+            && self.range > 0.0)
         {
             return Err(
                 "mount requires finite facing, fire_arc_deg in (0, 360] and positive finite range"

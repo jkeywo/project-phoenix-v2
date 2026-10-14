@@ -297,6 +297,16 @@ impl Context<'_> {
         Ok(())
     }
 }
+/// Validate private continuation without evaluating tasks or producing effects.
+pub fn validate_runtime(program: &Program, runtime: &TreeRuntime) -> Result<(), TreeError> {
+    if let Some(root) = &runtime.root {
+        validate(root, &program.root, program, 0, &mut 0)?;
+    } else if runtime.last_tick.is_some() {
+        return Err(fail("missing runtime root"));
+    }
+    Ok(())
+}
+
 pub fn step(
     program: &Program,
     facts: &BTreeMap<String, bool>,
@@ -312,11 +322,7 @@ pub fn step(
     {
         return Err(fail("input bindings do not match compiled interface"));
     }
-    if let Some(root) = &runtime.root {
-        validate(root, &program.root, program, 0, &mut 0)?;
-    } else if runtime.last_tick.is_some() {
-        return Err(fail("missing runtime root"));
-    }
+    validate_runtime(program, runtime)?;
     let mut next = runtime.clone();
     let root = match next.root.as_mut() {
         Some(root) => root,

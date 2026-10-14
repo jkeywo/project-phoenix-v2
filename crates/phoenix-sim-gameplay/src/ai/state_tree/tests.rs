@@ -394,3 +394,30 @@ fn restored_internal_state_cannot_skip_required_child() {
     assert!(step(&p, &BTreeMap::new(), &channels, &mut runtime, 2).is_err());
     assert_eq!(runtime, before);
 }
+
+#[test]
+fn continuation_validation_does_not_execute_or_reset_after_rejected_step() {
+    let program = compile(&config(), &bindings()).unwrap();
+    let mut runtime = TreeRuntime::default();
+    step(
+        &program,
+        &BTreeMap::new(),
+        &BTreeMap::from([("enabled".into(), false)]),
+        &mut runtime,
+        1,
+    )
+    .unwrap();
+    let saved = runtime.clone();
+    assert!(step(
+        &program,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut runtime,
+        2
+    )
+    .is_err());
+    validate_runtime(&program, &runtime).unwrap();
+    assert_eq!(runtime, saved);
+    runtime.root.as_mut().unwrap().active_leaf = "missing".into();
+    assert!(validate_runtime(&program, &runtime).is_err());
+}

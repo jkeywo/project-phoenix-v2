@@ -1,4 +1,5 @@
 use crate::core::messages::{RepairGroup, SystemId, TeamSlot};
+pub use crate::jobs::repair::RepairTeams;
 use crate::ship::config::ShipConfig;
 use crate::ship::damage::{DamageTier, SystemHull};
 
@@ -25,7 +26,7 @@ impl Default for RepairTimings {
     }
 }
 
-/// Pure state machine for all repair teams on the ship.
+/// Temporary mechanical phase executor rebuilt from canonical repair jobs.
 ///
 /// Teams are identified by slot index. The number of teams is set at
 /// construction time from the ship config (`repair_team_count`).
@@ -34,12 +35,12 @@ impl Default for RepairTimings {
 /// variant carries a `system_id` + `display_name`. The legacy `console` /
 /// `queued` fields on `TeamSlot` were removed along with the `Console` enum.
 #[derive(Debug, Clone)]
-pub struct RepairTeams {
+pub(crate) struct RepairPhases {
     slots: Vec<TeamSlot>,
     timings: RepairTimings,
 }
 
-impl RepairTeams {
+impl RepairPhases {
     /// Create a new `RepairTeams` with `count` teams, all idle, using
     /// the default (hardcoded-baseline) timings.
     pub fn new(count: usize) -> Self {
@@ -65,7 +66,7 @@ impl RepairTeams {
         &self.slots
     }
 
-    /// Replace every team's slot wholesale (issue #862's snapshot restore).
+    /// Populate the ephemeral phase projection from canonical job activities.
     ///
     /// The team *count* is not restored with it: how many teams a ship has is
     /// authored config the fresh world already rebuilt from TOML, and a save
@@ -101,11 +102,6 @@ impl RepairTeams {
         })
     }
 
-    /// Returns the index of the lowest-numbered idle team, or `None` if all are busy.
-    pub fn lowest_free_team(&self) -> Option<usize> {
-        self.slots.iter().position(|s| matches!(s, TeamSlot::Idle))
-    }
-
     /// Which teams may be given new internal work, ascending, with the team
     /// held abroad by an external dispatch left out (issues #1027, #1386).
     ///
@@ -130,20 +126,6 @@ impl RepairTeams {
                 (matches!(slot, TeamSlot::Idle) && abroad != Some(i)).then_some(i)
             })
             .collect()
-    }
-
-    /// [`Self::free_team_indices`] with a further `reserved` teams held back
-    /// from the **end** of the list (issue #1162's critical-repair reserve).
-    ///
-    /// A reserve is a COUNT and stays one: it says "keep a team spare for the
-    /// hull's own knocked-out systems" and names no slot, unlike the external
-    /// claim above it. Eating from the top of the idle list keeps the
-    /// lowest-numbered teams available, so the AI's deterministic visit order is
-    /// unchanged.
-    pub fn free_team_indices_reserving(&self, abroad: Option<usize>, reserved: u8) -> Vec<usize> {
-        let mut idle = self.free_team_indices(abroad);
-        idle.truncate(idle.len().saturating_sub(usize::from(reserved)));
-        idle
     }
 
     /// Whether `team_idx` is the team held abroad by an external dispatch
@@ -513,7 +495,13 @@ impl RepairTeams {
     /// team touches it. The old rule ("a repair team alone cannot lift the
     /// latch") left destroyed systems permanently stuck with nothing else in the
     /// game able to clear them.
-    pub fn tick(&mut self, dt: f32, hull: &mut SystemHull, config: Option<&ShipConfig>) {
+    pub fn tick(
+        &mut self,
+        dt: f32,
+        hull: &mut SystemHull,
+        config: Option<&ShipConfig>,
+        enabled: &[bool],
+    ) {
         let travel_duration = self.timings.travel_duration;
         let repair_rate = self.timings.repair_rate_hp_per_sec;
         // Which system each team is standing on, indexed by slot. Snapshotted
@@ -533,6 +521,9 @@ impl RepairTeams {
             })
             .collect();
         for (team_idx, slot) in self.slots.iter_mut().enumerate() {
+            if !enabled.get(team_idx).copied().unwrap_or(false) {
+                continue;
+            }
             match slot {
                 TeamSlot::Travelling {
                     system_id,

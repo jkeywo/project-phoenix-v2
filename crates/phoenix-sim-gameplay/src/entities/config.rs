@@ -852,6 +852,11 @@ impl EntityConfig {
             }
         }
 
+        if let Some(repair) = &config.repair {
+            crate::jobs::repair_workflow::compile_workflow(repair.workflow.as_ref())
+                .map_err(|error| SerdeError::custom(format!("repair.workflow: {error}")))?;
+        }
+
         // Validation: a [repair.external_dispatch] table has to describe a
         // dispatch that can do something (issue #1161). A non-positive reach or
         // repair rate is an author mistake whose only other symptom would be a

@@ -15,6 +15,7 @@ pub mod ai;
 pub mod console;
 pub mod entities;
 pub mod modifiers;
+pub mod jobs;
 pub mod objectives;
 pub mod radar_config;
 pub mod reference_grid;

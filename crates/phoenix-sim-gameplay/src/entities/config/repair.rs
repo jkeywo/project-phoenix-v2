@@ -34,6 +34,12 @@ pub struct RepairConfig {
     /// tunables already live under `[repair]`, so the selector joins them there
     /// rather than inventing a `[repair_console]` table the wire never uses.
     pub selector: Option<FineSystemAiSelectorToml>,
+    /// Restricted per-job execution workflow; absent uses the equivalent default.
+    /// Final writes permit one physical stage. Terminal failure or success before
+    /// physical completion pauses work as an error; it cannot release a team.
+    /// Ordinary recall/release remains available, including return cleanup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<crate::ai::state_tree::AiTreeConfig>,
     /// External repair-team dispatch (issue #1161). Loaded from
     /// `[repair.external_dispatch]`; present on a hull whose repair console can
     /// send a team to a nearby ally or structure, absent for everything else —
@@ -53,6 +59,7 @@ impl Default for RepairConfig {
             travel_duration_secs: 5.0,
             repair_rate_hp_per_sec: 0.5,
             selector: None,
+            workflow: None,
             external_dispatch: None,
         }
     }

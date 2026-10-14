@@ -142,12 +142,10 @@ fn beam_work_scales_burn_progress_and_preserves_starved_intent() {
     start_game_with_weapons(&mut app);
     let ship = local_ship_entity(&mut app);
     let id = SystemId("phaser-port".into());
-    app.world_mut().get_mut::<ActiveBeam>(ship).unwrap().start(
-        "port".into(),
-        "target-uuid".into(),
-        10.0,
-        3.0,
-    );
+    app.world_mut()
+        .get_mut::<ActiveBeam>(ship)
+        .unwrap()
+        .start("port", "target-uuid", 10.0, 3.0);
     set_local_energy(&mut app, ship, &id, 0.0);
     tick(&mut app);
     assert_eq!(

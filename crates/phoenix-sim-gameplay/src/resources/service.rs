@@ -128,4 +128,45 @@ mod tests {
         );
         assert!(toml::from_str::<ResourceLink>("search=true").is_err());
     }
+    #[test]
+    fn authored_services_require_real_local_endpoints_but_alias_names_are_supported() {
+        use crate::entities::config::EntityConfig;
+        let valid = r#"
+[torpedoes]
+count = 3
+[resource_services.reload]
+kind = "torpedo_magazine"
+[resource_services.fuel]
+kind = "capacity"
+id = "reserve"
+[[infrastructure.capacity]]
+id = "reserve"
+amount = 10
+"#;
+        let config = EntityConfig::from_toml(valid).unwrap();
+        assert_eq!(
+            resolve_endpoint(
+                "torpedoes",
+                &config.resource_services,
+                &ResourceLink {
+                    service: Some("reload".into()),
+                    provider: None
+                }
+            )
+            .unwrap(),
+            ResourceEndpoint::TorpedoMagazine
+        );
+        assert!(
+            EntityConfig::from_toml("[resource_services.fuel]\nkind='capacity'\nid='missing'")
+                .unwrap_err()
+                .to_string()
+                .contains("not declared")
+        );
+        assert!(
+            EntityConfig::from_toml("[resource_services.reload]\nkind='torpedo_magazine'")
+                .unwrap_err()
+                .to_string()
+                .contains("requires [torpedoes]")
+        );
+    }
 }

@@ -165,8 +165,8 @@ pub struct EntityConfig {
     /// every way. The `[[system]] kind = "umbilical"` block declares the system's
     /// identity (power group, station, damage entry); this table carries what the
     /// flow itself is, and a hull that authors one without the other is refused by
-    /// name at load. Both docked ends must carry an `[[infrastructure.capacity]]`
-    /// under the umbilical's `capacity` id for anything to move.
+    /// name at load. Each end resolves the requested resource through a named
+    /// service or direct capacity; the consumer may override its local endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalConfig>,
     /// The Security-team terms (issue #1346) — how many teams the hull musters,
@@ -701,7 +701,7 @@ impl EntityConfig {
 
         // Explicit services and overrides must name real local equipment. An
         // unconfigured direct umbilical may be supplied by a scenario override.
-        use crate::resources::service::{ResourceEndpoint, ResourceLink, resolve_endpoint};
+        use crate::resources::service::{ResourceEndpoint, resolve_endpoint};
         let validate_endpoint = |endpoint: &ResourceEndpoint| -> Result<(), String> {
             match endpoint {
                 ResourceEndpoint::Capacity { id } => {

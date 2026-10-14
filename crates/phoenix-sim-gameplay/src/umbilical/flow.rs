@@ -48,11 +48,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UmbilicalConfig {
-    /// The `[[infrastructure.capacity]]` id being moved. Both docked ends must
-    /// carry one under this id — that is what makes them the two ledgers the
-    /// umbilical bridges. A dock whose partner declares no such capacity is
-    /// refused ([`UmbilicalRefusal::NoCapacity`]). Not display text — a machine
-    /// name, the same as a `transfer`'s capacity id.
+    /// Requested resource identity. Empty links resolve an exact named service,
+    /// then a direct capacity with this id. Each end must have the resolved
+    /// endpoint; links confer neither control nor observation authority.
     pub capacity: String,
     /// Explicit local service/provider override. Empty uses the resource-name default.
     #[serde(

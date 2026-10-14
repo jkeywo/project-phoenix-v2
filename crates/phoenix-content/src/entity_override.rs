@@ -15,9 +15,6 @@
 /// `entity_loader` reconstructs the old algorithm from.
 pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     match (template, override_) {
-        (toml::Value::Table(_), toml::Value::Table(_)) if is_atomic_resource_endpoint(path) => {
-            override_.clone()
-        }
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {
             let mut result = t_table.clone();
             for (key, o_val) in o_table {
@@ -346,7 +343,9 @@ pub fn reject_unhonoured_removals(
 /// Resource endpoint bindings are tagged values, not independent table fields.
 /// An explicit replacement must not retain fields from the previous variant.
 pub fn is_atomic_resource_endpoint(path: &str) -> bool {
-    path.starts_with("resource_services.") || path == "umbilical.link.provider"
+    path.starts_with("resource_services.")
+        || path == "umbilical.link"
+        || path == "umbilical.link.provider"
 }
 
 fn merge_at(

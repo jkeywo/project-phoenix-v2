@@ -99,6 +99,12 @@ test('Workshop authors Consoles and Dock components through real validation, his
     await ai.locator('#workshop-ai-materialise').check();
     await ai.locator('[data-ai-action="flatten"]').click();
     await ai.locator('[data-ai-field="parameters.allow_start.value"]').uncheck();
+    await ai.locator('legend').first().scrollIntoViewIfNeeded();
+    await expect.poll(() => ai.evaluate(element => {
+      const own = element.getBoundingClientRect();
+      const pane = element.closest('.workshop-dock-panel').getBoundingClientRect();
+      return element.scrollWidth <= element.clientWidth + 2 && own.left >= pane.left && own.right <= pane.right;
+    })).toBe(true);
     await testInfo.attach('ai-state-tree-editor', { body: await page.screenshot(), contentType: 'image/png' });
     await ai.locator(':scope > [data-ai-action="apply"]').click();
     await expect(byId(page, 'status')).toHaveText(ts('workshop.ship.applied'));

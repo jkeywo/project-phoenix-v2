@@ -21,11 +21,18 @@ The architecture direction is recorded in [mission planning decisions](../archit
 
 ## Working contract
 
-Implement one increment at a time. Each changed capability includes authored
+Implement capabilities in dependency order. Each changed capability includes authored
 configuration, runtime, human controls, ordinary individual System AI, Workshop
 support and integration with deterministic state, snapshots and restore.
 Structural migration first preserves observable behaviour; intentional gameplay
 changes then receive new balance/activity evidence.
+
+On 14 October 2026 the user authorised an initial implementation commit followed
+by validation and fixes on a pinned agent worktree while the main thread starts
+the next increment. Merge those fixes in dependency order. Initial commits and
+started increments do not claim a verified exit; evidence records retain the
+tested revision and outstanding acceptance. Keep local Cargo and performance
+captures sequential, and run final gates on the integrated result before a push.
 
 Preserve shipped hulls, scenarios and tools. Preserve the existing networking
 architecture and knowledge boundaries. Old saves and external packs may require

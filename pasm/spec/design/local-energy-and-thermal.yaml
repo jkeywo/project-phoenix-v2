@@ -1,0 +1,42 @@
+entities:
+  - decision: consumer-local-energy-flow
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Incoming Flow and Local Energy Reserves
+      summary: "Engineering allocates incoming flow to individual Systems and groups. Each consumer operates from its local battery; flow is not a direct damage, speed or shield-output multiplier. Fullness increases passive drain. Heat is produced by gross charging and depletion, not only the net change. Accepted intake respects capacity; unused allocated energy remains at its source and is not redistributed. Continuous work reduces to its affordable fraction; discrete actions wait for their complete cost."
+      rationale:
+        - "User-selected S006 and S031–S038 and the approved increment 8 roadmap replace the earlier global battery/exhaustion-lock and boost plans. Saved intent survives temporary loss of energy or thermal availability."
+        - "[ai] Use a shared finite continuous-capacity processor rather than integer inventory units for energy. Work admission precedes ammunition consumption and effect production; publishers and the old battery screen are projections of the same state."
+  - decision: reactor-local-capacitor-and-thermal-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Reactor Uses Shared Storage and Thermal Mechanisms
+      summary: "The reactor has commanded output with finite ramp response, sustainable generation, burst capacitor reserve, heat and coolant. Reuse consumer storage and thermal machinery. The default ship has no additional mandatory main battery. Thermal trip and recovery have hysteresis and automatically resume the requested work when safe."
+      rationale:
+        - "User selected S031–S032. Exact hardware coefficients are authored implementation tuning, not a new gameplay interview. Consumer reserve should provide useful crisis margin without free sustained operation."
+  - decision: finite-coolant-and-saved-flow-cuts
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Finite Cooling and Recoverable Incoming Flow Cuts
+      summary: "Cooling consumes finite real coolant stock only for actual heat removed. Minimal controls use ordered priorities with no/low/high cooling; mid controls expose coarse flow and cooling; detail exposes nested fine groups. Manual shortfall uses deterministic random whole incoming-flow cuts until supply fits, preserves requested settings, and restores them as feasible. It cuts flow rather than System work and introduces no global exhaustion lock."
+      rationale:
+        - "User explicitly corrected random shutdowns to cut the flow, and selected storing manual values for automatic restoration. All groups are eligible; do not silently protect privileged consumers or unnecessarily rotate already served flows."
+        - "[ai] Persist fractional coolant consumption using increment 6 real service/stock endpoints. Resolve allocations in stable authored order, with the existing deterministic RNG for selected cuts. Physical conduit damage and routes land in increments 10–11; lossy coolant recycling remains provisional for increment 12."
+  - decision: explicit-weapon-restraint-independent-of-intake
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Preserve Tactical Restraint Separately From Energy Intake
+      summary: "Existing scripted hold-fire and return-fire and human weapon restraint require an admitted explicit weapon intent. Allocating zero incoming energy cannot itself prevent a charged weapon from firing. Preserve current scenario journeys while replacing the old cold-group fire gate; commands continue addressing stable System IDs through existing Console ownership."
+  - decision: local-energy-authoring-ai-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Energy Authoring, Ordinary AI and Continuation
+      summary: "Increment 8 includes validated authored coefficients, human controls and shared local status, ordinary individual System AI using supported reusable state trees, Workshop editing/preview/Test, and deterministic authoritative continuation. Each reserve, heat, ramp, requested/effective allocation, coolant remainder and AI memory participates in snapshots, restore and digests. Existing transport and knowledge limits remain unchanged."
+      rationale:
+        - "[ai] Extend the closed state-tree input/output vocabulary for numeric readings, comparisons and bounded allocation actions, without Workshop programming or a second controller. Initial implementation commits may precede isolated validation under the user's worktree workflow; completion requires evidence and dependency-order integration of fixes."

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 7,
+  "current_increment": 8,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -139,12 +139,15 @@
     {
       "id": 8,
       "title": "Power, batteries, coolant and heat",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         7
       ],
       "completion": "Local reserves, flow allocation, thermal state and selected flow cuts work with human/AI controls, complexity and replenishment.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/local-energy-and-thermal.yaml",
+        "docs/gameplay-redesign/implementation/increment-8.md"
+      ]
     },
     {
       "id": 9,
@@ -2760,6 +2763,18 @@
       "pending_acceptance": "Prior physical phone/native multi-monitor and human workload acceptance remains open; user authorises serial advancement through increment 18.",
       "to_increment": 7,
       "evidence": "docs/acceptance/1562-resource-stores.md"
+    },
+    {
+      "from_increment": 7,
+      "to_increment": 8,
+      "date": "2026-10-14",
+      "user_instruction": "After each increment submits its initial commit, testing and fixes can continue on an agent worktree while main starts the next increment.",
+      "pending_acceptance": "Increment 7 baseline comparison and evidence closeout are delegated; physical/native and human workload acceptance remain open.",
+      "evidence": "docs/gameplay-redesign/implementation/increment-8.md"
     }
-  ]
+  ],
+  "validation_workflow": {
+    "approved_date": "2026-10-14",
+    "description": "Initial increment commits are followed by validation and fixes on pinned agent worktrees while the main thread begins the next increment. Merge fixes in dependency order; initial commits do not claim verified completion. Cargo builds and performance captures remain sequential."
+  }
 }

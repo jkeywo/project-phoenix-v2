@@ -139,6 +139,7 @@ fn supported_components_are_serdes_own_field_list() {
             "captain_console",
             "comms_console",
             "power",
+            "energy",
             "sensors_console",
             "navigation_console",
             "shields_console",
@@ -936,7 +937,7 @@ fn an_inherited_keyed_entry_is_removed_with_the_tombstone_the_merge_understands(
             &files,
             HULL,
             vec![
-                Edit::Set {
+                Edit::Put {
                     path: vec![Segment::Key("energy".to_owned())],
                     value_source: value_source_of(&hardware["energy"]).unwrap(),
                 },

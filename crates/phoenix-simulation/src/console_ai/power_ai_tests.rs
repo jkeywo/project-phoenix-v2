@@ -57,7 +57,7 @@ fn app_for(mut content: EntityConfig, memory_tree: bool) -> (App, Entity) {
                 clear_admitted_each_tick,
                 ai_power_allocation,
                 crate::ship::power::handle_power_messages,
-                crate::ship::energy_publication::publish_power_blackboard,
+                crate::ship::power::publish_power_blackboard,
             )
                 .chain(),
         )
@@ -85,7 +85,7 @@ fn app_for(mut content: EntityConfig, memory_tree: bool) -> (App, Entity) {
     // Seed one real publication; decisions on the following tick read the same
     // frozen view that a human Console receives. Publishers run after the applier.
     app.world_mut()
-        .run_system_once(crate::ship::energy_publication::publish_power_blackboard)
+        .run_system_once(crate::ship::power::publish_power_blackboard)
         .unwrap();
     (app, entity)
 }
@@ -164,7 +164,7 @@ fn power_tree_operates_without_high_fidelity_or_a_ship_tag_and_suppresses_no_ops
         .set_flow(&group, 0.0)
         .unwrap();
     app.world_mut()
-        .run_system_once(crate::ship::energy_publication::publish_power_blackboard)
+        .run_system_once(crate::ship::power::publish_power_blackboard)
         .unwrap();
     app.update();
     let desired = power(&app, entity)
@@ -414,7 +414,7 @@ fn power_private_memory_survives_serialization_and_human_handoff() {
         .0 = tick;
     resumed
         .world_mut()
-        .run_system_once(crate::ship::energy_publication::publish_power_blackboard)
+        .run_system_once(crate::ship::power::publish_power_blackboard)
         .unwrap();
     for _ in 0..3 {
         app.update();

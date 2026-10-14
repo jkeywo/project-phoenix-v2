@@ -49,6 +49,7 @@ export const REMOVE_KEY = '_remove';
  */
 const COMPOSE_KEYED_ARRAYS = {
   console: 'id',
+  weapon: 'id',
   'behaviour.doctrine': 'id',
   shield_arc: 'id',
   station: 'id',
@@ -115,7 +116,7 @@ function joinPath(prefix, key) {
 
 // ── Merge (MergePolicy::ComposeFragments) ────────────────────────────────────
 
-const atomicResourceEndpoint = path => path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider';
+const atomicResourceEndpoint = path => path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider' || /^weapon(?:\[.*?\])?\.delivery$/.test(path);
 
 function mergeAt(path, template, override) {
   if (atomicResourceEndpoint(path) && isPlainObject(override)) return deepClone(override);

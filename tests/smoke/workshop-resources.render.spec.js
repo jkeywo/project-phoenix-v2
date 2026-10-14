@@ -149,7 +149,30 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     expect(await sourceOf(page)).toBe(beforeRefusal);
     await resourceForm(page); await byId(page, 'count').fill('32'); await byId(page, 'materialise').check();
     await applied(page, 'magazine-apply');
-    const edited = await sourceOf(page);
+    const beforeWeapon = await sourceOf(page);
+    // Common equipment uses the same source, history and Rust validation as
+    // stores. Select the first beam without coupling the journey to its id.
+    await revealWorkshopPanel(page, 'composition');
+    const weapon = id => page.locator('#workshop-weapon-' + id);
+    await weapon('template').selectOption(HULL);
+    await expect(weapon('save')).toBeEnabled();
+    const beam = await weapon('existing').evaluate(select => [...select.options].find(option => /\(Beam\)$/.test(option.textContent))?.value);
+    expect(beam).toBeDefined(); await weapon('existing').selectOption(beam);
+    const weaponId = await weapon('id').inputValue(), range = Number(await weapon('range').inputValue());
+    await weapon('range').fill(String(range + 1)); await weapon('save').click();
+    await expect(weapon('status')).toContainText('materialise');
+    expect(await sourceOf(page)).toBe(beforeWeapon);
+    await revealWorkshopPanel(page, 'composition'); await weapon('materialise').check();
+    await weapon('save').click(); await expect(weapon('status')).toHaveText(ts('workshop.changed'));
+    const afterWeapon = await sourceOf(page);
+    expect(parse(afterWeapon).weapon.find(row => row.id === weaponId).mount.range).toBe(range + 1);
+    await page.locator('#workshop-undo').click(); await expect.poll(() => sourceOf(page)).toBe(beforeWeapon);
+    await page.locator('#workshop-redo').click(); await expect.poll(() => sourceOf(page)).toBe(afterWeapon);
+    await revealWorkshopPanel(page, 'composition'); await weapon('materialise').check();
+    await weapon('fire_arc_deg').fill('-1'); await weapon('save').click();
+    await expect(weapon('status')).toContainText('refused');
+    expect(await sourceOf(page)).toBe(afterWeapon);
+    const edited = afterWeapon;
     expect(parse(edited).torpedoes.count).toBe(32);
     expect(await sourceOf(page, BASE)).toBe(BASE_TEXT);
 

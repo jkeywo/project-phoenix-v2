@@ -4821,3 +4821,49 @@ workshop.resource.capacity_endpoint,Workshop resource authoring,[Capacity store]
 workshop.resource.magazine_endpoint,Workshop resource authoring,[Torpedo magazine],[Torpedomagazin],[Torpedo magazine],machine
 workshop.resource.named_endpoint,Workshop resource authoring,[Named service],[Benannter Dienst],[Named service],machine
 workshop.resource.refused,Workshop resource authoring,[Resource edit refused: {reason}],[Ressourcenänderung abgelehnt: {reason}],[Resource edit refused: {reason}],machine
+workshop.weapon.title,Workshop weapon authoring,Weapons,Waffen,Weapons,machine
+workshop.weapon.hint,Workshop weapon authoring,"Edit supported mount, delivery and firing-pattern data. Console ownership and AI are configured in Composition. Guided range uses shared torpedo speed and lifespan.","Unterstützte Aufhängungs-, Wirkungs- und Feuermusterdaten bearbeiten. Konsolenbesitz und KI werden in Komposition konfiguriert. Die Reichweite gelenkter Waffen ergibt sich aus gemeinsamer Torpedogeschwindigkeit und Lebensdauer.","Edit supported mount, delivery and firing-pattern data. Console ownership and AI are configured in Composition. Guided range uses shared torpedo speed and lifespan.",machine
+workshop.weapon.template,Workshop weapon authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.weapon.existing,Workshop weapon authoring,Existing weapon,Vorhandene Waffe,Existing weapon,machine
+workshop.weapon.new,Workshop weapon authoring,New configured weapon,Neue konfigurierte Waffe,New configured weapon,machine
+workshop.weapon.materialise,Workshop weapon authoring,Materialise inherited weapon settings,Geerbte Waffeneinstellungen übernehmen,Materialise inherited weapon settings,machine
+workshop.weapon.id,Workshop weapon authoring,Weapon identity,Waffenidentität,Weapon identity,machine
+workshop.weapon.strategy_id,Workshop weapon authoring,Existing bank or tube identity (optional),Vorhandene Bank- oder Rohridentität (optional),Existing bank or tube identity (optional),machine
+workshop.weapon.delivery,Workshop weapon authoring,Delivery behaviour,Wirkungsverhalten,Delivery behaviour,machine
+workshop.weapon.facing_deg,Workshop weapon authoring,Facing (degrees),Ausrichtung (Grad),Facing (degrees),machine
+workshop.weapon.fire_arc_deg,Workshop weapon authoring,Fire arc (degrees),Schusswinkel (Grad),Fire arc (degrees),machine
+workshop.weapon.range,Workshop weapon authoring,Effective range,Effektive Reichweite,Effective range,machine
+workshop.weapon.marker,Workshop weapon authoring,Single barrel marker,Einzelne Laufmarkierung,Single barrel marker,machine
+workshop.weapon.barrels,Workshop weapon authoring,Barrel markers (comma separated),Laufmarkierungen (kommagetrennt),Barrel markers (comma separated),machine
+workshop.weapon.color,Workshop weapon authoring,Beam colour RGBA (optional),Strahlfarbe RGBA (optional),Beam colour RGBA (optional),machine
+workshop.weapon.parameters,Workshop weapon authoring,Delivery parameters,Wirkungsparameter,Delivery parameters,machine
+workshop.weapon.pattern,Workshop weapon authoring,Firing pattern,Feuermuster,Firing pattern,machine
+workshop.weapon.pattern_hint,Workshop weapon authoring,Steps list zero-based barrel indices. Guided patterns choose launch origins; they do not create rounds.,Schritte enthalten nullbasierte Laufnummern. Gelenkte Muster wählen Startpunkte; sie erzeugen keine Munition.,Steps list zero-based barrel indices. Guided patterns choose launch origins; they do not create rounds.,machine
+workshop.weapon.offset,Workshop weapon authoring,Offset (seconds),Zeitversatz (Sekunden),Offset (seconds),machine
+workshop.weapon.indices,Workshop weapon authoring,Barrel indices (comma separated),Laufnummern (kommagetrennt),Barrel indices (comma separated),machine
+workshop.weapon.add_step,Workshop weapon authoring,Add pattern step,Musterschritt hinzufügen,Add pattern step,machine
+workshop.weapon.remove_step,Workshop weapon authoring,Remove step,Schritt entfernen,Remove step,machine
+workshop.weapon.save,Workshop weapon authoring,Apply weapon settings,Waffeneinstellungen anwenden,Apply weapon settings,machine
+workshop.weapon.empty,Workshop weapon authoring,No weapons in this template.,Keine Waffen in dieser Vorlage.,No weapons in this template.,machine
+workshop.weapon.refused,Workshop weapon authoring,Weapon edit refused: {reason},Waffenänderung abgelehnt: {reason},Weapon edit refused: {reason},machine
+workshop.weapon.beam,Workshop weapon authoring,Beam,Strahl,Beam,machine
+workshop.weapon.bolt,Workshop weapon authoring,Straight bolt,Geradliniges Geschoss,Straight bolt,machine
+workshop.weapon.guided,Workshop weapon authoring,Guided torpedo,Gelenkter Torpedo,Guided torpedo,machine
+workshop.weapon.param.auto_arc_deg,Workshop weapon authoring,Automatic target arc (degrees),Automatischer Zielwinkel (Grad),Automatic target arc (degrees),machine
+workshop.weapon.param.damage_per_sec,Workshop weapon authoring,Damage per second,Schaden pro Sekunde,Damage per second,machine
+workshop.weapon.param.duration_secs,Workshop weapon authoring,Beam duration (seconds),Strahldauer (Sekunden),Beam duration (seconds),machine
+workshop.weapon.param.cooldown_secs,Workshop weapon authoring,Cooldown (seconds),Abklingzeit (Sekunden),Cooldown (seconds),machine
+workshop.weapon.param.cycle_jitter,Workshop weapon authoring,Cycle jitter,Zyklusschwankung,Cycle jitter,machine
+workshop.weapon.param.shield_pierce,Workshop weapon authoring,Shield penetration fraction,Schilddurchdringungsanteil,Shield penetration fraction,machine
+workshop.weapon.param.volley_count,Workshop weapon authoring,Rounds per volley,Schüsse pro Salve,Rounds per volley,machine
+workshop.weapon.param.volley_interval_secs,Workshop weapon authoring,Volley interval (seconds),Salvenintervall (Sekunden),Volley interval (seconds),machine
+workshop.weapon.param.charge_time_secs,Workshop weapon authoring,Charge time (seconds),Ladezeit (Sekunden),Charge time (seconds),machine
+workshop.weapon.param.projectile_speed,Workshop weapon authoring,Projectile speed,Geschossgeschwindigkeit,Projectile speed,machine
+workshop.weapon.param.collision_radius,Workshop weapon authoring,Collision radius,Kollisionsradius,Collision radius,machine
+workshop.weapon.param.visual_scale,Workshop weapon authoring,Visual scale,Darstellungsgröße,Visual scale,machine
+workshop.weapon.param.damage,Workshop weapon authoring,Damage,Schaden,Damage,machine
+workshop.weapon.param.recoil_impulse,Workshop weapon authoring,Recoil impulse,Rückstoßimpuls,Recoil impulse,machine
+workshop.weapon.param.screenshake_magnitude,Workshop weapon authoring,Screen shake magnitude,Bildschirmerschütterung,Screen shake magnitude,machine
+workshop.weapon.param.load_time,Workshop weapon authoring,Tube load time (optional seconds),Rohrladezeit (optionale Sekunden),Tube load time (optional seconds),machine
+workshop.weapon.param.volley_max,Workshop weapon authoring,Tube volley capacity,Rohrsalvenkapazität,Tube volley capacity,machine
+workshop.weapon.param.ai_target_count,Workshop weapon authoring,AI loaded-round target (optional),KI-Ziel für geladene Munition (optional),AI loaded-round target (optional),machine

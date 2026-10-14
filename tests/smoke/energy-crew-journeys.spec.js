@@ -2,8 +2,8 @@ import { test, expect, readHostPeerId, createTestClient, waitForWasmReady, expec
 import { dismissTutorialCards } from './dock-helpers.js';
 
 for (const hull of [
-  { file: 'alliance_destroyer', station: 'Engineering', primary: 'engineering', comms: 'comms', navigation: 'navigation', seats: 4 },
-  { file: 'alliance_courier', station: 'Captain', primary: 'captain', comms: 'comms-service', navigation: 'navigation-service', seats: 2 },
+  { file: 'alliance_destroyer', station: 'Engineering', observer: 'Captain', primary: 'engineering', comms: 'comms', navigation: 'navigation', seats: 4 },
+  { file: 'alliance_courier', station: 'Captain', observer: 'Tactical', primary: 'captain', comms: 'comms-service', navigation: 'navigation-service', seats: 2 },
 ]) test(`${hull.seats}-seat ${hull.file}: Energy and human-seeking Consoles retain their own working view`, { tag: '@core' }, async ({ context }) => {
   test.setTimeout(180000);
   const world = `[global]\nseed=808\ntitle="Energy crew ${hull.file}"\n[[available_ships]]\ntemplate_path="assets/entities/${hull.file}.toml"\n[[entity]]\ntemplate_path="assets/entities/${hull.file}.toml"\nid="player-ship"\nspawn_on="game_start"\n`;
@@ -12,9 +12,14 @@ for (const hull of [
   const hostId = await readHostPeerId(host), phone = await context.newPage();
   await phone.setViewportSize({ width: 1280, height: 800 }); await phone.goto(`/client/#${hostId}`);
   await phone.locator('#station-list .station-row').filter({ hasText: hull.station }).locator('button.claim-btn').click();
+  // Subscribe before launch: WorldSetup is the mission-start publication,
+  // while a late observer receives the current session projections instead.
+  const observer = await createTestClient(context, hostId, { name: 'Fixture observer' });
+  await observer.send('SelectStation', { station: hull.observer });
+  await observer.page.waitForFunction(token => window.__messages.some(message => message.type === 'StationAssigned' && message.data.token === token), observer.token);
+  await observer.send('SetReady', { ready: true });
   await phone.locator('#ready-btn').click();
   await expect(phone.locator('#station-hero')).toHaveAttribute('aria-hidden', 'false');
-  const observer = await createTestClient(context, hostId, { name: 'Fixture observer' });
   expectFixtureWorld(await observer.waitForMessage('WorldSetup', 10000), world);
   const tabs = phone.locator('#station-hero-tabs');
   await expect(tabs.locator(`[data-tab-id="${hull.comms}"]`)).toBeVisible();

@@ -38,8 +38,11 @@ const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8'
  */
 export const CLIENT_STAMP = (() => {
   try {
+    const dist = process.env.PHOENIX_SMOKE_DIST
+      ? path.resolve(process.env.PHOENIX_SMOKE_DIST)
+      : path.resolve(__dirname, '..', '..', 'dist');
     const html = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'dist', 'client', 'index.html'),
+      path.join(dist, 'client', 'index.html'),
       'utf-8',
     );
     const m = /<meta\s+name="phoenix-client-stamp"\s+content="([^"]*)"/.exec(html);

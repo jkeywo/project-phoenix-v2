@@ -122,6 +122,7 @@ pub struct WorkshopShipSchema {
     pub component_fields: std::collections::BTreeMap<String, Vec<WorkshopComponentField>>,
     pub channel_kinds: Vec<String>,
     pub ai_state_tree: WorkshopAiTreeSchema,
+    pub job_workflow: WorkshopJobWorkflowSchema,
     pub directive_kinds: Vec<String>,
 }
 
@@ -130,6 +131,13 @@ pub struct WorkshopAiTreeSchema {
     pub system_kinds: Vec<String>,
     #[serde(flatten)]
     pub vocabulary: crate::ai::state_tree::SchemaMetadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WorkshopJobWorkflowSchema {
+    #[serde(flatten)]
+    pub vocabulary: crate::ai::state_tree::SchemaMetadata,
+    pub default_tree: crate::ai::state_tree::AiTreeConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -186,6 +194,12 @@ pub fn ship_schema() -> WorkshopShipSchema {
             vocabulary: crate::ai::state_tree::schema_metadata(
                 &crate::ai::state_tree::dock_bindings("enabled"),
             ),
+        },
+        job_workflow: WorkshopJobWorkflowSchema {
+            vocabulary: crate::ai::state_tree::schema_metadata(
+                &crate::jobs::repair_workflow::bindings(),
+            ),
+            default_tree: crate::jobs::repair_workflow::default_config(),
         },
         system_kinds,
         directive_kinds: crate::objectives::directive::DirectiveKind::ALL

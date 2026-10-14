@@ -1,4 +1,4 @@
-import { writeStateTrees, rebindStateTreeChannel } from './workshop-state-trees.js';
+import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
 import { writeSystemComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
@@ -219,7 +219,11 @@ export function inspectShipAuthoring(draft, dependencies, path) {
     return { ...structuredClone(row), owner, local: localDoctrine.has(String(row.id)) };
   });
   const generated = authoredAndGeneratedSystems(composition.resolved.value).filter(system => system.generated).map(system => ({ ...system, local: false, owner: path }));
-  return { path, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated].map(system => {
+  const repairFields = composition.fields.filter(field => field.path.startsWith('repair.workflow'));
+  const repair = composition.resolved.value.repair;
+  return { path, repair: repair ? { ...structuredClone(repair), id: path,
+    ai_inherited: repairFields.some(field => field.owner !== path),
+    ai_owner: [...new Set(repairFields.map(field => field.owner))].join(', ') } : null, stations: rowsWithOwners(composition, 'station'), consoles: rowsWithOwners(composition, 'console'), systems: [...rowsWithOwners(composition, 'system'), ...generated].map(system => {
     const fields = composition.fields.filter(field => field.path.startsWith(`system[id=${system.id}].config.ai`));
     return { ...system, ai_inherited: fields.some(field => field.owner !== path),
       ai_owner: [...new Set(fields.map(field => field.owner))].join(', ') };
@@ -236,7 +240,11 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     if (dependent) throw finding(operation.path, before, quote(operation.rating), `Console ${dependent.id} uses rating ${operation.rating}; choose another visiting rating before removing it.`);
   }
 
-  if (operation.type === 'system-ai-set') {
+  if (operation.type === 'repair-workflow-set') {
+    if (!inspection.repair) throw new Error('No Repair capability on this entity.');
+    after = writeRepairWorkflow(before, inspection.repair, operation.workflow, operation);
+  }
+  else if (operation.type === 'system-ai-set') {
     const system = inspection.systems.find(row => row.id === operation.id);
     if (!system) throw new Error('Unknown System');
     after = writeStateTrees(before, system, operation.ai, operation);

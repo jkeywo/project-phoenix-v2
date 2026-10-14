@@ -1,14 +1,32 @@
 import { t } from './strings.js';
 import { resolveStateTree, idleStateTree } from '../editor/workshop-state-trees.js';
 
+export const systemTreeContext = {
+  id: 'workshop-ai', schemaKey: 'ai_state_tree',
+  value: owner => owner?.config?.ai, defaultValue: () => idleStateTree(),
+  channels: owner => (owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel),
+  inherited: owner => owner?.ai_inherited === true || owner?.local === false,
+  available: owner => !!owner?.id, supported: (owner, schema) => schema.system_kinds?.includes(owner?.kind),
+  operation: (owner, ai, materialise) => ({ type: 'system-ai-set', id: owner.id, ai, materialise }),
+};
+export const repairJobTreeContext = {
+  id: 'workshop-repair-workflow', schemaKey: 'job_workflow',
+  labels: { title: 'workshop.ship.job.title', rebinding: 'workshop.ship.job.context' },
+  value: owner => owner?.workflow, defaultValue: schema => schema?.default_tree || idleStateTree(),
+  channels: (_, schema) => schema?.channels || [],
+  inherited: owner => owner?.ai_inherited === true, available: owner => !!owner,
+  supported: owner => !!owner,
+  operation: (_, workflow, materialise) => ({ type: 'repair-workflow-set', workflow, materialise }),
+};
+
 /** Closed, typed visual authoring. The local draft may be incomplete; Apply is atomic. */
-export function mountStateTrees({ root, apply }) {
+export function mountStateTrees({ root, apply, context = systemTreeContext }) {
   const doc = root.ownerDocument, selections = new Map();
   let owner = null, schema = null, draft = { root: '', tree: [] }, stamp = '', inherited = false, materialise = false, error = '';
-  const section = doc.createElement('fieldset'); section.id = 'workshop-ai'; root.append(section);
-  const word = key => t(`workshop.ship.ai.${key}`);
+  const section = doc.createElement('fieldset'); section.id = context.id; root.append(section);
+  const word = key => t(context.labels?.[key] || `workshop.ship.ai.${key}`);
   const node = (tag, text) => { const el = doc.createElement(tag); if (text != null) el.textContent = text; return el; };
-  const idOf = key => `workshop-ai-${key}`;
+  const idOf = key => `${context.id}-${key}`;
   const button = (parent, key, fn, disabled = false) => { const el = node('button', word(key)); el.type = 'button'; el.dataset.aiAction = key; el.disabled = disabled;
     el.onclick = () => { error = '';try { fn(); } catch (caught) { error = String(caught.message); } paint(); }; parent.append(el); return el; };
   const field = (parent, key, value, change, choices = null, type = 'text') => {
@@ -20,7 +38,7 @@ export function mountStateTrees({ root, apply }) {
     const label = node('label', word(key.split('.').at(-1))); label.htmlFor = el.id; parent.append(label, el);
     el.onchange = () => { change(type === 'checkbox' ? el.checked : el.value); if (choices || type === 'checkbox') paint(); }; return el;
   };
-  const channels = () => (owner?.component || []).filter(row => row.kind === 'dock_mating').map(row => row.enabled_channel);
+  const channels = () => context.channels(owner, schema);
   const unique = (rows, prefix) => { let n = 1; while (rows.some(row => row.id === `${prefix}-${n}`)) n += 1; return `${prefix}-${n}`; };
   const resolved = tree => { try { return resolveStateTree(draft, tree.id); } catch { return tree; } };
   const sourceDefault = source => ({ source, ...(source === 'literal' ? { value: false } : source === 'pending' ? { channel: channels()[0] || '' }
@@ -54,7 +72,7 @@ export function mountStateTrees({ root, apply }) {
     if (at >= 0) render(box, rows[at], at);
   };
   const boolMap = (parent, key, values) => {
-    const box = node('fieldset'); box.append(node('legend', word(key))); parent.append(box);
+    const box = node('fieldset'); box.dataset.aiMap = key; box.append(node('legend', word(key))); parent.append(box);
     for (const [name, value] of Object.entries(values)) {
       const line = node('div'); box.append(line); let currentName = name;
       field(line, `${key}.${name}.name`, name, next => { if (next && !Object.hasOwn(values, next)) { const currentValue = values[currentName]; delete values[currentName]; values[next] = currentValue; currentName = next; } });
@@ -143,17 +161,17 @@ export function mountStateTrees({ root, apply }) {
     field(section, 'root', draft.root, value => { draft.root = value; }, draft.tree.map(row => row.id));
     ordered(section, 'trees', draft.tree, () => { const id = unique(draft.tree, 'tree'); if (!draft.root) draft.root = id;
       return { id, initial: 'idle', parameters: {}, memory: {}, state: [{ id: 'idle', task: [], transition: [] }] }; }, treeEditor);
-    button(section, 'reset', () => { draft = structuredClone(owner?.config?.ai || idleStateTree()); materialise = false; selections.clear(); });
-    button(section, 'apply', () => apply(() => ({ type: 'system-ai-set', id: owner.id, ai: structuredClone(draft), materialise })), !owner?.id || (inherited && !materialise));
+    button(section, 'reset', () => { draft = structuredClone(context.value(owner) || context.defaultValue(schema)); materialise = false; selections.clear(); });
+    button(section, 'apply', () => apply(() => context.operation(owner, structuredClone(draft), materialise)), !context.available(owner) || (inherited && !materialise));
   };
   return { value: () => structuredClone(draft), refresh(system, metadata, disabled) {
-    owner = system; schema = metadata?.ai_state_tree;
-    inherited = system?.ai_inherited === true || system?.local === false;
-    const next = JSON.stringify([system?.id, system?.config?.ai, system?.ai_inherited, system?.ai_owner, schema]);
-    if (next !== stamp) { stamp = next; draft = structuredClone(system?.config?.ai || idleStateTree()); selections.clear(); materialise = false; }
+    owner = system; schema = metadata?.[context.schemaKey];
+    inherited = context.inherited(system);
+    const next = JSON.stringify([system?.id, context.value(system), inherited, system?.ai_owner, schema]);
+    if (next !== stamp) { stamp = next; draft = structuredClone(context.value(system) || context.defaultValue(schema)); selections.clear(); materialise = false; }
     // The containing form resets descendant disabled flags; restore every draft
     // control boundary without discarding the staged edits.
     paint();
-    section.disabled = disabled || !schema || !schema.system_kinds?.includes(system?.kind);
+    section.disabled = disabled || !schema || !context.supported(system, schema);
   } };
 }

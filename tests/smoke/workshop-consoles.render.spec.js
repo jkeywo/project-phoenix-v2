@@ -153,6 +153,25 @@ test('Workshop authors Consoles and Dock components through real validation, his
     await page.locator('#workshop-redo').click();
     await expect.poll(() => sourceOf(page)).toBe(afterComponents);
 
+    // The same visual tree editor authors a separate, restricted Repair Job
+    // workflow. Adding private memory preserves the default repair behavior.
+    const beforeWorkflow = await sourceOf(page);
+    await revealWorkshopPanel(page, 'composition');
+    const workflow = page.locator('#workshop-repair-workflow');
+    await expect(workflow).toBeEnabled();
+    await workflow.locator('[data-ai-map="memory"] > [data-ai-action="add"]').click();
+    await workflow.locator('[data-ai-field="memory.value-1.name"]').fill('reviewed');
+    await workflow.locator('[data-ai-field="memory.value-1.name"]').dispatchEvent('change');
+    await workflow.locator(':scope > [data-ai-action="apply"]').click();
+    await expect(byId(page, 'status')).toHaveText(ts('workshop.ship.applied'));
+    const afterWorkflow = await sourceOf(page);
+    const writtenWorkflow = parse(afterWorkflow).repair.workflow;
+    expect(writtenWorkflow.tree.filter(row => !row._remove)[0].memory.reviewed).toBe(false);
+    await page.locator('#workshop-undo').click();
+    await expect.poll(() => sourceOf(page)).toBe(beforeWorkflow);
+    await page.locator('#workshop-redo').click();
+    await expect.poll(() => sourceOf(page)).toBe(afterWorkflow);
+
     const beforeOwnership = await sourceOf(page);
     await revealWorkshopPanel(page, 'composition');
     await byId(page, 'systems').selectOption('dock');

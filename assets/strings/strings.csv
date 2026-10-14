@@ -4784,3 +4784,5 @@ observation.source.sensors_report,Common recorded observation details,Sensors re
 observation.source.system_report,Common recorded observation details,System report,Systembericht,System report,machine
 observation.source.repair_team,Common recorded observation details,Repair team,Reparaturteam,Repair team,machine
 observation.source.repair_diagnosis,Common recorded observation details,Repair diagnosis,Reparaturdiagnose,Repair diagnosis,machine
+workshop.ship.job.title,Workshop repair job workflow editor,Repair Job workflow,Ablauf für Reparaturaufträge,Repair Job workflow,machine
+workshop.ship.job.context,Workshop repair job context boundary,This workflow executes admitted repair jobs; System AI still selects work. Only the listed repair effects are supported.,Dieser Ablauf führt freigegebene Reparaturaufträge aus; die System-KI wählt weiterhin die Arbeit aus. Nur die aufgeführten Reparatureffekte werden unterstützt.,This workflow executes admitted repair jobs; System AI still selects work. Only the listed repair effects are supported.,machine

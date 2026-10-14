@@ -1,4 +1,4 @@
-import { mountStateTrees } from './workshop-state-trees.js';
+import { mountStateTrees, repairJobTreeContext } from './workshop-state-trees.js';
 import { mountSystemComponents } from './workshop-system-components.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
 import { entityInventory } from '../editor/workshop-entity-composition.js';
@@ -123,6 +123,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     doctrineAdd, doctrineApply, doctrineUp, doctrineDown, doctrineRemove, status);
   const componentEditor = mountSystemComponents({ root: section, apply });
   const stateTreeEditor = mountStateTrees({ root: section, apply });
+  const jobTreeEditor = mountStateTrees({ root: section, apply, context: repairJobTreeContext });
   if (attach) root.append(section);
 
   let dependencies = null, schema = null, inspection = null, loading = null, generation = 0, disposed = false;
@@ -210,6 +211,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     ratingAdd.disabled = held || !selectedRatingOwner()?.local;
     ratingApply.disabled = ratingUp.disabled = ratingDown.disabled = ratingRemove.disabled = held || !selectedRatingOwner()?.local || !rating;
     doctrineApply.disabled = doctrineUp.disabled = doctrineDown.disabled = doctrineRemove.disabled = held || !doctrine?.local;
+    jobTreeEditor.refresh(inspection?.repair, schema, held);
     const composingNewSystem = !system || systemId.value !== system.id;
     componentEditor.refresh(composingNewSystem ? { id: null, kind: systemKind.value, local: true }
       : { ...system, kind: systemKind.value }, schema, held);

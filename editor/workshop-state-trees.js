@@ -69,3 +69,21 @@ export function rebindStateTreeChannel(ai, before, after) {
 }
 export const idleStateTree = () => ({ root: 'idle', tree: [{ id: 'idle', initial: 'idle',
   parameters: {}, memory: {}, state: [{ id: 'idle', task: [], transition: [] }] }] });
+
+/** The same library format in the independent Repair Job context. */
+export function writeRepairWorkflow(source, repair, workflow, { materialise = false } = {}) {
+  const local = parse(source).repair?.workflow;
+  if (stable(stripRemovals(local)) !== stable(repair?.workflow) && !materialise)
+    throw new Error('Explicitly materialise inherited repair workflow before editing it.');
+  const ids = new Set([...(repair?.workflow?.tree || []).map(row => row.id),
+    ...(local?.tree || []).filter(row => row._remove).map(row => row.id)]);
+  const authored = { ...clone(workflow), tree: [...[...ids].map(id => ({ id, _remove: true })), ...clone(workflow.tree || [])] };
+  const nl = source.includes('\r\n') ? '\r\n' : '\n';
+  const serialized = stringify({ repair: { workflow: authored } }).replace(/^\s*\[repair\]\r?\n/, '').trim().replace(/\n/g, nl);
+  const headers = [...source.matchAll(/^[ \t]*\[\[?([^\]\r\n]+)\]\]?[^\r\n]*(?:\r?\n|$)/gm)];
+  const first = headers.find(row => row[1].trim() === 'repair.workflow');
+  if (!first && local) throw new Error('Expand inline repair.workflow into TOML tables before visual editing.');
+  if (!first) return source.trimEnd() + nl + nl + serialized + nl;
+  const end = headers.find(row => row.index > first.index && !row[1].trim().startsWith('repair.workflow.'))?.index ?? source.length;
+  return source.slice(0, first.index) + serialized + nl + nl + source.slice(end);
+}

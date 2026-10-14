@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 4,
+  "current_increment": 5,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -92,12 +92,15 @@
     {
       "id": 5,
       "title": "Shared jobs and team execution",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         4
       ],
       "completion": "Existing repair work runs through shared job/team execution with equivalent repair outcomes and report-driven work lists.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/shared-jobs.yaml",
+        "docs/gameplay-redesign/implementation/increment-5.md"
+      ]
     },
     {
       "id": 6,
@@ -2672,6 +2675,13 @@
       "user_instruction": "Do 4",
       "pending_acceptance": "Physical phones, native multi-monitor and human workload acceptance remain open for prior increments.",
       "evidence": "docs/acceptance/1562-ai-state-trees.md"
+    },
+    {
+      "from": 4,
+      "to": 5,
+      "date": "2026-10-14",
+      "instruction": "Do 5",
+      "note": "User authorises advancing; prior physical-device and human acceptance remains open."
     }
   ]
 }

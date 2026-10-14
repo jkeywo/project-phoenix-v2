@@ -1,0 +1,27 @@
+entities:
+  - decision: shared-repair-job-execution
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Jobs and Team Execution
+      summary: "Increment 5 migrates existing internal and external repair commitments onto one team/job owner. Independent jobs retain identity, owning System, typed activity, continuation, progress and outcome. Repair reports remain received knowledge, not assignments. Existing commands, selectors, visibility, travel, sweep and repair results remain equivalent."
+      rationale:
+        - "User-approved roadmap Increment 5; Do 5 on 2026-10-14. AD22-AD25 select shared jobs, stage commitments, reusable state trees and independent jobs."
+        - "[ai] Reserve a named team when an admitted action starts work. Internal recall retains it until the existing return completes. External repair retains immediate claim/release and has no new travel delay. Derived legacy TeamSlot presentation is not a second assignment authority."
+  - decision: repair-job-workflow-context
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Restricted Repair Job State Trees
+      summary: "Reuse the supported state-tree schema, inheritance, reference calls, evaluator and Workshop editor for Job workflows with separate supported facts and effect channels. Private execution state belongs to each job. The ordinary System AI selects work through existing admission; a workflow executes that same admitted job for human or AI. No child jobs, scripting or Workshop extensions."
+      rationale:
+        - "[ai] Final ordered intents activate supported physical stages once per executor step. Preserve one existing repair phase per tick: arrival does not repair, sweep handoff does not apply leftover work, queued dispatch starts at zero. Reference calls remain within one job."
+        - "[ai] Authored defaults reproduce current repairs. Requirements and commitments initially mean actual team availability and supported activity readiness; inventories, parts, routes and production stay in their scheduled increments."
+  - decision: repair-job-continuation-and-projection
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Repair Job Continuation and Permitted Work Lists
+      summary: "Persist canonical job/team state, identity allocation and private workflow continuation through existing snapshots, digests and multiplayer paths. Publish supported job/work-list information through the existing Repair Console view without expanding diagnosis or remote knowledge. Workshop validates and edits the repair workflow beside existing repair tunables."
+      rationale:
+        - "[ai] System-addressed commands and current Console ownership remain the authority boundary. Report arrival never starts work or grants control. Restore must not duplicate team claims, reset work or accept unsupported state."

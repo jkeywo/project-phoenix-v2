@@ -16,6 +16,20 @@ use bevy::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+/// Resolve within the frozen capture; no filesystem or asynchronous fallback.
+#[cfg(any(target_arch = "wasm32", test))]
+fn composed_entity_source(
+    path: &str,
+    sources: &std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
+    let resolved = crate::entities::include_resolve::resolve_template(path, sources)
+        .map_err(|error| error.to_string())?;
+    resolved
+        .parse_with(crate::entities::config::EntityConfig::from_toml)
+        .map_err(|error| error.to_string())?;
+    Ok(resolved.toml)
+}
+
 /// Boot one preview over captured bytes. The frame is disposable and boots
 /// once; a second call is a caller error, not a reload.
 #[cfg(target_arch = "wasm32")]
@@ -49,6 +63,10 @@ pub fn viewer_workshop_preview_init(selection: String, source: JsValue) -> Resul
                 "The preview entity was not captured as source: {entity}"
             )));
         }
+        let resolved = composed_entity_source(entity, &captured.text).map_err(fail)?;
+        // The shared viewer reads entity source through this persistent cache.
+        // Seed the composed projection before it can request the raw root body.
+        crate::entities::config_cache::wasm_push_sidecar_toml(entity.to_string(), resolved);
     }
     let args = ViewerArgs {
         model: selection.model,
@@ -71,4 +89,51 @@ pub fn viewer_workshop_preview_init(selection: String, source: JsValue) -> Resul
     .add_plugins(ViewerPlugin { args })
     .run();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::composed_entity_source;
+    use crate::entities::config::EntityConfig;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn nested_captured_template_keeps_visuals_and_local_resource_overrides() {
+        let root = "includes=['middle.toml']\n[torpedoes]\ncount=32\n";
+        let sources = BTreeMap::from([
+            ("assets/entities/root.toml".into(), root.into()),
+            ("assets/entities/middle.toml".into(), "includes=['base.toml']\n".into()),
+            ("assets/entities/base.toml".into(), "[mesh]\nshape='sphere'\ncolour=[]\nmodel='assets/models/ship.glb'\n[torpedoes]\ncount=6\n[torpedoes.ai]\nidle=true\n[resource_services.torpedoes]\nkind='torpedo_magazine'\n".into()),
+        ]);
+        let text = composed_entity_source("assets/entities/root.toml", &sources).unwrap();
+        assert!(!text.contains("includes"));
+        let entity = EntityConfig::from_toml(&text).unwrap();
+        assert_eq!(
+            entity.mesh.unwrap().model.as_deref(),
+            Some("assets/models/ship.glb")
+        );
+        assert_eq!(entity.torpedoes.unwrap().count, 32);
+        assert!(entity.resource_services.contains_key("torpedoes"));
+        assert_eq!(sources["assets/entities/root.toml"], root);
+    }
+
+    #[test]
+    fn uncaptured_include_is_refused_without_live_project_fallback() {
+        let sources = BTreeMap::from([(
+            "assets/entities/root.toml".into(),
+            "includes=['alliance_cruiser.toml']\n".into(),
+        )]);
+        let error = composed_entity_source("assets/entities/root.toml", &sources).unwrap_err();
+        assert!(error.contains("alliance_cruiser.toml"), "{error}");
+    }
+
+    #[test]
+    fn invalid_composed_source_is_refused_before_viewer_boot() {
+        let sources = BTreeMap::from([(
+            "assets/entities/root.toml".into(),
+            "unsupported=true\n".into(),
+        )]);
+        let error = composed_entity_source("assets/entities/root.toml", &sources).unwrap_err();
+        assert!(error.contains("unsupported"), "{error}");
+    }
 }

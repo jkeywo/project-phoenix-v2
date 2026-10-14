@@ -3,7 +3,7 @@ title: Workshop Model Preview
 type: concept
 tags: [tooling, rendering, shaders, workshop, native]
 sources: [workshop.html, editor/workshop-launch.js, editor/workshop-model-preview.js, editor/workshop-model-structure.js, gui/workshop-models-panel.js, gui/workshop-model-preview-panel.js, scripts/dev-workshop.mjs, scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, crates/phoenix-presentation/src/viewer/preview.rs, crates/phoenix-presentation/src/viewer/lod.rs, crates/phoenix-presentation/src/viewer/stats.rs, crates/phoenix-presentation/src/render_setup.rs, crates/phoenix-presentation/src/entities/glb_visual.rs, crates/phoenix-presentation/src/entities/celestial_visual.rs, crates/phoenix-presentation/src/entities/mesh_stats.rs, crates/phoenix-presentation/src/viewer/mod.rs]
-updated: 2026-10-05
+updated: 2026-10-14
 ---
 
 # Workshop Model Preview
@@ -12,6 +12,12 @@ Workshop is the only supported model, rig and entity preview surface. Its Models
 document previews a GLB, one named sidecar variant, or a composed entity such as
 a ship, star or planet. Preview input is an immutable capture of the selected
 draft revision; source changes mark that picture stale until the author refreshes.
+
+Entity selections resolve their include closure with the canonical Rust resolver
+over captured text, then validate and seed the existing viewer source cache before
+boot. Missing captured fragments or invalid composed source refuse Preview;
+they cannot fall back to live project files. Measured mesh geometry distinguishes
+a loaded subject from the skybox and rig gizmos.
 
 Ordinary `ViewerPlugin` consumes captured preview input. Retained ladder mutation,
 asset reload and browser baking exports require explicit
@@ -71,8 +77,3 @@ compile without the server feature, its focused tests must run, and the shared
 preview plugin must continue to render non-flat models through Workshop. This
 feature name describes the renderer, not a standalone application.
 
-Ordinary `ViewerPlugin` consumes captured preview input. Ladder mutation, asset
-reload and legacy browser baking require explicit `LegacyViewerWorkflowPlugin`
-installation. Lighting entities change only for lighting commands. Shared GLB
-loading retains accepted-pack path and variant with each pending scene, so an
-outdated completion cannot replace the current selection.

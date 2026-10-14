@@ -171,7 +171,12 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await expect(page.locator('#workshop-preview-subject')).toHaveValue(HULL);
     await expect(page.locator('#workshop-model-preview-refresh')).toBeEnabled();
     await page.locator('#workshop-model-preview-refresh').click();
-    await expect.poll(() => page.locator('#workshop-model-preview-stats').textContent(), { timeout: 180_000 }).toMatch(/\d/);
+    // A starfield and rig bounds draw before the model settles. Require actual
+    // measured mesh geometry before the pixel check and screenshot.
+    await expect.poll(async () => {
+      const stats = await page.locator('#workshop-model-preview-stats').textContent();
+      return Number(stats.match(/Triangles: (\d+)/)?.[1] || 0);
+    }, { timeout: 180_000 }).toBeGreaterThan(0);
     await expect(page.frameLocator('.workshop-model-preview-frame').locator('#canvas')).toBeVisible();
     await expect.poll(() => previewColours(page), { timeout: 60_000 }).toBeGreaterThan(1);
     await testInfo.attach('resource-preview', { body: await page.screenshot(), contentType: 'image/png' });

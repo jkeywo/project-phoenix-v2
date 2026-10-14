@@ -63,7 +63,7 @@ transform = { position = [0.0, 0.0, 0.0] }
 template_path = "assets/entities/ship_civilian_hauler.toml"
 name = "world.probe_storm.entity.hulk_storm.name"
 transform = { position = [70.0, 0.0, 0.0] }
-overrides = { hull = { hull_integrity = 900.0 }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_storm_hulk_recovered", fails_below = 0.5 }] } }
+overrides = { interior = { team_homes = [], deck = [{ id = "main", label = "interior.deck.main.label", damage_weight = 1 }], compartment = [{ id = "bridge", deck = "main", label = "interior.room.bridge.label", x = -5, z = -10, width = 10, depth = 10, material = "light", max_hp = 450, recovery_fraction = 0.2, structural_remedy = "structural" }, { id = "engineering", deck = "main", label = "interior.room.engineering.label", x = -5, z = 0, width = 10, depth = 10, material = "bulkhead", max_hp = 450, recovery_fraction = 0.2, structural_remedy = "structural" }], connection = [{ id = "bridge-engineering", from = "bridge", to = "engineering", travel_secs = 5 }], placements = { red-alert = "bridge", helm-thrust = "engineering", helm-steering = "engineering", helm-impulse = "engineering", navigation = "bridge", power-reactor = "engineering", power-battery = "engineering" } }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_storm_hulk_recovered", fails_below = 0.5 }] } }
 
 # ── The idle pair in clear space ─────────────────────────────────────────────
 #
@@ -78,7 +78,7 @@ transform = { position = [0.0, 0.0, 3000.0] }
 template_path = "assets/entities/ship_civilian_hauler.toml"
 name = "world.probe_storm.entity.hulk_clear.name"
 transform = { position = [70.0, 0.0, 3000.0] }
-overrides = { hull = { hull_integrity = 900.0 }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_clear_hulk_recovered", fails_below = 0.5 }] } }
+overrides = { interior = { team_homes = [], deck = [{ id = "main", label = "interior.deck.main.label", damage_weight = 1 }], compartment = [{ id = "bridge", deck = "main", label = "interior.room.bridge.label", x = -5, z = -10, width = 10, depth = 10, material = "light", max_hp = 450, recovery_fraction = 0.2, structural_remedy = "structural" }, { id = "engineering", deck = "main", label = "interior.room.engineering.label", x = -5, z = 0, width = 10, depth = 10, material = "bulkhead", max_hp = 450, recovery_fraction = 0.2, structural_remedy = "structural" }], connection = [{ id = "bridge-engineering", from = "bridge", to = "engineering", travel_secs = 5 }], placements = { red-alert = "bridge", helm-thrust = "engineering", helm-steering = "engineering", helm-impulse = "engineering", navigation = "bridge", power-reactor = "engineering", power-battery = "engineering" } }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_clear_hulk_recovered", fails_below = 0.5 }] } }
 
 # ── THE DAMAGE PAIR, and the bystander that makes it mean something ──────────
 #

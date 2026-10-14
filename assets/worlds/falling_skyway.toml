@@ -1920,7 +1920,7 @@ transform = { anchor = "lyra_drift" }
 
 [entity.overrides]
 comms = { hailable = true }
-hull = { hull_integrity = 400.0 }
+interior = { team_homes = [], deck = [{ id = "main", label = "interior.deck.main.label", damage_weight = 1 }], compartment = [{ id = "bridge", deck = "main", label = "interior.room.bridge.label", x = -5, z = -10, width = 10, depth = 10, material = "light", max_hp = 200, recovery_fraction = 0.2, structural_remedy = "structural" }, { id = "engineering", deck = "main", label = "interior.room.engineering.label", x = -5, z = 0, width = 10, depth = 10, material = "bulkhead", max_hp = 200, recovery_fraction = 0.2, structural_remedy = "structural" }], connection = [{ id = "bridge-engineering", from = "bridge", to = "engineering", travel_secs = 5 }], placements = { red-alert = "bridge", helm-thrust = "engineering", helm-steering = "engineering", helm-impulse = "engineering", navigation = "bridge", power-reactor = "engineering", power-battery = "engineering" } }
 
 [entity.overrides.infrastructure]
 condition = 30.0

@@ -13,7 +13,7 @@ are retained. Five player hulls have multiple decks. The visual editor uses the
 existing accepted-source, inheritance, history and export path; System/shield
 creation and team-count edits preserve layout references atomically.
 
-Runtime integration is a working-tree change. Model defines the authored layout
+Initial runtime integration is committed as `22b31f57`. Model defines the authored layout
 and permitted positions. Gameplay compiles the graph and stores actual positions
 inside the existing RepairJobState. RepairPhases remains the work executor;
 physical arrival gates its transitions, spending and on-site knowledge. Routing
@@ -67,6 +67,18 @@ identity under arbitrary authored ordering.
   after those data-only fixes. This is working-tree evidence; unrelated increment
   9 fixture fixes were integrated during compilation, so it does not certify all
   increment 9 fixtures at one pinned source revision.
+- At the same runtime source, the real headless host passed three selected
+  cases: startup without a renderer, automatic mission launch and exact
+  deterministic repeat. Command: `cargo test -p project-phoenix
+  --no-default-features --features headless --test headless_runner --
+  builds_and_ticks_without_a_renderer auto_start_reaches_in_progress_with_no_players
+  deterministic_runs_reproduce_exactly`. The source changed only by documentation
+  commits during that build. Existing unused-import/dead-code warnings in this
+  narrow feature configuration remain separate from the ordinary final gates.
+
+Broader validation is pinned to `22b31f57` in the isolated increment-10-validation
+worktree. Later implementation proceeds under the user's authorised pipeline;
+fixes and evidence return in dependency order. No verified exit is claimed.
 
 ## Remaining evidence
 

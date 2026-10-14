@@ -596,6 +596,7 @@ fn test_app() -> App {
     .add_plugins(LobbyPlugin)
     .add_plugins(bevy::time::TimePlugin)
     .init_resource::<WorldResource>()
+    .init_resource::<crate::world::server::WorldContentRuntime>()
     .init_resource::<TrackedEntities>()
     .init_resource::<WorldSetupBroadcast>()
     .init_resource::<SimOutbox>()

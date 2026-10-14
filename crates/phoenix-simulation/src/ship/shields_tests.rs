@@ -212,6 +212,9 @@ fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
     };
     let damaged = || {
         let mut s = ShieldSystem::new(&config);
+        // Bind the single test arc explicitly to the real fore reserve rather
+        // than the legacy one-facing constructor's unmatched `all` identity.
+        s.facings[0].id = "fore".into();
         s.apply_damage(50, 0.0);
         s
     };
@@ -829,6 +832,7 @@ fn test_app_with_helm() -> App {
             ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();
+    attach_shield_fixture_power(&mut app, ship);
     app.insert_resource(ShipEntity(ship));
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)

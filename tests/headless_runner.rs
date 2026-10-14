@@ -22853,13 +22853,12 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
     // ── Interruption 4: the power allocation is lost ─────────────────────────
     reengage_holding(&mut app, &derelict);
     let parted = position_of(&mut app, DERELICT);
+    let held_operator = operator_pos(&mut app);
     cut_tractor_power(&mut app);
     run(&mut app, 2);
     let beam = tractor_beam_of(&mut app);
-    assert!(
-        !beam.engaged && beam.coupled_target.is_none(),
-        "losing power ended the hold"
-    );
+    assert!(beam.engaged && beam.coupled_target.as_deref() == Some(&derelict));
+    assert_eq!(beam.work_fraction, 0.0, "exhaustion pauses physical work");
     assert_eq!(beam.last_refusal, Some(TractorRefusal::Unpowered));
     place_operator(&mut app, Vec3::new(4000.0, 0.0, 0.0));
     run(&mut app, 3);
@@ -22868,9 +22867,17 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
         "an unpowered beam has let go"
     );
 
-    // ── Interruption 5: the tractor is knocked out to Disabled ───────────────
-    // Restore power first so the disable is the ONLY failing condition.
+    // Funding resumes the standing hold without issuing another engage order.
+    place_operator(&mut app, held_operator);
     restore_tractor_power(&mut app);
+    run(&mut app, 3);
+    let beam = tractor_beam_of(&mut app);
+    assert!(beam.engaged && beam.coupled_target.as_deref() == Some(&derelict));
+    assert!(beam.work_fraction > 0.0);
+    assert!(position_of(&mut app, DERELICT).distance(parted) < 50.0);
+
+    // ── Interruption 5: the tractor is knocked out to Disabled ───────────────
+    // Power is restored so the disable is the ONLY failing condition.
     reengage_holding(&mut app, &derelict);
     let parted = position_of(&mut app, DERELICT);
     disable_tractor(&mut app);
@@ -23373,8 +23380,9 @@ fn redock(app: &mut App) {
 }
 
 /// AC: a dock control appears only while a valid target is in range; running it
-/// mates the two hulls; undock separates them; and every interruption ends the
-/// dock cleanly. Also: the docked relationship folds and survives a resume.
+/// mates the two hulls; undock separates them. Exhaustion pauses physical work
+/// while retaining mate intent; other interruptions end the dock cleanly.
+/// Also: the docked relationship folds and survives a resume.
 #[test]
 fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it() {
     use project_phoenix::core::messages::SystemControlPayload;
@@ -23469,17 +23477,31 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
 
     // ── Interruption 2: the power allocation is lost ─────────────────────────
     redock(&mut app);
+    let held_pose = dock_operator_pos(&mut app);
     cut_dock_power(&mut app);
+    move_berth(&mut app, Vec3::new(101.0, 0.0, 0.0));
     run(&mut app, 3);
     let dock = dock_control_of(&mut app);
     assert!(
-        !dock.docked && !dock.engaged(),
-        "losing power ended the dock"
+        dock.docked && dock.engaged(),
+        "the standing mate intent persists"
+    );
+    assert_eq!(
+        dock_operator_pos(&mut app),
+        held_pose,
+        "no unfunded mate movement"
     );
     assert_eq!(dock.last_refusal, Some(DockRefusal::Unpowered));
+    restore_dock_power(&mut app);
+    run(&mut app, 3);
+    assert!(dock_control_of(&mut app).docked);
+    assert_ne!(
+        dock_operator_pos(&mut app),
+        held_pose,
+        "funding resumes mate movement"
+    );
 
     // ── Interruption 3: the dock is knocked out to Disabled ──────────────────
-    restore_dock_power(&mut app);
     redock(&mut app);
     disable_dock(&mut app);
     run(&mut app, 3);
@@ -24288,9 +24310,9 @@ fn a_full_ai_run_completes_a_transfer_against_the_named_depot() {
     );
 }
 
-/// AC: capacity moves between two docked hulls while the umbilical runs, and
-/// undock, power loss and umbilical damage each stop it while keeping what has
-/// moved. Also: the running flag folds and survives a snapshot resume.
+/// AC: capacity moves between two docked hulls while the umbilical runs. Power
+/// exhaustion pauses transfer while keeping intent; undock and damage stop it.
+/// All interruptions keep what moved. Running intent survives a snapshot resume.
 #[test]
 fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage() {
     use project_phoenix::core::messages::SystemControlPayload;
@@ -24386,8 +24408,11 @@ fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_da
     cut_umbilical_power(&mut app);
     run(&mut app, 3);
     let u = umbilical_of(&mut app);
-    assert!(!u.running, "losing power stopped the flow");
-    assert_eq!(u.last_refusal, Some(UmbilicalRefusal::Unpowered));
+    assert!(
+        u.running,
+        "exhaustion preserves the standing transfer intent"
+    );
+    assert!(u.last_refusal.is_none());
     let op_after_power = fuel_of(&mut app, operator);
     run(&mut app, 20);
     assert_eq!(
@@ -24396,8 +24421,15 @@ fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_da
         "what moved stays moved after a power loss"
     );
 
-    // ── Umbilical damage stops a running flow ────────────────────────────────
     restore_umbilical_power(&mut app);
+    run(&mut app, 20);
+    assert!(umbilical_of(&mut app).running);
+    assert!(
+        fuel_of(&mut app, operator) < op_after_power,
+        "funding resumes the same delivery without another start order"
+    );
+
+    // ── Umbilical damage stops a running flow ────────────────────────────────
     umbilical_redock(&mut app);
     send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
     run(&mut app, 20);

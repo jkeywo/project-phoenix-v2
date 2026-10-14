@@ -20,7 +20,7 @@ use std::{
 };
 
 const SYSTEMS: [&str; 3] = [
-    "phoenix_sim_gameplay::ship::power::publish_power_blackboard",
+    "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
     "phoenix_sim_gameplay::ship::shields::publish_shields_blackboard",
     "phoenix_simulation::console::repair::server::publish_repair_blackboard",
 ];

@@ -16,7 +16,7 @@ name = "Unresolved Manifest World"
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 1
+content_epoch = 2
 
 [[scenario]]
 id = "ghost"

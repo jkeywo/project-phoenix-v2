@@ -1,6 +1,6 @@
 # Committed mod-pack fixture (issue #986): a v1 pack authored against a
 # different content epoch than the host provides. The host rejects it with
-# `pack-content-mismatch` (requires.content_epoch = 2, base epoch = 1).
+# `pack-content-mismatch` (requires.content_epoch = 1, base epoch = 2).
 #
 # Regenerate with `node scripts/build-mod-pack-fixtures.mjs` (gated by `--check`).
 
@@ -12,7 +12,7 @@ name = "Aurora Skirmish"
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 2
+content_epoch = 1
 
 [[scenario]]
 id = "aurora_skirmish"

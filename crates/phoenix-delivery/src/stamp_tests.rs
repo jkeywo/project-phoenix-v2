@@ -132,3 +132,47 @@ fn a_stamp_parses_from_all_three_params_and_from_nothing_less() {
         None
     );
 }
+
+/// The redesigned equipment boundary rejects an older control vocabulary before
+/// its level-zero command can be mistaken for explicit weapons restraint.
+#[test]
+fn redesigned_equipment_rejects_old_protocol_and_old_content_but_accepts_matching_stamps() {
+    let manifest = include_str!("../../../assets/scenarios.toml");
+    let current = DeliveryStamp::for_manifest(manifest);
+    assert_eq!(current.to_field(), "7/phoenix-base/2");
+    let old_protocol = DeliveryStamp {
+        protocol: 6,
+        ..current.clone()
+    };
+    assert_eq!(
+        check_client_stamp(&current, Some(&old_protocol)),
+        Err(StampMismatch::Protocol { host: 7, client: 6 })
+    );
+    assert_eq!(
+        crate::check_host_stamp(&current, Some(&old_protocol.to_field()))
+            .unwrap_err()
+            .code(),
+        "protocol-mismatch"
+    );
+    let old_content = DeliveryStamp {
+        content_epoch: 1,
+        ..current.clone()
+    };
+    assert_eq!(
+        check_client_stamp(&current, Some(&old_content)),
+        Err(StampMismatch::ContentEpoch { host: 2, client: 1 })
+    );
+    assert_eq!(
+        crate::check_host_stamp(&current, Some(&old_content.to_field()))
+            .unwrap_err()
+            .code(),
+        "content-epoch-mismatch"
+    );
+    assert!(check_client_stamp(&current, Some(&current)).is_ok());
+    assert!(crate::check_host_stamp(&current, Some(&current.to_field())).is_ok());
+    assert!(check_bundle_content(&current, Some(manifest), "dist/assets/scenarios.toml").is_ok());
+    assert_eq!(
+        check_bundle_content(&current, Some(BASE), "old/assets/scenarios.toml"),
+        Err(StampMismatch::ContentEpoch { host: 2, client: 1 })
+    );
+}

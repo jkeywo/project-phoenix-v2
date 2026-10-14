@@ -788,7 +788,7 @@ describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
     expect(manifest.pack.id).toBe('aurora-skirmish');
     expect(manifest.pack.version).toBe('1.0.0');
     expect(manifest.pack.name).toBe('Aurora Skirmish');
-    expect(manifest.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 1 });
+    expect(manifest.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 2 });
     expect(manifest.scenario[0].world).toBe('assets/worlds/aurora_skirmish.toml');
   });
 
@@ -824,7 +824,7 @@ describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
   it('content-epoch-mismatch.zip requires a mismatched content epoch', () => {
     const manifest = readFixtureManifest('content-epoch-mismatch.zip');
     expect(manifest.pack.format).toBe(1);
-    expect(manifest.pack.requires.content_epoch).toBe(2);
+    expect(manifest.pack.requires.content_epoch).toBe(1);
   });
 
   // The overlapping pair (issue #987): both packs carry the SAME authored path

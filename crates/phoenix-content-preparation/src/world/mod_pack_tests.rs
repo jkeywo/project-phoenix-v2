@@ -1206,10 +1206,10 @@ fn pack_content_epoch_mismatch_rejects_whole_pack() {
 /// The base identity the committed fixtures declare `[pack.requires]`
 /// against — kept in step with scripts/build-mod-pack-fixtures.mjs.
 fn fixture_base_identity() -> ContentIdentity {
-    ContentIdentity {
-        id: "phoenix-base".to_string(),
-        epoch: 1,
-    }
+    phoenix_content::manifest::parse_content_identity(include_str!(
+        "../../../../assets/scenarios.toml"
+    ))
+    .unwrap()
 }
 
 #[test]
@@ -1266,8 +1266,12 @@ fn fixture_format_too_new_is_rejected() {
 }
 
 #[test]
-fn fixture_content_epoch_mismatch_is_rejected() {
+fn fixture_old_content_epoch_is_rejected() {
     let bytes = include_bytes!("../../../../tests/fixtures/mod-packs/content-epoch-mismatch.zip");
+    let files = read_store_zip(bytes).unwrap();
+    let manifest = phoenix_content::manifest::parse_pack_manifest(&files[MANIFEST_PATH]).unwrap();
+    assert_eq!(manifest.pack.unwrap().requires.content_epoch, Some(1));
+    assert_eq!(fixture_base_identity().epoch, 2);
     let result = validate_mod_pack(
         bytes,
         &fixture_base_identity(),

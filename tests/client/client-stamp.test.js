@@ -47,8 +47,16 @@ describe('reading the repository sources', () => {
   });
 });
 
+describe('redesigned equipment compatibility boundary', () => {
+  it('stamps the client for protocol 7 and content epoch 2', async () => {
+    expect(await clientStampField(root)).toBe('7/phoenix-base/2');
+    expect(stampField(6, { id: 'phoenix-base', epoch: 2 })).not.toBe(await clientStampField(root));
+    expect(stampField(7, { id: 'phoenix-base', epoch: 1 })).not.toBe(await clientStampField(root));
+  });
+});
+
 describe('degrading', () => {
-  it('is empty — meaning unstamped, which the host admits — when a source is unreadable', async () => {
+  it('is empty — meaning unstamped, which the host refuses — when a source is unreadable', async () => {
     expect(await clientStampField(path.join(root, 'no-such-checkout'))).toBe('');
   });
 

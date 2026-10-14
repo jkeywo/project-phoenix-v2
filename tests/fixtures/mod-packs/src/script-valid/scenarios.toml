@@ -14,7 +14,7 @@ description = "A pack whose sibling .rhai uses only sandbox-allowed capabilities
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 1
+content_epoch = 2
 
 [[scenario]]
 id = "script_valid"

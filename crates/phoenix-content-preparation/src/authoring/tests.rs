@@ -133,7 +133,7 @@ fn dependencies() -> WorkshopDependencies {
     WorkshopDependencies {
         base_files: BTreeMap::from([(
             "assets/scenarios.toml".into(),
-            "[content]\nid = \"phoenix-base\"\nepoch = 1\n".into(),
+            "[content]\nid = \"phoenix-base\"\nepoch = 2\n".into(),
         )]),
         packs: Vec::new(),
         base_assets: BTreeMap::new(),
@@ -389,7 +389,7 @@ fn a_pack_and_a_project_of_the_same_members_validate_to_the_same_catalogue() {
     pack_members.insert(
         "scenarios.toml".into(),
         format!(
-            "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n[pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n{COMPOSITION_SCENARIOS}"
+            "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n[pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 2\n\n{COMPOSITION_SCENARIOS}"
         ),
     );
     let zip = crate::workshop::archive::store_zip(
@@ -420,7 +420,7 @@ fn a_pack_and_a_project_of_the_same_members_validate_to_the_same_catalogue() {
     let mut project_members = composition_members();
     project_members.insert(
         "assets/scenarios.toml".into(),
-        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 2\n\n{COMPOSITION_SCENARIOS}"),
     );
     let project_files: BTreeMap<String, Vec<u8>> = project_members
         .iter()
@@ -458,7 +458,7 @@ fn a_project_world_declaring_a_missing_or_cyclic_child_is_refused_at_the_entry_l
     let mut members = composition_members();
     members.insert(
         "assets/scenarios.toml".into(),
-        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 2\n\n{COMPOSITION_SCENARIOS}"),
     );
     members.insert(
         "assets/worlds/beta.toml".into(),
@@ -580,7 +580,7 @@ fn a_project_template_declaring_a_missing_or_cyclic_include_is_refused_at_the_en
     let mut members = composition_members();
     members.insert(
         "assets/scenarios.toml".into(),
-        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 2\n\n{COMPOSITION_SCENARIOS}"),
     );
     // Neither template is reachable from a manifest root, so the world-driven
     // composition check never looks at them.
@@ -700,7 +700,7 @@ fn a_world_reachable_hull_with_a_broken_include_is_reported_once_and_not_twice()
     let mut project = members.clone();
     project.insert(
         "assets/scenarios.toml".into(),
-        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 2\n\n{COMPOSITION_SCENARIOS}"),
     );
     let report = validate_project(
         &project
@@ -715,7 +715,7 @@ fn a_world_reachable_hull_with_a_broken_include_is_reported_once_and_not_twice()
         "scenarios.toml".into(),
         format!(
             "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n\
-             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n\
+             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 2\n\n\
              {COMPOSITION_SCENARIOS}"
         ),
     );
@@ -801,7 +801,7 @@ fn a_project_world_whose_presets_break_the_rules_is_refused_at_the_offending_lin
     let mut project = members.clone();
     project.insert(
         "assets/scenarios.toml".into(),
-        format!("[content]\nid = \"phoenix-base\"\nepoch = 1\n\n{COMPOSITION_SCENARIOS}"),
+        format!("[content]\nid = \"phoenix-base\"\nepoch = 2\n\n{COMPOSITION_SCENARIOS}"),
     );
     let report = validate_project(
         &project
@@ -829,7 +829,7 @@ fn a_project_world_whose_presets_break_the_rules_is_refused_at_the_offending_lin
         "scenarios.toml".into(),
         format!(
             "[pack]\nformat = 1\nid = \"twin\"\nversion = \"1.0.0\"\nname = \"Twin\"\n\n\
-             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 1\n\n\
+             [pack.requires]\ncontent_id = \"phoenix-base\"\ncontent_epoch = 2\n\n\
              {COMPOSITION_SCENARIOS}"
         ),
     );
@@ -903,7 +903,7 @@ fn project_string_table_is_utf8_source_not_a_binary_runtime_asset() {
     let mut files = BTreeMap::from([
         (
             "assets/scenarios.toml".into(),
-            b"[content]\nid='phoenix-base'\nepoch=1\n[[scenario]]\nid='probe'\nworld='assets/worlds/probe.toml'\n".to_vec(),
+            b"[content]\nid='phoenix-base'\nepoch=2\n[[scenario]]\nid='probe'\nworld='assets/worlds/probe.toml'\n".to_vec(),
         ),
         (
             "assets/worlds/probe.toml".into(),

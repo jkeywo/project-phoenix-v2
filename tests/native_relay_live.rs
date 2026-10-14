@@ -89,11 +89,7 @@ fn origin() -> String {
 }
 
 fn host_stamp() -> DeliveryStamp {
-    DeliveryStamp {
-        protocol: project_phoenix::core::messages::PROTOCOL_VERSION,
-        content_id: "phoenix-base".to_string(),
-        content_epoch: 1,
-    }
+    DeliveryStamp::for_manifest(include_str!("../assets/scenarios.toml"))
 }
 
 /// The native host, polled on its own thread for the length of the test.

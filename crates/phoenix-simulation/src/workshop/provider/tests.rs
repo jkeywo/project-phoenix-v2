@@ -904,7 +904,7 @@ fn mod_workspace_saves_exact_sources_and_retains_binary_members_while_runtime_re
     let dependencies = WorkshopDependencies {
         base_files: BTreeMap::from([(
             "assets/scenarios.toml".into(),
-            "[content]\nid='phoenix-base'\nepoch=1\n".into(),
+            "[content]\nid='phoenix-base'\nepoch=2\n".into(),
         )]),
         packs: Vec::new(),
         base_assets: BTreeMap::new(),

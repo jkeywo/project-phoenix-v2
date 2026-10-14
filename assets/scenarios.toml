@@ -22,7 +22,9 @@
 
 [content]
 id = "phoenix-base"
-epoch = 1
+# Epoch 2 requires explicit Consoles, finite energy profiles and shield-arc equipment.
+# Older packs need conversion in Workshop or their original game version.
+epoch = 2
 
 [[scenario]]
 id = "combat_test"

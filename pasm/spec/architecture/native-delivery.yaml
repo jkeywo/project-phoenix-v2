@@ -61,6 +61,7 @@ entities:
         - "[ai] Enforced at two moments because the two halves are knowable at different ones. The client bundle on disk states its content identity in its own assets/scenarios.toml, so that half is checked at startup and refuses the port; a built bundle cannot state which protocol its WASM holds, so that half is checked per request."
         - "[ai] An unstamped caller is refused rather than assumed compatible, and a manifest with no [content] block stamps the empty identity no real client can match. Both follow #986's existing default: unidentified content refuses rather than silently accepts."
         - "[ai] Protocol is compared before content: a protocol mismatch makes every other field's meaning uncertain, so reporting a content difference first would send an operator after the wrong thing."
+        - "[user] The redesign compatibility boundary is wire protocol 7 and phoenix-base content epoch 2. Incoming energy flow no longer implies weapons restraint; explicit Console ownership, finite energy profiles and shield-arc equipment require converted content. Older peers and packs are refused through the existing stamp checks; conversion must validate definitions before changing their content pin, or use the original game version."
     architecture:
       kind: contract
       authority: authoritative
@@ -78,7 +79,7 @@ entities:
           check_bundle_content,
           client_stamp_from_request,
         ]
-      tests: [cargo test, tests/native_host.rs, crates/phoenix-simulation/src/delivery/stamp_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-simulation/src/delivery/tests.rs]
+      tests: [cargo test, tests/native_host.rs, crates/phoenix-delivery/src/stamp_tests.rs, crates/phoenix-model/src/messages_view_mode_tests.rs, crates/phoenix-delivery/src/tests.rs, tests/client/client-stamp.test.js]
 
   - component: delivery-http-contract
     core:

@@ -2,8 +2,8 @@
 title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
-sources: [tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-10-01
+sources: [crates/phoenix-delivery/src/stamp.rs, crates/phoenix-model/src/messages.rs, assets/scenarios.toml, assets/scenarios.demo.toml, tests/smoke/playwright.config.js, tests/smoke/serve.json, Trunk.toml, scripts/build-client.mjs, scripts/generate-debug-surfaces.mjs, scripts/check-deploy-headers.mjs, gui/debug-surfaces.generated.js, gui/vendor/README.md, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
+updated: 2026-10-14
 ---
 
 # Build & Deployment
@@ -207,6 +207,14 @@ Windows prompts to allow it through the firewall on first run. Pass
   signalling goes through the rendezvous service exactly as in a browser.
   Either way there is no TLS or auth — LAN or behind something else, never a
   public address.
+
+The current delivery stamp is `7/phoenix-base/2`, declared by
+`crates/phoenix-model/src/messages.rs` and both scenario manifests. Protocol 7
+separates incoming energy flow from explicit weapons restraint. Content epoch 2
+requires the Console, finite-energy and shield-arc definitions; older packs need
+those definitions converted and validated before updating their pin, or their
+original game version. The existing stamp checks refuse older clients, bundles
+and packs before treating their data as compatible.
 
 The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON

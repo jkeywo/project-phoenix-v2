@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { observationDetails } from '../observation-details.js';
 import {
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
@@ -165,6 +166,7 @@ export class PhRepairTeams extends PhElement {
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="teams-container"></div>
+  <div id="observation-reports"></div>
 `;
   }
 
@@ -484,6 +486,18 @@ export class PhRepairTeams extends PhElement {
   #render() {
     const s = this.#state || {};
     const teams = Array.isArray(s.teams) ? s.teams : [];
+    const reports = this.shadowRoot.getElementById('observation-reports');
+    const open = new Set([...reports.querySelectorAll('details[open]')].map(row => row.dataset.report));
+    reports.replaceChildren();
+    for (const report of s.reports || []) {
+      for (const [index, observation] of (report.observations || []).entries()) {
+        const row = observationDetails(this.ownerDocument, observation, s.observation_tick);
+        row.dataset.report = `${JSON.stringify(report.group)}:${index}`;
+        row.open = open.has(row.dataset.report);
+        row.querySelector('summary').textContent = `${report.station_label ? t(report.station_label) : t('observation.source.unknown')} · ${t('observation.details')}`;
+        reports.append(row);
+      }
+    }
     const auto = !!s.auto;
     const external = s.external_dispatch || null;
     const container = this.shadowRoot.getElementById('teams-container');

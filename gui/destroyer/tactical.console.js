@@ -47,7 +47,7 @@ export const renderStation = makeTacticalRender({
     // here — and independent of who currently hosts Comms (issue #1098).
     const dossierEl = doc.getElementById('dossier-panel');
     const dossiers = s.dossiers || [];
-    if (dossierEl) dossierEl.state = { dossiers };
+    if (dossierEl) dossierEl.state = { dossiers, observation_tick: s.observation_tick };
 
     // The Intel tab's unread badge (issue #1373). Reading is what clears it, so
     // the baseline is taken while the panel is actually OPEN — console-core

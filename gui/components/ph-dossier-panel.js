@@ -25,6 +25,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { observationDetails } from '../observation-details.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
@@ -169,6 +170,7 @@ export class PhDossierPanel extends PhElement {
       this.#pendingRecord = null;
     }
     const body = this.shadowRoot.getElementById('body');
+    const openDetails = new Set([...body.querySelectorAll('details[open]')].map(row => row.dataset.record));
     body.innerHTML = '';
 
     const listPane = document.createElement('div');
@@ -190,6 +192,7 @@ export class PhDossierPanel extends PhElement {
       if (this.#dossiers.length > 0) this.#renderSheetPrompt(sheetPane);
     }
     body.appendChild(sheetPane);
+    for (const details of body.querySelectorAll('.observation-details')) details.open = openDetails.has(details.dataset.record);
   }
 
   /** @param {HTMLElement} pane */
@@ -295,13 +298,15 @@ export class PhDossierPanel extends PhElement {
       heading.className = 'heading';
       heading.textContent = t('component.dossier.gathered');
       block.appendChild(heading);
-      evidence.forEach((entry) => {
+      evidence.forEach((entry, index) => {
         const row = document.createElement('div');
         row.className = 'entry';
         row.innerHTML = '<div class="text"></div><div class="provenance"></div>';
         row.children[0].textContent = entry.text ? t(entry.text) : '';
         const provenance = PROVENANCE_LABELS[entry.provenance];
         row.children[1].textContent = provenance ? t(provenance) : '';
+        const details = observationDetails(this.ownerDocument, entry.observation, this.state?.observation_tick);
+        details.dataset.record = `${dossier.uuid}:${index}`; row.appendChild(details);
         block.appendChild(row);
       });
       sheet.appendChild(block);

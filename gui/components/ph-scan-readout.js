@@ -30,6 +30,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { observationDetails } from '../observation-details.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { SENSORS_SCAN_ACTION_ID } from '../stations/sensors-actions.js';
 
@@ -151,6 +152,8 @@ export class PhScanReadout extends PhElement {
     const scan = (state && state.scan) || {};
     const reading = scan.reading || null;
     const body = this.shadowRoot.getElementById('body');
+    const oldDetails = body.querySelector('.observation-details');
+    const detailsOpen = oldDetails?.open && oldDetails.dataset.subject === reading?.subject_uuid;
     const reasonEl = this.shadowRoot.getElementById('reason');
     const button = this.shadowRoot.getElementById('action');
 
@@ -249,6 +252,9 @@ export class PhScanReadout extends PhElement {
         rows.appendChild(this.#row(t(label), String(amount), false));
       }
       body.appendChild(rows);
+      const details = observationDetails(this.ownerDocument, reading.observation, scan.observation_tick,
+        Number.isFinite(reading.condition_fraction) ? { condition_fraction: 'component.scan.condition' } : {});
+      details.dataset.subject = reading.subject_uuid || ''; details.open = !!detailsOpen; body.appendChild(details);
     }
 
     // A refusal and a reading are never both current: the server clears one

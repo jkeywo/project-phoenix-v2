@@ -1,3 +1,4 @@
+import { observationTickFor } from './observation-details.js';
 import { consoleReadState } from './console-topology.js';
 /**
  * gui/console-state.js — Pure state builder functions for HTML console iframes.
@@ -1627,6 +1628,8 @@ export function buildRepairConsoleState(state, systemIds = []) {
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems, bb.repair_groups);
     return {
       teams,
+      reports: bb.queue_depth || [],
+      observation_tick: observationTickFor(state, entry.systemId),
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
       damageable_systems:   damageableSystems,
@@ -1882,8 +1885,10 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  * @param {{ blackboards }} state
  */
 function scanPayload(state) {
-  const bb = blackboardOfKind(state, 'Scan')?.data || {};
+  const entry = blackboardOfKind(state, 'Scan');
+  const bb = entry?.data || {};
   return {
+    observation_tick: observationTickFor(state, entry?.systemId),
     capable: bb.capable ?? false,
     reading: bb.reading ?? null,
     refusal: bb.refusal ?? null,
@@ -1896,7 +1901,8 @@ function scanPayload(state) {
  *           regions, complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state, systemIds = []) {
-  const bb = blackboardOfKind(state, 'Sensors', systemIds)?.data;
+  const sensorEntry = blackboardOfKind(state, 'Sensors', systemIds);
+  const bb = sensorEntry?.data;
   const overrides = bb?.contact_overrides || {};
   const classifications = bb?.contact_classifications || {};
   const reports = bb?.contact_reports || {};
@@ -2060,6 +2066,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     ),
     blips,
     target_uuid:        state.sensorsTarget || null,
+    observation_tick: observationTickFor(state, sensorEntry?.systemId),
     target_report:      selectedReport ? reports[state.sensorsTarget] || null : null,
     target_name:        facts.target_name,
     target_kind:        facts.target_kind,
@@ -2512,6 +2519,7 @@ export function buildSystemStationConsoleState(stationId, state) {
   // `own_hull` below, for the same reason: every system-composed station gets
   // it, whether or not it renders it.
   return {
+    observation_tick: observationTickFor(state, blackboardOfKind(state, 'Dossiers')?.systemId),
     station_id: stationId,
     system_ids: ids,
     system_families: projectSystemFamilies(ids, state),

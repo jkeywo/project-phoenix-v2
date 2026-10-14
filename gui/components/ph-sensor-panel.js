@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { observationDetails } from '../observation-details.js';
 import { renderSensorReport } from '../sensor-report.js';
 import { PhElement, phDefine } from './ph-element.js';
 
@@ -114,6 +115,15 @@ export class PhSensorPanel extends PhElement {
 
     const hasTarget = !!s.target_uuid;
     renderSensorReport(root.getElementById("sensor-report"), hasTarget ? s.target_report : null);
+    const previousDetails = root.querySelector('.observation-details');
+    const report = hasTarget ? s.target_report : null;
+    const detailsOpen = previousDetails?.open && previousDetails.dataset.subject === s.target_uuid;
+    previousDetails?.remove();
+    if (report) {
+      const details = observationDetails(this.ownerDocument, report.observation, s.observation_tick);
+      details.dataset.subject = s.target_uuid || ''; details.open = !!detailsOpen;
+      root.getElementById('sensor-report').after(details);
+    }
     this.#noTargetEl.style.display = hasTarget ? 'none' : '';
     this.#targetCardEl.style.display = hasTarget ? '' : 'none';
     root.getElementById('target-area').dataset.hasTarget = String(hasTarget);

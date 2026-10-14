@@ -91,6 +91,8 @@ export class ClientSimState {
     const consoleImportance = preserveAuthorityProjection ? this.consoleImportance : {};
     const stationPuppets = preserveAuthorityProjection ? this.stationPuppets : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
+    this.observationTick = preserveAuthorityProjection ? this.observationTick ?? null : null;
+    this.observationGeneration = preserveAuthorityProjection ? this.observationGeneration ?? null : null;
     this.world = defaultWorld();
     this.crewSpectator = preserveAuthorityProjection ? this.crewSpectator : null;
     /** 'Auto' | 'Manual' */
@@ -342,6 +344,14 @@ export class ClientSimState {
         break;
       case 'SimState': {
         const snap = d.snapshot || {};
+        const observedNow = Number.isSafeInteger(snap.observation_tick) && snap.observation_tick >= 0 ? snap.observation_tick : null;
+        const observationGeneration = Number.isSafeInteger(snap.observation_generation) && snap.observation_generation >= 0 ? snap.observation_generation : null;
+        const knownGeneration = Math.max(this.observationGeneration ?? -1, this.consoleScopeGeneration ?? -1,
+          ...Object.values(this.blackboardPresentation || {}).filter(Number.isSafeInteger));
+        if (observedNow !== null && observationGeneration !== null && observationGeneration >= knownGeneration && (observationGeneration !== this.observationGeneration || observedNow >= (this.observationTick ?? -1))) {
+          this.observationTick = observedNow;
+          this.observationGeneration = observationGeneration;
+        }
         this.consoleHosts = Object.fromEntries((snap.console_hosts || []).filter(Boolean).map(entry => [entry.console, entry]));
         this.consoleViews = snap.console_views || {};
         this.systemStatus = snap.system_status || {};
@@ -404,6 +414,8 @@ export class ClientSimState {
         break;
       case 'ReturnedToLobby':
       case 'GameStarted':
+        this.observationTick = null;
+        this.observationGeneration = null;
         // These are the real round boundaries. Welcome is instead the
         // reconnect handshake for a peer already in the current round.
         this.consoleHosts = {};
@@ -676,9 +688,10 @@ export class ClientSimState {
             ? d.console_scope_tick : null;
           // Scoped authority is ordered by the host's existing continuation and tick.
           if (generation === null || tick === null) break;
-          const latestGeneration = Math.max(this.consoleScopeGeneration ?? -1,
+          const latestGeneration = Math.max(this.consoleScopeGeneration ?? -1, this.observationGeneration ?? -1,
             ...Object.values(this.blackboardPresentation).filter(Number.isSafeInteger));
           if (generation < latestGeneration || (generation === this.consoleScopeGeneration && tick < this.consoleScopeTick)) break;
+          if (this.observationGeneration !== null && generation > this.observationGeneration) this.observationTick = null;
           this.consoleScopeGeneration = generation;
           this.consoleScopeTick = tick;
           for (const systemId of Object.keys(this.blackboards)) {

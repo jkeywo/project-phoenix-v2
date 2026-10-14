@@ -4766,3 +4766,21 @@ workshop.ship.ai.tree,Workshop System AI state-tree editor,Referenced tree,Refer
 workshop.ship.ai.bind,Workshop System AI state-tree editor,Bind parameter,Parameter binden,Bind parameter,machine
 workshop.ship.ai.state,Workshop System AI state-tree editor,Target state,Zielzustand,Target state,machine
 workshop.ship.ai.rebinding,Workshop AI channel binding notice,Renaming a component command channel also updates this System AI in a local override.,Das Umbenennen eines Komponenten-Befehlskanals aktualisiert auch diese System-KI in einer lokalen Überschreibung.,Renaming a component command channel also updates this System AI in a local override.,machine
+observation.unknown,Common recorded observation details,Unknown,Unbekannt,Unknown,machine
+observation.details,Common recorded observation details,Observation details,Beobachtungsdetails,Observation details,machine
+observation.source,Common recorded observation details,Source,Quelle,Source,machine
+observation.sample,Common recorded observation details,Observed,Beobachtet,Observed,machine
+observation.receipt,Common recorded observation details,Received,Empfangen,Received,machine
+observation.age,Common recorded observation details,Sample age,Alter der Beobachtung,Sample age,machine
+observation.precision,Common recorded observation details,Precision,Genauigkeit,Precision,machine
+observation.tick,Common recorded observation details,Tick {tick},Tick {tick},Tick {tick},machine
+observation.ticks,Common recorded observation details,{ticks} ticks,{ticks} Ticks,{ticks} ticks,machine
+observation.qualitative,Common recorded observation details,Qualitative; no numeric precision,Qualitativ; keine numerische Genauigkeit,Qualitative; no numeric precision,machine
+observation.quantized,Common recorded observation details,{field}: step {step},{field}: Schrittweite {step},{field}: step {step},machine
+observation.source.unknown,Common recorded observation details,Unknown source,Unbekannte Quelle,Unknown source,machine
+observation.source.scan,Common recorded observation details,Scan,Scan,Scan,machine
+observation.source.evidence,Common recorded observation details,Evidence,Beleg,Evidence,machine
+observation.source.sensors_report,Common recorded observation details,Sensors report,Sensorbericht,Sensors report,machine
+observation.source.system_report,Common recorded observation details,System report,Systembericht,System report,machine
+observation.source.repair_team,Common recorded observation details,Repair team,Reparaturteam,Repair team,machine
+observation.source.repair_diagnosis,Common recorded observation details,Repair diagnosis,Reparaturdiagnose,Repair diagnosis,machine

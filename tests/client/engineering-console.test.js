@@ -96,6 +96,7 @@ describe('cruiser engineering renderStation', () => {
     expect(el('repair-teams').state).toEqual({
       teams: [{ id: 't1' }], auto: true, summary, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }],
+      reports: [], observation_tick: undefined,
       external_dispatch: null,
     });
   });

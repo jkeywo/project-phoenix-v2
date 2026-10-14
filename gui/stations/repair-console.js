@@ -61,6 +61,8 @@ export function makeRepairRender(variant) {
     if (teamsEl) {
       teamsEl.state = {
         teams: s.teams || [],
+        reports: s.reports || [],
+        observation_tick: s.observation_tick,
         auto: !!s.repair_auto,
         summary: !!s.repair_summary,
         targets: s.dispatch_targets || [],

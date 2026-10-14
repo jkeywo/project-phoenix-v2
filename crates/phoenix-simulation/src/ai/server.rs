@@ -1104,9 +1104,9 @@ fn lod_ai_ships(
                     // reset — `ai_policy_state_tick` then puts the machine in
                     // the policy's authored initial state on its first run.
                     //
-                    // Power AI is stateless since issue #784 (the
-                    // `PowerAiPolicy` is attached at spawn, not LOD-scoped), so
-                    // no per-fidelity power state is in the set.
+                    // Power's per-System tree program and private continuation
+                    // remain attached across fidelity changes; promotion does
+                    // not replace its controller or reset its work.
                     commands
                         .entity(entity)
                         .insert(ai_high_fidelity_components());

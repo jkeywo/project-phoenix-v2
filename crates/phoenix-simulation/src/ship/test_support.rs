@@ -48,7 +48,14 @@ pub fn test_app() -> App {
             )
                 .chain(),
         )
-        .add_plugins(ShipPlugin);
+        .add_plugins(ShipPlugin)
+        .add_plugins(crate::ship::power::ShipPowerPlugin)
+        .add_plugins(crate::infrastructure::server::InfrastructurePlugin);
+    use crate::sim_rng::InstallSimRng;
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
+        417,
+        crate::sim_rng::SeedSource::World,
+    ));
     // ShipPlugin owns the generic delayed router, while production registers
     // this typed consumer through HelmPlugin. Keep the test twin's historical
     // end-to-end Helm coordination behavior without pulling in Helm's publisher
@@ -190,8 +197,43 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
             ),
         ])),
         crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
-        crate::ship::power::PowerAiPolicy(policy("power")),
         crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),
+    ));
+    // Power's declaration is the actual hull's closed System tree, with the
+    // same finite hardware and stock owners that physical consumers use.
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shared fixture's authored Battleship composes");
+    let ship_definition = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .expect("the fixture carries its authored ownership")
+        .0
+        .clone();
+    let hardware = authored
+        .energy
+        .expect("the fixture hull declares finite energy hardware");
+    let trees = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(
+        &ship_definition,
+        Some(&hardware),
+    )
+    .expect("the fixture's authored System trees compile against actual hardware");
+    let power = crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship_definition)
+        .expect("the fixture's actual energy profile matches its System identities");
+    app.world_mut().entity_mut(ship).insert((
+        crate::ship::power::ShipPowerSystem(power),
+        crate::entities::spawner::EntityUuid("shared-ship-fixture".into()),
+        crate::resources::server::ResourceServices(authored.resource_services),
+        crate::infrastructure::InfrastructureCondition(
+            crate::infrastructure::InfrastructureState::from_config(
+                authored
+                    .infrastructure
+                    .as_ref()
+                    .expect("the fixture has physical coolant stock"),
+            ),
+        ),
+        trees,
     ));
     app.world_mut().entity_mut(ship).insert((
         crate::ship::sensors::SensorsTargetSelector {

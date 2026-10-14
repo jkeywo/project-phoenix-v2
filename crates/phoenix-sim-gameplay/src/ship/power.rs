@@ -44,41 +44,6 @@ impl Default for PowerMultiplierResource {
     }
 }
 
-/// Per-ship inline stateless Power allocation policy (issue #784).
-///
-/// From the ship's `[power.ai_policy]` block when authored, otherwise the
-/// canonical [`crate::entities::config::default_power_ai_config`] policy
-/// (which reproduces the retired stateful engine's helm←thrust / weapons←red
-/// alert behaviour with reserve guards). Read by
-/// `console_ai::server::ai_power_allocation`, which for each of the ship's
-/// AUTHORED power groups resolves that group's channel over an immutable
-/// per-tick fact snapshot and emits the winning `set_power_group_allocation`
-/// verb's absolute level as an admitted `SetPowerGroupAllocation` — the same
-/// admitted command a human Power operator sends.
-///
-/// This RETIRES the bespoke stateful `PowerAiConfigResource` +
-/// `ShipPowerAiState` (`EngageState` hysteresis) from #762: the decision is now
-/// a pure function of the per-tick snapshot, with no private timer state
-/// (AGENTS.md rule #7). Attached to every ship at spawn (player + NPC).
-#[derive(Component, Clone, Debug, Default)]
-pub struct PowerAiPolicy(pub crate::ai::policy::AiPolicy);
-
-/// Per-ship multiplier on the shared AI base cadence for `[power.ai_policy]`
-/// (issue #889's PASM-tracked runtime gap: `evaluate_every_ticks` was parsed
-/// and validated but no host read it). `ai_power_allocation` decides on every
-/// Nth arm of the shared `ai_tick_ready` latch rather than every arm.
-///
-/// A sibling component to [`PowerAiPolicy`] rather than a field ON it (or on
-/// the shared [`crate::ai::policy::AiPolicy`] type itself): dozens of call
-/// sites across the crate construct an `AiPolicy` by literal, and this way
-/// wiring Power's cadence costs one small component instead of touching every
-/// one of them, most of which do not (yet) need per-host cadence at all.
-///
-/// `1` — the parse default, and what every shipped hull authors today — means
-/// "every arm", identical to behaviour before this component existed.
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct PowerAiCadence(pub u32);
-
 /// Seed the immutable per-tick fact snapshot the Power allocation policy
 /// resolves each authored power group's channel against (issue #784).
 ///

@@ -1248,8 +1248,7 @@ pub struct CommsTargetSelector {
 /// Holds the ship's inline stateless [`crate::ai::policy::AiPolicy`], decoded
 /// from the authored `[comms_console.ai]` block and resolved once per open
 /// dialogue by [`operate_comms_response_ai`] on the single `comms_respond`
-/// channel. Mirrors [`crate::ship::shields::ShieldsFocusAiPolicy`] /
-/// `PowerAiPolicy`.
+/// channel. Other policy-based hosts own their declarations independently.
 ///
 /// Since #885b stage 5d there is no synthesised default behind it: a ship
 /// without the component answers nothing.
@@ -1262,10 +1261,8 @@ pub struct CommsResponseAiPolicy(pub crate::ai::policy::AiPolicy);
 /// every Nth arm of the shared `ai_tick_ready` latch rather than every arm.
 ///
 /// A sibling component to [`CommsResponseAiPolicy`] rather than a field on it
-/// (or on the shared [`crate::ai::policy::AiPolicy`] type), for the same
-/// reason `PowerAiCadence` sits beside `PowerAiPolicy`: dozens of call sites
-/// across the crate build an `AiPolicy` by literal, and a sibling component
-/// keeps wiring one host's cadence from touching all of them.
+/// (or on the shared [`crate::ai::policy::AiPolicy`] type): this host's cadence
+/// remains independent of the declaration shared by other policy consumers.
 ///
 /// `1` — the parse default, and what every shipped hull authors today — means
 /// "every arm", identical to behaviour before this component existed.

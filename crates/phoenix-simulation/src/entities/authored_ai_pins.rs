@@ -203,7 +203,6 @@ fn authored_policies(c: &EntityConfig) -> Vec<(String, FineSystemAiConfigToml)> 
             .as_ref()
             .and_then(|x| x.ai_policy.as_ref()),
     );
-    push("power", c.power.as_ref().and_then(|x| x.ai_policy.as_ref()));
     push(
         "torpedo_magazine",
         c.torpedoes.as_ref().and_then(|t| t.ai.as_ref()),
@@ -382,11 +381,6 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // recovery travel machine (issue #1539), on both movement axes.
     ("dynasty_player_cruiser", "engines"),
     ("dynasty_player_cruiser", "steering"),
-    // Its fourth power channel charges the strike reserve while boost is off,
-    // then yields that allocation during a paid strike or at full reserve.
-    // Ordinary helm and weapons bids remain, but this is deliberately not the
-    // fleet battery policy and is measured by the #1550 seeded duel matrix.
-    ("dynasty_player_cruiser", "power"),
     // …and NOT the three tubes the ring exists to point, which is worth a note
     // because they were listed here for one release (issue #929).
     //
@@ -540,55 +534,6 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // acquired the returning-fire rule would be a civilian craft that goes to
     // battlestations, and only this list would notice.
     ("ship_civilian_hauler", "captain"),
-    // ── The reactors whose drive is not gated by the alert ───────────────────
-    //
-    // These five author `power` inline and their `helm` ELEVATE reads
-    // `thrust >= thrust_threshold and battery_pct >= min_restore_helm`, and the
-    // HOLD above it reads `battery_pct >= min_reserve_helm` instead — both with
-    // NO `red_alert` term; the fleet baseline's carries one on both. That guard
-    // exists because `plan_helm_travel` commands near-max throttle for any ordinary
-    // transit, so an ungated rule holds an Alliance hull's drive elevated for
-    // its whole cruise and browns the reactor out with no combat involved.
-    //
-    // The reactor arithmetic is NOT what distinguishes them, and it is worth
-    // saying so because an earlier revision of this note claimed it was. An
-    // Alliance hull authors the same canonical trio at `helm 2 + weapons 2 +
-    // shields 2` = 6; four of these five author no `[power_groups.*]` at all, so
-    // `PowerSystem::from_authored_groups` falls back to `seeded_with_defaults`
-    // and seeds that same trio at level 2 — also 6. `ship_harrow_patrol` authors
-    // the same trio explicitly since #1398 (at the same levels, with
-    // `min_level = 0` on weapons so a scenario can take its guns cold), so the
-    // seeded total is 6 either way. Elevating helm puts BOTH at 7, and
-    // `PowerSystem::tick` indexes
-    // `config.rates[total - 3]`, which is -2 on the fleet baseline's
-    // `[5, 4, 3, 2, -2, -5]` and -2 on the patrol's `[6, 5, 4, 2, -2, -6]`
-    // alike. The same three groups cost the same drain either way.
-    //
-    // What distinguishes them is WHEN THE ALERT IS UP. An Alliance captain
-    // raises it on first contact (#912), so an alert-gated helm rule still
-    // releases the drive for the whole engagement. These five author the
-    // returning-fire rule ONLY — their captains raise the alert inside a short
-    // `combat_window_secs` of the last exchange of fire and stand it down
-    // otherwise, which is also why their guns are always-armed
-    // (`min_alert_to_fire = 0`, see the gun line above). A Harrow spends almost
-    // all of its life in transit with the alert down, so inheriting the guard
-    // would pin its drive at 2 for exactly the leg that needs it and release it
-    // only once the shooting had already started.
-    //
-    // These entries were first added by #923 with a different reason (the
-    // `sensors` channel the Alliance baseline then carried). #955 removed that
-    // channel again, so the departure is now the helm guard alone — a narrower
-    // claim, and the one that is actually true of the shipped files.
-    //
-    // Listed in the direction that keeps the entry meaningful: if one of these
-    // quietly acquires the alert guard its transit doctrine has changed and only
-    // this list notices, and if an Alliance hull quietly loses it the unanimity
-    // requirement notices instead.
-    ("ship_harrow_cruiser", "power"),
-    ("ship_harrow_destroyer", "power"),
-    ("ship_harrow_patrol", "power"),
-    ("ship_harrow_warhawk", "power"),
-    ("ship_requiem_courier", "power"),
 ];
 
 fn is_bespoke(hull: &str, slot: &str) -> bool {
@@ -597,7 +542,7 @@ fn is_bespoke(hull: &str, slot: &str) -> bool {
 
 /// **The replacement for the deleted not-equal-to-the-synthesiser assertion.**
 ///
-/// For every one of the fifteen policy kinds: the hulls NOT on
+/// For every one of the fourteen remaining policy kinds: the hulls NOT on
 /// [`BESPOKE_DOCTRINES`] must all author the identical configuration (that is
 /// the fleet baseline), and every hull that IS on the list must differ from it.
 #[test]
@@ -681,7 +626,7 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
          anything."
     );
 
-    // The fifteen policy kinds are all represented, so no kind slipped out of
+    // The fourteen remaining policy kinds are all represented, so no kind slipped out of
     // the comparison by having no authored block anywhere.
     let kinds: Vec<&str> = kinds_seen.keys().map(|s| s.as_str()).collect();
     assert_eq!(
@@ -695,7 +640,6 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
             "impulse",
             "lateral",
             "phaser_bank",
-            "power",
             "shields_focus",
             "steering",
             "torpedo_magazine",
@@ -703,7 +647,7 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
             "vertical",
             "weapons_doctrine",
         ],
-        "all fifteen policy kinds must be authored somewhere in the fleet, or a kind \
+        "all fourteen remaining policy kinds must be authored somewhere in the fleet, or a kind \
          is being compared against nothing"
     );
 }
@@ -2554,354 +2498,144 @@ fn the_composed_battleship_holds_its_impulse_drive_idle() {
     );
 }
 
-/// Power: the elevate rules need BOTH their trigger and their battery reserve;
-/// the hold rules need the channel to be elevated ALREADY; the baseline rules
-/// hold the line whenever a battery reading exists at all.
-///
-/// The brownout property is structural rather than a separate branch: an elevate
-/// guard cannot fire below its reserve, so allocation never rises when the
-/// battery cannot sustain it.
-///
-/// Since issue #1003 each channel carries two floors instead of one, and the
-/// hysteresis section at the bottom is where the pair earns its keep: between
-/// them the answer depends on `fact(power_<group>)` — where the channel already
-/// is — and on nothing else.
+/// The physical Power controller is the hull's supported closed System tree.
+/// Its ordinary healthy/recovery outputs must fit that same finite hardware;
+/// old pooled allocations and legacy policy declarations are not a second AI.
 #[test]
-fn power_guard_truth_table() {
-    let p = fleet_baseline_policy("power");
-    let thrust_threshold = param(&p, "thrust_threshold");
-    let helm_reserve = param(&p, "min_reserve_helm");
-    let helm_restore = param(&p, "min_restore_helm");
-    let weapons_reserve = param(&p, "min_reserve_weapons");
-    let weapons_restore = param(&p, "min_restore_weapons");
-
-    let elevated = |level: u8| Some(AiPolicyVerb::SetPowerGroupAllocation(level));
-    let (hi, lo) = (3u8, 2u8);
-
-    // ── helm ────────────────────────────────────────────────────────────────
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve + 30.0)
-            ])
-        ),
-        elevated(hi),
-        "red alert, sustained thrust AND battery above the helm reserve ⇒ elevate."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve + 30.0)
-            ])
-        ),
-        elevated(lo),
-        "same thrust and battery, but away from red alert ⇒ baseline. \
-         `plan_helm_travel` commands near-max thrust for ordinary transit, not just \
-         combat manoeuvring, so without this guard a cruising ship held the elevated \
-         allocation for its whole transit and browned out with no combat involved."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve - 20.0)
-            ])
-        ),
-        elevated(lo),
-        "red alert and thrust, battery BELOW the reserve ⇒ the elevate guard reads \
-         false and helm holds baseline. This is the brownout guard, and it is the \
-         reserve param that enforces it — not a global emergency branch."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold - 0.5),
-                ("battery_pct", helm_reserve + 30.0)
-            ])
-        ),
-        elevated(lo),
-        "thrust below the threshold ⇒ baseline, however full the battery, even at \
-         red alert."
-    );
-
-    // ── weapons ─────────────────────────────────────────────────────────────
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_reserve + 70.0)])
-        ),
-        elevated(hi),
-        "red alert AND battery above the weapons restore floor ⇒ elevate."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_reserve - 5.0)])
-        ),
-        elevated(lo),
-        "red alert but battery below the weapons reserve ⇒ baseline."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[("red_alert", 0.0), ("battery_pct", weapons_reserve + 70.0)])
-        ),
-        elevated(lo),
-        "no red alert ⇒ baseline."
-    );
-
-    // ── the hysteresis band, on both channels (issue #1003) ─────────────────
-    //
-    // Between a channel's shed floor and its restore floor the two rules
-    // disagree, and `fact(power_<group>)` is the tie-break. Every row below
-    // holds the battery at the SAME charge and changes only where the channel
-    // already is — which is exactly the property a single-threshold ladder
-    // cannot express, and the reason it flips at tick rate.
-    assert!(
-        helm_reserve < helm_restore && weapons_reserve < weapons_restore,
-        "each channel must restore above where it sheds ({helm_reserve}/{helm_restore}, \
-         {weapons_reserve}/{weapons_restore}), or there is no band to test"
-    );
-    let helm_band = (helm_reserve + helm_restore) / 2.0;
-    let weapons_band = (weapons_reserve + weapons_restore) / 2.0;
-
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_band),
-                ("power_helm", 3.0)
-            ])
-        ),
-        elevated(hi),
-        "in the band, helm ALREADY at 3 ⇒ the hold rule keeps it there. Shedding \
-         here would give the point back ten percent above the authored floor."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_band),
-                ("power_helm", 2.0)
-            ])
-        ),
-        elevated(lo),
-        "same charge, helm already SHED ⇒ baseline. It may not come back until \
-         `min_restore_helm`, which is what stops the shed and the re-elevate \
-         landing on one number and flipping every tick."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("battery_pct", weapons_band),
-                ("power_weapons", 3.0)
-            ])
-        ),
-        elevated(hi),
-        "in the band, weapons ALREADY at 3 ⇒ hold."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("battery_pct", weapons_band),
-                ("power_weapons", 2.0)
-            ])
-        ),
-        elevated(lo),
-        "same charge, weapons already SHED ⇒ baseline. This is the rung the \
-         battery actually oscillates on, so this is the row that matters."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[
-                ("red_alert", 0.0),
-                ("battery_pct", weapons_band),
-                ("power_weapons", 3.0)
-            ])
-        ),
-        elevated(lo),
-        "the hold rule carries the SAME trigger clauses as the elevate: holding is \
-         not a licence to keep the point once the alert is down."
-    );
-
-    // ── the exact boundary, on all four authored floors (issue #1003) ───────
-    //
-    // Every row above sits well clear of a floor; these sit exactly ON one, in
-    // both directions. Evaluated against the DECODED policy via the facts bag
-    // directly, like the rest of this test, rather than through the reactor's
-    // own `battery_pct` computation — that widens an f32 quotient before
-    // comparing, which is not the same number as a `param()` read as f64 when
-    // the assertion depends on landing exactly on the line.
-    let eps = 1e-6;
-
-    // helm SHED floor: the hold rule's guard is `>=`, so exactly on the floor
-    // still holds; one epsilon under it, the channel sheds.
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve),
-                ("power_helm", 3.0)
-            ])
-        ),
-        elevated(hi),
-        "helm already elevated, battery exactly ON the {helm_reserve} shed floor \
-         ⇒ the `>=` hold guard still reads true."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_reserve - eps),
-                ("power_helm", 3.0)
-            ])
-        ),
-        elevated(lo),
-        "helm already elevated, battery one epsilon BELOW the {helm_reserve} \
-         shed floor ⇒ sheds."
-    );
-
-    // helm RESTORE floor: the elevate rule's guard is also `>=`.
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_restore)
-            ])
-        ),
-        elevated(hi),
-        "helm not yet elevated, battery exactly ON the {helm_restore} restore \
-         floor ⇒ the `>=` elevate guard reads true and it climbs."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "helm",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("thrust", thrust_threshold + 0.2),
-                ("battery_pct", helm_restore - eps)
-            ])
-        ),
-        elevated(lo),
-        "helm not yet elevated, battery one epsilon BELOW the {helm_restore} \
-         restore floor ⇒ stays at baseline."
-    );
-
-    // weapons SHED floor.
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("battery_pct", weapons_reserve),
-                ("power_weapons", 3.0)
-            ])
-        ),
-        elevated(hi),
-        "weapons already elevated, battery exactly ON the {weapons_reserve} \
-         shed floor ⇒ holds."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[
-                ("red_alert", 1.0),
-                ("battery_pct", weapons_reserve - eps),
-                ("power_weapons", 3.0)
-            ])
-        ),
-        elevated(lo),
-        "weapons already elevated, battery one epsilon BELOW the \
-         {weapons_reserve} shed floor ⇒ sheds."
-    );
-
-    // weapons RESTORE floor.
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_restore)])
-        ),
-        elevated(hi),
-        "weapons not yet elevated, battery exactly ON the {weapons_restore} \
-         restore floor ⇒ climbs."
-    );
-    assert_eq!(
-        resolve(
-            &p,
-            "weapons",
-            &facts(&[("red_alert", 1.0), ("battery_pct", weapons_restore - eps)])
-        ),
-        elevated(lo),
-        "weapons not yet elevated, battery one epsilon BELOW the \
-         {weapons_restore} restore floor ⇒ stays at baseline."
-    );
-
-    // ── the absent-battery edge, on both channels ───────────────────────────
-    for channel in ["helm", "weapons"] {
-        assert_eq!(
-            resolve(&p, channel, &facts(&[])),
-            None,
-            "{channel}: with NO `battery_pct` reading even the baseline rule's guard \
-             reads false, so the channel resolves to `None` and the group HOLDS its \
-             seeded level. A zero-valued `min_reserve_baseline` does not make the \
-             baseline rule unconditional — it still requires the fact to be PRESENT."
+fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
+    use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
+    use std::collections::BTreeMap;
+    let mut checked = 0;
+    for (stem, hull) in ai_hulls() {
+        let Some(hardware) = hull.energy.as_ref() else {
+            continue;
+        };
+        assert!(
+            hull.power
+                .as_ref()
+                .is_none_or(|power| power.ai_policy.is_none()),
+            "{stem}: no competing legacy policy"
         );
+        let ship = hull.ship_config.as_ref().unwrap();
+        let reactor = ship
+            .systems
+            .iter()
+            .find(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+            .expect("physical hardware has a reactor System")
+            .id
+            .clone();
+        let (programs, mut frames) =
+            crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
+                .unwrap();
+        let mut physical = crate::modifiers::power_system::PowerSystem::from_energy(
+            hardware.clone(),
+            ship.clone(),
+        )
+        .unwrap();
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            reactor.clone(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        for (tick, recovering) in [(0, false), (1, true)] {
+            let mut readings = BTreeMap::from([
+                (
+                    "reactor_reserve_fraction".into(),
+                    if recovering { 0.0 } else { 0.75 },
+                ),
+                (
+                    "reactor_heat_fraction".into(),
+                    if recovering { 0.9 } else { 0.0 },
+                ),
+                (
+                    "output_actual".into(),
+                    hardware.reactor.initial_output_per_sec as f64,
+                ),
+            ]);
+            for group in &hardware.groups {
+                readings.insert(
+                    format!("reserve-{}", group.id.0),
+                    if recovering { 0.0 } else { 1.0 },
+                );
+                readings.insert(
+                    format!("heat-{}", group.id.0),
+                    if recovering { 0.9 } else { 0.0 },
+                );
+            }
+            let TreeHostOutcome::Evaluated(result) = decide_tree_with_numbers(
+                &sources,
+                &reactor,
+                programs.0.get(&reactor),
+                &BTreeMap::new(),
+                &readings,
+                &BTreeMap::new(),
+                frames.0.get_mut(&reactor).unwrap(),
+                tick,
+            )
+            .unwrap() else {
+                panic!("{stem}: actual authored Power tree must execute");
+            };
+            assert_eq!(
+                result.numeric_intents["reactor-output"] as f32,
+                hardware.reactor.sustainable_output_per_sec,
+                "{stem}: output remains hardware sustainable"
+            );
+            assert_eq!(
+                result.numeric_intents["reactor-cooling"] as f32,
+                if recovering {
+                    hardware.reactor.max_cooling_per_sec
+                } else {
+                    hardware.reactor.default_cooling_per_sec
+                }
+            );
+            assert!(result
+                .numeric_intents
+                .values()
+                .all(|value| value.is_finite() && *value >= 0.0));
+            for group in &hardware.groups {
+                let flow = result.numeric_intents[&format!("flow-{}", group.id.0)] as f32;
+                let cooling = result.numeric_intents[&format!("cooling-{}", group.id.0)] as f32;
+                assert_eq!(
+                    flow,
+                    if recovering {
+                        group.max_flow_per_sec
+                    } else {
+                        group.default_flow_per_sec
+                    },
+                    "{stem}/{}: reserve recovery uses authored flow",
+                    group.id.0
+                );
+                assert_eq!(
+                    cooling,
+                    if recovering {
+                        group.max_cooling_per_sec
+                    } else {
+                        group.default_cooling_per_sec
+                    },
+                    "{stem}/{}: heat recovery uses authored cooling",
+                    group.id.0
+                );
+                physical.set_flow(&group.id, flow).unwrap();
+                physical.set_cooling(&group.id, cooling).unwrap();
+            }
+        }
+        let consumer = hardware
+            .consumers
+            .iter()
+            .find(|consumer| consumer.continuous_cost_per_sec > 0.0)
+            .unwrap();
+        let before = physical.network().consumers[&consumer.system].energy;
+        let grant = physical
+            .work_continuous(&consumer.system, 0.2, 1.0)
+            .unwrap();
+        assert_eq!(
+            grant.fraction, 1.0,
+            "{stem}: the actual local reserve funds work"
+        );
+        assert!(physical.network().consumers[&consumer.system].energy < before);
+        checked += 1;
     }
-
-    // ── a group the policy never names ──────────────────────────────────────
-    assert_eq!(
-        resolve(
-            &p,
-            "sensors",
-            &facts(&[("battery_pct", 80.0), ("red_alert", 1.0), ("thrust", 1.0)])
-        ),
-        None,
-        "`sensors` is not named, so it resolves to `None` and holds whatever level the \
-         reactor seeded — no matter how favourable the facts."
-    );
+    assert!(checked > 0, "the pin must execute real shipped Power trees");
 }
 
 /// The offensive-weapon RED-ALERT fire gate, on all three fire channels, in
@@ -3951,7 +3685,6 @@ fn boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it() {
         "torpedo_tube",
         "torpedo_magazine",
         "shields_focus",
-        "power",
     ] {
         assert!(
             !fleet_baseline_policy(kind).idle,
@@ -4013,24 +3746,33 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
             checked += 1;
         }
     }
+    let tree_slots: usize = ai_hulls()
+        .iter()
+        .map(|(_, hull)| {
+            hull.ship_config
+                .as_ref()
+                .into_iter()
+                .flat_map(|ship| &ship.systems)
+                .filter(|system| {
+                    system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
+                        && system
+                            .config
+                            .as_ref()
+                            .and_then(|value| value.get("ai"))
+                            .is_some()
+                })
+                .count()
+        })
+        .sum();
     assert_eq!(
-        checked, 186,
-        "the fifteen policy kinds account for 186 of the fleet's 251 AI-capable \
-         fine-system slots (the other 65 are the selectors). A change in this number \
-         means a hull, weapon or kind moved. 186-of-251 since #1521, which added the \
-         THIRTEENTH AI-bearing hull — `dynasty_player_cruiser`, seventeen inherited \
-         policy slots and five selectors; 169-of-229 since #1163, which added the \
-         ELEVENTH and TWELFTH AI-bearing hulls — `ship_harrow_tug` and \
-         `alliance_tender`, eleven policy slots and five selectors EACH, both fully \
-         composed from the fleet baseline with no bespoke captain; 147-of-197 since \
-         #1028, which added the TENTH AI-bearing hull — `ship_civilian_hauler`, \
-         eleven policy slots and five selectors, every one of them composed from the \
-         fleet baseline except its stand-down captain; 136-of-181 since #956, which \
-         added the ship-level `weapons_doctrine` kind — one slot on each of the nine \
-         AI-bearing hulls; 127-of-172 after #954 moved the three-weapon RNG-coverage \
-         escort out of `assets/entities/` to the test-fixture directory, and \
-         141-of-191 before that."
+        checked, 173,
+        "fourteen remaining policy kinds retain their authored declarations"
     );
+    assert_eq!(
+        tree_slots, 13,
+        "the former per-hull Power policy slots remain declared as actual System trees"
+    );
+    assert_eq!(checked + tree_slots, 186, "the Power migration changes controller family without dropping a declaration; the other 65 fleet slots are selectors");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

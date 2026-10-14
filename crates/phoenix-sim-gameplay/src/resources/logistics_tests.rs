@@ -50,6 +50,7 @@ fn fixture() -> (
                 source: None,
                 target: 4,
                 reserve: 0,
+                priority: 0,
             },
             ManagedStoreConfig {
                 id: "magazine".into(),
@@ -61,6 +62,7 @@ fn fixture() -> (
                 source: Some("hold".into()),
                 target: 6,
                 reserve: 0,
+                priority: 0,
             },
         ],
         storage: vec![
@@ -80,6 +82,7 @@ fn fixture() -> (
             max_active: 2,
             max_batch: 3,
             units_per_sec: 2.0,
+            reorder_fraction: 1.0,
         }],
     };
     let definitions = BTreeMap::from([
@@ -543,6 +546,7 @@ fn shared_bay_accounting_counts_other_resources_and_incoming_without_mirrors() {
         source: None,
         target: 0,
         reserve: 0,
+        priority: 0,
     });
     profile
         .endpoints
@@ -592,18 +596,70 @@ fn authoring_refuses_duplicate_locations_wrong_local_owner_and_nonfinite_limits(
     handling.id = profile.handling().system.clone();
     handling.kind = LOGISTICS_KIND.into();
     ship.systems.push(handling);
-    for mode in 0..5 {
+    for mode in 0..8 {
         let mut config = profile.config.clone();
         match mode {
             0 => config.stores[1].endpoint = config.stores[0].endpoint.clone(),
             1 => config.stores[1].system = Some(profile.handling().system.clone()),
             2 => config.handling[0].units_per_sec = f32::NAN,
             3 => config.stores[1].target = 7,
-            _ => config.stores[1].source = Some("missing".into()),
+            4 => config.stores[1].source = Some("missing".into()),
+            5 => config.handling[0].reorder_fraction = f32::NAN,
+            6 => config.handling[0].reorder_fraction = -0.1,
+            _ => config.handling[0].reorder_fraction = 1.1,
         }
         assert!(
             CompiledLogistics::compile(&config, &ship, profile.graph(), profile.endpoints())
                 .is_err()
         );
     }
+}
+
+#[test]
+fn priority_edits_and_json_continuation_preserve_committed_jobs_and_require_exact_store_keys() {
+    let (mut profile, _, mut stocks) = fixture();
+    profile.config.stores[0].priority = 7;
+    let mut state = LogisticsState::new(&profile);
+    assert_eq!(state.priorities["hold"], 7);
+    dispatch(&profile, &mut state, &mut stocks, 1);
+    let jobs = state.batches.clone();
+    let stock_before = stocks.clone();
+    state.set_priority(&profile, "hold", 0).unwrap();
+    state.set_priority(&profile, "magazine", u16::MAX).unwrap();
+    assert_eq!(state.batches, jobs);
+    assert_eq!(stocks, stock_before);
+    let unchanged = state.clone();
+    assert!(state.set_priority(&profile, "absent", 1).is_err());
+    assert_eq!(state, unchanged);
+    let restored: LogisticsState =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(state, restored);
+    restored.validate(&profile, &stocks).unwrap();
+    let mut bad = restored.clone();
+    bad.priorities.remove("hold");
+    assert!(bad.validate(&profile, &stocks).is_err());
+    let mut bad = restored;
+    bad.priorities.insert("foreign".into(), 0);
+    assert!(bad.validate(&profile, &stocks).is_err());
+}
+
+#[test]
+fn old_authored_policy_defaults_are_explicit_and_new_values_stay_closed() {
+    let (profile, _, _) = fixture();
+    let mut authored = serde_json::to_value(profile.config()).unwrap();
+    for store in authored["store"].as_array_mut().unwrap() {
+        store.as_object_mut().unwrap().remove("priority");
+    }
+    authored["handling"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("reorder_fraction");
+    let old: LogisticsConfig = serde_json::from_value(authored.clone()).unwrap();
+    assert!(old.stores.iter().all(|store| store.priority == 0));
+    assert_eq!(old.handling[0].reorder_fraction, 1.0);
+    authored["store"][0]["priority"] = serde_json::json!(65536);
+    assert!(serde_json::from_value::<LogisticsConfig>(authored.clone()).is_err());
+    authored["store"][0]["priority"] = serde_json::json!(2);
+    authored["handling"][0]["unrestricted_policy"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<LogisticsConfig>(authored).is_err());
 }

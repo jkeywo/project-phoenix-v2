@@ -62,6 +62,7 @@ fn fixture() -> Fixture {
             source: None,
             target: 0,
             reserve: 0,
+            priority: 0,
         });
     }
     stores.push(ManagedStoreConfig {
@@ -74,6 +75,7 @@ fn fixture() -> Fixture {
         source: Some("hold".into()),
         target: 6,
         reserve: 0,
+        priority: 0,
     });
     let config = LogisticsConfig {
         stores,
@@ -98,6 +100,7 @@ fn fixture() -> Fixture {
             max_active: 2,
             max_batch: 3,
             units_per_sec: 2.0,
+            reorder_fraction: 1.0,
         }],
     };
     let stocks = BTreeMap::from([

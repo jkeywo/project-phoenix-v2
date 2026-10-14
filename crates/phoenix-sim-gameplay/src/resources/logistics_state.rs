@@ -46,6 +46,7 @@ pub struct LogisticsState {
     pub last_tick: u64,
     pub goals: BTreeMap<String, i64>,
     pub floors: BTreeMap<String, i64>,
+    pub priorities: BTreeMap<String, u16>,
     pub batches: BTreeMap<JobId, DeliveryBatch>,
     pub blocked: BTreeMap<JobId, DeliveryBlock>,
     pub last_outcome: Option<DeliveryOutcome>,
@@ -83,6 +84,12 @@ impl LogisticsState {
                 .iter()
                 .map(|s| (s.id.clone(), s.reserve))
                 .collect(),
+            priorities: profile
+                .config
+                .stores
+                .iter()
+                .map(|s| (s.id.clone(), s.priority))
+                .collect(),
             batches: BTreeMap::new(),
             blocked: BTreeMap::new(),
             last_outcome: None,
@@ -109,6 +116,16 @@ impl LogisticsState {
     ) -> Result<(), String> {
         self.check_amount(profile, store, value)?;
         self.floors.insert(store.into(), value);
+        Ok(())
+    }
+    pub fn set_priority(
+        &mut self,
+        profile: &CompiledLogistics,
+        store: &str,
+        priority: u16,
+    ) -> Result<(), String> {
+        profile.store(store)?;
+        self.priorities.insert(store.into(), priority);
         Ok(())
     }
     fn check_amount(
@@ -399,6 +416,7 @@ impl LogisticsState {
             || self.batches.len() > usize::from(profile.handling().max_active)
             || self.goals.keys().cloned().collect::<BTreeSet<_>>() != keys
             || self.floors.keys().cloned().collect::<BTreeSet<_>>() != keys
+            || self.priorities.keys().cloned().collect::<BTreeSet<_>>() != keys
         {
             return Err(
                 "logistics continuation identity or goal set differs from authored profile".into(),

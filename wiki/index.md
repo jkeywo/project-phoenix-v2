@@ -43,7 +43,7 @@ Current implementation orientation only. For intended design use
 - [Stations](./concepts/stations.md)
 - [System Addressing](./concepts/coarse-system-migration.md)
 - [Captain Plugin](./concepts/captain-plugin.md)
-- [Power Plugin](./concepts/power-plugin.md)
+- [Power Runtime](./concepts/power-plugin.md)
 - [Damage and Repair Runtime](./concepts/damage-and-repair-intent.md)
 - [Repair Plugin](./concepts/repair-plugin.md)
 - [Recorded Observations](./concepts/recorded-observations.md)

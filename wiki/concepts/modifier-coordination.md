@@ -3,7 +3,7 @@ title: Modifier Coordination
 type: concept
 tags: [modifiers, power, regions, impulse, collision, repair]
 sources: [crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/snapshot/mod.rs]
-updated: 2026-10-12
+updated: 2026-10-14
 ---
 
 # Modifier Coordination
@@ -14,11 +14,14 @@ updated: 2026-10-12
 
 `crates/phoenix-sim-gameplay/src/modifiers/cache.rs` owns storage, recomputation, and snapshot representation. `ModifierCoordinationPlugin` in `crates/phoenix-sim-gameplay/src/modifiers/coordination.rs` owns adapters for sources that otherwise would write the cache directly:
 
-- reactor allocation produces speed, yaw, phaser-damage, and shield-regeneration modifiers;
-- active impulse produces its authored speed multiplier;
+- damage produces equipment penalties;
+- retired allocation and unconditional impulse contributions are cleared;
 - region enter/exit observers add or remove radar, speed, and yaw effects.
 
-Impulse translation visits every ship, including ships projected remotely by a GM. It derives the speed modifier from that ship's current drive phase and authored multiplier on each pass; unchanged entries emit no duplicate events. Snapshot restoration rebuilds this derived modifier before the first resumed physics tick, including removal of a stale bootstrap impulse bonus.
+Actual impulse and boost effects are resolved with their local energy grants by
+physics. The compatibility translator clears the former unconditional speed
+contribution, including after snapshot restore. Allocation never amplifies a
+modifier slot; machinery consumes actual energy at its owning work boundary.
 
 Each adapter updates only its own source keys. Removing one effect recomputes the slot from the remaining contributions. Float bonuses sum first: a nonnegative sum produces `1 + sum`, while a negative sum produces `1 / (1 + abs(sum))`. Integer bonuses sum directly. Replacing or removing one source therefore preserves the other sources' contributions.
 

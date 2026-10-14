@@ -32,11 +32,17 @@ commits both ends conservatively. Infrastructure adjustments retain their
 existing drain, counter publication and threshold events; ammunition movement
 uses the magazine owner. The transaction view lasts only for that drain.
 
-Snapshot 42/rules 0.14 preserve stocks, claims and fractional flow carry.
+Snapshot 43/rules 0.15 preserve stocks, claims and fractional flow carry.
 Preflight validates tube identity, capacity, timers and claim relationships
 before writes. Resource digests include magazine/tube commitments and facility
 stocks. Other weapon effect state retains its existing deferred fold boundary.
 Services are rederived authored configuration. Protocol and transport are unchanged.
+
+Umbilical resource selection is an admitted setting limited to authored choices;
+its selected service and fractional progress survive continuation. Coolant uses
+real capacity stocks through these same service/transfer mechanisms. The energy
+owner retains only already-withdrawn fractional credit and queues actual debits.
+Pending paid torpedo bursts still occupy magazine space until emitted.
 
 Workshop's Composition resource panel edits stocks, magazine quantity, services
 and consumer links through ordinary validation, source history, export/reload,

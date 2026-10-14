@@ -28,6 +28,13 @@ over ammunition. These shared mechanisms introduce no new combat controller.
 - **Blasters:** straight, non-homing projectile volleys. Each bank predicts target motion at firing time, may require holding to charge, then fires its configured volley; bolts have their own speed, range-derived lifetime, collision radius, damage, and shield pierce.
 - **Torpedoes:** guided, proximity-detonating projectiles. Tubes have arcs and load state, share a magazine, and snapshot damage/pierce at launch.
 
+Preparation and sustained beams spend affordable continuous local energy; an
+instant firing step pays every simultaneous barrel/projectile before ammo,
+cooldown or effects change. Pending torpedo burst rounds remain physical onboard
+commitments until emitted. Zero intake does not silence a charged weapon.
+Explicit Tactical restraint and scenario hold/release orders share one canonical
+intent; AI reads it through its permitted Console publication.
+
 Torpedo ammunition now uses [shared resource stocks](resource-stores.md): loading claims a round, completion consumes it into the tube, and cancellation releases it. The existing readout remains available magazine quantity. Configured docked replenishment honours tube-held space.
 
 All three are ship-specific TOML capabilities. Tactical receives configured arcs plus live bank/tube state; the current weapons target is shared by player controls, Backfill, the Tactical blackboard, and the viewscreen projection. Current limitations and future work belong in PASM and GitHub rather than this navigation page.

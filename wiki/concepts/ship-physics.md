@@ -3,7 +3,7 @@ title: Ship Physics
 type: concept
 tags: [ship, physics, rapier, controller, pure-function]
 sources: [crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/state.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/server_app/registration.rs, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-27
+updated: 2026-10-14
 ---
 
 # Ship Physics
@@ -30,9 +30,10 @@ pose into `Transform` before Rapier sync.
 Each hull's `[helm_console]` supplies forward/reverse caps, acceleration,
 deceleration, yaw rate, low-speed turn boost, and lateral tuning. The spawner
 copies those values into a per-entity physics-config component; only fixtures
-or unauthored fallbacks use `ShipPhysicsConfig::new()`. Impulse, boost, power,
-damage, and other modifiers produce an effective config before the pure kernel
-runs. Collider shape and dimensions are likewise authored on the entity, not
+or unauthored fallbacks use `ShipPhysicsConfig::new()`. Damage and environment produce the effective equipment configuration.
+Each active axis, impulse and boost then receives its affordable local-reserve
+work grant before the pure kernel runs. Incoming allocation itself is not an
+output multiplier. Collider shape and dimensions are likewise authored on the entity, not
 fixed by this module.
 
 ## Behaviour rules
@@ -44,8 +45,9 @@ fixed by this module.
 - Steering uses the authored yaw rate, optionally boosted at low speed. Lateral
   and permitted vertical axes are independently rate-limited.
 - Destroyed fine helm actuators contribute zero new intent, while damaged
-  engines scale forward thrust. Power, impulse, boost, and modifier effects are
-  folded before integration.
+  engines scale forward thrust. Paid impulse/boost work and independent axis grants
+  limit new actuation without erasing intent or existing inertia. Distant AI
+  movement pays the same local reserves, including a reversal through zero.
 - `handle_collisions` sorts contacts deterministically, stops forward motion,
   separates the hull using authored collider geometry, and applies
   shield/hull damage from the captured impact speed.

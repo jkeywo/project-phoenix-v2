@@ -1,0 +1,57 @@
+{
+  "increment": 8,
+  "scope": "Targeted native migration and changed-path validation; not a full integration or playable-exit receipt",
+  "tested_revision": "bcc38afdc8563ce41ab015a89bbf3c9f6157f5b1",
+  "revision_composition": "29a41137 plus precision prerequisite 498359d1 replayed as bcc38afd",
+  "worktree": ".phoenix/worktrees/increment-8-owner-validation",
+  "source_status_at_execution": "clean",
+  "cargo_target_dir": "C:/Coding/project-phoenix-v2/target",
+  "source_provenance": {
+    "refreshed_lib_mtimes_without_byte_changes": ["phoenix-model", "phoenix-sim-contracts", "phoenix-sim-gameplay", "phoenix-sim-session", "phoenix-sim-world", "phoenix-simulation"],
+    "evidence": "Build log explicitly recompiles these packages from the pinned worktree; dependency records use relative crate paths, with absolute fixture paths on some records. No concurrent Cargo workload was authorized."
+  },
+  "runs": [
+    {
+      "command": "cargo test -p project-phoenix --no-default-features --features headless --no-fail-fast --test dynasty_backfill --test headless_runner --test publisher_ordering -- authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers seeded_duel_uses_finite_energy_and_mapped_power_tree_continuation a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes --test-threads=1",
+      "exit_code": 101,
+      "passed": 3,
+      "failed": 5,
+      "counting": "Eight selected top-level cases; the publisher test's failing subprocess child is not double counted.",
+      "log": ".phoenix/increment-8-changed-paths-retry.log",
+      "log_sha256": "f0ce8ca5ff587b4568c47a282fb8e9b0845214bcddcde8ea1e71d557f796ceb0",
+      "passed_cases": ["seeded_duel_uses_finite_energy_and_mapped_power_tree_continuation", "explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire", "capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage"],
+      "failed_cases": [
+        {"test": "authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers", "finding": "Uncrewed phase reached 12000 frames without a peer digest mismatch, but only one boost enable and no depletion/recovery; original activity assertion remains failed. The human phase was not reached."},
+        {"test": "phaser_cycle_jitter_is_assigned_by_ship_identity_on_both_peers", "finding": "No mismatched compared cycles, but both ships did not expose simultaneous live cycles within the new 120-frame precondition. This does not prove the required two-ship assignment."},
+        {"test": "a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it", "finding": "Standing coupling is absent at resumed-work assertion. Subsequent source inspection identifies the fixture's unpowered move to x4000 exceeding the authored 600 range; independent range interruption must be separated before claiming resumption."},
+        {"test": "two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it", "finding": "A redock helper precondition fails with disabled mate intent and an active undock target. Cause remains under investigation."},
+        {"test": "three_publishers_preserve_maps_consumers_and_wire_under_declared_order_registration_changes", "finding": "Historical frozen owner lookup cannot resolve the moved energy_publication publisher. Symbol mapping and actual ordering proof remain to reconcile."}
+      ]
+    },
+    {
+      "command": "cargo test -p phoenix-sim-gameplay --lib fractional_coolant_credit_survives_json_continuation_bit_for_bit -- --test-threads=1",
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "log": ".phoenix/increment-8-fractional-credit-owner.log",
+      "log_sha256": "048d9cad1a635a345b6ef345fbbcf34d6913fd72e62b3f35e4fe992c08c3844c"
+    }
+  ],
+  "prior_owner_evidence": {
+    "revision": "360a5c991df35d5fc22f0ec232980f035719a50b",
+    "package": "phoenix-simulation",
+    "configuration": "--lib --no-default-features, targeted owner filters, one test thread",
+    "passed": 151,
+    "failed": 0,
+    "ignored": 0,
+    "log": ".phoenix/increment-8-targeted-migration-owner-confirmed.log",
+    "log_sha256": "8abd3fc3b06c7c2b8f26ff26800186f5ce54dfffa3f31246f98a0c10fc686274",
+    "scope": "Declaration manifest20, flag hosts29, authored Power1, strict/stateless2, modifier coordination31, Sensors62, six previously failing shield-arc weapon fixtures6. Does not claim a fresh full weapon suite."
+  },
+  "limits": [
+    "This is historical Increment 8 source, protocol6/content epoch1/snapshot43/rules0.15; current integrated protocol7/content epoch2 requires its own evidence.",
+    "Five selected tests remain unresolved. No full-suite, final default-feature, native visual/human, balance, or complete playable-exit claim is made.",
+    "No thresholds, timing windows or assertions were weakened for this retry."
+  ]
+}

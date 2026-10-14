@@ -801,7 +801,14 @@ pub fn test_app_with_engine_hull() -> App {
             )
                 .chain(),
         )
-        .add_plugins(ShipPlugin);
+        .add_plugins(ShipPlugin)
+        .add_plugins(crate::ship::power::ShipPowerPlugin)
+        .add_plugins(crate::infrastructure::server::InfrastructurePlugin);
+    use crate::sim_rng::InstallSimRng;
+    app.insert_sim_rng(crate::sim_rng::SimRng::new(
+        417,
+        crate::sim_rng::SeedSource::World,
+    ));
     app.add_systems(
         FixedUpdate,
         crate::console::helm::server::receive_helm_coordination
@@ -889,6 +896,9 @@ pub fn test_app_with_engine_hull() -> App {
         HelmWaypointClearance::default(),
         crate::ai::server::ObjectiveCursors::default(),
     ));
+    // Human engine work uses the same finite local reserves and physical
+    // coolant services as the general fixture; no missing-owner free thrust.
+    attach_shipped_ai_declarations(&mut app, ship);
     app
 }
 

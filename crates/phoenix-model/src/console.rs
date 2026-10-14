@@ -15,6 +15,8 @@ pub struct ConsoleHostSnapshot {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsoleWorkingView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy_depth: Option<crate::energy::EnergyControlDepth>,
     pub inspected_record: Option<uuid::Uuid>,
     pub comms_thread: Option<String>,
     pub overlay: Option<String>,

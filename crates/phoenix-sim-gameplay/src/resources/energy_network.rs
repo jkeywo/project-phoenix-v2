@@ -10,22 +10,7 @@ use crate::ship::config::ShipConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EnergyAllocationMode {
-    #[default]
-    Manual,
-    Minimal,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CoolingUsage {
-    None,
-    #[default]
-    Low,
-    High,
-}
+pub use phoenix_model::energy::{CoolingUsage, EnergyAllocationMode};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -17,4 +17,5 @@ pub mod system_status;
 
 pub mod observation;
 
+pub mod energy;
 pub mod job;

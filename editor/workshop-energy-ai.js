@@ -1,7 +1,7 @@
 /** Generate supported authored Power nodes. Execution stays with ordinary System AI. */
 export function configuredPowerTree(profile) {
   if (!profile?.reactor || !Array.isArray(profile.group)) throw new Error('Power AI requires an energy hardware profile.');
-  const literal = (id, channel, value) => ({ id, action: { kind: 'write_number', channel, value } });
+  const literal = (id, channel, value) => ({ id, action: { kind: 'write_number', channel, value: Math.fround(value) } });
   const when = (name, comparison, value) => [{ value: { source: 'number_compare', name, comparison, value }, equals: true }];
   const tasks = [
     literal('output', 'reactor-output', profile.reactor.sustainable_output_per_sec),

@@ -2105,6 +2105,30 @@ pub enum SystemControlPayload {
         group: PowerGroupId,
         level: u8,
     },
+    SetEnergyReactor {
+        output_per_sec: f32,
+        cooling_per_sec: f32,
+    },
+    SetEnergyGroup {
+        group: PowerGroupId,
+        flow_per_sec: f32,
+        cooling_per_sec: f32,
+    },
+    SetEnergyPriority {
+        group: PowerGroupId,
+        priority: u16,
+    },
+    SetEnergyMode {
+        mode: crate::energy::EnergyAllocationMode,
+        cooling_usage: crate::energy::CoolingUsage,
+    },
+    SetEnergySystemFlow {
+        system: SystemId,
+        flow_per_sec: Option<f32>,
+    },
+    SetWeaponsRestraint {
+        held: bool,
+    },
     Hail {
         target_uuid: String,
     },
@@ -4335,6 +4359,10 @@ pub struct ShieldArcBlackboard {
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
+    #[serde(default)]
+    pub weapons_restrained: bool,
+    #[serde(default)]
+    pub weapons_restraint_auto: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strike_reserve: Option<StrikeReserveBlackboard>,
     /// The ship's **Combat Lock**, read from its own frozen
@@ -5047,6 +5075,8 @@ pub struct DossierEvidenceSnapshot {
 /// blackboard (issue #561).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct PowerBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy: Option<crate::energy::PowerEnergyBlackboard>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strike_reserve: Option<StrikeReserveBlackboard>,
     /// Per-power-group allocation entries, keyed on `PowerGroupId` (data-driven

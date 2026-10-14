@@ -278,59 +278,105 @@
     },
     {
       "id": 22,
-      "title": "Reusable situations and consequences",
+      "title": "Authored mission planning, scheduling and execution",
       "status": "pending",
       "depends_on": [
         21
       ],
-      "completion": "Existing objectives/scripts gain reusable workflows and typed consequences while scenarios work and GM remains optional.",
-      "evidence": []
+      "completion": "Reusable activity contracts, partial-order HTN domains and crew-aware temporal scheduling execute through independent situations, Scenario trees and ordinary jobs. Authored missions support sequential or concurrent work, committed deadlines, plan repair and Workshop inspection.",
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-22.md"
+      ],
+      "subincrements": [
+        {
+          "id": "22A",
+          "title": "Activity contracts and situation execution",
+          "status": "pending"
+        },
+        {
+          "id": "22B",
+          "title": "HTN domains and reusable libraries",
+          "status": "pending"
+        },
+        {
+          "id": "22C",
+          "title": "Crew-aware temporal scheduling",
+          "status": "pending"
+        },
+        {
+          "id": "22D",
+          "title": "Monitoring, repair and authoring",
+          "status": "pending"
+        }
+      ]
     },
     {
       "id": 23,
-      "title": "Authored continuing modes",
+      "title": "Continuing modes and persistent mission consequences",
       "status": "pending",
       "depends_on": [
         22
       ],
-      "completion": "Authored Patrol, then War, then Sandbox integrate transit, meaningful persistence, servicing, history and debrief.",
-      "evidence": [],
+      "completion": "Authored Patrol, then War, then Sandbox retain real assets, commitments and consequences across encounters. Capture, service, vessel return and evacuation prove persistence, actual transport, outside-actor outcomes and correct objective credit.",
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-23.md"
+      ],
       "subincrements": [
         {
-          "id": "23.1",
-          "title": "Authored Patrol run",
-          "status": "pending",
-          "depends_on": [
-            "22"
-          ]
+          "id": "23A",
+          "title": "Persistent commitments and entity relationships",
+          "status": "pending"
         },
         {
-          "id": "23.2",
-          "title": "Authored War run",
-          "status": "pending",
-          "depends_on": [
-            "23.1"
-          ]
+          "id": "23B",
+          "title": "Authored Patrol demonstration",
+          "status": "pending"
         },
         {
-          "id": "23.3",
-          "title": "Authored Sandbox sector",
-          "status": "pending",
-          "depends_on": [
-            "23.2"
-          ]
+          "id": "23C",
+          "title": "Authored War",
+          "status": "pending"
+        },
+        {
+          "id": "23D",
+          "title": "Authored Sandbox",
+          "status": "pending"
         }
       ]
     },
     {
       "id": 24,
-      "title": "Generation and final integration",
+      "title": "Opportunity discovery, adaptive direction and final integration",
       "status": "pending",
       "depends_on": [
         23
       ],
-      "completion": "Generation and bounded Director follow authored examples; coarse planetary activities and catalogue/Workshop/seat-experience audits complete.",
-      "evidence": []
+      "completion": "Bounded GOAP-like search combines existing activity operators around authored goals, admitting feasible optional opportunities into HTN missions. Adapt unannounced work within pacing bounds; preserve commitments and earned advantages. Complete planetary, catalogue, Workshop and 2/4/6/8-seat audits.",
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-24.md"
+      ],
+      "subincrements": [
+        {
+          "id": "24A",
+          "title": "Opportunity discovery",
+          "status": "pending"
+        },
+        {
+          "id": "24B",
+          "title": "Admission into the HTN",
+          "status": "pending"
+        },
+        {
+          "id": "24C",
+          "title": "Bounded live pacing",
+          "status": "pending"
+        },
+        {
+          "id": "24D",
+          "title": "Diagnostics, continuation and final integration",
+          "status": "pending"
+        }
+      ]
     }
   ],
   "provisional_items": [

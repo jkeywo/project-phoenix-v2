@@ -312,9 +312,10 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "22 — Reusable situations and consequences"
-      summary: "Existing objectives/scripts gain reusable workflows and typed consequences while scenarios work and GM remains optional."
+      title: "22 — Authored mission planning, scheduling and execution"
+      summary: "Reusable activity contracts, partial-order HTN domains and crew-aware temporal scheduling execute through independent situations, Scenario trees and ordinary jobs. Authored missions support sequential or concurrent work, committed deadlines, plan repair and Workshop inspection."
       rationale:
+        - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-22.md. Future design only; prior increments and current execution status are unchanged."
         - "Starts after increment 21 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
@@ -325,9 +326,10 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "23 — Authored continuing modes"
-      summary: "Authored Patrol, then War, then Sandbox integrate transit, meaningful persistence, servicing, history and debrief."
+      title: "23 — Continuing modes and persistent mission consequences"
+      summary: "Authored Patrol, then War, then Sandbox retain real assets, commitments and consequences across encounters. Capture, service, vessel return and evacuation prove persistence, actual transport, outside-actor outcomes and correct objective credit."
       rationale:
+        - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-23.md. Future design only; prior increments and current execution status are unchanged."
         - "Starts after increment 22 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
@@ -338,9 +340,10 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "24 — Generation and final integration"
-      summary: "Generation and bounded Director follow authored examples; coarse planetary activities and catalogue/Workshop/seat-experience audits complete."
+      title: "24 — Opportunity discovery, adaptive direction and final integration"
+      summary: "Bounded GOAP-like search combines existing activity operators around authored goals, admitting feasible optional opportunities into HTN missions. Adapt unannounced work within pacing bounds; preserve commitments and earned advantages. Complete planetary, catalogue, Workshop and 2/4/6/8-seat audits."
       rationale:
+        - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-24.md. Future design only; prior increments and current execution status are unchanged."
         - "Starts after increment 23 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone

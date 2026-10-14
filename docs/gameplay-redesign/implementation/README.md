@@ -7,6 +7,18 @@ complete [migration ledger](./migration-ledger.json). The
 [mechanism reconciliation](../architecture/feature-reconciliation.html) and
 [architecture decisions](../architecture/README.md) constrain implementation.
 
+## Revised future increments 22–24
+
+Approved 14 October 2026. These plans replace the earlier summaries for 22–24;
+increments 0–21, current implementation progress and outstanding acceptance remain
+unchanged. Plan documents in the ledger are design references, not passed evidence.
+
+- [22 — Authored mission planning, scheduling and execution](increment-22.md): activity contracts, HTN libraries, crew-aware scheduling and monitored execution.
+- [23 — Continuing modes and persistent mission consequences](increment-23.md): authored Patrol, War and Sandbox with enduring assets and commitments.
+- [24 — Opportunity discovery, adaptive direction and final integration](increment-24.md): bounded GOAP-like opportunity search feeding the HTN, live pacing and original final audits.
+
+The architecture direction is recorded in [mission planning decisions](../architecture/README.md#mission-planning-increments-22-24) and the [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).
+
 ## Working contract
 
 Implement one increment at a time. Each changed capability includes authored

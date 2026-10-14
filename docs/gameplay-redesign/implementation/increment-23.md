@@ -1,0 +1,88 @@
+# Increment 23 — Continuing modes and persistent mission consequences
+
+Approved future plan, 14 October 2026. Start after [increment 22](increment-22.md)'s
+verified playable exit. Preserve the existing programme gates and increments 0–21.
+See [architecture decisions](../architecture/README.md#mission-planning-increments-22-24)
+and [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).
+
+## Playable exit
+
+Authored Patrol, then War, then Sandbox use mission planning across encounters,
+retaining real assets and obligations through transit, servicing and save/resume.
+These authored examples establish acceptance cases for later opportunity search.
+
+## 23A — Persistent commitments and entity relationships
+
+Bind plans/situations to stable entities and durable outcomes. Ownership/control,
+custody, objective participation and factual history retain their authoritative
+owners. Plans refer to that state rather than copying inventories or conditions.
+
+Distinguish tentative proposals, revealed offers, accepted commitments and completed
+outcomes. Track ongoing escort, passenger and repair demands in future scheduling.
+A captured vessel retains actual damage, equipment, crew requirements and capacity
+after its originating situation finishes. Revalidate shared assets: incompatible
+transport assignments cannot both claim the same vessel's capacity.
+
+Persist bindings and commitment transitions through existing save infrastructure.
+Cancellation follows physical work rules; it does not teleport passengers, refund
+consumed stock or remove a ship. Avoid duplicate completion effects after restore.
+
+**Exit:** a situation ends while its vessel and obligations remain available to a
+later situation; shared-resource conflict and restoration cases are demonstrated.
+
+## 23B — Authored Patrol demonstration
+
+Author a security encounter with capture, negotiated and refusal outcomes. Provide
+alternative opportunities to return the vessel to port or use it for civilian
+evacuation. Both require actual preparation, transport and reception. Account for
+unavailability, destruction and abandonment, including passengers already aboard.
+
+These branches are authored, not generated. Reveal opportunities through ordinary
+observations, Comms and optional objectives, with plausible sources of information.
+Do not add an omniscient opportunity board. Acceptance is a commitment, not an
+automatic command to operate human-owned Systems. Refusal leaves a coherent mission.
+
+**Exit:** capture, service and reuse a ship across encounters; complete either
+return or evacuation, and resume during transport without changing asset identity.
+
+## 23C — Authored War
+
+After Patrol passes, introduce competing commitments, faction objectives and causal
+service dependencies using the same contracts. Outside actors resolve or change
+needs through actual work. Reconcile changed needs with existing independent
+objective-instance membership and completion-credit rules; a world change alone
+does not grant every crew objective credit.
+
+**Exit:** an outside actor resolves a need before the player arrives; the mission
+updates coherently, physical state is conserved and completion credit is correct.
+
+## 23D — Authored Sandbox
+
+After War passes, support persistent actors and assets with optional activities and
+no compulsory overarching mission sequence. Retain servicing, transit, factual
+history and debrief. Report completed, declined and partial outcomes only to the
+extent known to the crew. A lack of accepted work is valid, not an execution error.
+
+**Exit:** players can refuse offers, keep or transfer assets and continue play with
+consistent obligations and history through multiple sessions.
+
+## Authoring, acceptance and handoff
+
+Workshop supports authoring continuing-mode goals and bindings, inspecting durable
+commitments and testing the Patrol/War/Sandbox sequences through ordinary document
+history, validation, export/reload and disposable Test. Inspect entity references
+and ongoing work separately from private situation progression.
+
+- Resume before/after capture, offer, acceptance, embarkation and delivery.
+- Verify passenger/resource conservation, ownership and custody transitions.
+- Test conflicting commitments, unavailable ports, destroyed vessels and abandonment.
+- Verify outside-actor work changes needs without duplicate completion or credit.
+- Preserve permitted knowledge, command admission and ordinary individual System AI.
+- Compare combat and non-combat Station participation across supported crew sizes.
+
+Each mode is a separate playable exit, not three unverified features delivered at
+once. Include runtime, authoring, player feedback and deterministic continuation
+with each. Use targeted tests and human playtests, then the established integration
+gates. Hand the working examples and their outcome expectations to
+[increment 24](increment-24.md), which discovers combinations rather than requiring
+a bespoke captured-ship evacuation template.

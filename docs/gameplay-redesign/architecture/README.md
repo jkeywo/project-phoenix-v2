@@ -1108,3 +1108,64 @@ AD58 selects automatic team/delivery routing, and AD75 lets access and containme
 - **B — Permit automatic temporary passage under authored safety rules.** A passage request may cause the responsible controller to reopen and reseal the boundary automatically when its permitted knowledge and authored policy allow it, without a separate decision to lift the sealing order.
 
 **Selected: A.** Automatic routing respects a deliberate seal: reroute or wait and report the blockage. The responsible human or ordinary System AI decides whether to change the sealing order through normal authority. Ordinary permitted doors can still open for routine travel. Further boundary behaviour and implementation details are deferred under the current feature-reconciliation scope.
+
+## Mission planning increments 22–24
+
+User-approved revision, 14 October 2026; future design only. This elaborates AD30–33
+and the bounded Director while preserving their ownership and execution contracts.
+It replaces the earlier workflow-only interpretation of increment 22 and makes
+increment 24's generation include discovery from existing world state.
+
+### HTN composition and execution
+
+Partial-order HTNs select parameterised activities from explicitly imported domain
+libraries. Scenario state trees execute their lifecycles; explicit Rhai calls use
+the established sandbox/effect boundary. Physical work stays with admitted Systems
+and jobs. This does not reverse AD25's independent-job decision or merge private
+controller memory. One owner advances each activity; predicted effects are not
+world facts. Surviving entities and obligations outlive situation completion.
+
+### Scheduling and pressure
+
+Schedule using distinct ship capability, human attention and shared physical
+resource inputs. Occupied Stations expose capability bundles through their hosted
+Consoles; one person's Consoles share attention. Minute buckets forecast workload;
+exact simulation times govern dependencies and deadlines. Larger crews receive
+concurrent meaningful responsibility; combat strength remains separately balanced.
+Planning forecasts do not claim physical stock. Ordinary mechanisms revalidate
+and reserve at execution. Announced/committed deadlines change only through
+in-world causes. Preserve recovery slack and earned advantages. Attention modelling
+does not reintroduce AD74's rejected message-capacity accounting.
+
+### Systemic opportunity discovery
+
+Bounded GOAP-like search combines the same activity operators around authored goals
+and values using actual entities, capabilities and needs. It can discover vessel
+return, repair-and-evacuate or escort opportunities without bespoke templates for
+every combination. Revalidate candidates and admit selected ones as optional HTN
+tasks, revealed through ordinary observations, Comms and objectives. An offer is
+not acceptance; neither planning nor acceptance controls human-owned equipment.
+Hypothetical search does not mutate the world or guarantee player/NPC choices.
+
+The director adapts only unannounced work within authored pacing bounds, considers
+continuing obligations and prefers useful existing entities before new setup.
+Low input activity alone does not establish boredom; delegation does not trigger
+automatic replacement chores. Depth/candidate/expansion bounds and stable ordering
+keep search bounded and deterministic; exhaustion leaves existing execution intact.
+
+### Ownership, persistence and implementation sequence
+
+World owns mission planning/progression, Gameplay owns physical work and Session
+supplies participation/control facts. Simulation connects shared contracts without
+sibling dependencies. Keep authoritative world state, plan forecasts and permitted
+player/AI knowledge separate. Persist commitments, bindings, execution, deadlines,
+director history and necessary search continuation through existing save/digest
+mechanisms. Do not add a parallel network or individual-System controller.
+
+- [Increment 22](../implementation/increment-22.md): contracts, HTN libraries, scheduling, monitored execution and Workshop.
+- [Increment 23](../implementation/increment-23.md): authored Patrol, War and Sandbox; persistent assets and consequences.
+- [Increment 24](../implementation/increment-24.md): opportunity search, admission, live pacing and original final audits.
+
+These documents preserve the programme's playable exits and define acceptance.
+Detailed encodings, solver choice and calibrated tuning are settled before their
+owning runtime increment; estimates are not human-workload measurements.

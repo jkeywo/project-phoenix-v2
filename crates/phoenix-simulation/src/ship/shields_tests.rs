@@ -229,7 +229,7 @@ fn tick_shields_scales_regen_by_the_shield_regen_modifier() {
     let mut boosted_mods = ShipModifiers::new();
     boosted_mods.add_or_update(Modifier {
         source: crate::core::messages::ModifierSource::RegionEffect {
-            uuid: "shield-test-region".into(),
+            uuid: uuid::Uuid::from_u128(417),
         },
         slot: crate::core::messages::ModifierSlot::ShieldRegen,
         bonus: 1.0, // x2.0

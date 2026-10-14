@@ -1,15 +1,14 @@
 entities:
   - component: common-recorded-observation-projection
-    origin: ai
     core:
       status: implemented
       confidence: confirmed
       title: Common Recorded Observation Projection
       summary: "Projects shared subject, provenance, logical sample/receipt ticks and supported uncertainty from existing Scan readings, dossier evidence, held Sensors reports and Repair queue contributors. ConsoleKnowledgeView exposes borrowed metadata through the same owned/typed-feed gate as the record. No new observation store, live-gauge sample timestamps or additional information access."
       rationale:
-        - "Sample time comes from the existing owner, never publication or receipt. Quantization identifies an existing measured field; unspecified uncertainty does not certify a claim."
-        - "RepairRequestQueue retains contributor metadata and recovery watermarks in its existing capture/restore/digest path. Strictly older reports cannot reopen a recovered group; equal-tick damage remains admissible because diagnosis precedes damage sampling."
-        - "Client observation age requires the selected publication's generation to match the logical observation clock. Old snapshots cannot renew or mis-age held records across continuation."
+        - "[ai] Sample time comes from the existing owner, never publication or receipt. Quantization identifies an existing measured field; unspecified uncertainty does not certify a claim."
+        - "[ai] RepairRequestQueue retains contributor metadata and recovery watermarks in its existing capture/restore/digest path. Strictly older reports cannot reopen a recovered group; equal-tick damage remains admissible because diagnosis precedes damage sampling."
+        - "[ai] Client observation age requires the selected publication's generation to match the logical observation clock. Old snapshots cannot renew or mis-age held records across continuation."
     architecture:
       kind: subsystem
       authority: derived

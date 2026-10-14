@@ -84,7 +84,9 @@
       "evidence": [
         "pasm/spec/design/common-observations.yaml",
         "docs/gameplay-redesign/implementation/increment-4.md",
-        "docs/acceptance/1562-common-observations.md"
+        "docs/acceptance/1562-common-observations.md",
+        "docs/gameplay-redesign/implementation/observations-validation.json",
+        "docs/gameplay-redesign/implementation/observations-baseline.md"
       ]
     },
     {

@@ -61,4 +61,4 @@ Operate and delegate Cruiser Dock with an active Transfer objective, reclaim it
 and verify continuation when delegated again. In Workshop inspect the inherited
 Dock tree, materialise and edit it, undo/redo, export/reload, then enter and stop
 disposable Test. Judge whether supported node labels and resolved order are clear.
-Increment 4 has not started.
+The user subsequently authorised Increment 4 while these checks remain open.

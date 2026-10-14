@@ -13791,6 +13791,25 @@ fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() 
         >();
         query.single(app.world()).unwrap().last_hostile_fire_taken
     }
+    fn received_damage(app: &mut App) -> f32 {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<LocalShip>>();
+        let own_uuid = query.single(app.world()).unwrap().0.clone();
+        app.world()
+            .resource::<project_phoenix::core::telemetry::RunTelemetry>()
+            .balance_events
+            .iter()
+            .filter_map(|row| match &row.event {
+                project_phoenix::core::balance::BalanceEvent::DamageApplied {
+                    victim,
+                    amount,
+                    ..
+                } if victim == &own_uuid => Some(*amount),
+                _ => None,
+            })
+            .sum()
+    }
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
 
@@ -13825,11 +13844,21 @@ fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() 
     // "nothing has been fired since", which is what a stopped gun means.
     run(&mut app, ticks_for_sim_seconds(1.0, dt));
     let held_incoming = incoming_fire(&mut app).expect("the picket attacked the crew before hold");
+    let held_damage = received_damage(&mut app);
+    assert!(
+        held_damage > 0.0,
+        "the picket caused actual damage before hold"
+    );
     run(&mut app, ticks_for_sim_seconds(2.5, dt));
     assert_eq!(
         incoming_fire(&mut app),
         Some(held_incoming),
         "restraint stops the existing beam's physical work too"
+    );
+    assert_eq!(
+        received_damage(&mut app),
+        held_damage,
+        "no damage while held"
     );
     assert!(
         restraint_flag(&app, "enforcer_ordered_to_hold"),
@@ -13857,6 +13886,10 @@ fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() 
     assert!(restraint_flag(&app, "enforcer_released"));
     assert!(!weapons_are_restrained(&mut app, R_ENFORCER));
     let after_release = incoming_fire(&mut app).expect("the existing beam resumes");
+    assert!(
+        received_damage(&mut app) > held_damage,
+        "resumed fire applies actual damage"
+    );
     assert!(
         after_release > held_incoming,
         "release resumes physical fire from the same hull — {after_release} > {held_incoming}"
@@ -22882,12 +22915,17 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
     );
 
     // Funding resumes the standing hold without issuing another engage order.
-    place_operator(&mut app, held_operator);
+    place_operator(&mut app, held_operator + Vec3::X);
     restore_tractor_power(&mut app);
     run(&mut app, 3);
     let beam = tractor_beam_of(&mut app);
     assert!(beam.engaged && beam.coupled_target.as_deref() == Some(&derelict));
     assert!(beam.work_fraction > 0.0);
+    assert_ne!(
+        position_of(&mut app, DERELICT),
+        parted,
+        "funded work moves the existing held target to the new rig point"
+    );
     assert!(position_of(&mut app, DERELICT).distance(parted) < 50.0);
 
     // ── Interruption 5: the tractor is knocked out to Disabled ───────────────

@@ -1,129 +1,137 @@
+//! Integration evidence for the canonical local-energy owner. Legacy allocation
+//! rungs and output multipliers are no longer simulation state.
 use super::*;
+use crate::core::messages::*;
+use crate::entities::config::EntityConfig;
+use crate::entities::spawner::EntityUuid;
+use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
-use crate::modifiers::power_system::PowerConfig;
-
-/// Issue #977: the label producer emits `strings.csv` ids, never composed
-/// English. Every id it can return must exist in the table (so `localiseTree`
-/// resolves it), and the shape must be a dotted lowercase id.
-#[test]
-fn power_group_label_emits_string_ids_not_english() {
-    use crate::modifiers::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
-    for group in [
-        HELM_POWER_GROUP,
-        WEAPONS_POWER_GROUP,
-        SHIELDS_POWER_GROUP,
-        "ops",
-    ] {
-        let id = power_group_label(group);
-        assert!(
-            id.starts_with("power.group."),
-            "{group} → {id:?} must be a power.group.* id, not English"
-        );
-        assert!(
-            !id.chars().any(|c| c.is_ascii_uppercase() || c == ' '),
-            "{id:?} must be a dotted lowercase id"
-        );
-    }
-    assert_eq!(power_group_label("ops"), "power.group.unknown");
-}
-
-use crate::core::messages::{ModifierSlot, ServerMessage, *};
-use crate::modifiers::power_system::SHIELDS_POWER_GROUP;
-use crate::modifiers::ShipModifiers;
-use crate::server_app::{
-    LastBroadcastEntityPositions, LastBroadcastHull, ShipImpulse, ShipShields, SimOutbox,
+use crate::modifiers::power_system::{PowerState, PowerSystem};
+use crate::resources::server::ResourceServices;
+use crate::server_app::{LocalShip, Ship, ShipSystemBlackboards, SimOutbox};
+use crate::ship::components::{ConsoleHosts, ConsoleWorkingViews};
+use crate::ship_plugin::{
+    ActiveStationRatings, CoordinationQueue, ShipConfigComponent, ShipSystemControlSources,
 };
-use crate::weapons::shield::ShieldSystem;
+use crate::sim_rng::{InstallSimRng, SeedSource, SimRng};
 
 #[derive(Resource, Default)]
 struct Outbox(Vec<OutboundMessage>);
-
-fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
-    for m in reader.read() {
-        box_.0.push(m.clone());
-    }
+fn collect(mut reader: MessageReader<OutboundMessage>, mut out: ResMut<Outbox>) {
+    out.0.extend(reader.read().cloned());
 }
-
-fn test_app() -> App {
+fn hull() -> EntityConfig {
+    crate::entities::include_resolve::resolve_template(
+        "assets/entities/alliance_battleship.toml",
+        &crate::entities::include_resolve::HostFragmentSource,
+    )
+    .unwrap()
+    .parse_with(EntityConfig::from_toml)
+    .unwrap()
+}
+fn app_with(config: EntityConfig) -> (App, Entity) {
+    let ship = config.ship_config.clone().unwrap();
+    let power = PowerSystem::from_energy(config.energy.clone().unwrap(), ship.clone()).unwrap();
     let mut app = App::new();
-    app.add_plugins(LobbyPlugin)
-        .add_plugins(bevy::time::TimePlugin)
-        .add_plugins(crate::server_app::AdmissionPlugin)
-        // Chain the SimSet phases so admission (before Input) → the applier
-        // `handle_power_messages` (moved to Physics in issue #831) → battery
-        // tick → publish run in order. Without this, `handle_power_messages`
-        // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
-        // so it can run before the command is admitted and the allocation
-        // never applies (mirrors the navigation test harness's #830 chain).
-        // In `FixedUpdate`, where `ShipPowerPlugin` and `AdmissionPlugin`
-        // register since issue #895 — configured on `Update` this chain
-        // would order nothing at all.
-        .configure_sets(
-            FixedUpdate,
-            (
-                crate::sim_sets::SimSet::Input,
-                crate::sim_sets::SimSet::Physics,
-                crate::sim_sets::SimSet::Damage,
-                crate::sim_sets::SimSet::Modifiers,
-                crate::sim_sets::SimSet::Publish,
-                crate::sim_sets::SimSet::PublishAggregate,
-                crate::sim_sets::SimSet::Broadcast,
-            )
-                .chain(),
+    app.add_plugins((
+        LobbyPlugin,
+        bevy::time::TimePlugin,
+        crate::server_app::AdmissionPlugin,
+    ))
+    .configure_sets(
+        FixedUpdate,
+        (
+            crate::sim_sets::SimSet::Input,
+            crate::sim_sets::SimSet::Physics,
+            crate::sim_sets::SimSet::Damage,
+            crate::sim_sets::SimSet::Modifiers,
+            crate::sim_sets::SimSet::Publish,
+            crate::sim_sets::SimSet::PublishAggregate,
+            crate::sim_sets::SimSet::Broadcast,
         )
-        .init_resource::<crate::lobby::WorldResource>()
-        .init_resource::<SimOutbox>()
-        .init_resource::<LastBroadcastEntityPositions>()
-        .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
-        .init_resource::<LastBroadcastHull>()
-        .init_resource::<Outbox>()
-        .add_plugins(ShipPowerPlugin)
-        .add_systems(
-            FixedUpdate,
-            crate::modifiers::coordination::translate_power_modifiers.after(tick_power_system),
-        )
-        .add_plugins(crate::server_app::sim_state_broadcaster())
-        .add_systems(PostUpdate, collect);
-    // Exactly one fixed step per `update()` (issue #895), advancing 200 ms
-    // of sim time so the Hz-based broadcast timers always fire inside a
-    // single harness tick — the pace this fixture has always run at, which
-    // a bare `ManualDuration` no longer delivers now the sim is in
-    // `FixedUpdate` against the default 60 Hz timestep.
+            .chain(),
+    )
+    .init_resource::<crate::lobby::WorldResource>()
+    .init_resource::<crate::world::server::WorldContentRuntime>()
+    .init_resource::<crate::effect_queue::EffectQueue<CapacityAdjustment>>()
+    .init_resource::<crate::effect_queue::EffectQueue<crate::infrastructure::ConditionAdjustment>>()
+    .init_resource::<SimOutbox>()
+    .init_resource::<Outbox>()
+    .add_plugins(ShipPowerPlugin)
+    .add_systems(
+        FixedUpdate,
+        crate::infrastructure::server::tick_infrastructure_condition
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .before(mirror_weapons_cold_flags),
+    )
+    .add_systems(PostUpdate, collect)
+    .insert_sim_rng(SimRng::new(408, SeedSource::World));
     crate::ship::test_support::drive_one_fixed_step_per_update(
         &mut app,
         std::time::Duration::from_millis(200),
     );
-    // Spawn the player ship entity so handle_power_messages can query it.
-    app.world_mut().spawn((
-        crate::server_app::Ship,
-        crate::server_app::LocalShip,
-        crate::server_app::ShipSystemBlackboards::default(),
-        crate::ship::components::ConsoleHosts(
-            crate::ship::components::load_ship_config_from_disk()
-                .0
-                .consoles
-                .iter()
-                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
-                    console: console.id.clone(),
-                    host: console.home_station.clone(),
-                    rating: "Std".into(),
-                })
-                .collect(),
-        ),
-        crate::ship::components::load_ship_config_from_disk(),
-        crate::ship_plugin::ShipSystemControlSources::default(),
-        crate::ship_plugin::ActiveStationRatings::default(),
-        crate::core::messages::AdmittedCommands::default(),
-        crate::ship_plugin::CoordinationQueue::default(),
-        ShipShields(ShieldSystem::default(), 0.5),
-        ShipModifiers::new(),
-        ShipImpulse(crate::ship::impulse::ImpulseState::new()),
-        PowerBrownoutState::default(),
-    ));
-    app
+    let hosts = ConsoleHosts(
+        ship.consoles
+            .iter()
+            .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                console: console.id.clone(),
+                host: console.home_station.clone(),
+                rating: "Std".into(),
+            })
+            .collect(),
+    );
+    let entity = app
+        .world_mut()
+        .spawn((
+            Ship,
+            LocalShip,
+            EntityUuid("energy-ship".into()),
+            ShipPowerSystem(power),
+            ShipConfigComponent(ship),
+            hosts,
+            ConsoleWorkingViews::default(),
+            ShipSystemBlackboards::default(),
+            ShipSystemControlSources::default(),
+            ActiveStationRatings::default(),
+            AdmittedCommands::default(),
+            CoordinationQueue::default(),
+            PowerBrownoutState::default(),
+            ResourceServices(config.resource_services.clone()),
+            InfrastructureCondition(crate::infrastructure::InfrastructureState::from_config(
+                config.infrastructure.as_ref().unwrap(),
+            )),
+        ))
+        .id();
+    // Preserve the ordinary capture registration gate without constructing a
+    // separate save-only Power projection.
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipPhysics>();
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntitySystemHull>();
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipRedAlert>();
+    app.world_mut()
+        .register_component::<crate::console::command::server::ShipStationStances>();
+    (app, entity)
 }
-
-fn push_msg(app: &mut App, token: &str, msg: ClientMessage) {
+fn fixture() -> (App, Entity) {
+    app_with(hull())
+}
+fn power(app: &App, entity: Entity) -> &PowerSystem {
+    &app.world().get::<ShipPowerSystem>(entity).unwrap().0
+}
+fn state(app: &App, entity: Entity) -> PowerState {
+    power(app, entity).capture_continuation()
+}
+fn bb(app: &App, entity: Entity) -> &PowerBlackboard {
+    match &app.world().get::<ShipSystemBlackboards>(entity).unwrap().0
+        [&SystemId(crate::ship::system_registry::POWER_SYSTEM_ID.into())]
+    {
+        SystemBlackboard::Power(bb) => bb,
+        other => panic!("expected common Power observation, got {other:?}"),
+    }
+}
+fn push(app: &mut App, token: &str, msg: ClientMessage) {
     app.world_mut()
         .resource_mut::<Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -131,1501 +139,740 @@ fn push_msg(app: &mut App, token: &str, msg: ClientMessage) {
             msg,
         });
 }
-
 fn tick(app: &mut App) -> Vec<OutboundMessage> {
     app.update();
-    let sim_entries = app.world_mut().resource_mut::<SimOutbox>().drain();
-    let mut out = app.world().resource::<Outbox>().0.clone();
-    for entry in sim_entries {
-        out.push(OutboundMessage {
-            target: entry.target,
-            msg: entry.message,
-            delivery: entry.delivery,
-        });
-    }
-    app.world_mut().resource_mut::<Outbox>().0.clear();
+    let mut out = std::mem::take(&mut app.world_mut().resource_mut::<Outbox>().0);
+    out.extend(
+        app.world_mut()
+            .resource_mut::<SimOutbox>()
+            .drain()
+            .into_iter()
+            .map(|entry| OutboundMessage {
+                target: entry.target,
+                msg: entry.message,
+                delivery: entry.delivery,
+            }),
+    );
     out
 }
-
-fn start_game(app: &mut App) {
-    push_msg(
+fn join(app: &mut App, token: &str, station: &str) {
+    push(
         app,
-        "captain",
+        token,
         ClientMessage::Identify {
-            token: "captain".into(),
-            name: "Alice".into(),
+            token: token.into(),
+            name: token.into(),
         },
     );
     tick(app);
-    push_msg(
+    push(
         app,
-        "captain",
+        token,
         ClientMessage::SelectStation {
-            station: "Captain".into(),
+            station: station.into(),
         },
     );
     tick(app);
-    push_msg(app, "captain", ClientMessage::SetReady { ready: true });
+}
+fn start(app: &mut App) {
+    join(app, "captain", "Captain");
+    join(app, "power", "Power");
+    push(app, "captain", ClientMessage::SetReady { ready: true });
+    push(app, "power", ClientMessage::SetReady { ready: true });
     tick(app);
 }
-
-fn start_game_with_power(app: &mut App) {
-    push_msg(
-        app,
-        "captain",
-        ClientMessage::Identify {
-            token: "captain".into(),
-            name: "Alice".into(),
-        },
-    );
-    tick(app);
-    push_msg(
-        app,
-        "captain",
-        ClientMessage::SelectStation {
-            station: "Captain".into(),
-        },
-    );
-    tick(app);
-    push_msg(
-        app,
-        "power",
-        ClientMessage::Identify {
-            token: "power".into(),
-            name: "Monty".into(),
-        },
-    );
-    tick(app);
-    push_msg(
-        app,
-        "power",
-        ClientMessage::SelectStation {
-            station: "Power".into(),
-        },
-    );
-    tick(app);
-    push_msg(app, "captain", ClientMessage::SetReady { ready: true });
-    push_msg(app, "power", ClientMessage::SetReady { ready: true });
-    let _ = tick(app);
-}
-
-#[test]
-fn power_state_only_sent_to_power_holder() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    let out = tick(&mut app);
-
-    for m in out
-        .iter()
-        .filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. }))
-    {
-        assert!(
-            matches!(&m.target, Target::Token(t) if t == "power"),
-            "PowerState should only go to the Power holder, got {:?}",
-            m.target
-        );
-    }
-}
-
-#[test]
-fn no_power_station_holder_no_power_state_broadcast() {
-    let mut app = test_app();
-    start_game(&mut app);
-
-    let out = tick(&mut app);
-    let any_power_state = out
-        .iter()
-        .any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
-    assert!(
-        !any_power_state,
-        "no PowerState should be sent when no Power station holder exists"
-    );
-}
-
-#[test]
-fn power_increase_respects_bounds_noop_at_four() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    let _ = app
-        .world_mut()
-        .resource_mut::<ShipPowerSystem>()
-        .0
-        .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 4);
-    // Directly set via resource (the human message path lives in ship_plugin.rs).
-    // Verify the field clamps at 4 on the PowerSystem itself.
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
-        4,
-        "helm should remain at 4"
-    );
-}
-
-#[test]
-fn power_increase_respects_total_cap_of_eight() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    // Force total to 8 and check PowerSystem::increase is a no-op.
-    {
-        let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
-            4,
-        );
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
-            2,
-        );
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
-            2,
-        );
-    }
-    {
-        let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-        ps.0.increase(&PowerGroupId(SHIELDS_POWER_GROUP.into()));
-    }
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-        2,
-        "sensors should stay at 2 when total is already at the cap of 8"
-    );
-    assert_eq!(
-        app.world().resource::<ShipPowerSystem>().0.total(),
-        8,
-        "total should remain 8"
-    );
-}
-
-#[test]
-fn increasing_helm_power_updates_max_speed_via_modifiers() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    app.world_mut()
-        .resource_mut::<PowerMultiplierResource>()
-        .multipliers
-        .insert(PowerGroupId(HELM_POWER_GROUP.into()), [-0.5, 0.0, 1.0, 2.0]);
-
-    // Directly set helm=3 and tick to let translate_power_modifiers run.
-    let _ = app
-        .world_mut()
-        .resource_mut::<ShipPowerSystem>()
-        .0
-        .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
-    let _ = tick(&mut app);
-
-    let mult = {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
-        q.single(app.world()).unwrap().get(&ModifierSlot::MaxSpeed)
-    };
-    assert!(
-        (mult - 2.0).abs() < 1e-6,
-        "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}"
-    );
-}
-
-#[test]
-fn decreasing_weapons_power_updates_phaser_damage_via_modifiers() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    app.world_mut()
-        .resource_mut::<PowerMultiplierResource>()
-        .multipliers
-        .insert(
-            PowerGroupId(WEAPONS_POWER_GROUP.into()),
-            [-0.5, 0.0, 0.25, 0.5],
-        );
-
-    // Set weapons=1 directly and tick.
-    let _ = app
-        .world_mut()
-        .resource_mut::<ShipPowerSystem>()
-        .0
-        .set_group_allocation(&PowerGroupId(WEAPONS_POWER_GROUP.into()), 1);
-    let _ = tick(&mut app);
-
-    let expected = 1.0 / 1.5;
-    let mult = {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
-        q.single(app.world())
-            .unwrap()
-            .get(&ModifierSlot::PhaserDamage)
-    };
-    assert!(
-        (mult - expected).abs() < 1e-6,
-        "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}"
-    );
-}
-
-/// **A flat battery locks the reactor: every group is slammed to 1 and the
-/// collapse reaches the modifier table.**
-///
-/// The exhaustion lock, restored after issue #952's per-group floors were
-/// reverted — a player who fails to manage power loses the lot, not just the
-/// point they spent up. All three groups land on level 1, so every
-/// multiplier crushes to x0.667. `RadarRange` was the retired sensors
-/// group's and is now nobody's, so the reactor never touches it.
-#[test]
-fn a_flat_battery_locks_every_group_to_one_and_updates_all_modifiers() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    let defaults = [-0.5, 0.0, 0.25, 0.5];
-    app.world_mut()
-        .resource_mut::<PowerMultiplierResource>()
-        .multipliers
-        .insert(PowerGroupId(HELM_POWER_GROUP.into()), defaults);
-    app.world_mut()
-        .resource_mut::<PowerMultiplierResource>()
-        .multipliers
-        .insert(PowerGroupId(WEAPONS_POWER_GROUP.into()), defaults);
-    app.world_mut()
-        .resource_mut::<PowerMultiplierResource>()
-        .multipliers
-        .insert(PowerGroupId(SHIELDS_POWER_GROUP.into()), defaults);
-
-    {
-        let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
-            4,
-        );
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
-            2,
-        );
-        let _ = ps.0.set_group_allocation(
-            &crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
-            2,
-        );
-        ps.0.battery_charge = 0.0;
-    }
-
-    tick(&mut app);
-
-    let power = app.world().resource::<ShipPowerSystem>().0.clone();
-    assert!(power.locked(), "a flat battery locks the reactor");
-    assert_eq!(
-        power.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
-        1,
-        "the brownout slammed helm to 1"
-    );
-
-    let expected = 1.0 / 1.5;
-    let mods = {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
-        q.single(app.world()).unwrap().clone()
-    };
-
-    for (slot, label) in [
-        (ModifierSlot::MaxSpeed, "MaxSpeed"),
-        (ModifierSlot::PhaserDamage, "PhaserDamage"),
-        (ModifierSlot::ShieldRegen, "ShieldRegen"),
-    ] {
-        let mult = mods.get(&slot);
-        assert!(
-            (mult - expected).abs() < 1e-6,
-            "with every group locked to 1, {label} should be x{expected}, got {mult}"
-        );
-    }
-    assert!(
-        (mods.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6,
-        "the reactor must not touch RadarRange at all (#952), got {}",
-        mods.get(&ModifierSlot::RadarRange)
-    );
-}
-
-// ── Blackboard publish tests ────────────────────────────────────────────
-
-fn power_blackboard(app: &mut App) -> PowerBlackboard {
-    use crate::core::messages::{SystemBlackboard, SystemId};
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::ship::system_registry::POWER_SYSTEM_ID;
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let bbs = q.single(app.world()).unwrap();
-    match bbs.0.get(&SystemId(POWER_SYSTEM_ID.to_string())) {
-        Some(SystemBlackboard::Power(bb)) => bb.clone(),
-        _ => PowerBlackboard::default(),
-    }
-}
-
-#[test]
-fn strike_reserve_allocation_is_published_with_its_authored_label_and_zero_floor() {
-    use bevy::ecs::system::RunSystemOnce;
-    let hull = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/dynasty_player_cruiser.toml",
-    )
-    .unwrap();
-    let authored = hull.power.unwrap();
-    let config = PowerConfig {
-        strike_reserve: authored.strike_reserve,
-        capacity: authored.capacity,
-        rates: authored.rates,
-        sustainable_total: authored.sustainable_total,
-        max_commanded_total: authored.max_commanded_total,
-        emergency_threshold: authored.emergency_threshold,
-    };
-    let ship = hull.ship_config.unwrap();
-    let seed = authored_power_group_seed(&ship.power_groups);
-    let mut app = App::new();
-    app.world_mut().spawn((
-        crate::server_app::LocalShip,
-        ShipPowerSystem(PowerSystem::from_authored_groups(&config, &seed)),
-        PowerConfigResource(config),
-        crate::ship_plugin::ShipConfigComponent(ship),
-        crate::server_app::ShipSystemBlackboards::default(),
-    ));
-    app.world_mut()
-        .run_system_once(publish_power_blackboard)
-        .unwrap();
-    let bb = power_blackboard(&mut app);
-    let reserve = bb
-        .groups
-        .iter()
-        .find(|group| group.id == "strike-reserve")
-        .expect("charging control is visible");
-    assert_eq!(reserve.label, "dynasty.reserve.title");
-    assert_eq!((reserve.min_level, reserve.commanded_level), (0, 0));
-    assert!(!bb.charging, "an unallocated reserve does not charge");
-}
-
-#[test]
-fn publish_power_blackboard_contains_correct_data() {
-    let mut app = test_app();
-    start_game(&mut app);
-    tick(&mut app);
-
-    let bb = power_blackboard(&mut app);
-    assert!(
-        !bb.groups.is_empty(),
-        "expected at least one power group entry"
-    );
-    // Labels are `strings.csv` ids now (issue #977); `localiseTree`
-    // resolves them to HELM / WEAPONS / SHIELDS at the client boundary.
-    assert!(
-        bb.groups.iter().any(|e| e.label == "power.group.helm"),
-        "expected helm entry"
-    );
-    assert!(
-        bb.groups.iter().any(|e| e.label == "power.group.weapons"),
-        "expected weapons entry"
-    );
-    assert!(
-        bb.groups.iter().any(|e| e.label == "power.group.shields"),
-        "expected shields entry"
-    );
-    assert!(bb.total > 0, "total should be > 0");
-    // Total 6 on the default seed, where the default `rates` are still
-    // positive — the reserve is filling, not emptying.
-    assert!(!bb.draining, "should not be draining at the resting total");
-}
-
-/// **Every published entry carries the group's floor (issue #1004).**
-///
-/// The console draws its pip row from `min_level..=max_level`. Before this
-/// the field did not exist, the client fell back to `0`, and the row grew a
-/// bottom rung no order could ever light — a three-group console showed
-/// NINE lights where twelve were expected. A hull that authors no
-/// `[power_groups.*]` block (this fixture's `ShipConfigComponent::default`)
-/// publishes the parse default, which is also the floor `PowerSystem` SEEDS
-/// that group with — the two cannot drift apart, because `GROUP_LEVEL_MIN`
-/// is defined by calling the same `default_min_power_level`. It is a
-/// seeded default, not a global clamp: since issue #1395 each group is
-/// clamped to its OWN stored floor, and `GROUP_LEVEL_MIN` is additionally
-/// the rung the exhaustion lock forces every group down to.
-#[test]
-fn publish_power_blackboard_carries_each_groups_floor() {
-    let mut app = test_app();
-    start_game(&mut app);
-    tick(&mut app);
-
-    let bb = power_blackboard(&mut app);
-    assert_eq!(bb.groups.len(), 3, "helm, weapons, shields");
-    for e in &bb.groups {
-        assert_eq!(
-            e.min_level,
-            crate::ship::config::default_min_power_level(),
-            "group {} must publish the parse-default floor, never 0",
-            e.id
-        );
-        assert!(
-            e.min_level <= e.max_level,
-            "group {} has an empty pip range {}..={}",
-            e.id,
-            e.min_level,
-            e.max_level
-        );
-    }
-    // The count the client will draw, computed the same way the pip loop
-    // does: three groups x levels 1..=4.
-    let pips: u16 = bb
-        .groups
-        .iter()
-        .map(|e| u16::from(e.max_level - e.min_level + 1))
-        .sum();
-    assert_eq!(pips, 12, "12 pips, never the phantom 9-light state");
-}
-
-/// **A hull's own authored floor is published verbatim, above the parse
-/// default and below it alike (issues #1004, #1395).**
-///
-/// The floor is read off the ship's own `[power_groups.<id>]` block, not
-/// off the multiplier table — that table's LENGTH is a ceiling and says
-/// nothing about where the rungs start.
-///
-/// This is the config-to-wire pin for the number that IS the engine clamp:
-/// since #1395 `PowerSystem::floor_for` holds this same field, seeded at
-/// spawn by `authored_power_group_seed`, and every order goes through it.
-/// So the panel's `−` gate and the server's clamp read one number, and a
-/// hull that authors `min_level = 0` gets a group the crew may take cold
-/// — asserted below on `weapons`, alongside the above-default `helm` case.
-#[test]
-fn publish_power_blackboard_reads_the_authored_floor() {
-    use crate::modifiers::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
-    let mut app = test_app();
-    start_game(&mut app);
-    {
-        let ship = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-            .single(app.world())
-            .unwrap();
-        let mut cfg = app
-            .world_mut()
-            .entity_mut(ship)
-            .take::<crate::ship_plugin::ShipConfigComponent>()
-            .unwrap();
-        cfg.0.power_groups.insert(
-            PowerGroupId(HELM_POWER_GROUP.into()),
-            crate::ship::config::PowerGroupConfig {
-                label: "power.group.helm".into(),
-                default_level: 2,
-                min_level: 3,
-                max_level: 4,
-            },
-        );
-        // The coldable case, as the destroyer and the cruiser author it: a
-        // floor BELOW the parse default. Nothing on the way to the wire may
-        // round this up to 1, or the panel would gate `−` one rung above the
-        // level the reactor would actually accept.
-        cfg.0.power_groups.insert(
-            PowerGroupId(WEAPONS_POWER_GROUP.into()),
-            crate::ship::config::PowerGroupConfig {
-                label: "power.group.weapons".into(),
-                default_level: 2,
-                min_level: 0,
-                max_level: 4,
-            },
-        );
-        app.world_mut().entity_mut(ship).insert(cfg);
-    }
-    tick(&mut app);
-
-    let bb = power_blackboard(&mut app);
-    let helm = bb
-        .groups
-        .iter()
-        .find(|e| e.id == HELM_POWER_GROUP)
-        .expect("helm entry");
-    assert_eq!(helm.min_level, 3, "the authored floor reaches the wire");
-    let weapons = bb
-        .groups
-        .iter()
-        .find(|e| e.id == WEAPONS_POWER_GROUP)
-        .expect("weapons entry");
-    assert_eq!(
-        weapons.min_level, 0,
-        "an authored floor of 0 reaches the wire as 0, never floored to 1"
-    );
-    for other in bb
-        .groups
-        .iter()
-        .filter(|e| e.id != HELM_POWER_GROUP && e.id != WEAPONS_POWER_GROUP)
-    {
-        assert_eq!(
-            other.min_level,
-            crate::ship::config::default_min_power_level(),
-            "group {} authors no block, so it keeps the parse default",
-            other.id
-        );
-    }
-}
-
-#[test]
-fn publish_power_blackboard_reflects_helm_level_change() {
-    let mut app = test_app();
-    // Human holds Power; this test app doesn't register any power AI
-    // system anyway (that lives in ConsoleAiPlugin), but a human holder
-    // keeps the scenario realistic.
-    start_game_with_power(&mut app);
-    tick(&mut app);
-
-    let _ = app
-        .world_mut()
-        .resource_mut::<ShipPowerSystem>()
-        .0
-        .set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
-    tick(&mut app);
-
-    let bb = power_blackboard(&mut app);
-    let helm_entry = bb
-        .groups
-        .iter()
-        .find(|e| e.label == "power.group.helm")
-        .unwrap();
-    assert_eq!(
-        helm_entry.level, 3,
-        "helm level should be 3 after direct assignment"
-    );
-}
-
-#[test]
-fn control_system_set_power_group_allocation_updates_group() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    push_msg(
-        &mut app,
-        "power",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::power_reactor_system_id(),
-            payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
-                level: 4,
-            },
-        },
-    );
-    tick(&mut app);
-
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-        4
-    );
-}
-
-#[test]
-fn correlated_power_allocation_finishes_at_the_reactor_owner() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    let send = |app: &mut App, correlation: &str, group: &str, level| {
-        push_msg(
-            app,
-            "power",
-            ClientMessage::ControlSystemCorrelated {
-                correlation: ActionCorrelationId::new(correlation).expect("valid test correlation"),
-                target: crate::ship::system_registry::power_reactor_system_id(),
-                payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: PowerGroupId(group.into()),
-                    level,
-                },
-            },
-        );
-    };
-    let feedback_count =
-        |out: &[OutboundMessage], correlation: &str, expected| {
-            out.iter().filter(|message| {
-            matches!(
-                (&message.target, &message.msg),
-                (
-                    Target::Token(token),
-                    ServerMessage::ActionFeedback { correlation: actual, outcome }
-                ) if token == "power" && actual.as_str() == correlation && *outcome == expected
-            )
-        }).count()
-        };
-
-    send(&mut app, "power-applied", SHIELDS_POWER_GROUP, 4);
-    assert_eq!(
-        feedback_count(
-            &tick(&mut app),
-            "power-applied",
-            ActionFeedbackOutcome::Applied,
-        ),
-        1
-    );
-
-    // An out-of-range LEVEL is deliberately clamped and applied
-    // (`PowerSystem::set_group_allocation`), so the genuine owner-side refusal
-    // is an unknown GROUP — the one arm the reactor answers with `Err`.
-    send(&mut app, "power-refused", "no-such-group", 4);
-    assert_eq!(
-        feedback_count(
-            &tick(&mut app),
-            "power-refused",
-            ActionFeedbackOutcome::Refused,
-        ),
-        1
-    );
-}
-
-/// Wire-string regression: JS clients send `target: 'power-reactor'`
-/// (see `gui/action-map.js` `set_power` handler). This test pins the
-/// exact string used on the wire, so if either the JS side or the
-/// handler's `for_target(...)` argument drifts back to `"power"`,
-/// this fails (the admitted command routes elsewhere and the
-/// allocation never applies).
-#[test]
-fn set_power_group_allocation_wire_string_routes_to_reactor() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-
-    push_msg(
-        &mut app,
-        "power",
-        ClientMessage::ControlSystem {
-            target: SystemId("power-reactor".to_string()),
-            payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
-                level: 4,
-            },
-        },
-    );
-    tick(&mut app);
-
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-        4,
-        "raw wire string \"power-reactor\" must reach handle_power_messages \
-         — if this fails, either the handler's for_target() argument or the \
-         JS action-map target has drifted from \"power-reactor\"."
-    );
-}
-
-// ── Fine Power system tests (issue #513) ───────────────────────────────────
-//
-// Cover the reactor offline gate and the reactor/battery blackboard
-// publication.
-
-fn mark_offline(app: &mut App, system_id: SystemId) {
-    let ship = app
-        .world_mut()
-        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-        .single(app.world())
-        .unwrap();
-    let mut cs = app
-        .world_mut()
-        .entity_mut(ship)
-        .take::<crate::ship_plugin::ShipSystemControlSources>()
-        .unwrap();
-    cs.0.set_offline(system_id, true);
-    app.world_mut().entity_mut(ship).insert(cs);
-}
-
-#[test]
-fn reactor_offline_refuses_allocation_input() {
-    // End-to-end path via handle_power_messages: the admission gate
-    // ensures a Disabled/Destroyed reactor's `accept_human_input` is
-    // false, but the direct test is that dispatching a SetPowerGroupAllocation
-    // to the reactor id when it's offline leaves battery/allocation untouched.
-    //
-    // We test the handler directly (bypassing admission which lives in
-    // server_app.rs) by seeding an AdmittedCommand targeting the
-    // reactor's id and verifying the mutation still applies when the
-    // system is online, then does NOT apply when offline_systems marks
-    // the reactor offline via the standard admission gate.
-    //
-    // Since `handle_power_messages` does not itself consult
-    // `offline_systems` (admission does), we cover this via the
-    // full admission chain in a mini test app that includes
-    // `AdmissionPlugin`.
-    use crate::core::messages::{ClientMessage, PowerGroupId, SystemControlPayload};
-    use crate::lobby::LobbyPlugin;
-    let mut app = App::new();
-    app.add_plugins(LobbyPlugin)
-        .add_plugins(bevy::time::TimePlugin)
-        .add_plugins(crate::server_app::AdmissionPlugin)
-        // Chain the SimSet phases so admission (before Input) → the applier
-        // `handle_power_messages` (moved to Physics in issue #831) → battery
-        // tick → publish run in order. Without this, `handle_power_messages`
-        // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
-        // so it can run before the command is admitted and the allocation
-        // never applies (mirrors the navigation test harness's #830 chain).
-        // In `FixedUpdate` since issue #895 — see `test_app` above.
-        .configure_sets(
-            FixedUpdate,
-            (
-                crate::sim_sets::SimSet::Input,
-                crate::sim_sets::SimSet::Physics,
-                crate::sim_sets::SimSet::Damage,
-                crate::sim_sets::SimSet::Modifiers,
-                crate::sim_sets::SimSet::Publish,
-                crate::sim_sets::SimSet::PublishAggregate,
-                crate::sim_sets::SimSet::Broadcast,
-            )
-                .chain(),
-        )
-        .init_resource::<crate::lobby::WorldResource>()
-        .init_resource::<SimOutbox>()
-        .init_resource::<LastBroadcastEntityPositions>()
-        .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
-        .init_resource::<LastBroadcastHull>()
-        .init_resource::<Outbox>()
-        .add_plugins(ShipPowerPlugin)
-        .add_plugins(crate::server_app::sim_state_broadcaster());
-    // One fixed step per update, 200 ms of sim time each (issue #895).
-    crate::ship::test_support::drive_one_fixed_step_per_update(
-        &mut app,
-        std::time::Duration::from_millis(200),
-    );
-    // Spawn the player ship with control sources so we can seed offline_systems.
-    app.world_mut().spawn((
-        crate::server_app::Ship,
-        crate::server_app::LocalShip,
-        crate::server_app::ShipSystemBlackboards::default(),
-        crate::ship::components::ConsoleHosts(
-            crate::ship::components::load_ship_config_from_disk()
-                .0
-                .consoles
-                .iter()
-                .map(|console| phoenix_model::console::ConsoleHostSnapshot {
-                    console: console.id.clone(),
-                    host: console.home_station.clone(),
-                    rating: "Std".into(),
-                })
-                .collect(),
-        ),
-        crate::ship::components::load_ship_config_from_disk(),
-        crate::ship_plugin::ShipSystemControlSources::default(),
-        crate::ship_plugin::ActiveStationRatings::default(),
-        crate::core::messages::AdmittedCommands::default(),
-        crate::ship_plugin::CoordinationQueue::default(),
-        crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
-        ShipImpulse(crate::ship::impulse::ImpulseState::new()),
-        ShipModifiers::new(),
-        PowerBrownoutState::default(),
-    ));
-    start_game_with_power(&mut app);
-    // Baseline: reactor online — allocation should update.
-    push_msg(
-        &mut app,
-        "power",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::power_reactor_system_id(),
-            payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
-                level: 4,
-            },
-        },
-    );
-    tick(&mut app);
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-        4,
-        "baseline sanity: online reactor should accept allocation input"
-    );
-
-    // Now mark the reactor offline and try to change sensors back to 1.
-    mark_offline(
-        &mut app,
-        crate::ship::system_registry::power_reactor_system_id(),
-    );
-    push_msg(
-        &mut app,
-        "power",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::power_reactor_system_id(),
-            payload: SystemControlPayload::SetPowerGroupAllocation {
-                group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
-                level: 1,
-            },
-        },
-    );
-    tick(&mut app);
-    assert_eq!(
-        app.world()
-            .resource::<ShipPowerSystem>()
-            .0
-            .level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-        4,
-        "reactor offline must refuse allocation input (sensors should stay at 4)"
-    );
-}
-
-#[test]
-fn publish_writes_power_reactor_and_power_battery_blackboards() {
-    let mut app = test_app();
-    start_game(&mut app);
-    tick(&mut app);
-
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::ship::system_registry::{POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID};
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let bbs = q.single(app.world()).unwrap();
-
-    let reactor = bbs.0.get(&SystemId(POWER_REACTOR_SYSTEM_ID.to_string()));
-    let battery = bbs.0.get(&SystemId(POWER_BATTERY_SYSTEM_ID.to_string()));
-    assert!(
-        matches!(reactor, Some(SystemBlackboard::PowerReactor(_))),
-        "expected PowerReactor blackboard under power-reactor system id, got {reactor:?}"
-    );
-    assert!(
-        matches!(battery, Some(SystemBlackboard::PowerBattery(_))),
-        "expected PowerBattery blackboard under power-battery system id, got {battery:?}"
-    );
-    if let Some(SystemBlackboard::PowerReactor(bb)) = reactor {
-        assert!(
-            bb.is_online,
-            "reactor is_online must default to true when nothing is marked offline"
-        );
-    }
-    if let Some(SystemBlackboard::PowerBattery(bb)) = battery {
-        assert!(
-            bb.is_online,
-            "battery is_online must default to true when nothing is marked offline"
-        );
-    }
-}
-
-#[test]
-fn reactor_offline_blackboard_reports_is_online_false() {
-    let mut app = test_app();
-    start_game(&mut app);
-    // Seed offline_systems on the ship's control sources.
-    {
-        let ship = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-            .single(app.world())
-            .unwrap();
-        let mut cs = app
-            .world_mut()
-            .entity_mut(ship)
-            .take::<crate::ship_plugin::ShipSystemControlSources>()
-            .unwrap();
-        cs.0.set_offline(
-            crate::ship::system_registry::power_reactor_system_id(),
-            true,
-        );
-        app.world_mut().entity_mut(ship).insert(cs);
-    }
-    tick(&mut app);
-
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID;
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let bbs = q.single(app.world()).unwrap();
-    match bbs.0.get(&SystemId(POWER_REACTOR_SYSTEM_ID.to_string())) {
-        Some(SystemBlackboard::PowerReactor(bb)) => {
-            assert!(
-                !bb.is_online,
-                "reactor blackboard is_online must be false when offline_systems contains power-reactor"
-            );
-        }
-        other => panic!("expected PowerReactor blackboard, got {other:?}"),
-    }
-}
-
-#[test]
-fn battery_offline_blackboard_reports_is_online_false() {
-    let mut app = test_app();
-    start_game(&mut app);
-    {
-        let ship = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-            .single(app.world())
-            .unwrap();
-        let mut cs = app
-            .world_mut()
-            .entity_mut(ship)
-            .take::<crate::ship_plugin::ShipSystemControlSources>()
-            .unwrap();
-        cs.0.set_offline(
-            crate::ship::system_registry::power_battery_system_id(),
-            true,
-        );
-        app.world_mut().entity_mut(ship).insert(cs);
-    }
-    tick(&mut app);
-
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::ship::system_registry::POWER_BATTERY_SYSTEM_ID;
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-    let bbs = q.single(app.world()).unwrap();
-    match bbs.0.get(&SystemId(POWER_BATTERY_SYSTEM_ID.to_string())) {
-        Some(SystemBlackboard::PowerBattery(bb)) => {
-            assert!(
-                !bb.is_online,
-                "battery blackboard is_online must be false when offline_systems contains power-battery"
-            );
-        }
-        other => panic!("expected PowerBattery blackboard, got {other:?}"),
-    }
-}
-
-#[test]
-fn power_state_broadcast_still_sends_to_power_holder_when_reactor_offline() {
-    let mut app = test_app();
-    start_game_with_power(&mut app);
-    // Mark the reactor offline (audience routing should not care).
-    {
-        let ship = app
-            .world_mut()
-            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-            .single(app.world())
-            .unwrap();
-        let mut cs = app
-            .world_mut()
-            .entity_mut(ship)
-            .take::<crate::ship_plugin::ShipSystemControlSources>()
-            .unwrap();
-        cs.0.set_offline(
-            crate::ship::system_registry::power_reactor_system_id(),
-            true,
-        );
-        app.world_mut().entity_mut(ship).insert(cs);
-    }
-
-    let out = tick(&mut app);
-    // At least one PowerState message should still be sent to the power holder.
-    let power_state_to_power_holder = out.iter().any(|m| {
-        matches!(&m.msg, ServerMessage::PowerState { .. })
-            && matches!(&m.target, Target::Token(t) if t == "power")
-    });
-    assert!(
-        power_state_to_power_holder,
-        "PowerState broadcast must still target the Power holder even when the reactor is offline"
-    );
-}
-
-// ── Brownout advisory tests (issue #678) ────────────────────────────────
-
-#[derive(Resource, Default)]
-struct CoordEnqueueBox(Vec<CoordinationEnqueue>);
-
-fn collect_coord(
-    mut reader: MessageReader<CoordinationEnqueue>,
-    mut box_: ResMut<CoordEnqueueBox>,
-) {
-    for m in reader.read() {
-        box_.0.push(m.clone());
-    }
-}
-
-fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
-    let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
-    app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
-    msgs
-}
-
-fn brownout_test_app() -> App {
-    let mut app = test_app();
-    // Insert ShipPowerSystem component on the LocalShip entity so
-    // tick_power_brownout_advisory's query matches it.
-    let ship = app
-        .world_mut()
-        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
-        .single(app.world())
-        .unwrap();
-    let ship_config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_battleship.toml",
-    )
-    .expect("the shipped battleship composes")
-    .ship_config
-    .expect("the shipped battleship declares a ship config");
-    app.world_mut().entity_mut(ship).insert((
-        ShipPowerSystem(PowerSystem::default()),
-        crate::ship_plugin::ShipConfigComponent(ship_config),
-    ));
-    app.init_resource::<CoordEnqueueBox>()
-        .add_systems(PostUpdate, collect_coord);
-    app
-}
-
-/// Force the LocalShip's reactor into an exact `(allocations, charge,
-/// locked)` state, so a following `tick()` exercises the exhaustion lock
-/// deterministically rather than integrating toward it over many ticks.
-fn set_reactor(app: &mut App, alloc: &[(&str, u8)], charge: f32, locked: bool) {
-    let allocs: Vec<(PowerGroupId, u8)> = alloc
-        .iter()
-        .map(|(g, l)| (PowerGroupId((*g).into()), *l))
-        .collect();
-    let mut q = app
-        .world_mut()
-        .query_filtered::<&mut ShipPowerSystem, With<crate::server_app::LocalShip>>();
-    if let Ok(mut ps) = q.single_mut(app.world_mut()) {
-        ps.0.restore(&allocs, charge, locked);
-    }
-}
-
-#[test]
-fn tick_power_brownout_advisory_fires_only_on_reactor_lock() {
-    let mut app = brownout_test_app();
-    start_game(&mut app);
-
-    // A DRAINING but un-exhausted reactor (total 7, healthy battery) is the
-    // shed ladder's ordinary combat state, NOT a brownout. No advisory.
-    set_reactor(
-        &mut app,
-        &[
-            (HELM_POWER_GROUP, 3),
-            (WEAPONS_POWER_GROUP, 2),
-            (SHIELDS_POWER_GROUP, 2),
-        ],
-        80.0,
-        false,
-    );
-    let _ = tick(&mut app);
-    assert!(
-        drain_coord(&mut app).is_empty(),
-        "a draining-but-managed reactor is not a brownout"
-    );
-
-    // EXHAUST it: a flat battery at a draining total. `tick_power_system`
-    // clamps the charge at zero, takes every group down to GROUP_LEVEL_MIN and
-    // locks — the brownout. One advisory per (mapped) group.
-    set_reactor(
-        &mut app,
-        &[
-            (HELM_POWER_GROUP, 3),
-            (WEAPONS_POWER_GROUP, 3),
-            (SHIELDS_POWER_GROUP, 2),
-        ],
-        0.0,
-        false,
-    );
-    let _ = tick(&mut app);
-    let emitted = drain_coord(&mut app);
-    assert_eq!(
-        emitted.len(),
-        3,
-        "reactor exhaustion browns out all three groups"
-    );
-    for e in &emitted {
-        assert!(
-            matches!(&e.payload, CoordinationPayload::PowerBrownout { .. }),
-            "expected PowerBrownout, got {:?}",
-            e.payload
-        );
-    }
-    let routes: std::collections::HashMap<_, _> = emitted
-        .iter()
-        .filter_map(|event| match &event.payload {
-            CoordinationPayload::PowerBrownout { group, .. } => {
-                Some((group.as_str(), event.address.clone()))
-            }
-            _ => None,
-        })
-        .collect();
-    for (group, station) in [
-        (HELM_POWER_GROUP, "helm"),
-        (WEAPONS_POWER_GROUP, "tactical"),
-        (SHIELDS_POWER_GROUP, "shields"),
-    ] {
-        assert_eq!(
-            routes.get(group),
-            Some(&CoordinationAddress::Station(StationId(station.into()))),
-            "each brownout group resolves the authored owning Station; `{group}` must not use a fake System target"
-        );
-    }
-
-    // Still locked next tick, no fresh lock edge → no re-emission.
-    let _ = tick(&mut app);
-    assert!(
-        drain_coord(&mut app).is_empty(),
-        "no re-emission while the reactor stays locked"
-    );
-
-    // Recovery: the reserve climbs back over emergency_threshold and the
-    // reactor unlocks. The unlock edge is consumed silently — coming back
-    // is not a brownout.
-    set_reactor(
-        &mut app,
-        &[
-            (HELM_POWER_GROUP, 2),
-            (WEAPONS_POWER_GROUP, 2),
-            (SHIELDS_POWER_GROUP, 2),
-        ],
-        50.0,
-        true,
-    );
-    let _ = tick(&mut app);
-    assert!(
-        drain_coord(&mut app).is_empty(),
-        "recovery from a lock is not a brownout"
-    );
-
-    // A fresh exhaustion re-announces.
-    set_reactor(
-        &mut app,
-        &[
-            (HELM_POWER_GROUP, 3),
-            (WEAPONS_POWER_GROUP, 3),
-            (SHIELDS_POWER_GROUP, 2),
-        ],
-        0.0,
-        false,
-    );
-    let _ = tick(&mut app);
-    assert_eq!(
-        drain_coord(&mut app).len(),
-        3,
-        "a later exhaustion re-announces the brownout"
-    );
-}
-
-/// Issue #873. The brownout advisory's `sender_origin` must report the
-/// Power console's LIVE control source, not a hardcoded `ControlSource::Ai`.
-///
-/// The hardcode was a routing-tag lie in the opposite direction from the
-/// emit-side branches #873 removed: `route_coordination` reads the tag to
-/// pick Consume / Popup / Suppress, so a human-operated Power console's
-/// advisory claimed AI origin and raised a popup at a human Helm or
-/// Tactical, where two humans on the same bridge should simply talk
-/// (Suppress). The tag is stamped and forgotten — it is checked here at the
-/// point of emission precisely because nothing downstream may re-derive it.
-#[test]
-fn brownout_advisory_tags_the_live_power_control_source() {
-    use crate::ship::control_source::ControlSource;
-    for source in [ControlSource::Human, ControlSource::Ai] {
-        let mut app = brownout_test_app();
-        start_game(&mut app);
-        {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
-            for mut cs in q.iter_mut(app.world_mut()) {
-                cs.0.set(
-                    crate::ship::system_registry::power_reactor_system_id(),
-                    source,
-                );
-            }
-        }
-        let _ = tick(&mut app);
-        let _ = drain_coord(&mut app);
-
-        // Exhaust the reactor (flat battery at a draining total) so the
-        // lock fires the advisory.
-        set_reactor(
-            &mut app,
-            &[
-                (HELM_POWER_GROUP, 3),
-                (WEAPONS_POWER_GROUP, 3),
-                (SHIELDS_POWER_GROUP, 2),
-            ],
-            0.0,
-            false,
-        );
-        let _ = tick(&mut app);
-        let emitted = drain_coord(&mut app);
-        assert!(
-            !emitted.is_empty(),
-            "fixture must actually produce a brownout advisory for {source:?}"
-        );
-        for e in &emitted {
-            assert_eq!(
-                e.sender_origin, source,
-                "PowerBrownout must carry the reactor's live control source as its \
-                 routing tag; a hardcoded origin sends a human Power officer's \
-                 advisory down the AI→human popup path"
-            );
-        }
-    }
-}
-
-// ── Scripted restraint: the power orders behind `hold_fire` / `release_fire`
-//    and the `weapons_cold.*` mirror (issue #1398) ─────────────────────────────
-
-/// A bare app carrying just the two restraint systems, in the order the plugin
-/// chains them: drain the scenario's queued orders, then mirror the result.
-///
-/// Deliberately not [`test_app`] above: what is under test is a per-ENTITY
-/// reactor and the world flag store, and the fixture up there spawns a ship with
-/// neither a `ShipPowerSystem` component nor a uuid to address one by.
-fn restraint_app() -> App {
-    let mut app = App::new();
-    app.init_resource::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
-        .init_resource::<crate::world::server::WorldContentRuntime>()
-        .add_systems(
-            Update,
-            (drain_scripted_power_orders, mirror_weapons_cold_flags).chain(),
-        );
-    app
-}
-
-/// A hull authoring `weapons` at `default_level` with the given commandable
-/// floor, so a test can field both the ship that may go cold and the one that
-/// may not without hand-building a `ShipConfig`.
-fn coldable_hull(default_level: u8, min_level: u8) -> crate::ship_plugin::ShipConfigComponent {
-    crate::ship_plugin::ShipConfigComponent(
-        crate::ship::config::parse_and_validate(
-            &format!(
-                r#"
-[power_groups.weapons]
-label = "entity.test.power_groups.weapons.label"
-default_level = {default_level}
-min_level = {min_level}
-max_level = 4
-
-[[station]]
-id = "tactical"
-name = "Tactical"
-description = "Dummy"
-rank = "Ltn."
-
-[[console]]
-id = "tactical-console"
-home_station = "tactical"
-screen = "fixture.html"
-
-[[system]]
-id = "phaser-fore"
-kind = "phaser_bank"
-console = "tactical-console"
-power_group = "weapons"
-"#
-            ),
-            &["phaser_bank"],
-        )
-        .expect("the fixture hull parses"),
-    )
-}
-
-/// Spawn a ship with a reactor seeded from its own authored groups, the way the
-/// production spawner does.
-fn spawn_reactor_ship(
+fn command(
     app: &mut App,
-    uuid: &str,
-    name: Option<&str>,
-    local: bool,
-    config: crate::ship_plugin::ShipConfigComponent,
-) -> Entity {
-    let seed = authored_power_group_seed(&config.0.power_groups);
-    let power = ShipPowerSystem(PowerSystem::from_authored_groups(
-        &PowerConfig::default(),
-        &seed,
-    ));
-    let mut e = app.world_mut().spawn((
-        crate::server_app::Ship,
-        crate::entities::spawner::EntityUuid(uuid.to_string()),
-        power,
-        config,
-    ));
-    if let Some(name) = name {
-        e.insert(crate::entities::spawner::EntityName(name.to_string()));
+    token: &str,
+    correlation: &str,
+    payload: SystemControlPayload,
+) -> Vec<OutboundMessage> {
+    push(
+        app,
+        token,
+        ClientMessage::ControlSystemCorrelated {
+            target: crate::ship::system_registry::power_reactor_system_id(),
+            correlation: ActionCorrelationId::new(correlation).unwrap(),
+            payload,
+        },
+    );
+    tick(app)
+}
+fn feedback(
+    out: &[OutboundMessage],
+    token: &str,
+    correlation: &str,
+    expected: ActionFeedbackOutcome,
+) {
+    let matching: Vec<_> = out.iter().filter(|entry| matches!((&entry.target, &entry.msg),
+        (Target::Token(actual), ServerMessage::ActionFeedback { correlation: id, .. }) if actual == token && id.as_str() == correlation)).collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "one final response for the actual request: {out:?}"
+    );
+    assert!(
+        matches!(&matching[0].msg, ServerMessage::ActionFeedback { outcome, .. } if *outcome == expected)
+    );
+}
+fn request(group: &str, flow: f32, cooling: f32) -> SystemControlPayload {
+    SystemControlPayload::SetEnergyGroup {
+        group: PowerGroupId(group.into()),
+        flow_per_sec: flow,
+        cooling_per_sec: cooling,
     }
-    if local {
-        e.insert(crate::server_app::LocalShip);
-    }
-    e.id()
 }
 
-fn queue_order(app: &mut App, uuid: &str, level: ScriptedPowerLevel) {
+#[test]
+fn legacy_power_state_projection_only_reaches_the_current_power_holder() {
+    let (mut app, _) = fixture();
+    start(&mut app);
+    let out = tick(&mut app);
+    let messages: Vec<_> = out
+        .iter()
+        .filter(|entry| matches!(entry.msg, ServerMessage::PowerState { .. }))
+        .collect();
+    assert!(
+        !messages.is_empty(),
+        "the producer must run before checking its audience"
+    );
+    assert!(messages
+        .iter()
+        .all(|entry| matches!(&entry.target, Target::Token(token) if token == "power")));
+    push(&mut app, "power", ClientMessage::ReleaseStation);
+    tick(&mut app);
+    let out = tick(&mut app);
+    assert!(!out
+        .iter()
+        .any(|entry| matches!(entry.msg, ServerMessage::PowerState { .. })));
+}
+
+#[test]
+fn actual_reactor_owner_applies_numeric_flow_and_publishes_the_same_intent() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let max = power(&app, entity)
+        .config()
+        .groups
+        .iter()
+        .find(|g| g.id.0 == "helm")
+        .unwrap()
+        .max_flow_per_sec;
+    let out = command(
+        &mut app,
+        "power",
+        "flow-applied",
+        request("helm", max * 0.5, 0.0),
+    );
+    feedback(
+        &out,
+        "power",
+        "flow-applied",
+        ActionFeedbackOutcome::Applied,
+    );
+    assert_eq!(
+        power(&app, entity).flow_for(&PowerGroupId("helm".into())),
+        Some(max * 0.5)
+    );
+    let reading = bb(&app, entity).energy.as_ref().unwrap();
+    assert_eq!(
+        reading
+            .groups
+            .iter()
+            .find(|g| g.id == "helm")
+            .unwrap()
+            .desired_flow_per_sec,
+        max * 0.5
+    );
+    assert!(reading.reactor.capacity > 0.0);
+    assert_eq!(
+        reading.consumers.len(),
+        power(&app, entity).config().consumers.len()
+    );
+    assert!(
+        bb(&app, entity).groups.is_empty(),
+        "no second rung simulation projection"
+    );
+}
+
+#[test]
+fn invalid_paired_command_refuses_atomically_and_unknown_groups_are_not_created() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let before = power(&app, entity).flow_for(&PowerGroupId("helm".into()));
+    let max_cooling = power(&app, entity)
+        .config()
+        .groups
+        .iter()
+        .find(|g| g.id.0 == "helm")
+        .unwrap()
+        .max_cooling_per_sec;
+    let out = command(
+        &mut app,
+        "power",
+        "invalid-pair",
+        request("helm", 0.0, max_cooling + 1.0),
+    );
+    feedback(
+        &out,
+        "power",
+        "invalid-pair",
+        ActionFeedbackOutcome::Refused,
+    );
+    assert_eq!(
+        power(&app, entity).flow_for(&PowerGroupId("helm".into())),
+        before
+    );
+    let out = command(
+        &mut app,
+        "power",
+        "unknown-group",
+        request("missing", 0.0, 0.0),
+    );
+    feedback(
+        &out,
+        "power",
+        "unknown-group",
+        ActionFeedbackOutcome::Refused,
+    );
+    assert!(power(&app, entity)
+        .flow_for(&PowerGroupId("missing".into()))
+        .is_none());
+}
+
+#[test]
+fn captain_information_access_does_not_grant_reactor_authority() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let before = power(&app, entity).flow_for(&PowerGroupId("helm".into()));
+    let out = command(
+        &mut app,
+        "captain",
+        "wrong-holder",
+        request("helm", 0.0, 0.0),
+    );
+    feedback(
+        &out,
+        "captain",
+        "wrong-holder",
+        ActionFeedbackOutcome::Refused,
+    );
+    assert_eq!(
+        power(&app, entity).flow_for(&PowerGroupId("helm".into())),
+        before
+    );
+}
+
+#[test]
+fn console_handoff_rejects_previous_host_without_resetting_system_work() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let reactor = crate::ship::system_registry::power_reactor_system_id();
+    let console = app
+        .world()
+        .get::<ShipConfigComponent>(entity)
+        .unwrap()
+        .0
+        .systems
+        .iter()
+        .find(|s| s.id == reactor)
+        .unwrap()
+        .console
+        .clone()
+        .unwrap();
+    let before = state(&app, entity);
+    app.world_mut()
+        .get_mut::<ConsoleHosts>(entity)
+        .unwrap()
+        .0
+        .iter_mut()
+        .find(|host| host.console == console)
+        .unwrap()
+        .host = Some(StationId("captain".into()));
+    assert_eq!(state(&app, entity), before);
+    let out = command(&mut app, "power", "stale-host", request("helm", 0.0, 0.0));
+    feedback(&out, "power", "stale-host", ActionFeedbackOutcome::Refused);
+    let out = command(&mut app, "captain", "new-host", request("helm", 0.0, 0.0));
+    feedback(&out, "captain", "new-host", ActionFeedbackOutcome::Applied);
+    assert_eq!(
+        power(&app, entity).flow_for(&PowerGroupId("helm".into())),
+        Some(0.0)
+    );
+}
+
+#[test]
+fn ordinary_delegation_and_damage_refuse_human_flow_commands() {
+    use crate::ship::control_source::ControlSource;
+    for offline in [false, true] {
+        let (mut app, entity) = fixture();
+        start(&mut app);
+        let reactor = crate::ship::system_registry::power_reactor_system_id();
+        {
+            let mut sources = app
+                .world_mut()
+                .get_mut::<ShipSystemControlSources>(entity)
+                .unwrap();
+            if offline {
+                sources.0.set_offline(reactor, true);
+            } else {
+                sources.0.set(reactor, ControlSource::Ai);
+            }
+        }
+        let before = power(&app, entity).flow_for(&PowerGroupId("helm".into()));
+        let out = command(
+            &mut app,
+            "power",
+            if offline { "offline" } else { "delegated" },
+            request("helm", 0.0, 0.0),
+        );
+        feedback(
+            &out,
+            "power",
+            if offline { "offline" } else { "delegated" },
+            ActionFeedbackOutcome::Refused,
+        );
+        assert_eq!(
+            power(&app, entity).flow_for(&PowerGroupId("helm".into())),
+            before
+        );
+        if offline {
+            assert_eq!(power(&app, entity).network().output_actual_per_sec, 0.0);
+        }
+    }
+}
+
+#[test]
+fn priority_moves_reindex_equal_and_noncontiguous_siblings_only() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let roots: Vec<_> = power(&app, entity)
+        .config()
+        .groups
+        .iter()
+        .filter(|g| g.parent.is_none())
+        .map(|g| g.id.clone())
+        .collect();
+    assert!(roots.len() >= 3);
+    let moved = roots.last().unwrap().clone();
+    for priorities in [
+        vec![0; roots.len()],
+        (0..roots.len()).map(|i| (i * 7) as u16).collect(),
+    ] {
+        {
+            let mut p = app.world_mut().get_mut::<ShipPowerSystem>(entity).unwrap();
+            for (id, priority) in roots.iter().zip(priorities) {
+                p.0.set_priority(id, priority).unwrap();
+            }
+        }
+        let child_before: Vec<_> = power(&app, entity)
+            .config()
+            .groups
+            .iter()
+            .filter(|g| g.parent.is_some())
+            .map(|g| {
+                (
+                    g.id.clone(),
+                    power(&app, entity).network().groups[&g.id].priority,
+                )
+            })
+            .collect();
+        let out = command(
+            &mut app,
+            "power",
+            "priority",
+            SystemControlPayload::SetEnergyPriority {
+                group: moved.clone(),
+                priority: 0,
+            },
+        );
+        feedback(&out, "power", "priority", ActionFeedbackOutcome::Applied);
+        let mut ranked: Vec<_> = roots
+            .iter()
+            .map(|id| {
+                (
+                    power(&app, entity).network().groups[id].priority,
+                    id.clone(),
+                )
+            })
+            .collect();
+        ranked.sort();
+        assert_eq!(ranked[0].1, moved);
+        assert_eq!(
+            ranked.iter().map(|row| row.0).collect::<Vec<_>>(),
+            (0..roots.len() as u16).collect::<Vec<_>>()
+        );
+        for (id, priority) in child_before {
+            assert_eq!(power(&app, entity).network().groups[&id].priority, priority);
+        }
+    }
+}
+
+#[test]
+fn flow_cut_preserves_request_and_charged_local_reserves() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let requested: Vec<_> = power(&app, entity)
+        .network()
+        .groups
+        .iter()
+        .map(|(id, group)| (id.clone(), group.desired_flow_per_sec))
+        .collect();
+    {
+        let mut p = app.world_mut().get_mut::<ShipPowerSystem>(entity).unwrap();
+        p.0.network_mut().reactor.energy = 0.0;
+        p.0.network_mut().output_actual_per_sec = 0.0;
+        p.0.set_output(0.0).unwrap();
+    }
+    tick(&mut app);
+    let energy = bb(&app, entity).energy.as_ref().unwrap();
+    assert!(energy
+        .groups
+        .iter()
+        .any(|group| group.cut && group.effective_flow_per_sec == 0.0));
+    assert!(energy
+        .consumers
+        .iter()
+        .any(|consumer| consumer.energy > 0.0));
+    assert!(energy
+        .consumers
+        .iter()
+        .all(|consumer| !consumer.thermal_stopped));
+    for (id, desired) in requested {
+        assert_eq!(power(&app, entity).flow_for(&id), Some(desired));
+    }
+}
+
+/// Remove incidental thermal work so this integration check isolates a real
+/// queued stock withdrawal from reactor cooling, without changing shipped data.
+fn coolant_fixture() -> (App, Entity) {
+    let mut config = hull();
+    let hardware = config.energy.as_mut().unwrap();
+    for reserve in std::iter::once(&mut hardware.reactor.reserve)
+        .chain(hardware.consumers.iter_mut().map(|c| &mut c.reserve))
+    {
+        reserve.charge_heat_per_unit = 0.0;
+        reserve.discharge_heat_per_unit = 0.0;
+        reserve.passive_cooling_per_sec = 0.0;
+        reserve.passive_loss_at_full_per_sec = 0.0;
+    }
+    hardware.reactor.initial_heat = 10.0;
+    for consumer in &mut hardware.consumers {
+        consumer.initial_heat = 0.0;
+    }
+    app_with(config)
+}
+#[test]
+fn queued_coolant_debit_is_seen_before_heat_removal_and_committed_once() {
+    let (mut app, entity) = coolant_fixture();
+    start(&mut app);
+    let services = app.world().get::<ResourceServices>(entity).unwrap();
+    let provider = super::super::energy_runtime::coolant_bindings(power(&app, entity), services)
+        .unwrap()
+        .reactor;
+    let available = app
+        .world()
+        .get::<InfrastructureCondition>(entity)
+        .unwrap()
+        .0
+        .capacity_stock(&provider)
+        .unwrap()
+        .available();
+    app.world_mut()
+        .get_mut::<InfrastructureCondition>(entity)
+        .unwrap()
+        .0
+        .adjust_capacity(&provider, 1 - available)
+        .unwrap();
+    {
+        let mut p = app.world_mut().get_mut::<ShipPowerSystem>(entity).unwrap();
+        p.0.network_mut().reactor.heat = 10.0;
+        p.0.set_reactor_cooling(1.0).unwrap();
+    }
+    app.world_mut()
+        .resource_mut::<crate::effect_queue::EffectQueue<CapacityAdjustment>>()
+        .0
+        .push(CapacityAdjustment {
+            uuid: "energy-ship".into(),
+            capacity: provider.clone(),
+            delta: -1,
+        });
+    let before_credit = power(&app, entity)
+        .coolant_credit()
+        .get(&provider)
+        .copied()
+        .unwrap_or(0.0);
+    // Remove already-paid fractional coolant too, through its canonical saved
+    // continuation, so a zero-stock expectation is not mistaken for free fluid.
+    if before_credit > 0.0 {
+        let mut saved = state(&app, entity);
+        saved.coolant_credit.insert(provider.clone(), 0.0);
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .restore_continuation(&saved)
+            .unwrap();
+    }
+    tick(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<InfrastructureCondition>(entity)
+            .unwrap()
+            .0
+            .capacity_stock(&provider)
+            .unwrap()
+            .available(),
+        0
+    );
+    assert_eq!(power(&app, entity).network().reactor.heat, 10.0);
+    assert!(app
+        .world()
+        .resource::<crate::effect_queue::EffectQueue<CapacityAdjustment>>()
+        .0
+        .is_empty());
+    tick(&mut app);
+    assert_eq!(power(&app, entity).network().reactor.heat, 10.0);
+}
+
+#[test]
+fn common_observation_uses_the_reactor_reserve_for_the_battery_alias() {
+    let (mut app, entity) = fixture();
+    tick(&mut app);
+    let reading = bb(&app, entity).energy.as_ref().unwrap();
+    let boards = &app.world().get::<ShipSystemBlackboards>(entity).unwrap().0;
+    let SystemBlackboard::PowerBattery(alias) =
+        &boards[&crate::ship::system_registry::power_battery_system_id()]
+    else {
+        panic!("battery projection")
+    };
+    assert_eq!(alias.charge, reading.reactor.energy);
+    assert_eq!(alias.capacity, reading.reactor.capacity);
+    assert_eq!(bb(&app, entity).battery_charge, reading.reactor.energy);
+    assert!(
+        !reading
+            .consumers
+            .iter()
+            .any(|consumer| consumer.system
+                == crate::ship::system_registry::power_battery_system_id())
+    );
+    for group in &reading.groups {
+        assert_eq!(
+            group.label,
+            app.world()
+                .get::<ShipConfigComponent>(entity)
+                .unwrap()
+                .0
+                .power_groups[&PowerGroupId(group.id.clone())]
+                .label
+        );
+    }
+}
+
+#[test]
+fn scripted_restraint_changes_no_energy_flow_and_mirrors_each_transition_once() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut app, entity) = fixture();
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::entities::spawner::EntityName("Enforcer".into()));
+    let before = state(&app, entity).network;
+    for held in [true, false] {
+        app.world_mut()
+            .resource_mut::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
+            .0
+            .push(PendingGroupPower {
+                uuid: "energy-ship".into(),
+                held,
+            });
+        app.world_mut()
+            .run_system_once(drain_scripted_power_orders)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(mirror_weapons_cold_flags)
+            .unwrap();
+        assert_eq!(power(&app, entity).network(), &before);
+        assert_eq!(power(&app, entity).weapons_restrained(), held);
+        let runtime = app
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>();
+        assert_eq!(runtime.flags.flag(OWN_SHIP_WEAPONS_COLD_FLAG), held);
+        assert_eq!(runtime.flags.flag(&weapons_cold_flag("Enforcer")), held);
+        assert_eq!(runtime.pending_world_events.len(), 2);
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .pending_world_events
+            .clear();
+        app.world_mut()
+            .run_system_once(mirror_weapons_cold_flags)
+            .unwrap();
+        assert!(app
+            .world()
+            .resource::<crate::world::server::WorldContentRuntime>()
+            .pending_world_events
+            .is_empty());
+    }
     app.world_mut()
         .resource_mut::<crate::effect_queue::EffectQueue<PendingGroupPower>>()
         .0
         .push(PendingGroupPower {
-            uuid: uuid.to_string(),
-            group: PowerGroupId(WEAPONS_POWER_GROUP.to_string()),
-            level,
+            uuid: "absent".into(),
+            held: true,
         });
-}
-
-fn weapons_level(app: &mut App, entity: Entity) -> u8 {
-    app.world()
-        .get::<ShipPowerSystem>(entity)
-        .expect("the ship carries a reactor")
-        .0
-        .level_for(&PowerGroupId(WEAPONS_POWER_GROUP.to_string()))
-}
-
-fn flag(app: &App, name: &str) -> bool {
-    app.world()
-        .resource::<crate::world::server::WorldContentRuntime>()
-        .flags
-        .flag(name)
-}
-
-/// **Issue #1398.** `hold_fire` takes the named ship's weapons group cold and
-/// `release_fire` puts it back at the hull's AUTHORED default — not at a number
-/// the script or this system chose.
-///
-/// The hull boots at 3 rather than the fleet's usual 2 precisely so the release
-/// half cannot pass by coincidence: an applier that restored a hardcoded 2 would
-/// satisfy every shipped hull and quietly demote this one.
-#[test]
-fn a_scripted_hold_takes_the_weapons_cold_and_release_restores_the_authored_default() {
-    let mut app = restraint_app();
-    let ship = spawn_reactor_ship(
-        &mut app,
-        "u-1",
-        Some("Enforcer"),
-        false,
-        coldable_hull(3, 0),
-    );
-    assert_eq!(weapons_level(&mut app, ship), 3, "the hull boots at 3");
-
-    queue_order(&mut app, "u-1", ScriptedPowerLevel::Exact(0));
-    app.update();
-    assert_eq!(
-        weapons_level(&mut app, ship),
-        0,
-        "hold_fire reaches level 0"
-    );
-
-    queue_order(&mut app, "u-1", ScriptedPowerLevel::AuthoredDefault);
-    app.update();
-    assert_eq!(
-        weapons_level(&mut app, ship),
-        3,
-        "release_fire restores the hull's own default_level, not a Rust constant"
-    );
-}
-
-/// **Issue #1398.** A hull whose `[power_groups.weapons]` authors `min_level = 1`
-/// REFUSES a scripted hold, exactly as it refuses an Engineering officer's.
-///
-/// The order goes through `PowerSystem::set_group_allocation`, so which hulls can
-/// express restraint is a designer's decision in the entity TOML rather than the
-/// script vocabulary's. `alliance_battleship`, `alliance_courier` and
-/// `alliance_tender` all say `1` today.
-#[test]
-fn a_scripted_hold_is_clamped_by_the_hulls_own_authored_floor() {
-    let mut app = restraint_app();
-    let ship = spawn_reactor_ship(
-        &mut app,
-        "u-2",
-        Some("Battleship"),
-        false,
-        coldable_hull(2, 1),
-    );
-
-    queue_order(&mut app, "u-2", ScriptedPowerLevel::Exact(0));
-    app.update();
-
-    assert_eq!(
-        weapons_level(&mut app, ship),
-        1,
-        "the reactor clamps to the group's authored floor; the script gets no \
-         privilege the crew do not have"
-    );
-    assert!(
-        !flag(&app, &weapons_cold_flag("Battleship")),
-        "and the mirror says so — a scenario reading the flag learns the order did \
-         not take"
-    );
-}
-
-/// **Issue #1398.** The mirror writes both keys: the ROLE key for the hull the
-/// crew fly and the NAME key for any ship carrying an authored reference name,
-/// and each transition emits exactly one world event so an `on_flag_set` handler
-/// chains once rather than every tick.
-#[test]
-fn the_mirror_writes_the_role_and_name_keys_and_emits_one_event_per_transition() {
-    let mut app = restraint_app();
-    spawn_reactor_ship(&mut app, "u-local", None, true, coldable_hull(2, 0));
-    spawn_reactor_ship(
-        &mut app,
-        "u-named",
-        Some("Enforcer"),
-        false,
-        coldable_hull(2, 0),
-    );
-
-    app.update();
-    assert!(!flag(&app, OWN_SHIP_WEAPONS_COLD_FLAG));
-    assert!(!flag(&app, &weapons_cold_flag("Enforcer")));
     app.world_mut()
-        .resource_mut::<crate::world::server::WorldContentRuntime>()
-        .pending_world_events
-        .clear();
-
-    queue_order(&mut app, "u-local", ScriptedPowerLevel::Exact(0));
-    queue_order(&mut app, "u-named", ScriptedPowerLevel::Exact(0));
-    app.update();
-
-    assert!(
-        flag(&app, OWN_SHIP_WEAPONS_COLD_FLAG),
-        "the hull the crew fly mirrors under a ROLE key — a world's player ship is \
-         not required to declare a reference name"
-    );
-    assert!(flag(&app, &weapons_cold_flag("Enforcer")));
-
-    let set_events: Vec<String> = app
-        .world()
-        .resource::<crate::world::server::WorldContentRuntime>()
-        .pending_world_events
-        .iter()
-        .filter_map(|event| match event {
-            crate::world::content::WorldEvent::FlagSet { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        set_events,
-        vec![
-            weapons_cold_flag("Enforcer"),
-            OWN_SHIP_WEAPONS_COLD_FLAG.to_string()
-        ],
-        "one event per transition, in sorted flag order rather than in archetype \
-         iteration order"
-    );
-
-    // Idle ticks after the transition emit nothing: the store is READ before it
-    // is written, which is what keeps a world nobody orders byte-identical.
-    app.world_mut()
-        .resource_mut::<crate::world::server::WorldContentRuntime>()
-        .pending_world_events
-        .clear();
-    app.update();
-    app.update();
-    assert!(app
-        .world()
-        .resource::<crate::world::server::WorldContentRuntime>()
-        .pending_world_events
-        .is_empty());
+        .run_system_once(drain_scripted_power_orders)
+        .unwrap();
+    assert!(!power(&app, entity).weapons_restrained());
 }
 
-/// **Issue #1398.** An order naming a uuid no ship in the world carries is a
-/// warned no-op, not a panic and not a write onto some other hull.
 #[test]
-fn a_scripted_order_for_an_absent_ship_moves_nothing() {
-    let mut app = restraint_app();
-    let ship = spawn_reactor_ship(
-        &mut app,
-        "u-3",
-        Some("Enforcer"),
-        false,
-        coldable_hull(2, 0),
+fn cut_advisories_carry_actual_controller_and_debounce_until_recovery() {
+    use crate::ship::control_source::ControlSource;
+    use bevy::ecs::system::RunSystemOnce;
+    for source in [ControlSource::Human, ControlSource::Ai] {
+        let (mut app, entity) = fixture();
+        app.world_mut()
+            .get_mut::<ShipSystemControlSources>(entity)
+            .unwrap()
+            .0
+            .set(
+                crate::ship::system_registry::power_reactor_system_id(),
+                source,
+            );
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .network_mut()
+            .groups
+            .get_mut(&PowerGroupId("helm".into()))
+            .unwrap()
+            .cut = true;
+        app.world_mut()
+            .get_mut::<PowerBrownoutState>(entity)
+            .unwrap()
+            .locked_changed = true;
+        app.world_mut()
+            .run_system_once(tick_power_brownout_advisory)
+            .unwrap();
+        let emitted: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<CoordinationEnqueue>>()
+            .drain()
+            .collect();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].sender_origin, source);
+        app.world_mut()
+            .get_mut::<PowerBrownoutState>(entity)
+            .unwrap()
+            .locked_changed = true;
+        app.world_mut()
+            .run_system_once(tick_power_brownout_advisory)
+            .unwrap();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<CoordinationEnqueue>>()
+                .drain()
+                .count(),
+            0
+        );
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .network_mut()
+            .groups
+            .get_mut(&PowerGroupId("helm".into()))
+            .unwrap()
+            .cut = false;
+        app.world_mut()
+            .get_mut::<PowerBrownoutState>(entity)
+            .unwrap()
+            .locked_changed = true;
+        app.world_mut()
+            .run_system_once(tick_power_brownout_advisory)
+            .unwrap();
+        assert!(app
+            .world()
+            .get::<PowerBrownoutState>(entity)
+            .unwrap()
+            .notified_groups
+            .is_empty());
+    }
+}
+
+#[test]
+fn snapshot_roundtrip_restores_local_energy_intent_heat_cuts_coolant_and_continues_identically() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let consumer = power(&app, entity).config().consumers[0].system.clone();
+    {
+        let mut p = app.world_mut().get_mut::<ShipPowerSystem>(entity).unwrap();
+        p.0.set_fine_flow(&consumer, Some(0.0)).unwrap();
+        p.0.set_weapons_restrained(true);
+        p.0.network_mut().consumers.get_mut(&consumer).unwrap().heat = 2.0;
+        p.0.network_mut().reactor.energy = 0.0;
+        p.0.network_mut().output_actual_per_sec = 0.0;
+        p.0.set_output(0.0).unwrap();
+    }
+    tick(&mut app);
+    assert!(power(&app, entity)
+        .network()
+        .groups
+        .values()
+        .any(|group| group.cut));
+    let snapshot = crate::snapshot::capture(app.world());
+    assert_eq!(snapshot.entities.len(), 1);
+    let stored: crate::snapshot::PhoenixSnapshot =
+        ron::from_str(&ron::to_string(&snapshot).unwrap()).unwrap();
+    let (mut resumed, restored_entity) = fixture();
+    start(&mut resumed);
+    let report = crate::snapshot::restore(resumed.world_mut(), &stored);
+    assert!(report.is_complete(), "{report:?}");
+    assert_eq!(report.entities_restored, 1);
+    assert_eq!(state(&app, entity), state(&resumed, restored_entity));
+    assert_eq!(
+        app.world().get::<InfrastructureCondition>(entity),
+        resumed
+            .world()
+            .get::<InfrastructureCondition>(restored_entity)
     );
+    for _ in 0..4 {
+        tick(&mut app);
+        tick(&mut resumed);
+        assert_eq!(state(&app, entity), state(&resumed, restored_entity));
+        assert_eq!(
+            app.world().get::<InfrastructureCondition>(entity),
+            resumed
+                .world()
+                .get::<InfrastructureCondition>(restored_entity)
+        );
+    }
+}
 
-    queue_order(&mut app, "u-not-here", ScriptedPowerLevel::Exact(0));
-    app.update();
-
-    assert_eq!(weapons_level(&mut app, ship), 2);
-    assert!(!flag(&app, &weapons_cold_flag("Enforcer")));
+#[test]
+fn snapshot_refuses_invalid_energy_references_before_overwriting_live_stocks() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let before = state(&app, entity);
+    let stock = app
+        .world()
+        .get::<InfrastructureCondition>(entity)
+        .unwrap()
+        .clone();
+    let mut saved = crate::snapshot::capture(app.world());
+    assert_eq!(saved.entities.len(), 1);
+    saved.entities[0]
+        .power
+        .as_mut()
+        .unwrap()
+        .network
+        .fine_flows
+        .insert(SystemId("missing-system".into()), 1.0);
+    let report = crate::snapshot::restore(app.world_mut(), &saved);
+    assert!(!report.is_complete());
+    assert_eq!(state(&app, entity), before);
+    assert_eq!(
+        app.world().get::<InfrastructureCondition>(entity),
+        Some(&stock)
+    );
 }

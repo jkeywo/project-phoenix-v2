@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 5,
+  "current_increment": 6,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -109,12 +109,15 @@
     {
       "id": 6,
       "title": "Stores, transfers and service links",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         5
       ],
       "completion": "Existing ammunition, transfer and facility stock use shared capacities, inventories, reservations and explicit links; replenishment works.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/resource-stores.yaml",
+        "docs/gameplay-redesign/implementation/increment-6.md"
+      ]
     },
     {
       "id": 7,
@@ -2688,6 +2691,14 @@
       "user_instruction": "Do 5",
       "pending_acceptance": "Previous physical/device and human workload checks remain open.",
       "evidence": "docs/acceptance/1562-common-observations.md"
+    },
+    {
+      "from_increment": 5,
+      "to_increment": 6,
+      "date": "2026-10-14",
+      "user_instruction": "do 6 then",
+      "pending_acceptance": "Previous physical/device and human workload checks remain open.",
+      "evidence": "docs/acceptance/1562-shared-jobs.md"
     }
   ]
 }

@@ -1,0 +1,27 @@
+entities:
+  - decision: shared-resource-stores-and-claims
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Resource Stores and Stage Claims
+      summary: "Increment 6 migrates torpedo ammunition and infrastructure capacities onto shared bounded integer stocks, requirements and reservations inside their existing authoritative owners. A loading tube reserves its next round when loading starts, releases it on cancellation and consumes it on completion; the available magazine projection retains existing timing. Queued future work does not reserve supplies."
+      rationale:
+        - "User approved the serial roadmap and instructed do 6 then on 2026-10-14. AD23 and AD66 require next-stage claims and all-or-nothing requirements. Stock, reservations and committed work must not duplicate physical quantities."
+        - "[ai] Keep existing stock labels/order, AI grant policy, System admission and condition/counter publication. Each transfer secures source quantity and destination room together. Contending transfers use stable UUID order and account for earlier commitments rather than independently overbooking the same endpoint."
+  - decision: resource-service-bindings-and-replenishment
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Resource Services and Replenishment
+      summary: "Named authored resource services resolve to concrete capacity or torpedo-magazine endpoints; a consumer-owned link may explicitly override a named default. Existing umbilicals retain their requested capacity, docking, power, damage, rate and normal controls/AI. Configured ammunition replenishment uses the same docked flow, real provider stock and magazine headroom including tube-held rounds. No automatic provider search or rerouting."
+      rationale:
+        - "AD06 and AD28 select consumer-owned links, named defaults and concrete overrides. Resolution and type/reference validation run before ordinary loading or Workshop Test. An endpoint binding confers no observation or command authority."
+        - "[ai] Infrastructure stock remains owned by InfrastructureState and mutations publish through its existing drain. Magazine stock remains owned by TorpedoSystem. No mirrored ship inventory is added. Unconfigured existing flows still resolve their explicitly named capacity; no new resource or drain is imposed on shipped hulls."
+  - decision: resource-continuation-and-authoring
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Resource Continuation and Authoring
+      summary: "Stocks, claims and fractional umbilical flow progress participate immediately in snapshots, restore and deterministic digests. Workshop edits and validates supported stocks, service bindings and links through its existing document/history/Preview/Test workflow. Preserve existing transport, individual System AI and Console knowledge."
+      rationale:
+        - "[ai] Increment 6 is structural except for the explicit replenishment consumer and conservation/continuation corrections. Compare unchanged authored gameplay and Cruiser thresholds. Rescue personnel, local stock targets, timed internal deliveries, parts, production, new coolant/fuel drains and compartment routes remain later increments."

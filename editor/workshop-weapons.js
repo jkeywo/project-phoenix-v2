@@ -17,8 +17,11 @@ export function defaultWeapon(kind = 'beam') {
     guided: { kind, volley_max: 1 },
   }[kind];
   if (!delivery) throw new Error('Unsupported weapon delivery.');
-  return { id: '', mount: { facing_deg: 0, fire_arc_deg: 90, range: 40 }, delivery: clone(delivery) };
+  return { id: '', mount: { facing_deg: 0, fire_arc_deg: 90, range: 40 }, delivery: clone(delivery), ai: { idle: true } };
 }
+// Match TorpedoConfig's supported defaults when the author leaves global
+// tuning implicit. Generic mount validation compares against these values.
+export const guidedWeaponRange = value => (value.torpedoes?.speed ?? 15) * (value.torpedoes?.lifespan ?? 20);
 const at = (object, path) => path.split('.').reduce((value, key) => value?.[key], object);
 export function inspectWeapons(draft, dependencies, path) {
   const composition = inspectEntityComposition(draft, dependencies, path), value = composition.resolved.value;
@@ -30,7 +33,7 @@ export function inspectWeapons(draft, dependencies, path) {
       if (row[name] !== undefined) delivery[field] = clone(row[name]);
     }
     weapons.push({ section, weapon: { id: row.id, mount: { facing_deg: row.facing_deg ?? 0, fire_arc_deg: row.fire_arc_deg,
-      range: kind === 'beam' ? row.beam_range : kind === 'bolt' ? row.range : (value.torpedoes?.speed ?? 0) * (value.torpedoes?.lifespan ?? 0) },
+      range: kind === 'beam' ? row.beam_range : kind === 'bolt' ? row.range : guidedWeaponRange(value) },
     delivery, ...Object.fromEntries(['marker', 'barrels', 'pattern', 'ai'].filter(key => row[key] !== undefined).map(key => [key, clone(row[key])])) } });
   }
   return { ...composition, weapons };

@@ -52,6 +52,11 @@ describe('Workshop configurable weapon source editing', () => {
     value.mount.range = 40;
     expect(() => operation(current, { section: 'torpedoes.tubes', originalId: 'tube', weapon: value })).toThrow(/Guided range/);
   });
+  it('uses supported guided range defaults and explicit idle AI for new equipment', () => {
+    const current = draft('[torpedoes]\ncount=4\n[[torpedoes.tubes]]\nid="tube"\nfacing_deg=0\nfire_arc_deg=90\n');
+    expect(inspectWeapons(current, dependencies, path).weapons[0].weapon.mount.range).toBe(300);
+    for (const kind of ['beam', 'bolt', 'guided']) expect(defaultWeapon(kind).ai).toEqual({ idle: true });
+  });
   it('refuses inline selections, duplicate identities and nonfinite mounts', () => {
     const current = draft('weapon=[{id="beam-a",mount={facing_deg=0,fire_arc_deg=90,range=40},delivery={kind="beam",damage_per_sec=10}}]\n');
     expect(() => operation(current, { section: 'weapon', originalId: 'beam-a', weapon: edited(current) })).toThrow(/inline/);

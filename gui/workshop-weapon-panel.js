@@ -1,6 +1,6 @@
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
-import { inspectWeapons, applyWeaponOperation, defaultWeapon, WEAPON_PARAMETERS } from '../editor/workshop-weapons.js';
+import { inspectWeapons, applyWeaponOperation, defaultWeapon, guidedWeaponRange, WEAPON_PARAMETERS } from '../editor/workshop-weapons.js';
 
 /** Supported weapon data forms, accepted through authoritative validation. */
 export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft, busy, setBusy, changed = () => {}, attach = true }) {
@@ -112,10 +112,10 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   }
   save.addEventListener('click', () => void apply());
   create.addEventListener('click', () => { selected = null; existing.selectedIndex = -1; const value = defaultWeapon(kind.value);
-    if (kind.value === 'guided') value.mount.range = (inspection.resolved.value.torpedoes?.speed ?? 0) * (inspection.resolved.value.torpedoes?.lifespan ?? 0);
+    if (kind.value === 'guided') value.mount.range = guidedWeaponRange(inspection.resolved.value);
     paint(value); status.textContent = t('workshop.weapon.new'); });
   kind.addEventListener('change', () => { if (!selected) { const value = defaultWeapon(kind.value); value.id = id.value; value.strategy_id = strategy.value;
-    if (kind.value === 'guided') value.mount.range = (inspection.resolved.value.torpedoes?.speed ?? 0) * (inspection.resolved.value.torpedoes?.lifespan ?? 0);
+    if (kind.value === 'guided') value.mount.range = guidedWeaponRange(inspection.resolved.value);
     paint(value); } });
   template.addEventListener('change', () => { selected = null; inspect(true); }); existing.addEventListener('change', select);
   addStep.addEventListener('click', () => addPatternStep());

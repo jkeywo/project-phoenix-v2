@@ -1,34 +1,14 @@
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
-import { authoredAndGeneratedSystems } from './workshop-ship-authoring.js';
-
-export const ENERGY_RESERVE_FIELDS = Object.freeze(['capacity', 'max_intake_per_sec', 'passive_loss_at_full_per_sec',
-  'charge_heat_per_unit', 'discharge_heat_per_unit', 'passive_cooling_per_sec', 'coolant_heat_per_unit', 'trip_heat', 'recover_heat']);
-export const ENERGY_REACTOR_FIELDS = Object.freeze(['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'initial_output_per_sec', 'initial_energy', 'initial_heat', 'max_cooling_per_sec', 'default_cooling_per_sec']);
-export const ENERGY_CONSUMER_FIELDS = Object.freeze(['initial_energy', 'initial_heat', 'continuous_cost_per_sec', 'discrete_cost']);
-export const ENERGY_GROUP_FIELDS = Object.freeze(['max_flow_per_sec', 'default_flow_per_sec', 'max_cooling_per_sec', 'default_cooling_per_sec', 'priority', 'restore_delay_secs']);
+import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
+import { energyAliases } from './workshop-energy-model.js';
+import { requireCoolantStore } from './workshop-energy-model.js';
+import { configuredPowerTree } from './workshop-energy-ai.js';
+import { writeStateTrees } from './workshop-state-trees.js';
+export * from './workshop-energy-model.js';
 const clone = value => structuredClone(value);
-export const energyAliases = kind => ['power', 'power_reactor', 'power_battery', 'shields', 'phaser_control', 'command', 'captain', 'red_alert', 'viewscreen'].includes(kind);
-const mandatoryKinds = new Set(['helm_thrust', 'helm_steering', 'lateral_thrust', 'vertical_thrust', 'helm_impulse', 'helm_boost', 'helm_radar',
-  'tactical_radar', 'sensor_radar', 'sensors', 'navigation', 'comms', 'repair', 'tractor', 'dock', 'umbilical', 'transporter', 'security',
-  'torpedo_magazine', 'phaser_bank', 'blaster_bank', 'torpedo_tube', 'shield_arc']);
-const requiresEnergy = system => !energyAliases(system.kind) && (system.power_group || mandatoryKinds.has(system.kind));
-const reserve = () => ({ capacity: 100, max_intake_per_sec: 20, passive_loss_at_full_per_sec: 1, charge_heat_per_unit: 0.1,
-  discharge_heat_per_unit: 0.1, passive_cooling_per_sec: 0.2, coolant_heat_per_unit: 10, trip_heat: 50, recover_heat: 30 });
-export const defaultEnergyConsumer = system => ({ system, initial_energy: 50, initial_heat: 0, continuous_cost_per_sec: 1,
-  discrete_cost: 1, reserve: reserve(), coolant: { service: 'coolant' } });
-export const defaultEnergyGroup = id => ({ id, max_flow_per_sec: 20, default_flow_per_sec: 10,
-  max_cooling_per_sec: 5, default_cooling_per_sec: 1, priority: 0, restore_delay_secs: 0.5 });
-export function createEnergyModel(value) {
-  const systems = authoredAndGeneratedSystems(value).filter(requiresEnergy);
-  const missing = systems.filter(system => !system.power_group || !Object.hasOwn(value.power_groups || {}, system.power_group));
-  if (missing.length) throw new Error(`Assign authored power groups to machinery first: ${missing.map(system => system.id).join(', ')}.`);
-  return { reactor: { sustainable_output_per_sec: 100, max_output_per_sec: 200, ramp_per_sec: 20, initial_output_per_sec: 100,
-    initial_energy: 50, initial_heat: 0, max_cooling_per_sec: 5, default_cooling_per_sec: 1, reserve: reserve(), coolant: { service: 'coolant' } },
-  consumer: systems.map(system => defaultEnergyConsumer(system.id)),
-  group: Object.keys(value.power_groups || {}).sort().map(defaultEnergyGroup) };
-}
+
 export function inspectEnergy(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);
   const profile = inspection.resolved.value.energy;
@@ -38,7 +18,7 @@ export function inspectEnergy(draft, dependencies, path) {
     services: clone(inspection.resolved.value.resource_services || {}),
     capacities: clone(inspection.resolved.value.infrastructure?.capacity || []) };
 }
-function replaceEnergy(source, value) {
+export function replaceEnergySource(source, value) {
   const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)]
     .map(match => ({ start: match.index, name: match[1].replace(/\]$/, '').trim() }));
   const spans = headers.filter(row => row.name === 'energy' || row.name.startsWith('energy.')).map(row => ({ start: row.start,
@@ -56,7 +36,13 @@ export function prepareEnergyOperation(draft, dependencies, operation) {
     && !operation.materialise) throw new Error('Explicitly materialise inherited energy settings before editing.');
   const energy = clone(operation.energy);
   if (!energy?.reactor || !Array.isArray(energy.consumer) || !Array.isArray(energy.group)) throw new Error('Energy requires a reactor, consumers and control groups.');
-  const after = replaceEnergy(before, energy); parse(after);
+  let after = replaceEnergySource(before, energy);
+  if (!inspection.energy) {
+    requireCoolantStore(inspection.resolved.value, energy.reactor.coolant);
+    for (const system of inspection.resolved.value.system || []) if (system.kind === 'power_reactor' && !system.config?.ai?.tree?.length)
+      after = writeStateTrees(after, system, configuredPowerTree(energy), { materialise: operation.materialise === true });
+  }
+  parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }
 export async function applyEnergyOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {

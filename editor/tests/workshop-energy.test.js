@@ -4,6 +4,8 @@ import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
 import { createEnergyModel, inspectEnergy, prepareEnergyOperation, applyEnergyOperation } from '../workshop-energy.js';
 import { resolveTemplate } from '../entity-includes.js';
+import { stripRemovals } from '../entity-includes.js';
+import { applyShipOperation } from '../workshop-ship-authoring.js';
 const path = 'assets/entities/energy-ship.toml', base = 'assets/entities/base.toml', deps = { base_files: {}, packs: [] };
 const hardware = { system: [{ id: 'impulse', kind: 'impulse', power_group: 'propulsion' }, { id: 'power-reactor', kind: 'power_reactor', power_group: 'reactor' }, { id: 'power-battery', kind: 'power_battery' }], power_groups: { propulsion: {}, reactor: {} } };
 const source = '# keep top\n' + stringify({ energy: createEnergyModel(hardware) }) + '# keep appearance\n[appearance]\ncolor=[1,2,3]\n';
@@ -13,6 +15,33 @@ describe('Workshop energy authoring', () => {
     const model = createEnergyModel(hardware); expect(model.consumer.map(item => item.system)).toEqual(['impulse']);
     expect(model.group.map(item => item.id)).toEqual(['propulsion', 'reactor']);
     expect(model.reactor.coolant).toEqual({ service: 'coolant' }); expect(model.consumer[0].coolant).toEqual({ service: 'coolant' });
+  });
+  it('creates the first energy hardware and ordinary Power tree in one accepted history edit', async () => {
+    const value = { ...hardware, resource_services: { coolant: { kind: 'capacity', id: 'tank' } },
+      infrastructure: { capacity: [{ id: 'tank', amount: 10 }] } };
+    value.system[1].config = { ai: { idle: true } };
+    const before = stringify(value), current = draft(before), runtime = { dependencies: async () => deps, validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
+    await applyEnergyOperation({ draft: current, runtime, operation: { path, energy: createEnergyModel(value) } });
+    const after = current.read(path), parsed = stripRemovals(parse(after));
+    expect(parsed.energy.consumer.map(row => row.system)).toEqual(['impulse']);
+    expect(parsed.system[1].config.ai).toMatchObject({ root: 'power' });
+    expect(parsed.system[1].config.ai.tree[0].state[0].task[0].action.kind).toBe('write_number');
+    expect(current.snapshot().history.undo).toHaveLength(1); current.undo(); expect(current.read(path)).toBe(before);
+  });
+  it('adds and removes machinery together with its local reserve in single history edits', async () => {
+    const value = { ...hardware, tags: ['ship'], station: [{ id: 'engineering' }],
+      console: [{ id: 'engineering', home_station: 'engineering', screen: 'engineering.html' }],
+      system: [{ id: 'existing', kind: 'helm_thrust', console: 'engineering', power_group: 'propulsion' }],
+      resource_services: { coolant: { kind: 'capacity', id: 'tank' } }, infrastructure: { capacity: [{ id: 'tank', amount: 10 }] } };
+    value.energy = createEnergyModel(value);
+    const before = stringify(value), current = draft(before), runtime = { dependencies: async () => deps,
+      shipSchema: async () => ({ system_kinds: ['helm_thrust', 'helm_radar'] }), validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
+    await applyShipOperation({ draft: current, runtime, operation: { path, type: 'system-add', id: 'new-radar', kind: 'helm_radar', console: 'engineering', power_group: 'propulsion' } });
+    const added = current.read(path); expect(parse(added).energy.consumer.map(row => row.system)).toEqual(['existing', 'new-radar']);
+    expect(parse(added).energy.reactor).toEqual(value.energy.reactor); expect(current.snapshot().history.undo).toHaveLength(1);
+    await applyShipOperation({ draft: current, runtime, operation: { path, type: 'system-remove', id: 'new-radar' } });
+    expect(parse(current.read(path)).energy.consumer.map(row => row.system)).toEqual(['existing']);
+    current.undo(); expect(current.read(path)).toBe(added); current.undo(); expect(current.read(path)).toBe(before);
   });
   it('refuses mandatory machinery without groups, including generated physical shield arcs', () => {
     expect(() => createEnergyModel({ system: [{ id: 'drive', kind: 'helm_thrust' }] })).toThrow(/Assign authored power groups.*drive/);

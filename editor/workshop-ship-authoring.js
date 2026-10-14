@@ -1,8 +1,12 @@
+import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
+export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
 import { writeSystemComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
+import { defaultEnergyConsumer, requiresEnergy, requireCoolantStore } from './workshop-energy-model.js';
+import { replaceEnergySource } from './workshop-energy.js';
 
 const quote = value => JSON.stringify(String(value));
 const newlineOf = source => source.includes('\r\n') ? '\r\n' : '\n';
@@ -130,15 +134,6 @@ function provenanceFinding(inspection, prefix, token, message) {
   return finding(owner, source, token, message);
 }
 
-export function authoredAndGeneratedSystems(value) {
-  const systems = [...(value.system || [])];
-  const shields = systems.find(system => system.kind === 'shields');
-  if (shields) for (const arc of value.shield_arc || []) {
-    const id = `shield-arc-${arc.id}`;
-    if (!systems.some(system => system.id === id)) systems.push({ id, kind: 'shield_arc', console: shields.console, generated: true });
-  }
-  return systems;
-}
 
 function verify(path, source, schema, value = parse(source)) {
   const stations = value.station || [], systems = authoredAndGeneratedSystems(value), consoles = value.console || [];
@@ -295,17 +290,32 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
       after = after.slice(0, block.start) + remove(relative, feed) + after.slice(block.end);
     }
   }
-  else if (operation.type === 'system-add') after = append(after, { system: [{ id: operation.id, kind: operation.kind,
+  else if (operation.type === 'system-add') {
+    const added = { id: operation.id, kind: operation.kind,
     console: operation.console, ai_only: operation.ai_only === true,
     ...(operation.power_group ? { power_group: operation.power_group } : {}),
     ...(operation.components ? { component: operation.components, channel: operation.channels || [] } : {}),
-    ...(operation.ai ? { config: { ai: operation.ai } } : {}) }] });
+    ...(operation.ai ? { config: { ai: operation.ai } } : {}) };
+    after = append(after, { system: [added] });
+    const value = inspection.composition.resolved.value;
+    if (value.energy && requiresEnergy(added)) {
+      if (!added.power_group || !(value.energy.group || []).some(group => group.id === added.power_group))
+        throw new Error('Assign this machinery to an existing authored energy control group before adding it.');
+      const energy = structuredClone(value.energy), coolant = structuredClone(energy.reactor.coolant || { service: 'coolant' });
+      requireCoolantStore(value, coolant);
+      energy.consumer ||= []; const consumer = defaultEnergyConsumer(added.id); consumer.coolant = coolant;
+      energy.consumer.push(consumer); after = replaceEnergySource(after, energy);
+    }
+  }
   else if (operation.type === 'system-set' || operation.type === 'system-update') {
     const fields = operation.type === 'system-set' ? { [operation.field]: operation.value } : operation.fields;
     for (const [field, value] of Object.entries(fields)) { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before editing.`);
       after = value === undefined ? removeKey(after, block, field) : setKey(after, block, field, value); }
   }
-  else if (operation.type === 'system-remove') { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before removing it.`); after = remove(after, block); }
+  else if (operation.type === 'system-remove') { const block = entry(after, 'system', operation.id); if (!block) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before removing it.`); after = remove(after, block);
+    const energy = inspection.composition.resolved.value.energy;
+    if (energy?.consumer?.some(row => row.system === operation.id)) after = replaceEnergySource(after, { ...energy, consumer: energy.consumer.filter(row => row.system !== operation.id) });
+  }
   else if (operation.type === 'system-move') { const list = blocks(after, 'system', 'system'); const index = localIds(after, 'system').indexOf(operation.id);
     if (index < 0) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before reordering it.`);
     after = move(after, list, index, operation.direction); }

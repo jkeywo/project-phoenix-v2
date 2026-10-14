@@ -6720,3 +6720,36 @@ fn common_observation_metadata_roundtrips_without_renewing_sample_time() {
     assert_eq!(decoded, original);
     assert_eq!(decoded.age_ticks(45), Some(37));
 }
+
+#[test]
+fn system_observation_metadata_survives_ron_blackboard_encoding() {
+    use phoenix_model::observation::*;
+    let metadata = ObservationMetadata::at(
+        42,
+        ObservationSubject::System {
+            id: SystemId("helm-radar".into()),
+        },
+        ObservationProvenance {
+            kind: ObservationSource::SystemReport,
+            system: Some(SystemId("helm-radar".into())),
+            label: String::new(),
+        },
+        ObservationUncertainty::Qualitative,
+    )
+    .received(43);
+    let board = SystemBlackboard::Repair(RepairBlackboard {
+        queue_depth: vec![QueueEntryPreview {
+            group: fixture_repair_group("helm"),
+            station_label: "station.helm.name".into(),
+            tier: crate::ship::damage::DamageTier::Damaged,
+            deficit: 3.0,
+            observations: vec![metadata],
+        }],
+        ..Default::default()
+    });
+    // Save and peer snapshot transfer use RON, whose internally tagged
+    // enum handling differs from the command wire's JSON representation.
+    let stored = ron::to_string(&board).unwrap();
+    let decoded: SystemBlackboard = ron::from_str(&stored).unwrap();
+    assert_eq!(decoded, board);
+}

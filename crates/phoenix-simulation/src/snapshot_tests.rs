@@ -1783,9 +1783,12 @@ fn repair_report_sources_and_recovery_watermarks_survive_snapshot_restore() {
     use phoenix_model::observation::*;
     let observation = ObservationMetadata::at(
         42,
-        ObservationSubject::Unknown,
+        ObservationSubject::System {
+            id: crate::core::messages::SystemId("helm-radar".into()),
+        },
         ObservationProvenance {
-            kind: ObservationSource::RepairDiagnosis,
+            kind: ObservationSource::SystemReport,
+            system: Some(crate::core::messages::SystemId("helm-radar".into())),
             ..Default::default()
         },
         ObservationUncertainty::Qualitative,
@@ -1806,8 +1809,8 @@ fn repair_report_sources_and_recovery_watermarks_survive_snapshot_restore() {
         observation,
     ));
     let stored = repair_state(None, Some(&queue), None);
-    let json = serde_json::to_string(&stored).unwrap();
-    let restored: RepairState = serde_json::from_str(&json).unwrap();
+    let text = ron::to_string(&stored).unwrap();
+    let restored: RepairState = ron::from_str(&text).unwrap();
     let mut world = World::new();
     let entity = world.spawn(RepairRequestQueue::default()).id();
     apply_repair(&mut world.entity_mut(entity), &restored);

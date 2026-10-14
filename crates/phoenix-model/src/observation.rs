@@ -11,8 +11,25 @@ pub enum ObservationSubject {
         uuid: String,
     },
     System {
+        // Internally tagged enums buffer their fields through Serde Content.
+        // Encode this new subject key as a scalar so RON does not turn the
+        // nontransparent SystemId newtype into an undecodable sequence.
+        #[serde(with = "system_subject_id")]
         id: SystemId,
     },
+}
+
+mod system_subject_id {
+    use super::SystemId;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(id: &SystemId, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&id.0)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemId, D::Error> {
+        String::deserialize(deserializer).map(SystemId)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

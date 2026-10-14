@@ -148,6 +148,7 @@ export function makeTacticalRender(variant) {
           tubes: w.tubes || [],
           magazine: { current: w.torpedo_count || 0, max: w.torpedo_max || w.torpedo_count || dflt },
           target_uuid: w.target_uuid || null,
+          stock_control: w.stock_control || null,
         };
       }
     }

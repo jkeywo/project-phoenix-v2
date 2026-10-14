@@ -89,6 +89,8 @@ export function makeEngineeringRender(variant) {
 
     // ── Power ───────────────────────────────────────────────────────────
     const p = familyView(s, 'power');
+    const logistics = doc.getElementById('logistics-panel');
+    if (logistics) logistics.state = { ...familyView(s, 'logistics'), system_id: familySystemId(s, 'logistics') };
     const powerEl = doc.getElementById(ids.power);
     if (powerEl) powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto, ...(p.energy ? { energy: p.energy, system_id: p.system_id } : {}) };
     const batteryEl = doc.getElementById(ids.battery);

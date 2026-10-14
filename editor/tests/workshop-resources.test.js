@@ -34,6 +34,11 @@ describe('Workshop resource authoring', () => {
     const after = operation(draft(), { type: 'magazine-set', count: 8 });
     expect(after).toContain('count=8 # count note'); expect(parse(after).torpedoes.speed).toBe(10);
   });
+  it('separates authored ammunition capacity from its initial local stock', () => {
+    const after = operation(draft(), { type: 'magazine-set', count: 6, initial_count: 2 });
+    expect(parse(after).torpedoes).toMatchObject({ count: 6, initial_count: 2, speed: 10 });
+    expect(() => operation(draft(), { type: 'magazine-set', count: 6, initial_count: 7 })).toThrow(/Initial magazine/);
+  });
   it('adds supported capacity entries', () => {
     const after = operation(draft(), { type: 'capacity-set', id: 'parts', amount: 1, ceiling: 6 });
     expect(parse(after).infrastructure.capacity.map(row => row.id)).toEqual(['ammo', 'fuel', 'parts']);

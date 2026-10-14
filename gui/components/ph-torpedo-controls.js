@@ -1,3 +1,4 @@
+import './ph-stock-target.js';
 // Torpedo tube controls: per-tube volley-target UI (issue #632/#637 model).
 //
 // Each tube shows one slot icon per possible round (up to volley_max). Slots
@@ -91,6 +92,7 @@ export class PhTorpedoControls extends PhElement {
     <span>${t('component.torpedoes.title')}</span>
     <span class="magazine" id="magazine">0 / 0</span>
   </div>
+  <ph-stock-target id="stock-target" hidden></ph-stock-target>
   <div id="tubes"></div>
 `;
   }
@@ -255,6 +257,7 @@ export class PhTorpedoControls extends PhElement {
   render(state) {
     const s = state || {};
     const tubes = Array.isArray(s.tubes) ? s.tubes : [];
+    this.shadowRoot.getElementById('stock-target').state = s.stock_control || null;
     const mag = s.magazine || {};
     const magCurrent = mag.current != null ? mag.current : 0;
     const magMax = mag.max != null ? mag.max : 0;

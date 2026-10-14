@@ -644,7 +644,9 @@ damage_type = "laser"
 penetration = 20
 
 [torpedoes]
+# Initial stock is split with the real hold; capacity still includes tube occupancy.
 count = 6
+initial_count = 2
 damage_hull = 40
 damage_shields = 4
 speed = 15
@@ -1907,21 +1909,21 @@ manual_overview = "You keep the ship alive. Allocate reactor power between helm,
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical","weapons-access"]
+detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical","weapons-access","logistics"]
 
 [[station.rating]]
 name = "Guided"
-automated_systems = []
+automated_systems = ["logistics"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Simplified"
-automated_systems = ["repair"]
+automated_systems = ["repair","logistics"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Maintenance"
-automated_systems = ["repair","power-reactor","power-battery"]
+automated_systems = ["repair","power-reactor","power-battery","logistics"]
 detailed_systems = ["tractor","umbilical","weapons-access"]
 
 
@@ -5675,6 +5677,14 @@ kind = "Umbilical"
 source = "viewscreen"
 kind = "Viewscreen"
 
+[[console.feed]]
+source = "logistics"
+kind = "Logistics"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
 [[console]]
 id = "comms"
 name = "station.comms.name"
@@ -5861,6 +5871,7 @@ travel_secs = 2.5
 boundary = "weapons-access"
 
 [interior.placements]
+logistics = "engineering"
 dock = "support"
 captain = "bridge"
 command = "bridge"
@@ -5965,3 +5976,118 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Increment 12.1 provisional handling: real finite hold4 + magazine2 = baseline6.
+# Initial rounds remain six; combined storage ceiling is now 12 (hold6 + local6).
+# Tubes still start empty; the remaining local demand waits for real timed delivery.
+[[system]]
+id = "logistics"
+kind = "logistics"
+console = "engineering"
+power_group = "energy-logistics"
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[system.config.ai]
+root = "logistics"
+[[system.config.ai.tree]]
+id = "logistics"
+initial = "supply"
+[[system.config.ai.tree.state]]
+id = "supply"
+[[system.config.ai.tree.state.task]]
+id = "dispatch-needed"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "dispatch"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "delivery_available"
+
+[[infrastructure.capacity]]
+id = "hold-ammunition"
+amount = 4
+ceiling = 6
+label = "logistics.hold-ammunition.label"
+
+[[logistics.store]]
+id = "hold-ammunition"
+resource = "torpedoes"
+compartment = "engineering"
+role = "main"
+target = 4
+reserve = 0
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-ammunition"
+
+[[logistics.store]]
+id = "magazine"
+resource = "torpedoes"
+compartment = "weapons"
+role = "local"
+system = "torpedo-magazine"
+source = "hold-ammunition"
+target = 6
+reserve = 0
+
+[logistics.store.endpoint]
+kind = "torpedo_magazine"
+
+[[logistics.storage]]
+compartment = "engineering"
+space = 6
+
+[logistics.storage.unit_space]
+torpedoes = 1
+
+[[logistics.storage]]
+compartment = "weapons"
+space = 6
+
+[logistics.storage.unit_space]
+torpedoes = 1
+
+[[logistics.handling]]
+system = "logistics"
+max_active = 1
+max_batch = 2
+units_per_sec = 1

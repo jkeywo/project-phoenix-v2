@@ -335,6 +335,17 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   else if (operation.type === 'system-move') { const list = blocks(after, 'system', 'system'); const index = localIds(after, 'system').indexOf(operation.id);
     if (index < 0) throw ownedFinding(inspection, 'system', operation.id, `System ${operation.id} is included from another source; materialise it before reordering it.`);
     after = move(after, list, index, operation.direction); }
+  else if (operation.type === 'rating-fit-system') {
+    const station = entry(after, ratingSection, ratingOwner);
+    if (!station) throw ownedFinding(inspection, ratingSection, ratingOwner, 'Materialise the controlling rating source before fitting handling equipment.');
+    for (const [index, row] of (station.row.rating || []).entries()) if (index > 0 || row.detailed_systems !== undefined) {
+      const current = entry(after, ratingSection, ratingOwner), relative = after.slice(current.start, current.end);
+      const rating = entry(relative, `${ratingSection}.rating`, row.name, 'name');
+      const absolute = { ...rating, start: current.start + rating.start, body: current.start + rating.body, end: current.start + rating.end };
+      const key = index === 0 ? 'detailed_systems' : 'automated_systems';
+      after = setKey(after, absolute, key, [...new Set([...(row[key] || []), operation.system])]);
+    }
+  }
   else if (operation.type === 'rating-add') { const station = entry(after, ratingSection, ratingOwner); if (!station) throw ownedFinding(inspection, ratingSection, ratingOwner, `${ratingSection} ${ratingOwner} is included from another source; materialise it before adding a rating.`);
     const nl = newlineOf(after), fragment = `${nl}[[${ratingSection}.rating]]${nl}name = ${quote(operation.name)}${nl}automated_systems = []${nl}`;
     after = after.slice(0, station.end) + fragment + after.slice(station.end); }

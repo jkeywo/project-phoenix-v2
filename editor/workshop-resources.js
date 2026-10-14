@@ -113,6 +113,10 @@ export function prepareResourceOperation(draft, dependencies, operation) {
       after = append(after, '[torpedoes]');
     }
     after = scalar(after, table(after, 'torpedoes'), 'count', operation.count);
+    if (operation.initial_count !== undefined) {
+      if (!integer(operation.initial_count) || operation.initial_count > operation.count) throw new Error('Initial magazine stock must fit its ammunition capacity.');
+      after = scalar(after, table(after, 'torpedoes'), 'initial_count', operation.initial_count);
+    }
   } else if (operation.type === 'service-set') {
     if (!named(operation.name)) throw new Error('Resource service requires a name.');
     const address = /[.\[\]= ]/.test(operation.name) ? quote(operation.name) : operation.name;

@@ -4833,7 +4833,7 @@ workshop.resource.amount,Workshop resource authoring,[Starting quantity],[Anfang
 workshop.resource.ceiling,Workshop resource authoring,[Storage limit],[Lagergrenze],[Storage limit],machine
 workshop.resource.label,Workshop resource authoring,[Label String Id],[String-ID der Beschriftung],[Label String Id],machine
 workshop.resource.magazine,Workshop resource authoring,[Torpedo magazine],[Torpedomagazin],[Torpedo magazine],machine
-workshop.resource.count,Workshop resource authoring,[Starting quantity and storage limit],[Anfangsbestand und Lagergrenze],[Starting quantity and storage limit],machine
+workshop.resource.count,Workshop resource authoring,Magazine capacity including tube rounds,Magazinkapazität einschließlich Rohrmunition,Magazine capacity including tube rounds,machine
 workshop.resource.services,Workshop resource authoring,[Named resource services],[Benannte Ressourcendienste],[Named resource services],machine
 workshop.resource.service_name,Workshop resource authoring,[Service identifier],[Dienstkennung],[Service identifier],machine
 workshop.resource.endpoint,Workshop resource authoring,[Endpoint type],[Endpunkttyp],[Endpoint type],machine
@@ -5199,3 +5199,77 @@ damage.status.patched,Component condition,Patched,Notdürftig repariert,Patched,
 damage.repair.structure,Physical repair order,Repair compartment,Abteil reparieren,Repair compartment,machine
 damage.repair.component,Physical repair order,Repair {component},{component} reparieren,Repair {component},machine
 damage.repair.waiting_parts,Physical repair work,Waiting for parts,Warte auf Ersatzteile,Waiting for parts,machine
+workshop.logistics.title,Logistics authoring,Logistics,Logistik,Logistics,machine
+workshop.logistics.hint,Logistics authoring,Bind actual stores to compartments and handling. Goals request timed deliveries.,Echte Vorräte mit Abteilen und Transport verbinden. Ziele fordern zeitabhängige Lieferungen an.,Bind actual stores to compartments and handling. Goals request timed deliveries.,machine
+workshop.logistics.template,Logistics authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.logistics.materialise,Logistics authoring,Materialise inherited logistics,Geerbte Logistik lokal übernehmen,Materialise inherited logistics,machine
+workshop.logistics.refused,Logistics authoring,Logistics change refused: {reason},Logistikänderung abgelehnt: {reason},Logistics change refused: {reason},machine
+workshop.logistics.create,Logistics authoring,Create logistics profile,Logistikprofil erstellen,Create logistics profile,machine
+workshop.logistics.create-hint,Logistics authoring,Fit a logistics System in Composition then create its handling profile.,Ein Logistiksystem unter Komposition einbauen und dann sein Transportprofil erstellen.,Fit a logistics System in Composition then create its handling profile.,machine
+workshop.logistics.fit-first,Logistics authoring,"First fit a logistics System with Console, power, damage and compartment bindings in Composition.","Zuerst ein Logistiksystem mit Konsole, Energie, Schaden und Abteil unter Komposition einbauen.","First fit a logistics System with Console, power, damage and compartment bindings in Composition.",machine
+workshop.logistics.stores,Logistics authoring,Managed stores,Verwaltete Vorräte,Managed stores,machine
+workshop.logistics.storage-title,Logistics authoring,Shared compartment storage,Gemeinsamer Abteillagerraum,Shared compartment storage,machine
+workshop.logistics.handling,Logistics authoring,Handling machinery,Transportanlage,Handling machinery,machine
+workshop.logistics.existing,Logistics authoring,Existing entry,Vorhandener Eintrag,Existing entry,machine
+workshop.logistics.new,Logistics authoring,New entry,Neuer Eintrag,New entry,machine
+workshop.logistics.id,Logistics authoring,Store ID,Vorrats-ID,Store ID,machine
+workshop.logistics.endpoint,Logistics authoring,Actual resource endpoint,Echter Ressourcenendpunkt,Actual resource endpoint,machine
+workshop.logistics.resource,Logistics authoring,Resource ID,Ressourcen-ID,Resource ID,machine
+workshop.logistics.compartment,Logistics authoring,Compartment,Abteil,Compartment,machine
+workshop.logistics.role,Logistics authoring,Purpose,Zweck,Purpose,machine
+workshop.logistics.system,Logistics authoring,Owning System,Zuständiges System,Owning System,machine
+workshop.logistics.source,Logistics authoring,Allowed main store,Zulässiger Hauptvorrat,Allowed main store,machine
+workshop.logistics.target,Logistics authoring,Desired stock,Gewünschter Bestand,Desired stock,machine
+workshop.logistics.reserve,Logistics authoring,Protected stock floor,Geschützter Mindestbestand,Protected stock floor,machine
+workshop.logistics.main,Logistics authoring,Main hold,Hauptladeraum,Main hold,machine
+workshop.logistics.local,Logistics authoring,Local System store,Lokaler Systemvorrat,Local System store,machine
+workshop.logistics.space,Logistics authoring,Shared space limit,Gemeinsame Platzgrenze,Shared space limit,machine
+workshop.logistics.unit-cost,Logistics authoring,Space per resource unit,Platz je Ressourceneinheit,Space per resource unit,machine
+workshop.logistics.add-cost,Logistics authoring,Add compatible resource,Kompatible Ressource hinzufügen,Add compatible resource,machine
+workshop.logistics.max-active,Logistics authoring,Concurrent batches,Gleichzeitige Lieferungen,Concurrent batches,machine
+workshop.logistics.max-batch,Logistics authoring,Maximum batch quantity,Maximale Liefermenge,Maximum batch quantity,machine
+workshop.logistics.units-per-sec,Logistics authoring,Handling units per second,Transporteinheiten pro Sekunde,Handling units per second,machine
+workshop.logistics.save-store,Logistics authoring,Save managed store,Verwalteten Vorrat speichern,Save managed store,machine
+workshop.logistics.save-storage,Logistics authoring,Save storage profile,Lagerprofil speichern,Save storage profile,machine
+workshop.logistics.save-handling,Logistics authoring,Save handling,Transportanlage speichern,Save handling,machine
+workshop.logistics.remove,Logistics authoring,Remove entry,Eintrag entfernen,Remove entry,machine
+workshop.logistics.source-in-use,Logistics authoring,Reassign local sources before removing their main store.,Lokale Bezugsquellen vor dem Entfernen des Hauptvorrats neu zuweisen.,Reassign local sources before removing their main store.,machine
+workshop.logistics.duplicate-resource,Logistics authoring,Each storage resource needs exactly one space cost.,Jede Lagerressource benötigt genau einen Platzbedarf.,Each storage resource needs exactly one space cost.,machine
+workshop.resource.initial_count,Logistics authoring,Initial magazine stock,Anfänglicher Magazinbestand,Initial magazine stock,machine
+system.logistics.name,Logistics authoring,Inventory and handling,Vorräte und Transport,Inventory and handling,machine
+energy.group.logistics.label,Logistics authoring,Inventory handling,Vorratstransport,Inventory handling,machine
+logistics.hold-ammunition.label,Logistics authoring,Hold ammunition,Laderaummunition,Hold ammunition,machine
+logistics.title,Logistics controls,Inventory and handling,Vorräte und Transport,Inventory and handling,machine
+logistics.pause,Logistics controls,Pause handling,Transport pausieren,Pause handling,machine
+logistics.enable,Logistics controls,Enable handling,Transport aktivieren,Enable handling,machine
+logistics.stock-summary,Logistics controls,{resource}: stored {level} / {ceiling}; available {available}; held {held}; incoming {incoming}; shortage {shortage}; {compartment},{resource}: gelagert {level} / {ceiling}; verfügbar {available}; geladen {held}; unterwegs {incoming}; Fehlmenge {shortage}; {compartment},{resource}: stored {level} / {ceiling}; available {available}; held {held}; incoming {incoming}; shortage {shortage}; {compartment},machine
+logistics.target-summary,Logistics controls,Target {target}; protected {reserve},Ziel {target}; geschützt {reserve},Target {target}; protected {reserve},machine
+logistics.target,Logistics controls,Desired stock,Gewünschter Bestand,Desired stock,machine
+logistics.reserve,Logistics controls,Protected stock floor,Geschützter Mindestbestand,Protected stock floor,machine
+logistics.apply,Logistics controls,Apply,Übernehmen,Apply,machine
+logistics.manual,Logistics controls,Manual delivery,Manuelle Lieferung,Manual delivery,machine
+logistics.source,Logistics controls,Source store,Quellvorrat,Source store,machine
+logistics.destination,Logistics controls,Destination store,Zielvorrat,Destination store,machine
+logistics.amount,Logistics controls,Quantity,Menge,Quantity,machine
+logistics.dispatch,Logistics controls,Dispatch batch,Lieferung starten,Dispatch batch,machine
+logistics.return,Logistics controls,Return cargo,Fracht zurückbringen,Return cargo,machine
+logistics.delivery,Logistics controls,{quantity}: {source} to {destination}; {stage} at {compartment}; {progress}%,{quantity}: {source} nach {destination}; {stage} bei {compartment}; {progress}%,{quantity}: {source} to {destination}; {stage} at {compartment}; {progress}%,machine
+logistics.local-summary,Logistics controls,Incoming {incoming}; reserved {reserved}; held in tubes {held},Unterwegs {incoming}; reserviert {reserved}; in Rohren {held},Incoming {incoming}; reserved {reserved}; held in tubes {held},machine
+logistics.action.enabled,Logistics controls,Enable or pause handling,Transport aktivieren oder pausieren,Enable or pause handling,machine
+logistics.action.target,Logistics controls,Set desired stock,Gewünschten Bestand setzen,Set desired stock,machine
+logistics.action.reserve,Logistics controls,Set protected stock,Geschützten Bestand setzen,Set protected stock,machine
+logistics.action.dispatch,Logistics controls,Dispatch delivery,Lieferung starten,Dispatch delivery,machine
+logistics.action.return,Logistics controls,Return delivery cargo,Lieferfracht zurückbringen,Return delivery cargo,machine
+workshop.logistics.console,Logistics controls,Controlling Console,Steuerkonsole,Controlling Console,machine
+workshop.logistics.power-group,Logistics controls,Energy allocation group,Energiezuteilungsgruppe,Energy allocation group,machine
+workshop.logistics.capacity-id,Logistics controls,New hold capacity ID,Neue Laderaumkapazitäts-ID,New hold capacity ID,machine
+workshop.logistics.initial-hold,Logistics controls,Explicit initial hold quantity,Explizite anfängliche Laderaummenge,Explicit initial hold quantity,machine
+workshop.logistics.hold-ceiling,Logistics controls,Hold capacity,Laderaumkapazität,Hold capacity,machine
+logistics.stage.loading,Logistics stage,Loading,Beladen,Loading,machine
+logistics.stage.travelling,Logistics stage,In transit,Unterwegs,In transit,machine
+logistics.stage.unloading,Logistics stage,Unloading,Entladen,Unloading,machine
+logistics.blocked.access,Logistics delivery blockage,Access is blocked; cargo is retained at its current location.,Zugang blockiert; Fracht bleibt an ihrem aktuellen Ort.,Access is blocked; cargo is retained at its current location.,machine
+logistics.blocked.return_capacity,Logistics delivery blockage,Return storage is full; cargo and its receiving claim are retained.,Rücklager voll; Fracht und Empfangsreservierung bleiben erhalten.,Return storage is full; cargo and its receiving claim are retained.,machine
+logistics.blocked.receiving,Logistics delivery blockage,Receiving storage is unavailable; cargo is retained.,Empfangslager nicht verfügbar; Fracht bleibt erhalten.,Receiving storage is unavailable; cargo is retained.,machine
+logistics.blocked.disabled,Logistics delivery blockage,Handling is paused; committed cargo is retained.,Transport pausiert; übernommene Fracht bleibt erhalten.,Handling is paused; committed cargo is retained.,machine
+logistics.handling-limits,Logistics handling limits,Maximum {batch} per batch; {active} concurrent batches.,Maximal {batch} pro Lieferung; {active} gleichzeitige Lieferungen.,Maximum {batch} per batch; {active} concurrent batches.,machine

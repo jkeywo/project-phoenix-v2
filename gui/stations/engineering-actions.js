@@ -1,3 +1,4 @@
+import { LOGISTICS_ACTIONS, registerLogisticsActions } from './logistics-actions.js';
 /**
  * Shared semantic actions for Power, internal Repair, and Engineering-only
  * auxiliary controls.
@@ -135,6 +136,7 @@ export const EXTERNAL_REPAIR_TOGGLE_ACTION = action(
 
 export const ENGINEERING_ACTIONS = Object.freeze([
   ...ENERGY_ACTIONS,
+  ...LOGISTICS_ACTIONS,
   defineStationAction({ id: UMBILICAL_DIRECTION_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
     labelKey: 'engineering.transfer_direction', bindings: [null, null] }),
   defineStationAction({ id: UMBILICAL_RESOURCE_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
@@ -321,6 +323,7 @@ export function registerEngineeringActions(registry, options = {}) {
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
   registerEnergyActions(registry, { ...options, getState, sendAction });
+  registerLogisticsActions(registry, { ...options, getState, sendAction });
 
   const power = (direction) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const state = getState();

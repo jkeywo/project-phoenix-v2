@@ -1,3 +1,4 @@
+import { mountWorkshopLogistics } from './workshop-logistics-panel.js';
 import { mountWorkshopEnergy } from './workshop-energy-panel.js';
 import { mountWorkshopShields } from './workshop-shield-panel.js';
 import { mountWorkshopInterior } from './workshop-interior-panel.js';
@@ -205,6 +206,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let presetsPanel = null;
   let shipAuthoringPanel = null;
   let resourcePanel = null;
+  let logisticsPanel = null;
   let weaponPanel = null;
   let energyPanel = null;
   let shieldPanel = null;
@@ -286,6 +288,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   resourcePanel = mountWorkshopResources({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  logisticsPanel = mountWorkshopLogistics({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(),
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   weaponPanel = mountWorkshopWeapons({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -314,7 +319,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, resourcePanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
+  compositionTools.append(compositionPanel.node, spatialPanel.node, shipAuthoringPanel.node, resourcePanel.node, logisticsPanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -483,6 +488,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     presetsPanel?.refresh({ hidden: testing });
     shipAuthoringPanel?.refresh({ hidden: testing });
     resourcePanel?.refresh({ hidden: testing });
+    logisticsPanel?.refresh({ hidden: testing });
     weaponPanel?.refresh({ hidden: testing });
     energyPanel?.refresh({ hidden: testing });
     shieldPanel?.refresh({ hidden: testing });
@@ -1138,6 +1144,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     presetsPanel?.dispose();
     shipAuthoringPanel?.dispose();
     resourcePanel?.dispose();
+    logisticsPanel?.dispose();
     weaponPanel?.dispose();
     energyPanel?.dispose();
     shieldPanel?.dispose();

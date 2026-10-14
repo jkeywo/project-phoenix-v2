@@ -784,7 +784,8 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   const bankStates   = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
-  const torpedoMagBb = blackboardOfKind(state, 'TorpedoMagazine', systemIds)?.data || {};
+  const torpedoMagEntry = blackboardOfKind(state, 'TorpedoMagazine', systemIds);
+  const torpedoMagBb = torpedoMagEntry?.data || {};
   const torpedoMax   = torpedoMagBb.capacity ?? torpedoCount;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
   const regions      = tacRadarBb.regions ?? [];
@@ -880,6 +881,11 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     tubes,
     torpedo_count: torpedoCount,
     torpedo_max:   torpedoMax,
+    stock_control: torpedoMagBb.stock_store && torpedoMagBb.stock_target != null ? {
+      system_id: torpedoMagEntry.systemId, store: torpedoMagBb.stock_store, target: torpedoMagBb.stock_target,
+      ceiling: torpedoMax, incoming: torpedoMagBb.stock_incoming ?? 0, reserved: torpedoMagBb.stock_reserved ?? 0,
+      held: torpedoMagBb.stock_held ?? 0, auto: state.controlSources?.[torpedoMagEntry.systemId] !== 'Human',
+    } : null,
     phaser_mode:   phaserMode,
     strike_reserve: bb.strike_reserve || null,
     blips,
@@ -2432,6 +2438,12 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
  * @param {{ blackboards, blackboardKinds? }} state
  * @param {string[]} [systemIds] authored Security-family ids for this Station
  */
+export function buildLogisticsConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Logistics', systemIds), bb = entry?.data || {};
+  return { system_id: entry?.systemId ?? systemIds[0] ?? null, enabled: !!bb.enabled, max_batch: bb.max_batch ?? null, max_active: bb.max_active ?? null,
+    stores: bb.stores || [], deliveries: bb.deliveries || [], next_delivery: bb.next_delivery || null, refusal: bb.refusal || null };
+}
+
 export function buildSecurityConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Security', systemIds);
   const bb = entry?.data || {};
@@ -2479,6 +2491,7 @@ const FAMILY_BUILDERS = Object.freeze({
   // dead `view.command_auto` key nothing reads (issue #1381 fix round).
   command: Object.freeze({ build: buildCommandConsoleState }),
   tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
+  logistics: Object.freeze({ build: buildLogisticsConsoleState, autoField: 'logistics_auto', autoScope: 'first' }),
   umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
   security: Object.freeze({ build: buildSecurityConsoleState, autoField: 'security_auto', autoScope: 'first' }),
 });

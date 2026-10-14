@@ -19,11 +19,12 @@ export function mountWorkshopResources({ root, provider, runtime, draft: getDraf
   const capacityId = el('input', 'capacity-id'), amount = el('input', 'amount', null, { type: 'number', min: '0', step: '1' });
   const ceiling = el('input', 'ceiling', null, { type: 'number', min: '0', step: '1' }), label = el('input', 'label');
   const count = el('input', 'count', null, { type: 'number', min: '0', step: '1' });
+  const initialCount = el('input', 'initial-count', null, { type: 'number', min: '0', step: '1' });
   const services = el('select', 'services', null, { size: '4' }), serviceName = el('input', 'service-name');
   const serviceKind = el('select', 'service-kind'), serviceCapacity = el('select', 'service-capacity');
   const linkKind = el('select', 'link-kind'), linkService = el('select', 'link-service'), linkCapacity = el('select', 'link-capacity');
   let dependencies = null, inspection = null, disposed = false, generation = 0, loading = false, observedSource = null;
-  const inputs = [template, materialise, capacities, capacityId, amount, ceiling, label, count, services,
+  const inputs = [template, materialise, capacities, capacityId, amount, ceiling, label, count, initialCount, services,
     serviceName, serviceKind, serviceCapacity, linkKind, linkService, linkCapacity];
   const buttons = [];
   const row = (control, text) => { const wrapper = el('label', null, text, { for: control.id }); wrapper.append(control); return wrapper; };
@@ -34,13 +35,13 @@ export function mountWorkshopResources({ root, provider, runtime, draft: getDraf
   const fieldset = (text, ...children) => { const field = el('fieldset'); field.append(el('legend', null, text), ...children); return field; };
   const capacityApply = button('capacity-apply', 'workshop.resource.apply_capacity', () => ({ type: 'capacity-set',
     id: capacityId.value, amount: amount.valueAsNumber, ceiling: ceiling.valueAsNumber, ...(label.value ? { label: label.value } : {}) }));
-  const magazineApply = button('magazine-apply', 'workshop.resource.apply_magazine', () => ({ type: 'magazine-set', count: count.valueAsNumber }));
+  const magazineApply = button('magazine-apply', 'workshop.resource.apply_magazine', () => ({ type: 'magazine-set', count: count.valueAsNumber, initial_count: initialCount.valueAsNumber }));
   const serviceApply = button('service-apply', 'workshop.resource.apply_service', () => ({ type: 'service-set', name: serviceName.value,
     endpoint: serviceKind.value === 'torpedo_magazine' ? { kind: 'torpedo_magazine' } : { kind: 'capacity', id: serviceCapacity.value } }));
   const linkApply = button('link-apply', 'workshop.resource.apply_link', () => ({ type: 'link-set',
     ...(linkKind.value === 'service' ? { service: linkService.value }
       : { provider: linkKind.value === 'torpedo_magazine' ? { kind: 'torpedo_magazine' } : { kind: 'capacity', id: linkCapacity.value } }) }));
-  const magazineGroup = fieldset('workshop.resource.magazine', row(count, 'workshop.resource.count'), magazineApply);
+  const magazineGroup = fieldset('workshop.resource.magazine', row(count, 'workshop.resource.count'), row(initialCount, 'workshop.resource.initial_count'), magazineApply);
   const linkGroup = fieldset('workshop.resource.link', row(linkKind, 'workshop.resource.endpoint'), row(linkService, 'workshop.resource.service_name'),
     row(linkCapacity, 'workshop.resource.capacity_id'), linkApply);
   node.append(el('h3', null, 'workshop.resource.title'), el('p', null, 'workshop.resource.hint'), row(template, 'workshop.resource.template'),
@@ -88,7 +89,7 @@ export function mountWorkshopResources({ root, provider, runtime, draft: getDraf
       choose(serviceKind, kinds); choose(linkKind, [['service', t('workshop.resource.named_endpoint')], ...kinds]);
       const caps = inspection.capacities.map(item => [item.id, item.id]); choose(serviceCapacity, caps); choose(linkCapacity, caps);
       choose(linkService, Object.keys(inspection.services).map(name => [name, name])); paintService();
-      count.value = inspection.magazine?.count ?? '';
+      count.value = inspection.magazine?.count ?? ''; initialCount.value = inspection.magazine?.initial_count ?? inspection.magazine?.count ?? '';
       magazineGroup.hidden = !inspection.magazine; linkGroup.hidden = !inspection.umbilical;
       const link = inspection.umbilical?.link;
       linkKind.value = link?.provider?.kind || 'service'; linkCapacity.value = link?.provider?.id || '';

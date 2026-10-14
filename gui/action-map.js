@@ -53,7 +53,23 @@ function energyCommand(type, fields) {
   };
 }
 
+function logisticsCommand(type, fields) {
+  return (action, send) => {
+    if (typeof action.control_system_id !== 'string' || !action.control_system_id) return;
+    const correlated = typeof action.correlation === 'string' && action.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: action.correlation } : {}), target: action.control_system_id,
+      payload: { type, data: Object.fromEntries(fields.map(key => [key, action[key]])) },
+    });
+  };
+}
+
 export const ACTION_MAP = Object.freeze({
+  logistics_enabled: logisticsCommand('SetLogisticsEnabled', ['enabled']),
+  logistics_target: logisticsCommand('SetStockTarget', ['store', 'amount']),
+  logistics_reserve: logisticsCommand('SetStockReserve', ['store', 'amount']),
+  logistics_dispatch: logisticsCommand('DispatchDelivery', ['source', 'destination', 'amount']),
+  logistics_return: logisticsCommand('ReturnDelivery', ['job']),
   set_weapons_restraint: (action, send) => {
     const correlated = typeof action.correlation === 'string' && action.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', { ...(correlated ? { correlation: action.correlation } : {}),

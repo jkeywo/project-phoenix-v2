@@ -47,9 +47,11 @@ pub struct LogisticsState {
     pub goals: BTreeMap<String, i64>,
     pub floors: BTreeMap<String, i64>,
     pub batches: BTreeMap<JobId, DeliveryBatch>,
+    pub blocked: BTreeMap<JobId, DeliveryBlock>,
     pub last_outcome: Option<DeliveryOutcome>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DeliveryBlock {
     Disabled,
     Access,
@@ -82,6 +84,7 @@ impl LogisticsState {
                 .map(|s| (s.id.clone(), s.reserve))
                 .collect(),
             batches: BTreeMap::new(),
+            blocked: BTreeMap::new(),
             last_outcome: None,
         }
     }
@@ -227,6 +230,18 @@ impl LogisticsState {
         }
         let mut staged = self.clone();
         let mut result = LogisticsTickResult::default();
+        // Throughput belongs to the one handling System, not to each active
+        // reservation. Blocked travel offers zero work and leaves this budget.
+        let mut work_budget = dt;
+        let mut budgeted_work = |owner: &SystemId, requested: f32| -> Result<f32, String> {
+            let offered = requested.min(work_budget);
+            if offered <= 0.0 {
+                return Ok(0.0);
+            }
+            let fraction = fund(owner, offered, &mut work)?;
+            work_budget = (work_budget - offered).max(0.0);
+            Ok(fraction * (offered / requested))
+        };
         let ids: Vec<_> = staged.batches.keys().copied().collect();
         for id in ids {
             let claim = staged.claim(id);
@@ -275,7 +290,7 @@ impl LogisticsState {
                                 dt.min(remaining),
                                 blocked,
                                 &staged.owner,
-                                &mut work,
+                                &mut budgeted_work,
                             )?;
                         }
                     }
@@ -295,7 +310,7 @@ impl LogisticsState {
                     let eligible = dt.min((duration - batch.work_progress).max(0.0));
                     if eligible > 0.0 {
                         batch.work_progress = (batch.work_progress
-                            + eligible * fund(&staged.owner, eligible, &mut work)?)
+                            + eligible * fund(&staged.owner, eligible, &mut budgeted_work)?)
                         .min(duration);
                     }
                     if batch.work_progress < duration {
@@ -328,7 +343,7 @@ impl LogisticsState {
                         dt,
                         blocked,
                         &staged.owner,
-                        &mut work,
+                        &mut budgeted_work,
                     )? {
                         batch.stage = DeliveryStage::Unloading;
                         batch.work_progress = 0.0;
@@ -355,6 +370,7 @@ impl LogisticsState {
                 result.completed.push(outcome);
             }
         }
+        staged.blocked = result.blocked.iter().copied().collect();
         staged.last_tick = tick;
         *self = staged;
         Ok(result)
@@ -435,6 +451,31 @@ impl LogisticsState {
                 != expected.remove(&store.endpoint).unwrap_or_default()
             {
                 return Err("delivery transit and incoming stock claims disagree".into());
+            }
+        }
+        for (id, reason) in &self.blocked {
+            let batch = self
+                .batches
+                .get(id)
+                .ok_or("blocked delivery report has no active job")?;
+            let valid = match reason {
+                // Actual mechanical failure is reported by the adapter without
+                // clearing enabled intent, just like explicit pause.
+                DeliveryBlock::Disabled => true,
+                DeliveryBlock::Access => {
+                    batch.stage == DeliveryStage::Travelling && batch.navigation.blocked
+                }
+                DeliveryBlock::ReturnCapacity => batch.return_requested && !batch.returning,
+                DeliveryBlock::Receiving => {
+                    batch.stage == DeliveryStage::Unloading
+                        && batch.work_progress
+                            == batch.amount as f32 / profile.handling().units_per_sec
+                }
+            };
+            if !valid {
+                return Err(
+                    "blocked delivery report disagrees with its observed work stage".into(),
+                );
             }
         }
         if let Some(last) = &self.last_outcome {

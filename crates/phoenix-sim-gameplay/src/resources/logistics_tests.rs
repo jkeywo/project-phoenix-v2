@@ -472,6 +472,53 @@ fn disabled_and_duplicate_ticks_preserve_committed_work_and_quantities() {
     assert!(state.batches.is_empty());
     assert_eq!(total(&state, &stocks), 6);
 }
+
+#[test]
+fn concurrent_batches_share_one_work_budget_and_blocked_work_frees_it() {
+    let (profile, mut state, mut stocks) = fixture();
+    let first = dispatch(&profile, &mut state, &mut stocks, 1);
+    let second = dispatch(&profile, &mut state, &mut stocks, 1);
+    assert_eq!(
+        step(
+            &profile,
+            &mut state,
+            &mut stocks,
+            0.5,
+            &BTreeSet::new(),
+            1.0
+        ),
+        0.5
+    );
+    assert_eq!(state.batches[&first].stage, DeliveryStage::Travelling);
+    assert_eq!(
+        state.batches[&second].work_progress, 0.0,
+        "second reservation does not double handling throughput"
+    );
+    let blocked = profile
+        .graph()
+        .config
+        .connections
+        .iter()
+        .map(|c| c.id.clone())
+        .collect();
+    assert_eq!(
+        step(&profile, &mut state, &mut stocks, 0.5, &blocked, 1.0),
+        0.5
+    );
+    assert_eq!(state.blocked[&first], DeliveryBlock::Access);
+    assert_eq!(
+        state.batches[&second].stage,
+        DeliveryStage::Travelling,
+        "blocked first batch consumes no work budget"
+    );
+    let restored: LogisticsState =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(restored.blocked, state.blocked);
+    restored.validate(&profile, &stocks).unwrap();
+    let mut invalid = restored;
+    invalid.blocked.insert(JobId(999), DeliveryBlock::Disabled);
+    assert!(invalid.validate(&profile, &stocks).is_err());
+}
 #[test]
 fn shared_bay_accounting_counts_other_resources_and_incoming_without_mirrors() {
     let (mut profile, state, mut stocks) = fixture();

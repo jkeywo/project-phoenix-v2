@@ -29,6 +29,13 @@ describe('console object construction and JSON publication', () => {
         expect(actual).toMatchObject({ console_id: row.station, hosted_systems: row.state.stationSystems[row.station],
           own_hull: row.expected.own_hull, gm_takeover: row.expected.gm_takeover });
         const expected = structuredClone(row.expected);
+        if (row.name === 'composite') {
+          // The historical fixture predates recorded-observation details.
+          // Missing logical time stays unknown and missing reports stay empty.
+          expected.observation_tick = null;
+          expected.systems.repair.observation_tick = null;
+          expected.systems.repair.reports = [];
+        }
         if (row.name === 'visiting') {
           // A visiting radio is now its own Console, never spliced into Helm.
           delete expected.systems;

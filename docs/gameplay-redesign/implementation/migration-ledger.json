@@ -2467,9 +2467,10 @@
       "family": "personnel",
       "disposition": "migration",
       "increments": [
+        5,
         20
       ],
-      "note": "Implement selected scope only; the catalogue and architecture decision records constrain the detailed milestone specification."
+      "note": "Existing named external repair commitment migrates in increment 5; expanded field/personnel operations remain increment 20."
     },
     {
       "id": "S086",
@@ -2677,11 +2678,12 @@
       "evidence": "docs/acceptance/1562-ai-state-trees.md"
     },
     {
-      "from": 4,
-      "to": 5,
+      "from_increment": 4,
+      "to_increment": 5,
       "date": "2026-10-14",
-      "instruction": "Do 5",
-      "note": "User authorises advancing; prior physical-device and human acceptance remains open."
+      "user_instruction": "Do 5",
+      "pending_acceptance": "Previous physical/device and human workload checks remain open.",
+      "evidence": "docs/acceptance/1562-common-observations.md"
     }
   ]
 }

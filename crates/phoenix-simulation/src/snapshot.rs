@@ -207,7 +207,7 @@ use crate::console::repair::server::{RepairQueueEntry, RepairRequestQueue, ShipR
 use crate::console::weapons::beam::{ActiveBeam, ActiveBeamSlot, PhaserCooldown};
 use crate::console::weapons::torpedo::TorpedoSystemResource;
 pub use crate::core::collision_history::CollisionRecord;
-use crate::core::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
+use crate::core::messages::{CommsMessage, GamePhase, SystemId, WorldData};
 use crate::core::telemetry::RunTelemetry;
 use crate::dossier::evidence::EvidenceLog;
 use crate::entities::spawner::{EntityShipArcHull, EntitySystemHull, EntityUuid};
@@ -524,7 +524,7 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// abroad while leaving the real one double-booked — a divergence the digest
 /// would then report as corruption of a save that is perfectly intact. The
 /// format gate refuses it rather than guessing, which is why
-/// [`crate::console::repair::ExternalRepairSaveState::team_idx`] is mandatory
+/// the format-19 external repair team's stored index was mandatory
 /// with no serde default. A format-18 save with NO live claim is refused by the
 /// same gate, on the same rule every other bump on this ladder keeps: the
 /// version is a statement about the rules the save was written under, not about
@@ -647,7 +647,8 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// Older intent state cannot be restored into authored channel bindings.
 /// `39` — individual System AI tree states, memory and call continuation.
 /// `40` — common observation metadata and repair report continuation.
-pub const SNAPSHOT_FORMAT: u32 = 40;
+/// `41` — canonical repair jobs, team commitments and private workflow continuation.
+pub const SNAPSHOT_FORMAT: u32 = 41;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -726,7 +727,8 @@ pub const SNAPSHOT_FORMAT: u32 = 40;
 /// "0.10" - Dock composition and complete intent/clearance digest coverage.
 /// "0.11" — Dock runs one authored state-tree controller with persistent private memory.
 /// "0.12" — explicit repair report reduction and observation continuity.
-pub const SIMULATION_RULES: &str = "0.12";
+/// "0.13" — canonical repair assignments and restricted per-job workflows.
+pub const SIMULATION_RULES: &str = "0.13";
 
 /// The authored data, computed rather than remembered.
 ///
@@ -1018,27 +1020,6 @@ pub struct EntityState {
     /// Private tree continuation, including suspended human/offline Systems.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_trees: Option<crate::ai::state_tree_runtime::ShipAiTreeRuntime>,
-    /// The ship's external repair-dispatch state (issues #1161, #1386) — which
-    /// ally or structure a repair team is working abroad, and which team it is.
-    ///
-    /// A **projection**, not the whole
-    /// [`crate::console::repair::external_server::ExternalRepairDispatch`]
-    /// component, for `tractor`'s reason: the authored reach and rate ride the
-    /// template and are re-derived on spawn. What travels is the one thing the
-    /// fold cannot recover — the dispatched target — which
-    /// [`fold_external_repair_namespace`](crate::sim_digest) folds and which a
-    /// resume would otherwise drop, restoring a team as home when the crew had it
-    /// out helping an ally (and, with it, one more free team than the hull really
-    /// has). `deny_unknown_fields` on the repair table means a build predating
-    /// `[repair.external_dispatch]` refuses the template outright rather than
-    /// writing a same-content-digest save to disagree with, which is why #1161
-    /// did not bump [`SNAPSHOT_FORMAT`].
-    ///
-    /// Issue #1386 DID bump it, because the projection widened to name the team
-    /// holding the claim and no earlier record carries one — see format 19 on
-    /// [`SNAPSHOT_FORMAT`]'s ladder.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_repair: Option<crate::console::repair::ExternalRepairSaveState>,
     /// The ship's transfer-umbilical state (issue #1160) — whether the flow is
     /// running.
     ///
@@ -1717,16 +1698,9 @@ pub struct BlasterBolt {
 /// crew being told twice.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RepairState {
-    /// One `TeamSlot` per team, in slot order.
-    ///
-    /// The single place this payload stores a *type* rather than scalars, and
-    /// the exception is narrow on purpose: `TeamSlot` is already a wire type
-    /// with derived serde that the client renders from, so its variant order is
-    /// stored surface the repository had committed to before this module
-    /// existed. Copying it into scalars here would not remove that commitment,
-    /// only duplicate it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub teams: Vec<TeamSlot>,
+    /// One canonical job/team owner, including external commitments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jobs: Option<phoenix_sim_gameplay::jobs::RepairJobState>,
     /// Pending requests as `(repair group, label, tier, deficit)`, in the
     /// severity order the queue keeps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1777,7 +1751,7 @@ pub struct RepairState {
 /// [`WeaponFamily`] and [`WeaponEmitterArc`] already derive serde — they are the
 /// channel-3 payload types, so their shape was stored surface the repository had
 /// committed to before this module existed. Copying them into scalars here would
-/// not remove that commitment, only duplicate it — the [`RepairState::teams`]
+/// not remove that commitment, only duplicate it — the historical TeamSlot
 /// exception, for the same reason.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ArcRequestState {
@@ -3767,7 +3741,7 @@ fn repair_state(
         .unwrap_or_default();
     alerted_rows.sort_by(|a, b| a.0.cmp(&b.0));
     RepairState {
-        teams: teams.map(|t| t.0.slots().to_vec()).unwrap_or_default(),
+        jobs: teams.map(|t| t.0.save_state()),
         queue: queue
             .map(|q| {
                 q.entries
@@ -3822,24 +3796,6 @@ fn capture_tractors(entity: EntityRef<'_>) -> Option<crate::tractor::TractorSave
 /// matching the complete intent folded by `fold_dock_namespace`.
 fn capture_docks(entity: EntityRef<'_>) -> Option<crate::dock::DockSaveState> {
     Some(entity.get::<crate::dock::DockControl>()?.save_state())
-}
-
-/// The external repair-dispatch states, captured directly from its entity
-/// — see [`EntityState::external_repair`]. Only hulls that authored
-/// `[repair.external_dispatch]` carry one, so most worlds capture an empty list.
-///
-/// A hull that CAN dispatch and has sent nobody captures nothing — the same
-/// reading `fold_external_repair_namespace` takes: no dispatched target is
-/// byte-for-byte the state of a hull built before external dispatch existed, so
-/// writing it would charge every world fielding a capable hull for a feature its
-/// crew never used.
-fn capture_external_repair(
-    entity: EntityRef<'_>,
-) -> Option<crate::console::repair::ExternalRepairSaveState> {
-    let state = entity
-        .get::<crate::console::repair::ExternalRepairDispatch>()?
-        .save_state();
-    (state != crate::console::repair::ExternalRepairSaveState::default()).then_some(state)
 }
 
 /// The transfer-umbilical states, captured directly from its entity — see
@@ -4288,7 +4244,6 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                     ai_trees: entity
                         .get::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>()
                         .cloned(),
-                    external_repair: capture_external_repair(entity),
                     umbilical: capture_umbilicals(entity),
                     security: capture_security(entity),
                     scan: capture_scans(entity),
@@ -4893,6 +4848,8 @@ pub fn validate_boot_identity_for_world(
 pub enum RestoreGap {
     /// A captured `EntityUuid` no entity in the target world carries.
     MissingEntity(String),
+    /// Canonical assignments cannot resume against the authored crew/workflow.
+    RepairJobsInvalid { uuid: String, reason: String },
     /// The payload carries unread Coordination enqueues but the target app did
     /// not register the message buffers/cursor that own that staging seam.
     CoordinationStagingUnavailable { pending: usize },
@@ -4957,6 +4914,7 @@ pub enum RestoreGap {
 impl std::fmt::Display for RestoreGap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RestoreGap::RepairJobsInvalid { uuid, reason } => write!(f, "repair jobs for {uuid} cannot be restored: {reason}"),
             RestoreGap::MissingEntity(uuid) => {
                 write!(f, "the world has no entity `{uuid}` to restore into")
             }
@@ -5061,7 +5019,36 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         return report;
     }
 
+    let present: Vec<_> = world
+        .try_query::<(Entity, &EntityUuid)>()
+        .map(|mut query| {
+            query
+                .iter(world)
+                .map(|(entity, uuid)| (entity, uuid.0.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    for row in &snapshot.entities {
+        if let Some((entity, _)) = present.iter().find(|(_, uuid)| *uuid == row.uuid) {
+            if let Err(reason) = validate_entity_repair_jobs(world, *entity, row) {
+                report.gaps.push(RestoreGap::RepairJobsInvalid {
+                    uuid: row.uuid.clone(),
+                    reason,
+                });
+            }
+        }
+    }
+    if !report.gaps.is_empty() {
+        return report;
+    }
     restore_entities(world, snapshot, &mut report);
+    if report
+        .gaps
+        .iter()
+        .any(|gap| matches!(gap, RestoreGap::RepairJobsInvalid { .. }))
+    {
+        return report;
+    }
     restore_npc_frequency_matches(world, snapshot, &mut report);
     restore_coordination_staging(world, snapshot, &mut report);
     restore_asteroids(world, snapshot, &mut report);
@@ -5939,6 +5926,18 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
     // one that found a bootstrapped ship waiting.
     report.entities_restored = writes.len();
 
+    for (entity, row) in &writes {
+        if let Err(reason) = validate_entity_repair_jobs(world, *entity, row) {
+            report.gaps.push(RestoreGap::RepairJobsInvalid {
+                uuid: row.uuid.clone(),
+                reason,
+            });
+        }
+    }
+    if !report.gaps.is_empty() {
+        report.entities_restored = 0;
+        return;
+    }
     for (entity, row) in writes {
         apply_entity_state_with(
             world,
@@ -5958,6 +5957,21 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
     }
 }
 
+fn validate_entity_repair_jobs(
+    world: &World,
+    entity: Entity,
+    row: &EntityState,
+) -> Result<(), String> {
+    let Some(stored) = row.repair.as_ref() else {
+        return Ok(());
+    };
+    match (world.get::<ShipRepairTeams>(entity), stored.jobs.as_ref()) {
+        (Some(teams), Some(jobs)) => teams.0.clone().restore_state(jobs),
+        (None, None) => Ok(()),
+        _ => Err("saved team owner is missing or disagrees with the authored crew".into()),
+    }
+}
+
 /// Put ONE captured row back onto one live entity, at the caller's tick.
 ///
 /// Lifted out of [`restore_entities`] unchanged so the GM despawn inverse
@@ -5970,6 +5984,10 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if let Err(reason) = validate_entity_repair_jobs(world, entity, row) {
+        bevy::log::error!("refused repair job restore for {}: {}", row.uuid, reason);
+        return;
+    }
     let restored_at = fixed_elapsed_secs(world).unwrap_or_default();
     let restored_alert_tick = bevy::ecs::change_detection::Tick::new(
         world
@@ -6243,13 +6261,6 @@ fn apply_entity_state_with(
     if let Some(dock) = &row.dock {
         if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {
             control.restore(dock);
-        }
-    }
-    if let Some(external_repair) = &row.external_repair {
-        if let Some(mut dispatch) =
-            entity_mut.get_mut::<crate::console::repair::ExternalRepairDispatch>()
-        {
-            dispatch.restore(external_repair);
         }
     }
     if let Some(umbilical) = &row.umbilical {
@@ -6881,7 +6892,12 @@ fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
 /// Put a ship's repair crew back where it was standing.
 fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState) {
     if let Some(mut teams) = entity.get_mut::<ShipRepairTeams>() {
-        teams.0.restore_slots(&stored.teams);
+        if let Some(jobs) = &stored.jobs {
+            teams
+                .0
+                .restore_state(jobs)
+                .expect("repair job state prevalidated against its authored owner");
+        }
     }
     if let Some(mut queue) = entity.get_mut::<RepairRequestQueue>() {
         queue.recoveries = stored.recoveries.clone();

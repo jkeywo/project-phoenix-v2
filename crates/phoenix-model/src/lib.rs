@@ -16,3 +16,5 @@ pub mod wire;
 pub mod system_status;
 
 pub mod observation;
+
+pub mod job;

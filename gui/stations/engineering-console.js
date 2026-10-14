@@ -118,6 +118,7 @@ export function makeEngineeringRender(variant) {
       repairEl.state = {
         teams: r.teams || [],
         reports: r.reports || [],
+        jobs: r.jobs || [],
         observation_tick: r.observation_tick,
         auto: !!r.repair_auto,
         summary: !!r.repair_summary,

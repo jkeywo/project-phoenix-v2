@@ -66,8 +66,8 @@ model through the real WASM path. Browser transport uses the existing shim.
 ## Human/device acceptance
 
 Prior physical phone/native multi-monitor and human-workload acceptance remains
-pending. The user explicitly authorised advancing to Increment 4. Increment 5
-has not started. The ledger retains `in_progress` until this acceptance is complete.
+pending. The user explicitly authorised advancing to Increment 4. The user subsequently authorised Increment 5 with “Do 5”; this does not close
+the checks below. The ledger retains `in_progress` until this acceptance is complete.
 
 On a mixed human/AI Cruiser, take a Scan reading and leave it held while the world
 changes. Open details and confirm age advances without renewing the sample. Hand

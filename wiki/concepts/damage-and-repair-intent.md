@@ -3,7 +3,7 @@ title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
 sources: [crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm_action.rs, crates/phoenix-simulation/src/gm_projection.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-09-08
+updated: 2026-10-14
 ---
 
 # Damage and Repair Information
@@ -54,7 +54,10 @@ retains the exact host-internal deficit and the same receiver merges it into
 `RepairRequestQueue`; that value is
 a ranking input rather than player knowledge. Requests remain advisory:
 Engineering may dispatch a scarce team without one. Human controls and Backfill
-issue the same admitted dispatch and priority commands.
+issue the same admitted dispatch and priority commands. The canonical job/team
+owner executes those assignments; the report queue remains separate received
+knowledge. Permitted job rows expose assignment/outcome only, without expanding
+onsite diagnosis or giving a feed recipient machinery authority.
 
 Travel time is therefore also an information gate. Once on site, a team sweeps
 the damaged fine Systems in its typed `RepairGroup`: the existing home Station,

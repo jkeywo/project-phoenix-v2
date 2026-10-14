@@ -39,7 +39,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Repair Team Cycle Policy
-      summary: Repair teams travel to a target, repair at authored rate while on site, then return; Core is a valid repair target alongside station-owned systems.
+      summary: Canonical repair jobs commit named teams, execute the existing travel/work/return phases through restricted workflows and derive TeamSlot readouts. Core and typed home Station/detached Console groups remain valid repair targets.
       rationale:
         - "Issue #785 pinned the cycle's intra-Physics ordering explicitly: operate_repair_ai (decide/emit) → handle_dispatch_repair_team + handle_set_repair_priority + handle_set_repair_target_priority (apply) → tick_repair_teams (advance). #830 had pinned only the first edge, leaving tick_repair_teams ambiguous against the appliers even though all three mutate ShipRepairTeams; Bevy's parallel executor then serialised them run-varyingly, and a dispatch landing BEFORE the tick let a Returning { remaining } slot hit remaining <= 0 and flip straight to Travelling instead of staying Returning. That system-order ambiguity — not map iteration order — was the root cause of the intermittent all_busy_teams_ignore_further_dispatches failure. RepairPlugin::build now declares tick_repair_teams .after(handle_dispatch_repair_team).after(handle_set_repair_priority).after(handle_set_repair_target_priority), matching the .chain() its own npc_repair_app fixture already used, so the cycle advances deterministically every tick."
         - "[ai] Issue #1385 adds the FOURTH applier, handle_recall_repair_team, to that same list: tick_repair_teams is declared .after it as well. The #785 rule is every ShipRepairTeams applier before the advance, not those three by name, and a new verb that writes the component joins it. The recall's load-bearing pair is this edge rather than any pair inside the applier tuple: a recall admitted on the tick a team would otherwise arrive resolves recall-first to Returning { remaining: elapsed } — the walk out so far, less this tick's advance — and tick-first to a team that LANDED (Repairing, which also opens issue #737's on-site information gate and on_site_systems for that tick) and then walks home the full travel_duration. Different slot, different arrival time and a different visibility projection from identical input, i.e. a digest divergence between two hosts of one fleet, which no ambiguity check in this repo would have caught."
@@ -52,7 +52,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-simulation/src/console/repair/server.rs]
+      paths: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-simulation/src/console/repair/server.rs]
       symbols: [RepairTeams, tick_repair_teams]
       tests: [cargo test]
 
@@ -667,6 +667,8 @@ entities:
       paths:
         - crates/phoenix-simulation/src/console/repair/server.rs
         - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/jobs/repair.rs
+        - crates/phoenix-sim-gameplay/src/jobs/mod.rs
       symbols:
         - ShipRepairTeams
         - RepairTeams
@@ -683,7 +685,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Repair Team State
-      summary: The host-owned state for travelling, on-site, and returning repair teams.
+      summary: "Canonical per-ship TeamJobs owns internal repair phases, exact external commitments, identity allocation, private workflow state and bounded outcomes. RepairTeams derives legacy TeamSlot readouts. Queue reports and notification latches remain separate state. Snapshot 41 and the internal-repair digest namespace retain canonical jobs once."
     architecture:
       classification: authoritative
       owner: host-repair-team-state
@@ -693,6 +695,8 @@ entities:
       status: declared
       paths:
         - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/jobs/repair.rs
+        - crates/phoenix-sim-gameplay/src/jobs/mod.rs
         - crates/phoenix-simulation/src/console/repair/server.rs
         - crates/phoenix-model/src/messages.rs
       symbols:
@@ -701,6 +705,7 @@ entities:
         - on_site_systems
 
       tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
+
   - state: engineering-aggregate-hull-state
     core:
       status: implemented
@@ -914,6 +919,8 @@ entities:
       status: suspected
       paths:
         - crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs
+        - crates/phoenix-sim-gameplay/src/jobs/repair.rs
+        - crates/phoenix-sim-gameplay/src/jobs/mod.rs
         - gui/console-state.js
       symbols:
         - on_site_systems

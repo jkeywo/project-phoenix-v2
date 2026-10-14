@@ -2,13 +2,13 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-10-14
 ---
 
 # Repair Runtime
 
-`RepairPlugin` owns the server adapter for internal repair teams, Repair Backfill, blackboard publication, and external-repair registration. The deterministic team state machine lives in the Bevy-free `crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs`.
+`RepairPlugin` owns the server adapter for internal repair teams, Repair Backfill, blackboard publication, and external-repair registration. The Bevy-free `jobs/repair.rs` owns canonical assignments. `modifiers/repair_teams.rs` retains the physical repair phase executor and reexports the public RepairTeams facade.
 
 ## Internal repairs
 
@@ -42,6 +42,31 @@ That observation does not resolve other outstanding damage in the group.
 `RepairHumanAlerted` remains the separate popup latch. Queue observations and
 recovery watermarks participate in capture, restore and deterministic digest.
 
+## Jobs and workflows
+
+`TeamJobs<RepairActivity>` is the single per-ship owner of assignments and team
+commitments. Each row retains a ship-scoped JobId, issuing System, activity,
+private TreeRuntime, executor clock and bounded last outcome. Redirected local
+work keeps its committed team's identity. External retargeting creates a fresh
+activation; a repeated identical dispatch leaves the job intact. Internal recall
+keeps its team until the existing return trip finishes. External release remains
+immediate. TeamSlot readouts are derived from these jobs and are not saved.
+
+`repair.workflow` reuses the state-tree compiler, evaluator and editor with
+closed repair facts and stage-effect channels. Final writes gate one physical
+phase per executor step; arrival, sweep handoff and queued return keep their old
+boundaries. Workflows execute admitted human and AI assignments alike. The ordinary
+repair selector remains the System controller. A failed/premature terminal workflow
+surfaces interruption without releasing its team; ordinary recall/release provides
+cleanup. Workshop edits the same typed tree format through accepted-source history.
+The shipped repair workflow fragment reproduces current behavior.
+
+Canonical jobs and private continuation are captured once in RepairState.jobs,
+validated against the authored owner/crew/workflow on restore, and folded in the
+internal-repair namespace. Snapshot 41/rules 0.13 explicitly reject older state.
+Permitted Repair blackboards expose assignment/outcome rows to the shared read-only
+work list. It does not expose private memory, concealed damage or extra controls.
+
 ## External repairs
 
 `crates/phoenix-simulation/src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies progress to the target's authoritative condition track. Backfill uses the same command seam.
@@ -49,8 +74,9 @@ recovery watermarks participate in capture, restore and deterministic digest.
 `repair.external-dispatch` is the shared dispatch/recall semantic action on
 Repair and Engineering variants. Dispatch feedback completes after the live
 lock, range and free-team verdict; explicit recall is an idempotent applied
-assignment. A team remains committed, travels and repairs at the authored rates
-owned by the existing server state machines. A correlated external command on a
+assignment. The shared job owner holds the exact named team until release. External
+repair remains immediate; local work retains its authored travel and repair rates.
+ExternalRepairDispatch carries authored terms and transient refusal, with no second claim. A correlated external command on a
 hull without the optional dispatch capability terminates once as `Refused` rather
 than entering a queue with no owner.
 

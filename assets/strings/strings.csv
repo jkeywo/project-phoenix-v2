@@ -4786,3 +4786,14 @@ observation.source.repair_team,Common recorded observation details,Repair team,R
 observation.source.repair_diagnosis,Common recorded observation details,Repair diagnosis,Reparaturdiagnose,Repair diagnosis,machine
 workshop.ship.job.title,Workshop repair job workflow editor,Repair Job workflow,Ablauf für Reparaturaufträge,Repair Job workflow,machine
 workshop.ship.job.context,Workshop repair job context boundary,This workflow executes admitted repair jobs; System AI still selects work. Only the listed repair effects are supported.,Dieser Ablauf führt freigegebene Reparaturaufträge aus; die System-KI wählt weiterhin die Arbeit aus. Nur die aufgeführten Reparatureffekte werden unterstützt.,This workflow executes admitted repair jobs; System AI still selects work. Only the listed repair effects are supported.,machine
+job.work_item,Repair job work list,Job {id} · {team}: {phase},Auftrag {id} · {team}: {phase},Job {id} · {team}: {phase},machine
+job.phase.travelling,Repair job work list,Travelling,Unterwegs,Travelling,machine
+job.phase.working,Repair job work list,Working,In Arbeit,Working,machine
+job.phase.returning,Repair job work list,Returning,Rückkehr,Returning,machine
+job.phase.external,Repair job work list,External repair,Externe Reparatur,External repair,machine
+job.phase.finished,Repair job work list,Finished,Beendet,Finished,machine
+job.outcome.completed,Repair job work list,Completed,Abgeschlossen,Completed,machine
+job.outcome.cancelled,Repair job work list,Cancelled,Abgebrochen,Cancelled,machine
+job.outcome.failed,Repair job work list,Failed,Fehlgeschlagen,Failed,machine
+job.paused,Repair job work list,Paused,Pausiert,Paused,machine
+job.workflow_error,Repair job work list,Workflow stopped; recall team,Ablauf gestoppt; Team zurückrufen,Workflow stopped; recall team,machine

@@ -2,8 +2,8 @@
 title: Project Overview
 type: concept
 tags: [overview, intro]
-sources: [README.md, AGENTS.md, assets/scenarios.toml, assets/scenarios.demo.toml]
-updated: 2026-08-27
+sources: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, README.md, AGENTS.md, assets/scenarios.toml, assets/scenarios.demo.toml]
+updated: 2026-10-14
 ---
 
 # Project Overview
@@ -29,6 +29,8 @@ handshake. Guests who cannot scan type the code printed beside the QR.
   ship's authored station ratings decide which source operates each system.
 - Simulation decisions advance on a deterministic fixed tick. AI decision
   cadences are derived from that tick rather than rendered frames or wall time.
+- Repair uses one canonical job/team owner and restricted state-tree workflows.
+  Human and ordinary AI commands share admission; reports remain received knowledge.
 
 ## Content
 

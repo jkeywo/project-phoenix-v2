@@ -156,5 +156,18 @@ snapshot and digest paths. Workshop continues to edit typed feeds.
 [gameplay comparison](observations-baseline.md) pass. Both bounded scenario
 reports match Increment 3 byte for byte; the unchanged Cruiser matrix passes
 20/20 with identical merged results. Physical/device and human-workload
-acceptance remain separate. Shared jobs and team execution are Increment 5 and
-have not started.
+acceptance remain separate. The user subsequently authorised Increment 5.
+
+## Increment 5 — shared jobs and team execution
+
+The [implementation contract](increment-5.md), adopted PASM shared-job decisions
+and [acceptance record](../../acceptance/1562-shared-jobs.md) cover the current
+migration. One canonical job/team owner now holds local repair work and exact
+external commitments. Restricted workflows reuse state-tree machinery and its
+Workshop editor; ordinary admitted human/AI controls and physical repair phases
+retain existing behavior. Reports remain separate knowledge.
+
+Snapshot 41/rules 0.13 retain IDs, queued redirects and private continuation once.
+The existing Repair Console shows permitted assignment/outcome rows without
+additional controls or concealed diagnosis. Physical/device and human-workload
+acceptance remains open; Increment 6 has not started.

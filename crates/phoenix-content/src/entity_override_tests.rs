@@ -1021,3 +1021,43 @@ action = { kind = "complete", result = "success" }
         merge_entity_config_toml_with(&base, &overlay, MergePolicy::InstanceOverride).unwrap_err();
     assert!(error.contains("not honoured by a per-instance override"));
 }
+
+#[test]
+fn repair_workflow_fragments_share_keyed_order_and_removal_rules() {
+    let base: toml::Value = toml::from_str(include_str!(
+        "../../../assets/entities/fragments/jobs/repair_workflow.toml"
+    ))
+    .unwrap();
+    let overlay: toml::Value = toml::from_str(
+        r#"
+[[repair.workflow.tree]]
+id = "repair-job"
+[[repair.workflow.tree.state]]
+id = "execute"
+[[repair.workflow.tree.state.task]]
+id = "repair"
+_remove = true
+[[repair.workflow.tree.state.task]]
+id = "external"
+action = { value = { source = "literal", value = false } }
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+    let tasks = merged["repair"]["workflow"]["tree"][0]["state"][0]["task"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        tasks
+            .iter()
+            .map(|task| task["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["travel", "return", "external"]
+    );
+    assert_eq!(tasks[2]["action"]["value"]["value"].as_bool(), Some(false));
+    assert_eq!(
+        base["repair"]["workflow"]["tree"][0]["state"][0]["task"][0],
+        tasks[0]
+    );
+}

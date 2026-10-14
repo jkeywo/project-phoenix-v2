@@ -711,6 +711,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         repair_team_count,
         travel_duration_secs,
         repair_rate_hp_per_sec,
+        workflow,
         selector,
         external_dispatch,
     );

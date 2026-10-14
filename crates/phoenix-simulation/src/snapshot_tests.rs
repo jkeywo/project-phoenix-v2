@@ -6,6 +6,88 @@ use crate::gm_action::{
     GmAction, GmActionGrant, GmActionId, GmActionJournal, GmActionOrder, SimulationPaused,
 };
 
+#[test]
+fn repair_jobs_resume_return_queue_and_external_commitment_from_ron() {
+    use crate::modifiers::repair_teams::{RepairTeams, RepairTimings};
+    let timings = RepairTimings {
+        travel_duration: 2.0,
+        repair_rate_hp_per_sec: 1.0,
+    };
+    let mut live = RepairTeams::new_with_timings(2, timings);
+    let mut hull = crate::ship::damage::SystemHull::from_config(&[
+        (SystemId("first".into()), 10.0),
+        (SystemId("second".into()), 10.0),
+    ]);
+    hull.set_hp(&SystemId("first".into()), 1.0);
+    hull.set_hp(&SystemId("second".into()), 2.0);
+    live.dispatch(0, SystemId("first".into()), "First".into());
+    live.tick(1.0, &mut hull, None);
+    live.dispatch(0, SystemId("second".into()), "Second".into());
+    assert!(live.claim_external(1, "ally".into()));
+    assert!(live.step_external());
+    let stored = repair_state(Some(&ShipRepairTeams(live.clone())), None, None);
+    let stored: RepairState = ron::from_str(&ron::to_string(&stored).unwrap()).unwrap();
+    let mut target = World::new();
+    let entity = target
+        .spawn(ShipRepairTeams(RepairTeams::new_with_timings(2, timings)))
+        .id();
+    apply_repair(&mut target.entity_mut(entity), &stored);
+    let mut resumed = target.get::<ShipRepairTeams>(entity).unwrap().0.clone();
+    assert_eq!(resumed.save_state(), live.save_state());
+    assert!(resumed.free_team_indices(None).is_empty());
+    let mut resumed_hull = hull.clone();
+    for _ in 0..4 {
+        live.tick(1.0, &mut hull, None);
+        resumed.tick(1.0, &mut resumed_hull, None);
+        assert_eq!(live.step_external(), resumed.step_external());
+        assert_eq!(live.save_state(), resumed.save_state());
+        assert_eq!(
+            hull.current_for(&SystemId("second".into())),
+            resumed_hull.current_for(&SystemId("second".into()))
+        );
+    }
+    assert_eq!(resumed.external_target(), Some("ally"));
+}
+
+#[test]
+fn repair_job_preflight_refuses_invalid_identity_before_entity_writes() {
+    use crate::modifiers::repair_teams::RepairTeams;
+    let mut teams = RepairTeams::new(1);
+    teams.dispatch(0, SystemId("engine".into()), "Engine".into());
+    let mut world = sparse_capture_world(None);
+    world.register_component::<ActiveBeam>();
+    world.register_component::<PhaserCooldown>();
+    world.register_component::<TorpedoSystemResource>();
+    world.register_component::<EntityShipArcHull>();
+    world.register_component::<RepairRequestQueue>();
+    world.register_component::<RepairHumanAlerted>();
+    world.register_component::<crate::server_app::ShipSystemBlackboards>();
+    world.register_component::<crate::ai::server::ObjectiveCursors>();
+    world.register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    world.register_component::<crate::ship::shields::ShipShields>();
+    let entity = world
+        .spawn((
+            EntityUuid("repairer".into()),
+            ShipRepairTeams(teams),
+            ShipRedAlert(false),
+        ))
+        .id();
+    let before = world.get::<ShipRepairTeams>(entity).unwrap().0.save_state();
+    let mut row = capture_entities(&world).remove(0);
+    row.repair.as_mut().unwrap().jobs.as_mut().unwrap().teams[0]
+        .as_mut()
+        .unwrap()
+        .id
+        .0 = 0;
+    assert!(validate_entity_repair_jobs(&world, entity, &row).is_err());
+    apply_entity_state(&mut world, entity, &row, 0);
+    assert_eq!(
+        world.get::<ShipRepairTeams>(entity).unwrap().0.save_state(),
+        before
+    );
+    assert!(!world.get::<ShipRedAlert>(entity).unwrap().0);
+}
+
 fn sparse_capture_world(missing: Option<usize>) -> World {
     let mut world = World::new();
     if missing != Some(0) {

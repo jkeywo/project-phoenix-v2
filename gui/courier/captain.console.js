@@ -67,6 +67,7 @@ export const renderStation = makeCaptainRender({
     if (repairEl) {
       repairEl.state = {
         teams: repair.teams || [],
+        jobs: repair.jobs || [],
         auto: !!repair.repair_auto,
         summary: !!repair.repair_summary,
         targets: repair.dispatch_targets || [],

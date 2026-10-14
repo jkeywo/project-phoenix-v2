@@ -1629,6 +1629,7 @@ export function buildRepairConsoleState(state, systemIds = []) {
     return {
       teams,
       reports: bb.queue_depth || [],
+      jobs: bb.jobs || [],
       observation_tick: observationTickFor(state, entry.systemId),
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,

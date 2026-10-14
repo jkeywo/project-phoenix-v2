@@ -66,7 +66,7 @@ fn optional_namespace_exact_fold_characterization() {
         fold_station_stances_namespace(&world, FOLD_SEED),
         fold_tractor_namespace(&world, FOLD_SEED),
         fold_dock_namespace(&world, FOLD_SEED),
-        fold_external_repair_namespace(&world, FOLD_SEED),
+        fold_internal_repair_namespace(&world, FOLD_SEED),
         fold_umbilical_namespace(&world, FOLD_SEED),
         fold_security_namespace(&world, FOLD_SEED),
     ];
@@ -79,7 +79,7 @@ fn optional_namespace_exact_fold_characterization() {
             16847282475859703794,
             2604905312334251123,
             2045009351732382248,
-            12338065970744138158,
+            7322358685363040768,
             11779916052664557949,
             10771667353891034293,
         ]
@@ -98,12 +98,11 @@ fn optional_namespace_exact_fold_characterization() {
             ("tractor", 3412975283742167187),
             ("dock", 196895128352095218),
             ("system-ai-trees", 196895128352095218),
-            ("external-repair", 15298784236101610809),
-            ("umbilical", 203970584908569017),
-            ("asteroid", 10848069915580109200),
-            ("collisions", 11006195783312198968),
-            ("security", 11313664663400321796),
-            ("internal-repair", 11313664663400321796),
+            ("umbilical", 15491268977310092478),
+            ("asteroid", 1294415633813107063),
+            ("collisions", 16065284320352777755),
+            ("security", 14226133757962437551),
+            ("internal-repair", 12585372360240408742),
         ]
     );
 }
@@ -114,7 +113,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
     registered.register_component::<ShipStationStances>();
     registered.register_component::<DockControl>();
     registered.register_component::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>();
-    registered.register_component::<ExternalRepairDispatch>();
+    registered.register_component::<crate::console::repair::ShipRepairTeams>();
     registered.register_component::<ShipSecurityTeams>();
     for world in [World::new(), registered] {
         for fold in [
@@ -125,7 +124,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
             fold_tractor_namespace,
             fold_dock_namespace,
             fold_ai_trees_namespace,
-            fold_external_repair_namespace,
+            fold_internal_repair_namespace,
             fold_umbilical_namespace,
             fold_security_namespace,
         ] {
@@ -565,16 +564,14 @@ fn only_a_held_tractor_moves_the_digest_and_the_target_is_what_moves_it() {
 
 /// A tender, optionally holding one named team abroad on a named target.
 fn spawn_tender(world: &mut World, uuid: &str, abroad: Option<(u8, &str)>) {
-    let mut dispatch = crate::console::repair::ExternalRepairDispatch::new(
-        crate::console::repair::ExternalRepairConfig {
-            range: 600.0,
-            repair_rate: 8.0,
-        },
-    );
+    let mut teams = crate::modifiers::repair_teams::RepairTeams::new(3);
     if let Some((team_idx, target)) = abroad {
-        dispatch.claim(team_idx, Some(target.to_string()));
+        assert!(teams.claim_external(usize::from(team_idx), target.to_string()));
     }
-    world.spawn((EntityUuid(uuid.to_string()), dispatch));
+    world.spawn((
+        EntityUuid(uuid.to_string()),
+        crate::console::repair::ShipRepairTeams(teams),
+    ));
 }
 
 /// **Issues #1161, #1386.** A hull holding nobody abroad folds nothing at all —
@@ -594,7 +591,7 @@ fn a_field_repair_folds_its_target_and_the_team_working_it() {
     let mut idle = fold_world();
     spawn_tender(&mut idle, id, None);
     assert_eq!(
-        fold_external_repair_namespace(&idle, FOLD_SEED),
+        fold_internal_repair_namespace(&idle, FOLD_SEED),
         FOLD_SEED,
         "a hull dispatching nobody folds nothing — a folded row here would have moved every \
          committed world's digest for state none of them carry"
@@ -631,6 +628,68 @@ fn a_field_repair_folds_its_target_and_the_team_working_it() {
         world_digest(&other_ally),
         "…as must a host that thinks the team is working someone else"
     );
+}
+
+#[test]
+fn repair_job_digest_detects_private_continuation_and_identity_allocator() {
+    use crate::ai::state_tree::{BoolSource, TaskAction, TaskDef};
+    use crate::console::repair::ShipRepairTeams;
+    use crate::core::messages::SystemId;
+    use crate::modifiers::repair_teams::{RepairTeams, RepairTimings};
+    let mut workflow = crate::jobs::repair_workflow::default_config();
+    workflow.tree[0].memory.insert("visited".into(), false);
+    workflow.tree[0].state[0].task.push(TaskDef {
+        id: "visit".into(),
+        when: vec![],
+        action: TaskAction::Remember {
+            key: "visited".into(),
+            value: BoolSource::Literal { value: true },
+        },
+    });
+    let mut teams = RepairTeams::new_with_workflow(
+        1,
+        RepairTimings::default(),
+        SystemId("repair".into()),
+        Some(&workflow),
+    )
+    .unwrap();
+    teams.dispatch(0, SystemId("engine".into()), "Engine".into());
+    let mut hull =
+        crate::ship::damage::SystemHull::from_config(&[(SystemId("engine".into()), 10.0)]);
+    hull.set_hp(&SystemId("engine".into()), 1.0);
+    teams.tick(0.0, &mut hull, None);
+    let mut world = fold_world();
+    let entity = world
+        .spawn((EntityUuid("job-ship".into()), ShipRepairTeams(teams)))
+        .id();
+    let original = fold_internal_repair_namespace(&world, FOLD_SEED);
+    let saved = world.get::<ShipRepairTeams>(entity).unwrap().0.save_state();
+    let mut changed = saved.clone();
+    changed.teams[0]
+        .as_mut()
+        .unwrap()
+        .runtime
+        .root
+        .as_mut()
+        .unwrap()
+        .memory
+        .insert("visited".into(), false);
+    world
+        .get_mut::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .restore_state(&changed)
+        .unwrap();
+    assert_ne!(original, fold_internal_repair_namespace(&world, FOLD_SEED));
+    changed = saved;
+    changed.next_id += 1;
+    world
+        .get_mut::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .restore_state(&changed)
+        .unwrap();
+    assert_ne!(original, fold_internal_repair_namespace(&world, FOLD_SEED));
 }
 
 /// A docker, optionally mated to a named berth.

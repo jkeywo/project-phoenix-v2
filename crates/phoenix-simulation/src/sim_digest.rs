@@ -231,7 +231,6 @@ use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 use crate::civilian::CivilianTraffic;
 use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::command::server::ShipStationStances;
-use crate::console::repair::external_server::ExternalRepairDispatch;
 use crate::core::collision_history::CollisionHistory;
 use crate::core::messages::{CommsPriority, GamePhase};
 use crate::dock::DockControl;
@@ -452,7 +451,6 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("tractor", fold_tractor_namespace),
     ("dock", fold_dock_namespace),
     ("system-ai-trees", fold_ai_trees_namespace),
-    ("external-repair", fold_external_repair_namespace),
     ("umbilical", fold_umbilical_namespace),
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
@@ -2070,52 +2068,6 @@ fn fold_ai_trees_namespace(world: &World, acc: u64) -> u64 {
     )
 }
 
-/// Every ship dispatching a repair team abroad (issue #1161), in [`FoldKey`]
-/// order, in its own namespace.
-///
-/// # What is folded, and why it has to be
-///
-/// The uuid of the target a team is working abroad, for every ship actually
-/// dispatching one. This is the authoritative divergence signal a resume has to
-/// survive with the tractor's own reason turned to repair: two hosts that
-/// disagreed about whether a team was still over there would disagree about
-/// whether the ally's condition is climbing and whether this hull has a team
-/// free for its own sweep. The authored reach and rate are content, which
-/// `snapshot::content_digest` is answerable for, so neither is folded; the last
-/// refusal is a projection the next tick re-derives and is left out for the same
-/// reason the tractor leaves its refusal out.
-///
-/// The empty-walk affordance is [`fold_infrastructure_namespace`]'s, exactly as
-/// [`fold_tractor_namespace`] takes it: a hull that authored
-/// `[repair.external_dispatch]` and is dispatching nobody folds NOTHING — not
-/// even a row — so a shipped hull can gain the capability without moving any
-/// committed world's digest.
-fn fold_external_repair_namespace(world: &World, acc: u64) -> u64 {
-    fold_optional_namespace(
-        world,
-        acc,
-        "external-repair-namespace",
-        |dispatch: &ExternalRepairDispatch| {
-            dispatch
-                .dispatched_target
-                .as_ref()
-                .map(|target| (target.clone(), dispatch.team_idx))
-        },
-        |mut acc, (target, team_idx)| {
-            acc = fold_str(acc, &target);
-            // WHICH team is abroad, beside the target it is working (issue #1386).
-            // It has to fold for the reason the target does: two hosts that disagree
-            // about it disagree about which slot this hull has free for its own
-            // damage-control sweep, and therefore about where the next internal
-            // dispatch lands. The empty-walk affordance is untouched — a ship
-            // dispatching nobody still folds nothing at all, so `dispatched_target`
-            // folds exactly as it did.
-            acc = fold_u64(acc, u64::from(team_idx));
-            acc
-        },
-    )
-}
-
 /// Every ship whose transfer umbilical is RUNNING (issue #1160), in [`FoldKey`]
 /// order, in its own namespace.
 ///
@@ -2374,7 +2326,6 @@ mod tests;
 /// entity walks. Empty components contribute nothing; map insertion order is not state.
 fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
     use crate::console::repair::server::{RepairRequestQueue, ShipRepairTeams};
-    use crate::core::messages::TeamSlot;
     use crate::ship::components::RepairHumanAlerted;
     let acc = fold_optional_namespace(
         world,
@@ -2425,30 +2376,29 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
         acc,
-        "repair-teams",
+        "repair-jobs",
         |teams: &ShipRepairTeams| {
-            if teams
-                .0
-                .slots()
-                .iter()
-                .all(|slot| matches!(slot, TeamSlot::Idle))
-            {
+            if !teams.0.has_job_history() {
                 return None;
             }
-            let mut slots = teams.0.slots().to_vec();
-            for slot in &mut slots {
-                match slot {
-                    TeamSlot::Travelling { elapsed, .. } => {
-                        *elapsed = f32::from_bits(canon_f32(*elapsed))
+            let mut state = teams.0.save_state();
+            for job in state.teams.iter_mut().flatten() {
+                if let crate::jobs::repair::RepairActivity::Internal { phase, .. } =
+                    &mut job.activity
+                {
+                    match phase {
+                        crate::core::messages::TeamSlot::Travelling { elapsed, .. } => {
+                            *elapsed = f32::from_bits(canon_f32(*elapsed))
+                        }
+                        crate::core::messages::TeamSlot::Returning { remaining, .. } => {
+                            *remaining = f32::from_bits(canon_f32(*remaining))
+                        }
+                        _ => {}
                     }
-                    TeamSlot::Returning { remaining, .. } => {
-                        *remaining = f32::from_bits(canon_f32(*remaining))
-                    }
-                    _ => {}
                 }
             }
-            Some(slots)
+            Some(state)
         },
-        |acc, slots| fold_serde(acc, &slots),
+        |acc, state| fold_serde(acc, &state),
     )
 }

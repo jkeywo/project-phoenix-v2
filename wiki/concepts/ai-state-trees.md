@@ -2,7 +2,7 @@
 title: Individual System AI State Trees
 type: concept
 tags: [ai, systems, workshop, determinism]
-sources: [crates/phoenix-sim-gameplay/src/ai/state_tree/mod.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/schema.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/compile.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs, crates/phoenix-sim-gameplay/src/ai/host.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, assets/entities/fragments/ai/dock_state_tree.toml, gui/workshop-state-trees.js, gui/workshop.css, editor/workshop-state-trees.js, pasm/spec/design/ai-state-trees.yaml, pasm/spec/architecture/ai-state-trees.yaml]
+sources: [crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/mod.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/schema.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/compile.rs, crates/phoenix-sim-gameplay/src/ai/state_tree/evaluate.rs, crates/phoenix-sim-gameplay/src/ai/host.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ai/state_tree_runtime.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, assets/entities/fragments/ai/dock_state_tree.toml, gui/workshop-state-trees.js, gui/workshop.css, editor/workshop-state-trees.js, pasm/spec/design/ai-state-trees.yaml, pasm/spec/architecture/ai-state-trees.yaml]
 updated: 2026-10-14
 ---
 
@@ -46,8 +46,8 @@ No authored expressions or custom code nodes are supported.
 `ShipAiTreeRuntime` holds a deterministic map keyed by SystemId: active states,
 private memory, nested calls/completion and last evaluation tick. Snapshot capture,
 restore and the `system-ai-trees` digest stage include that state. Snapshot format
-40 and simulation rules 0.12 are the current compatibility boundary, including
-repair observation continuation.
+41 and simulation rules 0.13 are the current compatibility boundary, including
+repair job continuation.
 
 The shared `dock_state_tree.toml` library provides a derived standard controller
 and reusable operation call. Adoption and withdrawal ownership are authored memory,
@@ -62,6 +62,15 @@ existing accepted-source history. A derived tree can be explicitly flattened for
 structural changes. Renaming a mating enabled channel also rebinds its AI writes
 and pending reads in the same source operation. Inherited fragments remain intact.
 The editor uses the shared Workshop grid/wrapping conventions inside narrow docks.
+
+## Job reuse
+
+Repair jobs use the same schema, compiler, evaluator and editor with a separate
+closed vocabulary under `jobs/repair_workflow.rs`. Each assignment has independent
+private continuation. The ordinary repair selector still chooses work through
+System admission; these trees execute that work rather than replacing its AI.
+`validate_runtime` checks stored frames without running tasks during restoration.
+Workshop mounts separate System AI and Repair Job contexts over one editor.
 
 ## Related
 

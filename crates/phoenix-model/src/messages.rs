@@ -5221,6 +5221,9 @@ pub struct QueueEntryPreview {
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RepairBlackboard {
+    /// Permitted assignment/outcome work list from the single job owner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<crate::job::JobWorkItem>,
     #[serde(default)]
     pub repair_groups: Vec<RepairGroupDefinition>,
     /// Current team slot states (one entry per repair team).

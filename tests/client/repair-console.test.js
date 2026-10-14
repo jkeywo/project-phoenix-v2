@@ -53,7 +53,7 @@ describe('battleship repair renderStation', () => {
     expect(el('repair-teams').state).toEqual({
       teams: payload.teams, auto: true, summary, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }],
-      reports: [], observation_tick: undefined,
+      reports: [], jobs: [], observation_tick: undefined,
       external_dispatch: null,
     });
   });

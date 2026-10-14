@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { observationDetails } from '../observation-details.js';
+import { renderJobWorkList } from '../job-work-list.js';
 import {
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
@@ -167,6 +168,7 @@ export class PhRepairTeams extends PhElement {
   </div>
   <div id="teams-container"></div>
   <div id="observation-reports"></div>
+  <div id="job-work-list" role="status"></div>
 `;
   }
 
@@ -486,6 +488,7 @@ export class PhRepairTeams extends PhElement {
   #render() {
     const s = this.#state || {};
     const teams = Array.isArray(s.teams) ? s.teams : [];
+    renderJobWorkList(this.shadowRoot.getElementById('job-work-list'), s.jobs, teams);
     const reports = this.shadowRoot.getElementById('observation-reports');
     const open = new Set([...reports.querySelectorAll('details[open]')].map(row => row.dataset.report));
     reports.replaceChildren();

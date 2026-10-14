@@ -77,6 +77,26 @@ test('repair console: renders overall hull and the collapsed team roster', async
   await expect(page.locator('ph-repair-teams .card[data-team-id="1"] .btn')).toHaveCount(0);
 });
 
+test('repair jobs: paused work retains the existing human recall control and bounded outcome', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const job = { id: 7, owner: 'damage_control', team_idx: 0, phase: 'working',
+    target_system: 'aux-sensor', outcome: null, paused: true, workflow_error: false };
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), onSiteState({ jobs: [job] }));
+  const list = page.locator('ph-repair-teams #job-work-list');
+  await expect(list).toContainText('7');
+  await expect(list).toContainText('Paused');
+  await expect(list.locator('button')).toHaveCount(0);
+  await selectTeam(page, 0);
+  await expect(page.locator('ph-repair-teams .card[data-team-id="0"] .recall-row button')).toBeEnabled();
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState({
+    jobs: [{ ...job, phase: 'finished', outcome: 'cancelled', paused: false }],
+  }));
+  await expect(list).toContainText('Cancelled');
+  await expect(list.locator('[data-job-id]')).toHaveCount(1);
+  await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState());
+  await expect(list.locator('[data-job-id]')).toHaveCount(0);
+});
+
 test('repair console: Core bar hides when there are no damageable core systems', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => window.__updateConsole('repair', JSON.stringify(s)), repairState({ core_systems: [] }));

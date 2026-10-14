@@ -1,0 +1,20 @@
+entities:
+  - component: shared-job-execution-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Job Execution State
+      summary: "Gameplay TeamJobs owns independent repair assignments, stable ship-scoped IDs, named team commitments, private workflow continuation and bounded last outcomes. RepairTeams adapts the existing physical phase executor and derives TeamSlot readouts. Simulation retains admitted Repair commands, ordinary AI selectors, report reduction, onsite visibility and condition contributions. ExternalRepairDispatch contains only rederived authored terms and transient refusal; its team claim lives in the same job owner."
+      rationale:
+        - "[ai] Repair is the first real consumer. The same closed state-tree compiler/evaluator/editor supports Job facts and final effect channels; once-per-step stage execution preserves existing travel, repair, sweep and return boundaries. There is no additional AI controller or child-job hierarchy."
+        - "[ai] Snapshot 41/rules 0.13 carry canonical jobs once. Restore validates crew identity and private continuation before writing existing rows; digest folds canonical assignments and timers, not derived slots. Permitted work lists expose issued assignments/outcomes without hidden diagnosis or command authority."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      depends_on: [repair-visibility-publisher]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/mod.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/snapshot.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/job-work-list.js, gui/workshop-state-trees.js, editor/workshop-state-trees.js]
+      symbols: [TeamJobs, RepairTeams, validate_runtime, renderJobWorkList]
+      tests: [crates/phoenix-sim-gameplay/src/jobs/repair_tests.rs, crates/phoenix-simulation/src/snapshot_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, tests/client/job-work-list.test.js, editor/tests/workshop-job-workflow.test.js]

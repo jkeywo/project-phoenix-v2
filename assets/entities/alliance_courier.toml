@@ -24,6 +24,8 @@ mass = 3500.0
 tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
+includes = ["fragments/jobs/repair_workflow.toml"]
+
 [mesh]
 model = "assets/models/alliance_courier_recreated.glb"
 shape = "sphere"

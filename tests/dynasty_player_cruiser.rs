@@ -223,6 +223,10 @@ fn dynasty_reserve_uses_the_finite_reactor_capacitor_and_authored_power_tree() {
         power.battery_charge() > 0.0,
         "ordinary output charges the same capacitor"
     );
+    // Compare an already ramped sustainable reactor with a higher export
+    // limit. With no consumer intake, both generate the same sustainable
+    // amount; the higher setting must not manufacture capacitor charge.
+    power.network_mut().output_actual_per_sec = hardware.reactor.sustainable_output_per_sec;
     let mut boosted = power.clone();
     let mut boosted_stock = stock.clone();
     boosted
@@ -231,7 +235,12 @@ fn dynasty_reserve_uses_the_finite_reactor_capacitor_and_authored_power_tree() {
     let before = power.battery_charge();
     tick(&mut power, &mut stock, 1.0);
     tick(&mut boosted, &mut boosted_stock, 1.0);
-    assert!(boosted.battery_charge() > power.battery_charge());
+    assert!(boosted.network().output_actual_per_sec > power.network().output_actual_per_sec);
+    assert_eq!(
+        boosted.battery_charge(),
+        power.battery_charge(),
+        "raising the export limit cannot create extra reactor generation"
+    );
     assert!(power.battery_charge() > before);
     let weapon = strike.as_ref().unwrap().weapons.iter().next().unwrap();
     assert!(boosted.battery_charge() >= weapon.1.cost);

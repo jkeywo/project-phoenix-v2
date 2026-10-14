@@ -18,6 +18,7 @@
 //! rescue, or the mission ending all close a running transport's lifecycle with
 //! the appropriate terminal state, exactly as the tractor's hold does.
 
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,7 +34,6 @@ use crate::core::task_lifecycle::{
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityId, EntityName, EntitySystemHull, EntityUuid};
 use crate::science::scan::scanned_flag;
-use crate::ship::damage::DamageTier;
 use crate::ship::power::ShipPowerSystem;
 use crate::ship::system_registry::{transporter_system_id, TRANSPORTER_SYSTEM_ID};
 use crate::transporter::coupling::{
@@ -389,6 +389,7 @@ pub fn reveal_civilian_contacts(
 /// transport's activation ends with the mapped terminal reason.
 #[allow(clippy::type_complexity)]
 pub fn tick_transport(
+    physical_q: Query<&ShipDamage>,
     mut power_q: Query<&mut ShipPowerSystem>,
     time: Option<Res<Time>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
@@ -400,6 +401,7 @@ pub fn tick_transport(
             &Transporter,
             &Transform,
             Option<&EntitySystemHull>,
+            Option<&ShipDamage>,
             Option<&EntityUuid>,
         )>,
         // Every candidate contact's position, civilian state and world id.
@@ -432,16 +434,9 @@ pub fn tick_transport(
         .p0()
         .iter()
         .filter(|(_, t, _, _, _)| t.transporting)
-        .map(|(entity, t, transform, hull, uuid)| {
+        .map(|(entity, t, transform, hull, damage, uuid)| {
             let power_level = u8::MAX;
-            let disabled = hull
-                .map(|h| {
-                    matches!(
-                        h.0.tier_for(&transporter_system_id()),
-                        DamageTier::Disabled | DamageTier::Destroyed
-                    )
-                })
-                .unwrap_or(false);
+            let disabled = operation_disabled(damage, hull, &transporter_system_id());
             Row {
                 entity,
                 uuid: uuid.cloned(),
@@ -532,6 +527,13 @@ pub fn tick_transport(
                         .work_continuous(&transporter_system_id(), dt, 1.0)
                         .map_or(0.0, |grant| grant.fraction)
                 });
+                let fraction = fraction
+                    * physical_q.get(row.entity).map_or(1.0, |damage| {
+                        damage.factor(
+                            &transporter_system_id(),
+                            phoenix_model::damage::DamageBinding::Operation,
+                        )
+                    });
                 if fraction == 0.0 {
                     continue;
                 }

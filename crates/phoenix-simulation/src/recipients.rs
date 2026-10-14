@@ -174,12 +174,15 @@ pub(crate) fn resolve_in_world(
     // excludes those hulls without changing their assignment or frozen view.
     let mut hulls = world.query::<(
         &crate::entities::spawner::EntityUuid,
-        &crate::entities::spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>();
     let destroyed: BTreeSet<_> = hulls
         .iter(world)
-        .filter(|(_, hull)| hull.0.total_current() <= 0.0)
-        .map(|(uuid, _)| uuid.0.clone())
+        .filter(|(_, hull, damage)| {
+            crate::ship::compartment_damage::is_catastrophic(*damage, *hull)
+        })
+        .map(|(uuid, _, _)| uuid.0.clone())
         .collect();
     prepared
         .fleet

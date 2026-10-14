@@ -77,3 +77,22 @@ it('preserves Dynasty classes and button type without Alliance typography', () =
     expect(el(`${kind}-panel`).querySelector('.dynasty-aux-row')).not.toBeNull();
   }
 });
+
+it('shows collection direction and parts labels, retaining exact-owner selectors', () => {
+  const send = vi.fn(); window.sendAction = send;
+  const state = running => ({ system_ids: ['umbilical'], system_families: { umbilical: 'umbilical' }, systems: {
+    umbilical: { system_id: 'umbilical', direction: 'collect', running, allowed_resources: ['structural_parts', 'machinery_parts'], selected_resource: 'machinery_parts' }
+  } });
+  mountUmbilicalControl(el('umbilical-panel'));
+  renderUmbilicalPanel(state(false), document, key => key);
+  const direction = document.querySelector('[data-transfer-direction]');
+  expect(direction.value).toBe('collect'); expect(direction.disabled).toBe(false);
+  const resource = document.querySelector('[data-transfer-resource]');
+  expect([...resource.options].map(option => option.textContent)).toEqual(['damage.resource.structural_parts', 'damage.resource.machinery_parts']);
+  direction.value = 'deliver'; direction.dispatchEvent(new Event('change'));
+  expect(send).toHaveBeenLastCalledWith('set_transfer_direction', { direction: 'deliver', control_system_id: 'umbilical' });
+  renderUmbilicalPanel(state(true), document, key => key);
+  expect(document.querySelector('[data-transfer-direction]')).toBe(direction); expect(direction.disabled).toBe(true);
+  expect(el('umbilical-status').textContent).toContain('←');
+  delete window.sendAction;
+});

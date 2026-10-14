@@ -227,6 +227,24 @@ pub fn operating_tier(
     )
 }
 
+/// Read the actual first capability used by the existing work consumer. This
+/// adds no damage cache, allocation multiplier or alternate machinery owner.
+pub fn operation_for_kind(
+    damage: Option<&ShipDamage>,
+    config: &crate::ship::config::ShipConfig,
+    kind: &str,
+) -> f32 {
+    damage.map_or(1.0, |damage| {
+        config
+            .systems
+            .iter()
+            .find(|system| system.kind == kind)
+            .map_or(0.0, |system| {
+                damage.factor(&system.id, DamageBinding::Operation)
+            })
+    })
+}
+
 /// Intake/cooling faults do not turn off already charged working equipment.
 pub fn operation_disabled(
     damage: Option<&ShipDamage>,

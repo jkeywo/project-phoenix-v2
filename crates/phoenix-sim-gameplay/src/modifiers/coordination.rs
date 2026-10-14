@@ -143,7 +143,8 @@ const RADAR_DESTROYED_BONUS: f32 = -999.0;
 pub fn apply_radar_damage_modifiers(
     mut ships_q: Query<
         (
-            &crate::entities::spawner::EntitySystemHull,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::physical_damage::ShipDamage>,
             &mut ShipModifiers,
             Option<&crate::ship::components::ShipSystemControlSources>,
             Option<&crate::ship::components::ShipConfigComponent>,
@@ -156,7 +157,7 @@ pub fn apply_radar_damage_modifiers(
         helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
     };
 
-    for (hull, mut mods, sources, config) in ships_q.iter_mut() {
+    for (hull, damage, mut mods, sources, config) in ships_q.iter_mut() {
         for (kind, fallback, slot) in [
             (
                 crate::ship::system_registry::HELM_RADAR_KIND,
@@ -194,12 +195,22 @@ pub fn apply_radar_damage_modifiers(
                 } else {
                     mods.remove(&disabled_source, &slot);
                 }
-                let bonus = match hull.0.tier_for(&sid) {
-                    DamageTier::Operational => 0.0,
-                    DamageTier::Damaged | DamageTier::Disabled => {
-                        -hull.0.debuff_magnitude_for(&sid)
+                let bonus = if let Some(damage) = damage {
+                    let factor =
+                        damage.factor(&sid, phoenix_model::damage::DamageBinding::Operation);
+                    if factor == 0.0 {
+                        RADAR_DESTROYED_BONUS
+                    } else {
+                        factor - 1.0
                     }
-                    DamageTier::Destroyed => RADAR_DESTROYED_BONUS,
+                } else {
+                    match hull.map_or(DamageTier::Operational, |hull| hull.0.tier_for(&sid)) {
+                        DamageTier::Operational => 0.0,
+                        DamageTier::Damaged | DamageTier::Disabled => {
+                            -hull.map_or(0.0, |hull| hull.0.debuff_magnitude_for(&sid))
+                        }
+                        DamageTier::Destroyed => RADAR_DESTROYED_BONUS,
+                    }
                 };
                 mods.add_or_update(Modifier {
                     source: ModifierSource::SystemDamage(sid),

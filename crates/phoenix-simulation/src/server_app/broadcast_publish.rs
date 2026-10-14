@@ -338,6 +338,7 @@ pub(crate) fn publish_viewscreen_blackboard(
             Option<&crate::console::weapons::LastShipAttacker>,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::lockstep::FleetSlotOf>,
@@ -347,7 +348,7 @@ pub(crate) fn publish_viewscreen_blackboard(
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    for (mut entity_bbs, ra, activity, last_attacker, behaviour, hull, uuid) in
+    for (mut entity_bbs, ra, activity, last_attacker, behaviour, hull, damage, uuid) in
         ship_blackboards_q.iter_mut()
     {
         // Lift Combat Lock + Science Target from THIS ship's own radar
@@ -372,17 +373,9 @@ pub(crate) fn publish_viewscreen_blackboard(
         let last_weapon_fired_secs = activity.and_then(|a| a.last_weapon_fired);
         let last_attacker_uuid = last_attacker.and_then(|l| l.0.clone());
 
-        let hull_integrity_pct = hull
-            .map(|h| {
-                let max = h.0.total_max();
-                let cur = h.0.total_current();
-                if max > 0.0 {
-                    (cur / max * 100.0).clamp(0.0, 100.0)
-                } else {
-                    100.0
-                }
-            })
-            .unwrap_or(100.0);
+        let hull_integrity_pct = crate::ship::compartment_damage::structural_fraction(damage, hull)
+            .unwrap_or(1.0)
+            * 100.0;
 
         let conditions = WorldConditions {
             red_alert,
@@ -708,6 +701,7 @@ pub fn reconcile_runtime_entities(
             Option<&RadarAppearanceSection>,
             Option<&AsteroidFieldSection>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::entities::spawner::EntityTarget>,
             Option<&crate::ship::shields::ShipShields>,
             Option<&crate::infrastructure::InfrastructureCondition>,
@@ -759,17 +753,12 @@ pub fn reconcile_runtime_entities(
          radar_appearance: Option<&RadarAppearanceSection>,
          asteroid_field: Option<&AsteroidFieldSection>,
          hull_comp: Option<&crate::entities::spawner::EntitySystemHull>,
+         damage: Option<&crate::ship::compartment_damage::ShipDamage>,
          entity_target: Option<&crate::entities::spawner::EntityTarget>,
          shield_comp: Option<&crate::ship::shields::ShipShields>,
          infrastructure: Option<&crate::infrastructure::InfrastructureCondition>| {
-            let hull_fraction = hull_comp.map(|h| {
-                let max = h.0.total_max();
-                if max > 0.0 {
-                    h.0.total_current() / max
-                } else {
-                    1.0
-                }
-            });
+            let hull_fraction =
+                crate::ship::compartment_damage::structural_fraction(damage, hull_comp);
             let shield_fraction = shield_comp.map(|s| {
                 let total_hp: i32 = s.0.facings.iter().map(|f| f.hp).sum();
                 let total_max: i32 = s.0.facings.iter().map(|f| f.max_hp).sum();
@@ -870,6 +859,7 @@ pub fn reconcile_runtime_entities(
                 radar_appearance,
                 asteroid_field,
                 hull_comp,
+                damage,
                 entity_target,
                 shield_comp,
                 infrastructure,
@@ -885,6 +875,7 @@ pub fn reconcile_runtime_entities(
                     radar_appearance,
                     asteroid_field,
                     hull_comp,
+                    damage,
                     entity_target,
                     shield_comp,
                     infrastructure,
@@ -921,6 +912,7 @@ pub fn reconcile_runtime_entities(
                 radar_appearance,
                 asteroid_field,
                 hull_comp,
+                damage,
                 entity_target,
                 shield_comp,
                 infrastructure,
@@ -936,6 +928,7 @@ pub fn reconcile_runtime_entities(
                     radar_appearance,
                     asteroid_field,
                     hull_comp,
+                    damage,
                     entity_target,
                     shield_comp,
                     infrastructure,

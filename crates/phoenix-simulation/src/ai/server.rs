@@ -250,6 +250,7 @@ pub(crate) fn build_world_snapshot(
         Option<&crate::entities::spawner::EntityName>,
         Option<&crate::entities::spawner::FactionComponent>,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         Option<&crate::entities::spawner::ColliderSection>,
         Option<&crate::ship::state::ShipPhysics>,
         // Direct-fire reach (issue #788): the longest range this entity can put
@@ -281,20 +282,15 @@ pub(crate) fn build_world_snapshot(
                 name,
                 faction,
                 hull,
+                damage,
                 collider,
                 physics,
                 control_sources,
                 phasers,
                 blasters,
             )| {
-                let hull_fraction = hull.map(|h| {
-                    let max = h.0.total_max();
-                    if max > 0.0 {
-                        h.0.total_current() / max
-                    } else {
-                        1.0
-                    }
-                });
+                let hull_fraction =
+                    crate::ship::compartment_damage::structural_fraction(damage, hull);
                 let radius = collider.map(|c| c.0.radius).unwrap_or(0.0);
                 // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
                 // Use ShipPhysics.forward_speed (authoritative after #581).
@@ -582,7 +578,8 @@ pub(crate) fn aggregate_doctrine_blackboards(
             // scenery (stars, asteroids) out — only doctrine ships and turrets
             // qualify.
             Option<&BehaviourSection>,
-            &crate::entities::spawner::EntitySystemHull,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
@@ -607,20 +604,15 @@ pub(crate) fn aggregate_doctrine_blackboards(
         name_opt,
         behaviour,
         hull,
+        damage,
         mut blackboards,
         red_alert_opt,
         activity_opt,
         last_attacker_opt,
     ) in &mut query
     {
-        let hull_fraction = {
-            let max = hull.0.total_max();
-            if max > 0.0 {
-                (hull.0.total_current() / max).clamp(0.0, 1.0)
-            } else {
-                1.0
-            }
-        };
+        let hull_fraction =
+            crate::ship::compartment_damage::structural_fraction(damage, hull).unwrap_or(1.0);
         let red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
         // Whether something LANDED A HIT on this ship recently, on a decaying
         // window (issue #1010) — not whether it carries the component that
@@ -1484,6 +1476,7 @@ fn simulate_low_lod_ships(
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&mut crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -1522,6 +1515,7 @@ fn simulate_low_lod_ships(
         entity_uuid,
         mut power,
         control_sources,
+        physical,
     ) in &mut ships
     {
         let before = *physics;
@@ -1678,6 +1672,7 @@ fn simulate_low_lod_ships(
                     &mut physics,
                     power.as_deref_mut().map(|power| &mut power.0),
                     control_sources,
+                    physical,
                     dt,
                     max_speed,
                     max_yaw_rate,
@@ -1735,6 +1730,7 @@ fn simulate_low_lod_ships(
                     &mut physics,
                     power.as_deref_mut().map(|power| &mut power.0),
                     control_sources,
+                    physical,
                     dt,
                     max_speed,
                     max_yaw_rate,
@@ -1814,6 +1810,7 @@ fn simulate_low_lod_ships(
             &mut physics,
             power.as_deref_mut().map(|power| &mut power.0),
             control_sources,
+            physical,
             dt,
             max_speed,
             max_yaw_rate,
@@ -1833,6 +1830,7 @@ fn fund_low_lod_motion(
     proposed: &mut ShipPhysics,
     mut power: Option<&mut crate::modifiers::power_system::PowerSystem>,
     sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+    physical: Option<&crate::ship::compartment_damage::ShipDamage>,
     dt: f32,
     max_speed: f32,
     max_yaw_rate: f32,
@@ -1842,6 +1840,32 @@ fn fund_low_lod_motion(
     let offline = |id: crate::core::messages::SystemId| {
         sources.is_some_and(|sources| sources.0.is_offline(&id))
     };
+    let factor = |kind| {
+        power.as_deref().map_or(0.0, |power| {
+            phoenix_sim_gameplay::ship::physical_damage::operation_for_kind(
+                physical,
+                power.ship_config(),
+                kind,
+            )
+        })
+    };
+    let thrust_efficiency = factor(HELM_THRUST_KIND);
+    let steering_efficiency = factor(HELM_STEERING_KIND);
+    let engine_efficiency = physical.map_or(1.0, |damage| {
+        let factors: Vec<_> = [
+            helm_engine_port_system_id(),
+            helm_engine_starboard_system_id(),
+        ]
+        .into_iter()
+        .filter(|id| !offline(id.clone()) && damage.definition.components.contains_key(id))
+        .map(|id| damage.factor(&id, phoenix_model::damage::DamageBinding::Operation))
+        .collect();
+        if factors.is_empty() {
+            1.0
+        } else {
+            factors.iter().sum::<f32>() / factors.len() as f32
+        }
+    });
     if propelled && max_speed > 0.0 && proposed.forward_speed != 0.0 {
         let engine_fraction = match (
             offline(helm_engine_port_system_id()),
@@ -1863,6 +1887,7 @@ fn fund_low_lod_motion(
                     activity,
                 )
         };
+        let fraction = fraction * thrust_efficiency * engine_efficiency;
         if proposed.forward_speed * before.forward_speed < 0.0 {
             // Passive deceleration may reach rest, but crossing rest and
             // accelerating the other way is new actuator work.
@@ -1892,7 +1917,7 @@ fn fund_low_lod_motion(
                 activity,
             )
         };
-        proposed.yaw = before.yaw + delta * fraction;
+        proposed.yaw = before.yaw + delta * fraction * steering_efficiency;
     }
 }
 

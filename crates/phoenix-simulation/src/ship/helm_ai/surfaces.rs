@@ -59,6 +59,7 @@ pub(crate) type HelmAiFallbackQuery<'w, 's> = Query<
         Option<&'static crate::entities::spawner::EntityName>,
         Option<&'static crate::entities::spawner::FactionComponent>,
         Option<&'static crate::entities::spawner::EntitySystemHull>,
+        Option<&'static crate::ship::compartment_damage::ShipDamage>,
         Option<&'static crate::entities::spawner::ColliderSection>,
     ),
 >;
@@ -77,16 +78,13 @@ pub(crate) fn helm_ai_snapshot_entities(
     }
     entity_fallback_q
         .iter()
-        .map(|(uuid, transform, name, faction, hull, collider)| {
+        .map(|(uuid, transform, name, faction, hull, damage, collider)| {
             let runtime_name = runtime_ref.and_then(|rt| {
                 rt.name_to_uuid
                     .iter()
                     .find_map(|(n, mapped)| (mapped == &uuid.0).then(|| n.clone()))
             });
-            let hull_fraction = hull.and_then(|h| {
-                let max = h.0.total_max();
-                (max > 0.0).then(|| h.0.total_current() / max)
-            });
+            let hull_fraction = crate::ship::compartment_damage::structural_fraction(damage, hull);
             crate::ai::AiWorldEntity {
                 uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
                 name: runtime_name.or_else(|| name.map(|n| n.0.clone())),

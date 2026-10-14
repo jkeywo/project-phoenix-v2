@@ -5185,3 +5185,8 @@ workshop.weapon.compartment,Weapon ownership,Physical compartment,Physischer Rau
 energy.controls.generation,Reactor generation toggle,Generate reactor energy,Reaktorenergie erzeugen,Generate reactor energy,machine
 semantic_action.power.energy_generation.label,Reactor generation intent,Toggle reactor generation,Reaktorenergieerzeugung umschalten,Toggle reactor generation,machine
 semantic_action.power.energy_generation.accessibility,Reactor generation intent,Toggle reactor generation,Reaktorenergieerzeugung umschalten,Toggle reactor generation,machine
+console.umbilical.direction,Transfer direction,Transfer direction,Transferrichtung,Transfer direction,machine
+console.umbilical.deliver,Transfer direction,Send to docked partner,An angedockten Partner senden,Send to docked partner,machine
+console.umbilical.collect,Transfer direction,Collect from docked partner,Vom angedockten Partner abholen,Collect from docked partner,machine
+semantic_action.engineering.transfer_direction.label,Transfer direction semantic action,Choose transfer direction,Transferrichtung auswählen,Choose transfer direction,machine
+semantic_action.engineering.transfer_direction.accessibility,Transfer direction semantic action,Choose transfer direction,Transferrichtung auswählen,Choose transfer direction,machine

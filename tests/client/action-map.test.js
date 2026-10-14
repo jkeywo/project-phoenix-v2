@@ -70,6 +70,7 @@ describe('ACTION_MAP', () => {
       'set_strike_boost',
       'set_target',
       'set_torpedo_volley_target',
+      'set_transfer_direction',
       'set_transfer_resource',
       'set_view',
       'set_weapons_restraint',
@@ -1476,4 +1477,12 @@ describe('exact shield operation wire commands', () => {
     ACTION_MAP.set_shield_recovery({control_system_id:'shield-arc-fore'},send);
     expect(send).not.toHaveBeenCalled();
   });
+});
+
+it('sends only typed transfer directions to the actual controlling System', () => {
+  const send = vi.fn();
+  ACTION_MAP.set_transfer_direction({ control_system_id: 'umbilical', direction: 'collect', correlation: 'parts-in' }, send);
+  expect(send).toHaveBeenLastCalledWith('ControlSystemCorrelated', { correlation: 'parts-in', target: 'umbilical', payload: { type: 'SetTransferDirection', data: { direction: 'collect' } } });
+  send.mockClear(); ACTION_MAP.set_transfer_direction({ direction: 'reverse' }, send);
+  expect(send).not.toHaveBeenCalled();
 });

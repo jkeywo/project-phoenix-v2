@@ -24,6 +24,7 @@
 
 use crate::ai::state_tree_runtime::{ShipAiTreePrograms, ShipAiTreeRuntime};
 use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
 use phoenix_sim_gameplay::ship::composition::{
@@ -44,7 +45,6 @@ use crate::core::task_lifecycle::{
 use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
-use crate::ship::damage::DamageTier;
 use crate::ship::power::ShipPowerSystem;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::dock_system_id;
@@ -629,6 +629,7 @@ pub fn tick_dock(
             Option<&DockMarkers>,
             Option<&mut ShipPowerSystem>,
             Option<&EntitySystemHull>,
+            Option<&ShipDamage>,
             &EntityUuid,
         )>,
         // Every hull carrying dock markers, to resolve candidates and targets.
@@ -661,7 +662,7 @@ pub fn tick_dock(
 
     // Decide each own ship without holding the write borrow.
     let mut outcomes: Vec<DockOutcome> = Vec::new();
-    for (entity, dock, transform, markers, mut power, hull, uuid) in set.p0().iter_mut() {
+    for (entity, dock, transform, markers, mut power, hull, damage, uuid) in set.p0().iter_mut() {
         let own_pose = Pose {
             translation: transform.translation,
             rotation: transform.rotation,
@@ -670,14 +671,7 @@ pub fn tick_dock(
         // Allocation is incoming flow, not equipment availability. Geometry is
         // checked before paying, so impossible/idle attempts consume no energy.
         let power_level = u8::MAX;
-        let disabled = hull
-            .map(|h| {
-                matches!(
-                    h.0.tier_for(&dock.system_id),
-                    DamageTier::Disabled | DamageTier::Destroyed
-                )
-            })
-            .unwrap_or(false);
+        let disabled = operation_disabled(damage, hull, &dock.system_id);
 
         let mut outcome = decide_dock(
             entity,
@@ -704,6 +698,13 @@ pub fn tick_dock(
             } else {
                 1.0
             };
+            let fraction = fraction
+                * damage.map_or(1.0, |damage| {
+                    damage.factor(
+                        &dock.system_id,
+                        phoenix_model::damage::DamageBinding::Operation,
+                    )
+                });
             if fraction < 1.0 {
                 outcome = decide_dock(
                     entity,

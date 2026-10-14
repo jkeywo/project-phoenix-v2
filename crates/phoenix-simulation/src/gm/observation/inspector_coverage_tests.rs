@@ -191,7 +191,8 @@ fn active_domain_sources() -> (
             authored_document: Some("assets/entities/coverage.toml"),
             ratings: &ratings,
             controls: &controls,
-            hull: &hull,
+            hull: Some(&hull),
+            physical: None,
             blackboards: None,
         },
     ]);
@@ -228,6 +229,7 @@ fn active_domain_sources() -> (
             .map(|system| (system.id.clone(), 100.0))
             .collect::<Vec<_>>();
         let hull = SystemHull::from_config(&health);
+        let physical = crate::ship::compartment_damage::ShipDamage::from_config(&authored).unwrap();
         let projection = crate::gm::observation::ship_inspector::projection([
             crate::gm::observation::ship_inspector::ShipInspectorInputs {
                 id: "ship",
@@ -237,7 +239,8 @@ fn active_domain_sources() -> (
                 authored_document: path.to_str(),
                 ratings: &ratings,
                 controls: &controls,
-                hull: &hull,
+                hull: Some(&hull),
+                physical: physical.as_ref(),
                 blackboards: None,
             },
         ]);

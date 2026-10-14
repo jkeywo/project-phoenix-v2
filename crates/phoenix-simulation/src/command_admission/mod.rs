@@ -351,6 +351,7 @@ pub fn admit_system_commands(
         // `resolve_human_seeking_hosts` has run once.
         Option<&crate::ship_plugin::HumanSeekingHosts>,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
@@ -375,11 +376,15 @@ pub fn admit_system_commands(
     let mut local_ship: Option<Entity> = None;
     let mut by_ship_key: std::collections::HashMap<String, Entity> =
         std::collections::HashMap::new();
-    for (entity, mut sources, mut admitted, _, is_local, uuid, _, hull) in ship_query.iter_mut() {
+    for (entity, mut sources, mut admitted, _, is_local, uuid, _, hull, damage) in
+        ship_query.iter_mut()
+    {
         // Restore hull-derived availability before any command can enter.
         sources
             .0
-            .set_destroyed(hull.is_some_and(|h| h.0.is_destroyed()));
+            .set_destroyed(crate::ship::compartment_damage::is_catastrophic(
+                damage, hull,
+            ));
         admitted.0.clear();
         if is_local {
             local_ship = Some(entity);
@@ -419,7 +424,7 @@ pub fn admit_system_commands(
         };
         // Read-only: the accepted command is queued for its apply tick rather
         // than pushed here, so this borrow never needs to be mutable.
-        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts, _)) =
+        let Ok((ship_entity, control_sources, _, ship_config, _, ship_uuid, seeking_hosts, _, _)) =
             ship_query.get(route)
         else {
             if let Some(correlation) = correlation.as_ref() {
@@ -526,7 +531,7 @@ pub fn admit_system_commands(
         // tick's world, and the `Entity` captured at acceptance is only the
         // fallback for a ship that never had a uuid to be named by.
         let route = by_ship_key.get(&due.ship.0).copied().unwrap_or(due.route);
-        let Ok((_, _, mut admitted, _, _, _, _, hull)) = ship_query.get_mut(route) else {
+        let Ok((_, _, mut admitted, _, _, _, _, hull, damage)) = ship_query.get_mut(route) else {
             if let (Some(correlation), Some(token)) = (
                 due.command.feedback_correlation.as_ref(),
                 due.command.response_token.as_deref(),
@@ -548,7 +553,7 @@ pub fn admit_system_commands(
             );
             continue;
         };
-        if hull.is_some_and(|h| h.0.is_destroyed()) {
+        if crate::ship::compartment_damage::is_catastrophic(damage, hull) {
             if let (Some(correlation), Some(token)) = (
                 due.command.feedback_correlation.as_ref(),
                 due.command.response_token.as_deref(),

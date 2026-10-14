@@ -146,6 +146,7 @@ pub fn apply_helm_commands(
 /// (`crates/phoenix-sim-gameplay/src/ship/state.rs`) for the four out-of-band writers.
 #[allow(clippy::too_many_arguments)]
 pub fn integrate_ship_physics(
+    physical_q: Query<&crate::ship::physical_damage::ShipDamage>,
     time: Res<Time>,
     physics_cfg_res: Option<Res<ShipPhysicsConfigResource>>,
     bank_cfg_res: Option<Res<BankConfigResource>>,
@@ -249,6 +250,7 @@ pub fn integrate_ship_physics(
             vertical_speed: physics.vertical_speed,
         };
 
+        let physical = physical_q.get(_entity).ok();
         let mut power = power_q.get_mut(_entity).ok();
         let impulse_requested = impulse.is_some_and(|i| i.0.is_active())
             && !sources
@@ -270,6 +272,14 @@ pub fn integrate_ship_physics(
         } else {
             0.0
         };
+        let impulse_fraction = impulse_fraction
+            * power.as_deref().map_or(0.0, |power| {
+                crate::ship::physical_damage::operation_for_kind(
+                    physical,
+                    power.0.ship_config(),
+                    crate::ship::system_registry::HELM_IMPULSE_KIND,
+                )
+            });
         let impulse_active = impulse_requested && impulse_fraction > 0.0;
 
         let input = if impulse_active {
@@ -408,6 +418,55 @@ pub fn integrate_ship_physics(
             }
         }
 
+        if let Some(power) = power.as_deref() {
+            for (axis, kind) in [
+                (
+                    &mut scaled_input.thrust,
+                    crate::ship::system_registry::HELM_THRUST_KIND,
+                ),
+                (
+                    &mut scaled_input.steering,
+                    crate::ship::system_registry::HELM_STEERING_KIND,
+                ),
+                (
+                    &mut scaled_input.lateral,
+                    crate::ship::system_registry::LATERAL_THRUST_KIND,
+                ),
+                (
+                    &mut scaled_input.vertical,
+                    crate::ship::system_registry::VERTICAL_THRUST_KIND,
+                ),
+            ] {
+                *axis *= crate::ship::physical_damage::operation_for_kind(
+                    physical,
+                    power.0.ship_config(),
+                    kind,
+                );
+            }
+        }
+        if let Some(physical) = physical {
+            let mut factors = Vec::new();
+            for (id, offline) in [
+                (
+                    crate::ship::system_registry::helm_engine_port_system_id(),
+                    port_offline,
+                ),
+                (
+                    crate::ship::system_registry::helm_engine_starboard_system_id(),
+                    stbd_offline,
+                ),
+            ] {
+                if !offline && physical.definition.components.contains_key(&id) {
+                    factors.push(
+                        physical.factor(&id, phoenix_model::damage::DamageBinding::Operation),
+                    );
+                }
+            }
+            if !factors.is_empty() {
+                scaled_input.thrust *= factors.iter().sum::<f32>() / factors.len() as f32;
+            }
+        }
+
         let mut config = physics_cfg_comp
             .map(|c| c.0)
             .or_else(|| physics_cfg_res.as_deref().map(|c| c.0))
@@ -453,6 +512,14 @@ pub fn integrate_ship_physics(
             } else {
                 0.0
             };
+            let fraction = fraction
+                * power.as_deref().map_or(0.0, |power| {
+                    crate::ship::physical_damage::operation_for_kind(
+                        physical,
+                        power.0.ship_config(),
+                        crate::ship::system_registry::HELM_BOOST_KIND,
+                    )
+                });
             let multiplier = 1.0 + (boost_cfg.multiplier - 1.0) * fraction;
             config.max_speed *= multiplier;
             config.max_reverse_speed *= multiplier;

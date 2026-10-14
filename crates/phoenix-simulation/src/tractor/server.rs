@@ -19,6 +19,7 @@
 //! is now the only path that takes a target under tow.
 
 use crate::ai::standing_operation::OperationFacts;
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -38,7 +39,6 @@ use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityU
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
 use crate::modifiers::{Modifier, ShipModifiers};
-use crate::ship::damage::DamageTier;
 use crate::ship::power::ShipPowerSystem;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
@@ -587,6 +587,7 @@ pub fn operate_tractor_ai(
 /// the beam is really holding: a fresh coupling opens one, a lock that MOVES
 /// under a live hold closes one and opens another, and a refusal closes it.
 pub fn tick_tractor(
+    physical_q: Query<&ShipDamage>,
     time: Res<Time>,
     mut power_q: Query<&mut ShipPowerSystem>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
@@ -598,6 +599,7 @@ pub fn tick_tractor(
             Option<&TacticalRadarSelection>,
             &Transform,
             Option<&EntitySystemHull>,
+            Option<&ShipDamage>,
             Option<&EntityUuid>,
         )>,
         // Every entity's position, to resolve the locked target's separation.
@@ -622,16 +624,9 @@ pub fn tick_tractor(
         .p0()
         .iter()
         .filter(|(_, beam, _, _, _, _)| beam.engaged)
-        .map(|(entity, beam, selection, transform, hull, uuid)| {
+        .map(|(entity, beam, selection, transform, hull, damage, uuid)| {
             let power_level = u8::MAX;
-            let disabled = hull
-                .map(|h| {
-                    matches!(
-                        h.0.tier_for(&tractor_system_id()),
-                        DamageTier::Disabled | DamageTier::Destroyed
-                    )
-                })
-                .unwrap_or(false);
+            let disabled = operation_disabled(damage, hull, &tractor_system_id());
             Row {
                 entity,
                 uuid: uuid.cloned(),
@@ -686,6 +681,13 @@ pub fn tick_tractor(
                         .work_continuous(&tractor_system_id(), time.delta_secs(), 1.0)
                         .map_or(0.0, |grant| grant.fraction)
                 });
+                let fraction = fraction
+                    * physical_q.get(row.entity).map_or(1.0, |damage| {
+                        damage.factor(
+                            &tractor_system_id(),
+                            phoenix_model::damage::DamageBinding::Operation,
+                        )
+                    });
                 beam.work_fraction = fraction;
                 if fraction == 0.0 {
                     beam.last_refusal = Some(TractorRefusal::Unpowered);

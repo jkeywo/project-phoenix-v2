@@ -35,7 +35,7 @@ fn parent_intake_cut_keeps_charged_equipment_degraded_until_thermal_trip() {
     power.0.network_mut().groups.get_mut(&parent).unwrap().cut = true;
     assert!(!power.0.network().groups[group].cut);
     let sources = ControlSourceResolver::new();
-    let status = &project(&config, None, &sources, None, Some(&power), None)[&id];
+    let status = &project(&config, None, None, &sources, None, Some(&power), None)[&id];
     assert_eq!(status.availability, Availability::Degraded);
     assert_eq!(
         status
@@ -57,7 +57,7 @@ fn parent_intake_cut_keeps_charged_equipment_degraded_until_thermal_trip() {
     let reserve = power.0.network_mut().consumers.get_mut(&id).unwrap();
     reserve.thermal_stopped = true;
     reserve.heat = trip_heat;
-    let status = &project(&config, None, &sources, None, Some(&power), None)[&id];
+    let status = &project(&config, None, None, &sources, None, Some(&power), None)[&id];
     assert_eq!(status.availability, Availability::Unavailable);
     assert!(status
         .reasons
@@ -96,7 +96,7 @@ fn work_costs_distinguish_free_discrete_and_partial_mixed_capabilities() {
             crate::modifiers::power_system::PowerSystem::from_energy(hardware, config.clone())
                 .unwrap(),
         );
-        let status = &project(&config, None, &sources, None, Some(&power), None)[&id];
+        let status = &project(&config, None, None, &sources, None, Some(&power), None)[&id];
         assert_eq!(status.availability, expected);
         assert_eq!(
             status
@@ -155,7 +155,15 @@ fn dock_current_facts_override_historical_refusal_and_keep_multiple_reasons() {
     sources.set(id.clone(), ControlSource::Ai);
     let mut hull = crate::ship::damage::SystemHull::from_config(&[(id.clone(), 100.0)]);
     hull.set_hp(&id, 0.0);
-    let statuses = project(&config, Some(&hull), &sources, Some(&dock), None, None);
+    let statuses = project(
+        &config,
+        Some(&hull),
+        None,
+        &sources,
+        Some(&dock),
+        None,
+        None,
+    );
     let status = &statuses[&id];
     assert_eq!(status.availability, Availability::Unavailable);
     assert!(status.delegated);
@@ -184,6 +192,7 @@ fn dock_current_facts_override_historical_refusal_and_keep_multiple_reasons() {
     let status = &project(
         &config,
         Some(&hull),
+        None,
         &sources,
         Some(&dock),
         Some(&power),
@@ -195,6 +204,7 @@ fn dock_current_facts_override_historical_refusal_and_keep_multiple_reasons() {
     let status = &project(
         &config,
         Some(&hull),
+        None,
         &sources,
         Some(&dock),
         Some(&power),
@@ -203,4 +213,87 @@ fn dock_current_facts_override_historical_refusal_and_keep_multiple_reasons() {
     assert_eq!(status.availability, Availability::Unavailable);
     assert_eq!(status.reasons[0].code, StatusReasonCode::Unpowered);
     assert!(status.delegated);
+}
+
+#[test]
+fn physical_intake_fault_preserves_charged_work_but_operation_loss_does_not() {
+    use phoenix_model::damage::{ComponentCondition, DamageBinding};
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let mut physical = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
+        .unwrap()
+        .expect("physical Cruiser");
+    let (config, power) = cruiser();
+    let id = SystemId("dock".into());
+    let intake = physical.definition.components[&id]
+        .iter()
+        .find(|(_, row)| row.binding == DamageBinding::Intake)
+        .unwrap()
+        .0
+        .clone();
+    let operation = physical.definition.components[&id]
+        .iter()
+        .find(|(_, row)| row.binding == DamageBinding::Operation)
+        .unwrap()
+        .0
+        .clone();
+    {
+        let state = physical
+            .state
+            .components
+            .get_mut(&id)
+            .unwrap()
+            .get_mut(&intake)
+            .unwrap();
+        state.condition = ComponentCondition::Destroyed;
+        state.last_source = Some("test-hit".into());
+    }
+    let sources = ControlSourceResolver::new();
+    assert!(!crate::ship::compartment_damage::operation_disabled(
+        Some(&physical),
+        None,
+        &id
+    ));
+    let status = &project(
+        &config,
+        None,
+        Some(&physical),
+        &sources,
+        None,
+        Some(&power),
+        None,
+    )[&id];
+    assert_eq!(status.availability, Availability::Degraded);
+    {
+        let state = physical
+            .state
+            .components
+            .get_mut(&id)
+            .unwrap()
+            .get_mut(&operation)
+            .unwrap();
+        state.condition = ComponentCondition::Destroyed;
+        state.last_source = Some("test-hit".into());
+    }
+    assert!(crate::ship::compartment_damage::operation_disabled(
+        Some(&physical),
+        None,
+        &id
+    ));
+    let status = &project(
+        &config,
+        None,
+        Some(&physical),
+        &sources,
+        None,
+        Some(&power),
+        None,
+    )[&id];
+    assert_eq!(status.availability, Availability::Unavailable);
+    assert!(
+        power.0.network().consumers[&id].energy > 0.0,
+        "tool loss does not erase its battery"
+    );
 }

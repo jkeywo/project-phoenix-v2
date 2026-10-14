@@ -92,6 +92,7 @@ pub(crate) fn publish_comms_blackboard(
             Option<&EntityUuid>,
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship::components::HumanSeekingHosts>,
         ),
@@ -99,7 +100,7 @@ pub(crate) fn publish_comms_blackboard(
     >,
 ) {
     let key = crate::ship::system_registry::comms_system_id();
-    for (is_local, slot, uuid, alert, hull, mut boards, hosts) in &mut ships {
+    for (is_local, slot, uuid, alert, hull, damage, mut boards, hosts) in &mut ships {
         let mut bb = CommsBlackboard::default();
         if is_local || slot.is_some() {
             bb.messages = inbox
@@ -155,9 +156,8 @@ pub(crate) fn publish_comms_blackboard(
             }
             let conditions = crate::objectives::WorldConditions {
                 red_alert: alert.is_some_and(|a| a.0),
-                hull_fraction: hull.filter(|h| h.0.total_max() > 0.0).map_or(1.0, |h| {
-                    (h.0.total_current() / h.0.total_max()).clamp(0.0, 1.0)
-                }),
+                hull_fraction: crate::ship::compartment_damage::structural_fraction(damage, hull)
+                    .unwrap_or(1.0),
                 attacked: false,
             };
             bb.objectives = objectives
@@ -1479,14 +1479,14 @@ pub fn seed_comms_response_facts(reading: &CommsResponseReading) -> crate::world
 /// unavailable, Operational and Damaged as available. Ships with no hull
 /// tracker (bare-`App` fixtures, entities that never took damage modelling) are
 /// treated as available, matching the other AI hosts' hull fallbacks.
-fn comms_system_available(hull: Option<&crate::entities::spawner::EntitySystemHull>) -> bool {
-    let Some(hull) = hull else {
-        return true;
-    };
-    !matches!(
-        hull.0
-            .tier_for(&crate::ship::system_registry::comms_system_id()),
-        crate::ship::damage::DamageTier::Disabled | crate::ship::damage::DamageTier::Destroyed
+fn comms_system_available(
+    hull: Option<&crate::entities::spawner::EntitySystemHull>,
+    damage: Option<&crate::ship::compartment_damage::ShipDamage>,
+) -> bool {
+    !crate::ship::compartment_damage::operation_disabled(
+        damage,
+        hull,
+        &crate::ship::system_registry::comms_system_id(),
     )
 }
 
@@ -1755,6 +1755,7 @@ pub fn operate_comms_ai(
             &mut crate::core::messages::AdmittedCommands,
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&CommsTargetSelector>,
         ),
         With<crate::server_app::LocalShip>,
@@ -1780,8 +1781,17 @@ pub fn operate_comms_ai(
         in_range: bool,
     }
 
-    for (entity, entity_uuid, sources, ship_config, mut admitted, red_alert, hull, selector_comp) in
-        ships.iter_mut()
+    for (
+        entity,
+        entity_uuid,
+        sources,
+        ship_config,
+        mut admitted,
+        red_alert,
+        hull,
+        damage,
+        selector_comp,
+    ) in ships.iter_mut()
     {
         // Control-Source gate through the shared AI host spine (issue #1208): a
         // human holder (or an offline system) stands the hail selector down.
@@ -1809,16 +1819,8 @@ pub fn operate_comms_ai(
         // Score the objective pool against the same conditions
         // `publish_comms_blackboard` uses (red alert + hull fraction).
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
-        let hull_fraction = hull
-            .map(|h| {
-                let max = h.0.total_max();
-                if max > 0.0 {
-                    (h.0.total_current() / max).clamp(0.0, 1.0)
-                } else {
-                    1.0
-                }
-            })
-            .unwrap_or(1.0);
+        let hull_fraction =
+            crate::ship::compartment_damage::structural_fraction(damage, hull).unwrap_or(1.0);
         let conditions = crate::objectives::WorldConditions {
             red_alert,
             hull_fraction,
@@ -1996,7 +1998,7 @@ pub fn operate_comms_ai(
             position: [0.0, 0.0, 0.0],
             facts: seed_comms_self_facts(
                 selector_comp.power_rating,
-                comms_system_available(hull),
+                comms_system_available(hull, damage),
                 red_alert,
                 comms.as_deref().map(|rt| rt.contacts.len()).unwrap_or(0),
             ),
@@ -2184,6 +2186,7 @@ pub fn operate_comms_response_ai(
         &mut crate::core::messages::AdmittedCommands,
         Option<&crate::ship::state::ShipRedAlert>,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         Option<&CommsResponseAiPolicy>,
         Option<&CommsResponseAiCadence>,
         // The authored ship `power_rating` lives on the CO-LOCATED selector
@@ -2259,6 +2262,7 @@ pub fn operate_comms_response_ai(
         _admitted,
         red_alert,
         hull,
+        damage,
         policy_comp,
         cadence_comp,
         selector_comp,
@@ -2304,7 +2308,7 @@ pub fn operate_comms_response_ai(
         // spawned THIS ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
-        let comms_available = comms_system_available(hull);
+        let comms_available = comms_system_available(hull, damage);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
 
         // Inbox order is insertion order, so the decision sequence is

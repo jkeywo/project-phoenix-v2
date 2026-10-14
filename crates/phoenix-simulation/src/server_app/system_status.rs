@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 pub(crate) fn project(
     config: &crate::ship::config::ShipConfig,
     hull: Option<&crate::ship::damage::SystemHull>,
+    physical: Option<&crate::ship::compartment_damage::ShipDamage>,
     sources: &ControlSourceResolver,
     dock: Option<&crate::dock::server::DockControl>,
     power: Option<&crate::ship::power::ShipPowerSystem>,
@@ -17,7 +18,9 @@ pub(crate) fn project(
         .iter()
         .map(|system| {
             let entry = hull.and_then(|h| h.get(&system.id));
-            let damage = entry.and_then(|_| hull.map(|h| h.tier_for(&system.id)));
+            let damage = physical
+                .map(|physical| physical.operating_tier(&system.id))
+                .or_else(|| entry.and_then(|_| hull.map(|h| h.tier_for(&system.id))));
             let source = sources.source_for(&system.id);
             let mut status = SystemStatus::observe(
                 entry

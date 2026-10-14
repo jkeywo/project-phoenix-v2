@@ -154,6 +154,7 @@ pub fn tick_intent_narration(
             Option<&crate::console::weapons::beam::TacticalRadarSelection>,
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship::shields::ShipShields>,
             Option<&crate::ship::power::PowerBrownoutState>,
             Option<&crate::ship::helm_ai::HelmSteeringAiPolicyState>,
@@ -184,6 +185,7 @@ pub fn tick_intent_narration(
         tactical_selection,
         red_alert,
         hull,
+        damage,
         shields,
         brownout,
         steering_state,
@@ -215,10 +217,9 @@ pub fn tick_intent_narration(
                 },
                 NarratingSeat::Helm => IntentSnapshot {
                     combat_posture: Some(red_alert.map(|ra| ra.0).unwrap_or(false)),
-                    hull_fraction: hull.and_then(|h| {
-                        let max = h.0.total_max();
-                        (max > 0.0).then(|| h.0.total_current() / max)
-                    }),
+                    hull_fraction: crate::ship::compartment_damage::structural_fraction(
+                        damage, hull,
+                    ),
                     manoeuvre: steering_state
                         .map(|s| s.0.current.clone())
                         .filter(|name| !name.is_empty()),

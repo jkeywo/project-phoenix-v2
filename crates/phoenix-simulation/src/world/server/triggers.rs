@@ -120,7 +120,8 @@ pub(crate) fn collect_world_events(
     time: Option<Res<bevy::time::Time>>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
-        &crate::entities::spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -145,12 +146,12 @@ pub(crate) fn collect_world_events(
         });
     }
     let mut live_hulls = HashSet::new();
-    for (uuid, hull) in &hulls {
-        let max = hull.0.total_max();
-        if max <= 0.0 {
+    for (uuid, hull, damage) in &hulls {
+        let Some(current_fraction) =
+            crate::ship::compartment_damage::structural_fraction(damage, hull)
+        else {
             continue;
-        }
-        let current_fraction = (hull.0.total_current() / max).clamp(0.0, 1.0);
+        };
         live_hulls.insert(uuid.0.clone());
         if let Some(previous_fraction) = runtime
             .observed_hull_fractions

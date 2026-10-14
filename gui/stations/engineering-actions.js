@@ -30,6 +30,7 @@ export const REPAIR_PRIORITY_ACTION_ID = 'repair.prioritise-system';
 export const TRACTOR_TOGGLE_ACTION_ID = 'engineering.tractor';
 export const UMBILICAL_TOGGLE_ACTION_ID = 'engineering.umbilical';
 export const UMBILICAL_RESOURCE_ACTION_ID = 'engineering.transfer-resource';
+export const UMBILICAL_DIRECTION_ACTION_ID = 'engineering.transfer-direction';
 export const EXTERNAL_REPAIR_TOGGLE_ACTION_ID = 'repair.external-dispatch';
 
 const POWER_CONTEXTS = Object.freeze([
@@ -134,6 +135,8 @@ export const EXTERNAL_REPAIR_TOGGLE_ACTION = action(
 
 export const ENGINEERING_ACTIONS = Object.freeze([
   ...ENERGY_ACTIONS,
+  defineStationAction({ id: UMBILICAL_DIRECTION_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
+    labelKey: 'engineering.transfer_direction', bindings: [null, null] }),
   defineStationAction({ id: UMBILICAL_RESOURCE_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
     labelKey: 'engineering.transfer_resource', bindings: [null, null] }),
   POWER_DECREASE_ACTION,
@@ -401,6 +404,13 @@ export function registerEngineeringActions(registry, options = {}) {
       view.running ? 'stop_transfer' : 'start_transfer',
       { control_system_id: systemId },
     );
+  });
+
+  registry.register(ENGINEERING_ACTIONS.find(action => action.id === UMBILICAL_DIRECTION_ACTION_ID), ({ actionId, correlation, inputMs, detail } = {}) => {
+    const state = getState(), view = familyView(state, 'umbilical');
+    const systemId = ownerSystemId(state, view, 'umbilical');
+    if (!systemId || view.umbilical_auto || view.running || !['deliver', 'collect'].includes(detail?.direction)) return false;
+    return send(actionId, correlation, inputMs, 'set_transfer_direction', { direction: detail.direction, control_system_id: systemId });
   });
 
   registry.register(ENGINEERING_ACTIONS.find(action => action.id === UMBILICAL_RESOURCE_ACTION_ID), ({ actionId, correlation, inputMs, detail } = {}) => {

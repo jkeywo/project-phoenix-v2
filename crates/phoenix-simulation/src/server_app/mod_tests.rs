@@ -872,6 +872,7 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
         .insert("existing-client".into(), cached_projection.clone());
     let cached_hull = crate::console::repair::visibility::HullProjection {
         entries: vec![SystemHullStatus {
+            physical: None,
             system_id: SystemId("cached".into()),
             display_name: "Cached".into(),
             current: 7.0,

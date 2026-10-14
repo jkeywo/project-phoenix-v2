@@ -28,6 +28,7 @@
 //! backfill host may emit the byte-identical command when nobody does (AGENTS.md
 //! rule 6). No second gate, no roster, no officer.
 
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -44,7 +45,6 @@ use crate::security::teams::{
     SecurityActionConfig, SecurityCandidate, SecurityConfig, SecurityRefusal, SecurityTargetConfig,
     SecurityTeam, SecurityTeamState,
 };
-use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{security_system_id, SECURITY_KIND, SECURITY_SYSTEM_ID};
 use crate::world::content::WorldEvent;
 use crate::world::server::WorldContentRuntime;
@@ -292,14 +292,8 @@ fn target_rows(
 }
 
 /// Whether an operator's Security System is damaged out.
-fn security_disabled(hull: Option<&EntitySystemHull>) -> bool {
-    hull.map(|h| {
-        matches!(
-            h.0.tier_for(&security_system_id()),
-            DamageTier::Disabled | DamageTier::Destroyed
-        )
-    })
-    .unwrap_or(false)
+fn security_disabled(hull: Option<&EntitySystemHull>, damage: Option<&ShipDamage>) -> bool {
+    operation_disabled(damage, hull, &security_system_id())
 }
 
 // ── The dispatch / recall commands ───────────────────────────────────────────
@@ -345,13 +339,14 @@ pub fn handle_security_commands(
         &AdmittedCommands,
         &Transform,
         Option<&EntitySystemHull>,
+        Option<&ShipDamage>,
         &mut ShipSecurityTeams,
     )>,
 ) {
     // UUID order, not archetype order: two hosts must take the same ship's
     // commands in the same sequence.
     let mut ordered: Vec<(String, Entity, Vec<Request>, Vec3, bool)> = Vec::new();
-    for (entity, uuid, admitted, transform, hull, _) in operators.iter() {
+    for (entity, uuid, admitted, transform, hull, damage, _) in operators.iter() {
         let requests: Vec<Request> = admitted
             .for_target(SECURITY_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
@@ -378,7 +373,7 @@ pub fn handle_security_commands(
             entity,
             requests,
             transform.translation,
-            security_disabled(hull),
+            security_disabled(hull, damage),
         ));
     }
     if ordered.is_empty() {
@@ -388,7 +383,7 @@ pub fn handle_security_commands(
     let rows = target_rows(&targets);
 
     for (operator_uuid, entity, requests, operator_pos, disabled) in ordered {
-        let Ok((_, _, _, _, _, mut security)) = operators.get_mut(entity) else {
+        let Ok((_, _, _, _, _, _, mut security)) = operators.get_mut(entity) else {
             continue;
         };
         for request in requests {
@@ -521,6 +516,7 @@ enum TeamTransition {
 /// * **Return.** A withdrawing team that has arrived is available again.
 #[allow(clippy::type_complexity)]
 pub fn tick_security_teams(
+    physical_q: Query<&ShipDamage>,
     mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
     time: Option<Res<Time>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
@@ -536,6 +532,7 @@ pub fn tick_security_teams(
         &EntityUuid,
         &Transform,
         Option<&EntitySystemHull>,
+        Option<&ShipDamage>,
         &mut ShipSecurityTeams,
     )>,
 ) {
@@ -552,12 +549,12 @@ pub fn tick_security_teams(
     {
         let mut operator_rows: Vec<(String, Entity, Vec3, bool, ShipSecurityTeams)> = operators
             .iter()
-            .map(|(entity, uuid, transform, hull, security)| {
+            .map(|(entity, uuid, transform, hull, damage, security)| {
                 (
                     uuid.0.clone(),
                     entity,
                     transform.translation,
-                    security_disabled(hull),
+                    security_disabled(hull, damage),
                     security.clone(),
                 )
             })
@@ -642,7 +639,14 @@ pub fn tick_security_teams(
                             .work_continuous(&security_system_id(), requested_dt, 1.0)
                             .map_or(0.0, |grant| grant.fraction)
                     });
-                    requested_dt * fraction
+                    requested_dt
+                        * fraction
+                        * physical_q.get(*entity).map_or(1.0, |damage| {
+                            damage.factor(
+                                &security_system_id(),
+                                phoenix_model::damage::DamageBinding::Operation,
+                            )
+                        })
                 } else {
                     dt
                 };
@@ -703,7 +707,7 @@ pub fn tick_security_teams(
     }
 
     // Advance every committed clock and apply the decided transitions.
-    for (_, uuid, _, _, mut security) in operators.iter_mut() {
+    for (_, uuid, _, _, _, mut security) in operators.iter_mut() {
         let withdraw = security.config.withdraw_duration_secs;
         for (index, team) in security.teams.iter_mut().enumerate() {
             if team.is_committed() {
@@ -927,6 +931,7 @@ pub fn operate_security_ai(
         &crate::ship_plugin::ShipSystemControlSources,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&EntitySystemHull>,
+        Option<&ShipDamage>,
         &ShipSecurityTeams,
         &crate::server_app::ShipSystemBlackboards,
         Option<&SecurityAiDispatched>,
@@ -950,6 +955,7 @@ pub fn operate_security_ai(
             sources,
             config,
             hull,
+            damage,
             security,
             blackboards,
             host_dispatched,
@@ -961,7 +967,7 @@ pub fn operate_security_ai(
         if !sources.0.policy_for(&system_id).operate_ai {
             continue;
         }
-        if security_disabled(hull) {
+        if security_disabled(hull, damage) {
             continue;
         }
 

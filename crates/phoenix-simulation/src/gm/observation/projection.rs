@@ -576,7 +576,8 @@ type GmShipProjectionQuery<'w, 's> = Query<
     (
         &'static EntityUuid,
         Option<&'static EntityName>,
-        &'static EntitySystemHull,
+        Option<&'static EntitySystemHull>,
+        Option<&'static crate::ship::compartment_damage::ShipDamage>,
         &'static ShipPhysics,
         Option<&'static FactionComponent>,
         Option<&'static FleetSlotOf>,
@@ -602,6 +603,7 @@ type GmWorldProjectionQuery<'w, 's> = Query<
         &'static Transform,
         Option<&'static EntityTagsSection>,
         Option<&'static EntitySystemHull>,
+        Option<&'static crate::ship::compartment_damage::ShipDamage>,
         Option<&'static FactionComponent>,
         Option<&'static RegionShapeSection>,
         Option<&'static RegionEffectsSection>,
@@ -965,34 +967,45 @@ fn system_statuses(
 
 fn broad_status(
     hull: Option<&EntitySystemHull>,
+    damage: Option<&crate::ship::compartment_damage::ShipDamage>,
     infrastructure: Option<&InfrastructureCondition>,
     config: Option<&ShipConfigComponent>,
 ) -> GmEntityStatus {
-    let hull_percent = hull.map(|hull| percent(hull.0.total_current(), hull.0.total_max()));
-    let condition_percent = infrastructure
-        .map(|condition| percent(condition.0.condition(), condition.0.condition_max()));
+    let totals = crate::ship::compartment_damage::structural_totals(damage, hull);
+    let systems = if damage.is_some() {
+        config
+            .into_iter()
+            .flat_map(|config| &config.0.systems)
+            .map(|system| {
+                let station_id =
+                    config.and_then(|config| config.0.system_home_station(system).cloned());
+                let station_name = station_id
+                    .as_ref()
+                    .and_then(|station| config?.0.station(station))
+                    .map(|station| station.name.clone());
+                GmSystemHullStatus {
+                    system_id: system.id.clone(),
+                    station_id,
+                    station_name,
+                    name: system.id.0.clone(),
+                    current_milli_hp: 0,
+                    max_milli_hp: 0,
+                }
+            })
+            .collect()
+    } else {
+        hull.map_or_else(Vec::new, |hull| system_statuses(hull, config))
+    };
     GmEntityStatus {
-        hull_percent,
-        condition_percent,
-        destroyed: hull.is_some_and(|hull| hull.0.total_current() <= 0.0),
-        hull_current_milli_hp: hull
-            .map(|hull| crate::gm::operations::effect::hp_to_milli(hull.0.total_current())),
-        hull_max_milli_hp: hull
-            .map(|hull| crate::gm::operations::effect::hp_to_milli(hull.0.total_max())),
-        systems: hull.map_or_else(Vec::new, |hull| system_statuses(hull, config)),
-    }
-}
-
-fn hull_status(hull: &EntitySystemHull, config: Option<&ShipConfigComponent>) -> GmEntityStatus {
-    let total_max = hull.0.total_max();
-    let total_current = hull.0.total_current();
-    GmEntityStatus {
-        hull_percent: Some(percent(total_current, total_max)),
-        condition_percent: None,
-        destroyed: total_current <= 0.0,
-        hull_current_milli_hp: Some(crate::gm::operations::effect::hp_to_milli(total_current)),
-        hull_max_milli_hp: Some(crate::gm::operations::effect::hp_to_milli(total_max)),
-        systems: system_statuses(hull, config),
+        hull_percent: totals.map(|(current, maximum)| percent(current, maximum)),
+        condition_percent: infrastructure
+            .map(|condition| percent(condition.0.condition(), condition.0.condition_max())),
+        destroyed: crate::ship::compartment_damage::is_catastrophic(damage, hull),
+        hull_current_milli_hp: totals
+            .map(|(current, _)| crate::gm::operations::effect::hp_to_milli(current)),
+        hull_max_milli_hp: totals
+            .map(|(_, maximum)| crate::gm::operations::effect::hp_to_milli(maximum)),
+        systems,
     }
 }
 
@@ -1084,7 +1097,8 @@ fn publish_local_projection(
             &ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
             &ActiveStationRatings,
-            &EntitySystemHull,
+            Option<&EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::server_app::ShipSystemBlackboards>,
         ),
         With<Ship>,
@@ -1169,6 +1183,7 @@ fn publish_local_projection(
                 uuid,
                 name,
                 hull,
+                damage,
                 physics,
                 faction,
                 fleet_slot,
@@ -1206,9 +1221,9 @@ fn publish_local_projection(
                     position: [physics.x, physics.y, physics.z],
                     faction: faction_reference(faction, factions.as_deref()),
                     status: if infrastructure.is_some() {
-                        broad_status(Some(hull), infrastructure, ship_config)
+                        broad_status(hull, damage, infrastructure, ship_config)
                     } else {
-                        hull_status(hull, ship_config)
+                        broad_status(hull, damage, None, ship_config)
                     },
                     current_target,
                     geometry: None,
@@ -1226,6 +1241,7 @@ fn publish_local_projection(
             transform,
             tags,
             hull,
+            damage,
             faction,
             shape,
             effects,
@@ -1270,7 +1286,7 @@ fn publish_local_projection(
                 // at all, so its Systems project with no Station owner — which
                 // is the honest answer for a beacon, a planet or an authored
                 // asteroid, and leaves System scope available on it.
-                status: broad_status(hull, infrastructure, None),
+                status: broad_status(hull, damage, infrastructure, None),
                 current_target: None,
                 geometry,
                 radar: radar_appearance(radar),
@@ -1338,7 +1354,7 @@ fn publish_local_projection(
     let inspection_config_cache = configuration.authored();
     let ship_inspector = if wants(GmInspectorKind::HullFields) {
         crate::gm::observation::ship_inspector::projection(system_sources.iter().map(
-            |(uuid, name, template, config, controls, ratings, hull, blackboards)| {
+            |(uuid, name, template, config, controls, ratings, hull, damage, blackboards)| {
                 let authored = ship_inspector_authored_config(template, inspection_config_cache);
                 crate::gm::observation::ship_inspector::ShipInspectorInputs {
                     id: &uuid.0,
@@ -1348,7 +1364,8 @@ fn publish_local_projection(
                     authored_document: authored.map(|(path, _)| path.as_str()),
                     ratings,
                     controls: &controls.0,
-                    hull: &hull.0,
+                    hull: hull.map(|hull| &hull.0),
+                    physical: damage,
                     blackboards: blackboards.map(|rows| &rows.0),
                 }
             },
@@ -1566,6 +1583,7 @@ fn publish_station_projection(
             Option<&AsteroidUuid>,
             Option<&Transform>,
             Option<&EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship::shields::ShipShields>,
         ),
         Or<(With<EntityUuid>, With<AsteroidUuid>)>,
@@ -1584,6 +1602,7 @@ fn publish_station_projection(
             Option<&ShipPhysics>,
             Option<&crate::console::navigation::server::NavigationWaypoint>,
             Option<&EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship::components::ConsoleHosts>,
             Option<&crate::ship::components::ConsoleWorkingViews>,
         ),
@@ -1613,11 +1632,11 @@ fn publish_station_projection(
     let mut entity_states = live_entities
         .iter()
         .filter(|_| wants_detail)
-        .filter_map(|(uuid, asteroid_uuid, transform, hull, shields)| {
+        .filter_map(|(uuid, asteroid_uuid, transform, hull, damage, shields)| {
             let uuid = uuid
                 .map(|uuid| uuid.0.clone())
                 .or_else(|| asteroid_uuid.map(|uuid| uuid.0.clone()))?;
-            let hull_fraction = crate::server_app::project_entity_hull_fraction(hull);
+            let hull_fraction = crate::server_app::project_entity_hull_fraction(hull, damage);
             let (shield_fraction, shields_wire, shield_freq) =
                 crate::server_app::project_entity_shield_state(shields);
             let (position, yaw) = if asteroid_uuid.is_some() {
@@ -1673,6 +1692,7 @@ fn publish_station_projection(
                 physics,
                 waypoint,
                 hull,
+                damage,
                 console_hosts,
                 console_views,
             )| {
@@ -1769,22 +1789,35 @@ fn publish_station_projection(
                     .map(|(system, value)| (system.clone(), value.clone()))
                     .collect::<Vec<_>>();
                 blackboards.sort_by(|left, right| left.0.cmp(&right.0));
-                let console_hull = hull
-                    .filter(|_| detailed)
-                    .map(|hull| {
-                        hull.0
-                            .iter()
-                            .map(|(system_id, entry)| SystemHullStatus {
-                                system_id: system_id.clone(),
-                                display_name: entry.display_name.clone(),
-                                current: entry.current,
-                                max_hp: entry.max,
-                                tier: hull.0.tier_for(system_id),
-                                debuff_magnitude: hull.0.debuff_magnitude_for(system_id),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let console_hull = if let Some(damage) = damage.filter(|_| detailed) {
+                    config
+                        .0
+                        .systems
+                        .iter()
+                        .filter_map(|system| {
+                            crate::console::repair::visibility::physical_system_status(
+                                damage, &system.id, &config.0,
+                            )
+                        })
+                        .collect()
+                } else {
+                    hull.filter(|_| detailed)
+                        .map(|hull| {
+                            hull.0
+                                .iter()
+                                .map(|(system_id, entry)| SystemHullStatus {
+                                    physical: None,
+                                    system_id: system_id.clone(),
+                                    display_name: entry.display_name.clone(),
+                                    current: entry.current,
+                                    max_hp: entry.max,
+                                    tier: hull.0.tier_for(system_id),
+                                    debuff_magnitude: hull.0.debuff_magnitude_for(system_id),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
                 let ship_pose = physics.filter(|_| detailed).map_or_else(
                     GmShipPoseProjection::default,
                     |physics| GmShipPoseProjection {

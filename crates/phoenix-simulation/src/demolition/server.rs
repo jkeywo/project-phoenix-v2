@@ -34,6 +34,7 @@
 //! fire — needs nothing here at all: it is a target killed by gunnery with no
 //! charges ever placed, which is the scenario's own `on_destroyed` handler.
 
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -46,7 +47,6 @@ use crate::demolition::ops::{
 };
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::security::ShipSecurityTeams;
-use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{security_system_id, SECURITY_SYSTEM_ID};
 use crate::tractor::TractorBeam;
 use crate::world::content::WorldEvent;
@@ -150,14 +150,8 @@ fn target_rows(
 
 /// Whether a ship's Security System is damaged out — the System that fires the
 /// charges. The same read `security::server::security_disabled` makes.
-fn security_disabled(hull: Option<&EntitySystemHull>) -> bool {
-    hull.map(|h| {
-        matches!(
-            h.0.tier_for(&security_system_id()),
-            DamageTier::Disabled | DamageTier::Destroyed
-        )
-    })
-    .unwrap_or(false)
+fn security_disabled(hull: Option<&EntitySystemHull>, damage: Option<&ShipDamage>) -> bool {
+    operation_disabled(damage, hull, &security_system_id())
 }
 
 /// Whether no Security team on `security` is still committed to `target` — the
@@ -199,6 +193,7 @@ pub fn handle_demolition_commands(
         &EntityUuid,
         &AdmittedCommands,
         Option<&EntitySystemHull>,
+        Option<&ShipDamage>,
         Option<&ShipSecurityTeams>,
         Option<&TractorBeam>,
         &mut DemolitionControl,
@@ -231,10 +226,11 @@ pub fn handle_demolition_commands(
     let mut raised: Vec<String> = Vec::new();
 
     for (_, entity, requests) in ordered {
-        let Ok((_, _, _, hull, security, beam, mut control)) = operators.get_mut(entity) else {
+        let Ok((_, _, _, hull, damage, security, beam, mut control)) = operators.get_mut(entity)
+        else {
             continue;
         };
-        let disabled = security_disabled(hull);
+        let disabled = security_disabled(hull, damage);
         for target in requests {
             let row = rows.iter().find(|r| r.uuid == target);
             let (charged, detonated) = match (row, runtime.as_deref()) {
@@ -309,6 +305,7 @@ pub fn operate_demolition_ai(
         &crate::ship_plugin::ShipSystemControlSources,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&EntitySystemHull>,
+        Option<&ShipDamage>,
         Option<&ShipSecurityTeams>,
         Option<&TractorBeam>,
         &mut AdmittedCommands,
@@ -331,7 +328,7 @@ pub fn operate_demolition_ai(
     order.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (_, entity) in order {
-        let Ok((_, uuid, sources, config, hull, security, beam, mut admitted, _control)) =
+        let Ok((_, uuid, sources, config, hull, damage, security, beam, mut admitted, _control)) =
             ships.get_mut(entity)
         else {
             continue;
@@ -339,7 +336,7 @@ pub fn operate_demolition_ai(
         if !sources.0.policy_for(&system_id).operate_ai {
             continue;
         }
-        if security_disabled(hull) {
+        if security_disabled(hull, damage) {
             continue;
         }
         // The first target, in uuid order, whose shot would be safe. One per tick

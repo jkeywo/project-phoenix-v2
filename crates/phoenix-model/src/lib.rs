@@ -21,3 +21,5 @@ pub mod damage;
 pub mod energy;
 pub mod interior;
 pub mod job;
+
+pub mod umbilical;

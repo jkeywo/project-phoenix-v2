@@ -250,6 +250,21 @@ pub fn projection<'a>(
     let mut readings = BTreeMap::new();
     for ship in ships {
         let mut values = BTreeMap::new();
+        let (current_hp, max_hp) = ship
+            .physical
+            .map(|damage| {
+                let (current, maximum) = damage.structural_totals();
+                (current as f32, maximum as f32)
+            })
+            .or_else(|| {
+                ship.hull
+                    .map(|hull| (hull.total_current(), hull.total_max()))
+            })
+            .unwrap_or((0.0, 0.0));
+        let catastrophic = ship.physical.map_or_else(
+            || ship.hull.is_some_and(SystemHull::is_destroyed),
+            |damage| damage.catastrophic(),
+        );
         if let Some(authored) = ship.authored {
             let document = serde_json::to_value(authored).expect("EntityConfig serializes");
             if let Value::Object(sections) = document {
@@ -257,6 +272,8 @@ pub fn projection<'a>(
                 // sections are inspected by their own panels. These are every
                 // known hull and ship-operation section on EntityConfig.
                 for name in [
+                    "damage",
+                    "interior",
                     "hull",
                     "helm_console",
                     "helm_capability",
@@ -342,7 +359,7 @@ pub fn projection<'a>(
             &mut values,
             &mut fields,
             "runtime.hull.current_hp".into(),
-            ship.hull.total_current(),
+            current_hp,
             "float",
             None,
         );
@@ -350,7 +367,7 @@ pub fn projection<'a>(
             &mut values,
             &mut fields,
             "runtime.hull.max_hp".into(),
-            ship.hull.total_max(),
+            max_hp,
             "float",
             None,
         );
@@ -358,7 +375,7 @@ pub fn projection<'a>(
             &mut values,
             &mut fields,
             "runtime.hull.destroyed".into(),
-            ship.hull.is_destroyed(),
+            catastrophic,
             "bool",
             None,
         );
@@ -426,7 +443,21 @@ pub fn projection<'a>(
                 "action",
                 Some("system"),
             );
-            if let Some(entry) = ship.hull.get(id) {
+            if let Some(damage) = ship.physical {
+                if let Some(status) = crate::console::repair::visibility::physical_system_status(
+                    damage,
+                    id,
+                    ship.config,
+                ) {
+                    flatten(
+                        &serde_json::to_value(status).expect("physical status serializes"),
+                        &format!("{prefix}.physical"),
+                        &mut values,
+                        &mut fields,
+                        LiveMutability::Derived,
+                    );
+                }
+            } else if let Some(entry) = ship.hull.and_then(|hull| hull.get(id)) {
                 insert(
                     &mut values,
                     &mut fields,
@@ -447,7 +478,7 @@ pub fn projection<'a>(
                     &mut values,
                     &mut fields,
                     format!("{prefix}.health.tier"),
-                    format!("{:?}", ship.hull.tier_for(id)).to_lowercase(),
+                    format!("{:?}", ship.hull.expect("legacy entry").tier_for(id)).to_lowercase(),
                     "string",
                     None,
                 );
@@ -491,7 +522,7 @@ pub fn projection<'a>(
             ship.id.to_owned(),
             ShipInspection {
                 label: ship.label.to_owned(),
-                destroyed: ship.hull.is_destroyed(),
+                destroyed: catastrophic,
                 values,
             },
         );
@@ -510,7 +541,8 @@ pub struct ShipInspectorInputs<'a> {
     pub authored_document: Option<&'a str>,
     pub ratings: &'a ActiveStationRatings,
     pub controls: &'a ControlSourceResolver,
-    pub hull: &'a SystemHull,
+    pub hull: Option<&'a SystemHull>,
+    pub physical: Option<&'a crate::ship::compartment_damage::ShipDamage>,
     pub blackboards: Option<&'a HashMap<SystemId, SystemBlackboard>>,
 }
 

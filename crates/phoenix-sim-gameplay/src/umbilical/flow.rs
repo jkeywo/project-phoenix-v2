@@ -119,16 +119,7 @@ impl UmbilicalConfig {
     }
 }
 
-/// Which way a [`UmbilicalConfig`] moves its capacity, named from the
-/// **operator's** point of view (issue #1160).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UmbilicalDirection {
-    /// Operator → docked partner.
-    Deliver,
-    /// Docked partner → operator.
-    Collect,
-}
+pub use phoenix_model::umbilical::UmbilicalDirection;
 
 /// The one reason a flow did not start (or stopped) this tick (issue #1160), as
 /// the console shows it — a `strings.csv` id, never English. Copies the

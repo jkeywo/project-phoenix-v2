@@ -21,6 +21,7 @@
 //! publication boundary; magazine changes use their existing owner.
 
 use crate::ai::standing_operation::OperationFacts;
+use crate::ship::compartment_damage::{operation_disabled, ShipDamage};
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -37,7 +38,6 @@ use crate::dock::DockControl;
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::InfrastructureCondition;
-use crate::ship::damage::DamageTier;
 use crate::ship::power::ShipPowerSystem;
 use crate::ship::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
 use crate::umbilical::flow::{
@@ -64,6 +64,7 @@ use crate::umbilical::flow::{
 /// out.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TransferUmbilical {
+    pub selected_direction: UmbilicalDirection,
     pub selected_resource: String,
     /// The authored flow terms — capacity id, rate, direction, minimum power
     /// level.
@@ -106,6 +107,7 @@ impl TransferUmbilical {
     /// group.
     pub fn new(config: UmbilicalConfig, power_group: PowerGroupId) -> Self {
         Self {
+            selected_direction: config.direction,
             selected_resource: config.capacity.clone(),
             config,
             power_group,
@@ -125,6 +127,7 @@ impl TransferUmbilical {
     /// recomputed on the first resumed tick.
     pub fn save_state(&self) -> UmbilicalSaveState {
         UmbilicalSaveState {
+            selected_direction: self.selected_direction,
             selected_resource: self.selected_resource.clone(),
             running: self.running,
             carry: self.carry,
@@ -136,6 +139,7 @@ impl TransferUmbilical {
     /// fresh spawn. Fractional carry is restored. Last refusal and level projections are
     /// rederived by the next tick from the resumed world.
     pub fn restore(&mut self, save: &UmbilicalSaveState) {
+        self.selected_direction = save.selected_direction;
         self.running = save.running;
         self.selected_resource = save.selected_resource.clone();
         self.carry = save.carry;
@@ -154,6 +158,7 @@ impl TransferUmbilical {
 /// ship restores byte-identically and folds the same number.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UmbilicalSaveState {
+    pub selected_direction: UmbilicalDirection,
     pub selected_resource: String,
     #[serde(default)]
     pub running: bool,
@@ -203,6 +208,7 @@ impl Plugin for UmbilicalPlugin {
                     crate::core::messages::SystemControlPayloadDiscriminants::StartTransfer,
                     crate::core::messages::SystemControlPayloadDiscriminants::StopTransfer,
                     crate::core::messages::SystemControlPayloadDiscriminants::SetTransferResource,
+                    crate::core::messages::SystemControlPayloadDiscriminants::SetTransferDirection,
                 ],
             ),
         )
@@ -268,6 +274,25 @@ pub fn handle_umbilical_commands(
     for (entity, admitted, mut umbilical, uuid) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
             match &cmd.payload {
+                SystemControlPayload::SetTransferDirection { direction } => {
+                    let permitted = !umbilical.running;
+                    if permitted && umbilical.selected_direction != *direction {
+                        umbilical.selected_direction = *direction;
+                        umbilical.carry = 0.0;
+                        umbilical.last_refusal = None;
+                        umbilical.operator_level = None;
+                        umbilical.partner_level = None;
+                    }
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        if permitted {
+                            crate::core::messages::ActionFeedbackOutcome::Applied
+                        } else {
+                            crate::core::messages::ActionFeedbackOutcome::Refused
+                        },
+                    );
+                }
                 SystemControlPayload::SetTransferResource { resource } => {
                     let permitted = umbilical.config.permits_resource(resource);
                     if permitted && umbilical.selected_resource != *resource {
@@ -551,6 +576,7 @@ struct OperatorRow {
 /// shows both ends' levels the moment a berth is in reach.
 #[allow(clippy::type_complexity)]
 pub fn tick_umbilical(
+    physical_q: Query<&ShipDamage>,
     mut power_q: Query<&mut ShipPowerSystem>,
     // The capacity-adjustment queue, extracted off `WorldContentRuntime` (issue
     // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
@@ -567,6 +593,7 @@ pub fn tick_umbilical(
             &TransferUmbilical,
             &DockControl,
             Option<&EntitySystemHull>,
+            Option<&ShipDamage>,
         )>,
         // Every entity's capacity ledger, to resolve both docked ends.
         Query<(
@@ -586,16 +613,9 @@ pub fn tick_umbilical(
     let rows: Vec<OperatorRow> = set
         .p0()
         .iter()
-        .map(|(entity, uuid, umbilical, dock, hull)| {
+        .map(|(entity, uuid, umbilical, dock, hull, damage)| {
             let power_level = u8::MAX;
-            let disabled = hull
-                .map(|h| {
-                    matches!(
-                        h.0.tier_for(&umbilical_system_id()),
-                        DamageTier::Disabled | DamageTier::Destroyed
-                    )
-                })
-                .unwrap_or(false);
+            let disabled = operation_disabled(damage, hull, &umbilical_system_id());
             OperatorRow {
                 entity,
                 uuid: uuid.0.clone(),
@@ -606,6 +626,7 @@ pub fn tick_umbilical(
                 config: {
                     let mut config = umbilical.config.clone();
                     config.capacity = umbilical.selected_resource.clone();
+                    config.direction = umbilical.selected_direction;
                     // The explicit provider describes the original resource only.
                     // Other authored choices use their exact named service.
                     if config.capacity != umbilical.config.capacity {
@@ -729,7 +750,13 @@ pub fn tick_umbilical(
                     });
                     // Exhaustion pauses movement and preserves standing intent
                     // and already funded fractional flow.
-                    ctx.dt *= activity * fraction;
+                    let efficiency = physical_q.get(row.entity).map_or(1.0, |damage| {
+                        damage.factor(
+                            &umbilical_system_id(),
+                            phoenix_model::damage::DamageBinding::Operation,
+                        )
+                    });
+                    ctx.dt *= activity * fraction * efficiency;
                 } else {
                     ctx.dt = 0.0;
                 }
@@ -921,7 +948,7 @@ pub fn publish_umbilical_blackboard(
             allowed_resources: umbilical.config.resource_choices(),
             capacity: umbilical.config.capacity.clone(),
             rate: umbilical.config.rate,
-            direction: match umbilical.config.direction {
+            direction: match umbilical.selected_direction {
                 UmbilicalDirection::Deliver => "deliver".to_string(),
                 UmbilicalDirection::Collect => "collect".to_string(),
             },

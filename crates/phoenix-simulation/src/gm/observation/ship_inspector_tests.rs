@@ -108,7 +108,8 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
         authored_document: Some("assets/entities/ship.toml"),
         ratings: &ratings,
         controls: &controls,
-        hull: &hull,
+        hull: Some(&hull),
+        physical: None,
         blackboards: None,
     }]);
     let paths: BTreeMap<_, _> = projection

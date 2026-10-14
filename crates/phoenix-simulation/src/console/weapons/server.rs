@@ -1355,6 +1355,7 @@ struct TargetSelectionScans<'w, 's> {
             &'static Transform,
             Option<&'static FactionComponent>,
             Option<&'static crate::entities::spawner::EntitySystemHull>,
+            Option<&'static crate::ship::compartment_damage::ShipDamage>,
             Has<crate::lockstep::FleetSlotOf>,
         ),
         Or<(
@@ -1588,7 +1589,9 @@ fn ai_target_selection(
     // projections and spectating. They cease being automatic combat targets.
     let crew_wrecks: std::collections::BTreeSet<&str> = hostile_scan_q
         .iter()
-        .filter(|(_, _, _, hull, fleet)| *fleet && hull.is_some_and(|hull| hull.0.is_destroyed()))
+        .filter(|(_, _, _, hull, damage, fleet)| {
+            *fleet && crate::ship::compartment_damage::is_catastrophic(*damage, *hull)
+        })
         .map(|(uuid, ..)| uuid.0.as_str())
         .collect();
 

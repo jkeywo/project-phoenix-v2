@@ -9,67 +9,53 @@ use crate::ship::damage::DamageTier;
 
 // ── Damage-tier → control gate sync ──────────────────────────────────────────
 
-/// Bevy system that synchronises `ControlSourceResolver.offline_systems` with
-/// the current damage tiers of each system in the ship hull.
-///
-/// Runs in `SimSet::Damage` (after hull damage is applied). For every ship that
-/// carries both an [`EntitySystemHull`](crate::entities::spawner::EntitySystemHull)
-/// (wrapping [`SystemHull`]) and `ShipSystemControlSources`:
-///
-/// - Systems in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
-///   is added to `offline_systems`.
-/// - Systems in `Operational` or `Damaged` tier: their corresponding
-///   `SystemId` is removed from `offline_systems` (restoring normal gating).
-///
-/// The `SystemId` for each entry is the key of the [`SystemHull`] map
-/// directly — no `Console` → `SystemId` translation is needed.
-///
-/// Post-#514: also iterates the ship's `ShipArcHull` (when present) and flips
-/// each arc's fine `SystemId("shield-arc-<id>")` in/out of `offline_systems`
-/// using the same tier-derivation policy. Ships without a `ShipArcHull` (NPCs,
-/// legacy fixtures) are unaffected.
-///
-/// Fix to issue #617: earlier this system iterated BOTH `EntityConsoleHull`
-/// AND `EntitySystemHull` in parallel. In production only one of the two was
-/// mutated by damage code, so the second (unmodified) iteration silently
-/// cleared `offline_systems` entries that the first iteration correctly
-/// inserted. The reviewer caught this and the fix drops the duplicate
-/// iteration and picks `EntitySystemHull` as the single source of truth.
+/// Synchronise only physical operating loss into the existing damage gate.
+/// Intake/cooling faults leave a charged working capability available. GM state
+/// remains independent in the resolver and cannot be cleared by restoration.
 pub fn sync_console_damage_tiers(
     mut ships: Query<(
-        &crate::entities::spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::entities::spawner::EntityShipArcHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         &mut ShipSystemControlSources,
     )>,
 ) {
-    for (system_hull_component, arc_hull_opt, mut control_sources) in ships.iter_mut() {
-        let hull = &system_hull_component.0;
-        for (sid, _cur, _max) in hull.entries() {
-            let tier = hull.tier_for(sid);
-            match tier {
-                DamageTier::Disabled | DamageTier::Destroyed => {
-                    control_sources.0.set_offline(sid.clone(), true);
-                }
-                DamageTier::Operational | DamageTier::Damaged => {
-                    control_sources.0.set_offline(sid.clone(), false);
-                }
+    for (hull, arcs, damage, mut sources) in &mut ships {
+        sources
+            .0
+            .set_destroyed(crate::ship::compartment_damage::is_catastrophic(
+                damage, hull,
+            ));
+        if let Some(damage) = damage {
+            for system in damage.definition.interior.placements.keys() {
+                sources
+                    .0
+                    .set_offline(system.clone(), !damage.operational(system));
+            }
+            continue;
+        }
+        // Legacy prop/test owners are explicit; equipped ships have no HP map.
+        if let Some(hull) = hull {
+            for (system, _, _) in hull.0.entries() {
+                sources.0.set_offline(
+                    system.clone(),
+                    matches!(
+                        hull.0.tier_for(system),
+                        DamageTier::Disabled | DamageTier::Destroyed
+                    ),
+                );
             }
         }
-        // Per-arc hull tier sync (issue #514).
-        if let Some(arc_hull_component) = arc_hull_opt {
-            let arc_hull = &arc_hull_component.0;
-            for (arc_id, _entry) in arc_hull.iter() {
-                let Some(sid) = crate::ship::system_registry::shield_arc_system_id(arc_id) else {
-                    continue;
-                };
-                let tier = arc_hull.tier_for(arc_id);
-                match tier {
-                    DamageTier::Disabled | DamageTier::Destroyed => {
-                        control_sources.0.set_offline(sid, true);
-                    }
-                    DamageTier::Operational | DamageTier::Damaged => {
-                        control_sources.0.set_offline(sid, false);
-                    }
+        if let Some(arcs) = arcs {
+            for (id, _) in arcs.0.iter() {
+                if let Some(system) = crate::ship::system_registry::shield_arc_system_id(id) {
+                    sources.0.set_offline(
+                        system,
+                        matches!(
+                            arcs.0.tier_for(id),
+                            DamageTier::Disabled | DamageTier::Destroyed
+                        ),
+                    );
                 }
             }
         }
@@ -95,7 +81,8 @@ pub fn detect_damage_tier_crossings(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut ships: Query<(
         Entity,
-        &crate::entities::spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         &mut LastSystemTiers,
         &ShipConfigComponent,
         &ShipSystemControlSources,
@@ -120,6 +107,7 @@ pub fn detect_damage_tier_crossings(
     for (
         entity,
         hull_comp,
+        damage,
         mut last_tiers,
         config,
         sources,
@@ -130,6 +118,23 @@ pub fn detect_damage_tier_crossings(
     ) in &mut ships
     {
         let red_alert = red_alert.map(|ra| ra.0).unwrap_or(false);
+        if let Some(damage) = damage {
+            report_physical_crossings(
+                entity,
+                damage,
+                &config.0,
+                sources,
+                &mut last_tiers,
+                alerted.as_deref_mut(),
+                ship_uuid,
+                tactical_lock.as_deref_mut(),
+                tick.as_ref().map(|tick| tick.0),
+                &mut coord_writer,
+                balance_events.as_deref_mut(),
+            );
+            continue;
+        }
+        let Some(hull_comp) = hull_comp else { continue };
         let hull = &hull_comp.0;
         for (system_id, cur, _max) in hull.entries() {
             let current_tier = hull.tier_for(system_id);
@@ -335,6 +340,143 @@ pub fn detect_damage_tier_crossings(
                 .tiers
                 .insert(system_id.clone(), hull.tier_for(system_id));
             last_tiers.hp.insert(system_id.clone(), cur);
+        }
+    }
+}
+
+/// Physical reports expose operating symptoms, not private component locations or
+/// a synthetic percentage-HP deficit. Diagnosis/remedies remain Repair work.
+#[allow(clippy::too_many_arguments)]
+fn report_physical_crossings(
+    entity: Entity,
+    damage: &crate::ship::compartment_damage::ShipDamage,
+    config: &crate::ship::config::ShipConfig,
+    sources: &ShipSystemControlSources,
+    last: &mut LastSystemTiers,
+    _alerted: Option<&mut RepairHumanAlerted>,
+    uuid: Option<&crate::entities::spawner::EntityUuid>,
+    mut tactical: Option<&mut crate::console::weapons::TacticalRadarSelection>,
+    tick: Option<u64>,
+    writer: &mut MessageWriter<CoordinationEnqueue>,
+    mut balance: Option<&mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+) {
+    let prior_disarmed = config
+        .systems
+        .iter()
+        .filter(|system| is_weapon_emitter_kind(&system.kind))
+        .all(|system| {
+            matches!(
+                last.tiers.get(&system.id),
+                Some(DamageTier::Disabled | DamageTier::Destroyed)
+            )
+        });
+    for system in &config.systems {
+        let tier = damage.operating_tier(&system.id);
+        let previous = last
+            .tiers
+            .get(&system.id)
+            .copied()
+            .unwrap_or(DamageTier::Operational);
+        if tier != previous {
+            if let (Some(events), Some(uuid)) = (balance.as_deref_mut(), uuid) {
+                events.write(crate::core::balance::BalanceEvent::SystemTierCrossed {
+                    ship: uuid.0.clone(),
+                    system_id: system.id.0.clone(),
+                    from_tier: format!("{previous:?}"),
+                    to_tier: format!("{tier:?}"),
+                });
+            }
+        }
+        if tier != previous {
+            if !damage.operational(&system.id)
+                && system.kind == crate::ship::system_registry::TACTICAL_RADAR_KIND
+            {
+                if let Some(lock) = tactical.as_deref_mut() {
+                    lock.0 = None;
+                }
+            }
+            if tier > previous && tier == DamageTier::Destroyed {
+                if let Some(address) = crate::ship::coordination::address_for_system(
+                    config,
+                    &crate::ship::system_registry::captain_system_id(),
+                ) {
+                    writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin: sources.0.source_for(&system.id),
+                        address,
+                        payload: CoordinationPayload::Alert {
+                            title: "coordination.system_destroyed.title".into(),
+                            body: "coordination.system_destroyed.body".into(),
+                        },
+                        presentation: crate::core::messages::CoordinationPresentation::new(
+                            "coordination.system_destroyed.title",
+                            "coordination.system_destroyed.body",
+                        )
+                        .with_title_param("label", system.id.0.clone())
+                        .with_body_param("label", system.id.0.clone()),
+                        sender_label: system.id.0.clone(),
+                        sender_system: system.id.clone(),
+                    });
+                }
+            }
+            let group = crate::modifiers::repair_teams::repair_group(&system.id, config);
+            let label = crate::console::repair::server::repair_group_label(config, &group);
+            if let Some(address) = crate::ship::coordination::address_for_system(
+                config,
+                &crate::ship::system_registry::repair_system_id(),
+            ) {
+                writer.write(CoordinationEnqueue {
+                    source_entity: entity,
+                    sender_origin: sources.0.source_for(&system.id),
+                    address,
+                    payload: CoordinationPayload::RepairRequest {
+                        observation: Some(phoenix_model::observation::ObservationMetadata {
+                            subject: phoenix_model::observation::ObservationSubject::System {
+                                id: system.id.clone(),
+                            },
+                            provenance: phoenix_model::observation::ObservationProvenance {
+                                kind: phoenix_model::observation::ObservationSource::SystemReport,
+                                system: Some(system.id.clone()),
+                                label: String::new(),
+                            },
+                            observed_tick: tick,
+                            received_tick: None,
+                            uncertainty:
+                                phoenix_model::observation::ObservationUncertainty::Qualitative,
+                        }),
+                        system_id: system.id.clone(),
+                        group,
+                        station_label: label.clone(),
+                        tier,
+                        deficit: None,
+                    },
+                    presentation: crate::core::messages::CoordinationPresentation::titled(
+                        "coordination.repair.title",
+                    )
+                    .with_title_param("label", label),
+                    sender_label: system.id.0.clone(),
+                    sender_system: system.id.clone(),
+                });
+            }
+        }
+        last.tiers.insert(system.id.clone(), tier);
+        last.hp.remove(&system.id);
+    }
+    let emitters: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|system| is_weapon_emitter_kind(&system.kind))
+        .collect();
+    if !emitters.is_empty()
+        && !prior_disarmed
+        && emitters
+            .iter()
+            .all(|system| !damage.operational(&system.id))
+    {
+        if let (Some(events), Some(uuid)) = (balance, uuid) {
+            events.write(crate::core::balance::BalanceEvent::Disarmed {
+                ship: uuid.0.clone(),
+            });
         }
     }
 }

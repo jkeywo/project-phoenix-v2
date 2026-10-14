@@ -18,6 +18,7 @@ import {
   REPAIR_RECALL_ACTION_ID,
   TRACTOR_TOGGLE_ACTION_ID,
   UMBILICAL_TOGGLE_ACTION_ID,
+  UMBILICAL_DIRECTION_ACTION_ID,
 } from '../../gui/stations/engineering-actions.js';
 
 let sequence = 0;
@@ -68,7 +69,7 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
   it('publishes eight authoritative actions with exactly two slots and shipped contexts', () => {
-    expect(ENGINEERING_ACTIONS).toHaveLength(14);
+    expect(ENGINEERING_ACTIONS).toHaveLength(15);
     for (const action of ENGINEERING_ACTIONS) {
       expect(action.authoritativeFeedback).toBe(true);
       expect(action.bindings).toHaveLength(2);
@@ -547,4 +548,20 @@ describe('Engineering, Power, and Repair semantic actions', () => {
       correlation: result.correlation,
     }));
   });
+});
+
+it('admits collection direction only from the current stopped manual owner', () => {
+  const sendAction = vi.fn();
+  let state = keyed({ umbilical: { system_id: 'umbilical', running: false, umbilical_auto: false } }, { umbilical: 'umbilical' });
+  const actions = registry({ getState: () => state, sendAction });
+  expect(actions.activate(UMBILICAL_DIRECTION_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT, detail: { direction: 'collect' } })).toMatchObject({ handled: true });
+  expect(sendAction).toHaveBeenLastCalledWith('set_transfer_direction', expect.objectContaining({ direction: 'collect', control_system_id: 'umbilical', correlation: expect.any(String) }));
+  sendAction.mockClear();
+  for (const view of [{ running: true }, { umbilical_auto: true }]) {
+    state = keyed({ umbilical: { system_id: 'umbilical', ...view } }, { umbilical: 'umbilical' });
+    expect(actions.activate(UMBILICAL_DIRECTION_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT, detail: { direction: 'collect' } })).toMatchObject({ handled: false });
+  }
+  state = { systems: { umbilical: { system_id: 'umbilical' } }, system_ids: [] };
+  expect(actions.activate(UMBILICAL_DIRECTION_ACTION_ID, { context: ENGINEERING_ACTION_CONTEXT, detail: { direction: 'collect' } })).toMatchObject({ handled: false });
+  expect(sendAction).not.toHaveBeenCalled();
 });

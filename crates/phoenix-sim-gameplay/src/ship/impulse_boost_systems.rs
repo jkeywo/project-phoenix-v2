@@ -25,14 +25,16 @@ pub fn handle_impulse_messages(
         (
             &mut crate::server_app::ImpulseHullHistory,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::physical_damage::ShipDamage>,
             Option<&mut ImpulseCommand>,
             Option<&mut crate::ship::helm::DriveCommandWrites>,
         ),
         With<ShipImpulse>,
     >,
 ) {
-    for (mut history, hull, command, writes) in &mut ships {
-        let current_hp = hull.map_or(100.0, |hull| hull.0.total_current());
+    for (mut history, hull, damage, command, writes) in &mut ships {
+        let current_hp = crate::ship::physical_damage::structural_totals(damage, hull)
+            .map_or(100.0, |(current, _)| current);
         let damaged = history.0.is_some_and(|previous| current_hp < previous);
         history.0 = Some(current_hp);
         if damaged {

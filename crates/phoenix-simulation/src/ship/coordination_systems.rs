@@ -448,6 +448,7 @@ pub(crate) fn process_coordination_lag(
             Option<&crate::ship::components::ConsoleHosts>,
             &mut CoordinationQueue,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
             Has<LocalShip>,
         ),
@@ -467,18 +468,29 @@ pub(crate) fn process_coordination_lag(
         console_hosts,
         mut queue,
         entity_hull,
+        physical,
         entity_teams,
         is_local,
     ) in ship_components.iter_mut()
     {
         let repair_address = coordination::address_for_system(&ship_config.0, &repair_id);
-        let repair_vis = entity_hull.map(|hull| {
-            crate::console::repair::visibility::ship_hull_visibility(
-                &hull.0,
-                &ship_config.0,
-                entity_teams,
-            )
-        });
+        let repair_vis = physical
+            .map(|damage| {
+                crate::console::repair::visibility::HullVisibility::from_physical(
+                    damage,
+                    &ship_config.0,
+                    entity_teams.map(|teams| &teams.0),
+                )
+            })
+            .or_else(|| {
+                entity_hull.map(|hull| {
+                    crate::console::repair::visibility::ship_hull_visibility(
+                        &hull.0,
+                        &ship_config.0,
+                        entity_teams,
+                    )
+                })
+            });
 
         for msg in queue.0.due_messages(tick.0) {
             let to_label =

@@ -103,7 +103,7 @@ ai_only = true
     ]);
     hull.restore(&SystemId("a".into()), -75.0);
     hull.restore(&SystemId("c".into()), -100.0);
-    let rows = console_health_from_parts(&config, Some(&hull));
+    let rows = console_health_from_parts(&config, Some(&hull), None);
     assert_eq!(
         rows.iter().map(|r| r.console.clone()).collect::<Vec<_>>(),
         ["flight", "drive", "detached", "unmodeled"].map(|id| ConsoleId(id.into()))
@@ -112,7 +112,7 @@ ai_only = true
         rows.iter().map(|r| r.health).collect::<Vec<_>>(),
         vec![Some(0.25), Some(1.0), Some(0.75), None]
     );
-    assert!(console_health_from_parts(&config, None)
+    assert!(console_health_from_parts(&config, None, None)
         .iter()
         .all(|r| r.health.is_none()));
 }

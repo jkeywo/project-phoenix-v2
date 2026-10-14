@@ -2402,6 +2402,10 @@ pub enum SystemControlPayload {
     SetTransferResource {
         resource: String,
     },
+    /// Select delivery or collection while the transfer is stopped.
+    SetTransferDirection {
+        direction: crate::umbilical::UmbilicalDirection,
+    },
     /// Select a discovered rescue contact for the transporter (issue #1348).
     ///
     /// Targets the engineering-owned `transporter` system

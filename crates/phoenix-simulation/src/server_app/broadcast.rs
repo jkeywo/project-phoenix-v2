@@ -531,15 +531,9 @@ fn build_console_working_views(
 /// the rendererless GM's absolute entity lane.
 pub(crate) fn project_entity_hull_fraction(
     hull: Option<&crate::entities::spawner::EntitySystemHull>,
+    damage: Option<&crate::ship::compartment_damage::ShipDamage>,
 ) -> Option<f32> {
-    hull.map(|hull| {
-        let max = hull.0.total_max();
-        if max > 0.0 {
-            hull.0.total_current() / max
-        } else {
-            1.0
-        }
-    })
+    crate::ship::compartment_damage::structural_fraction(damage, hull)
 }
 
 /// Project the common shield fields carried by both ordinary `SimState` and
@@ -592,11 +586,12 @@ pub fn build_sim_state_entity_states(
         let mut q = world.query::<(
             &AsteroidUuid,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship::shields::ShipShields>,
         )>();
         q.iter(world)
-            .filter_map(|(uuid, hull_comp, shield_comp)| {
-                let hull_fraction = project_entity_hull_fraction(hull_comp);
+            .filter_map(|(uuid, hull_comp, damage, shield_comp)| {
+                let hull_fraction = project_entity_hull_fraction(hull_comp, damage);
                 // Per-facing detail + generator frequency (issue #927): the
                 // SAME producer this ship's own `ShieldsBlackboard.facings`
                 // uses (`ship::shields::shield_facing_statuses`) and the
@@ -689,11 +684,12 @@ pub fn build_sim_state_entity_states(
             &Transform,
             &EntityUuid,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship::shields::ShipShields>,
         ), Without<Asteroid>>();
         q.iter(world)
-            .map(|(transform, uuid, hull_comp, shield_comp)| {
-                let hull_fraction = project_entity_hull_fraction(hull_comp);
+            .map(|(transform, uuid, hull_comp, damage, shield_comp)| {
+                let hull_fraction = project_entity_hull_fraction(hull_comp, damage);
                 // Per-facing detail + generator frequency (issue #927) —
                 // same producer as the asteroid branch above; see the
                 // comment there for why this closes the Sensors-panel gap.
@@ -854,22 +850,41 @@ fn build_console_health_snapshots(
     let mut query = world.query_filtered::<(
         &crate::ship::components::ShipConfigComponent,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     ), With<LocalShip>>();
     query
         .iter(world)
         .next()
-        .map(|(config, hull)| console_health_from_parts(&config.0, hull.map(|h| &h.0)))
+        .map(|(config, hull, damage)| {
+            console_health_from_parts(&config.0, hull.map(|h| &h.0), damage)
+        })
         .unwrap_or_default()
 }
 
 fn console_health_from_parts(
     config: &crate::ship::config::ShipConfig,
     hull: Option<&crate::ship::damage::SystemHull>,
+    damage: Option<&crate::ship::compartment_damage::ShipDamage>,
 ) -> Vec<crate::core::messages::ConsoleHealthSnapshot> {
     config
         .consoles
         .iter()
         .map(|console| {
+            if let Some(damage) = damage {
+                let factors: Vec<_> = config
+                    .systems
+                    .iter()
+                    .filter(|system| system.console.as_ref() == Some(&console.id))
+                    .map(|system| {
+                        damage.factor(&system.id, phoenix_model::damage::DamageBinding::Operation)
+                    })
+                    .collect();
+                return crate::core::messages::ConsoleHealthSnapshot {
+                    console: console.id.clone(),
+                    health: (!factors.is_empty())
+                        .then(|| factors.iter().sum::<f32>() / factors.len() as f32),
+                };
+            }
             let (current, max) = config
                 .systems
                 .iter()
@@ -897,18 +912,21 @@ fn build_system_status(
         &crate::ship::components::ShipConfigComponent,
         &crate::ship_plugin::ShipSystemControlSources,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         Option<&crate::dock::server::DockControl>,
         Option<&crate::ship::power::ShipPowerSystem>,
         Option<&crate::dock::server::DockMarkers>,
         Option<&crate::ship::shields::ShipShields>,
     ), With<LocalShip>>();
-    let Some((config, sources, hull, dock, power, markers, shields)) = query.iter(world).next()
+    let Some((config, sources, hull, damage, dock, power, markers, shields)) =
+        query.iter(world).next()
     else {
         return Default::default();
     };
     let mut status = super::system_status::project(
         &config.0,
         hull.map(|h| &h.0),
+        damage,
         &sources.0,
         dock,
         power,

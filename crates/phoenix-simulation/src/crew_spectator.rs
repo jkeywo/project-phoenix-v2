@@ -5,6 +5,7 @@ use crate::core::messages::{
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target};
 use crate::server_app::{LocalShip, Ship};
+use crate::ship::compartment_damage::{is_catastrophic, ShipDamage};
 use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,8 +45,16 @@ fn update_crew_spectator(
     policy: CrewMissionPolicy,
     phase: Res<State<GamePhase>>,
     sessions: Res<Sessions>,
-    local: Query<(&EntityUuid, &EntitySystemHull), With<LocalShip>>,
-    ships: Query<(&EntityUuid, Option<&EntityName>, &EntitySystemHull), With<Ship>>,
+    local: Query<(&EntityUuid, Option<&EntitySystemHull>, Option<&ShipDamage>), With<LocalShip>>,
+    ships: Query<
+        (
+            &EntityUuid,
+            Option<&EntityName>,
+            Option<&EntitySystemHull>,
+            Option<&ShipDamage>,
+        ),
+        With<Ship>,
+    >,
     mut modes: Query<&mut crate::ship::state::ShipViewMode, With<LocalShip>>,
     mut state: ResMut<CrewSpectator>,
     mut inbound: MessageReader<InboundMessage>,
@@ -55,7 +64,7 @@ fn update_crew_spectator(
     let dead = local
         .single()
         .ok()
-        .filter(|(_, hull)| hull.0.is_destroyed());
+        .filter(|(_, hull, damage)| is_catastrophic(*damage, *hull));
     let active = *phase.get() == GamePhase::InProgress
         && policy.continues_after_ship_loss()
         && dead.is_some();
@@ -82,8 +91,8 @@ fn update_crew_spectator(
     let mut candidates: Vec<_> = if active {
         ships
             .iter()
-            .filter(|(_, _, hull)| !hull.0.is_destroyed())
-            .map(|(uuid, name, _)| CrewSpectatorShip {
+            .filter(|(_, _, hull, damage)| !is_catastrophic(*damage, *hull))
+            .map(|(uuid, name, _, _)| CrewSpectatorShip {
                 uuid: uuid.0.clone(),
                 name: name.map(|n| n.0.clone()).unwrap_or_else(|| uuid.0.clone()),
             })

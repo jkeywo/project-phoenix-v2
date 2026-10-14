@@ -322,6 +322,7 @@ fn restore_reseeds_running_and_clears_the_projections() {
     u.last_refusal = Some(UmbilicalRefusal::Disabled);
     u.operator_level = Some(12);
     u.restore(&UmbilicalSaveState {
+        selected_direction: UmbilicalDirection::Deliver,
         selected_resource: "reserve_fuel".into(),
         running: true,
         carry: 0.4,
@@ -585,5 +586,172 @@ fn a_flow_that_loses_its_dock_ends_the_standing_activation() {
             reason: TaskTerminalReason::TargetLost,
         }],
         "the standing activation closes; nothing new opens for a flow that was already live"
+    );
+}
+
+#[test]
+fn selecting_collection_moves_finite_port_parts_and_survives_continuation() {
+    use crate::resources::server::{tick_resource_transfers, ResourceTransfer};
+    let (mut app, operator) = docked_world();
+    app.init_resource::<EffectQueue<ResourceTransfer>>()
+        .init_resource::<EffectQueue<crate::infrastructure::CapacityAdjustment>>()
+        .init_resource::<EffectQueue<crate::infrastructure::ConditionAdjustment>>()
+        .init_resource::<crate::world::server::WorldContentRuntime>()
+        .add_systems(
+            Update,
+            (
+                tick_resource_transfers,
+                crate::infrastructure::tick_infrastructure_condition,
+            )
+                .chain()
+                .after(tick_umbilical),
+        );
+    let partner = app
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find(|(_, id)| id.0 == PARTNER)
+        .unwrap()
+        .0;
+    let stock = |amount| {
+        InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
+            capacities: vec![CapacityConfig {
+                id: "machinery_parts".into(),
+                amount,
+                ceiling: Some(10),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }))
+    };
+    app.world_mut().entity_mut(operator).insert(stock(0));
+    app.world_mut().entity_mut(partner).insert(stock(3));
+    {
+        let mut flow = app
+            .world_mut()
+            .get_mut::<TransferUmbilical>(operator)
+            .unwrap();
+        flow.config.capacity = "machinery_parts".into();
+        flow.selected_resource = "machinery_parts".into();
+        flow.config.rate = 2.0;
+    }
+    app.world_mut()
+        .get_mut::<crate::core::messages::AdmittedCommands>(operator)
+        .unwrap()
+        .0 = vec![
+        correlated_umbilical_command(
+            "collect-parts",
+            SystemControlPayload::SetTransferDirection {
+                direction: UmbilicalDirection::Collect,
+            },
+        ),
+        correlated_umbilical_command("collect-start", SystemControlPayload::StartTransfer),
+    ];
+    app.update();
+    let amount = |app: &App, entity| {
+        app.world()
+            .get::<InfrastructureCondition>(entity)
+            .unwrap()
+            .0
+            .capacity_stock("machinery_parts")
+            .unwrap()
+            .level
+    };
+    assert_eq!((amount(&app, operator), amount(&app, partner)), (2, 1));
+    let saved = app
+        .world()
+        .get::<TransferUmbilical>(operator)
+        .unwrap()
+        .save_state();
+    assert_eq!(saved.selected_direction, UmbilicalDirection::Collect);
+    let encoded = serde_json::to_string(&saved).unwrap();
+    let decoded = serde_json::from_str::<UmbilicalSaveState>(&encoded).unwrap();
+    app.world_mut()
+        .get_mut::<TransferUmbilical>(operator)
+        .unwrap()
+        .restore(&decoded);
+    // A direction change cannot reverse already running work.
+    app.world_mut()
+        .get_mut::<crate::core::messages::AdmittedCommands>(operator)
+        .unwrap()
+        .0 = vec![correlated_umbilical_command(
+        "cannot-reverse",
+        SystemControlPayload::SetTransferDirection {
+            direction: UmbilicalDirection::Deliver,
+        },
+    )];
+    app.update();
+    assert_eq!((amount(&app, operator), amount(&app, partner)), (3, 0));
+    assert_eq!(
+        app.world()
+            .get::<TransferUmbilical>(operator)
+            .unwrap()
+            .selected_direction,
+        UmbilicalDirection::Collect
+    );
+    app.update();
+    assert_eq!(
+        (amount(&app, operator), amount(&app, partner)),
+        (3, 0),
+        "collection cannot create parts after the port empties"
+    );
+}
+
+#[test]
+fn damaged_umbilical_reduces_actual_flow_after_paying_the_same_work() {
+    use phoenix_model::damage::{ComponentCondition, DamageBinding};
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let mut damage = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
+        .unwrap()
+        .expect("physical Cruiser");
+    let id = umbilical_system_id();
+    let name = damage.definition.components[&id]
+        .iter()
+        .find(|(_, row)| row.binding == DamageBinding::Operation)
+        .unwrap()
+        .0
+        .clone();
+    let full = damage.clone();
+    let state = damage
+        .state
+        .components
+        .get_mut(&id)
+        .unwrap()
+        .get_mut(&name)
+        .unwrap();
+    state.condition = ComponentCondition::Damaged;
+    state.last_source = Some("test-hit".into());
+    let factor = damage.factor(&id, DamageBinding::Operation);
+    assert!(factor > 0.0 && factor < 1.0);
+    let run = |damage| {
+        let (mut app, entity) = docked_world();
+        app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>();
+        app.world_mut().entity_mut(entity).insert(damage);
+        admit_start(&mut app, entity);
+        app.update();
+        let moved = app
+            .world()
+            .resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
+            .0[0]
+            .amount;
+        let remaining = app
+            .world()
+            .get::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&id]
+            .energy;
+        (moved, remaining)
+    };
+    let (normal, normal_energy) = run(full);
+    let (damaged, damaged_energy) = run(damage);
+    assert_eq!(damaged, (normal as f32 * factor).floor() as i64);
+    assert_eq!(
+        normal_energy, damaged_energy,
+        "fault loss changes output, not funded work cost"
     );
 }

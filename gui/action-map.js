@@ -163,6 +163,16 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  set_transfer_direction: (a, send) => {
+    if (!['deliver', 'collect'].includes(a.direction)) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
+      payload: { type: 'SetTransferDirection', data: { direction: a.direction } },
+    });
+  },
+
   set_transfer_resource: (a, send) => {
     if (typeof a.resource !== 'string' || !a.resource) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;

@@ -151,6 +151,7 @@ pub fn publish_entity_inspector_debug(
             &Transform,
             &crate::entities::spawner::EntityName,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
             Option<&crate::console::weapons::TacticalRadarSelection>,
@@ -160,7 +161,10 @@ pub fn publish_entity_inspector_debug(
     >,
     ship_physics_q: Query<&crate::ship::state::ShipPhysics, With<crate::server_app::LocalShip>>,
     player_hull_q: Query<
-        &crate::entities::spawner::EntitySystemHull,
+        (
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
+        ),
         With<crate::server_app::LocalShip>,
     >,
     ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
@@ -178,14 +182,33 @@ pub fn publish_entity_inspector_debug(
         let hull = player_hull_q
             .iter()
             .next()
-            .map(|h| {
-                h.0.entries()
-                    .map(|(sid, cur, max)| InspectorHullEntry {
-                        system: sid.0.clone(),
-                        current: cur,
-                        max,
+            .map(|(hull, damage)| {
+                if let Some(damage) = damage {
+                    damage
+                        .definition
+                        .interior
+                        .compartments
+                        .iter()
+                        .filter_map(|room| {
+                            Some(InspectorHullEntry {
+                                system: format!("compartment:{}", room.id),
+                                current: damage.state.compartments.get(&room.id)?.hp as f32,
+                                max: room.max_hp,
+                            })
+                        })
+                        .collect()
+                } else {
+                    hull.map_or_else(Vec::new, |hull| {
+                        hull.0
+                            .entries()
+                            .map(|(id, current, max)| InspectorHullEntry {
+                                system: id.0.clone(),
+                                current,
+                                max,
+                            })
+                            .collect()
                     })
-                    .collect()
+                }
             })
             .unwrap_or_default();
         let shield_facings = shields
@@ -211,12 +234,11 @@ pub fn publish_entity_inspector_debug(
     let entity_inputs: Vec<InspectorEntityInput> = entities
         .iter()
         .map(
-            |(transform, name, hull, faction_comp, comms_range, ai, tags)| {
+            |(transform, name, hull, damage, faction_comp, comms_range, ai, tags)| {
                 let p = transform.translation;
-                let (hull_current, hull_max) = match hull {
-                    Some(h) => (Some(h.0.total_current()), Some(h.0.total_max())),
-                    None => (None, None),
-                };
+                let (hull_current, hull_max) =
+                    crate::ship::compartment_damage::structural_totals(damage, hull)
+                        .map_or((None, None), |(current, max)| (Some(current), Some(max)));
                 // Present whenever the entity has a faction — "<unknown>" when the
                 // registry has no name for it, matching the legacy overlay.
                 let faction = faction_comp.map(|fc| {

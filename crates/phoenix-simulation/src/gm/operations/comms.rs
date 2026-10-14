@@ -63,9 +63,10 @@ pub struct GmCommsIdentity {
 }
 
 fn alive(entity: &EntityRef<'_>) -> bool {
-    entity
-        .get::<EntitySystemHull>()
-        .is_none_or(|hull| hull.0.total_current() > 0.0)
+    !crate::ship::compartment_damage::is_catastrophic(
+        entity.get::<crate::ship::compartment_damage::ShipDamage>(),
+        entity.get::<EntitySystemHull>(),
+    )
 }
 
 fn recipient(entity: &EntityRef<'_>) -> Option<GmCommsIdentity> {

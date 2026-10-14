@@ -122,6 +122,7 @@ pub(crate) fn open_scripted_comms_threads(
         Has<crate::lockstep::FleetSlotOf>,
         Has<crate::comms::component::CommsRange>,
         Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
         Option<&crate::ship::components::ShipConfigComponent>,
     )>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
@@ -266,10 +267,10 @@ pub(crate) fn open_scripted_comms_threads(
                         .iter()
                         .filter(|(uuid, ..)| uuid.0 == ship.0);
                     let compatible = matches.next().is_some_and(
-                        |(_, _, is_ship, fleet, _, hull, config, ..)| {
+                        |(_, _, is_ship, fleet, _, hull, damage, config, ..)| {
                             is_ship
                                 && fleet
-                                && hull.is_none_or(|h| h.0.total_current() > 0.0)
+                                && !crate::ship::compartment_damage::is_catastrophic(damage, hull)
                                 && config.is_some_and(|c| {
                                     c.0.system(&crate::ship::system_registry::comms_system_id())
                                         .is_some()
@@ -298,10 +299,10 @@ pub(crate) fn open_scripted_comms_threads(
                 let compatible =
                     matches
                         .next()
-                        .is_some_and(|(_, hailable, _, _, range, hull, ..)| {
+                        .is_some_and(|(_, hailable, _, _, range, hull, damage, ..)| {
                             hailable.is_some()
                                 && range
-                                && hull.is_none_or(|h| h.0.total_current() > 0.0)
+                                && !crate::ship::compartment_damage::is_catastrophic(damage, hull)
                         });
                 !compatible || matches.next().is_some()
             }
@@ -309,18 +310,17 @@ pub(crate) fn open_scripted_comms_threads(
             let mut matches = routed_endpoints
                 .iter()
                 .filter(|(uuid, ..)| uuid.0 == ship.0);
-            let compatible =
-                matches
-                    .next()
-                    .is_some_and(|(_, _, is_ship, fleet, _, hull, config, ..)| {
-                        is_ship
-                            && fleet
-                            && hull.is_none_or(|h| h.0.total_current() > 0.0)
-                            && config.is_some_and(|c| {
-                                c.0.system(&crate::ship::system_registry::comms_system_id())
-                                    .is_some()
-                            })
-                    });
+            let compatible = matches.next().is_some_and(
+                |(_, _, is_ship, fleet, _, hull, damage, config, ..)| {
+                    is_ship
+                        && fleet
+                        && !crate::ship::compartment_damage::is_catastrophic(damage, hull)
+                        && config.is_some_and(|c| {
+                            c.0.system(&crate::ship::system_registry::comms_system_id())
+                                .is_some()
+                        })
+                },
+            );
             !compatible || matches.next().is_some()
         }) {
             continue;

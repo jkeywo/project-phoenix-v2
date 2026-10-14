@@ -673,6 +673,7 @@ fn publish_captain_blackboard(
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::ship::state::ShipViewMode>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
@@ -686,6 +687,7 @@ fn publish_captain_blackboard(
         red_alert_comp,
         view_mode_comp,
         hull_opt,
+        damage,
         uuid_opt,
         ship_config,
         is_local,
@@ -694,18 +696,9 @@ fn publish_captain_blackboard(
     {
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
 
-        let (hull_fraction, hull_integrity_pct) = hull_opt
-            .map(|h| {
-                let max = h.0.total_max();
-                if max > 0.0 {
-                    let frac = h.0.total_current() / max;
-                    (frac, (frac * 100.0).clamp(0.0, 100.0))
-                } else {
-                    (1.0, 100.0)
-                }
-            })
-            .unwrap_or((1.0, 100.0));
-
+        let hull_fraction =
+            crate::ship::compartment_damage::structural_fraction(damage, hull_opt).unwrap_or(1.0);
+        let hull_integrity_pct = (hull_fraction * 100.0).clamp(0.0, 100.0);
         let red_alert_auto = control_sources
             .0
             .source_for(&crate::ship::system_registry::red_alert_system_id())

@@ -51,7 +51,8 @@ pub fn update_combat_activity(
     time: Res<Time>,
     mut ships: Query<
         (
-            &crate::entities::spawner::EntitySystemHull,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::physical_damage::ShipDamage>,
             &mut RecentCombatActivity,
             &mut crate::server_app::WeaponFiredThisTick,
             &mut crate::server_app::ShipAttackedThisTick,
@@ -61,13 +62,15 @@ pub fn update_combat_activity(
 ) {
     let now = time.elapsed_secs();
 
-    for (hull_comp, mut activity, mut weapon_fired, mut attacked) in ships.iter_mut() {
+    for (hull_comp, damage, mut activity, mut weapon_fired, mut attacked) in ships.iter_mut() {
         // Check for hull decrease against prev_hull snapshot.
-        let current_hull = hull_comp.0.total_current();
+        let (current_hull, maximum_hull) =
+            crate::ship::physical_damage::structural_totals(damage, hull_comp)
+                .unwrap_or((0.0, 0.0));
         let previous_hull = if activity.prev_hull > 0.0 {
             activity.prev_hull
         } else {
-            hull_comp.0.total_max()
+            maximum_hull
         };
         if current_hull < previous_hull {
             activity.last_damage_taken = Some(now);

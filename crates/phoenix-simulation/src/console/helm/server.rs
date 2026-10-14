@@ -9,7 +9,6 @@ use crate::ship::components::{
     CoordinationDelivery, DeliveredCoordination, HelmWaypointClearance, PendingArcBearingRequest,
     ShipConfigComponent, ShipSystemControlSources,
 };
-use crate::ship::damage::DamageTier;
 use crate::ship::state::ShipPhysics;
 use crate::ship::system_registry::{
     helm_engine_port_system_id, helm_engine_starboard_system_id, helm_station_key,
@@ -166,6 +165,7 @@ fn publish_helm_blackboard(
             Option<&ShipImpulse>,
             Option<&ShipBoost>,
             Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::ship_plugin::LastHelmInput>,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entities::spawner::HelmConsoleSection>,
@@ -195,6 +195,7 @@ fn publish_helm_blackboard(
         impulse,
         boost,
         hull,
+        damage,
         last_input,
         modifiers,
         helm_section,
@@ -351,10 +352,8 @@ fn publish_helm_blackboard(
 
         // Publish per-engine entries.
         for (system_id, engine_sid) in engine_entries {
-            let tier = hull
-                .map(|h| h.0.tier_for(&engine_sid))
-                .unwrap_or(DamageTier::Operational);
-            let is_online = !matches!(tier, DamageTier::Disabled | DamageTier::Destroyed);
+            let is_online =
+                !crate::ship::compartment_damage::operation_disabled(damage, hull, &engine_sid);
             // Prefer the JoystickState from the InterSystemQueue (written by
             // `publish_joystick_to_engines` in SimSet::Physics, which runs
             // before SimSet::Publish). LocalShip only: the queue's engine
@@ -395,10 +394,8 @@ fn publish_helm_blackboard(
 
         // ── Lateral thrust blackboard ───────────────────────────────────────
         let lt_sid = lateral_thrust_system_id();
-        let lt_tier = hull
-            .map(|h| h.0.tier_for(&SystemId(lt_sid.0.clone())))
-            .unwrap_or(DamageTier::Operational);
-        let lt_is_online = !matches!(lt_tier, DamageTier::Disabled | DamageTier::Destroyed);
+        let lt_is_online =
+            !crate::ship::compartment_damage::operation_disabled(damage, hull, &lt_sid);
         let lt_auto = sources
             .map(|s| s.0.policy_for(&lt_sid).operate_ai)
             .unwrap_or(false);

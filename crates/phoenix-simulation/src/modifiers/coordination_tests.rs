@@ -122,7 +122,13 @@ fn alliance_energy_profiles_pay_work_without_fixed_performance_multipliers() {
             .consumers
             .iter()
             .find(|consumer| {
-                consumer.system.0.starts_with("phaser-") && consumer.continuous_cost_per_sec > 0.0
+                power
+                    .ship_config()
+                    .system(&consumer.system)
+                    .is_some_and(|system| {
+                        matches!(system.kind.as_str(), "phaser_bank" | "blaster_bank")
+                    })
+                    && consumer.continuous_cost_per_sec > 0.0
             })
             .unwrap();
         let before = power.network().consumers[&consumer.system].energy;
@@ -135,7 +141,7 @@ fn alliance_energy_profiles_pay_work_without_fixed_performance_multipliers() {
         );
         assert!(
             power.network().consumers[&consumer.system].energy < before,
-            "{path}: actual phaser activity spends its finite local buffer"
+            "{path}: actual weapon activity spends its finite local buffer"
         );
     }
 }
@@ -581,70 +587,56 @@ fn impulse_active_does_not_affect_other_slots() {
     assert_eq!(mods.get(&ModifierSlot::RepairRate), 1.0);
 }
 
-/// Verifies that `translate_impulse_modifiers` reads `speed_multiplier`
-/// from `ImpulseConfigResource` rather than the `IMPULSE_SPEED_MULTIPLIER`
-/// const. With a custom 3.0× multiplier (vs. the 10.0× default), the
-/// MaxSpeed modifier must reflect the resource value.
+/// An active but unfunded Impulse intent cannot retain the old unconditional
+/// speed effect. The translator preserves independent modifiers and intent;
+/// actual funded speed is resolved by the sole physics integrator.
 #[test]
-fn translate_impulse_modifiers_reads_speed_multiplier_from_resource() {
-    use crate::server_app::ShipImpulse;
-    use crate::ship::impulse::ImpulseState;
-    use crate::ship_plugin::ImpulseConfigResource;
-
+fn translate_impulse_modifiers_clears_free_effect_without_changing_other_sources_or_intent() {
+    use crate::modifiers::Modifier;
     let mut app = App::new();
-
-    // Activate the impulse drive directly.
-    let mut impulse = ImpulseState::new();
-    impulse.start_charge();
-    impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-    assert!(
-        impulse.is_active(),
-        "test fixture: impulse should be active"
-    );
-    // Spawn a LocalShip carrying the per-entity components.
+    let mut mods = ShipModifiers::new();
+    mods.add_or_update(Modifier {
+        source: ModifierSource::ImpulseDrive,
+        slot: ModifierSlot::MaxSpeed,
+        bonus: 2.0,
+    });
+    mods.add_or_update(Modifier {
+        source: ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(8),
+        },
+        slot: ModifierSlot::MaxSpeed,
+        bonus: 0.25,
+    });
     let ship = app
         .world_mut()
         .spawn((
             crate::server_app::LocalShip,
             crate::server_app::Ship,
-            ShipImpulse(impulse),
-            ShipModifiers::new(),
+            ShipImpulse(ImpulseState {
+                phase: crate::ship::impulse::ImpulsePhase::Active,
+                charge_progress: 1.0,
+            }),
+            mods,
+            ImpulseConfigResource {
+                speed_multiplier: 3.0,
+                ..Default::default()
+            },
         ))
         .id();
-    // Configure a non-default speed multiplier (3.0 instead of 10.0).
-    // The MaxSpeed modifier must reflect this - proving the system
-    // reads the per-entity component rather than the const fallback.
-    app.world_mut()
-        .entity_mut(ship)
-        .insert(ImpulseConfigResource {
-            charge_duration: IMPULSE_CHARGE_DURATION,
-            speed_multiplier: 3.0,
-            acceleration_multiplier: 1.0,
-            engage_distance: 200.0,
-            cancel_distance: 40.0,
-            steering_multiplier: 0.0,
-        });
-
     app.add_systems(Update, translate_impulse_modifiers);
     app.update();
-
-    let mods = app
-        .world()
-        .get::<ShipModifiers>(ship)
-        .expect("ShipModifiers component");
-    let max_speed = mods.get(&ModifierSlot::MaxSpeed);
-    assert!(
-        (max_speed - 3.0).abs() < 1e-6,
-        "expected MaxSpeed=3.0 from resource speed_multiplier, got {max_speed}"
+    assert_eq!(
+        app.world()
+            .get::<ShipModifiers>(ship)
+            .unwrap()
+            .get(&ModifierSlot::MaxSpeed),
+        1.25
     );
-    assert!(
-        (max_speed - IMPULSE_SPEED_MULTIPLIER).abs() > 0.5,
-        "MaxSpeed must not fall back to IMPULSE_SPEED_MULTIPLIER const"
-    );
+    assert!(app.world().get::<ShipImpulse>(ship).unwrap().0.is_active());
 }
 
 #[test]
-fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
+fn unfunded_impulse_intents_cannot_recreate_a_free_effect_after_restore() {
     use crate::ship::impulse::ImpulsePhase;
     let mut app = App::new();
     app.add_systems(Update, translate_impulse_modifiers);
@@ -669,6 +661,16 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
             entity.id()
         })
         .collect();
+    for &ship in &ships {
+        app.world_mut()
+            .get_mut::<ShipModifiers>(ship)
+            .unwrap()
+            .add_or_update(crate::modifiers::Modifier {
+                source: ModifierSource::ImpulseDrive,
+                slot: ModifierSlot::MaxSpeed,
+                bonus: 5.0,
+            });
+    }
     app.update();
     for &ship in &ships {
         assert_eq!(
@@ -676,7 +678,7 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
                 .get::<ShipModifiers>(ship)
                 .unwrap()
                 .get(&ModifierSlot::MaxSpeed),
-            6.0
+            1.0
         );
     }
     // Snapshot adoption can replace the derived cache without changing phase.
@@ -692,7 +694,7 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
                 .get::<ShipModifiers>(ship)
                 .unwrap()
                 .get(&ModifierSlot::MaxSpeed),
-            6.0
+            1.0
         );
     }
     // A remote drive cancels independently of the locally projected drive.
@@ -707,7 +709,7 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
             .get::<ShipModifiers>(ships[0])
             .unwrap()
             .get(&ModifierSlot::MaxSpeed),
-        6.0
+        1.0
     );
     assert_eq!(
         app.world()
@@ -716,6 +718,18 @@ fn impulse_modifiers_follow_each_ship_and_rebuild_after_restore() {
             .get(&ModifierSlot::MaxSpeed),
         1.0
     );
+    assert!(app
+        .world()
+        .get::<ShipImpulse>(ships[0])
+        .unwrap()
+        .0
+        .is_active());
+    assert!(!app
+        .world()
+        .get::<ShipImpulse>(ships[1])
+        .unwrap()
+        .0
+        .is_active());
 }
 
 /// Regression test for PRD #597 gap-4: NPC ships with per-entity

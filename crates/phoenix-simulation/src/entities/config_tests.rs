@@ -7753,11 +7753,10 @@ fn authored_power_tree_loads_and_rejects_missing_or_competing_controller() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("[system.config.ai]") && error.contains(&reactor.id.0),
+        error.contains("requires an explicit config.ai state tree")
+            && error.contains(&reactor.id.0),
         "{error}"
     );
-    assert!(error.contains("ShipAiTreePrograms"), "{error}");
-
     let mut competing: toml::Value = toml::from_str(&source).unwrap();
     competing["power"].as_table_mut().unwrap().insert(
         "ai_policy".into(),

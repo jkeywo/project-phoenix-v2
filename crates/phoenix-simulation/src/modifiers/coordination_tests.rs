@@ -128,17 +128,21 @@ fn alliance_energy_profiles_pay_work_without_fixed_performance_multipliers() {
                     .is_some_and(|system| {
                         matches!(system.kind.as_str(), "phaser_bank" | "blaster_bank")
                     })
-                    && consumer.continuous_cost_per_sec > 0.0
+                    && (consumer.continuous_cost_per_sec > 0.0 || consumer.discrete_cost > 0.0)
             })
             .unwrap();
         let before = power.network().consumers[&consumer.system].energy;
-        assert_eq!(
-            power
-                .work_continuous(&consumer.system, 0.1, 1.0)
-                .unwrap()
-                .fraction,
-            1.0
-        );
+        if consumer.continuous_cost_per_sec > 0.0 {
+            assert_eq!(
+                power
+                    .work_continuous(&consumer.system, 0.1, 1.0)
+                    .unwrap()
+                    .fraction,
+                1.0
+            );
+        } else {
+            assert!(power.try_work_discrete(&consumer.system).unwrap());
+        }
         assert!(
             power.network().consumers[&consumer.system].energy < before,
             "{path}: actual weapon activity spends its finite local buffer"

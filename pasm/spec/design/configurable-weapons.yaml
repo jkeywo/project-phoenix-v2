@@ -1,0 +1,19 @@
+entities:
+  - decision: shared-weapon-mechanisms
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Mounts and Configurable Weapons
+      summary: "Increment 7 consolidates existing beam, straight bolt and guided torpedo equipment through shared mount geometry, barrel-pattern resolution and effect-delivery contracts. Authored equipment selects supported behaviours and parameters; existing System IDs, Console ownership, admitted controls, individual AI and shipped combat outcomes remain intact."
+      rationale:
+        - "User approved the serial roadmap and authorised increments 7 through 18, committing each, on 2026-10-14. Structural weapon migration precedes the new interception, guidance, payload and shield-probing gameplay in increment 15."
+        - "[ai] Keep beam fractional damage/cycle jitter, bolt lead prediction and torpedo loaded-round/burst semantics as supported strategies behind common mechanisms. A pattern must never create ammunition. Resolve geometry and schedules through real consumers rather than an unused generic framework."
+  - decision: configured-weapon-authoring-and-continuity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Configured Weapon Authoring and Continuity
+      summary: "Workshop edits supported mount, delivery and firing-pattern parameters through its document/history and authoritative validation workflow. Shared configuration has no competing simulation store. Existing authoritative cycle, projectile and loading state continues through snapshots, deterministic digests and ordinary network projections."
+      rationale:
+        - "[ai] Existing authored family blocks remain supported parameter syntax for their delivery strategies, with one compiled mechanism definition per equipment instance; unsupported combinations must fail validation. New generic authoring selects the same supported strategies and does not introduce a second live weapon/controller."
+        - "[ai] Migration verification compares existing human and AI fire journeys, loaded-round conservation, deterministic continuation and unchanged Cruiser thresholds. Advanced sensing, electronic operations, compartment damage and resource redesign stay in their owning increments."

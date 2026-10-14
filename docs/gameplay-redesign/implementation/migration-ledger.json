@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 6,
+  "current_increment": 7,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -126,12 +126,15 @@
     {
       "id": 7,
       "title": "Shared mounts and configurable weapons",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         6
       ],
       "completion": "Existing phasers, blasters and torpedoes use common mounts, barrel patterns and delivery/effect machinery with equivalent combat behaviour.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/configurable-weapons.yaml",
+        "docs/gameplay-redesign/implementation/increment-7.md"
+      ]
     },
     {
       "id": 8,
@@ -2703,6 +2706,14 @@
       "user_instruction": "do 6 then",
       "pending_acceptance": "Previous physical/device and human workload checks remain open.",
       "evidence": "docs/acceptance/1562-shared-jobs.md"
+    },
+    {
+      "user_instruction": "continue with 7-18 - until completion - committing after each",
+      "from_increment": 6,
+      "date": "2026-10-14",
+      "pending_acceptance": "Prior physical phone/native multi-monitor and human workload acceptance remains open; user authorises serial advancement through increment 18.",
+      "to_increment": 7,
+      "evidence": "docs/acceptance/1562-resource-stores.md"
     }
   ]
 }

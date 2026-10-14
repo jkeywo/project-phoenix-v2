@@ -14,10 +14,6 @@ pub struct InteriorConfig {
     pub connections: Vec<ConnectionConfig>,
     #[serde(default)]
     pub placements: BTreeMap<SystemId, String>,
-    /// Temporary physical homes for legacy hull damage buckets, removed when
-    /// compartment damage replaces those buckets in increment 11.
-    #[serde(default)]
-    pub repair_placements: BTreeMap<SystemId, String>,
     #[serde(default)]
     pub team_homes: Vec<String>,
 }
@@ -39,6 +35,9 @@ pub struct CompartmentConfig {
     pub width: f32,
     pub depth: f32,
     pub material: String,
+    pub max_hp: f32,
+    pub recovery_fraction: f32,
+    pub structural_remedy: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

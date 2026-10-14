@@ -29,6 +29,7 @@ pub type PhaserBankId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub id: PhaserBankId,
     pub facing_deg: f32,
     pub fire_arc_deg: f32,
@@ -112,6 +113,7 @@ pub type BlasterBankId = String;
 /// fields (recoil, screenshake, visual variants).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BlasterBankConfig {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub id: BlasterBankId,
     #[serde(default)]
     pub facing_deg: f32,
@@ -207,6 +209,7 @@ impl BlasterBankConfig {
     /// Convert this TOML config into a runtime `crate::weapons::blaster::BlasterBankConfig`.
     pub fn to_runtime(&self) -> crate::weapons::blaster::BlasterBankConfig {
         crate::weapons::blaster::BlasterBankConfig {
+            impact: self.impact,
             id: self.id.clone(),
             facing_deg: self.facing_deg,
             fire_arc_deg: self.fire_arc_deg,
@@ -243,6 +246,7 @@ pub type TorpedoTubeId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoTubeConfig {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub id: TorpedoTubeId,
     pub facing_deg: f32,
     pub fire_arc_deg: f32,

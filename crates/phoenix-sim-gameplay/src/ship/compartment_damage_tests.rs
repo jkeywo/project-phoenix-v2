@@ -14,9 +14,9 @@ fn fixture() -> (InteriorConfig, DamageConfig, ShipConfig) {
     let config:DamageConfig=serde_json::from_value(json!({
         "materials":{"steel":{"resistance":{"physical":1.0,"laser":2.0},"residual_fraction":0.5}},
         "remedies":{
-            "structure":{"work_secs":1.0,"structural_hp":10.0,"outcome":{"kind":"structural"},"requirements":[{"resource":"plate","service":"parts","amount":1}]},
-            "full":{"work_secs":2.0,"outcome":{"kind":"full"},"requirements":[{"resource":"module","service":"parts","amount":1}]},
-            "patch":{"work_secs":1.0,"outcome":{"kind":"patch","factor":0.25},"requirements":[]}
+            "structure":{"work_secs":1.0,"manual_work_fraction":0.25,"structural_hp":10.0,"outcome":{"kind":"structural"},"requirements":[{"resource":"plate","service":"parts","amount":1}]},
+            "full":{"work_secs":2.0,"manual_work_fraction":0.25,"outcome":{"kind":"full"},"requirements":[{"resource":"module","service":"parts","amount":1}]},
+            "patch":{"work_secs":1.0,"manual_work_fraction":0.25,"outcome":{"kind":"patch","factor":0.25},"requirements":[]}
         }
     })).unwrap();
     let component = json!({"id":"operation","binding":"operation","susceptibility":{"physical":1.0,"laser":1.0},"fault_dose_threshold":4.0,"degraded_factor":0.5,"full_remedy":"full","patch_remedy":"patch","field_replaceable":true});

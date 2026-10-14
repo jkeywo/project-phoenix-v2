@@ -59,13 +59,6 @@ impl InteriorGraph {
         {
             return Err("interior placements must name every installed System exactly once, including generated equipment".into());
         }
-        if config
-            .repair_placements
-            .iter()
-            .any(|(id, room)| systems.contains(id) || !adjacency.contains_key(room))
-        {
-            return Err("legacy repair placements require distinct hull bucket identities and valid compartments".into());
-        }
         if config.team_homes.len() != teams
             || config
                 .team_homes
@@ -182,10 +175,7 @@ impl InteriorGraph {
             .collect()
     }
     pub fn compartment_for_system(&self, id: &crate::core::messages::SystemId) -> Option<&String> {
-        self.config
-            .placements
-            .get(id)
-            .or_else(|| self.config.repair_placements.get(id))
+        self.config.placements.get(id)
     }
     pub fn validate_navigation(&self, teams: &[TeamNavigation]) -> Result<(), String> {
         if teams.len() != self.config.team_homes.len() {

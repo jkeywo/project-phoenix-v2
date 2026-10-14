@@ -760,6 +760,7 @@ impl PowerSystem {
                 .iter()
                 .zip(&consumers)
                 .map(|(group, consumer)| SystemInstanceConfig {
+                    damage_components: Vec::new(),
                     id: consumer.system.clone(),
                     kind: "fixture-energy-consumer".into(),
                     console: None,

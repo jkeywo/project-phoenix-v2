@@ -9,6 +9,9 @@ use crate::ship::{config::ShipConfig, damage::SystemHull};
 use phoenix_model::job::{JobOutcome, JobPhase, JobWorkItem};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+#[path = "repair_physical.rs"]
+mod physical;
+pub use physical::{PhysicalRepairWork, RepairStockAction};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RepairActivity {
@@ -19,6 +22,8 @@ pub enum RepairActivity {
 pub struct RepairJobState {
     pub jobs: TeamJobs<RepairActivity>,
     pub navigation: Option<Vec<crate::ship::interior::TeamNavigation>>,
+    /// Typed bounded work owned by the existing assignment, keyed by JobId.
+    pub physical_work: BTreeMap<u64, PhysicalRepairWork>,
 }
 impl std::ops::Deref for RepairJobState {
     type Target = TeamJobs<RepairActivity>;
@@ -38,6 +43,7 @@ pub struct RepairTeams {
     program: Program,
     readout: Vec<TeamSlot>,
     layout: Option<crate::ship::interior::InteriorGraph>,
+    damage_definition: Option<crate::ship::compartment_damage::DamageDefinition>,
 }
 impl RepairTeams {
     pub fn new(count: usize) -> Self {
@@ -57,11 +63,13 @@ impl RepairTeams {
             state: RepairJobState {
                 jobs: TeamJobs::new(count, owner),
                 navigation: None,
+                physical_work: BTreeMap::new(),
             },
             timings,
             program: repair_workflow::compile_workflow(workflow)?,
             readout: vec![TeamSlot::Idle; count],
             layout: None,
+            damage_definition: None,
         })
     }
     pub fn timings(&self) -> RepairTimings {
@@ -153,6 +161,7 @@ impl RepairTeams {
         self.state.clone()
     }
     pub fn restore_state(&mut self, state: &RepairJobState) -> Result<(), String> {
+        self.validate_physical_work(state)?;
         match (&self.layout, &state.navigation) {
             (Some(layout), Some(navigation)) => layout.validate_navigation(navigation)?,
             (None, None) => {}
@@ -192,7 +201,16 @@ impl RepairTeams {
                         }),
                         location,
                     ) => {
-                        if !matches!(location,TeamLocation::Compartment {compartment} if layout.compartment_for_system(id)==Some(compartment))
+                        let physical_room = active
+                            .and_then(|job| state.physical_work.get(&job.id.0))
+                            .and_then(|work| work.target.as_ref())
+                            .and_then(|target| match target {
+                                phoenix_model::damage::RepairWorkTarget::Compartment {
+                                    compartment,
+                                } => Some(compartment.as_str()),
+                                _ => None,
+                            });
+                        if !matches!(location,TeamLocation::Compartment {compartment} if physical_room.or_else(||layout.compartment_for_system(id).map(String::as_str))==Some(compartment.as_str()))
                         {
                             return Err(
                                 "on-site repair phase does not match its physical compartment"
@@ -645,6 +663,25 @@ impl RepairTeams {
                     outcome: job.outcome,
                     paused: job.paused,
                     workflow_error: job.workflow_error,
+                    target_work: self
+                        .state
+                        .physical_work
+                        .get(&job.id.0)
+                        .and_then(|work| work.target.clone()),
+                    work_progress: self.state.physical_work.get(&job.id.0).and_then(|work| {
+                        let recipe = self
+                            .damage_definition
+                            .as_ref()?
+                            .config
+                            .remedies
+                            .get(work.recipe.as_ref()?)?;
+                        Some(((work.progress / recipe.work_secs).clamp(0.0, 1.0) * 1000.0) as u16)
+                    }),
+                    waiting_parts: self
+                        .state
+                        .physical_work
+                        .get(&job.id.0)
+                        .is_some_and(|work| work.waiting_parts),
                 })
             })
             .collect()

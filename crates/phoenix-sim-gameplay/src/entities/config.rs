@@ -89,6 +89,7 @@ pub struct EntityConfig {
     pub energy: Option<EnergyConfigSection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interior: Option<crate::ship::interior::InteriorConfig>,
+    pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
     /// Unified shields config. Contains focus tuning at the top level and
@@ -579,6 +580,7 @@ impl EntityConfig {
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        damage_components: arc.damage_components.clone(),
                         components: Vec::new(),
                         channels: Vec::new(),
                         console: shields_console.clone(),
@@ -640,6 +642,7 @@ impl EntityConfig {
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
+                        damage_components: Vec::new(),
                         components: Vec::new(),
                         channels: Vec::new(),
                         console: Some(console_id),
@@ -848,7 +851,7 @@ impl EntityConfig {
                 .as_ref()
                 .is_some_and(|ship| !ship.systems.is_empty())
         {
-            return Err(SerdeError::custom("Installed Systems require an explicit [interior] layout in increment 10. Place every System, legacy hull repair bucket and team home in authored compartments; convert this content in Workshop or use its original game version."));
+            return Err(SerdeError::custom("Installed Systems require an explicit [interior] layout. Place every System and team home in authored compartments; convert this content in Workshop or use its original game version."));
         }
         if let Some(interior) = &config.interior {
             let ship = config
@@ -861,31 +864,54 @@ impl EntityConfig {
                 .map_or(0, |repair| repair.repair_team_count as usize);
             crate::ship::interior::InteriorGraph::compile(interior, ship, count)
                 .map_err(SerdeError::custom)?;
-            let legacy: std::collections::BTreeSet<_> = config
+            let damage = config.damage.as_ref().ok_or_else(|| SerdeError::custom(
+                "Equipped entities require explicit compartment damage/material/remedy definitions in increment 11; convert this content in Workshop or use its original game version"))?;
+            crate::ship::compartment_damage::DamageDefinition::compile(interior, damage, ship)
+                .map_err(SerdeError::custom)?;
+            if config
                 .hull
                 .as_ref()
-                .map(|hull| {
-                    let ids: Vec<_> = if hull.system_hull.is_empty() && hull.hull_integrity > 0.0 {
-                        vec![crate::core::messages::SystemId("captain".into())]
-                    } else {
-                        hull.system_hull
-                            .iter()
-                            .map(|row| row.system_id.clone())
-                            .collect()
-                    };
-                    ids.into_iter()
-                        .filter(|id| ship.system(id).is_none())
-                        .collect()
-                })
-                .unwrap_or_default();
-            if interior
-                .repair_placements
-                .keys()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>()
-                != legacy
+                .is_some_and(|hull| hull.hull_integrity > 0.0 || !hull.system_hull.is_empty())
             {
-                return Err(SerdeError::custom("interior.repair_placements must explicitly place every legacy hull damage bucket that is not an installed System; these temporary placements are replaced with compartment damage in increment 11"));
+                return Err(SerdeError::custom("Equipped entities use compartment max_hp and component conditions; remove legacy hull_integrity/system_hull after allocating their durability to the interior. Unconverted content requires its original game version"));
+            }
+            for system in &ship.systems {
+                for component in &system.damage_components {
+                    if component.binding != phoenix_model::damage::DamageBinding::Operation
+                        && !config.energy.as_ref().is_some_and(|energy| {
+                            system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
+                                || energy
+                                    .consumers
+                                    .iter()
+                                    .any(|consumer| consumer.system == system.id)
+                        })
+                    {
+                        return Err(SerdeError::custom(format!("Damage component '{}:{}' requires a real energy intake/cooling endpoint", system.id.0, component.id)));
+                    }
+                }
+            }
+            for (id, remedy) in &damage.remedies {
+                for requirement in &remedy.requirements {
+                    let link = crate::resources::service::ResourceLink {
+                        service: Some(requirement.service.clone()),
+                        provider: None,
+                    };
+                    let endpoint = crate::resources::service::resolve_endpoint(
+                        &requirement.resource,
+                        &config.resource_services,
+                        &link,
+                    )
+                    .map_err(|error| {
+                        SerdeError::custom(format!("Damage remedy '{id}': {error}"))
+                    })?;
+                    if !matches!(&endpoint, crate::resources::service::ResourceEndpoint::Capacity { id }
+                        if config.infrastructure.as_ref().is_some_and(|infrastructure| infrastructure.capacities.iter().any(|capacity| &capacity.id == id)))
+                    {
+                        return Err(SerdeError::custom(format!(
+                            "Damage remedy '{id}' requires an actual local parts capacity"
+                        )));
+                    }
+                }
             }
         }
 

@@ -13,6 +13,7 @@ pub struct WeaponDefinition {
     #[serde(default)]
     pub strategy_id: Option<String>,
     pub mount: WeaponMountConfig,
+    pub impact: phoenix_model::damage::DamageProfile,
     pub delivery: WeaponDeliveryConfig,
     #[serde(default)]
     pub marker: Option<String>,
@@ -105,6 +106,7 @@ impl WeaponDefinition {
             return Err("strategy_id must be nonempty without surrounding whitespace".into());
         }
         self.mount.validate()?;
+        self.impact.validate()?;
         if self
             .marker
             .as_ref()
@@ -230,6 +232,7 @@ impl WeaponDefinition {
                 shield_pierce,
             } => {
                 let bank = PhaserBankConfig {
+                    impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
                     fire_arc_deg: mount.fire_arc_deg,
@@ -264,6 +267,7 @@ impl WeaponDefinition {
                 screenshake_magnitude,
             } => {
                 let bank = BlasterBankConfig {
+                    impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
                     fire_arc_deg: mount.fire_arc_deg,
@@ -296,6 +300,7 @@ impl WeaponDefinition {
                 ai_target_count,
             } => {
                 let tube = TorpedoTubeConfig {
+                    impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
                     fire_arc_deg: mount.fire_arc_deg,

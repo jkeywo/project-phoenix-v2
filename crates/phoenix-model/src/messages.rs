@@ -127,6 +127,8 @@ pub struct SystemHullStatus {
     /// Destroyed, tier_config.debuff_magnitude when Damaged or Disabled).
     #[serde(default)]
     pub debuff_magnitude: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical: Option<crate::damage::PhysicalSystemStatus>,
 }
 
 /// A serialisable snapshot of a single shield facing for broadcasting.
@@ -1919,6 +1921,7 @@ pub struct RepairGroupDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum RepairTarget {
+    Work(crate::damage::RepairWorkTarget),
     Station(StationId),
     Console(ConsoleId),
     System(SystemId),

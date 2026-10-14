@@ -599,6 +599,7 @@ fn config_with(systems: &[(&str, Option<&str>)]) -> ShipConfig {
             .iter()
             .filter(|(_, station)| station.is_some())
             .map(|(id, station)| SystemInstanceConfig {
+                damage_components: Vec::new(),
                 components: Vec::new(),
                 channels: Vec::new(),
                 console: Some(phoenix_model::identity::ConsoleId(

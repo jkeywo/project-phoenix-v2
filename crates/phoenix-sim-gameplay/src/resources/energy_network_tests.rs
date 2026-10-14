@@ -57,6 +57,7 @@ fn fixture(
             .iter()
             .zip(&consumers)
             .map(|(group, consumer)| SystemInstanceConfig {
+                damage_components: Vec::new(),
                 id: consumer.system.clone(),
                 kind: "test-capability".into(),
                 console: None,

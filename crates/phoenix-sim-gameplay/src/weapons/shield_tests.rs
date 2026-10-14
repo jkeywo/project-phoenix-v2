@@ -4,6 +4,7 @@ use std::f32::consts::PI;
 #[test]
 fn shared_delivery_selects_the_actual_up_and_down_payload_fractions_once() {
     let delivery = super::super::mount::DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 100.0,
         damage_shields: 16.0,
         shield_pierce: 0.25,
@@ -28,6 +29,7 @@ fn shared_delivery_selects_the_actual_up_and_down_payload_fractions_once() {
 #[test]
 fn fractional_delivery_and_pierce_preserve_subdivided_hit_conservation() {
     let small = super::super::mount::DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 1.0,
         damage_shields: 1.0,
         shield_pierce: 0.0,
@@ -41,6 +43,7 @@ fn fractional_delivery_and_pierce_preserve_subdivided_hit_conservation() {
     assert_eq!(split.facings[0].hp, 95);
     assert_eq!(split.facings[0].interception_remainder, 0.0);
     let piercing = super::super::mount::DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 100.0,
         damage_shields: 16.0,
         shield_pierce: 1.0,
@@ -52,6 +55,7 @@ fn fractional_delivery_and_pierce_preserve_subdivided_hit_conservation() {
 #[test]
 fn guided_delivery_preserves_zero_strength_recovery_grace() {
     let delivery = super::super::mount::DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 100.0,
         damage_shields: 16.0,
         shield_pierce: 0.25,

@@ -235,6 +235,12 @@ impl ShieldsBaseConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShieldArcConfig {
+    #[serde(
+        default,
+        rename = "damage_component",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub damage_components: Vec<phoenix_model::damage::DamageComponentConfig>,
     /// Stable arc id (kebab-case fragment used to build the fine SystemId).
     pub id: String,
     /// Display label shown in the JS panel (e.g. `"Fore"`, `"All"`).
@@ -256,18 +262,6 @@ pub struct ShieldArcConfig {
     /// Per-arc override for offline duration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offline_duration: Option<f32>,
-    /// Per-arc hull HP for damage-tier tracking (fed into `ShipArcHull`).
-    #[serde(default)]
-    pub hull_max_hp: f32,
-    /// HP fraction below which the arc enters Damaged tier. Default 0.75.
-    #[serde(default = "default_arc_hull_damaged_threshold")]
-    pub hull_damaged_threshold_pct: f32,
-    /// HP fraction below which the arc enters Disabled tier. Default 0.25.
-    #[serde(default = "default_arc_hull_disabled_threshold")]
-    pub hull_disabled_threshold_pct: f32,
-    /// Debuff magnitude applied on Damaged/Disabled tier. Default 0.15.
-    #[serde(default = "default_arc_hull_debuff_magnitude")]
-    pub hull_debuff_magnitude: f32,
     /// Hit-routing priority. When multiple arcs cover the same bearing, the
     /// arc with the highest `priority` value absorbs the hit first. Falls
     /// through to the next tier only when all arcs at the higher priority
@@ -287,18 +281,6 @@ fn default_shield_frequency() -> f32 {
 
 fn default_arc_priority() -> u32 {
     1
-}
-
-fn default_arc_hull_damaged_threshold() -> f32 {
-    0.75
-}
-
-fn default_arc_hull_disabled_threshold() -> f32 {
-    0.25
-}
-
-fn default_arc_hull_debuff_magnitude() -> f32 {
-    0.15
 }
 
 impl ShieldArcConfig {

@@ -2,6 +2,7 @@ use super::*;
 
 fn make_system() -> BlasterSystem {
     BlasterSystem::new(BlasterBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".to_string(),
         facing_deg: 0.0,
         fire_arc_deg: 90.0,
@@ -114,6 +115,7 @@ fn step(barrels: &[u32], offset: f32) -> BarrelPatternStep {
 
 fn make_pattern_system(barrels: Vec<String>, pattern: Vec<BarrelPatternStep>) -> BlasterSystem {
     BlasterSystem::new(BlasterBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "multi".to_string(),
         volley_interval_secs: 0.1,
         cooldown_secs: 2.0,
@@ -1054,6 +1056,7 @@ fn request_fire_zero_volley_count_returns_false() {
 
 fn make_charging_system() -> BlasterSystem {
     BlasterSystem::new(BlasterBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "heavy".to_string(),
         charge_time_secs: 2.0,
         volley_count: 2,

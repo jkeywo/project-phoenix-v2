@@ -61,6 +61,7 @@ impl MountConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DamageDelivery {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub damage_hull: f32,
     pub damage_shields: f32,
     pub shield_pierce: f32,
@@ -68,6 +69,7 @@ pub struct DamageDelivery {
 
 impl DamageDelivery {
     pub fn validate(&self) -> Result<(), String> {
+        self.impact.validate()?;
         if !self.damage_hull.is_finite()
             || self.damage_hull < 0.0
             || !self.damage_shields.is_finite()

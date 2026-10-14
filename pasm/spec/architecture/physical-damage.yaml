@@ -1,0 +1,21 @@
+entities:
+  - component: physical-damage-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Compartment Structure and Component Restoration State
+      summary: "Gameplay ShipDamage owns compartment structure, disabling latches, component conditions and residual fault dose. Immutable definitions compile from accepted authored content. Existing incident producers apply the pure processor synchronously in their established phases and RNG order. RepairJobState owns typed work and bounded recipe progress; real capacity stocks own stage claims. Simulation integrates scoped projections and continuation."
+      rationale:
+        - "Increment 11 integration is in progress; no playable exit is claimed. Equipped entities have no competing SystemHull or ArcHull state. Legacy props retain their separate hull model."
+        - "Typed work uses the existing team commitment, private workflow and physical routes. Restoration is possible without powered tools at the authored manual fraction, while real parts and crew remain required."
+        - "Snapshot 46/rules 0.18 preflight owner presence, physical shape, typed work and claims before applying writes. Physical damage and incident continuation participate in ordinary deterministic digests."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads: [interior-routes-and-boundary-state, shared-job-execution-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/damage.rs, crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs]
+      symbols: [DamageDefinition, DamageState, ShipDamage, PhysicalRepairWork]
+      tests: [crates/phoenix-sim-gameplay/src/ship/compartment_damage_tests.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical_tests.rs]

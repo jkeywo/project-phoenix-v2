@@ -4,6 +4,7 @@ use std::f32::consts::PI;
 
 fn bank(id: &str, facing_deg: f32, fire_arc_deg: f32, auto_arc_deg: f32) -> PhaserBankConfig {
     PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.to_string(),
         facing_deg,
         fire_arc_deg,

@@ -18,6 +18,12 @@ fn id(value: &str) -> bool {
 fn source(value: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
+fn resource_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        })
+}
 fn finite(value: f32) -> bool {
     value.is_finite() && value >= 0.0
 }
@@ -134,11 +140,13 @@ impl DamageDefinition {
             if !id(name)
                 || !finite(remedy.work_secs)
                 || remedy.work_secs == 0.0
+                || !unit(remedy.manual_work_fraction)
+                || remedy.manual_work_fraction == 0.0
                 || !outcome
                 || remedy
                     .requirements
                     .iter()
-                    .any(|r| !id(&r.resource) || !id(&r.service) || r.amount <= 0)
+                    .any(|r| !resource_id(&r.resource) || !resource_id(&r.service) || r.amount <= 0)
             {
                 return Err(format!("invalid damage remedy '{name}'"));
             }

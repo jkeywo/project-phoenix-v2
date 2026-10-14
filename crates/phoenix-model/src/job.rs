@@ -37,4 +37,8 @@ pub struct JobWorkItem {
     pub outcome: Option<JobOutcome>,
     pub paused: bool,
     pub workflow_error: bool,
+    pub target_work: Option<crate::damage::RepairWorkTarget>,
+    /// Completed thousandths of the current bounded stage, not System HP.
+    pub work_progress: Option<u16>,
+    pub waiting_parts: bool,
 }

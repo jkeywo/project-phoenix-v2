@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 fn cfg(id: &str, facing_deg: f32, fire_arc_deg: f32) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
         fire_arc_deg,
@@ -703,6 +704,7 @@ fn find_detonation_hits_with_no_targets_in_range_returns_empty_even_if_source_pr
 
 fn volley_cfg(id: &str, volley_max: u32) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
         fire_arc_deg: 180.0,
@@ -993,6 +995,7 @@ fn patterned_cfg(
     volley_max: u32,
 ) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
         fire_arc_deg: 180.0,

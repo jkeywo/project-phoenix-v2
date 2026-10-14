@@ -75,6 +75,20 @@ These choices adopt the draft's five bounded integration decisions. They do not
 authorize unsupported condition scripting, arbitrary Workshop code, automatic
 deliveries or new networking.
 
+Physical-state integration uses a Gameplay ECS wrapper around the one pure
+DamageState, re-exported by Simulation, so Gameplay mechanics consume the actual
+owner without a reverse layer dependency or another mutable damage projection.
+Repair assignment, recall and prioritisation are crew orders: their existing
+ownership and individual AI remain meaningful when powered tools are damaged.
+Admit those orders against the actual baseline controller and crew scope while
+retaining GM disablement and stale-host refusal. Tool operation keeps ordinary
+availability gates. Each remedy explicitly authors `manual_work_fraction` in
+`(0,1]`; real team work can proceed at that fraction without powered tools, with
+paid tool work accelerating the remainder. Access, finite parts and the same
+bounded stage are required in either case. This prevents a zero-HP Repair room
+from permanently making its own restoration impossible. It adds no alternative
+Backfill policy, controller or portable energy store.
+
 Use the increment 10 interior, System placements, stable IDs and routed teams.
 Add no wall geometry, per-cell holes, precise component positions or second job
 owner. A walkable connection is not a damage path.
@@ -295,6 +309,38 @@ design, not a request to reopen the gameplay interview. Record their adoption in
 PASM and this specification before implementing their consumers.
 
 ## Verification and exit
+
+### Integration notes in progress
+
+The canonical physical owner is in Gameplay, with a Simulation re-export.
+Typed component/compartment orders specialise the existing team Job rather than
+creating another crew pool. A visit diagnoses only after physical arrival;
+travel permission cannot authorise same-step repair. Each bounded stage claims
+actual capacity stock, consumes it on completion and releases unconsumed claims
+on recall or replacement. Continuation validates target/recipe compatibility,
+unique task commitments and actual inventory claims before writes. A patched
+component can later receive full restoration; it cannot receive repeated patches.
+
+Permitted equipment details expose actual compartment structure and component
+conditions, without synthetic System HP, private dose or causal source. Repair
+map buttons issue typed work through ordinary System-addressed admission. Ship
+HP zero remains recoverable. Current combat scenarios need explicit neutralisation
+conditions for defeat; literal destruction remains a distinct event.
+
+Existing collision budget becomes a blunt Physical incident with penetration
+zero, using the direction captured before separation. Existing directionless
+DamageZone budget becomes four equal local-cardinal Laser exposures with zero
+penetration. Their offered shares sum to the old field budget and retain stable
+region/RNG order. These hazard profiles are provisional adapter tuning. GM direct
+damage distributes exact clamped loss over unique actual scoped compartments
+through the canonical internal-incident processor; shared-room equipment shares
+structural consequences.
+
+Targeted evidence so far: Gameplay `cargo check -p phoenix-sim-gameplay
+--no-default-features` passed after two route-reference type corrections. Client
+map/status/work-list tests passed 16 tests. New native physical repair tests,
+Simulation integration and the complete playable exit remain pending. Supporting
+schema/content commits are preparation, not milestone completion.
 
 Develop in vertical owner slices with targeted tests. Structural setup can land
 first with existing behavior, but do not switch accepted ships onto new damage

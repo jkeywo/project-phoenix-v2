@@ -641,6 +641,60 @@ impl InfrastructureState {
             .map(|c| &c.stock)
     }
 
+    /// Atomic repair-stage transaction against the actual capacity stocks.
+    /// The staged copy exists only for validation; it is committed together.
+    pub fn repair_parts(
+        &mut self,
+        action: crate::jobs::repair::RepairStockAction,
+        claim: &str,
+        recipe: &phoenix_model::damage::RemedyConfig,
+        services: &std::collections::BTreeMap<String, crate::resources::service::ResourceEndpoint>,
+    ) -> Result<Vec<FlagChange>, String> {
+        use crate::jobs::repair::RepairStockAction;
+        use crate::resources::service::{resolve_endpoint, ResourceEndpoint, ResourceLink};
+        let mut stocks: Vec<_> = self.capacities.iter().map(|c| c.stock.clone()).collect();
+        for (index, part) in recipe.requirements.iter().enumerate() {
+            let endpoint = resolve_endpoint(
+                &part.resource,
+                services,
+                &ResourceLink {
+                    service: Some(part.service.clone()),
+                    provider: None,
+                },
+            )?;
+            let ResourceEndpoint::Capacity { id } = endpoint else {
+                return Err("repair parts require a capacity endpoint".into());
+            };
+            let position = self
+                .capacities
+                .iter()
+                .position(|c| c.id == id)
+                .ok_or("missing repair parts stock")?;
+            let key = format!("{claim}/{index}");
+            match action {
+                RepairStockAction::Check | RepairStockAction::Reserve => {
+                    stocks[position].reserve(&key, part.amount)?
+                }
+                RepairStockAction::Consume => {
+                    if stocks[position].reserved.get(&key) != Some(&part.amount) {
+                        return Err("repair stage has no matching parts claim".into());
+                    }
+                    stocks[position].consume(&key);
+                }
+                RepairStockAction::Release => {
+                    stocks[position].release(&key);
+                }
+            }
+        }
+        if action == RepairStockAction::Check {
+            return Ok(Vec::new());
+        }
+        for (capacity, stock) in self.capacities.iter_mut().zip(stocks) {
+            capacity.stock = stock;
+        }
+        Ok(self.recompute_flags())
+    }
+
     /// Validate continuation before it reaches the infrastructure owner.
     pub fn validate_stocks(&self) -> Result<(), String> {
         let mut ids = std::collections::BTreeSet::new();

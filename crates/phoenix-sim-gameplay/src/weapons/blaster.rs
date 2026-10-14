@@ -51,6 +51,7 @@ use std::f32::consts::PI;
 /// future TOML fields without a `deny_unknown_fields` compile error.
 #[derive(Clone, Debug)]
 pub struct BlasterBankConfig {
+    pub impact: phoenix_model::damage::DamageProfile,
     /// Bank identifier (matches the TOML `id` field, e.g. `"fore"`, `"aft"`).
     pub id: String,
     /// Centre of the fire arc in degrees clockwise from ship-forward (0 = fore).
@@ -97,6 +98,7 @@ pub struct BlasterBankConfig {
 impl Default for BlasterBankConfig {
     fn default() -> Self {
         Self {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: String::new(),
             facing_deg: 0.0,
             fire_arc_deg: 90.0,
@@ -156,6 +158,7 @@ impl BlasterBankConfig {
 /// A single blaster bolt in flight.
 #[derive(Clone, Debug)]
 pub struct BlasterProjectile {
+    pub impact: phoenix_model::damage::DamageProfile,
     /// Unique identifier for this projectile (UUID string).
     pub id: String,
     /// World X position.
@@ -471,6 +474,7 @@ impl BlasterSystem {
                     self.config.facing_deg,
                 );
                 self.in_flight.push(BlasterProjectile {
+                    impact: self.config.impact,
                     id: uuid.clone(),
                     x: origin_x,
                     z: origin_z,
@@ -547,6 +551,8 @@ impl BlasterSystem {
         if let Some(pos) = self.in_flight.iter().position(|p| p.id == projectile_id) {
             let p = self.in_flight.remove(pos);
             Some(HitData {
+                impact: p.impact,
+                incoming: [simmath::sin(p.heading), -simmath::cos(p.heading)],
                 damage: p.damage,
                 shield_pierce: p.shield_pierce,
                 source_uuid: p.source_uuid,
@@ -628,6 +634,8 @@ pub struct LaunchEvent {
 /// Projectile stats returned by `consume_hit` for the damage system.
 #[derive(Clone, Debug)]
 pub struct HitData {
+    pub impact: phoenix_model::damage::DamageProfile,
+    pub incoming: [f32; 2],
     pub damage: i32,
     pub shield_pierce: f32,
     /// UUID of the ship that fired the bolt. Carried through so the damage
@@ -640,6 +648,7 @@ impl HitData {
     /// Equal shield/hull damage is the straight bolt's existing delivery rule.
     pub fn delivery(&self) -> super::mount::DamageDelivery {
         super::mount::DamageDelivery {
+            impact: self.impact,
             damage_hull: self.damage as f32,
             damage_shields: self.damage as f32,
             shield_pierce: self.shield_pierce,

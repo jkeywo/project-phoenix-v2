@@ -96,6 +96,9 @@ pub struct PartRequirement {
 #[serde(deny_unknown_fields)]
 pub struct RemedyConfig {
     pub work_secs: f32,
+    /// Unpowered team work; paid tools accelerate the remaining fraction.
+    /// Real crew, access, parts and bounded work are required in either case.
+    pub manual_work_fraction: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structural_hp: Option<f32>,
     pub outcome: RemedyOutcome,
@@ -142,6 +145,22 @@ pub struct ComponentState {
 pub struct CompartmentState {
     pub hp: f64,
     pub disabled: bool,
+}
+
+/// Permitted status projection: no private dose, source or controller memory.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalComponentStatus {
+    pub id: String,
+    pub binding: DamageBinding,
+    pub condition: ComponentCondition,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalSystemStatus {
+    pub compartment: String,
+    pub structural_hp: f32,
+    pub structural_max_hp: f32,
+    pub structurally_disabled: bool,
+    pub components: Vec<PhysicalComponentStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

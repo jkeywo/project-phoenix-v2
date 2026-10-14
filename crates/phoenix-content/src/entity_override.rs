@@ -163,6 +163,8 @@ const COMPOSE_KEYED_ARRAYS: &[(&str, &str)] = &[
     ("console.rating", "name"),
     ("system", "id"),
     ("system.component", "id"),
+    ("system.damage_component", "id"),
+    ("shield_arc.damage_component", "id"),
     ("system.channel", "name"),
     ("shield_arc.ai.tree", "id"),
     ("shield_arc.ai.tree.state", "id"),
@@ -369,6 +371,14 @@ pub fn is_atomic_interior(path: &str) -> bool {
     path == "interior"
 }
 
+/// Damage profiles and physical-part remedies replace as complete typed records.
+pub fn is_atomic_damage(path: &str) -> bool {
+    matches!(
+        path,
+        "damage" | "system.damage_component" | "shield_arc.damage_component"
+    )
+}
+
 fn merge_at(
     path: &str,
     template: &toml::Value,
@@ -380,7 +390,8 @@ fn merge_at(
             if is_atomic_resource_endpoint(path)
                 || is_atomic_weapon_delivery(path)
                 || is_atomic_energy_profile(path)
-                || is_atomic_interior(path) =>
+                || is_atomic_interior(path)
+                || is_atomic_damage(path) =>
         {
             override_.clone()
         }

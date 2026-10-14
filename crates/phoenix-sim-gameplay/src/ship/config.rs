@@ -78,6 +78,12 @@ pub use phoenix_model::console::ConsoleRatingConfig as StationRatingConfig;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemInstanceConfig {
+    #[serde(
+        default,
+        rename = "damage_component",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub damage_components: Vec<phoenix_model::damage::DamageComponentConfig>,
     #[serde(default, rename = "component", skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<super::composition::SystemComponentConfig>,
     #[serde(default, rename = "channel", skip_serializing_if = "Vec::is_empty")]

@@ -111,6 +111,7 @@ impl Default for TorpedoConfig {
 
 #[derive(Clone, Debug)]
 pub struct Torpedo {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub strike_damage_bonus: f32,
     pub uuid: String,
     pub x: f32,
@@ -227,6 +228,7 @@ impl TubeLoadState {
 
 #[derive(Clone, Debug)]
 pub struct TorpedoTube {
+    pub impact: phoenix_model::damage::DamageProfile,
     /// Tube identifier from TOML (e.g. `"fore_port"`, `"aft"`).
     pub id: TorpedoTubeId,
     /// Centre of the tube's fire arc, degrees clockwise from ship-forward.
@@ -452,6 +454,7 @@ pub struct TorpedoTickResult {
 /// the pure-module `tick` can drive the burst without Bevy.
 #[derive(Clone, Debug, Default)]
 pub struct TubeBurstState {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub tube_id: String,
     /// Torpedoes remaining to be fired in the current burst (0 = idle).
     pub pending: u32,
@@ -493,6 +496,7 @@ impl TorpedoSystem {
         let ai_target_count = config.ai_volley_target.unwrap_or(1).min(1);
         let tubes = vec![
             TorpedoTube {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_port".to_string(),
                 facing_deg: -30.0,
                 fire_arc_deg: 90.0,
@@ -508,6 +512,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_starboard".to_string(),
                 facing_deg: 30.0,
                 fire_arc_deg: 90.0,
@@ -523,6 +528,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "aft".to_string(),
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
@@ -558,6 +564,7 @@ impl TorpedoSystem {
         let tubes = tubes
             .iter()
             .map(|c| TorpedoTube {
+                impact: c.impact,
                 id: c.id.clone(),
                 facing_deg: c.facing_deg,
                 fire_arc_deg: c.fire_arc_deg,
@@ -982,6 +989,7 @@ impl TorpedoSystem {
         self.tubes[idx].active_barrels = vec![barrel0];
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
+            impact: self.tubes[idx].impact,
             strike_damage_bonus: 0.0,
             uuid: uuid.clone(),
             x: origin_x,
@@ -1001,6 +1009,7 @@ impl TorpedoSystem {
         if count_remaining > 0 {
             self.burst_states.retain(|b| b.tube_id != tube_id);
             self.burst_states.push(TubeBurstState {
+                impact: self.tubes[idx].impact,
                 tube_id: tube_id.to_string(),
                 pending: count_remaining,
                 timer: burst_interval,
@@ -1182,6 +1191,7 @@ impl TorpedoSystem {
                 burst.next_shot_index += 1;
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
+                    impact: burst.impact,
                     strike_damage_bonus: 0.0,
                     uuid: uuid.clone(),
                     x: origin_x,
@@ -1263,6 +1273,11 @@ impl TorpedoSystem {
             }
         };
         Some(TorpedoDetonation {
+            impact: removed.impact,
+            incoming: [
+                simmath::sin(removed.heading),
+                -simmath::cos(removed.heading),
+            ],
             damage_hull: damage(self.config.damage_hull),
             damage_shields: damage(self.config.damage_shields),
             shield_pierce: removed.shield_pierce,
@@ -1300,6 +1315,10 @@ impl TorpedoSystem {
 ///   whole, to the hull.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TorpedoDetonation {
+    pub impact: phoenix_model::damage::DamageProfile,
+    /// Arrival azimuth is retained before removing the guided projectile.
+    /// Near-vertical approaches use its stored azimuth, never the launcher.
+    pub incoming: [f32; 2],
     pub damage_hull: i32,
     pub damage_shields: i32,
     pub shield_pierce: f32,
@@ -1340,6 +1359,7 @@ impl TorpedoDetonation {
     /// launch-time pierce snapshot, after its existing strike bonus is applied.
     pub fn delivery(&self) -> super::mount::DamageDelivery {
         super::mount::DamageDelivery {
+            impact: self.impact,
             damage_hull: self.damage_hull as f32,
             damage_shields: self.damage_shields as f32,
             shield_pierce: self.shield_pierce,

@@ -20,6 +20,9 @@ fn graph() -> InteriorGraph {
                 width: 4.0,
                 depth: 4.0,
                 material: "bulkhead".into(),
+                max_hp: 100.0,
+                recovery_fraction: 0.2,
+                structural_remedy: "structure".into(),
             })
             .collect(),
         connections: vec![
@@ -46,7 +49,6 @@ fn graph() -> InteriorGraph {
             },
         ],
         placements: BTreeMap::new(),
-        repair_placements: BTreeMap::new(),
         team_homes: vec!["bridge".into()],
     };
     InteriorGraph::compile(&config, &ship(), 1).unwrap()

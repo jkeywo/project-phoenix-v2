@@ -25,6 +25,7 @@ fn fixture() -> (
         consoles: vec![],
         stations: vec![],
         systems: vec![SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: vec![],
             channels: vec![],
             id: SystemId("impulse".into()),

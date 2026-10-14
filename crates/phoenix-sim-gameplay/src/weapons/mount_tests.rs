@@ -72,6 +72,7 @@ fn mount_rejects_nonfinite_and_invalid_authored_parameters() {
 #[test]
 fn delivery_preserves_distinct_torpedo_payload_and_pierces_only_shields_up() {
     let delivery = DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 40.0,
         damage_shields: 4.0,
         shield_pierce: 0.25,
@@ -92,12 +93,14 @@ fn delivery_preserves_distinct_torpedo_payload_and_pierces_only_shields_up() {
 #[test]
 fn delivery_validation_rejects_bad_content_but_runtime_split_retains_defensive_rules() {
     let base = DamageDelivery {
+        impact: phoenix_model::damage::DamageProfile::default(),
         damage_hull: 4.0,
         damage_shields: 4.0,
         shield_pierce: 0.0,
     };
     for value in [-1.0, f32::NAN, f32::INFINITY] {
         assert!(DamageDelivery {
+            impact: phoenix_model::damage::DamageProfile::default(),
             damage_hull: value,
             ..base
         }

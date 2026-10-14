@@ -2351,6 +2351,15 @@ fn courier_toml_is_a_valid_two_station_hull() {
 
     let toml_str = include_str!("../../../../assets/entities/alliance_courier.toml");
     let config = EntityConfig::from_toml(toml_str).expect("alliance_courier must parse");
+    let shared = EntityConfig::from_toml(include_str!(
+        "../../../../assets/entities/fragments/jobs/repair_workflow.toml"
+    ))
+    .unwrap();
+    assert_eq!(
+        config.repair.as_ref().unwrap().workflow,
+        shared.repair.unwrap().workflow,
+        "the baked Courier must use the same repair workflow as the composed hulls"
+    );
     let ship_config = config.ship_config.clone().expect("ship_config present");
 
     // Two stations, one rating each.

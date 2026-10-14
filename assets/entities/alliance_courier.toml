@@ -24,7 +24,6 @@ mass = 3500.0
 tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
-includes = ["fragments/jobs/repair_workflow.toml"]
 
 [mesh]
 model = "assets/models/alliance_courier_recreated.glb"
@@ -1377,3 +1376,25 @@ kind = "Dossiers"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+# Inline equivalent of fragments/jobs/repair_workflow.toml for this baked hull.
+# [ai] Structural equivalence: one existing stage per tick.
+[repair.workflow]
+root = "repair-job"
+[[repair.workflow.tree]]
+id = "repair-job"
+initial = "execute"
+[[repair.workflow.tree.state]]
+id = "execute"
+[[repair.workflow.tree.state.task]]
+id = "travel"
+action = { kind = "write", channel = "advance_travel", value = { source = "fact", name = "travelling" } }
+[[repair.workflow.tree.state.task]]
+id = "repair"
+action = { kind = "write", channel = "apply_repair", value = { source = "fact", name = "repairing" } }
+[[repair.workflow.tree.state.task]]
+id = "return"
+action = { kind = "write", channel = "advance_return", value = { source = "fact", name = "returning" } }
+[[repair.workflow.tree.state.task]]
+id = "external"
+action = { kind = "write", channel = "apply_external", value = { source = "fact", name = "external" } }

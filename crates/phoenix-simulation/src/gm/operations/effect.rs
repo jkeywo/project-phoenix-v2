@@ -1,20 +1,18 @@
 //! Direct/internal GM damage and healing on one Entity (issue #1310, PRD #930
 //! milestone M2 Directing).
 //!
-//! A GM names an entity and an absolute amount. The effect is *internal*: it
-//! bypasses shields entirely and lands on [`crate::ship::damage::SystemHull`],
-//! where the ordinary weighted distribution decides which system absorbs it —
-//! the same distribution a beam hit uses, and the same one that reduces an
-//! NPC's single-entry hull (a legacy scalar `hull_integrity` becomes a
-//! one-system `SystemHull` at spawn, so "the NPC scalar path" is the ordinary
-//! path applied to a hull of one).
+//! A GM names an entity and an absolute amount. The internal effect bypasses
+//! shields. Equipped entities resolve the selected Systems to unique physical
+//! compartments and use the canonical internal damage owner. Legacy props keep
+//! their existing SystemHull distribution. Restoring structure preserves
+//! component faults, and zero structural HP remains recoverable.
 //!
 //! # Two phases, for the reason a Fire has two
 //!
 //! [`crate::gm::actions::action::apply_due_actions`] runs in `PreUpdate`, outside
 //! `SimSet`, and holds none of the destruction lifecycle's parameters. It
 //! therefore RESOLVES the effect at the agreed apply tick — target lookup,
-//! clamping, the discarded overflow, whether the hit is lethal — and arms
+//! clamping and the discarded overflow — and arms
 //! [`PendingGmDirectEffects`]; [`apply_gm_direct_effects`] then applies exactly
 //! that resolved amount inside `SimSet::Damage`, where destruction, despawn,
 //! balance events and the world registry are already this simulation's
@@ -64,14 +62,11 @@ use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GmDirectEffectScope {
-    /// The whole hull, using the ordinary weighted distribution.
+    /// The whole structure, using the applicable owner's weighted distribution.
     Entity,
-    /// The Systems that Station authored as its own, using the same weighted
-    /// distribution restricted to them.
+    /// The Station's authored Systems; shared physical rooms are counted once.
     Station(crate::core::messages::StationId),
-    /// Exactly one System. No distribution runs at all — there is nothing to
-    /// distribute across, and the spill loop of a one-entry walk is the
-    /// identity.
+    /// One System's physical compartment, or its legacy prop hull bucket.
     System(crate::core::messages::SystemId),
 }
 
@@ -86,19 +81,15 @@ pub enum GmDirectEffectScopeError {
     /// that authors no stations at all (a structure, an asteroid, a bare
     /// `[behaviour]` hull).
     UnknownStation,
-    /// The target's hull tracks no System with that id. Deliberately asked of
-    /// the HULL rather than of the ship config: a `[[system]]` with no
-    /// `[[hull.system_hull]]` entry (every Alliance radar) is authored but not
-    /// damageable, and "nothing there answers to that name" is the same answer
-    /// the operator needs for both.
+    /// The target's physical placements or legacy hull contain no such System.
     UnknownSystem,
     /// The Station exists and owns Systems, but this hull tracks none of them —
     /// the scoped spelling of [`crate::gm::actions::action::GmActionRefusalReason::TargetNotDamageable`].
     NotDamageable,
 }
 
-/// The Systems a scope permits an effect to touch, or `None` for the whole
-/// hull.
+/// Legacy-prop Systems a scope permits an effect to touch, or `None` for
+/// the whole hull. Equipped entities use [`physical_scope_rooms`].
 ///
 /// The ONE place a scope becomes a set of Systems. The reducer calls it to
 /// decide the refusal and to measure the totals a result is resolved against;

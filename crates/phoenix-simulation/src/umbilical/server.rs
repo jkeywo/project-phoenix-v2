@@ -1,7 +1,7 @@
 //! The Bevy adapter for the transfer umbilical (issue #1160).
 //!
 //! Gathers the live world into the plain values the pure sibling
-//! [`crate::umbilical::flow`] takes — both docked ends' capacity ledgers, the
+//! [`crate::umbilical::flow`] takes — both docked ends' resolved resource stocks, the
 //! umbilical's power level and damage tier, and #1159's docked state — and
 //! applies what comes back: the per-ship [`TransferUmbilical`] component, the
 //! fixed-tick systems that take the start/stop commands, move an authored
@@ -15,12 +15,10 @@
 //! *gates on the second*: a flow runs only while the umbilical's own hull is
 //! docked ([`crate::dock::DockControl::docked_partner`]), so resupply requires
 //! Helm to have achieved the dock first — two seats on two ships, or two seats on
-//! one. The capacity itself moves through the SAME queue the arrest (#1158) and
-//! the operations `transfer` use — a `CapacityAdjustment` on each end drained
-//! by [`crate::infrastructure::tick_infrastructure_condition`] — so the moved
-//! goods cross the docked partner's own authored ceiling and re-publish onto the
-//! counter a scenario predicate reads, rather than being written onto the
-//! component behind the one system that owns those numbers.
+//! one. Each planned move queues one ResourceTransfer. Its transaction drain
+//! commits both endpoints or neither, accounting for reservations and tube-held
+//! ammunition. Capacity changes retain the infrastructure adjustment and counter
+//! publication boundary; magazine changes use their existing owner.
 
 use crate::ai::standing_operation::OperationFacts;
 use bevy::prelude::*;
@@ -57,8 +55,8 @@ use crate::umbilical::flow::{
 ///
 /// `running` is the operator's INTENT to flow — set by `StartTransfer`, cleared
 /// by `StopTransfer` and by every interruption (undock, power loss, damage,
-/// partner without the capacity). It is the one field that is folded and
-/// snapshotted. `carry` is the sub-unit remainder the flow arithmetic meters a
+/// partner without the endpoint). Running intent and fractional carry are
+/// folded and snapshotted. `carry` is the sub-unit remainder the flow arithmetic meters a
 /// per-second rate through; `last_refusal` is why the flow last stopped; and
 /// `operator_level`/`partner_level` are this tick's ledger readings for the
 /// console. The fractional carry is authoritative continuation; refusal and level readings

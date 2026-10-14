@@ -4797,27 +4797,27 @@ job.outcome.cancelled,Repair job work list,Cancelled,Abgebrochen,Cancelled,machi
 job.outcome.failed,Repair job work list,Failed,Fehlgeschlagen,Failed,machine
 job.paused,Repair job work list,Paused,Pausiert,Paused,machine
 job.workflow_error,Repair job work list,Workflow stopped; recall team,Ablauf gestoppt; Team zurückrufen,Workflow stopped; recall team,machine
-workshop.resource.title,Workshop resource authoring,[Resource stores and service links],,,
-workshop.resource.hint,Workshop resource authoring,[Edit real stocks and local bindings. Use the existing entity Preview and Test controls to exercise them.],,,
-workshop.resource.template,Workshop resource authoring,[Entity template],,,
-workshop.resource.materialise,Workshop resource authoring,[Materialise inherited resource settings for this edit],,,
-workshop.resource.capacities,Workshop resource authoring,[Capacity stores],,,
-workshop.resource.existing,Workshop resource authoring,[Existing entries],,,
-workshop.resource.capacity_id,Workshop resource authoring,[Capacity identifier],,,
-workshop.resource.amount,Workshop resource authoring,[Starting quantity],,,
-workshop.resource.ceiling,Workshop resource authoring,[Storage limit],,,
-workshop.resource.label,Workshop resource authoring,[Label String Id],,,
-workshop.resource.magazine,Workshop resource authoring,[Torpedo magazine],,,
-workshop.resource.count,Workshop resource authoring,[Starting quantity and storage limit],,,
-workshop.resource.services,Workshop resource authoring,[Named resource services],,,
-workshop.resource.service_name,Workshop resource authoring,[Service identifier],,,
-workshop.resource.endpoint,Workshop resource authoring,[Endpoint type],,,
-workshop.resource.link,Workshop resource authoring,[Transfer umbilical link],,,
-workshop.resource.apply_capacity,Workshop resource authoring,[Apply capacity],,,
-workshop.resource.apply_magazine,Workshop resource authoring,[Apply magazine],,,
-workshop.resource.apply_service,Workshop resource authoring,[Apply service],,,
-workshop.resource.apply_link,Workshop resource authoring,[Apply link],,,
-workshop.resource.capacity_endpoint,Workshop resource authoring,[Capacity store],,,
-workshop.resource.magazine_endpoint,Workshop resource authoring,[Torpedo magazine],,,
-workshop.resource.named_endpoint,Workshop resource authoring,[Named service],,,
-workshop.resource.refused,Workshop resource authoring,[Resource edit refused: {reason}],,,
+workshop.resource.title,Workshop resource authoring,[Resource stores and service links],[Ressourcenlager und Versorgungsverbindungen],[Resource stores and service links],machine
+workshop.resource.hint,Workshop resource authoring,[Edit real stocks and local bindings. Use the existing entity Preview and Test controls to exercise them.],[Bearbeite tatsächliche Bestände und lokale Verbindungen. Prüfe sie mit den vorhandenen Vorschau- und Testfunktionen für Entitäten.],[Edit real stocks and local bindings. Use the existing entity Preview and Test controls to exercise them.],machine
+workshop.resource.template,Workshop resource authoring,[Entity template],[Entitätsvorlage],[Entity template],machine
+workshop.resource.materialise,Workshop resource authoring,[Materialise inherited resource settings for this edit],[Geerbte Ressourceneinstellungen für diese Änderung lokal übernehmen],[Materialise inherited resource settings for this edit],machine
+workshop.resource.capacities,Workshop resource authoring,[Capacity stores],[Ressourcenlager],[Capacity stores],machine
+workshop.resource.existing,Workshop resource authoring,[Existing entries],[Vorhandene Einträge],[Existing entries],machine
+workshop.resource.capacity_id,Workshop resource authoring,[Capacity identifier],[Lagerkennung],[Capacity identifier],machine
+workshop.resource.amount,Workshop resource authoring,[Starting quantity],[Anfangsbestand],[Starting quantity],machine
+workshop.resource.ceiling,Workshop resource authoring,[Storage limit],[Lagergrenze],[Storage limit],machine
+workshop.resource.label,Workshop resource authoring,[Label String Id],[String-ID der Beschriftung],[Label String Id],machine
+workshop.resource.magazine,Workshop resource authoring,[Torpedo magazine],[Torpedomagazin],[Torpedo magazine],machine
+workshop.resource.count,Workshop resource authoring,[Starting quantity and storage limit],[Anfangsbestand und Lagergrenze],[Starting quantity and storage limit],machine
+workshop.resource.services,Workshop resource authoring,[Named resource services],[Benannte Ressourcendienste],[Named resource services],machine
+workshop.resource.service_name,Workshop resource authoring,[Service identifier],[Dienstkennung],[Service identifier],machine
+workshop.resource.endpoint,Workshop resource authoring,[Endpoint type],[Endpunkttyp],[Endpoint type],machine
+workshop.resource.link,Workshop resource authoring,[Transfer umbilical link],[Versorgungsleitung],[Transfer umbilical link],machine
+workshop.resource.apply_capacity,Workshop resource authoring,[Apply capacity],[Lager übernehmen],[Apply capacity],machine
+workshop.resource.apply_magazine,Workshop resource authoring,[Apply magazine],[Magazin übernehmen],[Apply magazine],machine
+workshop.resource.apply_service,Workshop resource authoring,[Apply service],[Dienst übernehmen],[Apply service],machine
+workshop.resource.apply_link,Workshop resource authoring,[Apply link],[Verbindung übernehmen],[Apply link],machine
+workshop.resource.capacity_endpoint,Workshop resource authoring,[Capacity store],[Ressourcenlager],[Capacity store],machine
+workshop.resource.magazine_endpoint,Workshop resource authoring,[Torpedo magazine],[Torpedomagazin],[Torpedo magazine],machine
+workshop.resource.named_endpoint,Workshop resource authoring,[Named service],[Benannter Dienst],[Named service],machine
+workshop.resource.refused,Workshop resource authoring,[Resource edit refused: {reason}],[Ressourcenänderung abgelehnt: {reason}],[Resource edit refused: {reason}],machine

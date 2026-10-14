@@ -30,11 +30,12 @@ describe('console object construction and JSON publication', () => {
           own_hull: row.expected.own_hull, gm_takeover: row.expected.gm_takeover });
         const expected = structuredClone(row.expected);
         if (row.name === 'composite') {
-          // The historical fixture predates recorded-observation details.
-          // Missing logical time stays unknown and missing reports stay empty.
+          // The historical fixture predates recorded observations and jobs.
+          // Missing logical time stays unknown; reports and jobs stay empty.
           expected.observation_tick = null;
           expected.systems.repair.observation_tick = null;
           expected.systems.repair.reports = [];
+          expected.systems.repair.jobs = [];
         }
         if (row.name === 'visiting') {
           // A visiting radio is now its own Console, never spliced into Helm.

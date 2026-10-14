@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 11,
+  "current_increment": 12,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -203,12 +203,15 @@
     {
       "id": 12,
       "title": "Automatic logistics and production",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         11
       ],
       "completion": "Stock targets, timed delivery, fabrication and surviving salvage use real stores, jobs and routes; optional harvesting stays bounded.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-12.md",
+        "pasm/spec/design/automatic-logistics-and-production.yaml"
+      ]
     },
     {
       "id": 13,

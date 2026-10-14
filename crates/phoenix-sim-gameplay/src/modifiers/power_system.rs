@@ -140,8 +140,8 @@ impl PowerConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSystem {
-    hardware: EnergyConfigSection,
-    ship: ShipConfig,
+    hardware: std::sync::Arc<EnergyConfigSection>,
+    ship: std::sync::Arc<ShipConfig>,
     network: EnergyNetworkState,
     coolant_credit: BTreeMap<String, f64>,
     weapons_restrained: bool,
@@ -167,8 +167,8 @@ impl PowerSystem {
             .map(|id| (id.clone(), 0.0))
             .collect();
         Ok(Self {
-            hardware,
-            ship,
+            hardware: std::sync::Arc::new(hardware),
+            ship: std::sync::Arc::new(ship),
             network,
             coolant_credit: BTreeMap::new(),
             weapons_restrained: false,
@@ -259,6 +259,50 @@ impl PowerSystem {
     }
     pub fn try_spend_discrete(&mut self, system: &SystemId) -> Result<bool, String> {
         self.network.try_spend_discrete(&self.hardware, system)
+    }
+
+    /// Grant actual work before advancing an actuator or producing its effect.
+    pub fn work_continuous(
+        &mut self,
+        system: &SystemId,
+        dt: f32,
+        activity: f32,
+    ) -> Result<crate::resources::energy::EnergyGrant, String> {
+        if !dt.is_finite() || dt < 0.0 || !activity.is_finite() || activity < 0.0 {
+            return Err("energy work requires finite nonnegative time and activity".into());
+        }
+        let rate = self
+            .hardware
+            .consumers
+            .iter()
+            .find(|consumer| &consumer.system == system)
+            .ok_or("unknown energy consumer")?
+            .continuous_cost_per_sec;
+        self.spend_continuous(system, rate * dt * activity)
+    }
+
+    /// A simultaneous firing step commits every projectile's energy or none.
+    pub fn try_work_discrete_count(
+        &mut self,
+        system: &SystemId,
+        count: usize,
+    ) -> Result<bool, String> {
+        let consumer = self
+            .hardware
+            .consumers
+            .iter()
+            .find(|consumer| &consumer.system == system)
+            .ok_or("unknown energy consumer")?;
+        let amount = consumer.discrete_cost * count as f32;
+        self.network
+            .consumers
+            .get_mut(system)
+            .ok_or("unknown consumer state")?
+            .try_spend_discrete(&consumer.reserve, amount)
+    }
+
+    pub fn try_work_discrete(&mut self, system: &SystemId) -> Result<bool, String> {
+        self.try_work_discrete_count(system, 1)
     }
     pub fn set_weapons_restrained(&mut self, restrained: bool) {
         self.weapons_restrained = restrained;
@@ -435,7 +479,11 @@ impl PowerSystem {
         }
     }
     pub fn fire_strike_weapon(&mut self, system_id: &str) -> f32 {
-        if !self.strike_boost.as_ref().is_some_and(|boost| boost.enabled) {
+        if !self
+            .strike_boost
+            .as_ref()
+            .is_some_and(|boost| boost.enabled)
+        {
             return 1.0;
         }
         let Some(weapon) = self

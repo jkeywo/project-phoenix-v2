@@ -414,6 +414,7 @@ kind = "Weapons"
                 "blaster_bank",
                 "torpedo_tube",
                 "torpedo_magazine",
+                "shield_arc",
             ],
         )
         .expect("explicit fixture weapon ownership"),

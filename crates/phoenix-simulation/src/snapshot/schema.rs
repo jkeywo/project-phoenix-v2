@@ -9,6 +9,10 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     pub uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_damage: Option<phoenix_sim_gameplay::ship::compartment_damage::DamageState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disablement: Option<crate::ship::disablement::DisablementObservation>,
     /// What a **script spawned this entity from** (issue #863), or `None` for
     /// every authored `[[entity]]` block.
     ///
@@ -733,6 +737,9 @@ pub struct CoordinationEnqueueState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WeaponState {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub beam_impact_samples:
+        std::collections::BTreeMap<String, (String, phoenix_model::damage::HitSample)>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub beam_strike_bonuses: std::collections::BTreeMap<String, f32>,
     /// Every live phaser beam as `(bank, target uuid, remaining_secs,
     /// damage_accumulator, pending_cooldown_secs)`, in the bank order
@@ -832,6 +839,7 @@ pub struct TubeState {
 /// One torpedo mid-flight.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TorpedoInFlight {
+    pub impact: phoenix_model::damage::DamageProfile,
     #[serde(default)]
     pub strike_damage_bonus: f32,
     pub uuid: String,
@@ -853,6 +861,7 @@ pub struct TorpedoInFlight {
 /// One tube's pending burst.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BurstState {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub tube_id: String,
     pub pending: u32,
     pub timer: f32,
@@ -919,6 +928,7 @@ pub struct BlasterRuntime {
 /// One blaster bolt mid-flight — see [`BlasterRuntime::in_flight`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BlasterBolt {
+    pub impact: phoenix_model::damage::DamageProfile,
     pub id: String,
     pub x: f32,
     pub z: f32,
@@ -942,6 +952,10 @@ pub struct BlasterBolt {
 /// crew being told twice.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RepairState {
+    pub readings: Vec<(
+        crate::core::messages::RepairGroup,
+        Vec<crate::console::repair::server::RepairSourceReading>,
+    )>,
     /// One canonical job/team owner, including external commitments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jobs: Option<phoenix_sim_gameplay::jobs::RepairJobState>,
@@ -1495,8 +1509,11 @@ pub struct ScenarioState {
 pub struct WorldEventRecord {
     /// `0` Destroyed, `1` Attacked, `2` HullDroppedBelow, `3` TimerElapsed,
     /// `4` Hailed, `5` FlagSet, `6` FlagCleared, `7` WorldLoaded,
-    /// `8` EnteredRegion, `9` ExitedRegion, `10` WaypointReached.
+    /// `8` EnteredRegion, `9` ExitedRegion, `10` WaypointReached, `11` Disabled.
     pub kind: u8,
+    /// Reversible defeat entry/recovery for tag 11.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
     /// The event's primary name: an entity uuid, a region uuid, or a flag name.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subject: String,

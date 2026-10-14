@@ -598,6 +598,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Folded,
                 "interior-routes-and-boundary-state",
             )
+            .declare_state::<crate::ship::compartment_damage::ShipDamage>(
+                StateClass::Folded,
+                "physical-damage-state",
+            )
+            .declare_state::<crate::ship::disablement::DisablementObservation>(
+                StateClass::Folded,
+                "physical-damage-state",
+            )
             .declare_state::<crate::ship::access::InteriorLayout>(
                 StateClass::Derived,
                 "interior-routes-and-boundary-state",

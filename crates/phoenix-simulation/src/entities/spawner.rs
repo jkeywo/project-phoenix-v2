@@ -785,6 +785,22 @@ struct HullSpawn;
 
 impl SpawnSection for HullSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+        if let (Some(interior), Some(damage), Some(ship)) =
+            (&config.interior, &config.damage, &config.ship_config)
+        {
+            match phoenix_sim_gameplay::ship::compartment_damage::DamageDefinition::compile(
+                interior, damage, ship,
+            ) {
+                Ok(definition) => {
+                    let state = phoenix_sim_gameplay::ship::compartment_damage::DamageState::new(
+                        &definition,
+                    );
+                    cmds.insert(crate::ship::compartment_damage::ShipDamage { definition, state });
+                }
+                Err(error) => error!("refusing invalid physical damage owner: {error}"),
+            }
+            return;
+        }
         // Hull -- attach an EntitySystemHull component if the config has hull data.
         // Per-system entries take precedence; if absent we fall back to the
         // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`

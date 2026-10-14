@@ -1264,6 +1264,7 @@ fn trigger_state(name: &str) -> TriggerState {
         fired: false,
         origin_layer: None,
         seen_destroyed: std::collections::HashSet::new(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }
 }
@@ -3027,4 +3028,57 @@ fn canonical_magazine_claims_and_physical_tube_state_move_the_resource_digest() 
             "unused".into()
         });
     assert_ne!(claimed, fold_resource_stocks_namespace(&world, FOLD_SEED));
+}
+
+#[test]
+fn reversible_defeat_frontiers_and_event_edges_are_deterministic_and_folded() {
+    let mut world = World::new();
+    let entity = world
+        .spawn((
+            crate::entities::spawner::EntityUuid("actor".into()),
+            crate::ship::disablement::DisablementObservation { disabled: false },
+        ))
+        .id();
+    let before = fold_disablement_namespace(&world, 0);
+    world
+        .get_mut::<crate::ship::disablement::DisablementObservation>(entity)
+        .unwrap()
+        .disabled = true;
+    assert_ne!(before, fold_disablement_namespace(&world, 0));
+    assert_ne!(
+        fold_world_event(
+            0,
+            &WorldEvent::Disabled {
+                uuid: "actor".into(),
+                disabled: false
+            }
+        ),
+        fold_world_event(
+            0,
+            &WorldEvent::Disabled {
+                uuid: "actor".into(),
+                disabled: true
+            }
+        )
+    );
+    use crate::world::config::TriggerCondition;
+    assert_eq!(
+        trigger_condition_code(&TriggerCondition::OnDisabled {
+            entity_name: "a".into()
+        }),
+        13
+    );
+    assert_eq!(
+        trigger_condition_code(&TriggerCondition::OnAllNeutralized {
+            group: "g".into(),
+            after_secs: 0.0
+        }),
+        14
+    );
+    assert_eq!(
+        trigger_condition_code(&TriggerCondition::OnNeutralized {
+            entity_name: "a".into()
+        }),
+        15
+    );
 }

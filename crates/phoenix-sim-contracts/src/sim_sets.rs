@@ -286,4 +286,5 @@ pub enum FixedStep {
     PublishScenarioState,
     EmitScenarioNarrative,
     EmitAuthoredAndMarkedEntityNarrative,
+    PublishShipDisablement,
 }

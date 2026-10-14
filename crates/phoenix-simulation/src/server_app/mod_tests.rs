@@ -2448,6 +2448,7 @@ fn a_fireless_run_still_republishes_the_mission_panel_after_a_lobby_round_trip()
         fired: false,
         origin_layer: None,
         seen_destroyed: Default::default(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     });
     app.insert_resource(runtime)
@@ -2535,6 +2536,7 @@ fn a_lobby_round_trip_disarms_a_predicate_held_gm_fire() {
         fired: false,
         origin_layer: None,
         seen_destroyed: Default::default(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     });
     runtime.pending_gm_event_fires.insert(EVENT.to_string());
@@ -2646,6 +2648,7 @@ fn a_lobby_round_trip_disarms_a_waiting_gm_skip() {
         fired: false,
         origin_layer: None,
         seen_destroyed: Default::default(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     });
     runtime.pending_gm_event_skips.insert(EVENT.to_string());

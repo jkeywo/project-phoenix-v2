@@ -43,6 +43,10 @@ pub(super) fn world_event_from_record(row: &WorldEventRecord) -> Option<WorldEve
             uuid: row.subject.clone(),
             waypoint: row.other.clone(),
         },
+        11 => WorldEvent::Disabled {
+            uuid: row.subject.clone(),
+            disabled: row.disabled,
+        },
         _ => return None,
     })
 }
@@ -922,6 +926,21 @@ pub(super) fn validate_entity_repair_jobs(
     row: &EntityState,
 ) -> Result<(), String> {
     match (
+        world.get::<crate::ship::compartment_damage::ShipDamage>(entity),
+        row.physical_damage.as_ref(),
+    ) {
+        (Some(damage), Some(state)) => state.validate(&damage.definition)?,
+        (None, None) => {}
+        _ => return Err("saved physical damage owner disagrees with authored equipment".into()),
+    }
+    match (
+        world.get::<crate::ship::disablement::DisablementObservation>(entity),
+        row.disablement.as_ref(),
+    ) {
+        (Some(_), Some(_)) | (None, None) => {}
+        _ => return Err("saved disablement frontier disagrees with physical owner".into()),
+    }
+    match (
         world.get::<crate::ship::access::InteriorAccess>(entity),
         row.access.as_ref(),
     ) {
@@ -937,10 +956,78 @@ pub(super) fn validate_entity_repair_jobs(
         };
     };
     match (world.get::<ShipRepairTeams>(entity), stored.jobs.as_ref()) {
-        (Some(teams), Some(jobs)) => teams.0.clone().restore_state(jobs),
+        (Some(teams), Some(jobs)) => {
+            teams.0.clone().restore_state(jobs)?;
+            validate_physical_repair_claims(world, entity, row, jobs)
+        }
         (None, None) => Ok(()),
         _ => Err("saved team owner is missing or disagrees with the authored crew".into()),
     }
+}
+
+pub(super) fn validate_physical_repair_claims(
+    world: &World,
+    entity: Entity,
+    row: &EntityState,
+    jobs: &crate::jobs::RepairJobState,
+) -> Result<(), String> {
+    use crate::resources::service::{resolve_endpoint, ResourceEndpoint, ResourceLink};
+    let mut expected = std::collections::BTreeMap::new();
+    for (id, work) in &jobs.physical_work {
+        if !work.reserved {
+            continue;
+        }
+        let definition = &world
+            .get::<crate::ship::compartment_damage::ShipDamage>(entity)
+            .ok_or("repair claims without physical owner")?
+            .definition;
+        let recipe = definition
+            .config
+            .remedies
+            .get(
+                work.recipe
+                    .as_ref()
+                    .ok_or("reserved stage missing recipe")?,
+            )
+            .ok_or("unknown reserved repair recipe")?;
+        let services = world.get::<crate::resources::server::ResourceServices>(entity);
+        for (index, part) in recipe.requirements.iter().enumerate() {
+            let services = services.ok_or("repair parts have no authored resource services")?;
+            let ResourceEndpoint::Capacity { id: capacity } = resolve_endpoint(
+                &part.resource,
+                &services.0,
+                &ResourceLink {
+                    service: Some(part.service.clone()),
+                    provider: None,
+                },
+            )?
+            else {
+                return Err("repair parts do not name physical capacity stock".into());
+            };
+            let claim = format!("{}/{index}", work.claim(*id));
+            if expected.insert((capacity, claim), part.amount).is_some() {
+                return Err("duplicate repair stage claim".into());
+            }
+        }
+    }
+    let actual: std::collections::BTreeMap<_, _> = row
+        .infrastructure
+        .as_ref()
+        .into_iter()
+        .flat_map(|inventory| inventory.capacities())
+        .flat_map(|capacity| {
+            capacity
+                .stock
+                .reserved
+                .iter()
+                .filter(|(claim, _)| claim.starts_with("repair/"))
+                .map(|(claim, amount)| ((capacity.id.clone(), claim.clone()), *amount))
+        })
+        .collect();
+    if actual != expected {
+        return Err("physical repair progress and inventory claims disagree".into());
+    }
+    Ok(())
 }
 
 /// Put ONE captured row back onto one live entity, at the caller's tick.
@@ -984,6 +1071,18 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut damage), Some(stored)) = (
+        entity_mut.get_mut::<crate::ship::compartment_damage::ShipDamage>(),
+        row.physical_damage.as_ref(),
+    ) {
+        damage.state = stored.clone();
+    }
+    if let (Some(mut frontier), Some(stored)) = (
+        entity_mut.get_mut::<crate::ship::disablement::DisablementObservation>(),
+        row.disablement.as_ref(),
+    ) {
+        *frontier = stored.clone();
+    }
     if let (Some(mut access), Some(states)) = (
         entity_mut.get_mut::<crate::ship::access::InteriorAccess>(),
         row.access.as_ref(),
@@ -1643,6 +1742,14 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                 (
                     bank.clone(),
                     ActiveBeamSlot {
+                        impact_sample_target: stored
+                            .beam_impact_samples
+                            .get(bank)
+                            .map(|(target, _)| target.clone()),
+                        impact_sample: stored
+                            .beam_impact_samples
+                            .get(bank)
+                            .map(|(_, sample)| sample.clone()),
                         strike_damage_bonus: stored
                             .beam_strike_bonuses
                             .get(bank)
@@ -1688,6 +1795,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .torpedoes_in_flight
             .iter()
             .map(|t| Torpedo {
+                impact: t.impact,
                 strike_damage_bonus: t.strike_damage_bonus,
                 uuid: t.uuid.clone(),
                 x: t.position[0],
@@ -1706,6 +1814,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .bursts
             .iter()
             .map(|b| TubeBurstState {
+                impact: b.impact,
                 tube_id: b.tube_id.clone(),
                 pending: b.pending,
                 timer: b.timer,
@@ -1749,6 +1858,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                 .in_flight
                 .iter()
                 .map(|p| crate::weapons::blaster::BlasterProjectile {
+                    impact: p.impact,
                     id: p.id.clone(),
                     x: p.x,
                     z: p.z,
@@ -1782,6 +1892,12 @@ pub(super) fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState
             .iter()
             .map(
                 |(group, station_label, tier, deficit, observations)| RepairQueueEntry {
+                    readings: stored
+                        .readings
+                        .iter()
+                        .find(|(key, _)| key == group)
+                        .map(|(_, rows)| rows.clone())
+                        .unwrap_or_default(),
                     observations: observations.clone(),
                     group: group.clone(),
                     station_label: station_label.clone(),

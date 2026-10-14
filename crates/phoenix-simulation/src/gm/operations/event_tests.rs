@@ -14,6 +14,7 @@ fn state(id: &str, layer: Option<&str>, repeat: bool, fired: bool) -> TriggerSta
         fired,
         origin_layer: layer.map(str::to_string),
         seen_destroyed: Default::default(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }
 }

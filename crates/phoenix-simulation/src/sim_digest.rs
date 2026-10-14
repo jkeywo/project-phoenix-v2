@@ -458,6 +458,8 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("security", fold_security_namespace),
     ("internal-repair", fold_internal_repair_namespace),
     ("interior-access", fold_access_namespace),
+    ("physical-damage", fold_physical_damage_namespace),
+    ("disablement-observation", fold_disablement_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -1046,6 +1048,12 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             acc = fold_u64(acc, u64::from(state.fired));
             acc = fold_optional_str(acc, state.origin_layer.as_deref());
             acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
+            let mut disabled: Vec<_> = state.seen_disabled.iter().collect();
+            disabled.sort();
+            acc = fold_u64(acc, disabled.len() as u64);
+            for uuid in disabled {
+                acc = fold_str(acc, uuid);
+            }
             acc = fold_u64(acc, state.seen_destroyed.len() as u64);
             if !state.seen_destroyed.is_empty() {
                 let mut seen: Vec<&str> = state.seen_destroyed.iter().map(String::as_str).collect();
@@ -1189,6 +1197,9 @@ fn trigger_condition_code(condition: &crate::world::config::TriggerCondition) ->
         C::OnExitedRegion { .. } => 10,
         C::OnWaypointReached { .. } => 11,
         C::Manual => 12,
+        C::OnDisabled { .. } => 13,
+        C::OnAllNeutralized { .. } => 14,
+        C::OnNeutralized { .. } => 15,
     }
 }
 
@@ -1254,6 +1265,10 @@ fn fold_scheduled_call(mut acc: u64, call: &crate::world::script::schedule::Sche
 /// [`fold_scenario_schedule`] for why the tag is written by hand.
 fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
     match event {
+        WorldEvent::Disabled { uuid, disabled } => {
+            acc = fold_u64(acc, 11);
+            fold_u64(fold_str(acc, uuid), u64::from(*disabled))
+        }
         WorldEvent::Destroyed { uuid } => {
             acc = fold_u64(acc, 0);
             fold_str(acc, uuid)
@@ -1801,6 +1816,58 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
             attacks.sort_by(|a, b| a.0.cmp(&b.0));
             acc = fold_serde(acc, &attacks);
         }
+        if let Some(beam) = world.get::<crate::console::weapons::beam::ActiveBeam>(entity) {
+            let samples: Vec<_> = beam
+                .live_banks()
+                .map(|(id, slot)| (id, &slot.impact_sample_target, &slot.impact_sample))
+                .collect();
+            if !samples.is_empty() {
+                acc = fold_str(acc, "beam-physical-samples");
+                acc = fold_serde(acc, &samples);
+            }
+        }
+        if let Some(torpedoes) = world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
+        {
+            let mut profiles: Vec<_> = torpedoes
+                .0
+                .in_flight
+                .iter()
+                .map(|round| (&round.uuid, round.impact))
+                .collect();
+            profiles.sort_by(|a, b| a.0.cmp(b.0));
+            if !profiles.is_empty() {
+                acc = fold_str(acc, "torpedo-physical-profiles");
+                acc = fold_serde(acc, &profiles);
+            }
+            let mut bursts: Vec<_> = torpedoes
+                .0
+                .burst_states
+                .iter()
+                .map(|burst| (&burst.tube_id, burst.impact))
+                .collect();
+            bursts.sort_by(|a, b| a.0.cmp(b.0));
+            if !bursts.is_empty() {
+                acc = fold_str(acc, "torpedo-burst-physical-profiles");
+                acc = fold_serde(acc, &bursts);
+            }
+        }
+        if let Some(blasters) = world.get::<crate::console::weapons::BlasterSystemResource>(entity)
+        {
+            let mut profiles: Vec<_> = blasters
+                .0
+                .iter()
+                .flat_map(|bank| {
+                    bank.in_flight
+                        .iter()
+                        .map(|round| (round.id.clone(), round.impact))
+                })
+                .collect();
+            profiles.sort_by(|a, b| a.0.cmp(&b.0));
+            if !profiles.is_empty() {
+                acc = fold_str(acc, "blaster-physical-profiles");
+                acc = fold_serde(acc, &profiles);
+            }
+        }
         acc = match alert {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),
@@ -2120,14 +2187,17 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
         |umbilical: &TransferUmbilical| {
             (umbilical.running
                 || umbilical.carry != 0.0
-                || umbilical.selected_resource != umbilical.config.capacity)
+                || umbilical.selected_resource != umbilical.config.capacity
+                || umbilical.selected_direction != umbilical.config.direction)
                 .then_some((
                     umbilical.running,
                     umbilical.carry,
                     umbilical.selected_resource.clone(),
+                    umbilical.selected_direction,
                 ))
         },
-        |acc, (running, carry, resource)| {
+        |acc, (running, carry, resource, direction)| {
+            let acc = fold_serde(acc, &direction);
             fold_str(
                 fold_f32(fold_u64(acc, u64::from(running)), carry),
                 &resource,
@@ -2386,6 +2456,7 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 acc = fold_str(acc, &entry.station_label);
                 acc = fold_u64(acc, entry.tier as u64);
                 acc = fold_f32(acc, entry.deficit);
+                acc = fold_serde(acc, &entry.readings);
                 let mut observations = entry.observations;
                 crate::console::repair::reports::sort_observations(&mut observations);
                 acc = fold_serde(acc, &observations);
@@ -2462,6 +2533,26 @@ fn fold_access_namespace(world: &World, acc: u64) -> u64 {
             Some(statuses)
         },
         |acc, states| fold_serde(acc, &states),
+    )
+}
+
+fn fold_physical_damage_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "physical-damage",
+        |damage: &crate::ship::compartment_damage::ShipDamage| Some(damage.state.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_disablement_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "disablement-observation",
+        |frontier: &crate::ship::disablement::DisablementObservation| Some(frontier.clone()),
+        |acc, frontier| fold_serde(acc, &frontier),
     )
 }
 

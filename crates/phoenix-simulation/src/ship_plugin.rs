@@ -69,6 +69,13 @@ impl Plugin for ShipPlugin {
             .add_message::<DeliveredCoordination>()
             .add_message::<OrderedCoordinationPopup>()
             .add_message::<AiChatterEvent>();
+        app.add_message::<crate::ai::server::AiEntityDisabled>()
+            .add_systems(
+                FixedUpdate,
+                crate::ship::disablement::publish_ship_disablement
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .in_set(crate::sim_sets::FixedStep::PublishShipDisablement),
+            );
         // The ONE shared AI decision cadence (issues #803, #889, #895).
         // Installed by every plugin that registers a gated system; the helper
         // is idempotent and derives the latch from the logical tick in

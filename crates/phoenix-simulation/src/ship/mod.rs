@@ -46,4 +46,7 @@ pub mod viewscreen;
 pub mod console_publication;
 
 pub mod access;
+pub mod compartment_damage;
 pub mod composition;
+
+pub mod disablement;

@@ -560,6 +560,7 @@ fn an_armed_gm_event_fire_round_trips_with_its_authored_trigger_table() {
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }
     }
@@ -760,6 +761,7 @@ fn paused_gm_events_round_trip_with_their_authored_trigger_table() {
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }
     }
@@ -868,6 +870,7 @@ fn an_armed_gm_event_skip_round_trips_beside_an_armed_fire() {
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }
     }
@@ -1876,3 +1879,6 @@ fn repair_report_sources_and_recovery_watermarks_survive_snapshot_restore() {
     assert_eq!(actual.entries, queue.entries);
     assert_eq!(actual.recoveries, queue.recoveries);
 }
+
+#[path = "snapshot/actor_continuation_tests.rs"]
+mod actor_continuation_tests;

@@ -143,6 +143,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             AiTorpedoAutoFire,
             HandleFireTorpedo,
             HandleTorpedoMagazineInterSystem,
+            PublishShipDisablement,
             CollectWorldEvents,
             TickTriggerPipeline,
             TickScriptCallbacks,

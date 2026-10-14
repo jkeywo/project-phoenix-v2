@@ -29,6 +29,7 @@ fn trigger_state(
         fired,
         origin_layer: None,
         seen_destroyed: Default::default(),
+        seen_disabled: Default::default(),
         last_fired_elapsed: None,
     }
 }

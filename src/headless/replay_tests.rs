@@ -298,6 +298,7 @@ fn replays_through_the_canonical_journal(condition: crate::world::config::Trigge
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]
         .into(),
@@ -391,6 +392,7 @@ fn an_armed_gm_event_skip_replays_through_the_canonical_journal() {
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]
         .into(),
@@ -821,6 +823,7 @@ fn a_paused_gm_event_replays_through_the_canonical_journal() {
             fired: false,
             origin_layer: None,
             seen_destroyed: Default::default(),
+            seen_disabled: Default::default(),
             last_fired_elapsed: None,
         }]
         .into(),

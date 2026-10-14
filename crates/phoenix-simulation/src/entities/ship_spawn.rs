@@ -2,7 +2,7 @@
 //! Crew selection and local/fleet identity belong to the GameStart adapter.
 
 use super::config::EntityConfig;
-use super::spawner::{EntityShipArcHull, HelmConsoleSection, WeaponsConsoleSection};
+use super::spawner::{HelmConsoleSection, WeaponsConsoleSection};
 use bevy::prelude::*;
 
 /// Resolved ship inputs. No equipment or player/NPC branch belongs in this seed.
@@ -90,7 +90,6 @@ pub(super) fn install(
     install_blasters(config, cmds);
     install_helm(config, is_ship, cmds);
     install_shields(config, cmds);
-    install_arc_hull(config, cmds);
 }
 
 fn insert_ship_config_and_core_bundle(
@@ -530,6 +529,14 @@ fn insert_power_multipliers_and_modifiers(
                             }
                         }
                     }
+                    if let (Some(interior), Some(damage), Some(ship)) =
+                        (&config.interior, &config.damage, &config.ship_config)
+                    {
+                        match phoenix_sim_gameplay::ship::compartment_damage::DamageDefinition::compile(interior,damage,ship) {
+                            Ok(definition) => teams.install_damage_definition(definition),
+                            Err(error) => { error!("refusing repair teams with invalid damage definition: {error}"); return; }
+                        }
+                    }
                     cmds.insert(crate::console::repair::server::ShipRepairTeams(teams));
                 }
                 Err(error) => {
@@ -824,38 +831,5 @@ fn install_shields(config: &EntityConfig, cmds: &mut EntityCommands) {
             .map(|a| a.frequency)
             .unwrap_or(0.5);
         cmds.insert(crate::ship::shields::ShipShields(shield_system, freq));
-    }
-}
-
-fn install_arc_hull(config: &EntityConfig, cmds: &mut EntityCommands) {
-    // Per-arc hull HP (issue #514) — populated from `[[shield_arc]].hull_max_hp`
-    // and companion threshold/debuff fields. Attaches `EntityShipArcHull`
-    // alongside the shield system so `sync_console_damage_tiers` can route arc
-    // damage → offline_systems per-arc. Skipped when no arc declares hull HP.
-    if !config.shield_arcs.is_empty() {
-        let arc_entries: Vec<(String, crate::ship::damage::ArcHullEntry)> = config
-            .shield_arcs
-            .iter()
-            .filter(|a| a.hull_max_hp > 0.0)
-            .map(|a| {
-                (
-                    a.id.clone(),
-                    crate::ship::damage::ArcHullEntry {
-                        current: a.hull_max_hp,
-                        max: a.hull_max_hp,
-                        tier_config: crate::ship::damage::ConsoleTierConfig {
-                            damaged_threshold_pct: a.hull_damaged_threshold_pct,
-                            disabled_threshold_pct: a.hull_disabled_threshold_pct,
-                            debuff_magnitude: a.hull_debuff_magnitude,
-                        },
-                    },
-                )
-            })
-            .collect();
-        if !arc_entries.is_empty() {
-            cmds.insert(EntityShipArcHull(
-                crate::ship::damage::ShipArcHull::from_entries(arc_entries),
-            ));
-        }
     }
 }

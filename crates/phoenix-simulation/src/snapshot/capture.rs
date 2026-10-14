@@ -451,6 +451,11 @@ pub(super) fn capture_comms(world: &World) -> Option<CommsState> {
 pub(super) fn world_event_record(event: &WorldEvent) -> WorldEventRecord {
     let mut row = WorldEventRecord::default();
     match event {
+        WorldEvent::Disabled { uuid, disabled } => {
+            row.kind = 11;
+            row.subject = uuid.clone();
+            row.disabled = *disabled;
+        }
         WorldEvent::Destroyed { uuid } => {
             row.kind = 0;
             row.subject = uuid.clone();
@@ -690,6 +695,21 @@ pub(super) fn weapon_state(
 ) -> WeaponState {
     let system = torpedoes.map(|t| &t.0);
     WeaponState {
+        beam_impact_samples: beam
+            .map(|beam| {
+                beam.live_banks()
+                    .filter_map(|(bank, slot)| {
+                        Some((
+                            bank.clone(),
+                            (
+                                slot.impact_sample_target.clone()?,
+                                slot.impact_sample.clone()?,
+                            ),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         beam_strike_bonuses: beam
             .map(|b| {
                 b.live_banks()
@@ -750,6 +770,7 @@ pub(super) fn weapon_state(
                 s.in_flight
                     .iter()
                     .map(|t| TorpedoInFlight {
+                        impact: t.impact,
                         strike_damage_bonus: t.strike_damage_bonus,
                         uuid: t.uuid.clone(),
                         position: [t.x, t.y, t.z],
@@ -769,6 +790,7 @@ pub(super) fn weapon_state(
                 s.burst_states
                     .iter()
                     .map(|b| BurstState {
+                        impact: b.impact,
                         tube_id: b.tube_id.clone(),
                         pending: b.pending,
                         timer: b.timer,
@@ -833,6 +855,7 @@ pub(super) fn weapon_state(
                                 .in_flight
                                 .iter()
                                 .map(|p| BlasterBolt {
+                                    impact: p.impact,
                                     id: p.id.clone(),
                                     x: p.x,
                                     z: p.z,
@@ -871,6 +894,14 @@ pub(super) fn repair_state(
     alerted_rows.sort_by(|a, b| a.0.cmp(&b.0));
     RepairState {
         jobs: teams.map(|t| t.0.save_state()),
+        readings: queue
+            .map(|q| {
+                q.entries
+                    .iter()
+                    .map(|entry| (entry.group.clone(), entry.readings.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         queue: queue
             .map(|q| {
                 q.entries
@@ -1409,7 +1440,17 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                             p.vertical_speed,
                         ]
                     }),
-                    hull: hull.map(|h| hull_rows(&h.0)),
+                    hull: if entity.contains::<crate::ship::compartment_damage::ShipDamage>() {
+                        None
+                    } else {
+                        hull.map(|h| hull_rows(&h.0))
+                    },
+                    disablement: entity
+                        .get::<crate::ship::disablement::DisablementObservation>()
+                        .cloned(),
+                    physical_damage: entity
+                        .get::<crate::ship::compartment_damage::ShipDamage>()
+                        .map(|damage| damage.state.clone()),
                     red_alert: alert.map(|a| a.0),
                     // Sorted by station id, the same walk `fold_station_stances_namespace`
                     // takes, so the capture is byte-identical whatever order the map's

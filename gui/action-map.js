@@ -59,6 +59,7 @@ export const ACTION_MAP = Object.freeze({
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', { ...(correlated ? { correlation: action.correlation } : {}),
       target: controlSystemId(action, 'tactical-radar'), payload: { type: 'SetWeaponsRestraint', data: { held: !!action.held } } });
   },
+  set_energy_generation: energyCommand('SetEnergyGeneration', ['enabled']),
   set_energy_reactor: energyCommand('SetEnergyReactor', ['output_per_sec', 'cooling_per_sec']),
   set_energy_group: energyCommand('SetEnergyGroup', ['group', 'flow_per_sec', 'cooling_per_sec']),
   set_energy_priority: energyCommand('SetEnergyPriority', ['group', 'priority']),

@@ -550,3 +550,44 @@ fn equal_peers_emit_identical_admitted_commands_with_independent_tree_memory() {
         Some(false)
     );
 }
+
+#[test]
+fn dynasty_generation_cycle_reads_permitted_strike_observation_and_uses_ordinary_admission() {
+    let content = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/dynasty_player_cruiser.toml",
+    )
+    .unwrap();
+    let (mut app, entity) = app_for(content, false);
+    assert!(power(&app, entity).network().generation_enabled);
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::Power(board) = boards.0.get_mut(&SystemId("power".into())).unwrap()
+        else {
+            panic!("permitted power view")
+        };
+        board.strike_reserve = Some(crate::core::messages::StrikeReserveBlackboard {
+            charge: 60.0,
+            capacity: 95.1,
+            charging: false,
+            enabled: true,
+            depleted: false,
+        });
+    }
+    app.update();
+    assert!(!power(&app, entity).network().generation_enabled);
+    assert!(commands(&app, entity)
+        .contains(&SystemControlPayload::SetEnergyGeneration { enabled: false }));
+    // The next ordinary publication has no enabled strike. No live weapon or
+    // global state is borrowed to retain the previous Console observation.
+    app.update();
+    assert!(power(&app, entity).network().generation_enabled);
+    assert!(commands(&app, entity)
+        .contains(&SystemControlPayload::SetEnergyGeneration { enabled: true }));
+    app.update();
+    assert!(!commands(&app, entity)
+        .iter()
+        .any(|command| matches!(command, SystemControlPayload::SetEnergyGeneration { .. })));
+}

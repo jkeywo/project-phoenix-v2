@@ -2955,6 +2955,25 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+# Preserve the authored strike cycle using the ordinary reactor controller.
+# Capacitor export remains available while new generation is held off.
+[[system.config.ai.tree.state.task]]
+id = "generate-between-strikes"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "reactor-generation"
+value = { source = "literal", value = true }
+
+[[system.config.ai.tree.state.task]]
+id = "spend-strike-capacitor"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "reactor-generation"
+value = { source = "literal", value = false }
+[[system.config.ai.tree.state.task.when]]
+equals = true
+value = { source = "number_compare", name = "strike_boost_enabled", comparison = "greater", value = 0.0 }
+
 [[system]]
 id = "power-battery"
 console = "power"

@@ -5182,3 +5182,6 @@ workshop.damage.manual_work_fraction,Component repair tooling,Manual work fracti
 workshop.weapon.console,Weapon ownership,Controlling Console,Steuerkonsole,Controlling Console,machine
 workshop.weapon.group,Weapon ownership,Power allocation group,Stromversorgungsgruppe,Power allocation group,machine
 workshop.weapon.compartment,Weapon ownership,Physical compartment,Physischer Raum,Physical compartment,machine
+energy.controls.generation,Reactor generation toggle,Generate reactor energy,Reaktorenergie erzeugen,Generate reactor energy,machine
+semantic_action.power.energy_generation.label,Reactor generation intent,Toggle reactor generation,Reaktorenergieerzeugung umschalten,Toggle reactor generation,machine
+semantic_action.power.energy_generation.accessibility,Reactor generation intent,Toggle reactor generation,Reaktorenergieerzeugung umschalten,Toggle reactor generation,machine

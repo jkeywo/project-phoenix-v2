@@ -892,3 +892,54 @@ fn snapshot_refuses_invalid_energy_references_before_overwriting_live_stocks() {
         Some(&stock)
     );
 }
+
+#[test]
+fn reactor_generation_requires_current_operator_and_survives_full_snapshot_restore() {
+    let (mut app, entity) = fixture();
+    start(&mut app);
+    let out = command(
+        &mut app,
+        "captain",
+        "generation-wrong-holder",
+        SystemControlPayload::SetEnergyGeneration { enabled: false },
+    );
+    feedback(
+        &out,
+        "captain",
+        "generation-wrong-holder",
+        ActionFeedbackOutcome::Refused,
+    );
+    assert!(power(&app, entity).network().generation_enabled);
+    let out = command(
+        &mut app,
+        "power",
+        "generation-stop",
+        SystemControlPayload::SetEnergyGeneration { enabled: false },
+    );
+    feedback(
+        &out,
+        "power",
+        "generation-stop",
+        ActionFeedbackOutcome::Applied,
+    );
+    assert!(!power(&app, entity).network().generation_enabled);
+    let saved = crate::snapshot::capture(app.world());
+    let saved: crate::snapshot::PhoenixSnapshot =
+        ron::from_str(&ron::to_string(&saved).unwrap()).unwrap();
+    let out = command(
+        &mut app,
+        "power",
+        "generation-start",
+        SystemControlPayload::SetEnergyGeneration { enabled: true },
+    );
+    feedback(
+        &out,
+        "power",
+        "generation-start",
+        ActionFeedbackOutcome::Applied,
+    );
+    assert!(power(&app, entity).network().generation_enabled);
+    let report = crate::snapshot::restore(app.world_mut(), &saved);
+    assert!(report.is_complete(), "{report:?}");
+    assert!(!power(&app, entity).network().generation_enabled);
+}

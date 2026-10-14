@@ -2119,6 +2119,9 @@ pub enum SystemControlPayload {
         group: PowerGroupId,
         level: u8,
     },
+    SetEnergyGeneration {
+        enabled: bool,
+    },
     SetEnergyReactor {
         output_per_sec: f32,
         cooling_per_sec: f32,

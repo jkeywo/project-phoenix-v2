@@ -565,3 +565,30 @@ fn scarce_shared_coolant_respects_root_rank_before_equal_child_ranks() {
     assert_eq!(result.delivered_energy, 0.0);
     state.validate_against(&cfg, &ship).unwrap();
 }
+
+#[test]
+fn disabled_generation_still_exports_finite_reserve_and_preserves_cooling_and_continuation() {
+    let (mut cfg, ship, bindings, coolant) = fixture(vec![group("work", None, 10.0, 0)]);
+    cfg.reactor.reserve.passive_loss_at_full_per_sec = 2.0;
+    cfg.reactor.default_cooling_per_sec = 5.0;
+    let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    state.generation_enabled = false;
+    state.reactor.heat = 80.0;
+    let result = run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+    assert_eq!(result.generation_accepted, 0.0);
+    assert_eq!(result.generation_rejected, 0.0);
+    assert!(result.delivered_energy > 0.0);
+    assert!(state.consumers[&SystemId("consumer-work".into())].energy > 0.0);
+    assert!(state.reactor.energy < cfg.reactor.initial_energy - result.delivered_energy);
+    assert!(state.reactor.heat < 80.0);
+    assert!(result.coolant_used["coolant"] > 0.0);
+    let encoded = serde_json::to_string(&state).unwrap();
+    let mut resumed: EnergyNetworkState = serde_json::from_str(&encoded).unwrap();
+    resumed.validate_against(&cfg, &ship).unwrap();
+    assert_eq!(state, resumed);
+    run(&mut state, &cfg, &ship, &bindings, &coolant, 0.5);
+    run(&mut resumed, &cfg, &ship, &bindings, &coolant, 0.5);
+    assert_eq!(state, resumed);
+    state.generation_enabled = true;
+    assert!(run(&mut state, &cfg, &ship, &bindings, &coolant, 0.5).generation_accepted > 0.0);
+}

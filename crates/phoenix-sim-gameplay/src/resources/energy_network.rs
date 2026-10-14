@@ -30,6 +30,8 @@ pub struct EnergyGroupState {
 #[serde(deny_unknown_fields)]
 pub struct EnergyNetworkState {
     pub reactor: EnergyState,
+    /// New generation only; stored reserve export and cooling remain ordinary.
+    pub generation_enabled: bool,
     pub output_target_per_sec: f32,
     pub output_actual_per_sec: f32,
     pub reactor_cooling_per_sec: f32,
@@ -99,6 +101,7 @@ impl EnergyNetworkState {
         )?;
         let state = Self {
             reactor,
+            generation_enabled: true,
             output_target_per_sec: config.reactor.initial_output_per_sec,
             output_actual_per_sec: if reactor.thermal_stopped {
                 0.0
@@ -458,7 +461,7 @@ impl EnergyNetworkState {
         } else {
             (actual - ramp).max(target) as f32
         };
-        let generation = if next.reactor.thermal_stopped {
+        let generation = if !next.generation_enabled || next.reactor.thermal_stopped {
             0.0
         } else {
             budget(

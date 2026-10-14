@@ -150,7 +150,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
     let mut console_feed_sources: Vec<_> = console_publication_kinds.keys().cloned().collect();
     console_feed_sources.sort();
     let mut power_tree_vocabulary = crate::ai::state_tree::schema_metadata(
-        &crate::ai::state_tree::SupportedBindings::default(),
+        &phoenix_sim_gameplay::resources::energy_ai::power_bindings(),
     );
     power_tree_vocabulary.sources.push("number_compare");
     power_tree_vocabulary.actions.push("write_number");

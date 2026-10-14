@@ -38,6 +38,7 @@ pub fn publish_power_blackboard(
         }
         let energy = PowerEnergyBlackboard {
             reactor: ReactorEnergyReading {
+                generation_enabled: network.generation_enabled,
                 energy: network.reactor.energy,
                 capacity: r.reserve.capacity,
                 heat: network.reactor.heat,

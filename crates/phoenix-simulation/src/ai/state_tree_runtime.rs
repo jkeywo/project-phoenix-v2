@@ -49,7 +49,7 @@ pub fn compile_ship_trees_with_energy(
             })?;
             phoenix_sim_gameplay::ai::state_tree::compile_with_numbers(
                 &definition,
-                &phoenix_sim_gameplay::ai::state_tree::SupportedBindings::default(),
+                &phoenix_sim_gameplay::resources::energy_ai::power_bindings(),
                 &phoenix_sim_gameplay::resources::energy_ai::power_numeric_bindings(energy),
             )
         } else if system.kind == crate::ship::system_registry::SHIELD_ARC_KIND {

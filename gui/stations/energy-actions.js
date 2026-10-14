@@ -2,7 +2,7 @@
 import { defineStationAction, createCorrelatedActionSender } from './action-support.js';
 import { familySystemId, familyView } from '../console-payload.js';
 
-export const ENERGY_ACTION_IDS = Object.freeze({ reactor: 'power.energy-reactor', group: 'power.energy-group',
+export const ENERGY_ACTION_IDS = Object.freeze({ generation: 'power.energy-generation', reactor: 'power.energy-reactor', group: 'power.energy-group',
   priority: 'power.energy-priority', mode: 'power.energy-mode', system: 'power.energy-system-flow' });
 export const ENERGY_ACTIONS = Object.freeze(Object.entries(ENERGY_ACTION_IDS).map(([name, id]) => defineStationAction({
   id, contexts: ['power', 'engineering', 'captain'], labelKey: 'power.energy_' + name, bindings: [null, null],
@@ -18,7 +18,9 @@ export function registerEnergyActions(registry, options = {}) {
     const target = view?.system_id || familySystemId(state, 'power');
     if (!model || view.power_auto || !target || !detail) return false;
     let payload;
-    if (name === 'reactor' && bounded(detail.output_per_sec, model.reactor.max_output_per_sec) && bounded(detail.cooling_per_sec, model.reactor.max_cooling_per_sec))
+    if (name === 'generation' && typeof detail.enabled === 'boolean')
+      payload = { enabled: detail.enabled };
+    else if (name === 'reactor' && bounded(detail.output_per_sec, model.reactor.max_output_per_sec) && bounded(detail.cooling_per_sec, model.reactor.max_cooling_per_sec))
       payload = { output_per_sec: detail.output_per_sec, cooling_per_sec: detail.cooling_per_sec };
     else if (name === 'mode' && ['manual', 'minimal'].includes(detail.mode) && ['none', 'low', 'high'].includes(detail.cooling_usage))
       payload = { mode: detail.mode, cooling_usage: detail.cooling_usage };

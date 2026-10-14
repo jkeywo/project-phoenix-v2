@@ -3,11 +3,19 @@ use crate::ai::state_tree::{NumericBindings, NumericBounds};
 use crate::entities::config::EnergyConfigSection;
 use std::collections::BTreeMap;
 
+pub fn power_bindings() -> crate::ai::state_tree::SupportedBindings {
+    crate::ai::state_tree::SupportedBindings {
+        facts: Default::default(),
+        channels: ["reactor-generation".to_owned()].into(),
+    }
+}
+
 pub fn power_numeric_bindings(config: &EnergyConfigSection) -> NumericBindings {
     let mut facts: std::collections::BTreeSet<String> = [
         "reactor_reserve_fraction",
         "reactor_heat_fraction",
         "output_actual",
+        "strike_boost_enabled",
     ]
     .map(str::to_owned)
     .into();

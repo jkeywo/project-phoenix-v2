@@ -213,21 +213,36 @@ fn ai_power_allocation(
             continue;
         }
         let view = config.0.observations_for_system(&system, &boards.0);
-        let Some(energy) = view
+        let Some(power_view) = view
             .get(&crate::core::messages::SystemId(
                 crate::ship::system_registry::POWER_SYSTEM_ID.into(),
             ))
             .and_then(|board| match board {
-                SystemBlackboard::Power(board) => board.energy.as_ref(),
+                SystemBlackboard::Power(board) => Some(board),
                 _ => None,
             })
         else {
+            continue;
+        };
+        let Some(energy) = power_view.energy.as_ref() else {
             continue;
         };
         let Some(runtime) = runtimes.0.get_mut(&system) else {
             continue;
         };
         let mut facts = BTreeMap::from([
+            (
+                "strike_boost_enabled".into(),
+                if power_view
+                    .strike_reserve
+                    .as_ref()
+                    .is_some_and(|reading| reading.enabled)
+                {
+                    1.0
+                } else {
+                    0.0
+                },
+            ),
             (
                 "reactor_reserve_fraction".into(),
                 (energy.reactor.energy / energy.reactor.capacity) as f64,
@@ -275,7 +290,10 @@ fn ai_power_allocation(
             programs.0.get(&system),
             &BTreeMap::new(),
             &facts,
-            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "reactor-generation".into(),
+                energy.reactor.generation_enabled,
+            )]),
             runtime,
             tick.0,
         ) {
@@ -310,6 +328,19 @@ fn ai_power_allocation(
                 Some(config),
                 &mut admitted,
             );
+        }
+        if let Some(enabled) = result.intents.get("reactor-generation") {
+            if *enabled != energy.reactor.generation_enabled {
+                emit_ai_command(
+                    uuid,
+                    system.clone(),
+                    Control::SetEnergyGeneration { enabled: *enabled },
+                    sources,
+                    &sessions,
+                    Some(config),
+                    &mut admitted,
+                );
+            }
         }
         for group in &energy.groups {
             let flow = number(&format!("flow-{}", group.id), group.desired_flow_per_sec);

@@ -12,10 +12,11 @@ export class PhEnergyControls extends PhElement {
     <div class="row"><label for="depth">${t('energy.controls.depth')}<select id="depth"><option value="min">${t('energy.controls.min')}</option><option value="mid">${t('energy.controls.mid')}</option><option value="detail">${t('energy.controls.detail')}</option></select></label>
     <label for="mode">${t('energy.controls.mode')}<select id="mode"><option value="manual">${t('energy.controls.manual')}</option><option value="minimal">${t('energy.controls.minimal')}</option></select></label>
     <label for="usage">${t('energy.controls.coolant_usage')}<select id="usage"><option value="none">${t('energy.controls.none')}</option><option value="low">${t('energy.controls.low')}</option><option value="high">${t('energy.controls.high')}</option></select></label></div>
-    <fieldset id="reactor"><legend>${t('energy.controls.reactor')}</legend><p class="stats" id="reactor-status"></p><div id="reactor-controls"></div></fieldset>
+    <fieldset id="reactor"><legend>${t('energy.controls.reactor')}</legend><p class="stats" id="reactor-status"></p><label for="generation"><input id="generation" type="checkbox">${t('energy.controls.generation')}</label><div id="reactor-controls"></div></fieldset>
     <p class="stats" id="coolant"></p><div id="groups"></div><details id="consumer-section"><summary>${t('energy.controls.local_reserves')}</summary><div id="consumers"></div></details>`;
   }
   onTemplate() {
+    this.$('generation').onchange = () => { if (!this.$('generation').disabled) this.#activate('generation', { enabled: this.$('generation').checked }); };
     this._depth ||= 'mid'; this._groups = new Map(); this._consumers = new Map();
     this._groupRoot = this.$('groups'); this._consumerRoot = this.$('consumers');
     this.$('depth').onchange = () => { this._depth = this.$('depth').value; this.render(this.state);
@@ -88,6 +89,7 @@ export class PhEnergyControls extends PhElement {
     const reactorStatus = this.$('reactor-status'); reactorStatus.classList.toggle('hot', reactor.thermal_stopped);
     reactorStatus.textContent = t('energy.controls.reactor_status', { energy: number(reactor.energy), capacity: number(reactor.capacity), heat: number(reactor.heat), trip: number(reactor.trip_heat), output: number(reactor.output_actual_per_sec), desired: number(reactor.output_target_per_sec) })
       + (reactor.thermal_stopped ? ' ' + t('energy.controls.thermal_stop') : '');
+    this.$('generation').disabled = auto; this.$('generation').checked = reactor.generation_enabled;
     this.$('reactor-controls').hidden = depth === 'min';
     this.#value(this._output, reactor.output_target_per_sec, reactor.max_output_per_sec, auto);
     this.#value(this._cooling, reactor.cooling_per_sec, reactor.max_cooling_per_sec, auto);

@@ -246,6 +246,10 @@ pub fn handle_power_messages(
                 Control::SetPowerGroupAllocation { group, level } => candidate
                     .set_group_allocation(group, *level)
                     .map_err(|error| format!("{error:?}")),
+                Control::SetEnergyGeneration { enabled } => {
+                    candidate.set_generation_enabled(*enabled);
+                    Ok(())
+                }
                 Control::SetEnergyReactor {
                     output_per_sec,
                     cooling_per_sec,

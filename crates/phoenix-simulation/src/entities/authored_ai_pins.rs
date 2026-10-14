@@ -2618,6 +2618,7 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
         );
         for (tick, recovering) in [(0, false), (1, true)] {
             let mut readings = BTreeMap::from([
+                ("strike_boost_enabled".into(), 0.0),
                 (
                     "reactor_reserve_fraction".into(),
                     if recovering { 0.0 } else { 0.75 },
@@ -2647,7 +2648,7 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                 programs.0.get(&reactor),
                 &BTreeMap::new(),
                 &readings,
-                &BTreeMap::new(),
+                &BTreeMap::from([("reactor-generation".into(), true)]),
                 frames.0.get_mut(&reactor).unwrap(),
                 tick,
             )

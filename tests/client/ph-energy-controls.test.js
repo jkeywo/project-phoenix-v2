@@ -8,7 +8,7 @@ import { createConsoleViewSession } from '../../gui/console-working-view.js';
 import { ENERGY_ACTION_IDS } from '../../gui/stations/energy-actions.js';
 const group = (id, priority, parent = null) => ({ id, label: id, parent, priority, desired_flow_per_sec: 4, effective_flow_per_sec: 4,
   max_flow_per_sec: 20, desired_cooling_per_sec: 2, effective_cooling_per_sec: 2, max_cooling_per_sec: 5, cut: false });
-function model() { return { mode: 'manual', cooling_usage: 'low', reactor: { energy: 50, capacity: 100, heat: 2, trip_heat: 50, recover_heat: 30,
+function model() { return { mode: 'manual', cooling_usage: 'low', reactor: { generation_enabled: true, energy: 50, capacity: 100, heat: 2, trip_heat: 50, recover_heat: 30,
   thermal_stopped: false, output_target_per_sec: 10, output_actual_per_sec: 9, sustainable_output_per_sec: 10, max_output_per_sec: 20, cooling_per_sec: 2, max_cooling_per_sec: 5 },
 groups: [group('helm', 0), group('weapons', 1), group('engine', 0, 'helm')], consumers: [{ system: 'drive', group: 'engine', energy: 30, capacity: 40,
   heat: 5, trip_heat: 50, recover_heat: 30, thermal_stopped: false, intake_per_sec: 1, max_intake_per_sec: 2, flow_override_per_sec: 1 }], coolant: [{ provider: 'tank', available: 10, credit: 0.2 }] }; }
@@ -27,6 +27,15 @@ const change = (widget, id, value) => { const input = widget.shadowRoot.getEleme
 beforeEach(() => { document.body.innerHTML = ''; });
 afterEach(() => { document.body.innerHTML = ''; delete window.activateSemanticAction; delete window.sendAction; });
 describe('local energy human controls', () => {
+  it('sends generation intent through the current operator without changing export or reserve state', () => {
+    const fixture = setup(), { widget, wire } = fixture, toggle = widget.shadowRoot.getElementById('generation');
+    expect(toggle.checked).toBe(true); toggle.click();
+    expect(wire).toHaveBeenLastCalledWith('ControlSystemCorrelated', expect.objectContaining({ target: 'main-reactor', payload: { type: 'SetEnergyGeneration', data: { enabled: false } } }));
+    expect(fixture.view.energy.reactor.generation_enabled).toBe(true);
+    expect(fixture.view.energy.reactor.output_target_per_sec).toBe(10);
+    fixture.update({ power_auto: true }); expect(toggle.disabled).toBe(true);
+    wire.mockClear(); toggle.click(); expect(wire).not.toHaveBeenCalled();
+  });
   it('rejects stale or out-of-bounds flow commands without emitting machinery requests', () => {
     const { wire, view } = setup();
     const request = (id, detail) => window.activateSemanticAction(id, { detail });

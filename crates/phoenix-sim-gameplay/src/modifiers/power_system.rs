@@ -197,6 +197,9 @@ impl PowerSystem {
     pub fn network_mut(&mut self) -> &mut EnergyNetworkState {
         &mut self.network
     }
+    pub fn set_generation_enabled(&mut self, enabled: bool) {
+        self.network.generation_enabled = enabled;
+    }
     pub fn battery_charge(&self) -> f32 {
         self.network.reactor.energy
     }

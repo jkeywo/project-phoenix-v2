@@ -36,6 +36,7 @@ pub struct PowerEnergyBlackboard {
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReactorEnergyReading {
+    pub generation_enabled: bool,
     pub energy: f32,
     pub capacity: f32,
     pub heat: f32,

@@ -29,6 +29,7 @@ impl Plugin for ShipPowerPlugin {
             crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID,
         ).with_feedback(crate::command_admission::FeedbackAddress::MatcherSpelling, &[
             crate::core::messages::SystemControlPayloadDiscriminants::SetPowerGroupAllocation,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyGeneration,
             crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyReactor,
             crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyGroup,
             crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyPriority,

@@ -1109,7 +1109,7 @@ impl EntityConfig {
                         })?;
                     crate::ai::state_tree::compile_with_numbers(
                         &tree,
-                        &crate::ai::state_tree::SupportedBindings::default(),
+                        &crate::resources::energy_ai::power_bindings(),
                         &crate::resources::energy_ai::power_numeric_bindings(
                             config.energy.as_ref().unwrap(),
                         ),

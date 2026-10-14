@@ -343,6 +343,8 @@ id = "fore"
 label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 180
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-aft"] }
 hull_max_hp = 4
 
 [[shield_arc]]
@@ -350,6 +352,8 @@ id = "aft"
 label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 180
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore"] }
 hull_max_hp = 4
 
 # ── Power ────────────────────────────────────────────────────────────────────

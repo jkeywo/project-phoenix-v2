@@ -388,7 +388,7 @@ service = "coolant"
 system = "shield-arc-all"
 initial_energy = 22.5
 initial_heat = 0
-continuous_cost_per_sec = 1
+continuous_cost_per_sec = 0 # Physical upkeep/recharge costs belong to shield_arc.energy.
 discrete_cost = 0
 
 [energy.consumer.reserve]

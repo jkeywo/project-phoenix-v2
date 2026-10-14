@@ -204,6 +204,8 @@ id = "all"
 label = "shield_arc.all.label"
 center_deg = 0
 width_deg = 360
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.6666666666666666, recovery_energy_per_hp = 0, discharge_hp_per_sec = 0, recovery_targets = [] }
 max_hp = 120
 regen_per_sec = 1.5
 

@@ -1,5 +1,64 @@
 //! Entity schema: shields. Public paths remain in the parent module.
 use super::*;
+use crate::core::messages::SystemId;
+
+/// Physical shield work coefficients. Local storage, intake and thermal state
+/// remain in the owning System's ordinary energy profile.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShieldArcEnergyConfig {
+    pub upkeep_per_sec: f32,
+    pub recharge_energy_per_hp: f32,
+    pub recovery_energy_per_hp: f32,
+    pub discharge_hp_per_sec: f32,
+    pub recovery_targets: Vec<SystemId>,
+}
+
+impl ShieldArcEnergyConfig {
+    /// Provisional parser tuning for generated/fixture arcs, never an implicit
+    /// default for an authored `[[shield_arc]]` missing its required energy block.
+    pub fn for_generated_arc(recharge_energy_per_hp: f32, recovery_targets: Vec<SystemId>) -> Self {
+        Self {
+            upkeep_per_sec: 0.05,
+            recharge_energy_per_hp,
+            recovery_energy_per_hp: recharge_energy_per_hp * 0.5,
+            discharge_hp_per_sec: 5.0,
+            recovery_targets,
+        }
+    }
+
+    pub fn recovery_enabled(&self) -> bool {
+        self.recovery_energy_per_hp > 0.0 && self.discharge_hp_per_sec > 0.0
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("upkeep_per_sec", self.upkeep_per_sec),
+            ("recharge_energy_per_hp", self.recharge_energy_per_hp),
+            ("recovery_energy_per_hp", self.recovery_energy_per_hp),
+            ("discharge_hp_per_sec", self.discharge_hp_per_sec),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "shield energy {name} must be finite and non-negative"
+                ));
+            }
+        }
+        if self.recharge_energy_per_hp <= 0.0 {
+            return Err("shield energy recharge_energy_per_hp must be positive".into());
+        }
+        if self.recovery_enabled() && self.recovery_energy_per_hp >= self.recharge_energy_per_hp {
+            return Err("shield energy recovery_energy_per_hp must be strictly below recharge_energy_per_hp".into());
+        }
+        Ok(())
+    }
+}
+
+impl Default for ShieldArcEnergyConfig {
+    fn default() -> Self {
+        Self::for_generated_arc(0.5, Vec::new())
+    }
+}
 
 /// AI tuning parameters for the shields focus controller.
 ///
@@ -182,6 +241,9 @@ pub struct ShieldArcConfig {
     pub center_deg: f32,
     /// Arc angular width in degrees.
     pub width_deg: f32,
+    /// Explicit operating/recharge/recovery work. A missing block is an
+    /// actionable content-version mismatch, rather than free physical shields.
+    pub energy: ShieldArcEnergyConfig,
     /// Per-arc override for max HP; falls back to `[shields_console.base] max_hp`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_hp: Option<i32>,
@@ -249,6 +311,7 @@ impl ShieldArcConfig {
             regen_per_sec: self.regen_per_sec,
             offline_duration: self.offline_duration,
             priority: self.priority,
+            energy: self.energy.clone(),
         }
     }
 }

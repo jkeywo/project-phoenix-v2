@@ -825,6 +825,8 @@ id = "fore"
 label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.2857142857142857, recovery_energy_per_hp = 0.14285714285714285, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-starboard","shield-arc-aft","shield-arc-port","shield-arc-omni"] }
 hull_max_hp = 10
 
 [[shield_arc]]
@@ -832,6 +834,8 @@ id = "starboard"
 label = "shield_arc.starboard.label"
 center_deg = 90
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.2857142857142857, recovery_energy_per_hp = 0.14285714285714285, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-aft","shield-arc-port","shield-arc-omni"] }
 hull_max_hp = 9
 
 [[shield_arc]]
@@ -839,6 +843,8 @@ id = "aft"
 label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.2857142857142857, recovery_energy_per_hp = 0.14285714285714285, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-starboard","shield-arc-port","shield-arc-omni"] }
 hull_max_hp = 9
 
 [[shield_arc]]
@@ -846,6 +852,8 @@ id = "port"
 label = "shield_arc.port.label"
 center_deg = 270
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.2857142857142857, recovery_energy_per_hp = 0.14285714285714285, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-starboard","shield-arc-aft","shield-arc-omni"] }
 hull_max_hp = 9
 
 [[shield_arc]]
@@ -853,6 +861,8 @@ id = "omni"
 label = "shield_arc.omni.label"
 center_deg = 0
 width_deg = 360
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.2857142857142857, recovery_energy_per_hp = 0.14285714285714285, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-starboard","shield-arc-aft","shield-arc-port"] }
 priority = 2
 hull_max_hp = 8
 

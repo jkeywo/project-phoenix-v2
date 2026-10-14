@@ -35,6 +35,7 @@ pub use energy::*;
 mod shields;
 pub use shields::*;
 mod repair;
+mod shield_energy;
 pub use repair::*;
 mod comms;
 pub use comms::*;
@@ -387,7 +388,12 @@ impl EntityConfig {
         let shield_arcs: Vec<ShieldArcConfig> = match shield_arcs_value {
             Some(toml::Value::Array(arr)) => arr
                 .into_iter()
-                .map(|v| v.try_into::<ShieldArcConfig>())
+                .map(|v| {
+                    if v.get("energy").is_none() {
+                        return Err(SerdeError::custom("Shield arcs require an explicit [shield_arc.energy] work configuration (increment 9): author upkeep, recharge/recovery energy per HP, discharge rate and eligible recovery_targets. Convert this content in Workshop or use its original game version."));
+                    }
+                    v.try_into::<ShieldArcConfig>()
+                })
                 .collect::<Result<_, _>>()?,
             Some(other) => {
                 return Err(SerdeError::custom(format!(
@@ -806,6 +812,8 @@ impl EntityConfig {
                 .unwrap_or_default();
             energy
                 .validate(ship, &config.resource_services, &capacities)
+                .map_err(SerdeError::custom)?;
+            shield_energy::validate_shield_arc_energy(&config.shield_arcs, ship, energy)
                 .map_err(SerdeError::custom)?;
         }
 

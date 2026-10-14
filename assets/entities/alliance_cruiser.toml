@@ -1086,6 +1086,8 @@ id = "fore"
 label = "shield_arc.fore.label"
 center_deg = 0
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-port","shield-arc-aft","shield-arc-starboard"] }
 hull_max_hp = 7
 
 [[shield_arc]]
@@ -1093,6 +1095,8 @@ id = "port"
 label = "shield_arc.port.label"
 center_deg = 270
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-aft","shield-arc-starboard"] }
 hull_max_hp = 6
 
 [[shield_arc]]
@@ -1100,6 +1104,8 @@ id = "aft"
 label = "shield_arc.aft.label"
 center_deg = 180
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-port","shield-arc-starboard"] }
 hull_max_hp = 6
 
 [[shield_arc]]
@@ -1107,6 +1113,8 @@ id = "starboard"
 label = "shield_arc.starboard.label"
 center_deg = 90
 width_deg = 90
+# [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
+energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_per_hp = 0.25, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore","shield-arc-port","shield-arc-aft"] }
 hull_max_hp = 6
 
 [power]

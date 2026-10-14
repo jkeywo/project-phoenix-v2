@@ -1,0 +1,79 @@
+entities:
+  - decision: automatic-local-stock-goals-and-main-stores
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Local Stock Targets Request Timed Supply From Main Stores
+      summary: "G065 and S089 select main hold stores plus local System stock targets. Local operators set desired stock; routine replenishment then runs automatically and takes time. A dedicated inventory System has its own individual AI, supported priorities and actual storage constraints. Manual movement remains available through the same physical mechanisms."
+      rationale:
+        - "Selected in docs/gameplay-redesign/system-review.md; detailed Engineering exposes main-store goals, reserves and external supply priorities. Simplest and middle delegate those decisions without mandatory policy setup. Local targets remain with their own operators."
+        - "Actual stocks stay in their existing canonical capacity/magazine owners. Hold stock and local stock are different physical quantities, not mirrored views. A target does not guarantee supply, change another System's settings or authorise a protected allocation."
+        - "Inventory reads permitted demand reports, source readings and reserve policy through explicit typed Console bindings. Co-hosted tabs do not pool knowledge; no central omniscient planner or second temporary-Backfill policy is introduced."
+
+  - decision: located-delivery-batches-and-receiving-claims
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Departed Supplies Are Real Transit Quantities With Receiving Space
+      summary: "AD58-61 select aggregate internal batches over authored compartment routes and general handling capacity. Dispatch removes source quantity, creates that quantity in transit and reserves compatible receiving space together; arrival replaces that claim with stored occupancy. Delays, stops and cancellation do not erase cargo or teleport it back."
+      rationale:
+        - "Existing source Stock.reserved claims remain held physical quantity. Destination-space claims are a distinct accounting responsibility, not an inversion of source reservation semantics or extra stock. All competing loading and transfers respect receiving commitments."
+        - "Reuse stable routes and actual access boundaries; general handling has authored throughput/concurrency without a new personnel pool. Planners use permitted reports; execution checks actual constraints and reports encountered blockages. No rendered crate actor or individual porter is required."
+        - "AD67: priority affects waiting work and subsequent uncommitted stages, not automatic interruption of an active committed step. Separate supported stop/return requests retain actual quantity, location and commitment constraints."
+
+  - decision: finite-production-with-coupled-work-requirements
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Production Uses Real Inputs, Energy, Time and Output Capacity
+      summary: "G054/S014 and AD23/29/62/63/65/66 select equipment-dependent fabrication with finite inputs, paid machinery work and actual output stores. Some authored inputs compete with repair supply, with reserve policy respected. Each next indivisible work step secures required resources and capacities together; a failed attempt retains no new partial claims."
+      rationale:
+        - "All required stored products must fit before the next production step; output blockage pauses the whole recipe without discarding completed work or unrelated products. Passive thermal and resource mechanisms keep operating."
+        - "Temporary interruption preserves supported work. Deliberate recipe change discards consumed unfinished work, releases unused claims and retains unused inputs/completed products where compatible space permits, with explicit excess disposal only when retention is impossible."
+        - "Shared recipe vocabulary does not require a universal solver. New fabrication has one ordinary authored System state tree and the same Console information/authority as human operation; no free queue completion or global material currency."
+
+  - decision: actual-source-recovery-and-bounded-processing
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Recover Actual Cargo and Process Compatible Finite Materials
+      summary: "G046 and S090/91 select actual surviving resources and optional fitted processing/harvesting. Supported recovery consumes an actual source quantity, and compatible scrap processing produces specified materials using finite machinery, time and resources. Optional harvesting supports bridge decisions; Phoenix does not become a mining grind or unrestricted construction game."
+      rationale:
+        - "No anonymous kill loot, renewable HP-to-scrap conversion, repeated manual collection gestures or automatic conversion into any missing finished part. Acquisition requires actual tools, access/range, receiving space and supported observed target information."
+        - "G046's intact component/equipment recovery is retained explicitly for increment 13, where fitting provides its first portable-item consumer. Increment 12 handles actual cargo and supported material recovery without prematurely inventing a component consignment owner. This is a dependency boundary, not an exclusion of the selected feature."
+        - "S034 records lossy recycling as a selected direction, but the approved incremental roadmap and current milestone instruction retain coolant recycling provisional. Increment 12 adds no used-coolant collector or assumed recycler yield; existing consumable coolant and ordinary replenishment operate independently."
+
+  - decision: authorised-port-stock-target-replenishment
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Routine Allied Replenishment Follows Goals and Physical Service Limits
+      summary: "G067 selects automatic routine allied-port replenishment against approved targets, with manually initiated trade where required and an automatically populated editable order. Actual provider stocks, permission, capability, compatible capacity and physical transfer time remain constraints."
+      rationale:
+        - "Allied access is not unlimited purchasing authority. Inventory publishes approved demand through explicit permitted feeds; only the fitted transfer System's existing human/AI controller issues its admitted controls. Preserve existing dock/umbilical controls and resource services; no global refill, automatic supplier search, remote machinery control or market-price simulation is implied."
+        - "G108 requires real vessels for active-sector inter-location deliveries. Internal aggregate batches are not a licence for coarse resource teleportation between actors. Broader traffic/facilities and carried supply craft remain their scheduled increments."
+
+  - decision: automatic-logistics-increment-twelve-integration
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Prove Located Logistics Through Existing Ammunition First
+      summary: "Adopted increment 12 implementation contract in docs/gameplay-redesign/implementation/increment-12.md uses explicit managed endpoint locations, compatible compartment storage, general handling slots, one canonical transit owner and receiving-space claims. First implement real hold-to-magazine delivery; then local repair/coolant goals, finite ammunition production, bounded recovery/processing and authorised port goals. No increment 12 runtime or completed exit is claimed."
+      rationale:
+        - "[ai] Reuse InfrastructureState capacities, TorpedoSystem magazine, named ResourceServices and the actual local energy owner. Non-cargo capacities such as berths are not automatically physical stores. Do not mirror inventory or convert TeamJobs into an imaginary logistics personnel pool."
+        - "[ai] Adopted initial stop recovery retains cargo at its actual route position and requests a routed return, securing return space before releasing the original receiving claim. Full/blocked return waits and reports; it neither refunds nor loses cargo. Additional diversion/loss rules need separate explicit supported causes."
+        - "[ai] Adopted phase order settles existing active work/arrivals after prior machinery and transfer drains, then starts bounded new jobs which first progress next step. Outputs are available at existing consumers' next ordinary step; no unbounded same-tick production chain. Exact schedule edges must be verified against actual owners during implementation."
+        - "[ai] Each slice includes admitted human controls, the ordinary closed System AI, permitted reports, current shared status/delegation, Workshop exact-source/history/Preview/Test and complete deterministic snapshot/digest support. Whole-roster preflight verifies source/incoming claims, transit quantity/location, recipes and missing-endpoint recovery before writes."
+        - "[ai] Migrate resolved hulls, generated equipment, includes, World overrides and fixtures together. Preserve stable service/System identities, split existing quantities instead of duplicating them, and document intentional new feedstock/capacity tuning. Human browser/native acceptance and prior pinned validation remain separate from structural/automated evidence."
+
+  - decision: docked-service-policy-and-manual-offer-boundary
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Ports Own Bounded Supply Permission and Trade Initiation
+      summary: "Increment 12 adopts explicit port-owned FreeAlliedReplenishment or ManualOffer permission; omission grants no automatic supply. Free-allied requests require approved resource/quota, eligible relationship and actual dock/transfer coupling. Manual offers create no claims or spending until initiated by the current authorised human or an explicit authorised mission order."
+      rationale:
+        - "[ai] Adopted implementation judgment after inspecting existing finite services and umbilical ownership. Bind permission/quota claims to the actual docked partner/visit and withdraw on undock. Preserve completed delivery and release unperformed commitments through ordinary accounting. Provider stocks, rates and machinery remain authoritative."
+        - "[ai] Manually initiated offers are populated and editable within authored limits. Supported exchange costs use actual typed stock and physical transfer; no currency/general price engine is required. Unsupported trade fails clearly. Permission grants neither visitor machinery control nor unseen foreign-stock knowledge."

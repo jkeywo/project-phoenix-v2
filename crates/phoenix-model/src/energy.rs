@@ -63,7 +63,7 @@ pub struct EnergyGroupReading {
     pub priority: u16,
     pub cut: bool,
 }
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConsumerEnergyReading {
     pub system: crate::identity::SystemId,
     pub group: Option<crate::identity::PowerGroupId>,
@@ -74,6 +74,8 @@ pub struct ConsumerEnergyReading {
     pub recover_heat: f32,
     pub thermal_stopped: bool,
     pub intake_per_sec: f32,
+    pub max_intake_per_sec: f32,
+    pub flow_override_per_sec: Option<f32>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CoolantReading {

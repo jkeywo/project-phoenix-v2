@@ -7381,14 +7381,14 @@ const FIELD_REPAIR_CAPTURE_AT: u64 = 60;
 /// dispatch verbs end to end), and reaching the same state through commands
 /// would only add a lock, a separation and a tick budget to a claim about serde.
 ///
-/// Team **1** on purpose. `ExternalRepairSaveState::team_idx` has no serde
-/// default and `ExternalRepairDispatch::new` starts at 0, so a claim naming team
+/// Team **1** on purpose. The canonical team assignment has no implicit
+/// default; a mistaken restoration into team 0 must be detectable, so a claim naming team
 /// 0 would round-trip identically whether the field travelled or was dropped —
 /// the assertion would prove nothing. `alliance_destroyer` authors
 /// `repair_team_count = 2`, so team 1 is a real slot on the hull that carries the
 /// capability.
 fn send_a_team_abroad(world: &mut bevy::prelude::World) -> (String, String) {
-    use project_phoenix::console::repair::ExternalRepairDispatch;
+    use project_phoenix::console::repair::server::ShipRepairTeams;
     use project_phoenix::entities::spawner::EntityUuid;
 
     // Any other entity in the world stands in for the ally: the claim records a
@@ -7397,7 +7397,7 @@ fn send_a_team_abroad(world: &mut bevy::prelude::World) -> (String, String) {
     let mut ids: Vec<String> = uuids.iter(world).map(|u| u.0.clone()).collect();
     ids.sort();
 
-    let mut operators = world.query::<(&EntityUuid, &mut ExternalRepairDispatch)>();
+    let mut operators = world.query_filtered::<(&EntityUuid, &mut ShipRepairTeams), bevy::prelude::With<project_phoenix::console::repair::ExternalRepairDispatch>>();
     let (ship, target) = {
         let (uuid, _) = operators
             .iter_mut(world)
@@ -7415,7 +7415,7 @@ fn send_a_team_abroad(world: &mut bevy::prelude::World) -> (String, String) {
         .iter_mut(world)
         .find(|(uuid, _)| uuid.0 == ship)
         .expect("the operator is still there");
-    dispatch.claim(1, Some(target.clone()));
+    assert!(dispatch.0.claim_external(1, target.clone()));
     (ship, target)
 }
 
@@ -7425,9 +7425,19 @@ fn abroad_claims(payload: &PhoenixSnapshot) -> Vec<(String, String, u8)> {
         .entities
         .iter()
         .filter_map(|e| {
-            let claim = e.external_repair.as_ref()?;
-            let target = claim.dispatched_target.clone()?;
-            Some((e.uuid.clone(), target, claim.team_idx))
+            let jobs = e.repair.as_ref()?.jobs.as_ref()?;
+            jobs.teams.iter().enumerate().find_map(|(team, job)| {
+                let job = job.as_ref()?;
+                if job.outcome.is_some() {
+                    return None;
+                }
+                match &job.activity {
+                    project_phoenix::jobs::repair::RepairActivity::External { target } => {
+                        Some((e.uuid.clone(), target.clone(), team as u8))
+                    }
+                    _ => None,
+                }
+            })
         })
         .collect();
     rows.sort();
@@ -7436,15 +7446,19 @@ fn abroad_claims(payload: &PhoenixSnapshot) -> Vec<(String, String, u8)> {
 
 /// The same, read back off the live components rather than the payload.
 fn live_abroad_claims(world: &mut bevy::prelude::World) -> Vec<(String, String, u8)> {
-    use project_phoenix::console::repair::ExternalRepairDispatch;
+    use project_phoenix::console::repair::server::ShipRepairTeams;
     use project_phoenix::entities::spawner::EntityUuid;
 
-    let mut query = world.query::<(&EntityUuid, &ExternalRepairDispatch)>();
+    let mut query = world.query::<(&EntityUuid, &ShipRepairTeams)>();
     let mut rows: Vec<(String, String, u8)> = query
         .iter(world)
         .filter_map(|(uuid, dispatch)| {
-            let team = dispatch.abroad_team()? as u8;
-            Some((uuid.0.clone(), dispatch.dispatched_target.clone()?, team))
+            let team = dispatch.0.external_team()? as u8;
+            Some((
+                uuid.0.clone(),
+                dispatch.0.external_target()?.to_string(),
+                team,
+            ))
         })
         .collect();
     rows.sort();

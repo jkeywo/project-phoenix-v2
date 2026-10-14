@@ -593,7 +593,7 @@ pub(crate) fn publish_repair_blackboard(
             external_dispatch_target_condition,
         ) = match external_opt {
             Some(external) => {
-                let target = external.dispatched_target.clone();
+                let target = teams.0.external_target().map(str::to_string);
                 let target_name = target.as_ref().and_then(|uuid| {
                     named
                         .iter()
@@ -617,7 +617,7 @@ pub(crate) fn publish_repair_blackboard(
                     external.last_refusal.map(|r| r.string_id().to_string()),
                     // Which team went, published only while one is actually out
                     // there — the console derives the whole ABROAD card from it.
-                    external.abroad_team().map(|idx| idx as u8),
+                    teams.0.external_team().map(|idx| idx as u8),
                     target_condition,
                 )
             }
@@ -652,6 +652,7 @@ pub(crate) fn publish_repair_blackboard(
         let bb = RepairBlackboard {
             repair_groups,
             teams: team_slots,
+            jobs: teams.0.work_list(),
             travel_duration_secs: teams.0.timings().travel_duration,
             system_hull,
             damageable_systems,
@@ -1180,7 +1181,7 @@ pub fn operate_repair_ai(
         config_comp,
         target_selector,
         red_alert_comp,
-        external_dispatch,
+        _external_dispatch,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -1225,9 +1226,7 @@ pub fn operate_repair_ai(
         // to be sent anywhere. The human dispatch router reads the same source,
         // so a team sent to an ally cannot be undercut by whichever path did not
         // know about it (AGENTS.md rule 6).
-        let free_teams: Vec<usize> = teams
-            .0
-            .free_team_indices(external_dispatch.and_then(|e| e.abroad_team()));
+        let free_teams: Vec<usize> = teams.0.free_team_indices(teams.0.external_team());
         if free_teams.is_empty() {
             continue;
         }

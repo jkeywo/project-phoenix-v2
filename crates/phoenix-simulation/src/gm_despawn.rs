@@ -310,14 +310,17 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
             transport.last_refusal = Some(crate::transporter::TransportRefusal::NoContact);
         }
     }
-    for mut repair in world
-        .query::<&mut crate::console::repair::external_server::ExternalRepairDispatch>()
+    for (mut repair, mut teams) in world
+        .query::<(
+            &mut crate::console::repair::external_server::ExternalRepairDispatch,
+            &mut crate::console::repair::server::ShipRepairTeams,
+        )>()
         .iter_mut(world)
     {
-        if repair.dispatched_target.as_deref() == Some(&uuid) {
-            repair.release(Some(
-                crate::console::repair::external::ExternalRepairRefusal::NoTarget,
-            ));
+        if teams.0.external_target() == Some(uuid.as_str()) {
+            teams.0.release_external();
+            repair.last_refusal =
+                Some(crate::console::repair::external::ExternalRepairRefusal::NoTarget);
         }
     }
     for mut waypoint in world

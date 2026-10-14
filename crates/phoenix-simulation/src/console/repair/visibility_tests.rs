@@ -301,6 +301,7 @@ fn blackboard_projection_filters_hull_but_keeps_dispatch_targets() {
     let v = vis(vec![]);
     let bb = RepairBlackboard {
         teams: vec![],
+        jobs: vec![],
         travel_duration_secs: 5.0,
         system_hull: vec![
             status("core", 40.0),
@@ -368,6 +369,7 @@ fn queue(entries: &[(&str, f32)]) -> Vec<QueueEntryPreview> {
 fn bb_with_queue(queue: Vec<QueueEntryPreview>) -> RepairBlackboard {
     RepairBlackboard {
         teams: vec![],
+        jobs: vec![],
         travel_duration_secs: 5.0,
         system_hull: vec![status("core", 40.0), status("helm-radar", 60.0)],
         damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
@@ -1240,4 +1242,28 @@ fn coarse_queue_group_does_not_disclose_hidden_contributor_identity() {
     assert_eq!(projected.observations, vec![evidence("visible")]);
     assert_eq!(entry.observations.len(), 2);
     assert_eq!(projected.deficit, entry.deficit);
+}
+
+#[test]
+fn issued_jobs_survive_permitted_projection_without_revealing_target_damage() {
+    let v = vis(vec![]);
+    let mut bb = bb_with_queue(vec![]);
+    bb.jobs.push(phoenix_model::job::JobWorkItem {
+        id: phoenix_model::job::JobId(7),
+        owner: SystemId("repair".into()),
+        team_idx: 0,
+        phase: phoenix_model::job::JobPhase::Travelling,
+        target_system: Some(SystemId("helm-radar".into())),
+        target_entity: None,
+        outcome: None,
+        paused: false,
+        workflow_error: false,
+    });
+    let projected = v.project_repair_blackboard(Some(&StationId("engineering".into())), &bb);
+    assert_eq!(projected.jobs, bb.jobs);
+    assert!(!projected
+        .system_hull
+        .iter()
+        .any(|row| row.system_id.0 == "helm-radar"));
+    assert!(withheld_repair_blackboard(&bb).jobs.is_empty());
 }

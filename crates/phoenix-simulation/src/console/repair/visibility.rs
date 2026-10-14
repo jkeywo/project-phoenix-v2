@@ -582,6 +582,7 @@ impl HullVisibility {
                 .cloned()
                 .collect(),
             teams: bb.teams.clone(),
+            jobs: bb.jobs.clone(),
             travel_duration_secs: bb.travel_duration_secs,
             // External dispatch (issue #1161): whole-ship scalars/ids revealing
             // no per-system detail, so the Engineering holder this projection is
@@ -672,6 +673,7 @@ impl HullVisibility {
 fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
     RepairBlackboard {
         teams: vec![],
+        jobs: vec![],
         travel_duration_secs: bb.travel_duration_secs,
         system_hull: vec![],
         damageable_systems: vec![],

@@ -150,8 +150,8 @@ pub fn handle_dispatch_repair_team(
     >,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt, external_dispatch) in ship_query.iter_mut() {
-        let abroad = external_dispatch.and_then(|e| e.abroad_team());
+    for (admitted, ship_config, mut teams, hull_opt, _external_dispatch) in ship_query.iter_mut() {
+        let abroad = teams.0.external_team();
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
         // designer-authored display name), and fall back to the raw SystemId
@@ -291,9 +291,9 @@ pub fn handle_recall_repair_team(
                 // The abroad team first: its slot reads `Idle`, so falling
                 // through to `RepairTeams::recall` would refuse the one recall
                 // the crew can see a reason for.
-                let abroad = external
-                    .as_deref()
-                    .and_then(|e| e.abroad_team())
+                let abroad = teams
+                    .0
+                    .external_team()
                     .is_some_and(|idx| idx == *team_idx as usize);
                 if abroad {
                     // Reported BEFORE the claim clears, the ordering
@@ -314,8 +314,9 @@ pub fn handle_recall_repair_team(
                                 reason: crate::core::task_lifecycle::TaskTerminalReason::Released,
                             });
                     }
+                    teams.0.release_external();
                     if let Some(external) = external.as_deref_mut() {
-                        external.release(None);
+                        external.last_refusal = None;
                     }
                     crate::command_admission::finish_admitted_action_feedback(
                         &mut outbound,

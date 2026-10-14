@@ -13,7 +13,7 @@
 //! A team held against a NAMED target the crew designate from the repair
 //! console is unavailable to the hull's own damage-control sweep: the human
 //! dispatch router and the repair AI both ask
-//! [`ExternalRepairDispatch::abroad_team`] which slot is spoken for, so a team
+//! `ShipRepairTeams::external_team` which slot is spoken for, so a team
 //! sent to an ally cannot be undercut by whichever path did not know about it.
 //! Until #1386 that answer was a COUNT and every reader truncated the idle list
 //! to guess which slot it meant; naming the team is what lets a seat choose one.
@@ -44,144 +44,20 @@ use crate::world::server::WorldContentRuntime;
 
 use super::server::{RepairRequestQueue, ShipRepairTeams};
 
-/// One ship's external repair-dispatch state (issue #1161): the authored reach
-/// and rate, and which target a team is currently working abroad.
-///
-/// Inserted at spawn only on a hull that authored a `[repair.external_dispatch]`
-/// table AND declares repair teams — a hull with neither carries no component
-/// and is byte-identical in every way to one built before this existed
-/// (AGENTS.md rule 11).
-///
-/// `dispatched_target` is what a team is actually working this tick,
-/// `Some(target-uuid)` while a dispatch is live and `None` when the team is home.
-/// It commits immediately at dispatch time — unlike the tractor's engage/hold
-/// split, a dispatched team is a resource CLAIM, not a beam re-evaluated every
-/// tick: the free-team gate is a dispatch-time check, and once a team is over
-/// there only drifting past the range (or an explicit recall) brings it home.
+/// Authored external-repair terms and transient feedback. Team commitments
+/// live exclusively in ShipRepairTeams, alongside internal assignments.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ExternalRepairDispatch {
-    /// The authored dispatch terms — the reach and the repair rate.
     pub config: ExternalRepairConfig,
-    /// The target-uuid a team is working abroad this tick, or `None` when the
-    /// team is home. Present only while a dispatch is live.
-    pub dispatched_target: Option<String>,
-    /// **Which** of this ship's repair teams is the one abroad (issue #1386),
-    /// meaningful only while `dispatched_target` is `Some` — the two are set and
-    /// cleared together, which is why this is a plain `u8` rather than a second
-    /// `Option` that could disagree with the first.
-    ///
-    /// Read it through [`Self::abroad_team`], never directly: that accessor is
-    /// where "meaningful only while a claim is live" is enforced once instead of
-    /// at every call site.
-    pub team_idx: u8,
-    /// Why the last dispatch could not form, or why a live dispatch was brought
-    /// home — the reason the console shows, retained until the operator
-    /// dispatches or recalls again. `None` when idle or working cleanly.
     pub last_refusal: Option<ExternalRepairRefusal>,
 }
-
 impl ExternalRepairDispatch {
-    /// A fresh, idle dispatch record carrying its authored terms.
     pub fn new(config: ExternalRepairConfig) -> Self {
         Self {
             config,
-            dispatched_target: None,
-            team_idx: 0,
             last_refusal: None,
         }
     }
-
-    /// **The one team this ship is holding abroad**, or `None` when nobody is
-    /// out there — the answer the internal-sweep availability question is asked
-    /// with (issues #1161, #1386).
-    ///
-    /// Derived from the live `dispatched_target` rather than stored separately,
-    /// which is what makes "returned on recall or drift" true by construction: a
-    /// team brought home commits nothing, so there is no release step to forget.
-    /// The team never moves in the
-    /// [`crate::modifiers::repair_teams::RepairTeams`] readout — it is still
-    /// `Idle`, simply spoken for.
-    ///
-    /// Until #1386 this was a COUNT (`committed_repair_teams`) and every reader
-    /// truncated the idle list to guess which slot it meant. Naming the team is
-    /// what lets a seat choose one.
-    pub fn abroad_team(&self) -> Option<usize> {
-        self.dispatched_target
-            .is_some()
-            .then_some(self.team_idx as usize)
-    }
-
-    /// Commit the claim: `team_idx` is now working `target` (issue #1386). The
-    /// two move together, here, so no caller can set one without the other.
-    pub fn claim(&mut self, team_idx: u8, target: Option<String>) {
-        self.dispatched_target = target;
-        self.team_idx = team_idx;
-        self.last_refusal = None;
-    }
-
-    /// Release the claim and bring the team home (issue #1386). The index is
-    /// cleared WITH the target, the mirror of [`Self::claim`] setting the two
-    /// together: an idle record then has exactly one shape, so
-    /// [`Self::save_state`] on a hull holding nobody equals
-    /// [`ExternalRepairSaveState::default`] and `capture_external_repair`'s
-    /// "a hull that CAN dispatch and has sent nobody captures nothing" holds
-    /// after a recall as much as before the first dispatch.
-    ///
-    /// It cannot move the digest: `fold_external_repair_namespace` skips a
-    /// record with no `dispatched_target` entirely, so the index it would have
-    /// folded is one nobody reads.
-    pub fn release(&mut self, refusal: Option<ExternalRepairRefusal>) {
-        self.dispatched_target = None;
-        self.team_idx = 0;
-        self.last_refusal = refusal;
-    }
-
-    /// The persistable half — the dispatched target and the team holding it —
-    /// for the snapshot payload (issues #1161, #1386). The authored config rides
-    /// the template and is re-derived on spawn, so it is deliberately not here,
-    /// exactly as `TractorSaveState` leaves the coupling terms out.
-    pub fn save_state(&self) -> ExternalRepairSaveState {
-        ExternalRepairSaveState {
-            dispatched_target: self.dispatched_target.clone(),
-            team_idx: self.team_idx,
-        }
-    }
-
-    /// Reseed the dispatched target and the team holding it from a restored
-    /// snapshot (issue #1161), onto a record that already carries its authored
-    /// config from the fresh spawn.
-    ///
-    /// The last refusal is deliberately NOT restored: it is a projection the
-    /// next tick re-derives (a resumed dispatch that comes back out of range
-    /// refuses again on its first tick), so carrying a stale one would show the
-    /// crew a reason for a condition that no longer holds.
-    pub fn restore(&mut self, save: &ExternalRepairSaveState) {
-        self.dispatched_target = save.dispatched_target.clone();
-        self.team_idx = save.team_idx;
-        self.last_refusal = None;
-    }
-}
-
-/// The snapshot-carried half of an [`ExternalRepairDispatch`] (issue #1161): the
-/// dispatched target and the team working it, and nothing else.
-///
-/// `Default` is the idle record — no team abroad — which is what a hull that
-/// authored external dispatch captures whether it never used it or brought its
-/// team home again ([`ExternalRepairDispatch::release`] clears the index with
-/// the target for exactly that reason), so a resume of such a ship restores
-/// byte-identically and folds the same number.
-///
-/// `team_idx` is **mandatory** (issue #1386), with no serde default. A claim
-/// always names a team, and a record that carried one without naming it is a
-/// save written under the old commitment model whose team cannot be inferred:
-/// defaulting it to 0 would silently resume the wrong slot as abroad and leave
-/// the real one double-booked. `SNAPSHOT_FORMAT` moved for exactly that, so such
-/// a save is refused on format before this decode is ever reached.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ExternalRepairSaveState {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dispatched_target: Option<String>,
-    pub team_idx: u8,
 }
 
 // ── The dispatch / recall commands ───────────────────────────────────────────
@@ -236,7 +112,11 @@ pub fn handle_external_repair_commands(
         // Every entity's position, to resolve the designated target's separation.
         Query<(&EntityUuid, &Transform)>,
         // Apply the verdict.
-        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
+        Query<(
+            &mut ExternalRepairDispatch,
+            &mut ShipRepairTeams,
+            Option<&EntityUuid>,
+        )>,
     )>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
@@ -290,7 +170,7 @@ pub fn handle_external_repair_commands(
                 // Whoever holds this ship's one external claim right now — the
                 // team the availability answer excludes, and the team a named
                 // dispatch of ANOTHER slot is refused against (issue #1386).
-                let abroad = dispatch.and_then(|d| d.abroad_team()).map(|idx| idx as u8);
+                let abroad = teams.and_then(|t| t.0.external_team()).map(|idx| idx as u8);
                 for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
                     // The three field-repair verbs this system answers, read off
                     // the payload once. `Send(None)` is the fieldless dispatch
@@ -399,7 +279,7 @@ pub fn handle_external_repair_commands(
     // Apply.
     let mut dispatches = set.p2();
     for ((entity, request), separation) in requests.iter().zip(separations) {
-        let Ok((mut dispatch, uuid)) = dispatches.get_mut(*entity) else {
+        let Ok((mut dispatch, mut teams, uuid)) = dispatches.get_mut(*entity) else {
             crate::command_admission::finish_admitted_action_feedback(
                 &mut outbound,
                 request.command(),
@@ -434,6 +314,19 @@ pub fn handle_external_repair_commands(
                 };
                 match verdict {
                     Ok(()) => {
+                        let changed = teams.0.external_target() != lock.as_deref();
+                        let committed = chosen.zip(lock.as_ref()).is_some_and(|(team, target)| {
+                            teams.0.claim_external(team as usize, target.clone())
+                        });
+                        if !committed {
+                            dispatch.last_refusal = Some(ExternalRepairRefusal::TeamBusy);
+                            crate::command_admission::finish_admitted_action_feedback(
+                                &mut outbound,
+                                request.command(),
+                                crate::core::messages::ActionFeedbackOutcome::Refused,
+                            );
+                            continue;
+                        }
                         // The activation opens at COMMIT, not at every tick a
                         // team is still out there working (issue #1345) — the
                         // same dispatch-and-claim shape Security's team
@@ -448,7 +341,7 @@ pub fn handle_external_repair_commands(
                         // (dock/server.rs) and `StartTransfer if
                         // !umbilical.running` (umbilical/server.rs) guard the
                         // same no-op at their own commit sites.
-                        if dispatch.dispatched_target.as_deref() != lock.as_deref() {
+                        if changed {
                             push_lifecycle(
                                 lifecycle.as_deref_mut(),
                                 uuid,
@@ -458,15 +351,7 @@ pub fn handle_external_repair_commands(
                                 },
                             );
                         }
-                        // The verdict passed, so a team was resolved: the named
-                        // one, or the one the fieldless verb found. Both arms
-                        // above are unreachable with `chosen` empty — a named
-                        // order sets it to the slot it names, and the fieldless
-                        // one is refused `NoFreeTeam` when nothing was found —
-                        // and the fallback is written rather than panicked
-                        // because a claim on the lowest slot is the honest
-                        // answer if it ever were.
-                        dispatch.claim(chosen.unwrap_or(0), lock.clone());
+                        dispatch.last_refusal = None;
                         crate::command_admission::finish_admitted_action_feedback(
                             &mut outbound,
                             request.command(),
@@ -492,7 +377,7 @@ pub fn handle_external_repair_commands(
                 // Report the cancel BEFORE clearing the claim, so a recall of an
                 // idle dispatch (a stale-UI double tap) reports nothing at all
                 // (issue #1345).
-                if dispatch.dispatched_target.is_some() {
+                if teams.0.external_target().is_some() {
                     push_lifecycle(
                         lifecycle.as_deref_mut(),
                         uuid,
@@ -505,7 +390,8 @@ pub fn handle_external_repair_commands(
                 // Recall brings the team home and stops the work, leaving what it
                 // already did on the target. A deliberate recall is not a
                 // refusal, so the reason clears.
-                dispatch.release(None);
+                teams.0.release_external();
+                dispatch.last_refusal = None;
                 crate::command_admission::finish_admitted_action_feedback(
                     &mut outbound,
                     request.command(),
@@ -541,9 +427,18 @@ pub fn handle_external_repair_commands(
 pub fn tick_external_repair(
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut set: ParamSet<(
-        Query<(Entity, &ExternalRepairDispatch, &Transform)>,
+        Query<(
+            Entity,
+            &ExternalRepairDispatch,
+            &ShipRepairTeams,
+            &Transform,
+        )>,
         Query<(&EntityUuid, &Transform)>,
-        Query<(&mut ExternalRepairDispatch, Option<&EntityUuid>)>,
+        Query<(
+            &mut ExternalRepairDispatch,
+            &mut ShipRepairTeams,
+            Option<&EntityUuid>,
+        )>,
     )>,
 ) {
     struct Row {
@@ -555,10 +450,10 @@ pub fn tick_external_repair(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter_map(|(entity, dispatch, transform)| {
-            dispatch.dispatched_target.as_ref().map(|target| Row {
+        .filter_map(|(entity, dispatch, teams, transform)| {
+            teams.0.external_target().map(|target| Row {
                 entity,
-                target: target.clone(),
+                target: target.to_string(),
                 operator_pos: transform.translation,
                 range: dispatch.config.range,
             })
@@ -586,10 +481,11 @@ pub fn tick_external_repair(
         if let Err(refusal) =
             dispatch_status(true, Some(row.target.as_str()), separation, row.range)
         {
-            let Ok((mut dispatch, uuid)) = dispatches.get_mut(row.entity) else {
+            let Ok((mut dispatch, mut teams, uuid)) = dispatches.get_mut(row.entity) else {
                 continue;
             };
-            dispatch.release(Some(refusal));
+            teams.0.release_external();
+            dispatch.last_refusal = Some(refusal);
             // This system only ever CLOSES a dispatch (it never opens one — that
             // is `handle_external_repair_commands`' job at commit time), so every
             // row it walks was live and the terminal is unconditional (issue
@@ -689,25 +585,28 @@ pub fn apply_external_repair(
     // defensiveness the former `Option<ResMut<WorldContentRuntime>>` had.
     condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
     time: Option<Res<Time>>,
-    operators: Query<&ExternalRepairDispatch>,
+    mut operators: Query<(&ExternalRepairDispatch, &mut ShipRepairTeams)>,
     targets: Query<(&EntityUuid, &InfrastructureCondition)>,
 ) {
     // Collect from read-only queries first, so a world with no live dispatch
     // never takes the queue mutably and marks it changed on a quiet tick.
     let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
     let mut adjustments: Vec<ConditionAdjustment> = operators
-        .iter()
-        .filter_map(|dispatch| {
-            let target_uuid = dispatch.dispatched_target.as_ref()?;
+        .iter_mut()
+        .filter_map(|(dispatch, mut teams)| {
+            if !teams.0.step_external() {
+                return None;
+            }
+            let target_uuid = teams.0.external_target()?;
             // Only a target that carries a condition track can be worked; a
             // dispatch to something without one holds the team but banks nothing.
-            targets.iter().find(|(uuid, _)| &uuid.0 == target_uuid)?;
+            targets.iter().find(|(uuid, _)| uuid.0 == target_uuid)?;
             let delta = dispatch.config.repair_rate * dt;
             if delta == 0.0 {
                 return None;
             }
             Some(ConditionAdjustment {
-                uuid: target_uuid.clone(),
+                uuid: target_uuid.to_string(),
                 delta,
             })
         })
@@ -805,7 +704,7 @@ pub fn operate_external_repair_ai(
         uuid,
         sources,
         config,
-        dispatch,
+        _dispatch,
         lock,
         teams,
         repair_queue,
@@ -846,7 +745,7 @@ pub fn operate_external_repair_ai(
                 let has_free_team = teams
                     .map(|t| {
                         !t.0.free_team_indices_reserving(
-                            dispatch.abroad_team(),
+                            t.0.external_team(),
                             critical_local_repairs(repair_queue),
                         )
                         .is_empty()
@@ -855,7 +754,8 @@ pub fn operate_external_repair_ai(
                 // Dispatch once the ordered ally is locked and a team is free
                 // beyond every other claim. Idempotent — a team already working
                 // this target emits nothing.
-                let already_here = dispatch.dispatched_target.as_deref() == Some(resolved.as_str());
+                let already_here =
+                    teams.and_then(|t| t.0.external_target()) == Some(resolved.as_str());
                 let emit = (locked_on_target && has_free_team && !already_here)
                     .then_some(SystemControlPayload::DispatchExternalRepair);
                 // Claim the dispatch as host-driven while a team is out under this
@@ -868,7 +768,7 @@ pub fn operate_external_repair_ai(
             // No field-repair order: recall a team THIS HOST sent — never one a
             // console dispatched on the same AI-operated system.
             None => {
-                if dispatch.dispatched_target.is_some() && host_dispatched {
+                if teams.and_then(|t| t.0.external_target()).is_some() && host_dispatched {
                     commands
                         .entity(entity)
                         .remove::<ExternalRepairAiDispatched>();

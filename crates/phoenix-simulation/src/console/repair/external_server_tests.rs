@@ -76,8 +76,8 @@ fn external_repair_feedback_finishes_at_dispatch_and_recall_verdicts() {
     );
     assert_eq!(
         app.world()
-            .get::<ExternalRepairDispatch>(operator)
-            .and_then(|dispatch| dispatch.dispatched_target.as_deref()),
+            .get::<ShipRepairTeams>(operator)
+            .and_then(|teams| teams.0.external_target()),
         Some("ally-1"),
     );
 
@@ -102,8 +102,8 @@ fn external_repair_feedback_finishes_at_dispatch_and_recall_verdicts() {
     );
     assert!(app
         .world()
-        .get::<ExternalRepairDispatch>(operator)
-        .is_some_and(|dispatch| dispatch.dispatched_target.is_none()));
+        .get::<ShipRepairTeams>(operator)
+        .is_some_and(|teams| teams.0.external_target().is_none()));
 
     app.world_mut().entity_mut(operator).insert((
         AdmittedCommands(vec![correlated_external_command(
@@ -187,33 +187,17 @@ fn record() -> ExternalRepairDispatch {
     })
 }
 
-/// The claim NAMES its team (issue #1386) and only while it is live: an
-/// idle record holds nobody abroad, because `claim` and `release` set and
-/// clear the target and the index together.
 #[test]
-fn a_live_claim_names_its_team_and_an_idle_record_holds_nobody() {
-    let mut r = record();
-    assert_eq!(r.abroad_team(), None);
-
-    r.claim(2, Some("ally-1".into()));
-    assert_eq!(r.abroad_team(), Some(2));
-    assert_eq!(r.dispatched_target.as_deref(), Some("ally-1"));
-
-    r.release(None);
-    assert_eq!(r.abroad_team(), None);
-}
-
-/// A recalled (or drifted-out) claim leaves the record in the ONE idle
-/// shape, index included — otherwise `capture_external_repair` compares a
-/// `{ None, N }` record against the idle default, finds them unequal and
-/// writes a snapshot row for a hull holding nobody abroad.
-#[test]
-fn a_released_claim_returns_the_record_to_the_idle_default() {
-    let mut r = record();
-    r.claim(2, Some("ally-1".into()));
-    r.release(None);
-    assert_eq!(r.save_state(), ExternalRepairSaveState::default());
-    assert_eq!(r.team_idx, 0);
+fn a_live_claim_names_its_team_and_release_restores_availability() {
+    let mut teams = RepairTeams::new(3);
+    assert_eq!(teams.external_team(), None);
+    assert!(teams.claim_external(2, "ally-1".into()));
+    assert_eq!(teams.external_team(), Some(2));
+    assert_eq!(teams.external_target(), Some("ally-1"));
+    assert_eq!(teams.free_team_indices(None), vec![0, 1]);
+    assert!(teams.release_external());
+    assert_eq!(teams.external_team(), None);
+    assert_eq!(teams.free_team_indices(None), vec![0, 1, 2]);
 }
 
 fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
@@ -291,31 +275,19 @@ fn a_one_team_hull_reserves_its_last_team_for_a_critical_local_repair() {
 }
 
 #[test]
-fn save_state_carries_the_dispatched_target_and_the_team_working_it() {
-    let mut r = record();
-    r.claim(3, Some("ally-1".into()));
-    r.last_refusal = Some(ExternalRepairRefusal::OutOfRange);
-    let save = r.save_state();
-    assert_eq!(save.dispatched_target.as_deref(), Some("ally-1"));
-    assert_eq!(save.team_idx, 3);
-}
-
-#[test]
-fn an_idle_record_saves_as_default() {
-    assert_eq!(record().save_state(), ExternalRepairSaveState::default());
-}
-
-#[test]
-fn restore_reseeds_the_target_and_its_team_and_clears_any_stale_refusal() {
-    let mut r = record();
-    r.last_refusal = Some(ExternalRepairRefusal::NoFreeTeam);
-    r.restore(&ExternalRepairSaveState {
-        dispatched_target: Some("ally-2".into()),
-        team_idx: 1,
-    });
-    assert_eq!(r.dispatched_target.as_deref(), Some("ally-2"));
-    assert_eq!(r.abroad_team(), Some(1));
-    assert!(r.last_refusal.is_none());
+fn canonical_jobs_restore_external_target_and_exact_team_commitment() {
+    let mut original = RepairTeams::new(4);
+    assert!(original.claim_external(3, "ally-1".into()));
+    original.step_external();
+    let save = original.save_state();
+    let mut restored = RepairTeams::new(4);
+    restored.restore_state(&save).unwrap();
+    assert_eq!(restored.save_state(), save);
+    assert_eq!(restored.external_target(), Some("ally-1"));
+    assert_eq!(restored.external_team(), Some(3));
+    assert_eq!(restored.free_team_indices(None), vec![0, 1, 2]);
+    restored.release_external();
+    assert_eq!(restored.free_team_indices(None), vec![0, 1, 2, 3]);
 }
 
 // ── The task lifecycle (issue #1345) ─────────────────────────────────────
@@ -420,10 +392,10 @@ fn a_committed_dispatch_opens_one_activation() {
     assert_eq!(
         app.world()
             .entity(operator)
-            .get::<ExternalRepairDispatch>()
+            .get::<ShipRepairTeams>()
             .unwrap()
-            .dispatched_target
-            .as_deref(),
+            .0
+            .external_target(),
         Some(ALLY)
     );
     assert_eq!(
@@ -447,9 +419,10 @@ fn a_dispatch_refused_at_commit_time_opens_nothing() {
     assert!(app
         .world()
         .entity(operator)
-        .get::<ExternalRepairDispatch>()
+        .get::<ShipRepairTeams>()
         .unwrap()
-        .dispatched_target
+        .0
+        .external_target()
         .is_none());
     assert!(
         drain_lifecycle(&mut app).is_empty(),
@@ -513,10 +486,10 @@ fn a_repeat_dispatch_onto_the_same_target_reports_nothing_but_a_new_target_still
     assert_eq!(
         app.world()
             .entity(operator)
-            .get::<ExternalRepairDispatch>()
+            .get::<ShipRepairTeams>()
             .unwrap()
-            .dispatched_target
-            .as_deref(),
+            .0
+            .external_target(),
         Some(ALLY)
     );
 
@@ -544,10 +517,10 @@ fn a_repeat_dispatch_onto_the_same_target_reports_nothing_but_a_new_target_still
     assert_eq!(
         app.world()
             .entity(operator)
-            .get::<ExternalRepairDispatch>()
+            .get::<ShipRepairTeams>()
             .unwrap()
-            .dispatched_target
-            .as_deref(),
+            .0
+            .external_target(),
         Some(ALLY_TWO)
     );
 }
@@ -580,12 +553,15 @@ fn admit_named_dispatch(app: &mut App, operator: Entity, team_idx: u8) {
 }
 
 fn claim(app: &App, operator: Entity) -> (Option<String>, Option<usize>) {
-    let dispatch = app
+    let teams = app
         .world()
         .entity(operator)
-        .get::<ExternalRepairDispatch>()
+        .get::<ShipRepairTeams>()
         .unwrap();
-    (dispatch.dispatched_target.clone(), dispatch.abroad_team())
+    (
+        teams.0.external_target().map(str::to_string),
+        teams.0.external_team(),
+    )
 }
 
 fn refusal(app: &App, operator: Entity) -> Option<ExternalRepairRefusal> {
@@ -781,9 +757,10 @@ fn a_target_that_drifts_out_of_range_ends_the_live_dispatch() {
     assert!(app
         .world()
         .entity(operator)
-        .get::<ExternalRepairDispatch>()
+        .get::<ShipRepairTeams>()
         .unwrap()
-        .dispatched_target
+        .0
+        .external_target()
         .is_none());
 }
 
@@ -794,4 +771,32 @@ fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
     } else {
         RepairGroup::Station(StationId(id.into()))
     }
+}
+
+#[test]
+fn repeated_admitted_external_dispatch_keeps_job_identity_and_one_commitment() {
+    let (mut app, operator) = app_with(Some(Vec3::new(100.0, 0.0, 0.0)), 2);
+    admit_dispatch(&mut app, operator);
+    app.update();
+    let first = app
+        .world()
+        .get::<ShipRepairTeams>(operator)
+        .unwrap()
+        .0
+        .work_list();
+    drain_lifecycle(&mut app);
+    admit_dispatch(&mut app, operator);
+    app.update();
+    let teams = &app.world().get::<ShipRepairTeams>(operator).unwrap().0;
+    assert_eq!(
+        teams
+            .work_list()
+            .iter()
+            .map(|job| job.id)
+            .collect::<Vec<_>>(),
+        first.iter().map(|job| job.id).collect::<Vec<_>>()
+    );
+    assert_eq!(teams.external_team(), Some(0));
+    assert_eq!(teams.free_team_indices(None), vec![1]);
+    assert!(drain_lifecycle(&mut app).is_empty());
 }

@@ -23841,12 +23841,32 @@ fn external_repair_args(dt: f64) -> HeadlessArgs {
     }
 }
 
-fn external_dispatch_of(app: &mut App) -> project_phoenix::console::repair::ExternalRepairDispatch {
+// Read-only test projection; canonical commitments remain in ShipRepairTeams.
+struct ExternalDispatchView {
+    dispatched_target: Option<String>,
+    team: Option<usize>,
+    last_refusal: Option<project_phoenix::console::repair::external::ExternalRepairRefusal>,
+}
+impl ExternalDispatchView {
+    fn abroad_team(&self) -> Option<usize> {
+        self.team
+    }
+}
+fn external_dispatch_of(app: &mut App) -> ExternalDispatchView {
     let op = tractor_operator(app);
-    app.world()
+    let teams = app
+        .world()
+        .get::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
+        .unwrap();
+    let feedback = app
+        .world()
         .get::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
-        .expect("the tender carries an ExternalRepairDispatch")
-        .clone()
+        .unwrap();
+    ExternalDispatchView {
+        dispatched_target: teams.0.external_target().map(str::to_string),
+        team: teams.0.external_team(),
+        last_refusal: feedback.last_refusal,
+    }
 }
 
 /// The repair channel as the tender's host PUBLISHES it (issue #1386) — the
@@ -23876,8 +23896,8 @@ fn operator_free_team_count(app: &mut App) -> usize {
     let op = tractor_operator(app);
     let abroad = app
         .world()
-        .get::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
-        .and_then(|d| d.abroad_team());
+        .get::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
+        .and_then(|t| t.0.external_team());
     let teams = app
         .world()
         .get::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
@@ -25380,9 +25400,9 @@ fn every_new_operations_systems_state_is_present_in_the_digest() {
     {
         let mut disp = app
             .world_mut()
-            .get_mut::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+            .get_mut::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
             .expect("the destroyer carries an ExternalRepairDispatch");
-        disp.dispatched_target = Some(ally.clone());
+        assert!(disp.0.claim_external(0, ally.clone()));
     }
     let d_dispatch = state_digest(&app);
     assert_ne!(
@@ -25393,15 +25413,21 @@ fn every_new_operations_systems_state_is_present_in_the_digest() {
     {
         let mut disp = app
             .world_mut()
-            .get_mut::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+            .get_mut::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
             .unwrap();
-        disp.dispatched_target = None;
+        disp.0.release_external();
     }
+    assert!(external_dispatch_of(&mut app).dispatched_target.is_none());
+    let released_digest = state_digest(&app);
+    app.world_mut()
+        .get_mut::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
+        .unwrap()
+        .0
+        .release_external();
     assert_eq!(
         state_digest(&app),
-        baseline,
-        "with all four external systems idle again the digest is unchanged — a world with none \
-         active folds exactly as before"
+        released_digest,
+        "repeated release does not allocate another job or alter continuation"
     );
 
     // The four moves are DISTINCT: each system folds its own namespace, so no one

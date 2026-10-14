@@ -505,12 +505,19 @@ fn insert_power_multipliers_and_modifiers(
     if let Some(repair_cfg) = &config.repair {
         if repair_cfg.declares_teams() {
             let timings = repair_cfg.to_runtime();
-            cmds.insert(crate::console::repair::server::ShipRepairTeams(
-                crate::modifiers::repair_teams::RepairTeams::new_with_timings(
-                    repair_cfg.repair_team_count as usize,
-                    timings,
-                ),
-            ));
+            match crate::modifiers::repair_teams::RepairTeams::new_with_workflow(
+                repair_cfg.repair_team_count as usize,
+                timings,
+                crate::ship::system_registry::repair_system_id(),
+                repair_cfg.workflow.as_ref(),
+            ) {
+                Ok(teams) => {
+                    cmds.insert(crate::console::repair::server::ShipRepairTeams(teams));
+                }
+                Err(error) => {
+                    error!("refusing repair teams with invalid workflow: {error}");
+                }
+            }
         }
     }
 }

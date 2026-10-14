@@ -594,8 +594,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "dock-relationship-state",
             )
             .declare_state::<crate::console::repair::external_server::ExternalRepairDispatch>(
-                StateClass::Folded,
-                "external-repair-dispatch-state",
+                StateClass::Derived,
+                "shared-job-execution-state",
             )
             .declare_state::<crate::umbilical::server::TransferUmbilical>(
                 StateClass::Folded,

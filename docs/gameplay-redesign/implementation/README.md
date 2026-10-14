@@ -236,3 +236,19 @@ Under the user's subsequent explicit workflow, validation and fixes continue on
 a pinned worktree after initial implementation commits while main starts the
 next increment. Increment 7 matrix evidence pins `e848e2f3`; later implementation
 on main does not alter its inputs. Snapshot 42/rules 0.14/protocol 6 are unchanged.
+
+## Increment 8 — power, batteries, coolant and heat
+
+The [implementation contract](increment-8.md), adopted local-energy PASM design
+and [acceptance record](../../acceptance/1562-local-energy.md) cover the current
+runtime. Physical work consumes canonical local reserves; incoming allocation,
+finite coolant, heat, reactor ramping and deterministic flow cuts share the same
+network. Ordinary Power AI uses supported numeric state trees and permitted
+Console observations. Workshop and human controls edit the same authored model.
+
+Initial runtime integration is committed through `2ce8e316`; all shipped entity
+and scenario overrides pass the actual loader. Snapshot 43/rules 0.15 carry the
+new state; protocol 6 and the existing transport are retained. Native ownership,
+AI and continuation tests and matching-bundle browser checks continue in pinned
+validation worktrees. Gameplay balance and physical/device acceptance are pending;
+the increment has not yet passed its verified playable exit.

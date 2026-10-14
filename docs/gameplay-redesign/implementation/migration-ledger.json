@@ -150,7 +150,9 @@
       "completion": "Local reserves, flow allocation, thermal state and selected flow cuts work with human/AI controls, complexity and replenishment.",
       "evidence": [
         "pasm/spec/design/local-energy-and-thermal.yaml",
-        "docs/gameplay-redesign/implementation/increment-8.md"
+        "docs/gameplay-redesign/implementation/increment-8.md",
+        "docs/gameplay-redesign/implementation/increment-8-energy-tuning.md",
+        "docs/acceptance/1562-local-energy.md"
       ]
     },
     {

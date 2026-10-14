@@ -208,3 +208,239 @@ fn valid_retained_deck_can_restore_the_missing_physical_target() {
             .beam_impact_samples
     );
 }
+
+fn external_stage_world() -> (
+    World,
+    Entity,
+    Entity,
+    phoenix_model::damage::RepairWorkTarget,
+) {
+    use phoenix_model::damage::{ComponentCondition, RepairWorkTarget};
+    let mut world = base_world();
+    let source = spawn(&mut world, ATTACKER, false);
+    let target = spawn(&mut world, TARGET, true);
+    let mut physical = world.get::<ShipDamage>(target).unwrap().clone();
+    let (system, component) = physical
+        .definition
+        .components
+        .iter()
+        .flat_map(|(system, rows)| {
+            rows.iter()
+                .filter(|(_, row)| row.field_replaceable)
+                .map(move |(id, _)| (system.clone(), id.clone()))
+        })
+        .next()
+        .unwrap();
+    let state = physical
+        .state
+        .components
+        .get_mut(&system)
+        .unwrap()
+        .get_mut(&component)
+        .unwrap();
+    state.condition = ComponentCondition::Destroyed;
+    state.last_source = Some("snapshot-external-test".into());
+    let work_target = RepairWorkTarget::Component {
+        system: system.clone(),
+        component,
+    };
+    world.entity_mut(target).insert(physical);
+    let mut teams = world.get::<ShipRepairTeams>(source).unwrap().clone();
+    assert!(teams.0.claim_external(0, TARGET.into()));
+    world.entity_mut(source).insert(teams);
+    advance_external_stage(&mut world, source, target, 0.1);
+    let saved = world.get::<ShipRepairTeams>(source).unwrap().0.save_state();
+    let work = saved.external_physical_work.values().next().unwrap();
+    assert!(work.reserved && work.progress > 0.0);
+    assert_eq!(work.target.as_ref(), Some(&work_target));
+    // A local order may wait for this exact task without claiming or preempting
+    // the foreign crew's already active stage.
+    let mut local = world.get_mut::<ShipRepairTeams>(target).unwrap();
+    assert!(local
+        .0
+        .dispatch_physical(0, system, Some(work_target.clone()), "Local visit".into()));
+    let local_state = local.0.save_state();
+    assert!(local_state
+        .physical_work
+        .values()
+        .all(|work| work.target.is_none() && work.requested_target.as_ref() == Some(&work_target)));
+    (world, source, target, work_target)
+}
+
+fn advance_external_stage(world: &mut World, source: Entity, target: Entity, dt: f32) {
+    use crate::infrastructure::InfrastructureCondition;
+    use crate::jobs::repair::RepairStockAction;
+    let mut teams = world.get::<ShipRepairTeams>(source).unwrap().clone();
+    let mut inventory = world
+        .get::<InfrastructureCondition>(source)
+        .unwrap()
+        .clone();
+    let services = world
+        .get::<crate::resources::server::ResourceServices>(source)
+        .unwrap()
+        .clone();
+    let mut damage = world.get::<ShipDamage>(target).unwrap().clone();
+    teams.0.tick_external_physical(
+        dt,
+        TARGET,
+        &damage.definition,
+        &mut damage.state,
+        &std::collections::BTreeSet::new(),
+        |action, claim, recipe| {
+            if action == RepairStockAction::Release {
+                inventory.0.release_repair_claim(claim);
+                true
+            } else {
+                inventory
+                    .0
+                    .repair_parts(action, claim, recipe.unwrap(), &services.0)
+                    .is_ok()
+            }
+        },
+        |_, _| 0.0,
+    ); // Actual selected remedy's authored manual contribution.
+    world.entity_mut(source).insert((teams, inventory));
+    world.entity_mut(target).insert(damage);
+}
+
+fn stock_level(world: &World, entity: Entity) -> i64 {
+    world
+        .get::<crate::infrastructure::InfrastructureCondition>(entity)
+        .unwrap()
+        .0
+        .capacities()
+        .iter()
+        .map(|capacity| capacity.stock.level)
+        .sum()
+}
+
+#[test]
+fn duplicate_cross_actor_work_or_wrong_source_reservation_refuses_without_writes() {
+    for wrong_stock in [false, true] {
+        let (source_world, source, _, _) = external_stage_world();
+        let mut payload: PhoenixSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&capture(&source_world)).unwrap()).unwrap();
+        payload.tick = 999;
+        if wrong_stock {
+            let source = payload
+                .entities
+                .iter_mut()
+                .find(|row| row.uuid == ATTACKER)
+                .unwrap();
+            let inventory = source.infrastructure.as_mut().unwrap();
+            let capacity = inventory
+                .capacities
+                .iter_mut()
+                .find(|capacity| {
+                    capacity
+                        .stock
+                        .reserved
+                        .keys()
+                        .any(|claim| claim.starts_with("external-repair/"))
+                })
+                .unwrap();
+            *capacity.stock.reserved.values_mut().next().unwrap() += 1;
+            inventory.validate_stocks().unwrap();
+        } else {
+            let target = payload
+                .entities
+                .iter_mut()
+                .find(|row| row.uuid == TARGET)
+                .unwrap();
+            let work = target
+                .repair
+                .as_mut()
+                .unwrap()
+                .jobs
+                .as_mut()
+                .unwrap()
+                .physical_work
+                .values_mut()
+                .next()
+                .unwrap();
+            work.target = work.requested_target.take();
+        }
+        let mut world = base_world();
+        spawn(&mut world, ATTACKER, false);
+        let before = serde_json::to_value(capture(&world)).unwrap();
+        let count = world.entities().len();
+        let layer = world.resource::<WorldLayerMap>().0[LAYER]
+            .spawned_entities
+            .clone();
+        let report = restore(&mut world, &payload);
+        assert!(report.gaps.iter().any(|gap| matches!(gap, RestoreGap::RepairJobsInvalid { reason, .. }
+            if reason.contains(if wrong_stock { "source inventory claims disagree" } else { "same physical task" })
+        )), "{report:?}");
+        assert_eq!(report.entities_spawned, 0);
+        assert_eq!(world.entities().len(), count);
+        assert_eq!(
+            world.resource::<WorldLayerMap>().0[LAYER].spawned_entities,
+            layer
+        );
+        assert_eq!(serde_json::to_value(capture(&world)).unwrap(), before);
+        assert!(
+            stock_level(&source_world, source) > 0,
+            "candidate source uses actual finite stock"
+        );
+    }
+}
+
+#[test]
+fn external_stage_and_pending_local_order_resume_with_exact_source_parts_once() {
+    use phoenix_model::damage::{ComponentCondition, RepairWorkTarget};
+    let (mut live, source, target, work_target) = external_stage_world();
+    let payload: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(&live)).unwrap()).unwrap();
+    let saved = live.get::<ShipRepairTeams>(source).unwrap().0.save_state();
+    let stage = saved.external_physical_work.values().next().unwrap();
+    let required: i64 = stage.requirements.iter().map(|part| part.amount).sum();
+    assert!(required > 0);
+    let recipe = &live
+        .get::<ShipDamage>(target)
+        .unwrap()
+        .definition
+        .config
+        .remedies[stage.recipe.as_ref().unwrap()];
+    let steps = (recipe.work_secs / recipe.manual_work_fraction / 0.1).ceil() as usize + 2;
+    let initial = stock_level(&live, source);
+    let mut resumed = base_world();
+    let resumed_source = spawn(&mut resumed, ATTACKER, false);
+    let report = restore(&mut resumed, &payload);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    assert_eq!(report.entities_spawned, 1);
+    let resumed_target = resumed
+        .query::<(Entity, &EntityUuid)>()
+        .iter(&resumed)
+        .find(|(_, uuid)| uuid.0 == TARGET)
+        .unwrap()
+        .0;
+    for _ in 0..steps {
+        assert_eq!(
+            serde_json::to_value(capture(&live)).unwrap(),
+            serde_json::to_value(capture(&resumed)).unwrap()
+        );
+        advance_external_stage(&mut live, source, target, 0.1);
+        advance_external_stage(&mut resumed, resumed_source, resumed_target, 0.1);
+    }
+    assert_eq!(
+        initial - stock_level(&live, source),
+        required,
+        "one completed stage consumes exactly its source requirements"
+    );
+    assert_eq!(
+        stock_level(&live, source),
+        stock_level(&resumed, resumed_source)
+    );
+    let RepairWorkTarget::Component { system, component } = work_target else {
+        unreachable!()
+    };
+    assert_eq!(
+        live.get::<ShipDamage>(target).unwrap().state.components[&system][&component].condition,
+        ComponentCondition::Healthy
+    );
+    let local = live.get::<ShipRepairTeams>(target).unwrap().0.save_state();
+    assert!(local
+        .physical_work
+        .values()
+        .all(|work| work.target.is_none() && work.requested_target.is_some() && !work.reserved));
+}

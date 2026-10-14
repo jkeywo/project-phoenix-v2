@@ -23,7 +23,7 @@ use project_phoenix::{
     server_app::{LocalShip, Ship, ShipSystemBlackboards},
     ship::{
         control_source::ControlSource,
-        power::{PowerConfigResource, ShipPowerSystem},
+        power::ShipPowerSystem,
         shields::{PendingShieldsThreatBearing, ShipShields},
         state::{ShipPhaserFrequency, ShipRedAlert},
         system_registry,
@@ -216,19 +216,46 @@ fn prefix(app: &mut App, ships: &[Entity], label: &str) -> BTreeMap<String, Vec<
 }
 fn prepare_power_shields(app: &mut App, ships: &[Entity]) {
     for (index, ship) in ships.iter().enumerate() {
-        let capacity = app
-            .world()
-            .get::<PowerConfigResource>(*ship)
-            .unwrap()
-            .0
-            .capacity;
         let mut power = app.world_mut().get_mut::<ShipPowerSystem>(*ship).unwrap();
-        let ids: Vec<_> = power.0.iter().map(|(id, _)| id.clone()).collect();
-        // Reachable resting reactor state, retaining the actual authored policy/budget.
-        for id in ids {
-            power.0.set_group_allocation(&id, 2).unwrap();
+        let hardware = power.0.config().clone();
+        // Healthy actual hardware leaves one deliberately different flow order
+        // for the real tree to restore; no pooled-rung policy or synthetic AI.
+        for group in &hardware.groups {
+            power
+                .0
+                .set_flow(&group.id, group.default_flow_per_sec)
+                .unwrap();
+            power
+                .0
+                .set_cooling(&group.id, group.default_cooling_per_sec)
+                .unwrap();
         }
-        power.0.battery_charge = capacity;
+        power
+            .0
+            .set_output(hardware.reactor.sustainable_output_per_sec)
+            .unwrap();
+        power
+            .0
+            .set_reactor_cooling(hardware.reactor.default_cooling_per_sec)
+            .unwrap();
+        power.0.network_mut().reactor.energy = hardware.reactor.reserve.capacity;
+        power.0.network_mut().reactor.heat = 0.0;
+        power.0.network_mut().reactor.thermal_stopped = false;
+        for consumer in &hardware.consumers {
+            let reserve = power
+                .0
+                .network_mut()
+                .consumers
+                .get_mut(&consumer.system)
+                .unwrap();
+            reserve.energy = consumer.reserve.capacity;
+            reserve.heat = 0.0;
+            reserve.thermal_stopped = false;
+        }
+        power
+            .0
+            .set_flow(&PowerGroupId("weapons".into()), 0.0)
+            .unwrap();
         app.world_mut().get_mut::<ShipRedAlert>(*ship).unwrap().0 = true;
         let mut shields = app.world_mut().get_mut::<ShipShields>(*ship).unwrap();
         assert!(shields.0.facings.len() > index);
@@ -493,6 +520,11 @@ fn producer_order_child() {
         );
     }
     prepare_power_shields(&mut app, &ships);
+    // The tree can only react after ordinary publication exposes this state.
+    for _ in 0..4 {
+        step(&mut app, &ships, &mut observed);
+    }
+    wait_ready(&mut app, &ships, &mut observed);
     sources(&mut app, &ships, true);
     let admitted_prefix = prefix(&mut app, &ships, "positive");
     app.world_mut()
@@ -519,9 +551,17 @@ fn producer_order_child() {
                 .get::<ShipPowerSystem>(*ship)
                 .unwrap()
                 .0
-                .commanded_level_for(&PowerGroupId("weapons".into())),
-            3,
-            "actual Power consumer applied authored alert allocation"
+                .flow_for(&PowerGroupId("weapons".into())),
+            app.world()
+                .get::<ShipPowerSystem>(*ship)
+                .unwrap()
+                .0
+                .config()
+                .groups
+                .iter()
+                .find(|group| group.id.0 == "weapons")
+                .map(|group| group.default_flow_per_sec),
+            "actual Power consumer applied its authored flow"
         );
         assert_eq!(
             app.world()
@@ -607,8 +647,8 @@ fn producer_order_child() {
                 .get::<ShipPowerSystem>(*ship)
                 .unwrap()
                 .0
-                .commanded_level_for(&PowerGroupId("weapons".into())),
-            2
+                .flow_for(&PowerGroupId("weapons".into())),
+            Some(0.0)
         );
         assert_eq!(
             app.world()

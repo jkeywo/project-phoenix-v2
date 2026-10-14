@@ -160,54 +160,103 @@ fn the_new_hull_is_selectable_without_rewriting_the_npc_cruiser() {
 }
 
 #[test]
-fn dynasty_reserve_uses_explicit_ordinary_allocation() {
-    use project_phoenix::core::messages::PowerGroupId;
-    use project_phoenix::modifiers::power_system::{PowerConfig, PowerSystem};
+fn dynasty_reserve_uses_the_finite_reactor_capacitor_and_authored_power_tree() {
+    use project_phoenix::modifiers::power_system::PowerSystem;
+    use project_phoenix::resources::energy_network::EnergyCoolantBindings;
     let hull = load_entity_config(PLAYER_HULL).unwrap();
-    let reactor = hull.power.unwrap();
-    assert!(reactor.strike_reserve.is_some());
-    let config = PowerConfig {
-        strike_reserve: reactor.strike_reserve.clone(),
-        capacity: reactor.capacity,
-        rates: reactor.rates,
-        sustainable_total: reactor.sustainable_total,
-        max_commanded_total: reactor.max_commanded_total,
-        emergency_threshold: reactor.emergency_threshold,
-    };
+    let strike = hull.power.as_ref().unwrap().strike_reserve.clone();
+    assert!(strike.is_some());
+    assert!(hull.power.as_ref().unwrap().ai_policy.is_none());
+    let hardware = hull.energy.unwrap();
     let ship = hull.ship_config.unwrap();
-    let seed = project_phoenix::ship::power::authored_power_group_seed(&ship.power_groups);
-    let mut power = PowerSystem::from_authored_groups(&config, &seed);
-    assert_eq!(power.battery_charge, 0.0);
-    power.tick(1.0, &config);
-    assert_eq!(power.battery_charge, 0.0, "no passive capture");
-    power
-        .set_group_allocation(&PowerGroupId("strike-reserve".into()), 2)
+    let reactor = ship
+        .systems
+        .iter()
+        .find(|system| system.kind == "power_reactor")
         .unwrap();
-    power.tick(1.0, &config);
-    let nominal_charge = power.battery_charge;
-    power
-        .set_group_allocation(&PowerGroupId("helm".into()), 1)
+    let (programs, frames) =
+        project_phoenix::ai::state_tree_runtime::compile_ship_trees_with_energy(
+            &ship,
+            Some(&hardware),
+        )
         .unwrap();
-    power
-        .set_group_allocation(&PowerGroupId("strike-reserve".into()), 3)
+    assert!(programs.0.contains_key(&reactor.id) && frames.0.contains_key(&reactor.id));
+    let mut power = PowerSystem::from_energy(hardware.clone(), ship)
+        .unwrap()
+        .with_strike_reserve(strike.clone())
         .unwrap();
-    power.tick(1.0, &config);
-    assert!(power.battery_charge - nominal_charge > nominal_charge);
-    let serialized = serde_json::to_string(&power.capture_continuation()).unwrap();
-    let mut restored = PowerSystem::from_authored_groups(&config, &seed);
-    restored.restore_continuation(&serde_json::from_str(&serialized).unwrap());
-    for _ in 0..30 {
-        power.tick(1.0 / 60.0, &config);
-        restored.tick(1.0 / 60.0, &config);
-        assert_eq!(
-            power.capture_continuation(),
-            restored.capture_continuation()
-        );
+    assert_eq!(power.battery_charge(), power.network().reactor.energy);
+    let bindings = EnergyCoolantBindings {
+        reactor: "coolant-hold".into(),
+        consumers: hardware
+            .consumers
+            .iter()
+            .map(|consumer| (consumer.system.clone(), "coolant-hold".into()))
+            .collect(),
+    };
+    let mut stock = BTreeMap::from([("coolant-hold".into(), 1000_i64)]);
+    for group in &hardware.groups {
+        power.set_flow(&group.id, 0.0).unwrap();
+    }
+    power.network_mut().reactor.energy = 0.0;
+    power.network_mut().output_actual_per_sec = 0.0;
+    power.set_output(0.0).unwrap();
+    let tick = |power: &mut PowerSystem, stock: &mut BTreeMap<String, i64>, dt| {
+        let result = power.tick_energy(dt, &bindings, stock, &mut |_| 0).unwrap();
+        for (id, used) in result.coolant_withdrawals {
+            *stock.get_mut(&id).unwrap() -= used;
+        }
+    };
+    tick(&mut power, &mut stock, 1.0);
+    assert_eq!(
+        power.battery_charge(),
+        0.0,
+        "zero output cannot capture free energy"
+    );
+    power
+        .set_output(hardware.reactor.sustainable_output_per_sec)
+        .unwrap();
+    for _ in 0..10 {
+        tick(&mut power, &mut stock, 1.0 / 30.0);
     }
     assert!(
-        reactor.ai_policy.is_some(),
-        "ordinary Power Backfill remains authored"
+        power.battery_charge() > 0.0,
+        "ordinary output charges the same capacitor"
     );
+    let mut boosted = power.clone();
+    let mut boosted_stock = stock.clone();
+    boosted
+        .set_output(hardware.reactor.max_output_per_sec)
+        .unwrap();
+    let before = power.battery_charge();
+    tick(&mut power, &mut stock, 1.0);
+    tick(&mut boosted, &mut boosted_stock, 1.0);
+    assert!(boosted.battery_charge() > power.battery_charge());
+    assert!(power.battery_charge() > before);
+    let weapon = strike.as_ref().unwrap().weapons.iter().next().unwrap();
+    assert!(boosted.battery_charge() >= weapon.1.cost);
+    boosted.set_strike_boost(true);
+    let before = boosted.battery_charge();
+    assert_eq!(
+        boosted.fire_strike_weapon(weapon.0),
+        weapon.1.damage_multiplier
+    );
+    assert_eq!(boosted.battery_charge(), before - weapon.1.cost);
+    let saved =
+        serde_json::from_str(&serde_json::to_string(&boosted.capture_continuation()).unwrap())
+            .unwrap();
+    let mut restored = power.clone();
+    restored.restore_continuation(&saved).unwrap();
+    let mut restored_stock = boosted_stock.clone();
+    for _ in 0..30 {
+        tick(&mut boosted, &mut boosted_stock, 1.0 / 60.0);
+        tick(&mut restored, &mut restored_stock, 1.0 / 60.0);
+        assert_eq!(
+            boosted.capture_continuation(),
+            restored.capture_continuation()
+        );
+        assert_eq!(boosted_stock, restored_stock);
+    }
     assert!(load_entity_config(NPC_HULL)
         .unwrap()
         .power

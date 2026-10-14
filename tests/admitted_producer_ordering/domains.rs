@@ -8,7 +8,10 @@ pub fn owns(index: usize, command: &AdmittedCommand, arcs: &[SystemId]) -> bool 
     match index {
         0 => {
             command.target.0 == "power-reactor"
-                && matches!(command.payload, Payload::SetPowerGroupAllocation { .. })
+                && matches!(
+                    command.payload,
+                    Payload::SetEnergyGroup { .. } | Payload::SetEnergyReactor { .. }
+                )
         }
         1 => {
             arcs.contains(&command.target)

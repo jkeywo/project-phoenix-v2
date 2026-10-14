@@ -206,7 +206,7 @@ fn authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers() {
                     continue;
                 }
                 phases.insert(phase.0.current.clone());
-                max_charge = max_charge.max(power.0.battery_charge);
+                max_charge = max_charge.max(power.0.battery_charge());
                 let boost = power.0.strike_boost().unwrap();
                 if boost.enabled && !enabled_before {
                     enables += 1;
@@ -242,7 +242,7 @@ fn authored_dynasty_cycles_with_backfill_and_three_humans_on_both_peers() {
                     uuid.0,
                     hull.0.total_current(),
                     hull.0.total_max(),
-                    power.map(|power| (power.0.battery_charge, power.0.strike_boost()))
+                    power.map(|power| (power.0.battery_charge(), power.0.strike_boost()))
                 );
             }
         }

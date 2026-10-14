@@ -232,7 +232,7 @@ fn dynasty_strike_reserve_backfill_resumes_through_the_complete_schedule() {
             &project_phoenix::ship::power::PowerConfigResource,
         )>()
         .iter(live.world())
-        .any(|(power, config)| config.0.strike_reserve.is_some() && power.0.battery_charge > 0.0);
+        .any(|(power, config)| config.0.strike_reserve.is_some() && power.0.battery_charge() > 0.0);
     assert!(has_charged_reserve, "ordinary Backfill charges the reserve");
     let mut replay = boot(&config);
     step(&mut replay, CAPTURE_AT);

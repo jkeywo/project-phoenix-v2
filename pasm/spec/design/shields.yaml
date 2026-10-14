@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Shields Operator
-      summary: Bridge role that reads the defensive grid and chooses whether to focus an authored shield arc.
+      summary: "Operator of authored shield capabilities: reads the defensive grid, chooses arc priorities and manages supported battery-backed protection. This capability role does not require a separate claimable Station; the reference Cruiser assigns it to Science through data."
     game_design:
       architecture_links: [shield-focus-controller, shield-status-blackboard-state]
       responsibilities: [monitor shield arc health and availability, focus or clear a shield arc]
@@ -26,7 +26,9 @@ entities:
       status: accepted
       confidence: confirmed
       title: Set Shield Arc Focus
-      summary: Shields focuses one authored arc or clears the focus, applying that ship's configured defensive trade-offs.
+      summary: "Shields selects one authored arc or clears its focus through the retained admission boundary. Increment 9 reconciles this priority intent with actual upkeep, recharge and battery-mediated redistribution; a focus change cannot create strength or recoverable energy."
+      rationale:
+        - "S023 supersedes focus multipliers as the sole redistribution mechanism. Existing authored focus limits and controls are migration inputs; compatible protection/rate trade-offs must obey shield-strength-and-operating-energy and shield-conversion-conservation-and-continuation. No competing focus and redistribution controllers may operate one System."
     game_design:
       architecture_links: [shield-focus-controller, set-shield-arc-focus-command]
       owner_role: shields-operator
@@ -63,7 +65,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Shield Grid Information
-      summary: Shields sees authored arc geometry, health, availability, focus, and defensive grid status.
+      summary: "Shields sees permitted arc geometry, protection strength, effective availability, focus/priority and defensive grid status, with distinct local reserve, upkeep/recharge demand and actual redistribution feedback. Co-hosted Consoles retain their own knowledge scopes."
     game_design:
       enforcement_links: [shield-status-blackboard-state]
       visibility: role-visible
@@ -88,7 +90,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Shield Collapse and Recovery
-      summary: A shield facing driven to zero collapses and stops absorbing for its authored offline duration, then comes back empty and climbs at its authored regeneration rate; sustained fire on a recovering facing collapses it again. Identical for the player's ship and every NPC.
+      summary: "A shield facing driven to zero collapses and stops absorbing for its authored offline duration, then comes back empty and rebuilds at its authored rate as actual local energy funds recharge. Sustained fire can collapse a recovering facing again. Upkeep shortage is distinct from a damage collapse; player and NPC shields use the same rules."
       rationale:
         - "Issue #788 replaced the previous snap-back-to-full recovery. A collapse now costs a ship the whole climb rather than only the offline window, so there is a real interval during which a facing is partially recovered — which is what makes 'break off until shields are back to a fraction' a question anyone, human or AI, can answer or act on."
     game_design:

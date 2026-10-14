@@ -1,0 +1,59 @@
+entities:
+  - decision: shield-strength-and-operating-energy
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Separate Shield Protection and Operating Energy
+      summary: "S022 retains authored directional protection strength separate from generator local batteries. Hits deplete protection. Raised shields consume continuous upkeep and additional energy for actual timed recharge, with most shield-related consumption coming from recharge. Ordinary fullness-dependent battery loss remains a separate energy mechanism. Prepared energy does not instantly restore depleted protection."
+      rationale:
+        - "Selected S022 in docs/gameplay-redesign/system-review.md and the approved increment 9 roadmap. Keep geometry, supported damage/penetration and authored collapse/recovery while moving protection work onto the shared local energy, thermal and finite-coolant mechanisms."
+
+  - decision: shield-battery-mediated-redistribution
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Redistribute Shield Strength Through Actual Batteries
+      summary: "S023 permits donor protection to be discharged into a battery, then spent on another arc's ordinary timed recharge. The donor loses strength; the recipient receives no instantaneous HP transfer. Ordinary individual System AI can execute delegated priorities using the same resources, geometry and permitted observations as humans."
+      rationale:
+        - "Selected S023 explicitly changes the current focus-multiplier-only model. Exact conversion, rate and topology values were left open; no research-game coefficient or free focus conversion is adopted."
+
+  - decision: shield-recovery-uses-existing-local-reserves
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Retain Per-Arc Reserves and Explicit Recovery Bindings
+      summary: "Increment 9 retains stable per-arc System identities and their canonical local energy reserves. Authored eligible recovery destinations default to the shield arcs controlled by the same Console. Donor strength credits an eligible destination battery, subject to real capacity and supported intake/rate limits; the recipient still performs its own recharge. No shared-generator migration, mandatory central battery, integer energy inventory, second network or additional controller is introduced."
+      rationale:
+        - "[ai] Adopted integration judgment for the user-authorized milestone after inspecting increment 8's actual per-arc reserves. A physical recovery binding grants neither command authority over the recipient nor its Console's private observations."
+
+  - decision: shield-upkeep-partial-effective-protection
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Underfunded Upkeep Reduces Effective Protection
+      summary: "An affordable upkeep fraction provides partial effective protection; zero funded upkeep provides no interception. Preserve separate stored strength and raised intent through exhaustion and incoming-flow cuts. Thermal or equipment unavailability still prevents operation. Restoring energy can reactivate retained protection but cannot refill strength lost to damage or discharge."
+      rationale:
+        - "[ai] Adopted implementation choice, not a user-selected numerical absorption formula. The concrete damage split, work phase and fractional arithmetic require an implementation trace and tests across every damage consumer. Avoid a free raised field, a global restart lock or an invented loss of all stored strength."
+        - "[ai] Implementation specification: pay upkeep before recharge in stable arc order. The funded fraction permits the same fraction of interception; remaining damage bypasses normally and only intercepted damage depletes strength. Raised intent starts true; lowering retains strength."
+
+  - decision: shield-conversion-conservation-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Conserve Shield Recovery Work and Continue Its Intent
+      summary: "Discharge is finite and lossy: recovered energy per strength cannot exceed the source's recharge energy cost per strength across supported modes. Commit only actual donor removal and accepted battery credit, together; rejected charge leaves donor strength intact. Apply shared gross charge/depletion heat and real coolant rules once. Raised/recharge/discharge intent, selected endpoint and future-affecting fractional work join existing deterministic continuation, Console admission, ordinary AI and Workshop validation."
+      rationale:
+        - "[ai] Enforces S022/S023 with the increment 8 physical-resource contract. Focus toggles, fractional rounding, zero-cost recharge and alternating arcs must not create energy. Intentional discharge and focus decay must not masquerade as incoming damage in ordinary shield AI observations. Numerical rates, yield and AI donor thresholds remain provisional authored tuning."
+        - "[ai] Implementation specification: recovery target intent persists until cancellation, with bounded per-second work and persisted fractional strength. Voluntary emptying has no special collapse delay. Recovery and reactor intake share a canonical per-tick maximum-intake budget based on actual accepted energy; rejected energy removes no donor strength. Positive recovery yield is strictly below the donor and every eligible recipient recharge cost."
+
+  - decision: shield-retuning-independent-later-layer
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Preserve Selected Retuning Without Coupling Ordinary Shields to It
+      summary: "S024 selects defensive retuning for every generator, with equipment-dependent performance, a timed raised-shield transition, temporarily reduced protection and energy/heat cost. G050 probing remains optional with generally persistent findings until configuration changes. These interactions belong to increment 15; increment 9 upkeep, recharge and redistribution operate independently. Electronic protection against disruption remains increment 17."
+      rationale:
+        - "Selected S024 and G050 are retained explicitly rather than silently dropped or mistaken for completed current controls. The approved serial roadmap places probing/layered combat after the ordinary shield energy migration."

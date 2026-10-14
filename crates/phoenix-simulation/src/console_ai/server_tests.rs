@@ -505,6 +505,7 @@ fn torpedo_load_app(tube_source: ControlSource) -> (App, Entity) {
 
     let torpedoes = crate::weapons::torpedo::TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: 0.0,
             fire_arc_deg: 90.0,

@@ -1,7 +1,7 @@
 # Combat Test Scenario (#475, re-authored for #960 + #936)
 #
 # An 8-wave defence scenario that exercises the full combat stack:
-#   - on_timer wave clock + on_all_destroyed completion/victory (#470, #960)
+#   - on_timer wave clock + on_all_neutralized completion/victory (#470, #960)
 #   - NPC shields backend + Sensors panel rendering (#471, #473)
 #   - Rebalanced Harrow fleet + Axiom Station (#474)
 #   - Alliance-Harrow mutual hostility (#472)
@@ -49,8 +49,8 @@
 # continuous stream rather than a queue. Retune by editing the eight
 # `on_timer(N, …)` offsets — nothing in Rust knows the cadence.
 #
-# The ONLY thing still gated on `on_all_destroyed` is the ending window:
-# victory's `on_all_destroyed` over `hostiles` (plus its 5 s deferral), and the
+# The ONLY thing still gated on `on_all_neutralized` is the ending window:
+# victory's `on_all_neutralized` over `hostiles` (plus its 5 s deferral), and the
 # eight per-wave completion registrations that close each objective and pay down
 # `mission_threat_remaining`. Nothing spawns off a death any more.
 #
@@ -146,7 +146,7 @@
 #   blocks the trigger — which is exactly what happened: no spawn action in this
 #   world ever authored `groups`, so the `waves` group was empty and victory was
 #   unreachable at every tier (the all-defeat headless baseline recorded on
-#   issue #892). Group membership is dynamic, so a single `on_all_destroyed`
+#   issue #892). Group membership is dynamic, so a single `on_all_neutralized`
 #   over `hostiles` covers all three tiers with no name list at all.
 #
 #   The guard is `counter(waves_spawned) >= 8` rather than a clock, and under a
@@ -163,7 +163,7 @@
 #   An in-handler test would have spent the trigger on the first such window and
 #   made victory unreachable — the same failure, by a different route, that the
 #   guard exists to prevent.
-# Defeat:  Starbase Alpha destroyed → game_over "DEFEAT".
+# Defeat:  Starbase Alpha neutralized → game_over "DEFEAT".
 #          Player ship destroyed → handled by the built-in apply_hull_damage
 #          path which sets GamePhase::GameOver directly with reason
 #          "All consoles destroyed" — no scenario trigger needed.
@@ -188,7 +188,7 @@
 # is exactly right; what would be dishonest is counting waves DOWN as they
 # SPAWN, which would read 0 while the last four waves were alive and in the
 # player's face. The decrement is therefore kept where it was — beside each
-# wave's `complete_objective`, in that wave's own `on_all_destroyed` handler —
+# wave's `complete_objective`, in that wave's own `on_all_neutralized` handler —
 # and moved OFF the next wave's spawn trigger, which no longer exists. Waves can now
 # also die out of order (a player may focus wave 6 while wave 5 is still alive);
 # the counter does not care, because each wave pays its own single decrement.
@@ -227,7 +227,7 @@
 # authoritative digest over the scenario's own state, and this world's own
 # script populates plenty of it: the `mission_threat_remaining`/`ship_power`/
 # `waves_spawned` flags above are FlagStore entries, and the eight
-# `on_timer`/`on_all_destroyed`/`on_destroyed` triggers are latches — both now
+# `on_timer`/`on_all_neutralized`/`on_neutralized` triggers are latches — both now
 # walked by `sim_digest::fold_scenario_records` / `fold_scenario_flags`, neither
 # of which happened when 14942520827746055774 was measured. The thrust-band A/B
 # is untouched — it is a same-build comparison, and "0 helm power changes" is
@@ -468,7 +468,7 @@ spawn_on = "game_start"
 # Defended object, and since #936 a ALLIANCE one — the faction is authored on
 # `assets/entities/station_axiom.toml`, not here, because a station tagged
 # `allied` that belongs to nobody is wrong in every world that fields it. Named
-# "world.entity.starbase_alpha.name" so `on_destroyed` and every wave's
+# "world.entity.starbase_alpha.name" so `on_neutralized` and every wave's
 # `assault-starbase` directive can reference it; that string id IS the entity's
 # name as far as name resolution is concerned.
 [[entity]]
@@ -618,17 +618,17 @@ on_timer(225, "release_wave_6").gm_controls("release_wave_6", "world.combat_test
 on_timer(270, "release_wave_7").gm_controls("release_wave_7", "world.combat_test.gm.wave.7").pauseable();
 on_timer(315, "release_wave_8").gm_controls("release_wave_8", "world.combat_test.gm.wave.8").pauseable();
 
-on_all_destroyed("wave_1", "wave_1_cleared");
-on_all_destroyed("wave_2", "wave_2_cleared");
-on_all_destroyed("wave_3", "wave_3_cleared");
-on_all_destroyed("wave_4", "wave_4_cleared");
-on_all_destroyed("wave_5", "wave_5_cleared");
-on_all_destroyed("wave_6", "wave_6_cleared");
-on_all_destroyed("wave_7", "wave_7_cleared");
-on_all_destroyed("wave_8", "wave_8_cleared");
+on_all_neutralized("wave_1", "wave_1_cleared");
+on_all_neutralized("wave_2", "wave_2_cleared");
+on_all_neutralized("wave_3", "wave_3_cleared");
+on_all_neutralized("wave_4", "wave_4_cleared");
+on_all_neutralized("wave_5", "wave_5_cleared");
+on_all_neutralized("wave_6", "wave_6_cleared");
+on_all_neutralized("wave_7", "wave_7_cleared");
+on_all_neutralized("wave_8", "wave_8_cleared");
 
-on_all_destroyed("hostiles", "on_raid_broken").when("counter(waves_spawned) >= 8");
-on_destroyed("world.entity.starbase_alpha.name", "on_starbase_lost");
+on_all_neutralized("hostiles", "on_raid_broken").when("counter(waves_spawned) >= 8");
+on_neutralized("world.entity.starbase_alpha.name", "on_starbase_lost");
 on_world_loaded("add_standing_mission");
 
 // ── Comms, in authored order ──
@@ -1009,9 +1009,8 @@ fn on_raid_broken(ctx) {
         .game_over("world.combat_test.trigger.action.18.message", "victory");
 }
 
-// Defeat: Starbase Alpha destroyed. The player ship dying is handled by the
-// built-in `apply_hull_damage` path, which sets GamePhase::GameOver directly
-// with reason "All consoles destroyed" — no scenario trigger needed.
+// Defeat: Starbase Alpha is neutralized or actually destroyed. Recoverable
+// player disablement retains crew seats and the possibility of restoration.
 fn on_starbase_lost(ctx) {
     ctx.effects.game_over("world.combat_test.trigger.action.21.message", "defeat");
 }

@@ -2807,6 +2807,7 @@ export function buildConsoleView(consoleName, state) {
       console_view: state.consoleViews?.[definition.id] || null,
       observed_system_status: scoped.systemStatus || {},
       system_status: (definition.systems || []).map(system_id => ({ system_id,
+        physical: scoped.consoleHull?.find(row=>row.system_id===system_id)?.physical || null,
         ...(scoped.systemStatus?.[system_id] || { display_name: system_id, availability: 'unknown', reasons: [],
           delegated: scoped.controlSources?.[system_id] === 'Ai' }),
       })) };

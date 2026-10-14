@@ -3,6 +3,7 @@ use crate::ship::damage::DamageTier;
 
 fn status(id: &str, current: f32) -> SystemHullStatus {
     SystemHullStatus {
+        physical: None,
         system_id: SystemId(id.into()),
         display_name: id.into(),
         current,
@@ -1249,6 +1250,9 @@ fn issued_jobs_survive_permitted_projection_without_revealing_target_damage() {
     let v = vis(vec![]);
     let mut bb = bb_with_queue(vec![]);
     bb.jobs.push(phoenix_model::job::JobWorkItem {
+        target_work: None,
+        waiting_parts: false,
+        work_progress: None,
         id: phoenix_model::job::JobId(7),
         owner: SystemId("repair".into()),
         team_idx: 0,

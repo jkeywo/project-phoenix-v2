@@ -514,13 +514,27 @@ pub(super) fn validate_entity_resources(
                     saved.id != authored.id
                         || saved.ceiling != authored.ceiling
                         || saved.label != authored.label
-                        || !saved.stock.reserved.is_empty()
+                        || saved.stock.reserved.keys().any(|claim| {
+                            !claim.starts_with("repair/") && !claim.starts_with("external-repair/")
+                        })
                 })
         {
             return Err(
                 "infrastructure inventory disagrees with authored stores or has unsupported claims"
                     .into(),
             );
+        }
+        if infrastructure
+            .capacities()
+            .iter()
+            .any(|capacity| !capacity.stock.reserved.is_empty())
+        {
+            let jobs = row
+                .repair
+                .as_ref()
+                .and_then(|repair| repair.jobs.as_ref())
+                .ok_or("repair parts claims have no team owner")?;
+            super::application::validate_physical_repair_claims(world, entity, row, jobs)?;
         }
     }
     if let Some(flow) = &row.umbilical {
@@ -538,6 +552,7 @@ pub(super) fn validate_entity_resources(
         }
     }
     if let Some(stored) = &row.weapons {
+        validate_physical_attacks(world, row)?;
         if let Some(live) =
             world.get::<crate::console::weapons::torpedo::TorpedoSystemResource>(entity)
         {
@@ -567,6 +582,189 @@ pub(super) fn validate_entity_resources(
             candidate.validate_magazine()?;
         } else if stored.magazine.is_some() {
             return Err("magazine has no authored torpedo provider".into());
+        }
+    }
+    Ok(())
+}
+
+/// Validate launched effects against the complete immutable target roster.
+pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Result<(), String> {
+    let Some(stored) = &row.weapons else {
+        return Ok(());
+    };
+    for profile in stored
+        .torpedoes_in_flight
+        .iter()
+        .map(|round| &round.impact)
+        .chain(stored.bursts.iter().map(|burst| &burst.impact))
+        .chain(
+            stored
+                .blasters
+                .iter()
+                .flat_map(|bank| bank.in_flight.iter().map(|round| &round.impact)),
+        )
+    {
+        profile.validate()?;
+    }
+    if stored
+        .torpedoes_in_flight
+        .iter()
+        .any(|round| !round.strike_damage_bonus.is_finite() || round.strike_damage_bonus < -1.0)
+    {
+        return Err("invalid launched torpedo damage modifier".into());
+    }
+    for (bank, (target, sample)) in &stored.beam_impact_samples {
+        if !stored.beams.iter().any(|(id, ..)| id == bank)
+            || target.is_empty()
+            || sample.deck.is_empty()
+            || !sample.profile_fraction.is_finite()
+            || !(0.0..1.0).contains(&sample.profile_fraction)
+        {
+            return Err("invalid retained beam impact sample".into());
+        }
+        if let Some(mut targets) = world.try_query::<(
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::compartment_damage::ShipDamage,
+        )>() {
+            if let Some((_, damage)) = targets.iter(world).find(|(uuid, _)| &uuid.0 == target) {
+                if !damage
+                    .definition
+                    .interior
+                    .decks
+                    .iter()
+                    .any(|deck| deck.id == sample.deck)
+                {
+                    return Err("retained beam sample refers to an absent target deck".into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Cross-actor references and reservations must be checked on the complete
+/// candidate roster before any live entity, layer or run-state writes.
+pub(super) fn validate_cross_entity_repairs(
+    world: &World,
+    snapshot: &PhoenixSnapshot,
+) -> Result<(), (String, String)> {
+    use crate::resources::service::{resolve_endpoint, ResourceEndpoint, ResourceLink};
+    use phoenix_model::damage::RepairWorkTarget;
+    use std::collections::{BTreeMap, BTreeSet};
+    let roster: BTreeSet<_> = snapshot
+        .entities
+        .iter()
+        .map(|row| row.uuid.clone())
+        .collect();
+    let entities: BTreeMap<_, _> = world
+        .try_query::<(Entity, &EntityUuid)>()
+        .map(|mut query| {
+            query
+                .iter(world)
+                .map(|(entity, uuid)| (uuid.0.clone(), entity))
+                .collect()
+        })
+        .unwrap_or_default();
+    let definitions: BTreeMap<_, _> = entities
+        .iter()
+        .filter(|(uuid, _)| roster.contains(*uuid))
+        .filter_map(|(uuid, entity)| {
+            world
+                .get::<crate::ship::compartment_damage::ShipDamage>(*entity)
+                .map(|damage| (uuid.clone(), damage.definition.clone()))
+        })
+        .collect();
+    let mut claimed: BTreeMap<(String, RepairWorkTarget), (String, u64)> = BTreeMap::new();
+    for row in &snapshot.entities {
+        let Some(jobs) = row.repair.as_ref().and_then(|repair| repair.jobs.as_ref()) else {
+            continue;
+        };
+        let validate = || -> Result<(), String> {
+            let entity = *entities.get(&row.uuid).ok_or("repair source is missing")?;
+            let teams = world
+                .get::<ShipRepairTeams>(entity)
+                .ok_or("repair source has no authored team owner")?;
+            teams
+                .0
+                .validate_external_physical_targets(jobs, &definitions, &roster)?;
+            let mut expected = BTreeMap::new();
+            for (id, work) in &jobs.external_physical_work {
+                if !work.reserved {
+                    continue;
+                }
+                for (index, part) in work.requirements.iter().enumerate() {
+                    let services = world
+                        .get::<crate::resources::server::ResourceServices>(entity)
+                        .ok_or("external repair parts have no source resource services")?;
+                    let ResourceEndpoint::Capacity { id: capacity } = resolve_endpoint(
+                        &part.resource,
+                        &services.0,
+                        &ResourceLink {
+                            service: Some(part.service.clone()),
+                            provider: None,
+                        },
+                    )?
+                    else {
+                        return Err("external parts do not resolve to source physical stock".into());
+                    };
+                    if expected
+                        .insert(
+                            (capacity, format!("{}/{index}", work.claim(*id))),
+                            part.amount,
+                        )
+                        .is_some()
+                    {
+                        return Err("duplicate external repair parts claim".into());
+                    }
+                }
+            }
+            let actual: BTreeMap<_, _> = row
+                .infrastructure
+                .as_ref()
+                .into_iter()
+                .flat_map(|inventory| inventory.capacities())
+                .flat_map(|capacity| {
+                    capacity
+                        .stock
+                        .reserved
+                        .iter()
+                        .filter(|(claim, _)| claim.starts_with("external-repair/"))
+                        .map(|(claim, amount)| ((capacity.id.clone(), claim.clone()), *amount))
+                })
+                .collect();
+            if actual != expected {
+                return Err("external repair progress and source inventory claims disagree".into());
+            }
+            Ok(())
+        };
+        validate().map_err(|reason| (row.uuid.clone(), reason))?;
+        for job in jobs
+            .teams
+            .iter()
+            .flatten()
+            .filter(|job| job.outcome.is_none())
+        {
+            let work = match &job.activity {
+                crate::jobs::repair::RepairActivity::Internal { .. } => jobs
+                    .physical_work
+                    .get(&job.id.0)
+                    .and_then(|work| work.target.clone())
+                    .map(|target| (row.uuid.clone(), target)),
+                crate::jobs::repair::RepairActivity::External { target } => jobs
+                    .external_physical_work
+                    .get(&job.id.0)
+                    .filter(|work| &work.target_uuid == target && roster.contains(target))
+                    .and_then(|work| work.target.clone())
+                    .map(|work| (target.clone(), work)),
+            };
+            if let Some(key) = work {
+                if claimed.insert(key, (row.uuid.clone(), job.id.0)).is_some() {
+                    return Err((
+                        row.uuid.clone(),
+                        "multiple active repair teams claim the same physical task".into(),
+                    ));
+                }
+            }
         }
     }
     Ok(())

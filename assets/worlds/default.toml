@@ -209,7 +209,7 @@ label = "world.default.available_ships.1.label"
 # `load_world` and the comms template's broadcast.
 [script]
 setup = """
-on_destroyed("world.entity.raider_alpha.name", "on_raider_destroyed");
+on_neutralized("world.entity.raider_alpha.name", "on_raider_destroyed");
 on_attacked("world.entity.raider_alpha.name", "on_raider_attacked");
 on_attacked("world.entity.starbase_alpha.name", "on_starbase_attacked");
 on_hailed("world.entity.starbase_alpha.name", "on_starbase_hailed");

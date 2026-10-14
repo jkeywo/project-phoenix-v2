@@ -18,6 +18,7 @@ fn evidence(source: &str, tick: u64) -> ObservationMetadata {
 }
 fn entry(source: &str, tick: u64) -> RepairQueueEntry {
     RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![evidence(source, tick)],
         group: RepairGroup::Station(StationId("helm".into())),
         station_label: "Helm".into(),
@@ -92,4 +93,71 @@ fn damage_sampled_after_same_tick_diagnosis_can_reopen_group() {
         queue.reduce_report(entry("engine", 21)),
         ReportReduction::Raised
     );
+}
+
+#[test]
+fn current_source_can_improve_without_erasing_other_known_faults() {
+    let mut queue = RepairRequestQueue::default();
+    let mut left = entry("left", 20);
+    left.tier = DamageTier::Destroyed;
+    left.deficit = 80.0;
+    queue.reduce_report(left);
+    queue.reduce_report(entry("right", 21));
+    let mut recovery = entry("left", 22);
+    recovery.tier = DamageTier::Operational;
+    recovery.deficit = 0.0;
+    assert_eq!(queue.reduce_report(recovery), ReportReduction::Updated);
+    assert_eq!(queue.entries[0].tier, DamageTier::Damaged);
+    assert_eq!(queue.entries[0].deficit, 20.0);
+    let mut right = entry("right", 23);
+    right.tier = DamageTier::Operational;
+    right.deficit = 0.0;
+    assert_eq!(queue.reduce_report(right), ReportReduction::Resolved);
+    assert!(queue.entries.is_empty());
+    assert_eq!(
+        queue.reduce_report(entry("left", 21)),
+        ReportReduction::Unchanged
+    );
+}
+
+#[test]
+fn later_on_site_diagnosis_supersedes_an_older_system_report_but_not_another_system() {
+    let mut queue = RepairRequestQueue::default();
+    let mut fault = entry("left", 20);
+    fault.tier = DamageTier::Destroyed;
+    queue.reduce_report(fault);
+    queue.reduce_report(entry("right", 21));
+    let mut diagnosis = entry("left", 22);
+    diagnosis.observations[0].provenance.kind = ObservationSource::RepairTeam;
+    diagnosis.observations[0].provenance.system = Some(SystemId("repair".into()));
+    diagnosis.tier = DamageTier::Operational;
+    diagnosis.deficit = 0.0;
+    queue.reduce_report(diagnosis);
+    assert_eq!(queue.entries[0].tier, DamageTier::Damaged);
+    assert_eq!(queue.entries[0].readings.len(), 2);
+    assert_eq!(
+        queue.reduce_report(entry("left", 21)),
+        ReportReduction::Unchanged
+    );
+    let mut complete = entry("right", 23);
+    complete.observations[0].provenance.kind = ObservationSource::RepairTeam;
+    complete.tier = DamageTier::Operational;
+    complete.deficit = 0.0;
+    assert_eq!(queue.reduce_report(complete), ReportReduction::Resolved);
+    assert!(queue.entries.is_empty());
+}
+
+#[test]
+fn equal_tick_same_source_keeps_the_worst_reading() {
+    let mut queue = RepairRequestQueue::default();
+    let mut fault = entry("engine", 20);
+    fault.tier = DamageTier::Destroyed;
+    fault.deficit = 80.0;
+    queue.reduce_report(fault);
+    let mut healthy = entry("engine", 20);
+    healthy.tier = DamageTier::Operational;
+    healthy.deficit = 0.0;
+    queue.reduce_report(healthy);
+    assert_eq!(queue.entries[0].tier, DamageTier::Destroyed);
+    assert_eq!(queue.entries[0].deficit, 80.0);
 }

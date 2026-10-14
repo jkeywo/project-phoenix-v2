@@ -1,6 +1,99 @@
 //! Materialization.
 use super::*;
 
+/// Exercise the same spawn recipe in a disposable World before touching the
+/// live roster, layer membership or run clocks. No gameplay schedules run here.
+pub(super) fn preflight_missing_entities(
+    world: &World,
+    snapshot: &PhoenixSnapshot,
+    report: &mut RestoreReport,
+) {
+    let present: Vec<_> = world
+        .try_query::<(Entity, &EntityUuid)>()
+        .map(|mut query| {
+            query
+                .iter(world)
+                .map(|(entity, uuid)| {
+                    (
+                        uuid.0.clone(),
+                        world
+                            .get::<crate::ship::compartment_damage::ShipDamage>(entity)
+                            .cloned(),
+                        world.get::<ShipRepairTeams>(entity).cloned(),
+                        world
+                            .get::<crate::resources::server::ResourceServices>(entity)
+                            .cloned(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let missing: Vec<_> = snapshot
+        .entities
+        .iter()
+        .filter(|row| !present.iter().any(|(uuid, ..)| uuid == &row.uuid) && row.spawn.is_some())
+        .collect();
+    let mut staging = World::new();
+    // Only immutable authored shape/ownership is seeded. Saved stock and job
+    // payloads remain the candidate state, never mutable staging simulation.
+    for (uuid, damage, teams, services) in &present {
+        let mut entity = staging.spawn(EntityUuid(uuid.clone()));
+        if let Some(damage) = damage {
+            entity.insert(damage.clone());
+        }
+        if let Some(teams) = teams {
+            entity.insert(teams.clone());
+        }
+        if let Some(services) = services {
+            entity.insert(services.clone());
+        }
+    }
+    let mut staged = Vec::new();
+    for row in missing {
+        match spawn_from_origin(
+            &mut staging,
+            row,
+            row.spawn.as_ref().expect("filtered origin"),
+        ) {
+            Some(entity) => staged.push((entity, row)),
+            None => report
+                .gaps
+                .push(RestoreGap::MissingEntity(row.uuid.clone())),
+        }
+    }
+    // Existing attackers can retain samples of targets that are materialized by
+    // this restore. Validate all attacks only after every target shape exists.
+    for row in &snapshot.entities {
+        if let Err(reason) = super::preflight::validate_physical_attacks(&staging, row) {
+            report.gaps.push(RestoreGap::ResourceStateInvalid {
+                uuid: row.uuid.clone(),
+                reason,
+            });
+        }
+    }
+    if let Err((uuid, reason)) = super::preflight::validate_cross_entity_repairs(&staging, snapshot)
+    {
+        report
+            .gaps
+            .push(RestoreGap::RepairJobsInvalid { uuid, reason });
+    }
+    for (entity, row) in staged {
+        if let Err(reason) = super::application::validate_entity_repair_jobs(&staging, entity, row)
+        {
+            report.gaps.push(RestoreGap::RepairJobsInvalid {
+                uuid: row.uuid.clone(),
+                reason,
+            });
+        }
+        if let Err(reason) = super::preflight::validate_entity_resources(&staging, entity, row) {
+            report.gaps.push(RestoreGap::ResourceStateInvalid {
+                uuid: row.uuid.clone(),
+                reason,
+            });
+        }
+    }
+}
+
 /// Overwrite each captured entity's state, despawning anything the capture did
 /// not have.
 pub(super) fn restore_entities(

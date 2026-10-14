@@ -842,6 +842,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
             ServerMessageDiscriminants::SystemHullUpdate,
             ServerMessage::SystemHullUpdate {
                 entries: vec![SystemHullStatus {
+                    physical: None,
                     system_id: SystemId("helm".into()),
                     display_name: "Helm".into(),
                     current: 25.0,
@@ -5248,6 +5249,7 @@ fn system_blackboard_helm_omits_empty_hostile_weapon_arcs() {
 fn system_blackboard_repair_round_trips() {
     fn hull(id: &str, current: f32, tier: crate::ship::damage::DamageTier) -> SystemHullStatus {
         SystemHullStatus {
+            physical: None,
             system_id: SystemId(id.into()),
             display_name: id.into(),
             current,
@@ -5574,6 +5576,7 @@ fn radar_region_box_round_trips() {
 #[test]
 fn system_hull_status_round_trips() {
     let status = SystemHullStatus {
+        physical: None,
         system_id: SystemId("phaser-fore".into()),
         display_name: "Phaser Bank (Fore)".into(),
         current: 42.5,

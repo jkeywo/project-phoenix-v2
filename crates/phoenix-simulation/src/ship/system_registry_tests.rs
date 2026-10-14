@@ -155,6 +155,7 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
 
     let systems = vec![
         SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),
@@ -167,6 +168,7 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
             config: None,
         },
         SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),
@@ -179,6 +181,7 @@ fn console_family_projection_resolves_instance_ids_by_kind() {
             config: None,
         },
         SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("projection".into())),

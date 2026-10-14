@@ -726,10 +726,8 @@ pub fn reconcile_runtime_entities(
         })
         .unwrap_or_default();
     // Build the current set of ECS entity UUIDs.
-    let current: HashMap<String, Entity> = query
-        .iter()
-        .map(|(e, u, _, _, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
-        .collect();
+    let current: HashMap<String, Entity> =
+        query.iter().map(|(e, u, ..)| (u.0.clone(), e)).collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
     fn shape_to_wire(shape: &RegionShapeSection) -> String {

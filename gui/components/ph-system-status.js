@@ -37,6 +37,7 @@ export function mountSystemStatus(document) {
       id: row.system_id, heading: statusLabel(row),
       reasons: row.reasons.map(reason => t('system.status.reason.' + reason.code)
         + (reason.component_id ? ` (${reason.component_id})` : '')),
+      physical: row.physical,
     }));
     const signature = JSON.stringify(content);
     if (signature === detailSignature) return;
@@ -46,6 +47,17 @@ export function mountSystemStatus(document) {
       const heading = document.createElement('h3'); heading.textContent = row.heading; detail.append(heading);
       for (const reason of row.reasons) {
         const line = document.createElement('p'); line.textContent = reason; detail.append(line);
+      }
+      if (row.physical) {
+        const physical=row.physical;
+        const room=document.createElement('p');
+        room.textContent=t('damage.status.structure',{room:physical.compartment,current:Math.round(physical.structural_hp),max:Math.round(physical.structural_max_hp)});
+        detail.append(room);
+        for (const component of physical.components || []) {
+          const line=document.createElement('p');
+          line.textContent=`${component.id} · ${t('damage.status.'+component.condition.kind)}`;
+          detail.append(line);
+        }
       }
     }
   }

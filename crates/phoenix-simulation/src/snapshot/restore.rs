@@ -74,6 +74,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             }
         }
     }
+    super::materialization::preflight_missing_entities(world, snapshot, &mut report);
     if !report.gaps.is_empty() {
         return report;
     }

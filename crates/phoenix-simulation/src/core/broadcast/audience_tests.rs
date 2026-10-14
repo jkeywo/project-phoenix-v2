@@ -30,6 +30,7 @@ fn ship_config() -> ShipConfig {
         ],
         systems: vec![
             SystemInstanceConfig {
+                damage_components: Vec::new(),
                 components: Vec::new(),
                 channels: Vec::new(),
                 console: Some(phoenix_model::identity::ConsoleId("background".into())),
@@ -42,6 +43,7 @@ fn ship_config() -> ShipConfig {
                 config: None,
             },
             SystemInstanceConfig {
+                damage_components: Vec::new(),
                 components: Vec::new(),
                 channels: Vec::new(),
                 console: Some(phoenix_model::identity::ConsoleId("power".into())),
@@ -54,6 +56,7 @@ fn ship_config() -> ShipConfig {
                 config: None,
             },
             SystemInstanceConfig {
+                damage_components: Vec::new(),
                 components: Vec::new(),
                 channels: Vec::new(),
                 console: Some(phoenix_model::identity::ConsoleId("helm".into())),
@@ -237,6 +240,7 @@ fn pilot_ship_config() -> ShipConfig {
         stances: vec![],
     });
     config.systems.push(SystemInstanceConfig {
+        damage_components: Vec::new(),
         components: Vec::new(),
         channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId("pilot".into())),

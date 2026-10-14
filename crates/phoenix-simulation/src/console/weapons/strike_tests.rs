@@ -290,6 +290,7 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
     let ship = reserve(&mut app, 3.0, &["blaster-fore"]);
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             charge_time_secs: 1.0,
             volley_count: 1,

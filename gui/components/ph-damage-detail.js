@@ -54,14 +54,14 @@ export class PhDamageDetail extends PhElement {
       const max = e.max_hp != null ? e.max_hp : 0;
       const cur = e.current != null ? e.current : 0;
       const pct = max > 0 ? cur / max : 0;
-      const destroyed = cur === 0;
+      const destroyed = e.physical ? e.tier==='Destroyed' : cur === 0;
       const widthPct = Math.max(0, Math.min(1, pct)) * 100;
 
       let fillCls = 'fill';
       if (pct < 0.4) fillCls += ' crit';
       else if (pct < 0.75) fillCls += ' warn';
 
-      const tierLabel = e.tier != null ? 'T' + e.tier : '';
+      const tierLabel = e.physical ? (e.physical.components || []).map(component=>`${component.id}: ${t('damage.status.'+component.condition.kind)}`).join(' · ') : e.tier != null ? 'T' + e.tier : '';
       const nameLabel = e.display_name || '';
 
       let el = this.#rowCache.get(key);
@@ -75,6 +75,7 @@ export class PhDamageDetail extends PhElement {
       el.children[0].textContent = nameLabel;
       el.children[1].firstChild.className = fillCls;
       el.children[1].firstChild.style.width = widthPct + '%';
+      el.children[1].hidden=!!e.physical;
       var tierEl = el.children[2];
       tierEl.textContent = tierLabel;
       var dEl = el.querySelector('.destroyed-label');

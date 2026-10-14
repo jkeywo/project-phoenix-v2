@@ -328,18 +328,29 @@ fn duplicate_cross_actor_work_or_wrong_source_reservation_refuses_without_writes
                 .find(|row| row.uuid == ATTACKER)
                 .unwrap();
             let inventory = source.infrastructure.as_mut().unwrap();
-            let capacity = inventory
-                .capacities
+            // Corrupt the serialized candidate through its public save shape,
+            // without opening a mutable runtime inventory bypass for tests.
+            let mut value = serde_json::to_value(&*inventory).unwrap();
+            let capacity = value["capacities"]
+                .as_array_mut()
+                .unwrap()
                 .iter_mut()
                 .find(|capacity| {
-                    capacity
-                        .stock
-                        .reserved
+                    capacity["stock"]["reserved"]
+                        .as_object()
+                        .unwrap()
                         .keys()
                         .any(|claim| claim.starts_with("external-repair/"))
                 })
                 .unwrap();
-            *capacity.stock.reserved.values_mut().next().unwrap() += 1;
+            let amount = capacity["stock"]["reserved"]
+                .as_object_mut()
+                .unwrap()
+                .values_mut()
+                .next()
+                .unwrap();
+            *amount = serde_json::json!(amount.as_i64().unwrap() + 1);
+            *inventory = serde_json::from_value(value).unwrap();
             inventory.validate_stocks().unwrap();
         } else {
             let target = payload

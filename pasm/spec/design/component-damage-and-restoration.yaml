@@ -1,4 +1,13 @@
 entities:
+  - decision: public-neutralization-and-recoverable-defeat
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Public Neutralization Is Distinct From Physical Destruction
+      summary: "Recoverable propulsion-and-power disablement never destroys an entity or unseats its crew. An engineless actor is neutralized only when generation, usable reserves and its fitted operational capabilities are unavailable. A coarse lifecycle indication is public through normally available contacts, equally to human and AI operators; internal causes and buffers remain private. Actual catastrophe/despawn keeps the literal destruction event."
+      rationale:
+        - "[ai] Increment 11 needs a working defeat condition under the selected recoverable damage model. Authored combat defeat objectives migrate to explicit neutralization conditions; effects requiring literal destruction retain their existing condition."
+        - "[ai] Membership follows current entity UUIDs, so a healthy replacement sharing a name is not defeated by its predecessor's history. Recovery and repeated disablement use an explicit observation frontier and normal event continuation."
   - decision: compartment-structure-and-component-conditions
     core:
       status: accepted

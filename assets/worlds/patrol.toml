@@ -21,7 +21,7 @@
 #
 # RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
 # authoritative digest over the scenario's own state — this world's own
-# `on_world_loaded`/`on_destroyed` triggers are latches on
+# `on_world_loaded`/`on_neutralized` triggers are latches on
 # `WorldContentRuntime::trigger_states`, now walked by
 # `sim_digest::fold_scenario_records`, which did not happen when
 # 11531679067393217131 was measured. The thrust-band A/B is untouched — it is a
@@ -106,7 +106,7 @@ overrides = { tags = ["ship", "npc", "enemy"], behaviour = { doctrine = [
 [script]
 setup = """
 on_world_loaded("on_load");
-on_destroyed("world.entity.raider_alpha.name", "on_raider_destroyed");
+on_neutralized("world.entity.raider_alpha.name", "on_raider_destroyed");
 
 fn on_load(ctx) {
     ctx.effects.add_objective(#{

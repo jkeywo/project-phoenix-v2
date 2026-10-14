@@ -665,6 +665,7 @@ fn attach_fixture_weapon_energy_world(world: &mut World, ship: Entity) {
     for (id, kind) in equipment {
         if config.system(&id).is_none() {
             config.systems.push(SystemInstanceConfig {
+                damage_components: Vec::new(),
                 id,
                 kind: kind.into(),
                 console: None,
@@ -4173,6 +4174,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // detonates on the next tick. We write into both the per-entity component
     // and the resource to stay in sync.
     let torpedo = Torpedo {
+        impact: Default::default(),
         strike_damage_bonus: 0.0,
         uuid: "test-torp-1".into(),
         x: 1.0, // 1 m away from player at origin — within detonation_radius
@@ -4329,6 +4331,7 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     let fore_before = hp_of(&app, fore_arc);
 
     let torpedo = Torpedo {
+        impact: Default::default(),
         strike_damage_bonus: 0.0,
         uuid: "test-torp-astern".into(),
         x: start_x,
@@ -4476,6 +4479,7 @@ fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i3
 fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
     use crate::weapons::torpedo::Torpedo;
     let torpedo = Torpedo {
+        impact: Default::default(),
         strike_damage_bonus: 0.0,
         uuid: "payload-probe-round".into(),
         x: 0.0,
@@ -4840,6 +4844,7 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
             fire_arc_deg: 360.0,
@@ -4861,6 +4866,7 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
         });
     bank.in_flight
         .push(crate::weapons::blaster::BlasterProjectile {
+            impact: Default::default(),
             id: "proj-1".into(),
             x: 0.0,
             z: -20.0,
@@ -4916,6 +4922,7 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
         }
         let mut bank = crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 360.0,
@@ -4940,6 +4947,7 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
         for id in ["first", "second"] {
             bank.in_flight
                 .push(crate::weapons::blaster::BlasterProjectile {
+                    impact: Default::default(),
                     id: id.into(),
                     x: 100.0,
                     z: -20.0,
@@ -5031,6 +5039,7 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
             fire_arc_deg: 360.0,
@@ -5052,6 +5061,7 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
         });
     bank.in_flight
         .push(crate::weapons::blaster::BlasterProjectile {
+            impact: Default::default(),
             id: "proj-1".into(),
             x: 0.0,
             z: -20.0,
@@ -5942,6 +5952,7 @@ rank = "Ltn."
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![crate::entities::config::PhaserBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -6569,6 +6580,7 @@ fn arc_request_target(target_uuid: &str, position: Vec3) -> impl Bundle {
 fn blaster_res(facing_deg: f32, fire_arc_deg: f32, range: f32) -> BlasterSystemResource {
     BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
         crate::weapons::blaster::BlasterBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg,
             fire_arc_deg,
@@ -9296,6 +9308,7 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
             PhaserCooldown::default(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
                 banks: vec![crate::entities::config::PhaserBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "phaser-fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 270.0,
@@ -11086,6 +11099,7 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
     ts.in_flight.push(crate::weapons::torpedo::Torpedo {
+        impact: Default::default(),
         strike_damage_bonus: 0.0,
         uuid: "flying-1".into(),
         x: 0.0,
@@ -11183,6 +11197,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
 
     // Alternating two-barrel pattern on a fresh tube.
     let tube_cfg = crate::entities::config::TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore-centre".into(),
         facing_deg: 0.0,
         fire_arc_deg: 90.0,
@@ -11793,6 +11808,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
     enemy_torpedoes
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
+            impact: Default::default(),
             strike_damage_bonus: 0.0,
             uuid: "torpedo-uuid".into(),
             x: 0.0,
@@ -13610,6 +13626,7 @@ fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
         .insert(BlasterSystemResource(vec![
             crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -14165,6 +14182,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     );
     let npc_torpedo_sys = TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: -30.0,
             fire_arc_deg: 90.0,
@@ -14713,6 +14731,7 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             npc_physics,
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 180.0, // face toward -Z (toward target)
                     fire_arc_deg: 360.0,
@@ -14834,6 +14853,7 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             },
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -14928,6 +14948,7 @@ fn a_blaster_carrying_target_is_led_identically() {
     fn dummy_bank() -> BlasterSystemResource {
         BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 360.0,
@@ -15053,6 +15074,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -15151,6 +15173,7 @@ fn handle_fire_blaster_reports_the_actual_charge_consumer_outcome() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -15298,6 +15321,7 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: Default::default(),
                     // Underscore-authored, the spelling the inverse dropped.
                     id: "fore_port".into(),
                     facing_deg: 0.0,
@@ -15480,6 +15504,7 @@ fn spawn_policy_phaser_npc_at(
 
 fn wide_bank(id: &str, facing_deg: f32) -> crate::entities::config::PhaserBankConfig {
     crate::entities::config::PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
         fire_arc_deg: 360.0,
@@ -15997,6 +16022,7 @@ fn restraint_is_explicit_and_independent_of_system_group_or_intake() {
 /// the shipped hold-to-fire bank and authors `power_group = "weapons"`.
 fn cold_gate_blaster_bank() -> crate::weapons::blaster::BlasterBankConfig {
     crate::weapons::blaster::BlasterBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".into(),
         facing_deg: 0.0,
         fire_arc_deg: 360.0,
@@ -16478,6 +16504,7 @@ fn blaster_bank_idle_policy_holds_fire() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -16572,6 +16599,7 @@ console = "tactical"
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -17484,6 +17512,7 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
             fire_arc_deg: 360.0,
@@ -17509,6 +17538,7 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
     // clamp inside the hit handler, not projectile physics.
     bank.in_flight
         .push(crate::weapons::blaster::BlasterProjectile {
+            impact: Default::default(),
             id: "proj-god-mode".into(),
             x: 0.0,
             z: -20.0,

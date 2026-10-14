@@ -124,10 +124,10 @@ on_world_loaded("on_load");
 on_waypoint_reached("world.alliance_convoy.transport.aster", "safe_harbour", "aster_arrived");
 on_waypoint_reached("world.alliance_convoy.transport.bell", "safe_harbour", "bell_arrived");
 on_waypoint_reached("world.alliance_convoy.transport.cedar", "safe_harbour", "cedar_arrived");
-on_destroyed("world.alliance_convoy.transport.aster", "aster_lost");
-on_destroyed("world.alliance_convoy.transport.bell", "bell_lost");
-on_destroyed("world.alliance_convoy.transport.cedar", "cedar_lost");
-on_destroyed("world.alliance_convoy.raider.first", "first_raider_lost");
+on_neutralized("world.alliance_convoy.transport.aster", "aster_lost");
+on_neutralized("world.alliance_convoy.transport.bell", "bell_lost");
+on_neutralized("world.alliance_convoy.transport.cedar", "cedar_lost");
+on_neutralized("world.alliance_convoy.raider.first", "first_raider_lost");
 on_entered_region("world.alliance_convoy.recovery_zone", "escort_entered_recovery").when("flag(convoy_recovery_task_active)");
 on_timer(1, "scale_at_launch");
 

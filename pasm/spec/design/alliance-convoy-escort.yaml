@@ -12,7 +12,7 @@ entities:
       summary: >
         [ai] Four Alliance escort slots protect three civilian transports on a
         final route. The ship slots can choose destroyer or cruiser. The mission
-        closes when every transport has reached safety or been destroyed, and
+        closes when every transport has reached safety or been neutralized (recoverably disabled or actually destroyed), and
         narrates the actual count without a victory threshold. The 2,300-unit
         crossing at a hauler's 12-unit/s top speed and 0.18 route fraction
         gives an unobstructed travel baseline near eighteen minutes. The
@@ -30,7 +30,7 @@ entities:
       origin: ai
       title: All Transport Fates Resolved
       summary: >
-        [ai] Each transport independently reaches the safety marker or is lost.
+        [ai] Each transport independently reaches the safety marker or is lost through neutralization. A disabled transport cannot silently leave the fate resolver waiting forever; later recovery does not rewrite its already recorded mission loss.
         The final authored outcome waits for all three fates, even if every
         escort was destroyed earlier. No elapsed-time failure closes the route.
     game_design:

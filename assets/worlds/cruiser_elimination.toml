@@ -59,11 +59,11 @@ spawn_on = "game_start"
 [script]
 setup = """
 on_world_loaded("brief_teams");
-on_destroyed("world.cruiser_elimination.alliance_one", "alliance_loss");
-on_destroyed("world.cruiser_elimination.alliance_two", "alliance_loss");
-on_destroyed("world.cruiser_elimination.dynasty_one", "dynasty_loss");
-on_destroyed("world.cruiser_elimination.dynasty_two", "dynasty_loss");
-// Death handlers in one pipeline pass all commit before these flag events
+on_neutralized("world.cruiser_elimination.alliance_one", "alliance_loss");
+on_neutralized("world.cruiser_elimination.alliance_two", "alliance_loss");
+on_neutralized("world.cruiser_elimination.dynasty_one", "dynasty_loss");
+on_neutralized("world.cruiser_elimination.dynasty_two", "dynasty_loss");
+// Defeat handlers in one pipeline pass all commit before these flag events
 // enter the next pass. The resolver therefore sees both teams' same-tick losses.
 on_flag_set("alliance_eliminated", "resolve_match");
 on_flag_set("dynasty_eliminated", "resolve_match");

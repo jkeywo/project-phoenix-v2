@@ -1,14 +1,13 @@
 # Increment 11: component damage and restoration
 
 Implementation contract adopted after increment 10 initial commit `22b31f57`.
-This document records no completed implementation,
-verification or playable exit. Follow the later authorised pipeline: after
+Implementation is in progress. Supporting runtime commits do not establish
+verification or a playable exit. Follow the later authorised pipeline: after
 increment 10's initial integrated commit, its pinned validation and fixes can
 continue while the next increment proceeds, with relevant fixes integrated in
 dependency order. An initial commit does not establish a verified exit.
 Increment 10's remaining evidence stays visible and is not discharged by this
-document. This preparation task changes design documents only, with no increment
-11 runtime edits before increment 10's initial commit. The concrete integration
+document. Runtime work began after increment 10's initial commit. The concrete integration
 choices below are now adopted implementation judgments; coefficients remain
 authored tuning subject to evidence.
 
@@ -266,8 +265,8 @@ aggregate zero must instead produce the authored disabled/recoverable state.
 Broader evacuation/capture and return-to-service personnel execution retain
 AD53–55 but stay in their scheduled increments.
 
-Advance affected save/rules/content compatibility versions and reject unsupported
-old states before any writes. Where old hull fields remain for asteroids or
+The integrated compatibility boundary is protocol 8, content epoch 3, snapshot
+46 and simulation rules 0.18. Reject unsupported old states before any writes. Where old hull fields remain for asteroids or
 non-equipped destructible props, retain that separate owner explicitly. A legacy
 wire hull summary may be a derived compartment view only; it cannot drive new
 damage, repair, availability or ship death. Remove the increment 10

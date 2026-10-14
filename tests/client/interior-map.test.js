@@ -33,7 +33,7 @@ describe('permitted interior map',()=>{
   it('uses typed System dispatch and disables delegated operation',()=>{
     const host=document.createElement('div'); const dispatch=vi.fn(); const data=state();
     renderInteriorMap(host,data,translate,dispatch);
-    host.querySelector('button').click(); expect(dispatch).toHaveBeenCalledWith('radar');
+    host.querySelector('[data-map-focus="system:radar"]').click(); expect(dispatch).toHaveBeenCalledWith('radar');
     dispatch.mockClear(); renderInteriorMap(host,{...data,auto:true},translate,dispatch);
     expect(host.querySelector('button').disabled).toBe(true);
     host.querySelector('button').click(); expect(dispatch).not.toHaveBeenCalled();
@@ -45,12 +45,27 @@ describe('permitted interior map',()=>{
     data.navigation=[{location:{kind:'crossing',from:'bridge',to:'engine'},blocked:true}];
     renderInteriorMap(host,data,translate,vi.fn());
     expect(host.querySelector('select')).toBe(select);
-    expect(select.value).toBe('lower'); expect(host.querySelector('button').textContent).toBe('engine');
+    expect(select.value).toBe('lower'); expect(host.querySelector('[data-map-focus="system:engine"]').textContent).toBe('engine');
     expect(host.textContent).toContain('interior.map.blocked');
   });
   it('removes a withheld projection and never interprets labels as markup',()=>{
     const host=document.createElement('div');const data=state();data.interior.compartment[0].label='<img onerror="attack()">';
     renderInteriorMap(host,data,key=>key,vi.fn());expect(host.querySelector('img')).toBeNull();
     renderInteriorMap(host,{},translate,vi.fn());expect(host.hidden).toBe(true);expect(host.childNodes.length).toBe(0);
+  });
+  it('shows only permitted component conditions and sends distinct typed repair work',()=>{
+    const host=document.createElement('div');const data=state();const dispatch=vi.fn();
+    data.system_hull=[{system_id:'radar',physical:{compartment:'bridge',structural_hp:0,structural_max_hp:100,structurally_disabled:true,
+      components:[{id:'intake',binding:'intake',condition:{kind:'damaged'}}]}}];
+    renderInteriorMap(host,data,translate,dispatch);
+    host.querySelector('[data-map-focus="room:bridge"]').click();
+    expect(dispatch).toHaveBeenCalledWith({kind:'compartment',compartment:'bridge'});
+    host.querySelector('[data-map-focus="component:radar:intake"]').click();
+    expect(dispatch).toHaveBeenCalledWith({kind:'component',system:'radar',component:'intake'});
+    expect(host.textContent).toContain('damage.status.damaged');
+    expect(host.textContent).toContain('damage.status.structure');
+    expect(host.querySelector('[data-map-focus="component:engine:intake"]')).toBeNull();
+    renderInteriorMap(host,{...data,system_hull:[]},translate,dispatch);
+    expect(host.querySelector('[data-map-focus="component:radar:intake"]')).toBeNull();
   });
 });

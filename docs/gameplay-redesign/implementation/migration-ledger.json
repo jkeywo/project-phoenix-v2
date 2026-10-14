@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 10,
+  "current_increment": 11,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -181,18 +181,24 @@
         "pasm/spec/design/interior-layout-and-team-routes.yaml",
         "pasm/spec/architecture/interior-routes.yaml",
         "docs/gameplay-redesign/implementation/increment-10.md",
-        "docs/acceptance/1562-interiors.md"
+        "docs/acceptance/1562-interiors.md",
+        "docs/gameplay-redesign/implementation/interiors-native-targeted-validation.json"
       ]
     },
     {
       "id": 11,
       "title": "Component damage and restoration",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         10
       ],
       "completion": "Compartment penetration and component conditions land together with structural/component repair, parts use, disablement and recovery.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-11.md",
+        "pasm/spec/design/component-damage-and-restoration.yaml",
+        "docs/acceptance/1562-physical-damage.md",
+        "pasm/spec/architecture/physical-damage.yaml"
+      ]
     },
     {
       "id": 12,

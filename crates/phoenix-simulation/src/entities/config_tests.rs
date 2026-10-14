@@ -2544,47 +2544,10 @@ fn npc_ship_with_single_shield_arc_produces_one_arc_system() {
 }
 
 #[test]
-fn shield_arc_with_hull_max_hp_captures_tier_config() {
-    let toml_str = r#"
-tags = ["ship"]
-
-[[shield_arc]]
-id = "fore"
-label = "Fore"
-center_deg = 0
-width_deg = 90
-hull_max_hp = 7
-hull_damaged_threshold_pct = 0.60
-hull_disabled_threshold_pct = 0.20
-hull_debuff_magnitude = 0.30
-"#;
-    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
-        .expect("parse must succeed");
-    let arc = &config.shield_arcs[0];
-    assert_eq!(arc.hull_max_hp, 7.0);
-    assert!((arc.hull_damaged_threshold_pct - 0.60).abs() < 1e-6);
-    assert!((arc.hull_disabled_threshold_pct - 0.20).abs() < 1e-6);
-    assert!((arc.hull_debuff_magnitude - 0.30).abs() < 1e-6);
-}
-
-#[test]
-fn shield_arc_hull_thresholds_default_when_omitted() {
-    let toml_str = r#"
-tags = ["ship"]
-
-[[shield_arc]]
-id = "fore"
-label = "Fore"
-center_deg = 0
-width_deg = 90
-hull_max_hp = 6
-"#;
-    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
-        .expect("parse must succeed");
-    let arc = &config.shield_arcs[0];
-    assert!((arc.hull_damaged_threshold_pct - 0.75).abs() < 1e-6);
-    assert!((arc.hull_disabled_threshold_pct - 0.25).abs() < 1e-6);
-    assert!((arc.hull_debuff_magnitude - 0.15).abs() < 1e-6);
+fn retired_arc_hull_state_requires_conversion() {
+    let source =
+        "[[shield_arc]]\nid='fore'\nlabel='Fore'\ncenter_deg=0\nwidth_deg=90\nhull_max_hp=7\n";
+    assert!(EntityConfig::from_toml(&shield_fixture::with_energy(source)).is_err());
 }
 
 #[test]
@@ -4807,6 +4770,7 @@ fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
     let mut cfg = TorpedoConfig::default();
     cfg.shield_pierce = 0.75;
     let tubes = vec![TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".into(),
         facing_deg: 0.0,
         fire_arc_deg: 90.0,
@@ -4853,6 +4817,7 @@ fn phaser_banks_defaults_to_empty_vec_when_absent() {
 fn validate_phaser_banks_accepts_valid_list() {
     let banks = vec![
         PhaserBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "port".into(),
             facing_deg: -90.0,
             fire_arc_deg: 180.0,
@@ -4863,6 +4828,7 @@ fn validate_phaser_banks_accepts_valid_list() {
             ..Default::default()
         },
         PhaserBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "starboard".into(),
             facing_deg: 90.0,
             fire_arc_deg: 180.0,
@@ -4886,6 +4852,7 @@ fn validate_phaser_banks_rejects_empty_list() {
 fn validate_phaser_banks_rejects_duplicate_ids() {
     let banks = vec![
         PhaserBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "port".into(),
             facing_deg: -90.0,
             fire_arc_deg: 180.0,
@@ -4896,6 +4863,7 @@ fn validate_phaser_banks_rejects_duplicate_ids() {
             ..Default::default()
         },
         PhaserBankConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "port".into(),
             facing_deg: 90.0,
             fire_arc_deg: 180.0,
@@ -4914,6 +4882,7 @@ fn validate_phaser_banks_rejects_duplicate_ids() {
 #[test]
 fn validate_phaser_banks_rejects_auto_arc_greater_than_fire_arc() {
     let banks = vec![PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "port".into(),
         facing_deg: -90.0,
         fire_arc_deg: 90.0,
@@ -4940,6 +4909,7 @@ fn validate_phaser_banks_rejects_auto_arc_greater_than_fire_arc() {
 #[test]
 fn validate_phaser_banks_rejects_cycle_jitter_outside_its_range() {
     let bank = |jitter: f32| PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "port".into(),
         facing_deg: 0.0,
         fire_arc_deg: 270.0,
@@ -4971,6 +4941,7 @@ fn validate_phaser_banks_rejects_cycle_jitter_outside_its_range() {
 #[test]
 fn validate_phaser_banks_rejects_fire_arc_out_of_range() {
     let banks = vec![PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "port".into(),
         facing_deg: 0.0,
         fire_arc_deg: 400.0,
@@ -4987,6 +4958,7 @@ fn validate_phaser_banks_rejects_fire_arc_out_of_range() {
     );
 
     let banks = vec![PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "port".into(),
         facing_deg: 0.0,
         fire_arc_deg: 0.0,
@@ -5057,6 +5029,7 @@ count = 10
 fn validate_torpedo_tubes_accepts_valid_list() {
     let tubes = vec![
         TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: -30.0,
             fire_arc_deg: 90.0,
@@ -5069,6 +5042,7 @@ fn validate_torpedo_tubes_accepts_valid_list() {
             ai: None,
         },
         TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 180.0,
             fire_arc_deg: 90.0,
@@ -5094,6 +5068,7 @@ fn validate_torpedo_tubes_rejects_empty_list() {
 fn validate_torpedo_tubes_rejects_duplicate_ids() {
     let tubes = vec![
         TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 180.0,
             fire_arc_deg: 90.0,
@@ -5106,6 +5081,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
             ai: None,
         },
         TorpedoTubeConfig {
+            impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 0.0,
             fire_arc_deg: 90.0,
@@ -5126,6 +5102,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
 #[test]
 fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
     let tubes = vec![TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: "aft".into(),
         facing_deg: 180.0,
         fire_arc_deg: 0.0,
@@ -5145,6 +5122,7 @@ fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
 
 fn torpedo_tube(id: &str) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
         fire_arc_deg: 90.0,
@@ -5229,6 +5207,7 @@ fn validate_torpedo_tubes_rejects_multi_barrel_without_pattern() {
 
 fn blaster_bank(id: &str) -> BlasterBankConfig {
     BlasterBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         fire_arc_deg: 90.0,
         ..BlasterBankConfig::default()

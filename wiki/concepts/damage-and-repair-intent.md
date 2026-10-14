@@ -2,21 +2,26 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+sources: [crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
 updated: 2026-10-14
 ---
 
 # Damage and Repair Information
 
-Damage is authoritative per fine system, but exact detail is projected by Console.
+Equipped ships have one Gameplay `ShipDamage` owner: compartment structural HP
+and component conditions. Components have no separate HP pool or precise internal
+position. Planar damage traces cross the selected weighted deck; actual materials,
+penetration and deposited payload determine structural loss and condition dose.
+Legacy System HP remains a separate owner for unequipped props and fixtures.
+Exact detail is projected by Console.
 `HullVisibility` is the single policy used by both live Repair publication and
 reconnect resync:
 
-- every recipient receives the ship-wide aggregate and destroyed-hull
+- every recipient receives the ship-wide structural and structurally unavailable
   fractions;
 - each Console sees exact damage for its owned Systems, independent of hosting;
 - the Repair Console sees true `Core` and other Systems only while a team is
-  actually `Repairing` that System; explicit Repair feeds carry that same view;
+  actually `Repairing` in its compartment; explicit Repair feeds carry that same view;
 - detached Console equipment is owned, so it is not classified as Core;
 - a `Travelling` or recalled/returning team reveals nothing yet;
 - `system_hull` and `queue_depth` are filtered by that policy, while the list
@@ -50,20 +55,21 @@ and applies `HullVisibility` before a human delivery crosses the typed delivery
 seam, so an ineligible popup carries its tier but no exact deficit. Repair's
 own receiver applies the first sub-Disabled / every Disabled-or-Destroyed alert
 latch and emits accepted popups to the shared enqueue-ordered flush. AI delivery
-retains the exact host-internal deficit and the same receiver merges it into
+retains its source observation and available deficit and the same receiver merges it into
 `RepairRequestQueue`; that value is
 a ranking input rather than player knowledge. Requests remain advisory:
-Engineering may dispatch a scarce team without one. Human controls and Backfill
+Engineering may dispatch a scarce team without one. A later observation of the same
+identified System supersedes older symptoms across permitted reporters; equal-tick
+readings retain the worst severity, while unrelated Systems remain unresolved. Human controls and Backfill
 issue the same admitted dispatch and priority commands. The canonical job/team
 owner executes those assignments; the report queue remains separate received
 knowledge. Permitted job rows expose assignment/outcome only, without expanding
 onsite diagnosis or giving a feed recipient machinery authority.
 
-Travel time is therefore also an information gate. Once on site, a team sweeps
-the damaged fine Systems in its typed `RepairGroup`: the existing home Station,
-a detached Console, or true Core. Its standing ordinal priority and optional
-pinned target choose among the eligible rows. Leaving a System removes that
-local detail immediately. Queue keys, reports, dispatch, sweeps and alert latches
+Travel time is therefore also an information gate. Once on site, a team diagnoses its physical compartment and selects structural
+or component work. Typed component priorities select inspected work there.
+Leaving the compartment removes that local detail immediately. Reports retain
+their typed `RepairGroup`: home Station, detached Console or true Core. Queue keys, reports, dispatch, sweeps and alert latches
 share this grouping; snapshots and digests retain the typed identities. `gui/console-state.js` assembles the
 projected state for the shared `ph-repair-teams` control.
 
@@ -72,7 +78,7 @@ projected state for the shared `ph-repair-teams` control.
 `ControlSourceResolver` carries a separate GM-disabled System set (#1312). Its
 normal availability policy blocks human commands, AI and operation while the
 latch is set. Damage synchronisation and rating changes cannot clear it, and
-Restore removes only the latch: HP, damage tiers and repair eligibility are
+Restore removes only the latch: physical structure, component conditions and repair eligibility are
 unchanged. `snapshot.rs` restores this state before continuation admission;
 `sim_digest.rs` folds the sorted ship/System identities.
 

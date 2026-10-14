@@ -14,7 +14,7 @@ description = "A deterministic fixture pack for issue #986."
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 2
+content_epoch = 3
 
 [[scenario]]
 id = "aurora_skirmish"

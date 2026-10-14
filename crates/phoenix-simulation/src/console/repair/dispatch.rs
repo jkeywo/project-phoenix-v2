@@ -145,12 +145,15 @@ pub fn handle_dispatch_repair_team(
             // an ally is unavailable to this hull's own damage-control sweep, in
             // the console readout and to the repair AI alike.
             Option<&super::external_server::ExternalRepairDispatch>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt, _external_dispatch) in ship_query.iter_mut() {
+    for (admitted, ship_config, mut teams, hull_opt, _external_dispatch, physical) in
+        ship_query.iter_mut()
+    {
         let abroad = teams.0.external_team();
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
@@ -184,7 +187,12 @@ pub fn handle_dispatch_repair_team(
                 // exactly as it was — an Idle team stays Idle, a working team is
                 // not recalled — which is the same nothing-happens a dispatch to
                 // an undamaged station has always produced.
-                let Some(sid) = resolve_repair_target(repair_target, ship_config, hull_ref) else {
+                let resolved = if let Some(damage) = physical {
+                    resolve_physical_repair_target(repair_target, &ship_config.0, damage)
+                } else {
+                    resolve_repair_target(repair_target, ship_config, hull_ref)
+                };
+                let Some(sid) = resolved else {
                     crate::command_admission::finish_admitted_action_feedback(
                         &mut outbound,
                         cmd,
@@ -216,15 +224,82 @@ pub fn handle_dispatch_repair_team(
                     continue;
                 }
                 let display = display_name_for(&sid);
-                teams.0.dispatch(*team_idx as usize, sid, display);
+                let applied = if physical.is_some() {
+                    let exact = match repair_target {
+                        RepairTarget::Work(target) => Some(target.clone()),
+                        _ => None,
+                    };
+                    teams
+                        .0
+                        .dispatch_physical(*team_idx as usize, sid, exact, display)
+                } else {
+                    teams.0.dispatch(*team_idx as usize, sid, display);
+                    true
+                };
                 crate::command_admission::finish_admitted_action_feedback(
                     &mut outbound,
                     cmd,
-                    crate::core::messages::ActionFeedbackOutcome::Applied,
+                    if applied {
+                        crate::core::messages::ActionFeedbackOutcome::Applied
+                    } else {
+                        crate::core::messages::ActionFeedbackOutcome::Refused
+                    },
                 );
             }
         }
     }
+}
+
+fn resolve_physical_repair_target(
+    target: &RepairTarget,
+    config: &crate::ship::config::ShipConfig,
+    damage: &crate::ship::compartment_damage::ShipDamage,
+) -> Option<SystemId> {
+    // Resolving a visit uses authored homes, never hidden damage or parts.
+    let group = match target {
+        RepairTarget::Work(phoenix_model::damage::RepairWorkTarget::Component {
+            system,
+            component,
+        }) => {
+            damage
+                .definition
+                .component(&phoenix_model::damage::ComponentRef {
+                    system: system.clone(),
+                    component: component.clone(),
+                })?;
+            return Some(system.clone());
+        }
+        RepairTarget::Work(phoenix_model::damage::RepairWorkTarget::Compartment {
+            compartment,
+        }) => {
+            damage.definition.compartment(compartment)?;
+            return damage
+                .definition
+                .interior
+                .placements
+                .iter()
+                .find(|(_, room)| *room == compartment)
+                .map(|(system, _)| system.clone())
+                .or_else(|| damage.definition.components.keys().next().cloned());
+        }
+        RepairTarget::System(id) => {
+            return damage
+                .definition
+                .components
+                .contains_key(id)
+                .then(|| id.clone())
+        }
+        RepairTarget::Station(id) => crate::core::messages::RepairGroup::Station(id.clone()),
+        RepairTarget::Console(id) => crate::core::messages::RepairGroup::Console(id.clone()),
+        RepairTarget::Core => crate::core::messages::RepairGroup::Core,
+        RepairTarget::External => return None,
+    };
+    damage
+        .definition
+        .components
+        .keys()
+        .find(|id| crate::modifiers::repair_teams::repair_group(id, config) == group)
+        .cloned()
 }
 
 /// Handle `RecallRepairTeam` messages from the Repair console (issue #1385).
@@ -391,20 +466,32 @@ pub fn handle_set_repair_target_priority(
             &mut ShipRepairTeams,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (admitted, mut teams, hull_opt, config_opt) in ship_query.iter_mut() {
+    for (admitted, mut teams, hull_opt, config_opt, physical) in ship_query.iter_mut() {
         for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
             if let SystemControlPayload::SetRepairTargetPriority { system_id } = &cmd.payload {
-                let applied = match (hull_opt, config_opt) {
-                    (Some(hull), Some(config)) => teams
-                        .0
-                        .prioritise_system(system_id, &hull.0, &config.0)
-                        .is_some(),
-                    _ => false,
+                let applied = if let Some(damage) = physical {
+                    physical_priority_options(&teams.0, damage)
+                        .into_iter()
+                        .find(|(_, id, _)| id == system_id)
+                        .is_some_and(|(team, id, target)| {
+                            teams
+                                .0
+                                .dispatch_physical(team, id.clone(), Some(target), id.0)
+                        })
+                } else {
+                    match (hull_opt, config_opt) {
+                        (Some(hull), Some(config)) => teams
+                            .0
+                            .prioritise_system(system_id, &hull.0, &config.0)
+                            .is_some(),
+                        _ => false,
+                    }
                 };
                 crate::command_admission::finish_admitted_action_feedback(
                     &mut outbound,
@@ -463,6 +550,7 @@ fn resolve_repair_target(
     hull: Option<&crate::ship::damage::SystemHull>,
 ) -> Option<SystemId> {
     match target {
+        RepairTarget::Work(_) => None,
         // Not this resolver's arm — the caller skips it before ever asking (see
         // `handle_dispatch_repair_team`). Named here rather than caught by a
         // wildcard so a future `RepairTarget` variant still fails to compile
@@ -534,3 +622,67 @@ fn resolve_repair_target(
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod tests;
+
+/// Priorities are offered only for work in a room an on-site team can inspect.
+/// Authored placement alone never reveals the condition of another room.
+pub(super) fn physical_priority_options(
+    teams: &crate::modifiers::repair_teams::RepairTeams,
+    damage: &crate::ship::compartment_damage::ShipDamage,
+) -> Vec<(usize, SystemId, phoenix_model::damage::RepairWorkTarget)> {
+    use phoenix_model::damage::{ComponentCondition, RepairWorkTarget};
+    let mut options = std::collections::BTreeMap::new();
+    for (team, slot) in teams.slots().iter().enumerate() {
+        if !matches!(slot, crate::core::messages::TeamSlot::Repairing { .. }) {
+            continue;
+        }
+        let Some(phoenix_sim_gameplay::ship::interior::TeamNavigation {
+            location:
+                phoenix_sim_gameplay::ship::interior::TeamLocation::Compartment { compartment },
+            ..
+        }) = teams
+            .navigation()
+            .and_then(|navigation| navigation.get(team))
+        else {
+            continue;
+        };
+        for (id, home) in &damage.definition.interior.placements {
+            if home != compartment {
+                continue;
+            }
+            let fault = damage.state.components.get(id).and_then(|components| {
+                components
+                    .iter()
+                    .find(|(name, state)| match state.condition {
+                        ComponentCondition::Healthy => false,
+                        ComponentCondition::Destroyed => damage
+                            .definition
+                            .components
+                            .get(id)
+                            .and_then(|components| components.get(*name))
+                            .is_some_and(|definition| definition.field_replaceable),
+                        _ => true,
+                    })
+                    .map(|(component, _)| RepairWorkTarget::Component {
+                        system: id.clone(),
+                        component: component.clone(),
+                    })
+            });
+            let target = fault.or_else(|| {
+                damage
+                    .definition
+                    .compartment(home)
+                    .zip(damage.state.compartments.get(home))
+                    .filter(|(definition, state)| state.hp < f64::from(definition.max_hp))
+                    .map(|_| RepairWorkTarget::Compartment {
+                        compartment: home.clone(),
+                    })
+            });
+            if let Some(target) = target {
+                options
+                    .entry(id.clone())
+                    .or_insert((team, id.clone(), target));
+            }
+        }
+    }
+    options.into_values().collect()
+}

@@ -3744,6 +3744,7 @@ fn vertical_thrust_ai_app(
             .0
             .systems
             .push(crate::ship::config::SystemInstanceConfig {
+                damage_components: Vec::new(),
                 components: Vec::new(),
                 channels: Vec::new(),
                 id: crate::ship::system_registry::vertical_thrust_system_id(),
@@ -9814,6 +9815,7 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
             .0
             .in_flight
             .push(crate::weapons::torpedo::Torpedo {
+                impact: Default::default(),
                 strike_damage_bonus: 0.0,
                 uuid: format!("salvo-{i}"),
                 x: 0.0,
@@ -11658,6 +11660,7 @@ fn bank(
     dps: f32,
 ) -> crate::entities::config::PhaserBankConfig {
     crate::entities::config::PhaserBankConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
         fire_arc_deg,

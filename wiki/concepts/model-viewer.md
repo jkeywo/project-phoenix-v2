@@ -49,7 +49,7 @@ vocabulary: `--model=assets/models/...glb`, `--variant=name`,
 launchers deliberately interpolate no command-line arguments. Their optional
 selection is the `PHOENIX_WORKSHOP_OPEN` URL query environment variable, read
 and validated directly by Node (for example `model=assets/models/ship.glb&gizmos=1`,
-or `file=assets/worlds/demo.toml` for `start-editor.bat`). Native Workshop owns
+or `file=assets/worlds/combat_test.toml` for `start-editor.bat`). Native Workshop owns
 project writes and external model tools; browser Workshop remains archive-only.
 
 The model preview uses the game's render path rather than a copied scene:

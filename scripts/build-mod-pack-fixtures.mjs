@@ -71,7 +71,7 @@ const SPECIAL_FROM_SRC = new Set(['corrupt-crc']);
 
 /** The editor-exporter input for the `editor-round-trip` fixture. A minimal
  *  MOD-mode export: a `[pack]` identity matching the shipped base content
- *  (`phoenix-base` epoch 2) plus one world and one scenario. `exportModPack`
+ *  (`phoenix-base` epoch 3) plus one world and one scenario. `exportModPack`
  *  serialises + validates it, so the committed archive is genuinely
  *  editor-produced. Kept here (not in a source dir) because the exporter takes
  *  parsed objects, not files. */
@@ -83,7 +83,7 @@ const EDITOR_ROUND_TRIP_INPUT = {
     name: 'Editor Round Trip',
     author: 'Fixture Author',
     description: 'Produced by the editor exporter and re-validated on the host (issue #991).',
-    requires: { content_id: 'phoenix-base', content_epoch: 2 },
+    requires: { content_id: 'phoenix-base', content_epoch: 3 },
   },
   files: [
     {

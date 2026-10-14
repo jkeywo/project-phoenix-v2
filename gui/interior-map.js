@@ -68,12 +68,31 @@ export function renderInteriorMap(host, state, translate, dispatch, seal, viewCh
   for (const room of rooms) {
     const section = doc.createElement('section');
     const name = doc.createElement('strong'); name.textContent = translate(room.label); section.append(name);
-    for (const [system, compartment] of Object.entries({...layout.placements,...layout.repair_placements})) {
+    const physical=(state.system_hull || []).find(row=>row.physical?.compartment===room.id)?.physical;
+    if (physical) {
+      const status=doc.createElement('p');
+      status.textContent=translate('damage.status.structure',{room:translate(room.label),current:Math.round(physical.structural_hp),max:Math.round(physical.structural_max_hp)});
+      section.append(status);
+    }
+    const repair=doc.createElement('button');repair.type='button';
+    repair.textContent=translate('damage.repair.structure');repair.dataset.mapFocus=`room:${room.id}`;
+    repair.disabled=!!state.auto || !Number.isInteger(state.selectedTeam);
+    repair.addEventListener('click',()=>{if(!repair.disabled)host.mapDispatch?.({kind:'compartment',compartment:room.id});});section.append(repair);
+    for (const [system, compartment] of Object.entries(layout.placements || {})) {
       if (compartment !== room.id) continue;
       const button = doc.createElement('button'); button.type = 'button'; button.textContent = system;
       button.dataset.mapFocus=`system:${system}`;
       button.disabled = !!state.auto || !Number.isInteger(state.selectedTeam) || !allowed.has(system);
       button.addEventListener('click', () => { if (!button.disabled) host.mapDispatch?.(system); }); section.append(button);
+      const detail=(state.system_hull || []).find(row=>row.system_id===system)?.physical;
+      for (const component of detail?.components || []) {
+        const status=doc.createElement('span');status.textContent=`${component.id} · ${translate('damage.status.'+component.condition.kind)}`;section.append(status);
+        if (component.condition.kind==='healthy') continue;
+        const work=doc.createElement('button');work.type='button';work.textContent=translate('damage.repair.component',{component:component.id});
+        work.dataset.mapFocus=`component:${system}:${component.id}`;
+        work.disabled=button.disabled;
+        work.addEventListener('click',()=>{if(!work.disabled)host.mapDispatch?.({kind:'component',system,component:component.id});});section.append(work);
+      }
     }
     const present = (state.navigation || []).flatMap((team, index) => team.location?.kind === 'compartment' && team.location.compartment === room.id ? [index + 1] : []);
     if (present.length) { const p = doc.createElement('p'); p.textContent = translate('interior.map.teams', {teams: present.join(', ')}); section.append(p); }

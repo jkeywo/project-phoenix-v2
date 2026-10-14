@@ -2805,6 +2805,7 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
                 entries: groups
                     .iter()
                     .map(|group| RepairQueueEntry {
+                        readings: Vec::new(),
                         observations: vec![],
                         group: group.clone(),
                         station_label: "same".into(),
@@ -2989,6 +2990,7 @@ fn repair_evidence_and_resolved_watermarks_participate_in_digest() {
         .unwrap()
         .entries
         .push(RepairQueueEntry {
+            readings: Vec::new(),
             observations: vec![observation],
             group: RepairGroup::Core,
             station_label: "Core".into(),

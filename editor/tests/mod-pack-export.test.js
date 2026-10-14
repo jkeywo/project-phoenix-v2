@@ -788,7 +788,7 @@ describe('committed mod-pack fixtures round-trip through readStoreZip', () => {
     expect(manifest.pack.id).toBe('aurora-skirmish');
     expect(manifest.pack.version).toBe('1.0.0');
     expect(manifest.pack.name).toBe('Aurora Skirmish');
-    expect(manifest.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 2 });
+    expect(manifest.pack.requires).toEqual({ content_id: 'phoenix-base', content_epoch: 3 });
     expect(manifest.scenario[0].world).toBe('assets/worlds/aurora_skirmish.toml');
   });
 

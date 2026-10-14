@@ -55,10 +55,7 @@ fn full_snapshot_preserves_the_actor_frontier_and_next_recovery_occurs_once() {
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
-    assert_eq!(
-        saved.entities[0].disablement.as_ref().unwrap().disabled,
-        true
-    );
+    assert!(saved.entities[0].disablement.as_ref().unwrap().disabled);
     let (mut resumed, restored) = actor();
     let report = restore(resumed.world_mut(), &saved);
     assert!(report.is_complete(), "{report:?}");

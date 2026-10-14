@@ -54,6 +54,7 @@ fn queue(app: &mut App, ship: Entity, target: &str, payload: SystemControlPayloa
 }
 fn tube(id: &str) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
         fire_arc_deg: 90.0,
@@ -188,6 +189,7 @@ fn observe_simultaneous_projectile_identity_assignment() {
             WeaponFiredThisTick::default(),
             TorpedoSystemResource(torp),
             BlasterSystemResource(vec![BlasterSystem::new(BlasterBankConfig {
+                impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 volley_count: 1,
                 charge_time_secs: 0.0,

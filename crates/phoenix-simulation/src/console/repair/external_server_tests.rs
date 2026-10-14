@@ -202,6 +202,7 @@ fn a_live_claim_names_its_team_and_release_restores_availability() {
 
 fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
     crate::console::repair::server::RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("engineering"),
         station_label: "engineering".into(),

@@ -249,7 +249,7 @@ pub fn tick_infrastructure_condition(
 /// The transition is decided from the store's own `(before, after)` rather than
 /// from `FlagChange::raised`, so a flag two structures share does not emit a
 /// second `FlagSet` for a value that was already up.
-fn mirror_flags(
+pub(crate) fn mirror_flags(
     runtime: &mut WorldContentRuntime,
     changes: &[FlagChange],
     uuid: &str,

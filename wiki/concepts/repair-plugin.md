@@ -2,7 +2,7 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-10-14
 ---
 
@@ -12,9 +12,10 @@ updated: 2026-10-14
 
 ## Internal repairs
 
-The Repair console and `operate_repair_ai` emit the same admitted payloads. The dispatch adapters in `crates/phoenix-simulation/src/console/repair/dispatch.rs` apply team dispatch and priority changes. `tick_repair_teams` advances each ship's own teams and repairs its own `EntitySystemHull`.
+The Repair console and `operate_repair_ai` emit the same admitted payloads. The dispatch adapters in `crates/phoenix-simulation/src/console/repair/dispatch.rs` apply team dispatch and priority changes. `tick_repair_teams` advances each ship's own teams and advances actual structural/component remedies against its own `ShipDamage`.
+Legacy unequipped fixtures retain the independent `EntitySystemHull` path.
 
-An on-site team sweeps repairable Systems in its assigned repair group worst-first. `SetRepairTargetPriority` can pin one system as the next job without changing the standing deterministic order. Team slots carry `SystemId` and display text so the client never reconstructs target identity from an obsolete console enum.
+An on-site team diagnoses its compartment and performs one bounded structural or component task. Distinct teams can repair different components concurrently; each exact task is exclusive. `SetRepairTargetPriority` chooses inspected work in a compartment with an on-site team. Team slots carry `SystemId` and display text so the client never reconstructs target identity from an obsolete console enum.
 
 `repair.dispatch-team` preserves the exact authored Repair owner, selected integer
 team slot and Station/Console/Core target, while `repair.prioritise-system` preserves that
@@ -30,14 +31,16 @@ All other correlated outcomes are `Refused`, with no optimistic team movement.
 
 `RepairRequestQueue` records outstanding requests for human and AI Repair
 operators. It deduplicates by typed `RepairGroup` (home Station, detached Console,
-or Core), retaining the worst tier and largest deficit. `reports.rs` preserves
-separate contributor observations and rejects older samples from the same source.
+or Core), reducing current readings to the worst known tier and largest deficit. `reports.rs`
+preserves separate contributor observations, accepts improving readings from the
+same source and rejects older samples.
 Recovery watermarks prevent strictly older reports from reopening a resolved group;
 equal-tick damage remains admissible because diagnosis precedes damage sampling.
 
-`prune_repair_request_queue` supplies the existing operational-group diagnostic as
-an explicit recovery observation. A named System reaching full HP during actual
-team work contributes a completion observation; recall or Returning alone does not.
+Physical recovery arrives through ordinary System reports and on-site team
+diagnoses, including rooms inspected before completing work. No remote truth
+poll prunes physical requests. `prune_repair_request_queue` retains the legacy
+operational-group diagnostic only for the legacy HP owner.
 That observation does not resolve other outstanding damage in the group.
 `RepairHumanAlerted` remains the separate popup latch. Queue observations and
 recovery watermarks participate in capture, restore and deterministic digest.
@@ -63,9 +66,15 @@ The shipped repair workflow fragment reproduces current behavior.
 
 Canonical jobs and private continuation are captured once in RepairState.jobs,
 validated against the authored owner/crew/workflow on restore, and folded in the
-internal-repair namespace. Snapshot 45/rules 0.17 explicitly reject older state.
+internal-repair namespace. Snapshot 46/rules 0.18 explicitly reject older state.
 Permitted Repair blackboards expose assignment/outcome rows to the shared read-only
 work list. It does not expose private memory, concealed damage or extra controls.
+
+Physical stages reserve real Infrastructure parts, consume atomically on
+completion and release unused claims on recall or retarget. Recipe-defined manual
+work remains possible when powered tools fail; the actual Repair operating factor
+scales paid acceleration. Full restoration is preferred, with indefinite reduced
+patches only when full restoration cannot be funded.
 
 ## Physical layout and access
 
@@ -87,14 +96,13 @@ Console working-view admission. Co-hosting and read-only feeds grant no controls
 
 ## External repairs
 
-`crates/phoenix-simulation/src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies progress to the target's authoritative condition track. Backfill uses the same command seam.
+`crates/phoenix-simulation/src/console/repair/external_server.rs` owns dispatch to a nearby ally or structure. It shares the ship's team pool, consumes ordinary admitted commands, and applies the visited target's physical structural/component remedies using the source ship's actual parts and tools. Unequipped targets retain the existing condition-track adjustment. Backfill uses the same command seam.
 
 `repair.external-dispatch` is the shared dispatch/recall semantic action on
 Repair and Engineering variants. Dispatch feedback completes after the live
 lock, range and free-team verdict; explicit recall is an idempotent applied
-assignment. The shared job owner holds the exact named team until release. External
-repair remains immediate; local work retains its authored travel and repair rates.
-ExternalRepairDispatch carries authored terms and transient refusal, with no second claim. A correlated external command on a
+assignment. The shared job owner holds the exact named team until release. External recall retains its existing immediate release; visited physical work uses the target remedy's work time and manual fraction. Restoring a target retains the ordinary aboard commitment until recall or loss of range.
+ExternalRepairDispatch carries authored terms and transient refusal, with no second crew claim. External physical stages remain in the existing Job, cache bounded recipe requirements for deletion-frontier cleanup, and reserve only actual source stock. Active task claims are reconstructed from internal/external jobs; pending local requests wait without taking an existing foreign claim. A correlated external command on a
 hull without the optional dispatch capability terminates once as `Refused` rather
 than entering a queue with no owner.
 

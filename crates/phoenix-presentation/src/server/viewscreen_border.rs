@@ -875,7 +875,13 @@ fn to_computer_message_wire(
 /// fires only on actual change.
 fn recompute_hud_state(
     red_alert_q: Query<&crate::ship::state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
+    hull_q: Query<
+        (
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&phoenix_sim_gameplay::ship::physical_damage::ShipDamage>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
     mission_report: Option<Res<crate::core::report::MissionReport>>,
@@ -902,7 +908,15 @@ fn recompute_hud_state(
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
     let (hull_current, hull_max) = hull_q
         .single()
-        .map(|h| (h.0.total_current(), h.0.total_max()))
+        .map(|(hull, physical)| {
+            physical
+                .map(|damage| {
+                    let (current, max) = damage.structural_totals();
+                    (current as f32, max as f32)
+                })
+                .or_else(|| hull.map(|hull| (hull.0.total_current(), hull.0.total_max())))
+                .unwrap_or((100.0, 100.0))
+        })
         .unwrap_or((100.0, 100.0));
     let engine_thrust = last_input_q
         .iter()
@@ -968,7 +982,13 @@ fn recompute_hud_state(
 /// `OnEnter(GamePhase::GameOver)` system: push one final HUD state.
 fn push_game_over_hud_state(
     red_alert_q: Query<&crate::ship::state::ShipRedAlert, With<crate::server_app::LocalShip>>,
-    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
+    hull_q: Query<
+        (
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&phoenix_sim_gameplay::ship::physical_damage::ShipDamage>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     game_over_reason: Option<Res<GameOverReason>>,
     mission_report: Option<Res<crate::core::report::MissionReport>>,
     world_resource: Option<Res<WorldResource>>,
@@ -980,7 +1000,15 @@ fn push_game_over_hud_state(
     let red_alert = red_alert_q.single().map(|ra| ra.0).unwrap_or(false);
     let (hull_current, hull_max) = hull_q
         .single()
-        .map(|h| (h.0.total_current(), h.0.total_max()))
+        .map(|(hull, physical)| {
+            physical
+                .map(|damage| {
+                    let (current, max) = damage.structural_totals();
+                    (current as f32, max as f32)
+                })
+                .or_else(|| hull.map(|hull| (hull.0.total_current(), hull.0.total_max())))
+                .unwrap_or((100.0, 100.0))
+        })
         .unwrap_or((100.0, 100.0));
     // Engine thrust and phaser fire are both forced off at game over so the
     // looping SFX stop with the sim. The computer-message banner is forced

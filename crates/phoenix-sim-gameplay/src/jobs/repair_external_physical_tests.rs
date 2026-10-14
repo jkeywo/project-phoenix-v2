@@ -98,14 +98,14 @@ fn advance(
 }
 fn remaining(stock: &InfrastructureState) -> i64 {
     stock
-        .capacities
+        .capacities()
         .iter()
         .map(|capacity| capacity.stock.level)
         .sum()
 }
 fn reserved(stock: &InfrastructureState) -> i64 {
     stock
-        .capacities
+        .capacities()
         .iter()
         .flat_map(|capacity| capacity.stock.reserved.values())
         .sum()

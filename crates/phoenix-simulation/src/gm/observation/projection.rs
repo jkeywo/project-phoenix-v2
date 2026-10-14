@@ -1451,7 +1451,17 @@ fn publish_local_projection(
         system_controls: system_sources
             .iter()
             .map(
-                |(uuid, _name, _template, config, sources, _ratings, _hull, _blackboards)| {
+                |(
+                    uuid,
+                    _name,
+                    _template,
+                    config,
+                    sources,
+                    _ratings,
+                    _hull,
+                    _physical,
+                    _blackboards,
+                )| {
                     (
                         uuid.0.clone(),
                         config
@@ -1848,6 +1858,7 @@ fn publish_station_projection(
                     let mut status = crate::server_app::system_status::project(
                         &config.0,
                         hull.map(|h| &h.0),
+                        damage,
                         &sources.0,
                         dock,
                         power,

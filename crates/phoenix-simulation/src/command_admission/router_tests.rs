@@ -3,6 +3,7 @@ use crate::core::messages::{AdmittedCommand, SystemControlPayload, SystemId};
 
 fn system(id: &str, kind: &str) -> crate::ship::config::SystemInstanceConfig {
     crate::ship::config::SystemInstanceConfig {
+        damage_components: Vec::new(),
         components: Vec::new(),
         channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId("router-scope".into())),

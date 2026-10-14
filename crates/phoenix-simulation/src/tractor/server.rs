@@ -623,7 +623,7 @@ pub fn tick_tractor(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter(|(_, beam, _, _, _, _)| beam.engaged)
+        .filter(|(_, beam, ..)| beam.engaged)
         .map(|(entity, beam, selection, transform, hull, damage, uuid)| {
             let power_level = u8::MAX;
             let disabled = operation_disabled(damage, hull, &tractor_system_id());

@@ -169,6 +169,7 @@ impl RepairTeams {
         if !self.step_external() {
             return;
         }
+        let owner = self.state.owner.clone();
         let team = self.external_team().expect("active external job");
         let id = self.state.teams[team].as_ref().expect("external team").id.0;
         let work = self
@@ -261,7 +262,7 @@ impl RepairTeams {
             0.0
         };
         let funded = if tool_dt > 0.0 {
-            tools(&self.state.owner, tool_dt).clamp(0.0, 1.0)
+            tools(&owner, tool_dt).clamp(0.0, 1.0)
         } else {
             0.0
         };

@@ -424,7 +424,9 @@ use super::*;
 /// 43: local energy networks, thermal hysteresis, finite coolant credit and flow restoration.
 /// 44: raised shield intent, battery recovery and partial-interception continuation.
 /// 45: persistent physical repair-team positions and shared access-boundary state.
-pub const SNAPSHOT_FORMAT: u32 = 45;
+/// 46: physical damage, retained impact profiles/samples, typed parts-backed
+/// repair stages and reversible actor defeat frontiers replace primary ship HP.
+pub const SNAPSHOT_FORMAT: u32 = 46;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -506,7 +508,9 @@ pub const SNAPSHOT_FORMAT: u32 = 45;
 /// "0.13" — canonical repair assignments and restricted per-job workflows.
 /// "0.17" — authored compartment routes gate repair arrival and knowledge;
 /// access boundaries retain actual transitions separately from protected orders.
-pub const SIMULATION_RULES: &str = "0.17";
+/// "0.18" — directional compartment damage, component conditions, finite-parts
+/// restoration and recoverable neutralization replace aggregate ship destruction.
+pub const SIMULATION_RULES: &str = "0.18";
 
 /// The authored data, computed rather than remembered.
 ///

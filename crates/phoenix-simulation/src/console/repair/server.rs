@@ -40,8 +40,16 @@ pub struct RepairRequestQueue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RepairQueueEntry {
     pub observations: Vec<phoenix_model::observation::ObservationMetadata>,
+    pub readings: Vec<RepairSourceReading>,
     pub group: RepairGroup,
     pub station_label: String,
+    pub tier: DamageTier,
+    pub deficit: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RepairSourceReading {
+    pub source: phoenix_model::observation::ObservationMetadata,
     pub tier: DamageTier,
     pub deficit: f32,
 }
@@ -278,6 +286,7 @@ pub(crate) fn receive_repair_coordination(
             CoordinationDelivery::Ai | CoordinationDelivery::HumanRouted => {
                 if let Some(queue) = queue.as_deref_mut() {
                     queue.push_or_merge(RepairQueueEntry {
+                        readings: Vec::new(),
                         observations: observation
                             .clone()
                             .map(|mut value| {
@@ -374,49 +383,216 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 pub fn tick_repair_teams(
     time: Res<Time>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
-    mut ship_q: Query<
-        (
-            Option<&mut ShipRepairTeams>,
-            Option<&mut RepairRequestQueue>,
-            &ShipModifiers,
-            &mut crate::entities::spawner::EntitySystemHull,
-            Option<&crate::entities::spawner::EntityUuid>,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Has<crate::lockstep::FleetSlotOf>,
-            Has<crate::server_app::LocalShip>,
-            Option<&mut crate::ship::power::ShipPowerSystem>,
-            Option<&crate::ship::access::InteriorAccess>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut inputs: ParamSet<(
+        Query<
+            (
+                Option<&mut ShipRepairTeams>,
+                Option<&mut RepairRequestQueue>,
+                &ShipModifiers,
+                Option<&mut crate::entities::spawner::EntitySystemHull>,
+                Option<&crate::entities::spawner::EntityUuid>,
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Has<crate::lockstep::FleetSlotOf>,
+                Has<crate::server_app::LocalShip>,
+                Option<&mut crate::ship::power::ShipPowerSystem>,
+                Option<&crate::ship::access::InteriorAccess>,
+                Option<&mut crate::ship::compartment_damage::ShipDamage>,
+                Option<&mut crate::infrastructure::InfrastructureCondition>,
+                Option<&crate::resources::server::ResourceServices>,
+                Option<&ShipSystemControlSources>,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+        Query<(&crate::entities::spawner::EntityUuid, &ShipRepairTeams)>,
+    )>,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
+    mut world_runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let dt = time.delta_secs();
+
+    // Foreign claims come from existing committed jobs, not a second registry.
+    // Read once before internal work; external execution observes the resulting
+    // local claims later in this deterministic fixed-step order.
+    let mut foreign_claims: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<phoenix_model::damage::RepairWorkTarget>,
+    > = Default::default();
+    for (source, teams) in inputs.p1().iter() {
+        let state = teams.0.save_state();
+        for (id, work) in &state.external_physical_work {
+            if work.target_uuid == source.0 {
+                continue;
+            }
+            let active = state.teams.iter().flatten().any(|job| job.id.0 == *id
+                && job.outcome.is_none()
+                && matches!(&job.activity, crate::jobs::repair::RepairActivity::External { target } if target == &work.target_uuid));
+            if active {
+                if let Some(target) = &work.target {
+                    foreign_claims
+                        .entry(work.target_uuid.clone())
+                        .or_default()
+                        .insert(target.clone());
+                }
+            }
+        }
+    }
+    let mut ship_q = inputs.p0();
 
     for (
         teams_comp,
         mut queue,
         modifiers,
-        mut hull,
+        hull,
         ship_uuid,
         config,
         fleet,
         local,
         mut power,
         access,
+        mut physical,
+        mut inventory,
+        services,
+        tool_controls,
     ) in ship_q.iter_mut()
     {
         // Crew wrecks remain for identity and cinematic spectating. A queued
         // repair must not revive them on the next tick and reopen admission.
         // NPC repair/recovery, including authored derelicts, keeps its policy.
-        if (fleet || local) && hull.0.is_destroyed() {
+        if (fleet || local)
+            && physical.as_ref().map_or_else(
+                || hull.as_ref().is_some_and(|h| h.0.is_destroyed()),
+                |damage| damage.catastrophic(),
+            )
+        {
             continue;
         }
         let Some(mut teams) = teams_comp else {
+            continue;
+        };
+        if let Some(damage) = physical.as_deref_mut() {
+            let blocked = access
+                .zip(teams.0.layout())
+                .map(|(access, layout)| access.blocked_connections(layout))
+                .unwrap_or_default();
+            let mut observed_rooms = physical_on_site_rooms(&teams.0);
+            let tool_factors: std::collections::BTreeMap<_, _> = damage
+                .definition
+                .components
+                .keys()
+                .map(|id| {
+                    (
+                        id.clone(),
+                        damage.factor(id, phoenix_model::damage::DamageBinding::Operation),
+                    )
+                })
+                .collect();
+            let before: f64 = damage.state.compartments.values().map(|room| room.hp).sum();
+            let mut changes = Vec::new();
+            teams.0.tick_physical_with_claims(
+                dt * modifiers.get(&ModifierSlot::RepairRate),
+                &mut damage.state,
+                &blocked,
+                &ship_uuid
+                    .and_then(|uuid| foreign_claims.get(&uuid.0))
+                    .cloned()
+                    .unwrap_or_default(),
+                |action, claim, recipe| {
+                    if recipe.requirements.is_empty() {
+                        return true;
+                    }
+                    let (Some(inventory), Some(services)) = (inventory.as_deref_mut(), services)
+                    else {
+                        return false;
+                    };
+                    match inventory.0.repair_parts(action, claim, recipe, &services.0) {
+                        Ok(flags) => {
+                            changes.extend(flags);
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                },
+                |owner, work_dt| {
+                    let factor = tool_factors.get(owner).copied().unwrap_or(0.0);
+                    if factor <= 0.0
+                        || tool_controls.is_some_and(|controls| controls.0.is_offline(owner))
+                    {
+                        return 0.0;
+                    }
+                    power.as_deref_mut().map_or(0.0, |power| {
+                        power
+                            .0
+                            .work_continuous(owner, work_dt, 1.0)
+                            .map_or(0.0, |grant| grant.fraction * factor)
+                    })
+                },
+            );
+            observed_rooms.extend(physical_on_site_rooms(&teams.0));
+            if let (Some(queue), Some(config)) = (queue.as_deref_mut(), config) {
+                for (id, room) in &damage.definition.interior.placements {
+                    if !observed_rooms.contains(room) {
+                        continue;
+                    }
+                    let tier = damage.operating_tier(id);
+                    let structural_deficit = damage
+                        .definition
+                        .compartment(room)
+                        .zip(damage.state.compartments.get(room))
+                        .map_or(0.0, |(definition, state)| {
+                            1.0 - state.hp as f32 / definition.max_hp
+                        });
+                    queue.reduce_report(RepairQueueEntry {
+                        group: repair_group(id, &config.0),
+                        station_label: repair_group_label(&config.0, &repair_group(id, &config.0)),
+                        tier,
+                        deficit: structural_deficit.max(
+                            1.0 - damage
+                                .factor(id, phoenix_model::damage::DamageBinding::Operation),
+                        ),
+                        readings: vec![],
+                        observations: vec![phoenix_model::observation::ObservationMetadata {
+                            subject: phoenix_model::observation::ObservationSubject::System {
+                                id: id.clone(),
+                            },
+                            provenance: phoenix_model::observation::ObservationProvenance {
+                                kind: phoenix_model::observation::ObservationSource::RepairTeam,
+                                system: Some(repair_system_id()),
+                                label: String::new(),
+                            },
+                            observed_tick: tick.as_ref().map(|tick| tick.0),
+                            received_tick: tick.as_ref().map(|tick| tick.0),
+                            uncertainty:
+                                phoenix_model::observation::ObservationUncertainty::Qualitative,
+                        }],
+                    });
+                }
+            }
+            if let (Some(runtime), Some(uuid)) = (world_runtime.as_deref_mut(), ship_uuid) {
+                crate::infrastructure::server::mirror_flags(runtime, &changes, &uuid.0, &log);
+            }
+            let restored = damage
+                .state
+                .compartments
+                .values()
+                .map(|room| room.hp)
+                .sum::<f64>()
+                - before;
+            if restored > 0.0 {
+                if let (Some(events), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                    events.write(crate::core::balance::BalanceEvent::RepairApplied {
+                        ship: uuid.0.clone(),
+                        hp: restored as f32,
+                    });
+                }
+            }
+            continue;
+        }
+        let Some(mut hull) = hull else {
             continue;
         };
         let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
@@ -519,6 +695,7 @@ pub(crate) fn publish_repair_blackboard(
         &mut crate::server_app::ShipSystemBlackboards,
         Option<&crate::ship::access::InteriorAccess>,
         Option<&crate::ship::access::InteriorLayout>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
     // Resolve a dispatched target's world entity-name id for the readout — no
     // English crosses the wire, exactly as the tractor publisher reports its
@@ -534,7 +711,8 @@ pub(crate) fn publish_repair_blackboard(
     // only, which never moves while a crew watch a repair.
     conditions: Query<(
         &crate::entities::spawner::EntityUuid,
-        &crate::infrastructure::InfrastructureCondition,
+        Option<&crate::infrastructure::InfrastructureCondition>,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
     for (
@@ -548,6 +726,7 @@ pub(crate) fn publish_repair_blackboard(
         mut blackboards,
         access,
         layout,
+        physical,
     ) in ship_q.iter_mut()
     {
         let default_teams;
@@ -563,10 +742,11 @@ pub(crate) fn publish_repair_blackboard(
 
         // Build the SystemHullStatus list from the authoritative `SystemHull`
         // iteration.
-        let system_hull: Vec<SystemHullStatus> = hull_opt
+        let mut system_hull: Vec<SystemHullStatus> = hull_opt
             .map(|h| {
                 h.0.iter()
                     .map(|(sid, entry)| SystemHullStatus {
+                        physical: None,
                         system_id: sid.clone(),
                         display_name: entry.display_name.clone(),
                         current: entry.current,
@@ -577,12 +757,29 @@ pub(crate) fn publish_repair_blackboard(
                     .collect()
             })
             .unwrap_or_default();
+        if let (Some(damage), Some(config)) = (physical, config_opt) {
+            system_hull = config
+                .0
+                .systems
+                .iter()
+                .filter_map(|system| {
+                    super::visibility::physical_system_status(damage, &system.id, &config.0)
+                })
+                .collect();
+        }
 
         let damageable_systems: Vec<SystemId> =
             system_hull.iter().map(|s| s.system_id.clone()).collect();
-        let priority_targets = match (hull_opt, config_opt) {
-            (Some(hull), Some(config)) => teams.0.prioritisable_systems(&hull.0, &config.0),
-            _ => Vec::new(),
+        let priority_targets = if let Some(damage) = physical {
+            super::dispatch::physical_priority_options(&teams.0, damage)
+                .into_iter()
+                .map(|(_, id, _)| id)
+                .collect()
+        } else {
+            match (hull_opt, config_opt) {
+                (Some(hull), Some(config)) => teams.0.prioritisable_systems(&hull.0, &config.0),
+                _ => Vec::new(),
+            }
         };
 
         let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
@@ -634,10 +831,15 @@ pub(crate) fn publish_repair_blackboard(
                 // (`apply_external_repair`), and the card must not draw a bar
                 // for work that cannot happen.
                 let target_condition = target.as_ref().and_then(|uuid| {
-                    conditions
-                        .iter()
-                        .find(|(id, _)| &id.0 == uuid)
-                        .map(|(_, condition)| condition.0.condition_fraction())
+                    conditions.iter().find(|(id, ..)| &id.0 == uuid).and_then(
+                        |(_, condition, damage)| {
+                            damage
+                                .map(|damage| damage.structural_fraction())
+                                .or_else(|| {
+                                    condition.map(|condition| condition.0.condition_fraction())
+                                })
+                        },
+                    )
                 });
                 (
                     Some(external.config.range),
@@ -1042,13 +1244,18 @@ pub(crate) fn prune_repair_request_queue(
     mut ships: Query<
         (
             &mut RepairRequestQueue,
-            &crate::entities::spawner::EntitySystemHull,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             &crate::ship_plugin::ShipConfigComponent,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     for (mut queue, hull, config) in ships.iter_mut() {
+        // Physical reports are updated by ordinary System reports and on-site
+        // diagnosis. Missing legacy Hull is never privileged remote diagnosis.
+        let Some(hull) = hull else {
+            continue;
+        };
         if queue
             .entries
             .iter()
@@ -1193,6 +1400,7 @@ pub fn operate_repair_ai(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&RepairTargetSelector>,
             Option<&crate::ship::state::ShipRedAlert>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
             // The external repair-dispatch record (issue #1161), read for the
             // one question it answers here: how many of this ship's teams are
             // held abroad against a designated target, and so unavailable to the
@@ -1213,6 +1421,7 @@ pub fn operate_repair_ai(
         config_comp,
         target_selector,
         red_alert_comp,
+        physical,
         _external_dispatch,
         mut admitted,
     ) in ships.iter_mut()
@@ -1221,7 +1430,103 @@ pub fn operate_repair_ai(
         // human holder (or an offline system) stands the auto-dispatcher down.
         // Repair resolves a data-driven SELECTOR the spine does not model, so only
         // its gate — the one step it shares with the policy hosts — routes here.
-        if !crate::ai::host::ai_operates(&sources.0, &repair_system_id()) {
+        if !sources
+            .0
+            .crew_order_policy_for(&repair_system_id())
+            .operate_ai
+        {
+            continue;
+        }
+        if let Some(damage) = physical {
+            if let (Some(teams), Some(queue), Some(config), Some(selector)) =
+                (teams_comp, repair_queue_comp, config_comp, target_selector)
+            {
+                let mut assigned: std::collections::BTreeSet<_> = teams
+                    .0
+                    .slots()
+                    .iter()
+                    .filter_map(|slot| match slot {
+                        TeamSlot::Travelling {
+                            system_id: Some(id),
+                            ..
+                        }
+                        | TeamSlot::Repairing {
+                            system_id: Some(id),
+                            ..
+                        } => Some(repair_group(id, &config.0).selector_key()),
+                        _ => None,
+                    })
+                    .collect();
+                let self_context = crate::ai::selector::SelfContext {
+                    position: [0.0; 3],
+                    facts: seed_repair_self_facts(
+                        teams.0.free_team_indices(None).len(),
+                        damage.structural_fraction(),
+                        selector.power_rating,
+                        red_alert_comp.is_some_and(|alert| alert.0),
+                    ),
+                };
+                for team in teams.0.free_team_indices(None) {
+                    let mut candidates: Vec<_> = queue
+                        .entries
+                        .iter()
+                        .map(|entry| {
+                            let key = entry.group.selector_key();
+                            let system_count = config
+                                .0
+                                .systems
+                                .iter()
+                                .filter(|system| repair_group(&system.id, &config.0) == entry.group)
+                                .count();
+                            crate::ai::selector::SelectorCandidate {
+                                uuid: key.clone(),
+                                position: [0.0; 3],
+                                facts: seed_repair_facts(&RepairCandidateReading {
+                                    tier_ordinal: entry.tier as u8,
+                                    deficit: entry.deficit,
+                                    // Symptom severity is the reported reading. No
+                                    // remote component condition is polled here.
+                                    damage_fraction: (entry.tier as u8 as f32) / 3.0,
+                                    worst_system_damage_fraction: (entry.tier as u8 as f32) / 3.0,
+                                    system_count,
+                                    is_core: entry.group == RepairGroup::Core,
+                                    source_repair_request: true,
+                                    assigned: assigned.contains(&key),
+                                }),
+                            }
+                        })
+                        .collect();
+                    candidates.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+                    let Some(winner) = selector.selector.select(
+                        &self_context,
+                        &candidates,
+                        None,
+                        &ai_env.flag_chain(ship_entity),
+                    ) else {
+                        break;
+                    };
+                    let Some(entry) = queue
+                        .entries
+                        .iter()
+                        .find(|entry| entry.group.selector_key() == winner)
+                    else {
+                        break;
+                    };
+                    emit_ai_command(
+                        entity_uuid,
+                        repair_system_id(),
+                        crate::core::messages::SystemControlPayload::DispatchRepairTeam {
+                            team_idx: team as u8,
+                            target: entry.group.target(),
+                        },
+                        sources,
+                        &sessions,
+                        Some(config),
+                        &mut admitted,
+                    );
+                    assigned.insert(winner);
+                }
+            }
             continue;
         }
         // The queue + config are always present together on production ships
@@ -1452,3 +1757,26 @@ pub fn operate_repair_ai(
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+fn physical_on_site_rooms(teams: &RepairTeams) -> std::collections::BTreeSet<String> {
+    teams
+        .slots()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| {
+            if !matches!(slot, TeamSlot::Repairing { .. }) {
+                return None;
+            }
+            match &teams.navigation()?.get(index)?.location {
+                phoenix_sim_gameplay::ship::interior::TeamLocation::Compartment { compartment } => {
+                    Some(compartment.clone())
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "physical_server_tests.rs"]
+mod physical_tests;

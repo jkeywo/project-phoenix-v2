@@ -491,8 +491,8 @@ export class PhRepairTeams extends PhElement {
     const s = this.#state || {};
     renderInteriorMap(this.shadowRoot.getElementById('interior-map'), {
       ...s, selectedTeam: this.#selectedTeamId,
-    }, t, system => activateEngineeringAction(this, REPAIR_DISPATCH_ACTION_ID,
-      {team_idx:this.#selectedTeamId, target:{type:'System',data:system}}, 'dispatch_repair_team'),
+    }, t, target => activateEngineeringAction(this, REPAIR_DISPATCH_ACTION_ID,
+      {team_idx:this.#selectedTeamId, target:typeof target==='string'?{type:'System',data:target}:{type:'Work',data:target}}, 'dispatch_repair_team'),
     (system,sealed) => this.sendAction('set_access_seal',{control_system_id:system,sealed}),
     view => {if(s.console_id) this.sendAction('set_console_view',{console:s.console_id,view});});
     const teams = Array.isArray(s.teams) ? s.teams : [];

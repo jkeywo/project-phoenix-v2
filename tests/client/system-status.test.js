@@ -42,6 +42,19 @@ describe('common System status', () => {
     expect(document.querySelector('[role=dialog]').textContent).toContain('Damaged');
     expect(document.querySelector('[role=dialog]').textContent).not.toContain('Insufficient power');
   });
+  it('updates permitted physical details without presenting component HP',()=>{
+    const widget=mount();
+    const physical={compartment:'engineering',structural_hp:20,structural_max_hp:100,structurally_disabled:false,
+      components:[{id:'coolant-link',binding:'cooling',condition:{kind:'damaged'}}]};
+    widget.update([row('reactor',{physical})]);
+    document.querySelector('[data-system-id=reactor]').click();
+    const dialog=document.querySelector('[role=dialog]');
+    expect(dialog.textContent).toContain('engineering: structure 20/100');
+    expect(dialog.textContent).toContain('coolant-link · Damaged');
+    widget.update([row('reactor',{physical:{...physical,structural_hp:30,components:[{id:'coolant-link',binding:'cooling',condition:{kind:'healthy'}}]}})]);
+    expect(dialog.textContent).toContain('engineering: structure 30/100');
+    expect(dialog.textContent).toContain('coolant-link · Healthy');
+  });
   it('updates open details, represents multiple reasons and restores keyboard focus on Escape/disposal', () => {
     const widget = mount(); widget.update([row('left')]);
     const button = document.querySelector('[data-system-id=left]'); button.focus(); button.click();

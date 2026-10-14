@@ -1296,6 +1296,7 @@ fn queue_entry_retained_when_all_systems_destroyed() {
     let config = ShipConfig {
         stations: fixture_stations(&[station_id]),
         systems: vec![SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId(station_id.into())),
@@ -1319,6 +1320,7 @@ fn queue_entry_retained_when_all_systems_destroyed() {
         entries: vec![],
     };
     rq.entries.push(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group(station_id),
         station_label: "Helm".into(),
@@ -1393,6 +1395,7 @@ fn npc_repair_config() -> crate::ship_plugin::ShipConfigComponent {
     crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
@@ -1475,6 +1478,7 @@ fn spawn_npc_repair(
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("helm"),
         station_label: "Helm".into(),
@@ -1914,6 +1918,7 @@ fn set_repair_target_priority_from_a_non_engineering_token_is_rejected() {
 fn two_station_config() -> crate::ship_plugin::ShipConfigComponent {
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
     let sys = |id: &str, station: &str| SystemInstanceConfig {
+        damage_components: Vec::new(),
         components: Vec::new(),
         channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId(station.into())),
@@ -1973,6 +1978,7 @@ fn spawn_two_station_npc(
             continue;
         }
         queue.push_or_merge(RepairQueueEntry {
+            readings: Vec::new(),
             observations: vec![],
             group: fixture_repair_group(station),
             station_label: station.into(),
@@ -2411,6 +2417,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
 
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("helm"),
         station_label: "helm".into(),
@@ -2419,6 +2426,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
     });
     // `damage_sync` files an ownerless system's request under this id.
     queue.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
@@ -2431,6 +2439,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
@@ -2516,6 +2525,7 @@ fn spawn_two_ownerless_rows(
     // id, so the destroyed `science` row is reported as a `core` request.
     let mut queue = RepairRequestQueue::default();
     queue.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group(REPAIR_CORE_BUCKET_KEY),
         station_label: REPAIR_CORE_BUCKET_KEY.into(),
@@ -2527,6 +2537,7 @@ fn spawn_two_ownerless_rows(
     let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
         stations: fixture_stations(&["helm"]),
         systems: vec![SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             console: Some(phoenix_model::identity::ConsoleId("helm".into())),
@@ -2679,6 +2690,7 @@ fn a_second_team_is_not_dispatched_to_a_core_bucket_being_swept() {
 #[test]
 fn queue_severity_tie_breaks_on_smallest_station_id() {
     let entry = |station: &str| RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group(station),
         station_label: station.into(),
@@ -2957,6 +2969,7 @@ fn prune_retains_an_all_destroyed_station_through_the_ai_loop() {
 fn destroyed_tier_requests_are_queued_and_merged() {
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
@@ -2967,6 +2980,7 @@ fn destroyed_tier_requests_are_queued_and_merged() {
 
     let mut rq = RepairRequestQueue::default();
     rq.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
@@ -2974,6 +2988,7 @@ fn destroyed_tier_requests_are_queued_and_merged() {
         deficit: 40.0,
     });
     rq.push_or_merge(RepairQueueEntry {
+        readings: Vec::new(),
         observations: vec![],
         group: fixture_repair_group("alpha"),
         station_label: "Alpha".into(),
@@ -3265,6 +3280,7 @@ fn repair_queue_keeps_console_station_and_core_names_distinct() {
     ];
     for group in &groups {
         queue.push_or_merge(RepairQueueEntry {
+            readings: Vec::new(),
             observations: vec![],
             group: group.clone(),
             station_label: "Same display name".into(),
@@ -3316,6 +3332,7 @@ fn actual_team_completion_records_evidence_without_resolving_other_group_work() 
         teams.restore_slots(&[slot]);
         let mut queue = RepairRequestQueue::default();
         queue.push_or_merge(RepairQueueEntry {
+            readings: Vec::new(),
             observations: vec![],
             group: RepairGroup::Core,
             station_label: "Core".into(),

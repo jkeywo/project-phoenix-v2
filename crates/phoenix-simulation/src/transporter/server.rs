@@ -433,7 +433,7 @@ pub fn tick_transport(
     let rows: Vec<Row> = set
         .p0()
         .iter()
-        .filter(|(_, t, _, _, _)| t.transporting)
+        .filter(|(_, t, ..)| t.transporting)
         .map(|(entity, t, transform, hull, damage, uuid)| {
             let power_level = u8::MAX;
             let disabled = operation_disabled(damage, hull, &transporter_system_id());

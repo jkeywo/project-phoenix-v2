@@ -71,6 +71,7 @@ fn reserved_ammunition_and_fractional_flow_resume_from_ron_without_reset() {
         );
     }
     let flow = crate::umbilical::UmbilicalSaveState {
+        selected_direction: crate::umbilical::UmbilicalDirection::Collect,
         selected_resource: "torpedoes".into(),
         running: true,
         carry: 0.75,
@@ -1857,6 +1858,7 @@ fn repair_report_sources_and_recovery_watermarks_survive_snapshot_restore() {
     .received(43);
     let mut queue = RepairRequestQueue::default();
     queue.entries.push(RepairQueueEntry {
+        readings: Vec::new(),
         group: crate::core::messages::RepairGroup::Core,
         station_label: "Core".into(),
         tier: crate::ship::damage::DamageTier::Damaged,

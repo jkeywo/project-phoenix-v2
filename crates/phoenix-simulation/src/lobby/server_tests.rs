@@ -121,6 +121,7 @@ fn client_system_kind_projection_preserves_arbitrary_authored_instance_ids() {
     use crate::ship::config::SystemInstanceConfig;
 
     let system = |id: &str, kind: &str| SystemInstanceConfig {
+        damage_components: Vec::new(),
         components: Vec::new(),
         channels: Vec::new(),
         console: Some(phoenix_model::identity::ConsoleId("projection".into())),

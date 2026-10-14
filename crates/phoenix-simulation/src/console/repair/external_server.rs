@@ -671,7 +671,7 @@ pub fn apply_external_repair(
                 .flatten()
                 .any(|job| job.id.0 == *id && job.outcome.is_none());
             if active {
-                for target in &work.target {
+                if let Some(target) = &work.target {
                     claims
                         .entry((source.0.clone(), target.clone()))
                         .or_default()

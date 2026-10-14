@@ -175,6 +175,7 @@ fn repair_publication_follows_console_and_explicit_feed_without_revealing_hidden
     let entries: Vec<_> = ids
         .iter()
         .map(|id| SystemHullStatus {
+            physical: None,
             system_id: SystemId((*id).into()),
             display_name: (*id).into(),
             current: 25.0,

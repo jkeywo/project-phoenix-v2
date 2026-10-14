@@ -230,6 +230,7 @@ fn unchanged_weapons_projection_republishes_after_console_handoff() {
             ..Default::default()
         }],
         systems: vec![crate::ship::config::SystemInstanceConfig {
+            damage_components: Vec::new(),
             components: Vec::new(),
             channels: Vec::new(),
             id: crate::core::messages::SystemId("blaster-fore".into()),

@@ -331,7 +331,7 @@ fn a_foreign_active_stage_blocks_explicit_internal_work_without_preempting_it() 
     assert_eq!(tool_calls, 0);
     assert_eq!(damage.compartments["front"].hp, 50.0);
     assert!(stock
-        .capacities
+        .capacities()
         .iter()
         .all(|capacity| capacity.stock.reserved.is_empty()));
     assert!(teams

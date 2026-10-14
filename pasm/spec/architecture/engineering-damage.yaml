@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: System Damage Availability Policy
-      summary: Maps per-system hull tiers to degraded, disabled, or destroyed availability and prevents damaged systems from accepting or applying control.
+      summary: Projects actual operation-component loss and compartment disablement into System availability. Intake/cooling faults affect their service flow without disabling charged working equipment; independent GM and thermal causes remain intact. Legacy prop HP retains its own policy.
     architecture:
       kind: availability-policy
       authority: authoritative
@@ -13,8 +13,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/ship/damage.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/ship_plugin.rs]
-      symbols: [DamageTier, SystemHull]
+      paths: [crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship_plugin.rs]
+      symbols: [DamageTier, ShipDamage]
       tests: [cargo test, crates/phoenix-sim-gameplay/src/ship/damage_tests.rs]
 
   - component: damage-source-router
@@ -22,7 +22,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Damage Source Router
-      summary: Applies collision, weapon, and region damage through shields where applicable and then distributes leaked damage to repairable system hull.
+      summary: Routes actual collision, weapon, region and supported GM incidents through existing protection and one planar compartment/component damage processor. Equipped ships have no parallel System HP pool; unequipped props retain their separate hull owner.
     architecture:
       kind: damage-router
       authority: authoritative
@@ -60,8 +60,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Ship Destruction Threshold
-      summary: Transitions the player ship to GameOver when all repairable system hull is destroyed; non-local NPC ships instead despawn and emit destruction events.
+      title: Explicit Destruction and Recoverable Defeat
+      summary: "Equipped entities remain recoverable when compartments reach zero HP. Explicit catastrophe/despawn emits literal destruction; recoverable neutralization has its own reversible frontier and authored objective conditions. Crew seats and repair admission remain available. Legacy unequipped destructibles retain their independent HP destruction rule."
     architecture:
       kind: outcome-policy
       authority: authoritative
@@ -229,7 +229,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Damage State
-      summary: Authoritative per-system hull and damage-tier state on the host simulation.
+      summary: "One Gameplay ShipDamage owns equipped compartment structure and component conditions; damage tiers are derived operating symptoms. Legacy unequipped props keep their own SystemHull state."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -257,7 +257,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Authoritative Damage State
-      summary: The host-owned truth for per-system hull, tiers, and repairable damage.
+      summary: "The host-owned compartment structure, component conditions and causal dose of equipped ships. Legacy prop hull state is distinct. Repair stages and real inventory claims have their existing job/stock owners."
     architecture:
       classification: authoritative
       owner: host-damage-state
@@ -751,7 +751,7 @@ entities:
       confidence: confirmed
       title: Engineering Destroyed Capability State
       summary: >-
-        Ship-wide share of total capacity held by systems destroyed outright,
+        Ship-wide share of structural capacity in disabled compartments for equipped ships,
         visible to Engineering before any team arrives.
       rationale:
         - >-

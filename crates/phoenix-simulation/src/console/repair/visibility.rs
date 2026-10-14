@@ -148,22 +148,25 @@ pub(crate) struct HullProjectionInputs<'w, 's> {
         'w,
         's,
         (
-            &'static crate::entities::spawner::EntitySystemHull,
+            Option<&'static crate::entities::spawner::EntitySystemHull>,
             &'static crate::ship_plugin::ShipConfigComponent,
             Option<&'static super::server::ShipRepairTeams>,
             Option<&'static crate::ship::components::ConsoleHosts>,
+            Option<&'static crate::ship::compartment_damage::ShipDamage>,
         ),
         With<crate::server_app::LocalShip>,
     >,
 }
 impl HullProjectionInputs<'_, '_> {
     pub(crate) fn visibility(&self) -> Option<HullVisibility> {
-        let (hull, config, teams, _) = self.hulls.iter().next()?;
-        Some(ship_hull_visibility(&hull.0, &config.0, teams))
+        let (hull, config, teams, _, physical) = self.hulls.iter().next()?;
+        physical
+            .map(|damage| HullVisibility::from_physical(damage, &config.0, teams.map(|t| &t.0)))
+            .or_else(|| hull.map(|hull| ship_hull_visibility(&hull.0, &config.0, teams)))
     }
     pub(crate) fn projection_for(&self, station: Option<&StationId>) -> Option<HullProjection> {
-        let (hull, config, teams, hosts) = self.hulls.iter().next()?;
-        let vis = ship_hull_visibility(&hull.0, &config.0, teams);
+        let (_, config, _, hosts, _) = self.hulls.iter().next()?;
+        let vis = self.visibility()?;
         Some(vis.projection_for_host(&config.0, hosts.unwrap_or(&Default::default()), station))
     }
 }
@@ -175,6 +178,8 @@ impl HullProjectionInputs<'_, '_> {
 /// Built once per broadcast tick, then queried per recipient.
 #[derive(Clone, Debug)]
 pub struct HullVisibility {
+    structural_fraction: Option<f32>,
+    unavailable_structure: Option<f32>,
     /// Every damageable system, exact detail. Never sent as-is.
     entries: Vec<SystemHullStatus>,
     /// Owning station per system id; `None` means ownerless — the Core bucket.
@@ -191,6 +196,103 @@ pub struct HullVisibility {
 }
 
 impl HullVisibility {
+    pub fn from_physical(
+        damage: &crate::ship::compartment_damage::ShipDamage,
+        config: &ShipConfig,
+        teams: Option<&RepairTeams>,
+    ) -> Self {
+        let entries: Vec<_> = config
+            .systems
+            .iter()
+            .filter_map(|system| physical_system_status(damage, &system.id, config))
+            .collect();
+        let owner_of = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.system_id.clone(),
+                    config
+                        .system(&entry.system_id)
+                        .and_then(|system| config.system_home_station(system))
+                        .cloned(),
+                )
+            })
+            .collect();
+        let engineering_station = config
+            .system(&repair_system_id())
+            .and_then(|system| config.system_home_station(system))
+            .cloned();
+        let rooms: std::collections::BTreeSet<_> = teams
+            .into_iter()
+            .flat_map(|teams| {
+                teams
+                    .slots()
+                    .iter()
+                    .zip(teams.navigation().unwrap_or_default())
+            })
+            .filter_map(|(slot, team)| match (slot, &team.location) {
+                (
+                    crate::core::messages::TeamSlot::Repairing { .. },
+                    phoenix_model::interior::TeamLocation::Compartment { compartment },
+                ) => Some(compartment),
+                _ => None,
+            })
+            .collect();
+        let on_site = config
+            .systems
+            .iter()
+            .filter(|system| {
+                damage
+                    .definition
+                    .interior
+                    .placements
+                    .get(&system.id)
+                    .is_some_and(|room| rooms.contains(room))
+            })
+            .map(|system| system.id.clone())
+            .collect();
+        let mut visibility = Self::new(entries, owner_of, engineering_station, on_site);
+        visibility.group_of = config
+            .systems
+            .iter()
+            .map(|system| {
+                (
+                    system.id.clone(),
+                    crate::modifiers::repair_teams::repair_group(&system.id, config),
+                )
+            })
+            .collect();
+        visibility.console_owned = config
+            .systems
+            .iter()
+            .filter(|system| system.console.is_some())
+            .map(|system| system.id.clone())
+            .collect();
+        visibility.structural_fraction = Some(damage.structural_fraction());
+        let total: f32 = damage
+            .definition
+            .interior
+            .compartments
+            .iter()
+            .map(|room| room.max_hp)
+            .sum();
+        let disabled: f32 = damage
+            .definition
+            .interior
+            .compartments
+            .iter()
+            .filter(|room| {
+                damage
+                    .state
+                    .compartments
+                    .get(&room.id)
+                    .is_some_and(|room| room.disabled)
+            })
+            .map(|room| room.max_hp)
+            .sum();
+        visibility.unavailable_structure = Some(if total > 0.0 { disabled / total } else { 0.0 });
+        visibility
+    }
     /// Build from already-resolved parts. Pure — used directly by tests.
     pub fn new(
         entries: Vec<SystemHullStatus>,
@@ -210,6 +312,8 @@ impl HullVisibility {
             })
             .collect();
         Self {
+            structural_fraction: None,
+            unavailable_structure: None,
             entries,
             owner_of,
             group_of,
@@ -225,6 +329,7 @@ impl HullVisibility {
         let entries: Vec<SystemHullStatus> = hull
             .iter()
             .map(|(sid, entry)| SystemHullStatus {
+                physical: None,
                 system_id: sid.clone(),
                 display_name: entry.display_name.clone(),
                 current: entry.current,
@@ -283,6 +388,9 @@ impl HullVisibility {
     /// projected `entries` list can no longer be summed into one. Returns
     /// `None` when the ship declares no damageable systems.
     pub fn aggregate_fraction(&self) -> Option<f32> {
+        if let Some(fraction) = self.structural_fraction {
+            return Some(fraction);
+        }
         let max: f32 = self.entries.iter().map(|e| e.max_hp).sum();
         if max <= 0.0 {
             return None;
@@ -310,6 +418,9 @@ impl HullVisibility {
     /// distinct band. Returns `None` when the ship declares no damageable
     /// systems, matching [`Self::aggregate_fraction`].
     pub fn destroyed_fraction(&self) -> Option<f32> {
+        if let Some(fraction) = self.unavailable_structure {
+            return Some(fraction);
+        }
         let max: f32 = self.entries.iter().map(|e| e.max_hp).sum();
         if max <= 0.0 {
             return None;
@@ -664,6 +775,52 @@ impl HullVisibility {
             .map(|entry| filter_queue_observations(entry, |id| self.can_see(viewer, id)))
             .collect()
     }
+}
+
+pub(crate) fn physical_system_status(
+    damage: &crate::ship::compartment_damage::ShipDamage,
+    id: &SystemId,
+    _config: &ShipConfig,
+) -> Option<SystemHullStatus> {
+    use phoenix_model::damage::{DamageBinding, PhysicalComponentStatus, PhysicalSystemStatus};
+    let compartment = damage.definition.interior.placements.get(id)?;
+    let room = damage.definition.compartment(compartment)?;
+    let room_state = damage.state.compartments.get(compartment)?;
+    let components = damage
+        .definition
+        .components
+        .get(id)?
+        .iter()
+        .map(|(name, component)| {
+            Some(PhysicalComponentStatus {
+                id: name.clone(),
+                binding: component.binding,
+                condition: damage
+                    .state
+                    .components
+                    .get(id)?
+                    .get(name)?
+                    .condition
+                    .clone(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let factor = damage.factor(id, DamageBinding::Operation);
+    Some(SystemHullStatus {
+        system_id: id.clone(),
+        display_name: id.0.clone(),
+        current: 0.0,
+        max_hp: 0.0,
+        tier: damage.operating_tier(id),
+        debuff_magnitude: 1.0 - factor,
+        physical: Some(PhysicalSystemStatus {
+            compartment: compartment.clone(),
+            structural_hp: room_state.hp as f32,
+            structural_max_hp: room.max_hp,
+            structurally_disabled: room_state.disabled,
+            components,
+        }),
+    })
 }
 
 /// The repair blackboard a viewer who is not entitled to it receives.

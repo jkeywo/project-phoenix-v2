@@ -119,7 +119,7 @@ fn reserved(app: &App, entity: Entity) -> i64 {
         .get::<InfrastructureCondition>(entity)
         .unwrap()
         .0
-        .capacities
+        .capacities()
         .iter()
         .flat_map(|capacity| capacity.stock.reserved.values())
         .sum()
@@ -129,7 +129,7 @@ fn level(app: &App, entity: Entity) -> i64 {
         .get::<InfrastructureCondition>(entity)
         .unwrap()
         .0
-        .capacities
+        .capacities()
         .iter()
         .map(|capacity| capacity.stock.level)
         .sum()

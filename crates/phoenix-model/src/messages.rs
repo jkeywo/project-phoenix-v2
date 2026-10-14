@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
 /// Revision 7 separates incoming energy flow from explicit weapons restraint;
 /// an older client's level-zero control would otherwise suggest hold fire.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

@@ -12,7 +12,7 @@ entities:
     architecture:
       kind: subsystem
       authority: authoritative
-      depends_on: [repair-visibility-publisher]
+      reads: [repair-team-state, authoritative-damage-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared

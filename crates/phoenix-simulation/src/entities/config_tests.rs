@@ -5341,8 +5341,8 @@ fn default_captain_policy_validates_and_resolves() {
 /// AC7 — THE back-compat guard. Every shipped stateless block still parses
 /// AND decodes to a policy with NO machine, no states and no memory: the
 /// #882 schema fields are all `#[serde(default)]`, so nothing an author
-/// wrote before this issue changed meaning. Enumerates all fourteen
-/// remaining policy defaults; the reactor's closed tree is checked separately.
+/// wrote before this issue changed meaning. Enumerates the remaining stateless
+/// policy defaults; closed reactor and shield trees are checked separately.
 #[test]
 fn every_shipped_stateless_default_still_parses_as_stateless() {
     let shipped: Vec<(&str, FineSystemAiConfigToml)> = vec![
@@ -5393,10 +5393,6 @@ fn every_shipped_stateless_default_still_parses_as_stateless() {
         (
             "torpedo_magazine",
             crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_magazine"),
-        ),
-        (
-            "shields_focus",
-            crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus"),
         ),
     ];
     for (name, cfg) in shipped {
@@ -7607,21 +7603,49 @@ value = false
 // ── Shields focus AI policy (issue #783) ─────────────────────────────────
 
 #[test]
-fn default_shields_focus_policy_validates_and_resolves() {
-    let s = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus");
-    assert!(validate_fine_system_ai_policy(&s, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS).is_ok());
-    let sp = s.to_policy().expect("shields focus default resolves");
-    // Baseline: a priority-10 damage rule + a priority-0 imbalance fallback.
-    assert!(!sp.idle);
-    assert_eq!(sp.rules.len(), 2);
-    // All four authored numbers seeded as params.
-    assert!(sp.params.get(SHIELD_FOCUS_DAMAGE_WINDOW_PARAM).is_some());
-    assert!(sp
-        .params
-        .get(SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM)
-        .is_some());
-    assert!(sp.params.get(SHIELD_FOCUS_DAMAGE_PCT_PARAM).is_some());
-    assert!(sp.params.get(SHIELD_FOCUS_HEALTH_RATIO_PARAM).is_some());
+fn authored_shield_trees_load_and_reject_missing_or_competing_controller() {
+    let source = resolved_text("alliance_cruiser");
+    let config = EntityConfig::from_toml(&source).expect("actual authored shield hull loads");
+    let ship = config.ship_config.as_ref().unwrap();
+    let (programs, frames) =
+        crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, config.energy.as_ref())
+            .unwrap();
+    for arc in &config.shield_arcs {
+        let id = crate::ship::system_registry::shield_arc_system_id(&arc.id).unwrap();
+        assert!(
+            programs.0.contains_key(&id) && frames.0.contains_key(&id),
+            "each actual arc owns a program and private continuation"
+        );
+        assert_eq!(
+            ship.system(&id).unwrap().config.as_ref().unwrap().get("ai"),
+            Some(&toml::Value::try_from(&arc.ai).unwrap())
+        );
+    }
+    let mut missing: toml::Value = toml::from_str(&source).unwrap();
+    missing["shield_arc"].as_array_mut().unwrap()[0]
+        .as_table_mut()
+        .unwrap()
+        .remove("ai");
+    let error = EntityConfig::from_toml(&toml::to_string(&missing).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("[shield_arc.ai]") && error.contains("Workshop"),
+        "{error}"
+    );
+    let mut competing: toml::Value = toml::from_str(&source).unwrap();
+    competing["shields_console"].as_table_mut().unwrap().insert(
+        "ai_policy".into(),
+        toml::from_str::<toml::Value>("idle = true").unwrap(),
+    );
+    let error = EntityConfig::from_toml(&toml::to_string(&competing).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Remove retired [shields_console.ai_policy]")
+            && error.contains("two controllers"),
+        "{error}"
+    );
 }
 
 #[test]

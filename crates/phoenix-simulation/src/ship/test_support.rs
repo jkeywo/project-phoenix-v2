@@ -109,7 +109,7 @@ pub fn test_app() -> App {
                 crate::ship::damage::SystemHull::from_config(hull_config),
             ),
             LastHelmInput::default(),
-            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            authored_fixture_shields(),
             ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();
@@ -135,6 +135,39 @@ pub fn test_app() -> App {
     app
 }
 
+fn authored_fixture_shields() -> crate::server_app::ShipShields {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("shared fixture hull loads");
+    let config = authored.shields_console.as_ref().unwrap();
+    let base = config.base.as_ref().unwrap().to_runtime();
+    let arcs: Vec<_> = authored
+        .shield_arcs
+        .iter()
+        .map(|arc| arc.to_runtime())
+        .collect();
+    let mut shields = crate::weapons::shield::ShieldSystem::from_arcs(&arcs, &base);
+    shields.focus_config = crate::weapons::shield::ShieldFocusConfig {
+        bonus_max_hp: config.focus_bonus_max_hp,
+        bonus_regen: config.focus_bonus_regen,
+        penalty_max_hp: config.focus_penalty_max_hp,
+        penalty_regen: config.focus_penalty_regen,
+        decay_rate: config.focus_decay_rate,
+        focused_damage_multiplier: config.focus_focused_damage_multiplier,
+        unfocused_damage_multiplier: config.focus_unfocused_damage_multiplier,
+    };
+    for facing in &mut shields.facings {
+        facing.protection_fraction = 0.0;
+    }
+    let frequency = authored
+        .shield_arcs
+        .first()
+        .map(|arc| arc.frequency)
+        .unwrap_or(config.frequency);
+    crate::server_app::ShipShields(shields, frequency)
+}
+
 /// Attach every SHIP-LEVEL AI declaration a shipped hull authors, decoded from
 /// the shipped TOML (issue #885b stage 5d).
 ///
@@ -152,6 +185,7 @@ pub fn test_app() -> App {
 ///
 /// The per-WEAPON declarations are not here — they are per bank and per tube, so
 /// a fixture that spawns weapons attaches its own map.
+
 pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
     use crate::entities::authored_ai_pins::{shipped_policy_toml, shipped_selector_toml};
     let policy = |kind: &str| {
@@ -196,7 +230,6 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
                 policy("boost"),
             ),
         ])),
-        crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
         crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),
     ));
     // Power's declaration is the actual hull's closed System tree, with the
@@ -221,7 +254,22 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
     .expect("the fixture's authored System trees compile against actual hardware");
     let power = crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship_definition)
         .expect("the fixture's actual energy profile matches its System identities");
+    let shield_tuning = authored
+        .shields_console
+        .as_ref()
+        .and_then(|config| config.ai.as_ref());
+    let shield_tuning = shield_tuning
+        .map(|config| crate::ship::shields::ShieldsAiConfigResource {
+            damage_window_secs: config.damage_window_secs,
+            min_damage_window_secs: config.min_damage_window_secs,
+            damage_pct_threshold: config.damage_pct_threshold,
+            health_ratio_threshold: config.health_ratio_threshold,
+            ..Default::default()
+        })
+        .unwrap_or_default();
     app.world_mut().entity_mut(ship).insert((
+        crate::ship::shields::ShieldsDamageHistory::default(),
+        shield_tuning,
         crate::ship::power::ShipPowerSystem(power),
         crate::entities::spawner::EntityUuid("shared-ship-fixture".into()),
         crate::resources::server::ResourceServices(authored.resource_services),
@@ -811,7 +859,7 @@ pub fn test_app_with_engine_hull() -> App {
                 crate::ship::damage::SystemHull::from_config(hull_config),
             ),
             LastHelmInput::default(),
-            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            authored_fixture_shields(),
             ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();

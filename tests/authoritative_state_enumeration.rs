@@ -344,7 +344,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::ship::sensors::SensorsFrequencyState",
     "phoenix_simulation::ship::sensors::SensorsTargetSelector",
     "phoenix_simulation::ship::shields::ShieldsAiConfigResource",
-    "phoenix_simulation::ship::shields::ShieldsFocusAiPolicy",
     "phoenix_simulation::ship::shields::ShipShields",
     "phoenix_simulation::ship::state::ShipViewMode",
     "phoenix_simulation::world::server::PendingScenarioLoad",
@@ -870,12 +869,12 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
     }
     assert!(
         authoritative.contains("ShipAiTreeRuntime"),
-        "the reactor's private tree continuation must remain in the authoritative fold"
+        "reactor and shield private tree continuation must remain in the authoritative fold"
     );
     let excluded = census_excluded_short_names(&app);
     assert!(
         excluded.contains("ShipAiTreePrograms"),
-        "immutable compiled reactor programs must be declared derived, not unclassified"
+        "immutable compiled reactor/shield programs must be declared derived, not unclassified"
     );
     assert!(!authoritative.contains("ShipAiTreePrograms"));
     // RenderInterp OUT: it must never be declared authoritative. It is declared

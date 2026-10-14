@@ -15,7 +15,12 @@ pub fn owns(index: usize, command: &AdmittedCommand, arcs: &[SystemId]) -> bool 
         }
         1 => {
             arcs.contains(&command.target)
-                && matches!(command.payload, Payload::SetShieldArcFocus { .. })
+                && matches!(
+                    command.payload,
+                    Payload::SetShieldArcFocus { .. }
+                        | Payload::SetShieldRaised { .. }
+                        | Payload::SetShieldRecovery { .. }
+                )
         }
         2 => {
             command.target.0 == "navigation"

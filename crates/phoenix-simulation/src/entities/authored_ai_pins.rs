@@ -198,12 +198,6 @@ fn authored_policies(c: &EntityConfig) -> Vec<(String, FineSystemAiConfigToml)> 
     push("impulse", helm.and_then(|h| h.impulse_ai.as_ref()));
     push("boost", helm.and_then(|h| h.boost_ai.as_ref()));
     push(
-        "shields_focus",
-        c.shields_console
-            .as_ref()
-            .and_then(|x| x.ai_policy.as_ref()),
-    );
-    push(
         "torpedo_magazine",
         c.torpedoes.as_ref().and_then(|t| t.ai.as_ref()),
     );
@@ -542,7 +536,7 @@ fn is_bespoke(hull: &str, slot: &str) -> bool {
 
 /// **The replacement for the deleted not-equal-to-the-synthesiser assertion.**
 ///
-/// For every one of the fourteen remaining policy kinds: the hulls NOT on
+/// For every one of the thirteen remaining policy kinds: the hulls NOT on
 /// [`BESPOKE_DOCTRINES`] must all author the identical configuration (that is
 /// the fleet baseline), and every hull that IS on the list must differ from it.
 #[test]
@@ -626,7 +620,7 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
          anything."
     );
 
-    // The fourteen remaining policy kinds are all represented, so no kind slipped out of
+    // The thirteen remaining policy kinds are all represented, so no kind slipped out of
     // the comparison by having no authored block anywhere.
     let kinds: Vec<&str> = kinds_seen.keys().map(|s| s.as_str()).collect();
     assert_eq!(
@@ -640,14 +634,13 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
             "impulse",
             "lateral",
             "phaser_bank",
-            "shields_focus",
             "steering",
             "torpedo_magazine",
             "torpedo_tube",
             "vertical",
             "weapons_doctrine",
         ],
-        "all fourteen remaining policy kinds must be authored somewhere in the fleet, or a kind \
+        "all thirteen remaining policy kinds must be authored somewhere in the fleet, or a kind \
          is being compared against nothing"
     );
 }
@@ -1047,45 +1040,124 @@ fn comms_response_guard_truth_table() {
     );
 }
 
-/// Shields focus: the priority-10 damage rule fires above the authored threshold
-/// and not below it — but the priority-0 fallback is unconditional, so the
-/// CHANNEL never resolves to `None` either way.
-///
-/// That is the pin, and it is deliberately blunt: because both rules emit the
-/// same value-less `focus_shield_arc` verb, the threshold has NO effect on what
-/// the host does with the resolved verb. The arc-ranking kernel runs every tick
-/// regardless. The redundancy is recorded on #885 rather than fixed here — a pin
-/// that changes what it pins is worthless.
+/// Every physical arc executes its own authored closed tree. Focus reads the
+/// permitted preference, and recovery stops for an empty donor, restored
+/// recipient or unavailable target. Coefficients remain authored tuning.
 #[test]
-fn shields_focus_guard_truth_table() {
-    let p = fleet_baseline_policy("shields_focus");
-    let threshold = param(&p, "damage_pct_threshold");
-
-    let concentrated = facts(&[("recent_damage_pct_max", threshold + 30.0)]);
-    let diffuse = facts(&[("recent_damage_pct_max", threshold - 30.0)]);
-
-    assert!(
-        p.rules[0].when.evaluate_with(&concentrated, &p.params, &[]),
-        "damage above the authored threshold ⇒ the priority-10 damage rule FIRES."
-    );
-    assert!(
-        !p.rules[0].when.evaluate_with(&diffuse, &p.params, &[]),
-        "damage below it ⇒ the priority-10 rule reads FALSE. The fact name must be \
-         one the host seeds or this could never be false."
-    );
-
-    for (name, snapshot) in [
-        ("concentrated", &concentrated),
-        ("diffuse", &diffuse),
-        ("no damage facts at all", &facts(&[])),
-    ] {
-        assert_eq!(
-            resolve(&p, "shield_focus", snapshot),
-            Some(AiPolicyVerb::FocusShieldArc),
-            "{name} ⇒ still act, via the unconditional priority-0 fallback. The kernel \
-             runs every tick, which is the pre-#783 baseline this policy preserves."
+fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
+    use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
+    let mut checked = 0;
+    let mut recoverable = 0;
+    for (stem, hull) in ai_hulls() {
+        assert!(
+            hull.shields_console
+                .as_ref()
+                .is_none_or(|config| config.ai_policy.is_none()),
+            "{stem}: no competing shield policy"
         );
+        if hull.shield_arcs.is_empty() {
+            continue;
+        }
+        let ship = hull.ship_config.as_ref().unwrap();
+        let (programs, mut frames) = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(
+            ship,
+            hull.energy.as_ref(),
+        )
+        .unwrap();
+        for arc in &hull.shield_arcs {
+            let id = crate::ship::system_registry::shield_arc_system_id(&arc.id).unwrap();
+            let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+            sources.set(id.clone(), crate::ship::control_source::ControlSource::Ai);
+            let (bindings, numeric) =
+                phoenix_sim_gameplay::ship::shield_ai::bindings(&arc.energy.recovery_targets);
+            let mut tick = 0;
+            for preferred in [false, true] {
+                let mut facts: BTreeMap<_, _> = bindings
+                    .facts
+                    .iter()
+                    .map(|name| (name.clone(), false))
+                    .collect();
+                facts.insert("preferred_focus".into(), preferred);
+                let numbers = numeric
+                    .facts
+                    .iter()
+                    .map(|name| (name.clone(), 1.0))
+                    .collect();
+                let TreeHostOutcome::Evaluated(result) = decide_tree_with_numbers(
+                    &sources,
+                    &id,
+                    programs.0.get(&id),
+                    &facts,
+                    &numbers,
+                    &BTreeMap::new(),
+                    frames.0.get_mut(&id).unwrap(),
+                    tick,
+                )
+                .unwrap() else {
+                    panic!("{stem}/{}: authored arc tree executes", arc.id);
+                };
+                assert_eq!(result.intents.get("raised"), Some(&true));
+                assert_eq!(result.intents.get("focus"), Some(&preferred));
+                tick += 1;
+            }
+            for target in &arc.energy.recovery_targets {
+                for (ready, donor, recipient, expected) in [
+                    (true, 1.0, 0.0, true),
+                    (true, 0.0, 0.0, false),
+                    (true, 1.0, 1.0, false),
+                    (false, 1.0, 0.0, false),
+                ] {
+                    let mut facts: BTreeMap<_, _> = bindings
+                        .facts
+                        .iter()
+                        .map(|name| (name.clone(), false))
+                        .collect();
+                    let mut numbers: BTreeMap<_, _> = numeric
+                        .facts
+                        .iter()
+                        .map(|name| (name.clone(), 0.0))
+                        .collect();
+                    facts.insert(format!("target-visible-{}", target.0), ready);
+                    facts.insert(format!("target-preferred-{}", target.0), true);
+                    facts.insert(format!("target-ready-{}", target.0), ready);
+                    facts.insert(format!("recovering-{}", target.0), !expected);
+                    numbers.insert("strength_fraction".into(), donor);
+                    numbers.insert(format!("target-strength-{}", target.0), recipient);
+                    let TreeHostOutcome::Evaluated(result) = decide_tree_with_numbers(
+                        &sources,
+                        &id,
+                        programs.0.get(&id),
+                        &facts,
+                        &numbers,
+                        &BTreeMap::new(),
+                        frames.0.get_mut(&id).unwrap(),
+                        tick,
+                    )
+                    .unwrap() else {
+                        panic!("{stem}/{}: recovery tree executes", arc.id);
+                    };
+                    assert_eq!(
+                        result.intents.get(&format!("recover-{}", target.0)),
+                        Some(&expected),
+                        "{stem}/{}/{}: ready={ready}, donor={donor}, recipient={recipient}",
+                        arc.id,
+                        target.0
+                    );
+                    tick += 1;
+                }
+                recoverable += 1;
+            }
+            checked += 1;
+        }
     }
+    assert_eq!(
+        checked, 21,
+        "all physical arcs in the thirteen-hull fleet execute their own tree"
+    );
+    assert!(
+        recoverable > 0,
+        "exercise real authored physical recovery endpoints"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3684,7 +3756,6 @@ fn boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it() {
         "blaster_bank",
         "torpedo_tube",
         "torpedo_magazine",
-        "shields_focus",
     ] {
         assert!(
             !fleet_baseline_policy(kind).idle,
@@ -3746,33 +3817,41 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
             checked += 1;
         }
     }
-    let tree_slots: usize = ai_hulls()
-        .iter()
-        .map(|(_, hull)| {
-            hull.ship_config
-                .as_ref()
-                .into_iter()
-                .flat_map(|ship| &ship.systems)
-                .filter(|system| {
-                    system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
-                        && system
-                            .config
-                            .as_ref()
-                            .and_then(|value| value.get("ai"))
-                            .is_some()
-                })
-                .count()
-        })
-        .sum();
+    let count_trees = |kind: &str| {
+        ai_hulls()
+            .iter()
+            .map(|(_, hull)| {
+                hull.ship_config
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|ship| &ship.systems)
+                    .filter(|system| {
+                        system.kind == kind
+                            && system
+                                .config
+                                .as_ref()
+                                .and_then(|value| value.get("ai"))
+                                .is_some()
+                    })
+                    .count()
+            })
+            .sum::<usize>()
+    };
+    let reactor_slots = count_trees(crate::ship::system_registry::POWER_REACTOR_KIND);
+    let shield_slots = count_trees(crate::ship::system_registry::SHIELD_ARC_KIND);
     assert_eq!(
-        checked, 173,
-        "fourteen remaining policy kinds retain their authored declarations"
+        checked, 160,
+        "thirteen remaining policy kinds retain their authored declarations"
     );
     assert_eq!(
-        tree_slots, 13,
-        "the former per-hull Power policy slots remain declared as actual System trees"
+        reactor_slots, 13,
+        "every fleet hull retains its actual reactor tree"
     );
-    assert_eq!(checked + tree_slots, 186, "the Power migration changes controller family without dropping a declaration; the other 65 fleet slots are selectors");
+    assert_eq!(
+        shield_slots, 21,
+        "every physical shield arc has its own tree; unshielded hulls need no ghost policy"
+    );
+    assert_eq!(checked + reactor_slots + shield_slots, 194, "per-arc controllers replace thirteen coarse shield policies with twenty-one physical arc trees; the other 65 fleet slots are selectors");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

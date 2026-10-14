@@ -987,45 +987,21 @@ hull_integrity = 60.0
     );
 }
 
-/// A `[shields_console]` that carries only an AI policy is not a shield
-/// system.
-///
-/// This is the shape #885b stage 5c created: `[shields_console.ai_policy]`
-/// is a required declaration on every AI-bearing hull, and writing it brings
-/// `[shields_console]` into existence whether or not the hull has shields.
-/// `ship_requiem_courier.toml` is exactly this — no `[[shield_arc]]`, no
-/// `[shields_console.base]` — and it must keep having no shields at all, so
-/// the gate reads the shield CONTENT rather than the table header. The rule
-/// change rides along: a block authoring neither used to mean a default
-/// four-facing system and now means none.
+/// A console configuration without physical arcs or a base creates no shield
+/// machinery. Unshielded entities do not need a placeholder controller.
 #[test]
-fn a_shields_console_holding_only_an_ai_policy_attaches_no_ship_shields() {
+fn an_empty_shields_console_attaches_no_ship_shields() {
     let mut app = test_app();
-    let toml = r#"
-[hull]
-hull_integrity = 60.0
-
-[shields_console.ai_policy]
-
-[[shields_console.ai_policy.rule]]
-priority = 0
-channel = "shield_focus"
-when = "true"
-verb = "focus_shield_arc"
-"#;
-    let config = EntityConfig::from_toml(toml).expect("toml must parse");
-    assert!(
-        config.shields_console.is_some() && config.shield_arcs.is_empty(),
-        "precondition: the table exists but declares no shields"
-    );
+    let config = EntityConfig::from_toml("[hull]\nhull_integrity = 60.0\n[shields_console]\n")
+        .expect("neutral console-only metadata parses");
+    assert!(config.shields_console.is_some() && config.shield_arcs.is_empty());
     let uuid = uuid::Uuid::new_v4().to_string();
     let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
     assert!(
         app.world()
             .get::<crate::ship::shields::ShipShields>(spawned)
             .is_none(),
-        "declaring a shields-focus POLICY must not conjure a shield system onto a \
-             hull that carries no arcs and no base config"
+        "console metadata never creates physical shield equipment"
     );
 }
 

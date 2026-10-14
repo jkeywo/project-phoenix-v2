@@ -5,7 +5,7 @@
 | Document | GDD-STATION-EXPERIENCES |
 | Status | Working draft; combines implemented station behaviour with clearly marked accepted direction |
 | Owner | Unassigned |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-10-02 |
 | Scope | Player experience for Captain, Helm, Tactical, Sensors, Navigation, Comms, Shields, Power, and Repair |
 | Authority | Player-facing design overview. Ship TOML, console code, PASM, and runtime validation remain canonical. |
 
@@ -31,7 +31,9 @@ Every console uses one shared Hero Bar. It pins the player's directly held stati
 
 The current runtime provides authored station ratings whose `automated_systems` list determines which fine systems are human- or AI-operated. A station holder can change rating during play and the host applies the resulting control-source changes immediately.
 
-The accepted future direction extends this into an authored star ladder. Star 0 is complete Backfill; higher authored rungs combine AI, simplified, and detailed control per system, normally reaching three to five stars. A scenario may impose a detailed-control floor on particular system families. Simplified control is limited AI directed from a summary surface; detailed control exposes the full model. This ladder, scenario floor, and generalised detail-screen host are design direction, not a claim about the current shipped console set.
+Current Cruiser content includes distinct supported rungs and the runtime's per-System floor resolver/live rating changes. **Plan — C2:** complete the broader authored star/detail ladder, world-authored floor selectors and detailed Sensors/Comms surfaces. Star 0 is Backfill; higher rungs combine AI, simplified and detailed control. A resolver and some authored rungs do not mean every detailed console or scenario floor selector is delivered.
+
+The [Current Baseline](../foundation/current-baseline.md) adds a compact decision/cooperation matrix and identifies delivered Crew Control, Dynasty roles and remaining Plan. Operations/Medical below are **Plan — C7**; desired experience and accessibility language remains a playtest target unless specifically credited as Current.
 
 ## Station-family overview
 
@@ -212,13 +214,13 @@ Station owners know exact local damage and request help socially or through advi
 
 A team in transit reveals no new detail and cannot be reprioritised as if already present. Destroyed or unavailable systems continue to impair the ship until repaired; all repairable system hull reaching zero ends the player ship. Backfill ranks candidates from the same visible aggregate/request facts. Lists and team states need explicit labels, progress, and confirmation that do not depend on animation or colour.
 
-## Future Command
+## Current Command
 
-T1's auxiliary human-seeking Command station is normally hosted by Captain through hull data and need not create another lobby seat. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle and shared Hero Bar presentation are defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+The implemented auxiliary human-seeking Command Station is normally hosted by Captain through hull data and need not create another lobby seat. It lists AI-controlled Stations and sets authored standard, alert-neutral or objective-specific stances at Station scale. It does not operate individual Systems. The Dynasty player Cruiser separately calls its primary command seat Command; authored topology decides which Systems it owns. See [Command and Crew Control](../mechanics/command-and-crew-control.md) and [Dynasty Player Cruiser](../content/ships/dynasty-ships.md).
 
-## Future Operations and Medical
+## Plan — C7 Operations and Medical
 
-Accepted unscheduled Operations systems plan and support external and Away Missions. A hull may carry several Operations systems with different mission tags, transport, capacity and personnel authority. Medical triages and treats Duty Officer consequences, supports missions and reads medical results while requesting specialist scans from Science.
+Planned C7 Operations Systems assemble and support Away Missions and personnel assignments. A hull may carry several with different mission tags, transport, capacity and personnel authority. Medical triages and treats Duty Officer consequences, supports missions and reads medical results while requesting specialist scans from Science. Current tractor/dock/umbilical/field-repair work is distinct from this personnel vertical.
 
 Both use the common station-database framework and are detailed in [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
 

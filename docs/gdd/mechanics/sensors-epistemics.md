@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current targeting, scan and evidence mechanics with accepted extensions |
+| Last updated | 2026-10-02 |
 | Scope | Radar projection, science targeting, scans, evidence, dossiers, confidence and environmental observation |
 | Audience | Design, content, UI, simulation and playtest |
 
@@ -40,7 +41,7 @@ The last successful reading is a snapshot of what the crew saw at that tick. It 
 
 Taking a scan latches `scan.<entity-id>.taken` for scenario logic, but completion does not automatically add prose evidence. A scenario that wants the result preserved as a finding appends an authored string entry with scan provenance.
 
-## Knowledge ladder
+## Plan — C2/C5 knowledge ladder
 
 The accepted scan ladder moves from detection, through identification and classification, to tactical assessment and intrusive analysis. Detection supplies location and broad category. Identification adds transponder, faction or declared identity. Classification adds hull class, role and known capabilities. Tactical assessment adds observable shields, damage, emissions and active systems. Individual entities may omit or falsify authored fields, while evidence records how each claim was obtained.
 
@@ -54,15 +55,15 @@ Evidence is an append-only log. Each entry names the subject entity, a string-ca
 
 A dossier is a current projection, not an independent truth store. It combines identity, crew-facing description, faction, current hail standing, published infrastructure facts, commitments and gathered evidence. Hidden or unpublished state has no route into it. An empty dossier means the crew has a recognised subject with nothing yet on file; a missing dossier means there is no eligible subject surface.
 
-## Accepted confidence model
+## Plan — C2 confidence and per-ship evidence
 
-The accepted extension gives each observing ship its own observation and evidence stores. Knowledge crosses ships only through Comms and carries provenance. This is required before multi-ship or opposed-crew play so one crew's scan does not silently become everyone's knowledge.
+The planned C2 extension gives each observing ship its own observation/evidence stores with explicit Comms transfer and provenance. Current multi-ship references and GM observer-specific contact reports exist, but do not complete this broader field/scan/evidence model. Credit current projections separately from the Plan.
 
 Observation confidence uses a small ordered ladder: detected, rough, fair and precise. Scan effort advances confidence per subject, with displayed ranges derived from the tier and a seeded offset so an estimate is not always centred on truth. Interference can slow progress or cap the reachable tier.
 
 The scan suite gains one clear mode axis: wide scanning accumulates slowly across subjects in range; focused scanning advances one named subject quickly while other progress pauses. Environmental fields become scan subjects rather than requiring a separate scanner.
 
-## Fields and hazard knowledge
+## Plan — C2/C3 fields and hazard knowledge
 
 Future environmental fields upgrade the existing region model with intensity, falloff and deterministic motion or growth. Radiation, interference and debris have real effects. Sensors observes those fields through the same evidence model, while Helm and Navigation receive actionable hazard advisories rather than raw omniscience.
 

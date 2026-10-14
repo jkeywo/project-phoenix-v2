@@ -5,11 +5,13 @@
 | Document | GDD-ENTITY-AUTHORING |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-10-02 |
 | Scope | Generic entity templates, composition, world instances, and TOML authoring contract |
 | Authority | Design and authoring overview. `crates/phoenix-sim-gameplay/src/entities/config.rs`, the validators, and shipped assets are runtime truth; PASM is architecture truth. |
 
 This document defines the common design model for things that exist in a Phoenix world. It deliberately stops before the detailed ship-system model, which is covered by [Ships and Ship Systems](./ships-and-systems.md), and before scenario choreography, which is covered by [Scenario Authoring](./scenario-authoring.md).
+
+Current authoring uses [Workshop](./gm-and-workshop.md): browser/native exact-source composition and forms, runtime validation, grouped history/recovery, captured model/assets and disposable Test. Validated asset packs and the old editor/viewer redirects are implemented. **Plan:** golden/dock human acceptance and unscheduled source-level Rhai debugging. Workshop authoring is distinct from the C5/C6 planned player loadout/refit system.
 
 Related documents: [World and Environmental Systems](./world-environmental-systems.md), [AI and Backfill](./ai-and-backfill.md), [Alliance Ships](../content/ships/alliance-ships.md), and [Harrow Ships](../content/ships/harrow-ships.md).
 

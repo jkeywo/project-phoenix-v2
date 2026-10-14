@@ -5,7 +5,7 @@
 | Document | GDD-DIFFICULTY-BALANCE |
 | Status | Working draft; numerical targets remain content-specific until measured |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-10-02 |
 | Scope | Balance dimensions, evidence, hull/scenario scaling, crew workload, accessibility, metrics, and review process |
 | Authority | Design framework. Authored assets, deterministic reports, tests, and recorded playtests remain evidence truth. |
 
@@ -14,6 +14,12 @@ Phoenix balance is the quality of a crew’s decision space, not merely a 50% wi
 Related documents: [Game Design Overview](./overview.md), [Station Experiences](../systems/station-experiences.md), [AI and Backfill](../systems/ai-and-backfill.md), [Combat Test](../content/scenarios/combat-test.md), [Falling Skyway](../content/scenarios/falling-skyway.md), [Alliance Ships](../content/ships/alliance-ships.md), and [Onboarding, Tutorials, and Accessibility](./onboarding-accessibility.md).
 
 Mechanic-level playtest questions are collected in the nine pages under [Movement and Helm](../mechanics/movement.md), with peer links from each mechanic to its principal dependencies.
+
+## Current comparison baseline
+
+Use [Current Baseline](./current-baseline.md) to record scenario, hull, human count, occupied primary/visiting Stations, rating and GM involvement. Include cooperative Skyway/escort work and competitive Cruiser Elimination separately. Current tools include seeded duel/AAR runs, per-objective results, Station command activity and broad GM workload states. These measure behaviour/outcomes; they do not establish fun from action counts alone.
+
+**Plan / evidence open:** T5 convoy scaling/pacing, larger-session limits, real-network/one-hour runs and human accessibility/language exits; native/GM/Workshop human acceptance. The PASM AI completion target and prepared acceptance kits are not completed measurements. Compare future C2–C9 capabilities in a separate Plan column rather than crediting them to the present game.
 
 ## Balance dimensions
 

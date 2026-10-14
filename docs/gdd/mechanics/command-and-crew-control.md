@@ -2,11 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted for T1 (formerly Band A2), with later accessibility assistance |
+| Status | Current T1 Crew Control; deeper accessibility assistance remains Plan |
+| Last updated | 2026-10-02 |
 | Scope | Command stances, AI station direction, spectators, AFK delegation, human-seeking stations and the shared Hero Bar |
 | Audience | Design, UI, simulation, content and playtest |
 
-T1 gives a small or partially automated crew a way to direct the ship without operating every system. Command works at station scale: it tells an AI-controlled station what posture to adopt, then that station's existing authored policies decide how its individual systems act.
+Implemented T1 Crew Control gives a small or partially automated crew a way to direct the ship without operating every system. Command works at Station scale: it tells an AI-controlled Station what posture to adopt, then its existing authored policies decide how individual Systems act. The roadmap records #1092 and Distributed Ship Operations #1143 as closed; this is current capability rather than an implementation prerequisite still to begin.
 
 Related documents: [AI and Backfill](../systems/ai-and-backfill.md), [Station Experiences](../systems/station-experiences.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Onboarding and Accessibility](../foundation/onboarding-accessibility.md), [Native and Network Foundation](../systems/native-network-foundation.md), and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
 
@@ -50,11 +51,11 @@ The bar shows the selected station's name, rating and authoritative health. Stat
 
 ## Spectator MVP
 
-T1 adds an explicit Spectator role. Spectators do not count toward readiness and cannot issue simulation commands. The MVP provides one crew-public summary screen and allows a spectator to claim an eligible open station manually.
+The current Spectator role does not count toward readiness and cannot issue simulation commands. Its crew-public summary screen permits manual entry into eligible open Stations. Multi-ship wrecked crews also remain cinematic spectators while surviving ships continue.
 
-Richer spectator views are planned but not scheduled. They may select or swipe among authorised system-monitor projections, but must obey scenario knowledge boundaries rather than receiving an omniscient debug feed.
+**Plan — C9:** richer spectator views may select or swipe among authorised system-monitor projections while obeying scenario knowledge boundaries. The present roadmap schedules advanced participation under Sandbox; older unscheduled descriptions are superseded.
 
-## Accessibility direction
+## Plan — deeper accessibility assistance
 
 Later accessibility assistance builds on the same delegation and human-seeking rules. Player settings describe functional effects, not diagnoses, and remain private. Eligibility is evaluated for the complete visiting station at its required rating. Other players may see that a station destination is unavailable or unsuitable, but never the reason.
 
@@ -62,7 +63,7 @@ T1 establishes the low-cost integration seam rather than deferring it: a shared 
 
 Every base playable hull at its full supported player count must provide at least one station/rating combination compatible with the complete supported accessibility-option set in a simple scenario. This guarantee does not extend to understaffed play or every complex scenario duty. Human-seeking placement should avoid overloading that accessibility anchor where another compatible player exists.
 
-## T1 acceptance criteria
+## Current T1 contracts and playtest criteria
 
 - Command lists AI-controlled stations and applies only authored stances available to them.
 - Standard, neutral and objective stances follow their authored persistence and invalidation rules.

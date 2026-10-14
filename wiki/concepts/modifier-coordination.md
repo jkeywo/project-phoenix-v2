@@ -3,7 +3,7 @@ title: Modifier Coordination
 type: concept
 tags: [modifiers, power, regions, impulse, collision, repair]
 sources: [crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/collision.rs, crates/phoenix-simulation/src/regions/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/snapshot.rs]
-updated: 2026-09-09
+updated: 2026-10-12
 ---
 
 # Modifier Coordination
@@ -20,7 +20,7 @@ updated: 2026-09-09
 
 Impulse translation visits every ship, including ships projected remotely by a GM. It derives the speed modifier from that ship's current drive phase and authored multiplier on each pass; unchanged entries emit no duplicate events. Snapshot restoration rebuilds this derived modifier before the first resumed physics tick, including removal of a stale bootstrap impulse bonus.
 
-Each adapter updates only its own source keys. Removing one effect returns that slot to the product of the remaining sources, not to a hardcoded baseline.
+Each adapter updates only its own source keys. Removing one effect recomputes the slot from the remaining contributions. Float bonuses sum first: a nonnegative sum produces `1 + sum`, while a negative sum produces `1 / (1 + abs(sum))`. Integer bonuses sum directly. Replacing or removing one source therefore preserves the other sources' contributions.
 
 ## Consumers
 

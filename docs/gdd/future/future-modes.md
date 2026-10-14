@@ -3,13 +3,15 @@
 | Field | Value |
 |---|---|
 | Document | GDD-FUTURE-MODES |
-| Status | Directional design; most sections are roadmap or permitted extension, not committed current functionality |
+| Status | Current foundations plus Plan; see dated delivery baseline |
 | Owner | Unassigned |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-10-02 |
 | Scope | Multi-ship, Patrol, War and Sandbox modes, ship customisation, generated-mode foundations, native/physical bridges, event outputs, and GM tools |
 | Authority | Product/design direction only. PASM roadmap and specific future PRDs govern implementation commitments. |
 
 Phoenix may scale from a browser, television, and phones to multi-ship sessions and purpose-built bridge venues. Every extension must preserve the complete zero-setup route and the same authoritative station/system model. Optional depth should add ways to participate, author, and present the game without splitting it into incompatible “real” and “casual” versions.
+
+Use [Current Baseline](../foundation/current-baseline.md) and [Plan Baseline](./roadmap-baseline.md) when comparing capabilities. Native simulation, Crew Control, multi-ship reference content and GM/Workshop now exist. Generated modes, customisation, personnel and external hardware describe **Plan**.
 
 Related documents: [Game Design Overview](../foundation/overview.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Scenario Authoring](../systems/scenario-authoring.md), [Release Bands C7–C9](./release-bands-g-i.md), [Planned but Not Scheduled](./planned-not-scheduled.md), and [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md).
 
@@ -25,19 +27,19 @@ Related documents: [Game Design Overview](../foundation/overview.md), [Game and 
 
 | Direction | Current foundation | Status in this GDD |
 |---|---|---|
-| T1 Bridge Foundations (formerly Band A2) | Crew control plus front-loaded networking and native Windows bridge work. | Accepted first technical band after release A; split across two PRDs |
-| Native delivery | Native `phoenix-host` can serve a built bundle/catalogue/version pin; T1 adds native simulation/viewscreen and Ultralight station hosting. | Started foundation with accepted T1 expansion |
-| Multi-ship | Per-ship state, AI ownership, command logs and deterministic fixed ticks exist; T1 supplies transport/recovery, and the multi-ship host mesh follows in T5. | Planned roadmap direction with front-loaded foundation |
-| Patrol Mode | Scenario systems, seeded world content and campaign projection. | Authored MVP in Band C6; procedural generation in C8 |
-| War Mode | Multi-system run state, Pursuit, allies and coarse strategic consequences. | Authored MVP in Band C7; procedural generation in C8 |
-| Sandbox Mode | Shared generator/Director plus persistent actor, economy and sector state. | Accepted Band C9 direction |
-| Ship customisation | Entity fragments/composition and accepted supply/demand design. | Accepted staged roadmap, not current player feature |
-| Duty Teams and Away Missions | Fixed typed teams, named Duty Officers, Operations systems, Medical and off-screen assignments. | Accepted; planned but not scheduled |
-| Physical bridge | Web consoles, optional native delivery, stable commands/state. | Native Windows bridge foundation accepted for T1 |
-| Lighting/smoke/show control | Alert and presentation events could supply cues. | Permitted future adapter; PASM currently does not commit show hardware |
-| GM tools | Debug/host surfaces, scenario effect vocabulary, snapshots, activity/balance events. | Planned staged roadmap |
+| T1 Bridge Foundations | Crew Control/Distributed Ship Operations delivered; transport/native implementation exists. | Current; native media/setup/hardware completion remains Plan |
+| Native delivery | Native simulation/Viewscreen, lobby and isolated Ultralight Stations beside bundle serving. | Current; direct LAN/optional cloud leg; acceptance open |
+| Multi-ship | Fixed slots, host mesh, addressed Objectives, six-peer tests, wreck spectators and reference worlds. | Current implementation; T5 recovery/scale/performance/human/network exits remain Plan |
+| Patrol Mode | Scenario systems, seeded authored content and campaign projection. | Plan — authored MVP in C6; procedural generation in C8 |
+| War Mode | Scenario systems and campaign projection; persistent multi-system runs, Pursuit and allies are planned. | Plan — authored MVP in C7; procedural generation in C8 |
+| Sandbox Mode | Authored worlds and GM tools; shared generator/Director and persistent economy are planned. | Plan — C9 |
+| Ship customisation | Entity fragments/composition; player loadout and supply/demand extensions are planned. | Plan — staged C5/C6 roadmap |
+| Duty Teams and Away Missions | Repair-team/external-System foundations only. | Plan — C7 personnel/Operations/Medical |
+| Physical bridge | Native multi-monitor console/layout/input implementation. | Current; hardware/setup acceptance open; peripherals Plan — unscheduled |
+| Lighting/smoke/show control | In-sim title/sound/Viewscreen cue vocabulary. | External hardware Plan — unscheduled |
+| GM tools | M1–M8 feature code, Workshop and constrained Live Inspector. | Current with human exits open; M9 Plan — T6 |
 
-## Multi-ship play
+## Current multi-ship foundation and Plan — T5 completion
 
 ### Experience
 
@@ -56,7 +58,7 @@ Several independently crewed ships share one scenario. Each bridge has incomplet
 
 Escort and protected transit, split investigation, pincer or screen tactics, mutual repair/tow, asymmetric ships, contested evidence, simultaneous infrastructure work, and one bridge carrying information another needs. Scenarios should avoid long periods where one ship waits for the other to complete private play.
 
-## Patrol Mode
+## Plan — C6/C8 Patrol Mode
 
 ### Experience
 
@@ -74,7 +76,7 @@ Band C6 introduces the mode-profile and run-orchestration seams. Band C8 introdu
 
 Patrol Mode does not generate a galaxy-scale continuous universe or simulate every system between missions. It produces bounded playable situations with persistent facts. Generated content must use the same world/entity/Rhai or successor authoring contracts and pass equivalent validation.
 
-## Ship customisation
+## Plan — C5/C6 ship customisation
 
 ### Principle
 
@@ -90,15 +92,15 @@ The accepted future power model makes every component draw energy, retains ship-
 
 The player holding a station in the lobby owns choices for that station’s loadout section; an unclaimed station uses the hull’s authored default. The composed loadout freezes at spawn into deterministic content. Mid-mission refit occurs only at an authored starbase path. Campaign scenarios may grant a reactor improvement; fixed skirmish balance remains sidegrade-only through authoring rather than a hidden mode switch.
 
-## Duty Teams, Duty Officers, and Away Missions
+## Plan — C7 Duty Teams, Duty Officers and Away Missions
 
-The accepted unscheduled model generalises repair teams into fixed anonymous Duty Teams by type. Each team has a named Duty Officer leader whose compatible traits provide bonuses, but a leaderless team remains functional. Duty Officers can also occupy authored ship-system slots, gaining benefits and exposure to discrete damage-event casualties while assigned.
+The planned C7 model generalises repair teams into typed anonymous Duty Teams. Named Duty Officer leaders supply compatible traits; leaderless teams remain functional. Officers may occupy authored System slots with benefits and discrete damage-event casualty exposure.
 
 Multiple Operations systems launch compatible off-screen missions through shuttles, transporters or carried craft. Required and optional slots may take teams, individual officers or both. The bridge supports missions through ordinary scans, Comms, deadlines and scenario effects; exact check probabilities reflect preparation, personnel, transport and current conditions. Medical treats persistent personnel consequences without introducing continuous crew simulation.
 
 The complete contract is in [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
 
-## War, procedural generation and Sandbox
+## Plan — C7–C9 War, procedural generation and Sandbox
 
 Band C7 ships an authored War Mode run toward one decisive mission, letting the crew gather allies and supplies and weaken enemies across intervening systems. Band C8 procedurally generates Patrol assignments and War runs. Band C9 removes the fixed assignment chain or destination for Sandbox and gives the shared Director wider latitude in a persistent actor-and-economy simulation suitable for player-chosen work and GM-led sessions.
 
@@ -106,11 +108,11 @@ All modes retain bridge-first play. Allied vessels are autonomous actors directe
 
 ## Native hosts and clients
 
-The current native host is a delivery server: it serves a built client bundle, manifest, catalogue, and version stamp. T1 extends this into an optional Windows host that runs the authoritative simulation, renders the viewscreen natively and presents isolated Ultralight station panes across full-screen monitors. It replaces PeerJS with Phoenix WebSocket rendezvous/signalling and direct or TURN-relayed WebRTC while preserving the browser route.
+The native host serves bundles and, with `--world` or `--lobby`, runs the authoritative Windows simulation/Viewscreen. Ultralight provides isolated local Stations and the runtime display/console lobby. Phoenix has replaced PeerJS; native crew joining uses direct LAN or cloud relay. T1 media/setup/hardware and T5 larger-session acceptance remain open.
 
 A native client is an optional shell around the same console actions and state. Each local pane has its own player identity and projection; it must not gain exclusive controls, higher simulation authority, or content incompatible with a browser participant. Bridge profiles author one or two station panes per station monitor, a native viewscreen, independent touchscreen routing and per-surface cameras, microphones and audio outputs. See [Native and Network Foundation](../systems/native-network-foundation.md).
 
-## Physical consoles and peripherals
+## Plan — unscheduled custom peripherals
 
 Custom panels may map buttons, encoders, sliders, touchscreens, lamps, and displays to station commands and state. A bridge may build one Helm console or a complete room. Hardware profiles should bind semantic actions such as `set thrust`, `select shield arc`, or `raise red alert`, not DOM coordinates or private component internals.
 
@@ -123,7 +125,7 @@ Required properties:
 - profile portability and per-station test mode;
 - safe handling of stuck switches, noisy axes, and unavailable outputs.
 
-## Lighting, smoke, sound, and show control
+## Plan — unscheduled external show control
 
 Venue systems may subscribe to semantic cues such as lobby ready, countdown, scenario start, Red Alert, impact, shield failure, brownout, critical hull, comms hail, victory, and defeat. Cues enhance atmosphere but never carry unique information.
 
@@ -135,9 +137,9 @@ The adapter should receive structured state/events and own venue-specific timing
 
 A GM supports pacing, performs characters, directs scenario systems, facilitates access, and recovers a live event. The GM is not required for ordinary play and does not replace authored automation.
 
-### Planned progression
+### Current progression and Plan — T6
 
-The roadmap stages GM capability from a session role with omniscient map, activity feed, and pause; through mission/effect directing and a comms performance studio; into facilitation, safety, checkpoints/undo, information control, in-sim presentation, campaign persistence, and pacing heuristics.
+GM M1–M8 code covers observation/puppeting, directing, Comms/knowledge comparison, attention/workload, history/undo/checkpoints, Workshop/Live inspection, information control and in-sim cues. Human exits remain open for performing, facilitation, recovery and Workshop/docks/audio. **Plan — T6:** M9 campaign persistence/deep advisory pacing. See [GM and Workshop](../systems/gm-and-workshop.md).
 
 ### Authority and safety
 

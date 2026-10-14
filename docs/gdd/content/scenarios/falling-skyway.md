@@ -5,11 +5,13 @@
 | Document | GDD-CONTENT-FALLING-SKYWAY |
 | Status | Implemented authored scenario; balance and recommended crew remain TBD |
 | Owner | Unassigned |
-| Last updated | 2026-08-27 |
+| Last updated | 2026-10-02 |
 | Scope | Premise, intensity eras, actors, systems, choices, outcomes, and authoring contract for Falling Skyway |
 | Authority | `assets/worlds/falling_skyway.toml` and referenced templates are content truth. |
 
 Falling Skyway is the current operational-crisis scenario. An orbital skyhook, its fuel-depot ladder, and the traffic depending on them are failing as a radiation storm approaches. A labour dispute, corporate interests, civilian movement, incomplete records, limited transfer capacity, and an armed picket make the crisis political as well as technical. The crew cannot preserve every claim in full; it must learn what is true, keep enough infrastructure alive, and decide who receives scarce passage.
+
+Baseline review used `uv run pasm design digest` on 2026-10-02. Its live deadline/causality model confirms the current scenario rather than the older roadmap's 25-minute/×4 re-author summary. **Current:** C1 Scan/Operate/Order Backfill support is implemented (#1129 closed). **Plan:** narrative follow-ups #1352/#1337 and recommended-crew/workload proof remain open; campaign facts have no finished follow-on episode flow. The 80–95% mandatory-objective AI completion range is a roadmap target, not a fresh measurement in this documentation review.
 
 Related documents: [Scenario Authoring](../../systems/scenario-authoring.md), [Campaign Continuity and Persistence](../../foundation/campaign-continuity.md), [Thin Margin Setting](../../foundation/thin-margin-setting.md), [World and Environmental Systems](../../systems/world-environmental-systems.md), [Station Experiences](../../systems/station-experiences.md), [Difficulty and Balance](../../foundation/difficulty-balance-playtesting.md), and [AI and Backfill](../../systems/ai-and-backfill.md).
 
@@ -69,6 +71,8 @@ The design purpose is to distribute first tasks quickly: Captain and Comms estab
 
 Depot Ladder B’s structural reading and filed record can disagree. A genuine Ladder B scan creates the discrepancy finding; Havelock’s supplied maintenance-file copy can support negotiation but cannot substitute for that scan. After a negotiated settlement, worker corroboration opens a sticky, range-gated filing thread from Control. Only the crew’s explicit filing response puts the scan diff and worker account on Control’s record and completes the optional objective. Evidence matters later in negotiation and consequences; it is not just collectible lore.
 
+Lark's corridor collision is a separate opening-era deadline. A routine hail arrives at 330 seconds and a final critical check at 360 seconds opens a twenty-second response window. Any valid structure survey scan enables the scan-backed unsafe response on Comms. The crew must send that response before 380 seconds to stop Lark: scanning alone, opening the channel, or reading the warning does not issue the stop order. Missing it produces a physical collision and scripted defeat, independently of the survey objective's status. These three clocks are hidden from the public deadline list.
+
 ### Storm era — Physical crisis
 
 The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. Every weather beat has its own deadline trigger and waits for neither strike settlement nor an act checkpoint: the storm changes the physical and operational problem while civilian traffic remains in motion.
@@ -92,7 +96,10 @@ The decision is not a detached dialogue menu. Infrastructure capacity, claimant 
 | Deadline | Due | Design function |
 |---|---:|---|
 | `tether_slip` | 160s | Immediate physical warning |
+| `lark_first_hail_due` | 330s | Hidden routine corridor check |
 | `skyway_survey_due` | 360s | Forces early investigation |
+| `lark_final_hail_due` | 360s | Hidden critical hail; opens twenty-second stop-order window |
+| `lark_collision_due` | 380s | Hidden collision/defeat unless the scan-backed unsafe response was sent |
 | `storm_front_due` | 400s | Opens the environmental crisis |
 | `storm_band_one_due` | 580s | Storm escalation |
 | `storm_band_two_due` | 740s | Storm escalation |

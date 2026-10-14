@@ -5,7 +5,7 @@
 | Document | GDD-ONBOARDING-ACCESSIBILITY |
 | Status | Working draft; current tutorial/manual behaviour and proposed accessibility requirements are distinguished below |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-10-02 |
 | Scope | First-session learning, contextual help, station handover, facilitation, input alternatives, sensory access, and test targets |
 | Authority | Player-experience requirements. Current implementation is authoritative only where explicitly described as implemented. |
 
@@ -13,7 +13,13 @@ Phoenix should let a group enter play without studying a rulebook, while still r
 
 Related documents: [Game and Session Lifecycle](./game-lifecycle.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Ships and Ship Systems](../systems/ships-and-systems.md), [AI and Backfill](../systems/ai-and-backfill.md), [Difficulty, Balance, and Playtesting](./difficulty-balance-playtesting.md), and [Future Modes](../future/future-modes.md).
 
-Future crew-control and delivery details: [Command and Crew Control](../mechanics/command-and-crew-control.md), [Release Bands C7–C9](../future/release-bands-g-i.md), and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+Current crew-control and remaining Plan: [Command and Crew Control](../mechanics/command-and-crew-control.md), [Plan Baseline](../future/roadmap-baseline.md), [Release Bands C7–C9](../future/release-bands-g-i.md) and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+
+## Current implementation and Plan boundary — 2026-10-02
+
+Current platform work includes private effect-named Accessibility profiles/eligibility, Hero Bar focus and non-colour indicators, semantic actions/remapping and correlated feedback, keyboard/gamepad ownership, presentation/comfort settings, category audio with visual/text equivalents, and German localisation. Coverage and acceptance vary by supported surface; this is not a conformance claim.
+
+**Plan:** close native settings/setup, real-device audio, and T5 human accessibility/language exits; continue assistance through the content ladder. Full screen-reader support and structured text/list alternatives for radar/Navigation/Viewscreen canvases are accepted but unscheduled. The alternative-path table below states targets rather than a claim that every canvas alternative is implemented.
 
 ## Onboarding goals
 
@@ -46,7 +52,7 @@ Only one eligible overlay is active at a time, selected by authored priority and
 
 The ship manual is read-only and ship-specific. It combines the authored station overview with generated details from systems actually mounted on that hull: weapon ranges/arcs/cadence, torpedo capacity, radar ranges, reactor/battery, repair timings, comms range, helm capability, and rating automation. It should remain available during play without pausing the whole crew.
 
-The Alliance Destroyer currently has the most complete contextual tutorial content. Other hulls require their own authored coverage as they move through the release-readiness sequence.
+The Alliance Destroyer and Cruiser have contextual tutorial/readiness content; the current Dynasty player Cruiser also authors role guidance and contextual strike-reserve tips. Courier/Battleship release-readiness and fleet-wide human onboarding evidence remain **Plan**. Hull-specific help coverage does not prove first-session comprehension.
 
 ## Tutorial-writing rules
 
@@ -80,7 +86,7 @@ A deliberate handover should expose the station overview, current objective, rat
 
 The baseline game should not require a facilitator. For events and mixed-experience groups, a facilitator may recommend stations, help choose ratings, explain the first objective, and pause or intervene through supported host/GM tools when available. Facilitation must not rely on hidden rules that ordinary players cannot later discover through manuals or feedback.
 
-Facilitator guidance should include: suggested station assignment by player preference; common connection recovery; what Backfill is currently doing; how to reduce workload; scenario-specific content notes; when to let the crew struggle; and questions for a short debrief. Future GM tools are described in [Future Modes](../future/future-modes.md).
+Facilitator guidance should include station assignment by preference, connection recovery, Backfill state, workload reduction, content notes, when to let the crew struggle and debrief questions. Implemented optional tools and outstanding human exits are described in [GM and Workshop](../systems/gm-and-workshop.md).
 
 ## Accessibility target
 

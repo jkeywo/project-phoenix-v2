@@ -5,16 +5,30 @@
 | Document | GDD-INDEX |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-10-02 |
 | Scope | Navigation, document authority, current coverage, and recommended next documents |
 | Authority | Orientation only. Linked code, assets, PASM, and project planning remain canonical for their domains. |
 
 The Project Phoenix GDD is federated: short design documents explain player-facing intent and authoring contracts, while code and assets remain runtime truth, PASM remains design/architecture truth, and GitHub remains planning truth. The GDD should not become a stale duplicate schema or backlog.
 
+## Comparison baseline — 2026-10-02
+
+The separate [Gameplay Redesign GDD](../gameplay-redesign/README.md) starts from player activity, decision-making and AI delegation. Its [ship systems catalogue](../gameplay-redesign/ship-systems.md), [game systems catalogue](../gameplay-redesign/game-systems.md) and [research register](../gameplay-redesign/research/README.md) are exploratory inputs. This GDD remains the current/Plan comparison baseline.
+
+Start with [Current Game Design Baseline](./foundation/current-baseline.md) for the implemented game, catalogue, hulls, Station tasks, cooperation and limits. Read [Plan and Delivery Baseline](./future/roadmap-baseline.md) separately for all content/technical bands and accepted unscheduled work in PASM. Together they establish the baseline before competitor comparison or reconsideration of the existing setting and task design.
+
+**Current** means implemented in the reviewed checkout, not necessarily deployed or human-accepted. **Plan** means undelivered roadmap scope, with a band or explicit unscheduled status. **Acceptance open** distinguishes delivered features from outstanding human/hardware/network proof. Experience goals and open decisions do not count as current capabilities. The existing fictional direction is preserved for comparison; this update does not ratify a redesign.
+
 ## Current documents
 
 | Document | Coverage |
 |---|---|
+| [Current Game Design Baseline](./foundation/current-baseline.md) | Current participation, four scenarios, five player hulls, Station decisions/cooperation, simulation, tooling and comparison questions |
+| [Plan and Delivery Baseline](./future/roadmap-baseline.md) | C1–C9/T1–T6 delivery boundaries, remaining Plan scope, open acceptance and unscheduled work |
+| [Alliance Convoy Escort](./content/scenarios/alliance-convoy-escort.md) | Four-slot cooperative escort, addressed tasks and transport-fate endings; T5 reference status |
+| [Cruiser Elimination](./content/scenarios/cruiser-elimination.md) | Four fixed Cruisers, Alliance/Dynasty teams, surviving-crew continuation and draw/win resolution |
+| [Dynasty Player Cruiser](./content/ships/dynasty-ships.md) | Six-role player bridge, strike reserve and distinction from Harrow NPC content |
+| [GM and Workshop](./systems/gm-and-workshop.md) | Implemented GM M1–M8, exact-source Authoring/disposable Test/Live Inspector, acceptance and Plan M9 |
 | [Game Design Overview](./foundation/overview.md) | Vision, audience, pillars, experience promise, scope, accessibility direction, and success questions |
 | [Game and Session Lifecycle](./foundation/game-lifecycle.md) | Enter game, connect/disconnect, lobby, scenario entry/end, replay, and exit |
 | [Entity Authoring](./systems/entity-authoring.md) | Generic template/instance model, composition, common TOML surfaces, and validation |
@@ -49,7 +63,7 @@ The Project Phoenix GDD is federated: short design documents explain player-faci
 
 ## What these documents now cover
 
-Together, the set defines the game’s high-level identity, complete session and campaign journeys, principal authoring layers, station experiences, detailed interconnected mechanics, the T1 Bridge Foundations PRDs (formerly Band A2), the C2–C9 content direction, accepted unscheduled dependency clusters, shared-setting relationship, onboarding/accessibility target, balance framework, world systems, current ship families and both current scenarios. Each page distinguishes shipped behavior from accepted direction and unscheduled extension; detailed schemas and tunables remain in their canonical sources.
+Together, the set describes current session/Station play, four selectable scenario roots, Alliance and Dynasty player hulls, Harrow NPCs, native and multi-ship implementation, saves, GM tools and Workshop. It also describes the intended campaign journey, C2–C9 content, T1–T6 remaining work, shared-setting direction, accessibility targets and balance questions. The two baseline documents resolve implementation versus Plan at the review date; detailed schemas and tunables remain in their canonical sources.
 
 ## Remaining gaps
 
@@ -88,14 +102,16 @@ These should remain visibly deferred rather than filled with speculative recomme
 
 ## Recommended next sequence
 
-1. Break the two T1 Bridge Foundations PRDs (formerly Band A2)—[Crew Control](./mechanics/command-and-crew-control.md) and [Native and Network](./systems/native-network-foundation.md)—into implementation work before content band C2 begins.
-2. Review and ratify the Phoenix-era setting relationship, especially the Imperium name, House identities, chronology, and which facts are inherited versus local.
+1. Compare Current and Plan separately against the older competitor research; assess each Station's decisions, idle/overloaded periods, communication and automation before adding more simulation depth.
+2. Review the existing setting direction against that player-work evidence before settling further canon, chronology or institutional detail.
 3. Choose the first episode that consumes Falling Skyway’s projection and define its input bindings before expanding the full campaign shell.
 4. Run Combat Test and Falling Skyway playtests using the station, onboarding, AI, accessibility, balance, debrief, and continuity questions; ratify crew counts, pacing, workload, and measurable targets.
 5. Turn the accessibility target into an implementation/audit matrix for the supported browser route.
 6. Review the detailed mechanic pages against playtest evidence and use their diffs to drive PASM amendments or implementation issues.
-7. Write each future scenario, mode or [unscheduled cluster](./future/planned-not-scheduled.md) as it enters active design, preserving its dependency and status boundaries.
+7. Complete the outstanding native, GM/Workshop and T5 acceptance work recorded in the [Plan baseline](./future/roadmap-baseline.md), and write future content as it enters active design.
 
 ## Maintenance rule
 
 Update a GDD page when player-facing intent or a content summary changes. Update PASM when design/architecture decisions change, assets when authored truth changes, code when runtime truth changes, and GitHub when planned work changes. If a GDD table repeats live balance values, label it as a snapshot and link to the authoritative asset.
+
+Keep undelivered work explicitly marked **Plan**. Preserve its PASM component/band and distinguish an open acceptance exit from an absent implementation. Refresh the review date/revision when checking the baseline again; do not promote an old `accepted` roadmap label to Current without checking runtime/assets.

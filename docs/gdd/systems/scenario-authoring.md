@@ -5,7 +5,7 @@
 | Document | GDD-SCENARIO-AUTHORING |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-09-21 |
+| Last updated | 2026-10-02 |
 | Scope | Generic scenario design, world TOML, Rhai choreography, outcomes, and validation |
 | Authority | Design and authoring overview. Live world/script schemas, validators, assets, and PASM remain canonical. |
 
@@ -14,6 +14,10 @@ Phoenix scenarios range from direct tests with clear win conditions to operation
 Related documents: [Thin Margin Setting](../foundation/thin-margin-setting.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [World and Environmental Systems](./world-environmental-systems.md), [Difficulty and Balance](../foundation/difficulty-balance-playtesting.md), [Combat Test](../content/scenarios/combat-test.md), and [Falling Skyway](../content/scenarios/falling-skyway.md).
 
 Detailed mechanics: [Sensors and Epistemics](../mechanics/sensors-epistemics.md), [Comms and Commitments](../mechanics/comms-commitments.md), and [Crew-Owned External Systems](../mechanics/external-operations.md).
+
+Current catalogue references also include [Alliance Convoy Escort](../content/scenarios/alliance-convoy-escort.md) and [Cruiser Elimination](../content/scenarios/cruiser-elimination.md), with fixed ship slots and addressed Objectives/results. [Workshop](./gm-and-workshop.md) provides current browser/native authoring, validation and disposable Test. Generated Patrol/War/Orbital/Sandbox remain **Plan — C8/C9**.
+
+Before changing a scenario's pacing, causality, deadlines or consequences, run `uv run pasm design digest` and use its merged declared-intent/live-values output. Prefer hash-guarded `pasm design writeback` for tuning, and validate structural script changes against PASM. A historical roadmap synopsis is not the current clock model.
 
 ## Scenario contract
 

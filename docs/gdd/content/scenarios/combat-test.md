@@ -5,11 +5,11 @@
 | Document | GDD-CONTENT-COMBAT-TEST |
 | Status | Implemented content overview; balance remains iterative |
 | Owner | Unassigned |
-| Last updated | 2026-08-26 |
+| Last updated | 2026-10-02 |
 | Scope | Premise, structure, scaling, entities, outcomes, and authoring contract for Combat Test |
 | Authority | `assets/worlds/combat_test.toml` and referenced templates are content truth. |
 
-Combat Test is a direct cooperative defence scenario. The crew protects Starbase Alpha against eight timed Harrow waves, using a selectable Alliance ship. It is intentionally simpler than Falling Skyway and is fully compatible with the design pillars: the scenario may provide a scripted problem and answer while the crew still coordinates a connected ship to execute that answer.
+Combat Test is a direct cooperative defence scenario. The crew protects Starbase Alpha against eight timed Harrow waves, using a selectable Alliance hull or the distinct Dynasty player Cruiser. It is simpler than Falling Skyway: the crew coordinates a connected ship against a clear authored combat problem. Selection is broader in the base catalogue than in the curated demo.
 
 Related documents: [Scenario Authoring](../../systems/scenario-authoring.md), [Station Experiences](../../systems/station-experiences.md), [AI and Backfill](../../systems/ai-and-backfill.md), [Difficulty and Balance](../../foundation/difficulty-balance-playtesting.md), [Alliance Ships](../ships/alliance-ships.md), and [Harrow Ships](../ships/harrow-ships.md).
 
@@ -22,7 +22,7 @@ Detailed mechanics: [Movement and Helm](../../mechanics/movement.md), [Targeting
 | Form | Combat drill / defence mission |
 | Recommended crew | 2–4 |
 | Possible crew | 0 through the selected hull’s station maximum |
-| Offered ships | Alliance Courier, Destroyer, Cruiser, Battleship |
+| Offered ships | Alliance Courier, Destroyer, Cruiser, Battleship; Dynasty player Cruiser |
 | Protected objective | Starbase Alpha |
 | Opposition | Eight timed Harrow wave groups with power-rating scaling |
 | Victory | All hostiles destroyed after all eight waves have spawned |
@@ -60,7 +60,7 @@ Each wave is tracked as a group and has a cleared handler. The scenario also tra
 
 ## Difficulty scaling
 
-At scenario start the selected hull’s authored `power_rating` is copied into scenario state. Ratings currently read Courier 25, Destroyer 70, Cruiser 90, and Battleship 120. Ships rated at least 90 receive additional Destroyer opposition on alternating wave patterns; ships rated at least 100 receive additional Cruiser opposition on the other configured patterns. The exact spawn composition is canonical in the Rhai functions, but the design intent is stable: power rating changes the encounter, not the underlying behaviour of either fleet.
+At scenario start the selected hull's authored `power_rating` enters scenario state. Current Alliance ratings are Courier 25, Destroyer 70, Cruiser 90 and Battleship 120; the Dynasty player Cruiser composes the Cruiser baseline. At least 90 adds Destroyer opposition on the configured alternating waves; at least 100 adds Cruiser opposition on the others. The Rhai spawn functions remain canonical. Record the selected template/faction as well as rating when comparing outcomes.
 
 Power rating is a coarse content-scaling measure, not a promise of equal difficulty across crew sizes. A Battleship operated by two people may have more raw capacity and more workload than the same hull with nine. Playtest reporting should therefore record selected hull, connected players, occupied stations, and ratings.
 

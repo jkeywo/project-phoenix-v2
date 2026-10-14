@@ -5,28 +5,30 @@
 | Document | GDD-OVERVIEW |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-26 |
+| Last updated | 2026-10-02 |
 | Scope | Vision and high-level game experience |
 | Authority | Orientation only. Code and assets are runtime truth; PASM is design and architecture truth. |
 
 This is the front door to a federated Game Design Document. It describes the identity of Project Phoenix and links outward to canonical sources; it does not duplicate detailed mechanics, balance values, content catalogues, or technical specifications.
 
+The [Current Baseline](./current-baseline.md) records the implemented game as of 2026-10-02; the [Plan Baseline](../future/roadmap-baseline.md) records undelivered PASM roadmap work and open acceptance. Existing setting and pillar language below remains design direction for review, rather than evidence that it produces engaging work for every player.
+
 Related documents: [Game and Session Lifecycle](./game-lifecycle.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Thin Margin Setting](./thin-margin-setting.md), [Onboarding and Accessibility](./onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Difficulty and Balance](./difficulty-balance-playtesting.md), [World and Environmental Systems](../systems/world-environmental-systems.md), and [Future Modes](../future/future-modes.md).
 
 ## High-level concept
 
-**Project Phoenix is a cooperative spaceship bridge simulator for browsers in which a group gathers around a shared viewscreen, joins from their phones, and operates one ship through specialised stations.** Each player sees and controls only part of the situation, so success comes from communicating, setting priorities, and combining decisions into a coherent response.
+**Project Phoenix is a scenario-driven spaceship bridge game in which groups gather around shared Viewscreens, join from browser consoles, and operate ships through specialised Stations.** Cooperative missions remain central; the current catalogue also includes multi-ship escort and competitive team combat. Each officer controls part of the situation, creating opportunities to communicate, set priorities and combine decisions.
 
 | Attribute | Overview |
 |---|---|
-| Genre | Cooperative spaceship bridge simulator; scenario-driven command and operations game |
-| Platforms | Zero-setup browser host and browser-based phone consoles by default; optional native and physical-bridge integrations may extend the same game |
-| Session model | One host-authoritative simulation with local or remote players connected as crew |
+| Genre | Spaceship bridge simulator; cooperative scenarios and competitive team combat; command and operations game |
+| Platforms | Browser host and installation-free phone consoles; optional implemented Windows native host/Viewscreen and local Ultralight consoles |
+| Session model | Host-authoritative crew play; deterministic multi-ship/GM host mesh implemented with larger-session acceptance still open |
 | Possible players | 0 through the selected ship's authored maximum; unclaimed stations operate through Backfill AI |
 | Recommended players | Authored per scenario and, where needed, per ship. Combat Test: 2–4. Falling Skyway: to be determined. |
 | Typical length | Scenario-dependent. The broader design boundary is 30–90 minutes; Combat Test is shorter, while Falling Skyway uses a ratified 20–30 minute crisis envelope with its allocation close at 30 minutes. |
-| Current content | Combat Test, an escalating defence scenario; Falling Skyway, an operational crisis with traffic, infrastructure, negotiation, evidence, deadlines, and consequences |
-| Long-term structure | A growing catalogue of authored missions, followed by campaign continuity and a generated Patrol Mode |
+| Current content | Combat Test, Falling Skyway, Alliance Convoy Escort and Cruiser Elimination; demo restricts to Combat Test with Alliance Destroyer/Cruiser |
+| Long-term structure | **Plan:** Thin Margin missions, campaign/run continuity, authored Patrol/War, generated Patrol/War and persistent Sandbox; see the Plan baseline |
 | Commercial model and release targets | Deliberately deferred |
 
 ## Player fantasy
@@ -111,8 +113,10 @@ Phoenix currently demonstrates two complementary forms of play:
 
 - **Combat Test** is a short, escalating defence of Starbase Alpha. Timed enemy waves create accumulating pressure and exercise the complete combat stack.
 - **Falling Skyway** is the first *Thin Margin* mission. The crew enters a place already in motion and must handle damaged infrastructure, civilian traffic, a labour dispute, corporate security, a radiation storm, incomplete evidence, limited transfer capacity, and promises that can be kept or broken.
+- **Alliance Convoy Escort** is a four-slot cooperative reference: protect three transports until their actual arrival or loss, with shared and addressed tasks.
+- **Cruiser Elimination** is a competitive two-team reference: two Alliance versus two Dynasty player Cruisers, with wrecked-crew spectating, a surviving-team win or simultaneous-elimination draw.
 
-The accepted roadmap expands this into a sequence of Thin Margin missions. Each release adds a bounded physical or operational foundation, one mission that uses it, and another playable hull. Later work adds campaign continuity, Game Master facilitation, and eventually Patrol Mode: coherent generated assignments rather than procedural variety for its own sake.
+**Plan:** Thin Margin missions C2–C5, authored Patrol C6, authored War/personnel C7, generated Patrol/War and Orbital Mode C8, and Sandbox C9. Hull readiness follows its own staged ladder rather than adding a hull in every band. GM facilitation and Workshop have implemented capabilities; campaign/deep pacing and remaining acceptance are separately recorded in the technical track.
 
 ## Tone and fiction
 
@@ -124,9 +128,9 @@ Presentation should support the ensemble fantasy: the viewscreen supplies shared
 
 ## Setup and bridge scale
 
-Zero-setup browser play is the product baseline. Work has begun on native host delivery, and T1 now includes the Phoenix WebSocket/RTC transport plus a true Windows host with native viewscreen rendering and Ultralight local stations. Later extensions may add custom peripherals and event-output integrations for lighting, smoke, sound, or other venue systems. A group may therefore play with a television and phones, build one physical console, or construct a complete event bridge.
+Browser play is the product baseline. Phoenix WebSocket/RTC transport, fallback game-frame relay, native Windows simulation/Viewscreen, local Ultralight Stations and runtime lobby/display assignment are implemented. Native hardware/media/setup acceptance remains open. Custom peripherals and external event-output integrations are **Plan — unscheduled**, rather than current setup capabilities.
 
-All such integrations are optional adapters around the same authoritative game and station model. Scenario rules and ordinary controls must remain playable through the baseline browser route. PASM currently records external show hardware as not planned while requiring the cue path not to preclude future integration; this overview treats it as a permitted extension direction, not committed roadmap scope.
+All such integrations are optional adapters around the same authoritative game and Station model. Scenario rules and ordinary controls must remain playable through the browser route. The present delivery roadmap places custom peripherals/external show systems in its accepted unscheduled cluster; implemented in-sim GM/scenario cues do not deliver those hardware adapters.
 
 ## Scope boundaries and non-goals
 
@@ -186,6 +190,8 @@ Every scenario is technically possible with zero human players through Backfill 
 |---|---:|---:|---|
 | Combat Test | 0–selected ship maximum | 2–4 | Working recommendation |
 | Falling Skyway | 0–selected ship maximum | To be determined by playtest | Open |
+| Alliance Convoy Escort | Up to four ships with their selected hull's primary seats; unclaimed ships Backfill | To be ratified | T5 reference; acceptance open |
+| Cruiser Elimination | Four fixed six-seat Cruisers; unclaimed ships Backfill | To be ratified | Competitive reference; acceptance open |
 
 Future scenario briefs should state a recommended range, the hulls used to establish it, and any material change in experience at the low and high ends.
 
@@ -215,11 +221,12 @@ Core playtest questions:
 
 ## Current implementation versus intended product
 
-The full development catalogue already contains the bridge simulation, the major station families, human/AI authority hand-off, scenario scripting, Combat Test, and Falling Skyway. The public demo is intentionally narrower: Combat Test with the Alliance Destroyer and Alliance Cruiser. The roadmap broadens content and delivery in release bands rather than treating every planned capability as part of the current player promise.
+The development catalogue contains four scenario roots, five player hulls, Crew Control, native hosting, multi-ship reference play, saves and optional GM tools; Workshop supports authoring and disposable Test. The curated demo is narrower: Combat Test with the Alliance Destroyer and Alliance Cruiser. See the [Current Baseline](./current-baseline.md) for capability and acceptance boundaries.
 
 Detailed documents should keep these labels distinct:
 
 - **Implemented:** observable in the current code and authored assets.
+- **Plan:** undelivered PASM roadmap scope; identify its band or unscheduled status. Mark outstanding acceptance separately when code exists.
 - **Accepted:** an intended design recorded in PASM but not necessarily shipped.
 - **Proposed:** under discussion and not yet an approved product promise.
 - **Inferred:** overview wording synthesised from implementation and accepted design; it should be ratified before being treated as a pillar or marketing claim.
@@ -234,7 +241,7 @@ The following remain deliberately open or require validation:
 - numerical success thresholds after baseline playtests;
 - commercial model, release platforms, and minimum supported devices, which are deliberately deferred;
 - roadmap commitment and interface standards for optional native clients, peripherals, and event systems;
-- the location and current status of the earlier trait-based crew assignment design.
+- workload and enjoyment under the present fictional constraints; [Duty Teams/Officers](../mechanics/duty-teams-and-operations.md) are **Plan — C7**, rather than a missing unscheduled design.
 
 The pillar wording is sufficient as internal, LLM-facing guidance. It can be rewritten for a human-facing or marketing document without changing the underlying principles. Proposed audience, accessibility, and success-measure language should be ratified or revised before this overview becomes the canonical vision layer.
 

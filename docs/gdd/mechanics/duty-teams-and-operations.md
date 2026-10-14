@@ -2,11 +2,14 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted, planned but not scheduled |
+| Status | Plan — C7 personnel/Operations vertical; not current functionality |
+| Last updated | 2026-10-02 |
 | Scope | Duty Teams, Duty Officers, system assignments, Away Missions, boarding, Medical and Operations systems |
 | Audience | Design, content, UI, simulation and campaign |
 
 Duty Teams turn the repair-team pattern into a shared workforce model without simulating every person aboard. Duty Officers provide named leadership and traits; Operations systems assemble and launch bounded off-screen missions that the bridge can support through its ordinary stations.
+
+The current PASM roadmap schedules the minimum complete vertical with authored War in C7 (`roadmap-war-mode-mvp`, #1094). Existing repair teams are a foundation, not general personnel/Away Mission/Medical implementation. All mechanics below describe **Plan**.
 
 Related documents: [External Operations](./external-operations.md), [Damage, Diagnosis and Repair](./damage-repair.md), [Comms and Commitments](./comms-commitments.md), [Campaign Continuity](../foundation/campaign-continuity.md), and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
 
@@ -87,4 +90,3 @@ Officers may return available, fatigued, injured, missing or dead. Injury and di
 - [External Operations](./external-operations.md)
 - [World files architecture](../../../pasm/spec/architecture/world-files.yaml)
 - [Engineering and damage architecture](../../../pasm/spec/architecture/engineering-damage.yaml)
-

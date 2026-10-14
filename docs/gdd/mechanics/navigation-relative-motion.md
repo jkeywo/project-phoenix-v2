@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current waypoint and chart mechanic with accepted 3D extension |
+| Last updated | 2026-10-02 |
 | Scope | System chart, destinations, anchored waypoints, route advice, traffic orders and reference frames |
 | Audience | Design, content, UI, simulation and playtest |
 
@@ -60,7 +61,7 @@ Player-facing calculations should distinguish world position, ship-relative bear
 
 The minimum useful relative-motion set is distance, bearing, relative speed or closing state, and estimated arrival where a stable estimate exists. The design avoids presenting false precision during abrupt manoeuvres or when a target's intent is unknown.
 
-## Accepted 3D direction
+## Plan — C3 relative/physical space; C6/C8 transit/Orbital
 
 The accepted movement extension allows Navigation to contribute desired three-dimensional position or velocity to a shared motion plan, along with hazard assessment. Different hulls may author bounded vertical lanes, full 3D movement or scenario-specific constraints.
 

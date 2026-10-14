@@ -2,11 +2,14 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted direction without a release band |
+| Status | Plan — unscheduled; scheduled cross-references identified below |
+| Last updated | 2026-10-02 |
 | Scope | Dependency-grouped features that do not currently fit the C1–C9 content or T1–T6 technical tracks |
 | Audience | Design, roadmap, content and future planning |
 
 These features are accepted parts of Phoenix's long-term design but have no promised release band. Their order below expresses dependencies, not priority or delivery sequence. Work should enter a band only when its supporting systems, scenario proof and release capacity are clear.
+
+The present roadmap schedules personnel/Pursuit/surrender/War in C7, generated modes/Orbital in C8 and Sandbox/advanced participation in C9; those sections below are cross-references. The remaining unscheduled set is listed in [Plan Baseline](./roadmap-baseline.md): human media, mines/cloak/expanded EWar/self-destruct, peripherals/show systems, source-level Rhai debugging and canvas text/list/full screen-reader alternatives. All are **Plan**.
 
 Related documents: [Future Modes](./future-modes.md), [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md), [Command and Crew Control](../mechanics/command-and-crew-control.md), [Native and Network Foundation](../systems/native-network-foundation.md), [Campaign Continuity](../foundation/campaign-continuity.md), and [World and Environmental Systems](../systems/world-environmental-systems.md).
 

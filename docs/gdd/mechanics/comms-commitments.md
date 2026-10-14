@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current mechanic |
+| Last updated | 2026-10-02 |
 | Scope | Hails, scripted dialogue, response authority, range and jamming, promises and settlement |
 | Audience | Design, narrative, content, UI, simulation and playtest |
 
@@ -56,13 +57,13 @@ Promises appear on the dossier of the party they were made to when that party ha
 
 Campaign continuity preserves the declared promise and settlement, not the whole transient inbox. A later scenario may react to the fact and terms; it should not depend on reconstructing every previous message bubble.
 
-## Intelligence database
+## Plan — C6 Intelligence; C7 personnel/surrender
 
 Band C6's database/library work gives Comms the primary Intelligence search and correlation surface. It organises known entities, registry codes, dossiers, reports, pursuit estimates and mission history over the shared evidence model. Other station databases remain focused projections and do not obsolete Intelligence.
 
-Comms-specialist Away Missions may acquire sources, records or other durable entries for the Intelligence database. Those missions follow the unscheduled Operations and Duty Team framework rather than adding an espionage mode to ordinary dialogue.
+**Plan — C7:** Comms-specialist Away Missions may acquire records/sources for the database using Operations and Duty Teams. This is scheduled personnel work, not a current espionage mode in ordinary dialogue.
 
-Surrender is accepted but unscheduled. Comms may offer or demand authored terms; the receiving actor may accept, refuse, counteroffer or feign compliance. Acceptance changes objectives, hostility and vessel orders without automatically despawning or transferring ownership.
+**Plan — C7:** Comms surrender offers/demands authored terms, with acceptance, refusal, counteroffer or feigned compliance. It changes objectives, hostility and vessel orders without automatically despawning/transferring ownership.
 
 ## AI and backfill
 

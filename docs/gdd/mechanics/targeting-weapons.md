@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current mechanic with accepted refinements |
+| Last updated | 2026-10-02 |
 | Scope | Combat lock, weapon families, readiness, firing and bearing coordination |
 | Audience | Design, content, UI, simulation and playtest |
 
@@ -46,7 +47,7 @@ Torpedoes are guided proximity projectiles. Individual tubes have firing arcs an
 
 Torpedoes reward ammunition judgment, tube readiness and attack geometry. The in-flight count is public authoritative state so consoles and AI policies can reason about salvos without inferring them from transient launch messages.
 
-Band C5 adds authored torpedo payload sidegrades through Tactical calibration and ammunition fabrication. Payloads may trade shield interaction, armour penetration, disruption, marking or another explicit effect rather than forming a simple light-to-heavy damage ladder. A tube loads a selected available payload, and its behavior remains frozen at launch.
+**Plan — C5:** authored torpedo payload sidegrades through Tactical calibration and ammunition fabrication. Payloads may trade shield interaction, armour penetration, disruption, marking or another explicit effect rather than forming a simple light-to-heavy damage ladder. A tube loads a selected available payload, and its behavior remains frozen at launch.
 
 ## Readiness grammar
 

@@ -5,7 +5,7 @@
 | Document | GDD-CAMPAIGN-CONTINUITY |
 | Status | Directional design built on an implemented projection and save foundation; a complete campaign player flow is not yet shipped |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-10-02 |
 | Scope | Episode continuity, durable facts, save/resume, debrief, campaign selection, failure, refit, crew identity, and compatibility |
 | Authority | Human-facing design synthesis. PASM and code govern the implemented projection and snapshot contracts; future implementation commitments belong in PASM and GitHub. |
 
@@ -36,7 +36,9 @@ The runtime already supplies two important foundations:
 - A `PhoenixSnapshot` records a whole authoritative mission payload in RON inside the `vellum-save` envelope. The host can save and resume a local slot and can export or import a portable `phoenix-save.ron` file. Restore checks format, build/content, scenario, and script compatibility before activating the world.
 - `campaign::projection::project` folds a stored run into versioned `CampaignFacts`. Its declared fields are mission, outcome, `campaign.*` tallies, commitments, evidence, standing, named assets, and structures. `seed_flags` restores the campaign tallies and settled commitment flags for a later scenario script to read.
 
-Falling Skyway already writes a complete campaign handoff at its close. What is not yet a finished product flow is the campaign shell around these pieces: campaign creation and naming, a campaign record containing multiple episodes, episode selection, debrief confirmation, later-world override binding, crew or ship roster management, campaign browsing, and an ordinary non-debug save interface.
+Falling Skyway writes campaign facts at its close. Ordinary non-debug mission save/catalogue UX is now implemented: peer-local named saves, rolling autosave, compatibility-gated startup resume and portable import/export, with native storage/CLI and GM checkpoints. See [Save Catalogues](../../../wiki/concepts/save-catalogues.md).
+
+**Plan:** the campaign shell still needs creation/naming, a multi-episode record, episode selection, debrief commitment, later-world bindings, roster management and campaign browsing. C6/C7 continuing runs and T6 GM continuity/deep pacing use the foundations; no ratified follow-on consumer episode is currently a finished product flow.
 
 ## Campaign loop
 
@@ -115,7 +117,7 @@ Persistent ship condition should remain legible and bounded. The default between
 
 Player identity is not the same as character identity. Session tokens currently reconnect browsers to a live host; they are not accounts, campaign profiles, or officer characters. A campaign should allow different human players to occupy the same stations across episodes without treating absence as desertion or losing the ship’s history.
 
-The accepted unscheduled personnel model carries named Duty Officers and fixed anonymous Duty Teams. Officers have traits, system or mission assignments and availability states; teams have a type, leader and current assignment. Campaign continuity may carry officer recruitment, promotion, fatigue, injury, disappearance and death together with mission outcomes. Watches, hunger, sleep, continuous location and individual ensign simulation remain outside scope. See [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
+**Plan — C7:** named Duty Officers and typed anonymous Duty Teams supply traits, assignments and availability. Campaign continuity may carry recruitment, promotion, fatigue, injury, disappearance and death with mission outcomes. Watches, hunger, sleep, continuous location and individual ensign simulation remain outside scope. See [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
 
 ## Episode input and output contract
 
@@ -160,7 +162,7 @@ A mission snapshot resumes the exact compatible run. It should be possible to sa
 
 A campaign checkpoint is written after an episode’s projection has been accepted. The write should be atomic from the player’s perspective: either the old checkpoint remains current or the complete new checkpoint does. Campaign records need their own format/version, campaign identifier, episode history, current durable facts, compatible content identity, and provenance for imported or modded episodes. The existing `CampaignFacts` version is a vocabulary version for one projection, not yet a full campaign-file format.
 
-Autosave policy, number of manual slots, storage location, cloud/account support, encryption, and recovery retention are open product decisions. The zero-setup route must still offer an understandable local and portable path without requiring an account.
+Mission autosave is implemented on completed ticks: first in-progress capture, the world-authored interval (default 30 simulation seconds), and the first observed GameOver tick. Browser peer-local catalogues and native FileStore storage/CLI are implemented; portable saves require no account. **Plan / open campaign decisions:** multi-episode custody, branch/checkpoint presentation, backup/migration policy and any cloud/account/encryption support. Mission autosave does not decide campaign checkpoint policy.
 
 ## Failure, replay, and branching
 

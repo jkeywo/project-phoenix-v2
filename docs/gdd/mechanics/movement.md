@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current mechanic with accepted extensions |
+| Last updated | 2026-10-02 |
 | Scope | Ship motion, Helm authority, impulse, boost and manoeuvre coordination |
 | Audience | Design, content, UI, simulation and playtest |
 
@@ -58,7 +59,7 @@ AI Helm runs on the shared fixed decision cadence and emits ordinary admitted He
 
 AI may follow a Navigation waypoint only when the scenario's clearance permits that behaviour. It may respond to a Tactical arc request, but the request remains steering advice. These rules stop backfill from inventing objectives or accepting coordination that a human would be free to reject.
 
-## Accepted direction beyond the current model
+## Plan — C3 motion and physical-space extensions
 
 The accepted extension is a shared three-dimensional desired-motion and hazard-assessment layer. Navigation, AI Helm and coordination requests would contribute desired position, velocity or facing; fine actuators would still decide what the ship can achieve. Hulls could author bounded vertical lanes, full three-dimensional flight or other movement modes without replacing the common command path.
 
@@ -83,4 +84,3 @@ Movement values belong in hull and system TOML: available axes, acceleration, ma
 - [Navigation design](../../../pasm/spec/design/navigation.yaml)
 - [Weapons architecture](../../../pasm/spec/architecture/weapons.yaml)
 - [Helm control intent wiki](../../../wiki/concepts/helm-control-intent.md)
-

@@ -3,10 +3,13 @@
 | Field | Value |
 |---|---|
 | Status | Current mechanic |
+| Last updated | 2026-10-02 |
 | Scope | Directional shield arcs, focus, damage routing, collapse and recovery |
 | Audience | Design, content, UI, simulation and playtest |
 
 Shields turn the direction of danger into a crew decision. The grid is divided into authored arcs, incoming damage strikes the matching available facing, and the Shields operator can focus protection at a cost elsewhere.
+
+The focus/arc mechanic below is **Current**. **Plan — C4:** detailed frequency/modulation and arc management alongside deeper Engineering. See [Plan Baseline](../future/roadmap-baseline.md); current weapon frequency behaviour does not imply that entire future Shield control surface is implemented.
 
 Related documents: [Targeting and Weapons](./targeting-weapons.md), [Movement and Helm](./movement.md), [Power and Resource Network](./power-resource-network.md), [Damage, Diagnosis and Repair](./damage-repair.md), and [Station Experiences](../systems/station-experiences.md).
 
@@ -75,4 +78,3 @@ Arc state must be readable without relying on red, amber and green alone. Use sh
 - [Shields architecture](../../../pasm/spec/architecture/shields.yaml)
 - [Shields intent wiki](../../../wiki/concepts/shields-intent.md)
 - [Weapons architecture](../../../pasm/spec/architecture/weapons.yaml)
-

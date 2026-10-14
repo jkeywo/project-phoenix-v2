@@ -2,7 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted roadmap direction |
+| Status | Plan — C7–C9; no current mode implementation claimed |
+| Last updated | 2026-10-02 |
 | Scope | War MVP, Patrol/War procedural generation, Sandbox Mode, supporting features, technical investment, polish and accessibility increments |
 | Audience | Product, design, engineering, content, accessibility and playtest |
 

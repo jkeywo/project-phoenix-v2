@@ -5,7 +5,7 @@
 | Document | GDD-AI-BACKFILL |
 | Status | Working draft; current behaviour and transitional architecture are identified explicitly |
 | Owner | Unassigned |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-10-02 |
 | Scope | Vacant-station operation, human/AI handoff, NPC doctrine, information parity, transparency, and difficulty boundaries |
 | Authority | Player-facing AI design. PASM, ship TOML, command admission, and runtime systems are authoritative. |
 
@@ -13,7 +13,9 @@ Phoenix uses AI to keep every authored ship functional at any crew size and to o
 
 Related documents: [Station Experiences](./station-experiences.md), [Ships and Ship Systems](./ships-and-systems.md), [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md), [Alliance Ships](../content/ships/alliance-ships.md), [Harrow Ships](../content/ships/harrow-ships.md), and [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md).
 
-T1 crew direction is specified in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+Current T1 [Crew Control](../mechanics/command-and-crew-control.md) includes Command, AFK, complete human-seeking Stations and Hero Bar hosting. C1 Backfill consumes Scan/Operate/Order Objectives for Falling Skyway, including ordinary civilian route orders. Unclaimed multi-ship slots and disconnected retained ships use ordinary Backfill.
+
+**Plan — C2:** complete star/detail composition and world-authored floors; distinct Cruiser rungs/per-System floor resolution already exist. **Plan — T5:** larger-session failure/replacement and real-network acceptance. The [Current Baseline](../foundation/current-baseline.md) separates capabilities from human enjoyment and AI completion targets.
 
 ## Design goals
 
@@ -49,7 +51,7 @@ Current station ratings author which owned systems are automated. The station ho
 
 The accepted future star ladder adds simplified and detailed control rungs per system. Simplified control means a limited AI drives the full model from human-selected summary settings; it does not replace the system with a lower-fidelity simulation. Star 0 remains full Backfill. This ladder is accepted direction, not the current complete interface.
 
-Human-seeking is accepted at station rather than fine-system scale. A primary station prefers its active direct holder; otherwise it walks a finite authored fallback list containing only compatible host stations and then falls back to AI. An auxiliary station may have no dedicated seat. Only directly player-held stations can host a visitor, and the visiting station retains its complete UI, identity, rating, systems and state. Its authored visiting rating is independent of the host station and may be raised by a scenario floor.
+Implemented human-seeking is at Station scale. A primary Station prefers its active direct holder; otherwise a finite compatible fallback list leads to a directly held host or AI. Auxiliary Stations may have no seat. Visitors retain complete UI, identity, rating, Systems and state, with visiting ratings independent of their host. General world-authored floor selectors remain **Plan — C2**.
 
 ## AI decision model
 

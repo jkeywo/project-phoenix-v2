@@ -5,11 +5,13 @@
 | Document | GDD-LIFECYCLE |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-19 |
+| Last updated | 2026-10-02 |
 | Scope | Enter game, connection lifecycle, lobby, scenario entry, scenario end, replay, and exit |
 | Authority | Design overview. Code and assets are runtime truth; PASM is design and architecture truth. |
 
 This document defines the player-facing lifecycle around a Phoenix scenario. It covers how a group forms, how a player's identity survives connection changes, how the crew enters and leaves a scenario, and what the game must preserve or discard at each boundary. Detailed network protocols, station mechanics, and scenario rules belong in their own specifications.
+
+See [Current Baseline](./current-baseline.md) for native lobby, AFK/Spectator, multi-ship wreck continuation and named/autosave capabilities, and [Plan Baseline](../future/roadmap-baseline.md) for remaining scope/acceptance. This journey includes design targets; unresolved browser clean-round reuse is not a finished replay promise.
 
 Related documents: [Game Design Overview](./overview.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Onboarding and Accessibility](./onboarding-accessibility.md), [Station Experiences](../systems/station-experiences.md), [AI and Backfill](../systems/ai-and-backfill.md), [Native and Network Foundation](../systems/native-network-foundation.md), and [Future Modes](../future/future-modes.md).
 
@@ -72,7 +74,7 @@ Startup failures should name the failed stage and offer a useful recovery action
 
 ### Human-readable join codes
 
-T1 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate typed suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
+Implemented Phoenix transport replaces PeerJS with typed codes. Crew and host joining use separate project namespaces and a compatible-release version. Players type the suffix or scan a QR. Each ship host owns its private crew code; the fleet host code admits/recovers hosts. Native hosts also mint a direct-LAN crew code whose QR points at the listener's served page. Full network/recovery acceptance remains open.
 
 The rendezvous layer distinguishes unknown, wrong-type and version-mismatched codes before transport setup. The eventual host handshake still refuses incompatible protocol/content stamps authoritatively. Codes survive reconnects and mission transitions. Rotation is explicit and restricted to periods when no mission is running.
 
@@ -136,11 +138,11 @@ Automatic reconnect retries persist with bounded backoff. When the same session 
 - The client receives a fresh authoritative projection; it does not rely on locally cached simulation state.
 - In Loading or InProgress, reconnect does not restart or rewind the scenario.
 
-The target lifecycle also permits reconnect during GameOver so a refreshed player can see the terminal result and participate in the return. The current runtime processes `Identify` during Lobby, Loading, and InProgress but not GameOver; this is an implementation gap rather than a desired loss of identity at the final screen.
+Identification is a lifecycle handshake in every phase, including GameOver (`src/lobby/server.rs`). A refreshed or recreated console can reconnect for the terminal result and lobby return rather than losing its one-time handshake on the final screen.
 
 ### Host disconnect
 
-In the current single-host model, losing the host is different from losing a phone: the authoritative simulation has gone. Clients may report and retry the link, but they cannot elect a replacement or continue locally. Refreshing the host may also create a new join route that existing clients do not know. Host migration and recovery belong to the accepted future P2P multi-ship design, not the current baseline promise.
+Losing the sole authoritative host stops its simulation; phones cannot continue it locally. Multi-host sessions have deterministic departure, Backfill and snapshot/recovery machinery on surviving peers. **Plan — T5:** close larger-session replacement/failure and real-network/long-session acceptance. This machinery does not provide automatic migration when no authoritative peer survives.
 
 ## 3. Pre-scenario selection and lobby
 

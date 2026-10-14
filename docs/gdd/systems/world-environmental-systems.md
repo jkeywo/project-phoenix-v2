@@ -5,7 +5,7 @@
 | Document | GDD-WORLD-ENVIRONMENT |
 | Status | Working draft; current systems and accepted future field direction are separated below |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-10-02 |
 | Scope | Spatial world, celestial bodies, terrain, regions, fields, traffic, infrastructure, scanning/evidence, and external operations |
 | Authority | Player-facing systemic design. Entity/world TOML, runtime systems, validators, and PASM remain canonical. |
 
@@ -50,9 +50,9 @@ Regions are authored sphere, box, or torus volumes. The host tracks ship members
 
 A region’s radar presentation comes from its authored shape or asteroid-field geometry plus `radar_appearance.region_colour`. Human and AI systems consume the same resulting modifiers and availability state. Scenario scripts may respond to flags/events caused by region interaction but should not manually apply a duplicate effect.
 
-## Environmental fields: accepted direction
+## Plan — C2 environmental fields; C3 physical sources
 
-The accepted Band-B field design upgrades the region system in place rather than introducing a second volume model. A field adds analytic parameters for intensity, falloff, motion, growth, and a logical-tick envelope. Sampling is a pure function of field parameters, position, and tick; snapshots carry parameters, not per-position samples. Existing binary regions are the step-falloff special case.
+The planned C2 field design upgrades Regions with intensity, falloff, motion, growth and tick envelopes; C3 adds physical source emission. Sampling is a pure function of parameters, position and tick. Snapshots carry parameters rather than samples; binary Regions are the step-falloff special case. This is Plan rather than a delivered general field model.
 
 Planned field consumers are radiation damage through the normal damage path; interference that degrades observation, comms, and the AI coordination bus symmetrically; and debris that creates seeded strike risk plus Helm/Navigation advisories. Falling Skyway’s current storm is intended to migrate without changing behaviour first. This is accepted design direction, not all current runtime capability.
 
@@ -91,7 +91,7 @@ A refusal or interruption must state its reason in player language. A completed 
 
 Current scanning capability is authored on the observing hull through range bands, condition precision, capacity reporting, power requirements, and environmental degradation. It reads the target’s authoritative published or scannable structure state. Scenario evidence and dossiers combine identity, faction, comms standing, infrastructure state, commitments, and gathered evidence with provenance.
 
-The accepted future epistemic model keys observations/evidence by observing ship. Confidence advances through discrete detected, rough, fair, and precise tiers, with deterministic uncertainty and interference caps. One scan axis chooses wide accumulation across subjects or focused rapid work on one subject. Evidence transfers between ships only through Comms with provenance. This model is planned direction and especially relevant to future multi-ship play.
+**Plan — C2:** per-observer observations/evidence, detected/rough/fair/precise confidence, uncertainty/interference caps, wide/focused scanning and Comms transfer. Current multi-ship references and GM observer-specific reports do not complete this model. C3 physical/map/local space, C4 networks and C8 Orbital Mode remain Plan; see [Plan Baseline](../future/roadmap-baseline.md).
 
 ## Dossiers and commitments
 

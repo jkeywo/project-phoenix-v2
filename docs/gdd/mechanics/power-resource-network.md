@@ -3,6 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Current allocation mechanic with accepted network extension |
+| Last updated | 2026-10-02 |
 | Scope | Reactor output, battery, power groups, exhaustion, heat and future supply networks |
 | Audience | Design, content, UI, simulation and playtest |
 
@@ -46,7 +47,7 @@ AI Power uses authored rules to bid for group levels. Each rule can require a mi
 
 Backfill should keep the ship viable without flattening every interesting trade-off. Conservative defaults are appropriate for routine play, while scenario or hull policies may accept overdraw under named conditions.
 
-## Accepted supply-and-demand extension
+## Plan — C4 supply-and-demand extension
 
 The accepted future model represents generation, storage and consumption as a connected resource network. A reactor supplies components and a battery buffers demand. Systems state their demand and priority; the resolver produces delivered power and an inspectable reason when demand is unmet.
 

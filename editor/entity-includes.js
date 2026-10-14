@@ -65,6 +65,7 @@ const COMPOSE_KEYED_ARRAYS = {
   'system.config.ai.tree.state': 'id',
   'system.config.ai.tree.state.task': 'id',
   'system.config.ai.tree.state.transition': 'id',
+  'infrastructure.capacity': 'id',
   'torpedoes.tubes': 'id',
   'weapons_console.blaster_banks': 'id',
   'weapons_console.phaser_banks': 'id',
@@ -114,7 +115,10 @@ function joinPath(prefix, key) {
 
 // ── Merge (MergePolicy::ComposeFragments) ────────────────────────────────────
 
+const atomicResourceEndpoint = path => path.startsWith('resource_services.') || path === 'umbilical.link.provider';
+
 function mergeAt(path, template, override) {
+  if (atomicResourceEndpoint(path) && isPlainObject(override)) return deepClone(override);
   if (isPlainObject(template) && isPlainObject(override)) {
     const result = { ...template };
     for (const key of Object.keys(override)) {
@@ -230,6 +234,9 @@ function insertLeaf(prefix, origin, out) {
  * separate — see the Rust `record_leaves` doc.
  */
 function recordLeaves(prefix, mergePath, value, step, out) {
+  if (atomicResourceEndpoint(mergePath) && isPlainObject(value)) {
+    for (const key of out.keys()) if (key === prefix || isDescendant(key, prefix)) out.delete(key);
+  }
   const origin = () => ({ source: step.source, chain: step.chain.slice() });
   if (isPlainObject(value)) {
     const keys = Object.keys(value);

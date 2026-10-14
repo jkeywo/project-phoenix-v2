@@ -113,6 +113,10 @@ pub struct EntityConfig {
     /// section existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infrastructure: Option<crate::infrastructure::InfrastructureConfig>,
+    /// Named local resource endpoints; bindings confer no control or information.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub resource_services:
+        std::collections::BTreeMap<String, crate::resources::service::ResourceEndpoint>,
     /// The sensor suite's scan capability (issue #1032). Present on a hull whose
     /// science station can take a reading of an external structure; absent for
     /// everything else, which can scan nothing and is refused by name if asked.
@@ -623,7 +627,10 @@ impl EntityConfig {
             if let Some(ship) = &config.ship_config {
                 for system in ship.systems.iter().filter(|s| is_weapon(&s.kind)) {
                     if !reserve.weapons.get(&system.id.0).is_some_and(|w| w.valid()) {
-                        return Err(SerdeError::custom(format!("strike reserve requires a positive finite cost and damage multiplier >= 1 for weapon '{}'", system.id.0)));
+                        return Err(SerdeError::custom(format!(
+                            "strike reserve requires a positive finite cost and damage multiplier >= 1 for weapon '{}'",
+                            system.id.0
+                        )));
                     }
                 }
                 for (id, weapon) in &reserve.weapons {
@@ -690,6 +697,59 @@ impl EntityConfig {
         // anything.
         if let Some(ref infrastructure) = config.infrastructure {
             infrastructure.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Explicit services and overrides must name real local equipment. An
+        // unconfigured direct umbilical may be supplied by a scenario override.
+        use crate::resources::service::{ResourceEndpoint, ResourceLink, resolve_endpoint};
+        let validate_endpoint = |endpoint: &ResourceEndpoint| -> Result<(), String> {
+            match endpoint {
+                ResourceEndpoint::Capacity { id } => {
+                    if !config.infrastructure.as_ref().is_some_and(|state| {
+                        state.capacities.iter().any(|capacity| &capacity.id == id)
+                    }) {
+                        return Err(format!(
+                            "resource endpoint capacity {id:?} is not declared on this entity"
+                        ));
+                    }
+                }
+                ResourceEndpoint::TorpedoMagazine => {
+                    if config.torpedoes.is_none() {
+                        return Err(
+                            "torpedo_magazine endpoint requires [torpedoes] on this entity".into(),
+                        );
+                    }
+                }
+            }
+            Ok(())
+        };
+        for (name, endpoint) in &config.resource_services {
+            if name.trim().is_empty() {
+                return Err(SerdeError::custom(
+                    "resource service must have a non-empty name",
+                ));
+            }
+            if let ResourceEndpoint::Capacity { id } = endpoint {
+                if id.trim().is_empty() {
+                    return Err(SerdeError::custom(
+                        "capacity endpoint must have a non-empty id",
+                    ));
+                }
+            }
+            validate_endpoint(endpoint).map_err(SerdeError::custom)?;
+        }
+        if let Some(umbilical) = &config.umbilical {
+            let endpoint = resolve_endpoint(
+                &umbilical.capacity,
+                &config.resource_services,
+                &umbilical.link,
+            )
+            .map_err(SerdeError::custom)?;
+            if !umbilical.link.is_empty()
+                || config.resource_services.contains_key(&umbilical.capacity)
+            {
+                validate_endpoint(&endpoint).map_err(SerdeError::custom)?;
+            }
         }
 
         // Validation: a [scan] table has to describe a fidelity ladder that can
@@ -807,7 +867,9 @@ impl EntityConfig {
                 ));
             }
             if !docks.is_empty() && config.dock.is_some() {
-                return Err(SerdeError::custom("active Dock tuning must move from [dock] to its dock_mating System component; remove the competing top-level [dock] table (increment 2 format)"));
+                return Err(SerdeError::custom(
+                    "active Dock tuning must move from [dock] to its dock_mating System component; remove the competing top-level [dock] table (increment 2 format)",
+                ));
             }
         }
 
@@ -1533,7 +1595,7 @@ fn validate_collider_config(collider: &ColliderConfig) -> Result<(), String> {
                     "collider.half_height is required for shape = \"Cylinder\" — a cylinder \
                      with no half-height is a zero-thickness disc nothing can collide with"
                         .to_string(),
-                )
+                );
             }
             // NaN spelled out rather than left to `!(h > 0.0)`: it is the same
             // failure as zero — a body rapier cannot make sense of — and it
@@ -1541,7 +1603,7 @@ fn validate_collider_config(collider: &ColliderConfig) -> Result<(), String> {
             Some(h) if h.is_nan() || h <= 0.0 => {
                 return Err(format!(
                     "collider.half_height must be positive for shape = \"Cylinder\", got {h}"
-                ))
+                ));
             }
             Some(_) => {}
         }

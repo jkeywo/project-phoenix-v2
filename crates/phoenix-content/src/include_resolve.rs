@@ -105,7 +105,7 @@
 use std::collections::BTreeMap;
 
 use crate::entity_override::{ArrayRule, MergePolicy};
-use crate::findings::{line_of, Severity, SourceLocation, WorldFinding};
+use crate::findings::{Severity, SourceLocation, WorldFinding, line_of};
 
 /// The authored key that lists a template's ordered includes.
 pub const INCLUDES_KEY: &str = "includes";
@@ -375,6 +375,9 @@ fn record_leaves(
     };
     match value {
         toml::Value::Table(table) => {
+            if crate::entity_override::is_atomic_resource_endpoint(merge_path) {
+                out.retain(|address, _| address != prefix && !is_descendant(address, prefix));
+            }
             if table.is_empty() {
                 if !prefix.is_empty() {
                     insert_leaf(prefix, origin(), out);

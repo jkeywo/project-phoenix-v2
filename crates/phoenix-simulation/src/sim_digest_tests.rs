@@ -777,6 +777,7 @@ fn dock_channels_and_mechanical_state_move_the_digest() {
 fn spawn_umbilical(world: &mut World, uuid: &str, running: bool) {
     let mut umbilical = TransferUmbilical::new(
         crate::umbilical::UmbilicalConfig {
+            link: Default::default(),
             capacity: "reserve_fuel".into(),
             rate: 5.0,
             direction: crate::umbilical::UmbilicalDirection::Deliver,
@@ -2865,14 +2866,16 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
         station_alert,
         fold_internal_repair_namespace(&alerts, FOLD_SEED)
     );
-    assert!(FOLD_STAGES
-        .iter()
-        .any(|(name, _)| *name == "internal-repair"));
+    assert!(
+        FOLD_STAGES
+            .iter()
+            .any(|(name, _)| *name == "internal-repair")
+    );
 }
 
 #[test]
 fn system_tree_digest_covers_private_calls_and_stable_system_identity() {
-    use crate::ai::state_tree_runtime::{continued_tree, ShipAiTreeRuntime};
+    use crate::ai::state_tree_runtime::{ShipAiTreeRuntime, continued_tree};
     use crate::core::messages::SystemId;
     let make = |reverse: bool, progressed: bool| {
         let mut world = fold_world();

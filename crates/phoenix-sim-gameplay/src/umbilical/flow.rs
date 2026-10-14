@@ -54,6 +54,12 @@ pub struct UmbilicalConfig {
     /// refused ([`UmbilicalRefusal::NoCapacity`]). Not display text — a machine
     /// name, the same as a `transfer`'s capacity id.
     pub capacity: String,
+    /// Explicit local service/provider override. Empty uses the resource-name default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::resources::service::ResourceLink::is_empty"
+    )]
+    pub link: crate::resources::service::ResourceLink,
     /// How much of the capacity crosses per second, in the capacity's own
     /// authored units. Metered onto the whole-number ledger through the carry, so
     /// a rate finer than one unit per tick still moves at the authored rate over

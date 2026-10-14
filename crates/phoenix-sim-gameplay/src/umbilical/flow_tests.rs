@@ -2,6 +2,7 @@ use super::*;
 
 fn config(direction: UmbilicalDirection, rate: f32) -> UmbilicalConfig {
     UmbilicalConfig {
+        link: Default::default(),
         capacity: "reserve_fuel".into(),
         rate,
         direction,
@@ -32,22 +33,27 @@ fn ctx(carry: f32) -> FlowContext {
 fn a_valid_config_passes_and_the_unrunnable_ones_are_named() {
     assert!(config(UmbilicalDirection::Deliver, 5.0).validate().is_ok());
     let blank = UmbilicalConfig {
+        link: Default::default(),
         capacity: "  ".into(),
         ..config(UmbilicalDirection::Deliver, 5.0)
     };
     assert!(blank.validate().unwrap_err().contains("capacity"));
-    assert!(config(UmbilicalDirection::Deliver, 0.0)
-        .validate()
-        .unwrap_err()
-        .contains("rate"));
+    assert!(
+        config(UmbilicalDirection::Deliver, 0.0)
+            .validate()
+            .unwrap_err()
+            .contains("rate")
+    );
     let unpowered = UmbilicalConfig {
         min_power_level: 0,
         ..config(UmbilicalDirection::Deliver, 5.0)
     };
-    assert!(unpowered
-        .validate()
-        .unwrap_err()
-        .contains("min_power_level"));
+    assert!(
+        unpowered
+            .validate()
+            .unwrap_err()
+            .contains("min_power_level")
+    );
 }
 
 // ── The gates ────────────────────────────────────────────────────────────
@@ -173,14 +179,14 @@ fn deliver_clamps_at_source_depletion() {
         &ctx(0.0),
     );
     assert_eq!(
-            v,
-            FlowVerdict::Flowing {
-                operator_delta: -3,
-                partner_delta: 3,
-                carry: 0.0
-            },
-            "it moves only what the source holds — no undershoot below what's there, no overshoot past empty"
-        );
+        v,
+        FlowVerdict::Flowing {
+            operator_delta: -3,
+            partner_delta: 3,
+            carry: 0.0
+        },
+        "it moves only what the source holds — no undershoot below what's there, no overshoot past empty"
+    );
 }
 
 #[test]
@@ -211,14 +217,14 @@ fn collect_clamps_at_source_depletion_and_headroom_too() {
         &ctx(0.0),
     );
     assert_eq!(
-            v,
-            FlowVerdict::Flowing {
-                operator_delta: 2,
-                partner_delta: -2,
-                carry: 0.0
-            },
-            "the tighter of the partner's 4 and the operator's headroom 2 wins — clamps both ways when collecting"
-        );
+        v,
+        FlowVerdict::Flowing {
+            operator_delta: 2,
+            partner_delta: -2,
+            carry: 0.0
+        },
+        "the tighter of the partner's 4 and the operator's headroom 2 wins — clamps both ways when collecting"
+    );
 }
 
 #[test]

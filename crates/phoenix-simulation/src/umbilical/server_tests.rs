@@ -33,6 +33,7 @@ fn capacity(level: i64, ceiling: i64) -> InfrastructureCondition {
 fn umbilical() -> TransferUmbilical {
     TransferUmbilical::new(
         UmbilicalConfig {
+            link: Default::default(),
             capacity: "reserve_fuel".into(),
             rate: 5.0,
             direction: UmbilicalDirection::Deliver,
@@ -137,10 +138,11 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
         ),
         1
     );
-    assert!(app
-        .world()
-        .get::<TransferUmbilical>(operator)
-        .is_some_and(|umbilical| umbilical.running));
+    assert!(
+        app.world()
+            .get::<TransferUmbilical>(operator)
+            .is_some_and(|umbilical| umbilical.running)
+    );
 
     app.world_mut()
         .entity_mut(operator)
@@ -266,6 +268,7 @@ fn capacity_config(amount: i64, ceiling: i64) -> InfrastructureConfig {
 
 fn flow_config() -> UmbilicalConfig {
     UmbilicalConfig {
+        link: Default::default(),
         capacity: "fuel".into(),
         rate: 10.0,
         direction: UmbilicalDirection::Deliver,

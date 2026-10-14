@@ -15,6 +15,9 @@
 /// `entity_loader` reconstructs the old algorithm from.
 pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     match (template, override_) {
+        (toml::Value::Table(_), toml::Value::Table(_)) if is_atomic_resource_endpoint(path) => {
+            override_.clone()
+        }
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {
             let mut result = t_table.clone();
             for (key, o_val) in o_table {
@@ -171,6 +174,7 @@ const COMPOSE_KEYED_ARRAYS: &[(&str, &str)] = &[
     ("repair.workflow.tree.state", "id"),
     ("repair.workflow.tree.state.task", "id"),
     ("repair.workflow.tree.state.transition", "id"),
+    ("infrastructure.capacity", "id"),
     ("torpedoes.tubes", "id"),
     ("weapons_console.blaster_banks", "id"),
     ("weapons_console.phaser_banks", "id"),
@@ -339,6 +343,12 @@ pub fn reject_unhonoured_removals(
     }
 }
 
+/// Resource endpoint bindings are tagged values, not independent table fields.
+/// An explicit replacement must not retain fields from the previous variant.
+pub fn is_atomic_resource_endpoint(path: &str) -> bool {
+    path.starts_with("resource_services.") || path == "umbilical.link.provider"
+}
+
 fn merge_at(
     path: &str,
     template: &toml::Value,
@@ -346,6 +356,9 @@ fn merge_at(
     policy: MergePolicy,
 ) -> toml::Value {
     match (template, override_) {
+        (toml::Value::Table(_), toml::Value::Table(_)) if is_atomic_resource_endpoint(path) => {
+            override_.clone()
+        }
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {
             let mut result = t_table.clone();
             for (key, o_val) in o_table {

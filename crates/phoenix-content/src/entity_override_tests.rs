@@ -124,11 +124,13 @@ fn compose_layer_empty_tags_still_clears() {
     let over: toml::Value = toml::from_str(r#"tags = []"#).unwrap();
     let result = merge_entity_config_toml_with(&template, &over, MergePolicy::ComposeFragments)
         .expect("ComposeFragments honours the tombstone, so it never rejects one");
-    assert!(result
-        .get("tags")
-        .and_then(|v| v.as_array())
-        .unwrap()
-        .is_empty());
+    assert!(
+        result
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1060,4 +1062,39 @@ action = { value = { source = "literal", value = false } }
         base["repair"]["workflow"]["tree"][0]["state"][0]["task"][0],
         tasks[0]
     );
+}
+
+#[test]
+fn resource_endpoint_variants_replace_and_capacity_entries_keep_identity() {
+    let base: toml::Value = toml::from_str(
+        r#"
+[resource_services.torpedoes]
+kind = "capacity"
+id = "spares"
+[[infrastructure.capacity]]
+id = "fuel"
+amount = 10
+[[infrastructure.capacity]]
+id = "spares"
+amount = 3
+"#,
+    )
+    .unwrap();
+    let patch: toml::Value = toml::from_str(
+        r#"
+[resource_services.torpedoes]
+kind = "torpedo_magazine"
+[[infrastructure.capacity]]
+id = "fuel"
+amount = 7
+"#,
+    )
+    .unwrap();
+    let merged =
+        merge_entity_config_toml_with(&base, &patch, MergePolicy::ComposeFragments).unwrap();
+    assert!(merged["resource_services"]["torpedoes"].get("id").is_none());
+    let capacities = merged["infrastructure"]["capacity"].as_array().unwrap();
+    assert_eq!(capacities.len(), 2);
+    assert_eq!(capacities[0]["amount"].as_integer(), Some(7));
+    assert_eq!(capacities[1]["id"].as_str(), Some("spares"));
 }

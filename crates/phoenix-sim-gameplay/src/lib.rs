@@ -20,6 +20,7 @@ pub mod objectives;
 pub mod radar_config;
 pub mod reference_grid;
 pub mod regions;
+pub mod resources;
 pub mod ship;
 pub mod weapons;
 pub mod world {

@@ -1709,7 +1709,7 @@ pub fn torpedo_tubes_fillable(
 
     // And finally the rounds: enough left in the magazine to cover what the
     // tubes are still short of.
-    sys.torpedoes_remaining >= sys.salvo_shortfall()
+    sys.torpedoes_remaining() >= sys.salvo_shortfall()
 }
 
 /// Fold this fine system's OWN private memory into the shared fact snapshot

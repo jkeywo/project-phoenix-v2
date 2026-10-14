@@ -13,6 +13,7 @@
 //! Coordinate system: same as `ship_physics` / `radar` — XZ plane, Y-up.
 //! Ship forward is −Z when yaw = 0.
 
+use crate::resources::{reserve_requirements, ResourceRequirement, Stock};
 use crate::simmath;
 use crate::weapons::pattern::BarrelPattern;
 use std::f32::consts::PI;
@@ -430,7 +431,8 @@ pub enum LoadTickOutcome {
 pub struct TorpedoSystem {
     pub tubes: Vec<TorpedoTube>,
     pub config: TorpedoConfig,
-    pub torpedoes_remaining: u32,
+    /// Physical rounds in the magazine, including claimed rounds being loaded.
+    pub magazine: Stock,
     pub in_flight: Vec<Torpedo>,
     /// Per-tube burst-fire pending state (issue #632). Entries are removed
     /// when their `pending` count reaches 0.
@@ -551,7 +553,8 @@ impl TorpedoSystem {
         Self {
             tubes,
             config,
-            torpedoes_remaining: count,
+            magazine: Stock::new(i64::from(count), i64::from(count))
+                .expect("u32 ammunition is bounded"),
             in_flight: Vec::new(),
             burst_states: Vec::new(),
         }
@@ -594,7 +597,8 @@ impl TorpedoSystem {
         Self {
             tubes,
             config,
-            torpedoes_remaining: count,
+            magazine: Stock::new(i64::from(count), i64::from(count))
+                .expect("u32 ammunition is bounded"),
             in_flight: Vec::new(),
             burst_states: Vec::new(),
         }
@@ -635,102 +639,152 @@ impl TorpedoSystem {
             .sum()
     }
 
-    /// Every round this ship still HAS: the magazine, plus the rounds already
-    /// moved out of it into the tubes (issue #943).
-    ///
-    /// `torpedoes_remaining` alone is the rounds left to *reload* with, not the
-    /// rounds aboard: the magazine is debited when a load STARTS
-    /// ([`Self::start_load`], [`Self::claim_magazine_round`], the auto-load
-    /// block in [`Self::tick`]), so a round parked in a tube has already left
-    /// the counter. A hull whose tube doctrine keeps its tubes topped up
-    /// therefore reads permanently short by its parked volley — the
-    /// `alliance_destroyer` parks 3 of its 12 — and anything that rations
-    /// rounds against that number strands the parked ones for ever.
-    ///
-    /// The three states are counted exactly once each, which is why this is a
-    /// method and not a call-site sum:
-    /// * `Loaded`/`Unloading` rounds sit in `loaded_count` (an `Unloading` tube
-    ///   keeps its round there until [`Self::tick`] completes the unload and
-    ///   moves it back to the magazine);
-    /// * a `Loading` tube's round is in NEITHER field — already debited from
-    ///   the magazine, not yet in `loaded_count` — so it is counted here from
-    ///   the state itself, the same "already paid for" reading
-    ///   [`Self::salvo_shortfall`] takes;
-    /// * everything else is in `torpedoes_remaining`.
-    ///
-    /// Rounds in flight are NOT counted: they have been spent.
+    /// Physical rounds aboard: magazine level already includes Loading claims;
+    /// ready and Unloading rounds remain in each tube until returned or fired.
+    /// In-flight rounds have been spent and are excluded.
     pub fn rounds_aboard(&self) -> u32 {
-        self.torpedoes_remaining
+        self.magazine.level as u32 + self.tubes.iter().map(|t| t.loaded_count).sum::<u32>()
+    }
+
+    /// Available ammunition retains the old magazine readout: claims disappear
+    /// from availability as soon as loading starts.
+    pub fn torpedoes_remaining(&self) -> u32 {
+        self.magazine.available() as u32
+    }
+
+    pub fn magazine_claim_id(tube_id: &str) -> String {
+        format!("torpedo-load:{tube_id}")
+    }
+
+    /// Ready rounds belong to tubes but still occupy this ship's ammunition room.
+    /// Loading rounds are already retained within the magazine's physical level.
+    pub fn magazine_headroom(&self) -> i64 {
+        self.magazine
+            .headroom()
+            .saturating_sub(
+                self.tubes
+                    .iter()
+                    .map(|t| i64::from(t.loaded_count))
+                    .sum::<i64>(),
+            )
+            .max(0)
+    }
+
+    pub fn replenish(&mut self, amount: i64) -> i64 {
+        self.magazine
+            .adjust(amount.max(0).min(self.magazine_headroom()))
+    }
+
+    /// Check canonical claims against the tube work they support on restore.
+    pub fn validate_magazine(&self) -> Result<(), String> {
+        self.magazine.validate()?;
+        if self.magazine.ceiling != i64::from(self.config.count) {
+            return Err("magazine ceiling does not match authored ammunition capacity".into());
+        }
+        for tube in &self.tubes {
+            let claimed = self
+                .magazine
+                .reserved
+                .get(&Self::magazine_claim_id(&tube.id))
+                .copied();
+            let expected = matches!(tube.load_state, TubeLoadState::Loading { .. }).then_some(1);
+            if claimed != expected {
+                return Err(format!(
+                    "magazine claim does not match loading tube '{}'",
+                    tube.id
+                ));
+            }
+        }
+        if self.magazine.reserved.len()
+            != self
+                .tubes
+                .iter()
+                .filter(|t| matches!(t.load_state, TubeLoadState::Loading { .. }))
+                .count()
+        {
+            return Err("magazine contains an unknown tube claim".into());
+        }
+        if self.magazine.level
             + self
                 .tubes
                 .iter()
-                .map(|t| {
-                    t.loaded_count
-                        + u32::from(matches!(t.load_state, TubeLoadState::Loading { .. }))
-                })
-                .sum::<u32>()
+                .map(|t| i64::from(t.loaded_count))
+                .sum::<i64>()
+            > self.magazine.ceiling
+        {
+            return Err("magazine and tube rounds exceed ammunition capacity".into());
+        }
+        Ok(())
     }
 
     /// Start loading a torpedo into the given tube.
     ///
-    /// Consumes one torpedo from the shared pool. Returns `false` if the pool
+    /// Claims one torpedo from the shared pool. Returns `false` if the pool
     /// is empty, the tube id is unknown, the tube is not in the `Unloaded`
     /// state, or the tube is already at `volley_max` capacity.
     pub fn start_load(&mut self, tube_id: &str) -> bool {
-        if self.torpedoes_remaining == 0 {
+        if !self.claim_magazine_round(tube_id) {
             return false;
         }
-        let idx = self.tubes.iter().position(|t| t.id == tube_id);
-        let Some(idx) = idx else {
-            return false;
-        };
-        if self.tubes[idx].load_state != TubeLoadState::Unloaded {
-            return false;
+        if self.start_load_reserved(tube_id) {
+            true
+        } else {
+            self.release_magazine_round(tube_id);
+            false
         }
-        if self.tubes[idx].loaded_count >= self.tubes[idx].volley_max {
-            return false;
-        }
-        self.torpedoes_remaining -= 1;
-        self.tubes[idx].start_load();
-        true
     }
 
     /// Start loading a torpedo into the given tube *without* consuming from
     /// the shared magazine (issue #512).
     ///
-    /// Used by the Bevy `handle_torpedo_magazine_inter_system` consumer after
-    /// the magazine has already been decremented via the channel-2
-    /// [`crate::core::messages::InterSystemPayload::ClaimTorpedoRound`] transaction.
-    /// The caller is responsible for having granted the round.
+    /// Used after the magazine has granted this tube a next-stage claim through
+    /// the channel-2 `ClaimTorpedoRound` transaction.
     ///
     /// Returns `false` if the tube id is unknown, the tube is not in the
     /// `Unloaded` state, or the tube is at `volley_max` capacity. Does NOT
-    /// check magazine stock.
+    /// claim another round; it requires the matching pregranted reservation.
     pub fn start_load_reserved(&mut self, tube_id: &str) -> bool {
-        let idx = self.tubes.iter().position(|t| t.id == tube_id);
-        let Some(idx) = idx else {
+        let Some(tube) = self.tubes.iter_mut().find(|t| t.id == tube_id) else {
             return false;
         };
-        if self.tubes[idx].load_state != TubeLoadState::Unloaded {
+        if tube.load_state != TubeLoadState::Unloaded
+            || tube.loaded_count >= tube.volley_max
+            || self
+                .magazine
+                .reserved
+                .get(&Self::magazine_claim_id(tube_id))
+                != Some(&1)
+        {
             return false;
         }
-        if self.tubes[idx].loaded_count >= self.tubes[idx].volley_max {
-            return false;
-        }
-        self.tubes[idx].start_load();
+        tube.start_load();
         true
     }
 
-    /// Consume one round from the shared magazine without touching any tube
-    /// (issue #512). Used by the magazine consumer to enact a
-    /// [`crate::core::messages::InterSystemPayload::ClaimTorpedoRound`]. Returns
-    /// `false` when the magazine is empty (claim refused).
-    pub fn claim_magazine_round(&mut self) -> bool {
-        if self.torpedoes_remaining == 0 {
+    /// Atomically claim the next round for an eligible tube. A repeated claim
+    /// cannot reserve a second round, and loading tubes cannot claim again.
+    pub fn claim_magazine_round(&mut self, tube_id: &str) -> bool {
+        let Some(tube) = self.tube(tube_id) else {
+            return false;
+        };
+        if tube.load_state != TubeLoadState::Unloaded || tube.loaded_count >= tube.volley_max {
             return false;
         }
-        self.torpedoes_remaining -= 1;
-        true
+        reserve_requirements(
+            std::slice::from_mut(&mut self.magazine),
+            &[ResourceRequirement {
+                stock: 0,
+                claim: Self::magazine_claim_id(tube_id),
+                amount: 1,
+            }],
+        )
+        .is_ok()
+    }
+
+    pub fn release_magazine_round(&mut self, tube_id: &str) -> bool {
+        self.magazine
+            .release(&Self::magazine_claim_id(tube_id))
+            .is_some()
     }
 
     /// Start unloading (or cancel a load in progress).
@@ -756,7 +810,7 @@ impl TorpedoSystem {
         if is_loading {
             // Cancel in-progress load, return torpedo to pool.
             self.tubes[idx].start_unload();
-            self.torpedoes_remaining += 1;
+            self.release_magazine_round(tube_id);
             true
         } else if is_unloading {
             false
@@ -867,6 +921,12 @@ impl TorpedoSystem {
             (origin, barrel, step)
         };
 
+        // A partial ready volley can fire while its next round is loading.
+        // Firing resets that activity, so release its unfinished claim rather
+        // than losing a physical round or leaving an orphan reservation.
+        if matches!(self.tubes[idx].load_state, TubeLoadState::Loading { .. }) {
+            self.release_magazine_round(tube_id);
+        }
         self.tubes[idx].mark_fired(); // sets loaded_count = 0, load_state = Unloaded
 
         // Round 0: the immediate launch.
@@ -927,7 +987,13 @@ impl TorpedoSystem {
             let outcome = t.tick(dt);
             match outcome {
                 LoadTickOutcome::LoadedOne => {
-                    t.loaded_count += 1;
+                    if self
+                        .magazine
+                        .consume(&Self::magazine_claim_id(&t.id))
+                        .is_some()
+                    {
+                        t.loaded_count += 1;
+                    }
                 }
                 LoadTickOutcome::UnloadedOne => {
                     if t.loaded_count > 0 {
@@ -939,7 +1005,7 @@ impl TorpedoSystem {
             }
         }
         // Return unloaded torpedoes to the magazine.
-        self.torpedoes_remaining += unload_completions;
+        self.magazine.adjust(i64::from(unload_completions));
 
         // ── Auto-load toward target_count ─────────────────────────────────
         let n_tubes = self.tubes.len();
@@ -952,12 +1018,12 @@ impl TorpedoSystem {
                 )
                 && tube.loaded_count < tube.target_count
                 && tube.loaded_count < tube.volley_max
-                && self.torpedoes_remaining > 0
+                && self.torpedoes_remaining() > 0
             {
-                self.torpedoes_remaining -= 1;
-                // start_load() requires Unloaded state, so reset from Loaded first
+                // start_load() requires Unloaded state, so reset from Loaded first.
                 self.tubes[i].load_state = TubeLoadState::Unloaded;
-                self.tubes[i].start_load();
+                let id = self.tubes[i].id.clone();
+                self.start_load(&id);
             }
         }
 

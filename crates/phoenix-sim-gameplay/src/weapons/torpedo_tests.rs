@@ -128,7 +128,8 @@ fn rounds_aboard_only_falls_when_a_round_is_launched() {
     let mut sys = default_system();
     let aboard = sys.rounds_aboard();
     assert_eq!(
-        aboard, sys.torpedoes_remaining,
+        aboard,
+        sys.torpedoes_remaining(),
         "with every tube empty the two measures agree — they only diverge \
          once rounds are parked in tubes, which is the whole defect"
     );
@@ -137,7 +138,7 @@ fn rounds_aboard_only_falls_when_a_round_is_launched() {
     // risen yet, the one moment the round is in neither field.
     sys.tubes[0].target_count = 1;
     assert!(sys.start_load("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, aboard - 1);
+    assert_eq!(sys.torpedoes_remaining(), aboard - 1);
     assert_eq!(
         sys.rounds_aboard(),
         aboard,
@@ -157,7 +158,7 @@ fn rounds_aboard_only_falls_when_a_round_is_launched() {
     assert!(sys.start_unload("fore_port"));
     assert_eq!(sys.rounds_aboard(), aboard);
     sys.tick(load_time, &HashMap::new(), &mut no_uuid);
-    assert_eq!(sys.torpedoes_remaining, aboard);
+    assert_eq!(sys.torpedoes_remaining(), aboard);
     assert_eq!(sys.rounds_aboard(), aboard);
 
     // Only a launch spends one.
@@ -173,9 +174,9 @@ fn rounds_aboard_only_falls_when_a_round_is_launched() {
 #[test]
 fn start_load_decrements_torpedo_count() {
     let mut sys = default_system();
-    assert_eq!(sys.torpedoes_remaining, 10);
+    assert_eq!(sys.torpedoes_remaining(), 10);
     assert!(sys.start_load("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 9);
+    assert_eq!(sys.torpedoes_remaining(), 9);
 }
 
 #[test]
@@ -185,7 +186,7 @@ fn start_load_fails_when_no_torpedoes() {
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     assert!(!sys.start_load("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 0);
+    assert_eq!(sys.torpedoes_remaining(), 0);
 }
 
 // ── channel-2 magazine claim helpers (issue #512) ─────────────────────
@@ -193,9 +194,9 @@ fn start_load_fails_when_no_torpedoes() {
 #[test]
 fn claim_magazine_round_decrements_when_available() {
     let mut sys = default_system();
-    assert_eq!(sys.torpedoes_remaining, 10);
-    assert!(sys.claim_magazine_round());
-    assert_eq!(sys.torpedoes_remaining, 9);
+    assert_eq!(sys.torpedoes_remaining(), 10);
+    assert!(sys.claim_magazine_round("fore_port"));
+    assert_eq!(sys.torpedoes_remaining(), 9);
 }
 
 #[test]
@@ -204,18 +205,20 @@ fn claim_magazine_round_returns_false_when_empty() {
     config.count = 0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
-    assert!(!sys.claim_magazine_round());
-    assert_eq!(sys.torpedoes_remaining, 0);
+    assert!(!sys.claim_magazine_round("fore_port"));
+    assert_eq!(sys.torpedoes_remaining(), 0);
 }
 
 #[test]
 fn start_load_reserved_begins_loading_without_touching_magazine() {
     let mut sys = default_system();
-    assert_eq!(sys.torpedoes_remaining, 10);
+    assert_eq!(sys.torpedoes_remaining(), 10);
+    assert!(sys.claim_magazine_round("fore_port"));
     assert!(sys.start_load_reserved("fore_port"));
     assert_eq!(
-        sys.torpedoes_remaining, 10,
-        "reserved load must not touch the magazine counter (caller decremented already)"
+        sys.torpedoes_remaining(),
+        9,
+        "reserved load must not claim twice (caller reserved already)"
     );
     assert!(matches!(
         sys.tube("fore_port").unwrap().load_state,
@@ -232,6 +235,7 @@ fn start_load_reserved_fails_for_unknown_tube() {
 #[test]
 fn start_load_reserved_fails_when_tube_not_unloaded() {
     let mut sys = default_system();
+    assert!(sys.claim_magazine_round("fore_port"));
     assert!(sys.start_load_reserved("fore_port"));
     // Second call must fail because tube is now Loading.
     assert!(!sys.start_load_reserved("fore_port"));
@@ -242,14 +246,14 @@ fn launch_does_not_change_torpedo_count() {
     let mut sys = loaded_system();
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
     // Count was decremented at load time, not at launch
-    assert_eq!(sys.torpedoes_remaining, 7);
+    assert_eq!(sys.torpedoes_remaining(), 7);
 }
 
 #[test]
 fn start_load_fails_for_unknown_tube() {
     let mut sys = default_system();
     assert!(!sys.start_load("dorsal"));
-    assert_eq!(sys.torpedoes_remaining, 10);
+    assert_eq!(sys.torpedoes_remaining(), 10);
 }
 
 #[test]
@@ -291,21 +295,21 @@ fn launch_from_unknown_tube_returns_unknown() {
 fn unload_cancelling_load_returns_torpedo_to_pool() {
     let mut sys = default_system();
     assert!(sys.start_load("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 9);
+    assert_eq!(sys.torpedoes_remaining(), 9);
     assert!(sys.start_unload("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 10);
+    assert_eq!(sys.torpedoes_remaining(), 10);
 }
 
 #[test]
 fn start_unload_loaded_tube_starts_timer_torpedo_returned_on_completion() {
     let mut sys = default_system();
     load_tube(&mut sys, "fore_port");
-    assert_eq!(sys.torpedoes_remaining, 9);
+    assert_eq!(sys.torpedoes_remaining(), 9);
     assert!(sys.start_unload("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 9); // not returned yet
-                                            // Disable auto-management so the manual-unload test is isolated: after
-                                            // the timer fires we expect exactly one torpedo to return to the pool
-                                            // and no auto-reload to start.
+    assert_eq!(sys.torpedoes_remaining(), 9); // not returned yet
+                                              // Disable auto-management so the manual-unload test is isolated: after
+                                              // the timer fires we expect exactly one torpedo to return to the pool
+                                              // and no auto-reload to start.
     sys.tube_mut("fore_port").unwrap().target_count = 0;
     let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
     sys.tick(
@@ -313,14 +317,14 @@ fn start_unload_loaded_tube_starts_timer_torpedo_returned_on_completion() {
         &targets,
         &mut no_uuid,
     );
-    assert_eq!(sys.torpedoes_remaining, 10); // returned after timer
+    assert_eq!(sys.torpedoes_remaining(), 10); // returned after timer
 }
 
 #[test]
 fn start_unload_on_unloaded_tube_does_nothing() {
     let mut sys = default_system();
     assert!(!sys.start_unload("fore_port"));
-    assert_eq!(sys.torpedoes_remaining, 10);
+    assert_eq!(sys.torpedoes_remaining(), 10);
 }
 
 #[test]
@@ -782,7 +786,7 @@ fn auto_load_toward_target_count() {
     let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
     // First tick starts loading torpedo #1.
     sys.tick(0.0, &targets, &mut no_uuid);
-    assert_eq!(sys.torpedoes_remaining, 9);
+    assert_eq!(sys.torpedoes_remaining(), 9);
     assert!(matches!(
         sys.tube("t1").unwrap().load_state,
         TubeLoadState::Loading { .. }
@@ -790,12 +794,12 @@ fn auto_load_toward_target_count() {
     // Tick past load_time: torpedo #1 finishes, torpedo #2 starts immediately.
     sys.tick(5.0, &targets, &mut no_uuid);
     assert_eq!(sys.tube("t1").unwrap().loaded_count, 1);
-    assert_eq!(sys.torpedoes_remaining, 8); // second load started
-                                            // Tick past load_time again: torpedo #2 finishes.
+    assert_eq!(sys.torpedoes_remaining(), 8); // second load started
+                                              // Tick past load_time again: torpedo #2 finishes.
     sys.tick(5.0, &targets, &mut no_uuid);
     assert_eq!(sys.tube("t1").unwrap().loaded_count, 2);
     // No more auto-loads: loaded_count == target_count.
-    assert_eq!(sys.torpedoes_remaining, 8);
+    assert_eq!(sys.torpedoes_remaining(), 8);
 }
 
 #[test]
@@ -807,7 +811,7 @@ fn fire_volley_fires_first_torpedo_immediately_rest_in_burst() {
     let tubes = vec![volley_cfg("t1", 3)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     // Load 3 torpedoes manually.
-    sys.torpedoes_remaining -= 3;
+    sys.magazine.adjust(-i64::from(3));
     let tube = sys.tube_mut("t1").unwrap();
     tube.loaded_count = 3;
     let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
@@ -830,7 +834,7 @@ fn burst_launches_remaining_torpedoes_at_interval() {
     config.burst_interval_secs = 0.3;
     let tubes = vec![volley_cfg("t1", 3)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
-    sys.torpedoes_remaining -= 3;
+    sys.magazine.adjust(-i64::from(3));
     let tube = sys.tube_mut("t1").unwrap();
     tube.loaded_count = 3;
     sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
@@ -867,7 +871,7 @@ fn fire_with_partial_load_fires_what_is_loaded() {
     let tubes = vec![volley_cfg("t1", 4)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     // Only 2 of 4 are loaded.
-    sys.torpedoes_remaining -= 2;
+    sys.magazine.adjust(-i64::from(2));
     let tube = sys.tube_mut("t1").unwrap();
     tube.loaded_count = 2;
     let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
@@ -889,7 +893,7 @@ fn auto_unload_when_target_count_decremented() {
     let tubes = vec![volley_cfg("t1", 3)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     // Start with 2 loaded, target_count = 2 (auto-managed mode).
-    sys.torpedoes_remaining -= 2;
+    sys.magazine.adjust(-i64::from(2));
     {
         let tube = sys.tube_mut("t1").unwrap();
         tube.loaded_count = 2;
@@ -915,7 +919,8 @@ fn auto_unload_when_target_count_decremented() {
         "should stop at target_count=1"
     );
     assert_eq!(
-        sys.torpedoes_remaining, 9,
+        sys.torpedoes_remaining(),
+        9,
         "one torpedo returned to magazine"
     );
 }
@@ -930,7 +935,7 @@ fn auto_unload_when_target_set_to_zero() {
     let tubes = vec![volley_cfg("t1", 3)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     // Pre-load 2 torpedoes directly (bypass timer for test clarity).
-    sys.torpedoes_remaining -= 2;
+    sys.magazine.adjust(-i64::from(2));
     {
         let tube = sys.tube_mut("t1").unwrap();
         tube.loaded_count = 2;
@@ -964,7 +969,8 @@ fn auto_unload_when_target_set_to_zero() {
         "tube should be fully unloaded"
     );
     assert_eq!(
-        sys.torpedoes_remaining, 10,
+        sys.torpedoes_remaining(),
+        10,
         "both torpedoes returned to magazine"
     );
 }
@@ -1004,7 +1010,7 @@ fn patterned_cfg(
 /// mirror the load-time spend (so a later `launch` proves it does NOT spend
 /// again).
 fn preload(sys: &mut TorpedoSystem, tube: &str, n: u32) {
-    sys.torpedoes_remaining -= n;
+    sys.magazine.adjust(-i64::from(n));
     sys.tube_mut(tube).unwrap().loaded_count = n;
 }
 
@@ -1102,7 +1108,7 @@ fn patterned_simultaneous_step_with_one_loaded_fires_exactly_one() {
     );
     let mut sys = TorpedoSystem::from_configs(&[cfg], config);
     preload(&mut sys, "t1", 1);
-    let mag_before = sys.torpedoes_remaining;
+    let mag_before = sys.torpedoes_remaining();
 
     let origins = [(10.0, 0.0, 0.0), (20.0, 0.0, 0.0)];
     let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
@@ -1126,7 +1132,8 @@ fn patterned_simultaneous_step_with_one_loaded_fires_exactly_one() {
         "first barrel only"
     );
     assert_eq!(
-        sys.torpedoes_remaining, mag_before,
+        sys.torpedoes_remaining(),
+        mag_before,
         "launch must not spend from the magazine (spend happens at load)"
     );
 }
@@ -1143,7 +1150,7 @@ fn patterned_burst_count_bounded_by_loaded_count() {
     let cfg = patterned_cfg("t1", vec!["b0".into()], vec![barrel_step(&[0], 0.0)], 3);
     let mut sys = TorpedoSystem::from_configs(&[cfg], config);
     preload(&mut sys, "t1", 2);
-    let mag_before = sys.torpedoes_remaining;
+    let mag_before = sys.torpedoes_remaining();
 
     let origins = [(10.0, 0.0, 0.0)];
     let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
@@ -1167,7 +1174,8 @@ fn patterned_burst_count_bounded_by_loaded_count() {
     );
     assert!(sys.burst_states.is_empty());
     assert_eq!(
-        sys.torpedoes_remaining, mag_before,
+        sys.torpedoes_remaining(),
+        mag_before,
         "magazine untouched by patterned firing"
     );
 }
@@ -1381,4 +1389,113 @@ fn planar_collision_matches_2d_when_all_y_zero() {
         sys.find_detonation_hits(&hit),
         vec![("t1".to_string(), "e".to_string())]
     );
+}
+
+#[test]
+fn scarce_loading_claims_release_on_cancel_and_consume_on_completion() {
+    let mut config = TorpedoConfig::default();
+    config.count = 1;
+    let mut sys = TorpedoSystem::from_configs(&[cfg("a", 0.0, 90.0), cfg("b", 0.0, 90.0)], config);
+    sys.tube_mut("a").unwrap().target_count = 1;
+    assert!(sys.start_load("a"));
+    assert_eq!(sys.magazine.level, 1);
+    assert_eq!(sys.torpedoes_remaining(), 0);
+    assert!(!sys.start_load("b"));
+    assert!(!sys.claim_magazine_round("a"));
+    sys.validate_magazine().unwrap();
+    assert!(sys.start_unload("a"));
+    assert_eq!(sys.torpedoes_remaining(), 1);
+    assert!(sys.magazine.reserved.is_empty());
+    sys.tube_mut("a").unwrap().target_count = 0;
+    sys.tube_mut("b").unwrap().target_count = 1;
+    assert!(sys.start_load("b"));
+    sys.tick(
+        sys.tube("b").unwrap().load_time,
+        &HashMap::new(),
+        &mut no_uuid,
+    );
+    assert_eq!(sys.magazine.level, 0);
+    assert!(sys.magazine.reserved.is_empty());
+    assert_eq!(sys.tube("b").unwrap().loaded_count, 1);
+    assert_eq!(sys.rounds_aboard(), 1);
+    sys.validate_magazine().unwrap();
+}
+
+#[test]
+fn replenishment_keeps_room_for_claimed_ready_and_returning_rounds() {
+    let mut sys = loaded_system();
+    assert_eq!(sys.magazine_headroom(), 0);
+    assert_eq!(sys.replenish(100), 0);
+    sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+    assert_eq!(sys.magazine_headroom(), 1);
+    assert_eq!(sys.replenish(100), 1);
+    sys.tube_mut("fore_starboard").unwrap().target_count = 0;
+    assert!(sys.start_unload("fore_starboard"));
+    assert_eq!(sys.magazine_headroom(), 0);
+    assert_eq!(sys.replenish(1), 0);
+    sys.tick(
+        sys.tube("fore_starboard").unwrap().load_time,
+        &HashMap::new(),
+        &mut no_uuid,
+    );
+    assert_eq!(sys.rounds_aboard(), 10);
+    assert_eq!(sys.magazine_headroom(), 0);
+    sys.validate_magazine().unwrap();
+}
+
+#[test]
+fn reserved_start_requires_a_real_claim_and_restore_rejects_orphan_claims() {
+    let mut sys = default_system();
+    assert!(!sys.start_load_reserved("fore_port"));
+    assert!(!sys.claim_magazine_round("unknown"));
+    assert!(sys.claim_magazine_round("fore_port"));
+    assert!(sys.claim_magazine_round("fore_port"));
+    assert_eq!(sys.magazine.reserved.len(), 1);
+    assert!(sys.start_load_reserved("fore_port"));
+    sys.validate_magazine().unwrap();
+    sys.magazine
+        .reserved
+        .remove(&TorpedoSystem::magazine_claim_id("fore_port"));
+    assert!(sys.validate_magazine().is_err());
+    sys.magazine.reserved.insert("unknown".into(), 1);
+    assert!(sys.validate_magazine().is_err());
+}
+
+#[test]
+fn firing_a_partial_volley_releases_its_unfinished_loading_claim() {
+    let mut config = TorpedoConfig::default();
+    config.count = 5;
+    let mut tube = cfg("a", 0.0, 90.0);
+    tube.volley_max = 2;
+    let mut sys = TorpedoSystem::from_configs(&[tube], config);
+    sys.set_volley_target("a", 2);
+    sys.tick(0.0, &HashMap::new(), &mut no_uuid);
+    sys.tick(
+        sys.tube("a").unwrap().load_time,
+        &HashMap::new(),
+        &mut no_uuid,
+    );
+    assert_eq!(sys.tube("a").unwrap().loaded_count, 1);
+    assert!(matches!(
+        sys.tube("a").unwrap().load_state,
+        TubeLoadState::Loading { .. }
+    ));
+    assert_eq!(sys.torpedoes_remaining(), 3);
+    assert_eq!(sys.rounds_aboard(), 5);
+    let result = sys.launch("a", "shot".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+    assert!(matches!(
+        result,
+        LaunchResult::Launched {
+            count_remaining: 0,
+            ..
+        }
+    ));
+    assert_eq!(sys.torpedoes_remaining(), 4);
+    assert_eq!(sys.rounds_aboard(), 4);
+    assert!(sys.magazine.reserved.is_empty());
+    sys.validate_magazine().unwrap();
+    sys.tick(0.0, &HashMap::new(), &mut no_uuid);
+    assert_eq!(sys.magazine.reserved.len(), 1);
+    assert_eq!(sys.rounds_aboard(), 4);
+    sys.validate_magazine().unwrap();
 }

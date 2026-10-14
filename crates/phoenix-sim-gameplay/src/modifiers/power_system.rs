@@ -50,8 +50,7 @@ pub enum PowerAllocationError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingGroupPower {
     pub uuid: String,
-    pub group: PowerGroupId,
-    pub level: ScriptedPowerLevel,
+    pub held: bool,
 }
 
 /// Legacy payload projection. None of these fields is independently mutable

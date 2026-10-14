@@ -564,364 +564,151 @@ pub(crate) fn ai_shield_focus(
 // `emit_power_ai_command` (issue #831) likewise collapsed into the shared
 // `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
-/// The read-only resource context `ai_power_allocation` reads besides the
-/// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
-/// the session table the emit seam consults, the log filter, the global
-/// objective pool scored for the OBJECTIVE fact, and the shared AI base cadence
-/// (raw tick + interval).
-///
-/// A signature grouping only — every field keeps its type and `Option` fallback
-/// (`log`/`objectives`/`tick`/`base_interval` stay `Option` for the bare-`App`
-/// fixtures that never insert them), so the access set is byte-for-byte
-/// unchanged; the system destructures it back to its original locals at entry.
-#[derive(bevy::ecs::system::SystemParam)]
-struct PowerAiContext<'w> {
-    sessions: Res<'w, crate::lobby::Sessions>,
-    log: Option<Res<'w, crate::logging::LogFilterConfig>>,
-    objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
-    objective_instances: Option<Res<'w, crate::world::server::ObjectiveInstanceManagerRes>>,
-    tick: Option<Res<'w, crate::sim_tick::SimTick>>,
-    base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
-}
-
-/// AI power-allocation decision system (issue #784: inline stateless policy
-/// spine; admitted transport #831).
-///
-/// Reworked from the retired stateful engine (`PowerAiConfigResource` +
-/// `ShipPowerAiState` `EngageState` hysteresis, #762) onto the same inline
-/// stateless `AiPolicy` spine as #779–#783. For each of the ship's AUTHORED
-/// power groups it resolves that group's own output channel — the channel IS the
-/// power group id, dynamic per-ship data, NOT a fixed catalogue (AC1) — over an
-/// immutable per-tick fact snapshot, and emits the winning
-/// `SetPowerGroupAllocation(level)` verb's absolute target as an admitted
-/// `SetPowerGroupAllocation` payload targeting `POWER_REACTOR_SYSTEM_ID`, for
-/// `ship::power::handle_power_messages` to apply later this tick — the same
-/// admitted seam a human Power operator uses (AGENTS.md rule #6). It never writes
-/// `ShipPowerSystem` directly.
-///
-/// # Gating (AC5 human Control Source)
-/// - `ShipSystemControlSources.policy_for(power_reactor_system_id()).operate_ai`
-///   — a human holding the Power station flips this to false, so the AI stands
-///   down at the decide gate. No per-tick state to reset (statelessness removed
-///   the last `EngageState` timer, AGENTS.md rule #7), so regaining AI control
-///   the next tick yields a clean decision from the fresh snapshot (lifecycle
-///   reset is trivially correct).
-/// - `AiHighFidelity` (query filter).
-///
-/// # Facts + scenario flags (AC3)
-/// `seed_power_facts` builds the immutable SHIP/THREAT/OBJECTIVE/SYSTEM fact
-/// snapshot host-side (the #779 empty-facts lesson: a guard never fires unless
-/// the host seeds the fact). The read-only scenario `flags` chain — anchored at
-/// the layer that spawned the ship and terminating at
-/// `WorldContentRuntime.flags` (issue #891 stage 2) — is passed to
-/// `resolve_channel` so authored guards can gate on world flags/counters: the
-/// read surface #784 introduced and #891 spread to every host.
-///
-/// # Brownout avoidance (AC5), no global emergency exception
-/// Each rule's reserve is an authored `param` referenced by its `when` guard
-/// (`fact(battery_pct) >= param(min_reserve)`). Below the reserve the elevate
-/// guard does not fire, so allocation never rises when the battery can't sustain
-/// it — the per-rule reserve guards REPLACE the retired global emergency
-/// exception. The applier's drain/exhaustion-lock/recovery is unchanged.
-///
-/// # Absolute-level emit, spent against the reactor's budget (issue #959)
-/// The verb carries an absolute target level, and the levels for ALL of the
-/// ship's groups are decided together rather than one channel at a time.
-/// [`crate::modifiers::power_system::plan_allocation`] takes each group's bid —
-/// the winning rule's level, that rule's authored `priority`, and the group's
-/// authored `max_level` — reserves the budget the un-bid groups are already
-/// holding, and hands out what is left in authored-priority order. The host emits **only the
-/// groups whose commanded level actually changes**, decreases first, so a
-/// settled ship emits nothing.
-///
-/// That is the fix for the silent cap-refusal loop. The applier's re-clamp to
-/// `[1, 4]` and to the ship-wide
-/// reactor's authored `max_commanded_total` is still there as the
-/// backstop it always was, but it no longer has anything to catch: a plan that
-/// cannot be refused cannot be re-emitted for ever either.
+/// Ordinary per-System tree AI uses exactly the Console's published readings.
 fn ai_power_allocation(
-    time: Res<Time>,
-    // The read-only AI-host world context — flag chain, sessions, and origin
-    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
-    // runs this host must register it (`register_ai_host_env`) or fail loudly at
-    // schedule build, so a bare `App` cannot silently diverge from production.
-    ai_env: crate::ai::host::AiHostEnv,
-    // The session table, log filter, objective pool, and shared AI base cadence
-    // (tick + interval) bundled as one `SystemParam` (issue #1185). See
-    // [`PowerAiContext`].
-    context: PowerAiContext,
-    mut ships: Query<
-        (
-            Entity,
-            Option<&crate::entities::spawner::EntityUuid>,
-            &crate::ship_plugin::ShipSystemControlSources,
-            &crate::ship::power::ShipPowerSystem,
-            Option<&crate::ship::state::ShipRedAlert>,
-            // The ACTUAL actuator throttle, written for every ship (NPC and
-            // player alike) by `process_helm_inputs`. Deliberately NOT
-            // `LastHelmInput`, which is only a LocalShip HUD mirror and stays
-            // at its spawn default (0) on every NPC — so seeding the power
-            // `thrust` fact from it pinned every NPC's helm channel below its
-            // elevate guard, letting only the human-piloted player ever reach
-            // the top power rung.
-            Option<&crate::ship::helm::ThrustInput>,
-            Option<&crate::ship::power::PowerConfigResource>,
-            Option<&crate::ship::power::PowerAiPolicy>,
-            Option<&crate::ship::power::PowerAiCadence>,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::ship::combat_activity::RecentCombatActivity>,
-            &mut crate::core::messages::AdmittedCommands,
-        ),
-        (
-            With<crate::ai::server::AiHighFidelity>,
-            With<crate::server_app::Ship>,
-        ),
-    >,
+    tick: Res<crate::sim_tick::SimTick>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        &crate::ship_plugin::ShipConfigComponent,
+        &crate::server_app::ShipSystemBlackboards,
+        &crate::ai::state_tree_runtime::ShipAiTreePrograms,
+        &mut crate::ai::state_tree_runtime::ShipAiTreeRuntime,
+        &mut crate::core::messages::AdmittedCommands,
+    )>,
 ) {
-    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
-    let PowerAiContext {
-        sessions,
-        log,
-        objectives,
-        objective_instances,
-        tick,
-        base_interval,
-    } = context;
-
-    let now = time.elapsed_secs();
-    let tick = tick.map(|t| t.0).unwrap_or(0);
-    let base_interval = base_interval.map(|b| b.0).unwrap_or(1);
-
-    for (
-        ship_entity,
-        entity_uuid,
-        control_sources,
-        power,
-        red_alert_comp,
-        thrust_comp,
-        cfg_comp,
-        policy_comp,
-        cadence_comp,
-        ship_config,
-        combat_activity,
-        mut admitted,
-    ) in ships.iter_mut()
-    {
-        // An assignment to another ship must not bias this ship's power AI.
-        let has_destroy_objective = objectives.as_ref().is_some_and(|om| {
-            let ship_id = entity_uuid.map_or("", |u| u.0.as_str());
-            om.0.effective_scored_for_ship(
-                &crate::objectives::WorldConditions::default(),
-                None,
-                ship_id,
-                objective_instances.as_ref().map(|i| &i.0),
-            )
-            .iter()
-            .any(|s| {
-                matches!(
-                    s.directive,
-                    crate::core::messages::AiDirective::Destroy { .. }
-                )
+    use crate::core::messages::{SystemBlackboard, SystemControlPayload as Control};
+    use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
+    use std::collections::BTreeMap;
+    let system = crate::ship::system_registry::power_reactor_system_id();
+    for (uuid, sources, config, boards, programs, mut runtimes, mut admitted) in &mut ships {
+        if !crate::ai::host::ai_operates(&sources.0, &system) {
+            continue;
+        }
+        let view = config.0.observations_for_system(&system, &boards.0);
+        let Some(energy) = view
+            .get(&crate::core::messages::SystemId(
+                crate::ship::system_registry::POWER_SYSTEM_ID.into(),
+            ))
+            .and_then(|board| match board {
+                SystemBlackboard::Power(board) => board.energy.as_ref(),
+                _ => None,
             })
-        });
-        // Control-Source gate through the shared AI host spine (issue #1208): not
-        // (or no longer) AI-driven — a human Control Source — stands the reactor
-        // down. Power resolves a RANKED channel the spine does not model, so only
-        // its gate — the one step it shares with the policy hosts — routes here.
-        // Stateless, so nothing to reset; the next tick under AI control decides
-        // cleanly.
-        if !crate::ai::host::ai_operates(
-            &control_sources.0,
-            &crate::ship::system_registry::power_reactor_system_id(),
-        ) {
+        else {
             continue;
+        };
+        let Some(runtime) = runtimes.0.get_mut(&system) else {
+            continue;
+        };
+        let mut facts = BTreeMap::from([
+            (
+                "reactor_reserve_fraction".into(),
+                (energy.reactor.energy / energy.reactor.capacity) as f64,
+            ),
+            (
+                "reactor_heat_fraction".into(),
+                (energy.reactor.heat / energy.reactor.trip_heat) as f64,
+            ),
+            (
+                "output_actual".into(),
+                energy.reactor.output_actual_per_sec as f64,
+            ),
+        ]);
+        for group in &energy.groups {
+            let mut reserve = 1.0f32;
+            let mut heat = 0.0f32;
+            for consumer in &energy.consumers {
+                let mut cursor = consumer.group.as_ref().map(|id| id.0.as_str());
+                let mut belongs = false;
+                for _ in 0..=energy.groups.len() {
+                    let Some(id) = cursor else {
+                        break;
+                    };
+                    if id == group.id {
+                        belongs = true;
+                        break;
+                    }
+                    cursor = energy
+                        .groups
+                        .iter()
+                        .find(|candidate| candidate.id == id)
+                        .and_then(|candidate| candidate.parent.as_deref());
+                }
+                if belongs {
+                    reserve = reserve.min(consumer.energy / consumer.capacity);
+                    heat = heat.max(consumer.heat / consumer.trip_heat);
+                }
+            }
+            facts.insert(format!("reserve-{}", group.id), reserve as f64);
+            facts.insert(format!("heat-{}", group.id), heat as f64);
         }
-
-        // Per-entity power config only (issue #738 isolation): the parse-time
-        // default each ship is spawned with, never a player-ship global.
-        let cfg_default;
-        let cfg: &crate::ship::power::PowerConfigResource = match cfg_comp {
-            Some(c) => c,
-            None => {
-                cfg_default = crate::ship::power::PowerConfigResource::default();
-                &cfg_default
+        let result = match decide_tree_with_numbers(
+            &sources.0,
+            &system,
+            programs.0.get(&system),
+            &BTreeMap::new(),
+            &facts,
+            &BTreeMap::new(),
+            runtime,
+            tick.0,
+        ) {
+            Ok(TreeHostOutcome::Evaluated(result)) => result,
+            Ok(_) => continue,
+            Err(error) => {
+                warn!(%error, "power.tree_refused");
+                continue;
             }
         };
-
-        // No attached `[power.ai_policy]` ⇒ no allocation decisions, and every
-        // group holds the level the reactor seeded. Since #885b stage 5d there
-        // is no synthesised stand-in.
-        let Some(policy_comp) = policy_comp else {
-            continue;
+        let number = |name: &str, fallback: f32| {
+            result
+                .numeric_intents
+                .get(name)
+                .map(|value| *value as f32)
+                .unwrap_or(fallback)
         };
-        let policy: &crate::ai::policy::AiPolicy = &policy_comp.0;
-
-        // Per-host multiplier on the shared base cadence (issue #889's
-        // evaluate_every_ticks, wired at runtime): a ship whose
-        // `[power.ai_policy]` authors `evaluate_every_ticks = n` decides on
-        // every Nth arm of `ai_tick_ready`, not every arm. `1` (every shipped
-        // hull today) reduces this to a no-op — see `AiBaseInterval`'s docs.
-        let evaluate_every_ticks = cadence_comp.map(|c| c.0).unwrap_or(1);
-        if !crate::ai::cadence::evaluate_every_ticks_ready(
-            tick,
-            base_interval,
-            evaluate_every_ticks,
-        ) {
-            continue;
-        }
-
-        // The read-only scenario flag chain (AC3), anchored at the layer that
-        // spawned THIS ship (issue #891 stage 2) — correctly layered, so
-        // `parent:` prefixes climb toward the base store exactly as a trigger
-        // authored in that layer would.
-        let flag_chain = ai_env.flag_chain(ship_entity);
-
-        let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
-        let thrust = thrust_comp.map(|t| t.0).unwrap_or(0.0);
-        let battery_pct = if cfg.0.capacity > 0.0 {
-            (power.0.battery_charge / cfg.0.capacity) * 100.0
-        } else {
-            0.0
-        };
-        let secs_since_combat = combat_activity.and_then(|a| {
-            let last = most_recent_combat(a);
-            last.map(|s| now - s)
-        });
-
-        // Immutable per-tick fact snapshot. `offline_system_count` is seeded 0
-        // for now (a fuller per-system availability seed from blackboards is
-        // future work); the fact still exists so an authored guard referencing it
-        // validates and reads a real value.
-        let facts = crate::ship::power::seed_power_facts(
-            &power.0,
-            battery_pct,
-            thrust,
-            red_alert,
-            secs_since_combat,
-            None,
-            has_destroy_objective,
-            0,
-        );
-
-        // Collect the ship's AUTHORED power groups' bids (dynamic channels,
-        // AC1). For each group resolve its channel; the highest-priority
-        // matching rule wins (AC4) and its verb carries the absolute level it
-        // asks the group to hold, alongside that rule's own authored priority.
-        // A group with no matching rule resolves `None` and bids for nothing —
-        // it holds whatever it was last commanded to, and `plan_allocation`
-        // reserves the budget for it.
-        //
-        // Nothing is emitted from this loop. Issue #959: a per-group emit made
-        // in ignorance of what the other groups had asked for is exactly how the
-        // silent cap refusal happened — the applier's budget check refuses the
-        // surplus without an error, and the next decision arm asks again.
-        let group_ids: Vec<crate::core::messages::PowerGroupId> =
-            power.0.iter().map(|(id, _)| id.clone()).collect();
-        let mut bids: Vec<crate::modifiers::power_system::AllocationBid> =
-            Vec::with_capacity(group_ids.len());
-        for group_id in &group_ids {
-            // Only the allocation verb ever resolves on a power-group channel
-            // (the policy is validated to carry no other), so an `if let` is
-            // exhaustive in practice; any other verb holds (no bid).
-            if let Some((
-                rule_priority,
-                crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level),
-            )) = policy.resolve_channel_ranked(&group_id.0, &facts, &flag_chain)
-            {
-                bids.push(crate::modifiers::power_system::AllocationBid {
-                    group: group_id.clone(),
-                    want: *level,
-                    // This group's own authored ceiling. A hull that declares no
-                    // `[power_groups.*]` block at all has none to read, so the
-                    // parse default stands in — the same value its groups were
-                    // seeded and are clamped by.
-                    max_level: ship_config
-                        .and_then(|sc| sc.0.power_groups.get(group_id))
-                        .map(|g| g.max_level)
-                        .unwrap_or_else(crate::ship::config::default_max_power_level),
-                    // And its own authored floor (issue #1395). A group whose
-                    // hull authored `min_level = 0` costs the budget nothing to
-                    // keep in the running, so the planner does not spend a
-                    // point guaranteeing a minimum the hull never asked for.
-                    // Same fallback as the ceiling above: no `[power_groups.*]`
-                    // block, no number to read, so the parse default stands in
-                    // — which is also the floor the reactor seeded with.
-                    //
-                    // The bid is still made for a group that is currently COLD;
-                    // `plan_allocation` drops it there, because the decision
-                    // that the AI may not warm a group somebody switched off is
-                    // the planner's to keep, not this loop's to anticipate.
-                    floor: ship_config
-                        .and_then(|sc| sc.0.power_groups.get(group_id))
-                        .map(|g| g.min_level)
-                        .unwrap_or_else(crate::ship::config::default_min_power_level),
-                    rule_priority,
-                });
-            }
-        }
-
-        // Spend the reactor's budget across those bids (issue #959). What comes
-        // back is a set of levels that FITS — nothing in it can be refused —
-        // with every decrease ahead of every increase so no intermediate state
-        // trips the cap either, and with no-ops already dropped so a settled
-        // ship emits nothing at all.
-        //
-        // No-op suppression compares against the COMMANDED level, not the
-        // effective one (issue #952), and `plan_allocation` inherits that. A
-        // group the battery floor is holding down reads lower than it was set
-        // to, and comparing against that reading would make the AI think its own
-        // standing order had already been carried out: it would stop correcting
-        // the order downward for as long as the brownout lasted, and the group
-        // would snap back to a level nobody had asked for since the fight
-        // started the moment the reserve recovered. The floor is the REACTOR's
-        // business; what the crew has asked for is this policy's, and the two
-        // are allowed to disagree.
-        for (group_id, level) in crate::modifiers::power_system::plan_allocation(&power.0, &bids) {
-            crate::pinfo!(
-                log,
-                crate::logging::LogCat::Power,
-                entity = ship_entity,
-                "{} power {} -> {} (policy)",
-                group_id.0,
-                power.0.commanded_level_for(&group_id),
-                level
-            );
+        let output = number("reactor-output", energy.reactor.output_target_per_sec);
+        let cooling = number("reactor-cooling", energy.reactor.cooling_per_sec);
+        if output != energy.reactor.output_target_per_sec
+            || cooling != energy.reactor.cooling_per_sec
+        {
             emit_ai_command(
-                entity_uuid,
-                crate::ship::system_registry::power_reactor_system_id(),
-                crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: group_id,
-                    level,
+                uuid,
+                system.clone(),
+                Control::SetEnergyReactor {
+                    output_per_sec: output,
+                    cooling_per_sec: cooling,
                 },
-                control_sources,
+                sources,
                 &sessions,
-                ship_config,
+                Some(config),
                 &mut admitted,
             );
         }
+        for group in &energy.groups {
+            let flow = number(&format!("flow-{}", group.id), group.desired_flow_per_sec);
+            let cooling = number(
+                &format!("cooling-{}", group.id),
+                group.desired_cooling_per_sec,
+            );
+            if flow != group.desired_flow_per_sec || cooling != group.desired_cooling_per_sec {
+                emit_ai_command(
+                    uuid,
+                    system.clone(),
+                    Control::SetEnergyGroup {
+                        group: crate::core::messages::PowerGroupId(group.id.clone()),
+                        flow_per_sec: flow,
+                        cooling_per_sec: cooling,
+                    },
+                    sources,
+                    &sessions,
+                    Some(config),
+                    &mut admitted,
+                );
+            }
+        }
     }
 }
-
-/// Most-recent combat timestamp for the THREAT `secs_since_combat` fact,
-/// mirroring `operate_captain_ai`'s reduction over the same activity fields.
-fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) -> Option<f32> {
-    [
-        a.last_damage_taken,
-        a.last_hostile_fire_taken,
-        a.last_weapon_fired,
-    ]
-    .into_iter()
-    .flatten()
-    .fold(None, |acc: Option<f32>, s| {
-        Some(acc.map_or(s, |cur| cur.max(s)))
-    })
-}
-
-// `integrate_power_state` (issue #693's mutate-only adapter) was deleted by
-// issue #831: truth-integration for power lives in
-// `ship::power::handle_power_messages`, the single admitted-command applier
-// for human and AI commands alike (mirroring the shields #826 retirement of
-// `integrate_shield_state`).
 
 // ── Torpedo AI (issue #694, completed by #698) ──────────────────────────────
 
@@ -1030,11 +817,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
             // fixtures that spawn a ship without it; absent reads `false`.
             Option<&crate::ship::state::ShipRedAlert>,
-            // Issue #1396: this ship's reactor, so each TUBE's own authored
-            // power group can be read for COLD (level 0) and folded into that
-            // same fact. `Option<&_>`: a fixture with no reactor is not a ship
-            // with dead tubes.
-            Option<&crate::ship::power::ShipPowerSystem>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the launch posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
@@ -1073,7 +855,6 @@ pub(crate) fn ai_torpedo_auto_fire(
         tube_policies,
         mut admitted,
         red_alert_opt,
-        power_opt,
         stances_opt,
     ) in ships.iter_mut()
     {
@@ -1100,10 +881,10 @@ pub(crate) fn ai_torpedo_auto_fire(
             crate::console::weapons::WeaponsAlertPosture::from_parts(
                 red_alert_opt,
                 crate::ship::system_registry::torpedo_tube_system_id(tube_id).is_some_and(|sid| {
-                    crate::console::weapons::system_power_group_is_cold(
-                        Some(&ship_config.0),
-                        power_opt.map(|p| &p.0),
+                    crate::console::weapons::observed_weapons_restraint(
+                        Some(ship_config),
                         &sid,
+                        Some(blackboards),
                     )
                 }),
                 stance_override,

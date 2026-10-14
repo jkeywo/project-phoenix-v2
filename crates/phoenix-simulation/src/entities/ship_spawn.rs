@@ -190,55 +190,33 @@ fn insert_ship_scratch_state(cmds: &mut EntityCommands) {
 /// optional inline power-allocation policy from `[power.ai_policy]`.
 fn insert_power_state(
     config: &EntityConfig,
-    power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
+    _power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
     cmds: &mut EntityCommands,
 ) {
-    // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
-    // `[power]` TOML block get `PowerConfigResource::default()` /
-    // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
-    // `ai_power_allocation` (issue #693), and `tick_power_system` can
-    // iterate every ship uniformly (`With<Ship>`) without an `is_npc`
-    // fork. When the TOML supplies `[power]` / `[power.ai]`, those
-    // values seed the components.
-    let power_config = match &config.power {
-        Some(pc) => {
-            crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
-                strike_reserve: pc.strike_reserve.clone(),
-                capacity: pc.capacity,
-                rates: pc.rates,
-                sustainable_total: pc.sustainable_total,
-                max_commanded_total: pc.max_commanded_total,
-                emergency_threshold: pc.emergency_threshold,
-            })
-        }
-        None => crate::ship::power::PowerConfigResource::default(),
+    let Some(hardware) = config.energy.as_ref() else {
+        // Reduced test entities may omit machinery; accepted playable content
+        // is required to declare its physical energy profile at validation.
+        return;
     };
-    cmds.insert(crate::ship::power::ShipPowerSystem(
-        crate::modifiers::power_system::PowerSystem::from_authored_groups(
-            &power_config.0,
-            power_group_seed,
-        ),
-    ));
-    cmds.insert(power_config);
-    // Inline stateless Power allocation AI policy (issue #784) — from the
-    // ship's `[power.ai_policy]` block. Since #885b stage 5d there is no
-    // Rust-side synthesiser behind it: strict AI-declaration mode
-    // (`AiDeclarationMode::DEFAULT`) rejects an AI-capable hull that omits
-    // the block at load, so an AI-bearing entity always authors one and the
-    // `None` arm is reached only by a config built in code. Nothing is
-    // attached in that case — an undeclared system gets no automation, which
-    // is PRD #774 US7's requirement. `to_policy` cannot fail here: the block
-    // was validated in `EntityConfig::from_toml`.
-    if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-        cmds.insert((
-            crate::ship::power::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
-            // Carried from the SAME authored block (issue #889's
-            // evaluate_every_ticks, wired at runtime): a resolved
-            // `AiPolicy` alone forgets this field, so it rides alongside
-            // as a sibling component.
-            crate::ship::power::PowerAiCadence(ai.evaluate_every_ticks),
-        ));
+    let ship = config
+        .ship_config
+        .as_ref()
+        .expect("energy hardware requires a ship definition");
+    let mut power =
+        crate::modifiers::power_system::PowerSystem::from_energy(hardware.clone(), ship.clone())
+            .expect("validated energy hardware");
+    let mut legacy = crate::ship::power::PowerConfigResource::default();
+    legacy.0.capacity = hardware.reactor.reserve.capacity;
+    if let Some(config) = &config.power {
+        legacy.0.strike_reserve = config.strike_reserve.clone();
     }
+    power = power
+        .with_strike_reserve(legacy.0.strike_reserve.clone())
+        .expect("validated strike overdrive");
+    cmds.insert((crate::ship::power::ShipPowerSystem(power), legacy));
+    let trees = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
+        .expect("validated System AI trees");
+    cmds.insert(trees);
 }
 
 /// Per-entity power multipliers, defaulted then overridden by any per-console

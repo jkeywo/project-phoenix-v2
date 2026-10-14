@@ -445,6 +445,27 @@ pub(super) fn validate_entity_resources(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    match (
+        world.get::<crate::ship::power::ShipPowerSystem>(entity),
+        &row.power,
+    ) {
+        (Some(live), Some(saved)) => {
+            let ids = row
+                .infrastructure
+                .as_ref()
+                .map(|state| {
+                    state
+                        .capacities()
+                        .iter()
+                        .map(|capacity| capacity.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            live.0.validate_continuation(saved, &ids)?;
+        }
+        (None, None) => {}
+        _ => return Err("energy network continuation disagrees with authored machinery".into()),
+    }
     if row.infrastructure.is_none()
         && world
             .get::<crate::infrastructure::InfrastructureCondition>(entity)

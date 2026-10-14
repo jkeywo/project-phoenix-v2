@@ -988,25 +988,13 @@ pub fn register_effects(engine: &mut HostRegistry) {
     // the reactor has a second author — the crew's Engineering officer — and a
     // flag pushed here would have covered the scenario's orders and silently
     // missed theirs.
-    for (name, level) in [
-        (
-            "hold_fire",
-            crate::modifiers::power_system::ScriptedPowerLevel::Exact(0),
-        ),
-        (
-            "release_fire",
-            crate::modifiers::power_system::ScriptedPowerLevel::AuthoredDefault,
-        ),
-    ] {
+    for (name, held) in [("hold_fire", true), ("release_fire", false)] {
         engine.register_fn(
             name,
             move |sink: &mut EffectSink, entity: ImmutableString| {
-                sink.push(ActionCmd::SetGroupPower {
+                sink.push(ActionCmd::SetWeaponsRestraint {
                     entity: entity.to_string(),
-                    group: crate::core::messages::PowerGroupId(
-                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-                    ),
-                    level,
+                    held,
                 });
             },
         );

@@ -1732,11 +1732,6 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                 alert.map(|a| a.0),
                 world
                     .get::<crate::ship::power::ShipPowerSystem>(entity)
-                    .filter(|_| {
-                        world
-                            .get::<crate::ship::power::PowerConfigResource>(entity)
-                            .is_some_and(|c| c.0.strike_reserve.is_some())
-                    })
                     .map(|p| p.0.capture_continuation()),
             )
         })
@@ -1751,7 +1746,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
         if let Some(power) = power {
-            acc = fold_str(acc, "strike-reserve");
+            acc = fold_str(acc, "local-energy-network");
             acc = fold_serde(acc, &power);
             // A paid attack keeps its bonus after boost switches off. Include
             // those in-flight values in the reserve hull's digest frontier.

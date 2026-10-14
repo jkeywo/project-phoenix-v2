@@ -235,10 +235,9 @@ pub enum ActionCmd<SpawnConfig> {
     /// and an Engineering officer's order produce the same
     /// `FlagSet`/`FlagCleared` transition. A flag written here would have been
     /// written for the scenario's orders and silently absent for the crew's.
-    SetGroupPower {
+    SetWeaponsRestraint {
         entity: String,
-        group: crate::core::messages::PowerGroupId,
-        level: crate::modifiers::power_system::ScriptedPowerLevel,
+        held: bool,
     },
     /// Order the named civilian to hold, divert or dock (issue #1028).
     ///
@@ -519,15 +518,9 @@ impl ActionCmd<std::convert::Infallible> {
             Self::SetWorkforceState { id, mutation } => {
                 ActionCmd::SetWorkforceState { id, mutation }
             }
-            Self::SetGroupPower {
-                entity,
-                group,
-                level,
-            } => ActionCmd::SetGroupPower {
-                entity,
-                group,
-                level,
-            },
+            Self::SetWeaponsRestraint { entity, held } => {
+                ActionCmd::SetWeaponsRestraint { entity, held }
+            }
             Self::OrderCivilian { entity, order } => ActionCmd::OrderCivilian { entity, order },
             Self::RecordDossierEvidence {
                 subject,

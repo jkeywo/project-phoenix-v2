@@ -534,6 +534,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state_alias::<crate::sim_rng::BlasterRng, crate::sim_rng::SimRng>()
             .declare_state_alias::<crate::sim_rng::BeamCycleRng, crate::sim_rng::SimRng>()
             .declare_state_alias::<crate::sim_rng::CommsChoiceRng, crate::sim_rng::SimRng>()
+            .declare_state_alias::<crate::sim_rng::PowerFlowRng, crate::sim_rng::SimRng>()
             .declare_state_alias::<crate::world_id::EntityMint, crate::world_id::WorldIdMint>()
             .declare_state_alias::<crate::world_id::AsteroidMint, crate::world_id::WorldIdMint>()
             .declare_state_alias::<crate::world_id::MessageMint, crate::world_id::WorldIdMint>()
@@ -1036,6 +1037,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<crate::sim_rng::BlasterRng>()
         .init_resource::<crate::sim_rng::BeamCycleRng>()
         .init_resource::<crate::sim_rng::CommsChoiceRng>()
+        .init_resource::<crate::sim_rng::PowerFlowRng>()
         .insert_resource(crate::entities::config_cache::FactionRegistryResource(
             crate::entities::config_cache::get_faction_registry(),
         ))

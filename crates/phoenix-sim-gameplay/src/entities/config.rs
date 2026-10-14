@@ -772,6 +772,15 @@ impl EntityConfig {
             }
         }
 
+        if config.energy.is_none()
+            && config.ship_config.as_ref().is_some_and(|ship| {
+                ship.systems
+                    .iter()
+                    .any(|system| requires_energy_profile(&system.kind))
+            })
+        {
+            return Err(SerdeError::custom("Physical ship Systems require an explicit [energy] hardware profile (increment 8): author the reactor, each local reserve and allocation group, and a real coolant service/stock. Convert this content in Workshop or use its original game version."));
+        }
         if let Some(energy) = &config.energy {
             let ship = config.ship_config.as_ref().ok_or_else(|| {
                 SerdeError::custom("[energy] requires authored ship Systems and groups")

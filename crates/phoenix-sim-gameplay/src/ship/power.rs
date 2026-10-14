@@ -1,7 +1,4 @@
-use crate::core::messages::{
-    CoordinationPayload, PowerBatteryBlackboard, PowerBlackboard, PowerGroupEntry, PowerGroupId,
-    PowerReactorBlackboard, SystemBlackboard, SystemId,
-};
+use crate::core::messages::{CoordinationPayload, PowerGroupId, SystemId};
 use crate::modifiers::power_system::{
     power_level_for_group, AuthoredPowerGroup, PowerConfig, PowerSystem, HELM_POWER_GROUP,
     POWER_GROUP_ORDER, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
@@ -198,7 +195,7 @@ impl PowerBrownoutState {
 /// display label. Anything unknown falls back to `power.group.unknown`.
 ///
 /// **This function is the live path, for every hull.** It is the sole producer
-/// of [`PowerGroupEntry::label`] and of [`CoordinationPayload::PowerBrownout`]'s
+/// of the allocation entry label and of [`CoordinationPayload::PowerBrownout`]'s
 /// label, and nothing in `gui/` reads a `power_groups` block. Per issue #977 it
 /// emits a `strings.csv` id, never composed English: the blackboard and the
 /// coordination payload both cross `localiseTree` at the wire boundary, which
@@ -270,7 +267,10 @@ pub fn authored_power_group_seed(
 /// Apply admitted settings to the reactor owner. Ownership and knowledge remain
 /// Console-scoped; displaying another consumer never admits its commands.
 pub fn handle_power_messages(
-    mut ships: Query<(&crate::core::messages::AdmittedCommands, &mut ShipPowerSystem)>,
+    mut ships: Query<(
+        &crate::core::messages::AdmittedCommands,
+        &mut ShipPowerSystem,
+    )>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     use crate::core::messages::SystemControlPayload as Control;
@@ -278,33 +278,88 @@ pub fn handle_power_messages(
         for cmd in admitted.for_target(crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID) {
             let mut candidate = power.0.clone();
             let result: Result<(), String> = match &cmd.payload {
-                Control::SetPowerGroupAllocation { group, level } => candidate.set_group_allocation(group, *level).map_err(|error| format!("{error:?}")),
-                Control::SetEnergyReactor { output_per_sec, cooling_per_sec } => candidate.set_output(*output_per_sec).and_then(|()| candidate.set_reactor_cooling(*cooling_per_sec)),
-                Control::SetEnergyGroup { group, flow_per_sec, cooling_per_sec } => candidate.set_flow(group, *flow_per_sec).and_then(|()| candidate.set_cooling(group, *cooling_per_sec)),
-                Control::SetEnergySystemFlow { system, flow_per_sec } => candidate.set_fine_flow(system, *flow_per_sec),
-                Control::SetEnergyMode { mode, cooling_usage } => { candidate.set_mode(*mode); candidate.set_cooling_usage(*cooling_usage); Ok(()) },
-                Control::SetEnergyPriority { group, priority } => reorder_energy_group(&mut candidate, group, *priority),
+                Control::SetPowerGroupAllocation { group, level } => candidate
+                    .set_group_allocation(group, *level)
+                    .map_err(|error| format!("{error:?}")),
+                Control::SetEnergyReactor {
+                    output_per_sec,
+                    cooling_per_sec,
+                } => candidate
+                    .set_output(*output_per_sec)
+                    .and_then(|()| candidate.set_reactor_cooling(*cooling_per_sec)),
+                Control::SetEnergyGroup {
+                    group,
+                    flow_per_sec,
+                    cooling_per_sec,
+                } => candidate
+                    .set_flow(group, *flow_per_sec)
+                    .and_then(|()| candidate.set_cooling(group, *cooling_per_sec)),
+                Control::SetEnergySystemFlow {
+                    system,
+                    flow_per_sec,
+                } => candidate.set_fine_flow(system, *flow_per_sec),
+                Control::SetEnergyMode {
+                    mode,
+                    cooling_usage,
+                } => {
+                    candidate.set_mode(*mode);
+                    candidate.set_cooling_usage(*cooling_usage);
+                    Ok(())
+                }
+                Control::SetEnergyPriority { group, priority } => {
+                    reorder_energy_group(&mut candidate, group, *priority)
+                }
                 _ => continue,
             };
-            if result.is_ok() { power.0 = candidate; }
-            crate::command_admission::finish_admitted_action_feedback(&mut outbound, cmd,
-                if result.is_ok() { crate::core::messages::ActionFeedbackOutcome::Applied }
-                else { crate::core::messages::ActionFeedbackOutcome::Refused });
+            if result.is_ok() {
+                power.0 = candidate;
+            }
+            crate::command_admission::finish_admitted_action_feedback(
+                &mut outbound,
+                cmd,
+                if result.is_ok() {
+                    crate::core::messages::ActionFeedbackOutcome::Applied
+                } else {
+                    crate::core::messages::ActionFeedbackOutcome::Refused
+                },
+            );
         }
     }
 }
 
 /// A priority command moves one sibling in a stable list, rather than creating
 /// ambiguous equal priorities or silently reordering unrelated subgroups.
-fn reorder_energy_group(power: &mut PowerSystem, group: &PowerGroupId, requested: u16) -> Result<(), String> {
-    let parent = power.config().groups.iter().find(|entry| &entry.id == group)
-        .ok_or("unknown energy group")?.parent.clone();
-    let mut siblings: Vec<_> = power.config().groups.iter().filter(|entry| entry.parent == parent)
-        .map(|entry| entry.id.clone()).collect();
-    siblings.sort_by(|a, b| (power.network().groups[a].priority, a).cmp(&(power.network().groups[b].priority, b)));
+fn reorder_energy_group(
+    power: &mut PowerSystem,
+    group: &PowerGroupId,
+    requested: u16,
+) -> Result<(), String> {
+    let parent = power
+        .config()
+        .groups
+        .iter()
+        .find(|entry| &entry.id == group)
+        .ok_or("unknown energy group")?
+        .parent
+        .clone();
+    let mut siblings: Vec<_> = power
+        .config()
+        .groups
+        .iter()
+        .filter(|entry| entry.parent == parent)
+        .map(|entry| entry.id.clone())
+        .collect();
+    siblings.sort_by(|a, b| {
+        (power.network().groups[a].priority, a).cmp(&(power.network().groups[b].priority, b))
+    });
     siblings.retain(|id| id != group);
     siblings.insert(usize::from(requested).min(siblings.len()), group.clone());
-    for (rank, id) in siblings.iter().enumerate() { power.set_priority(id, u16::try_from(rank).map_err(|_| "too many priority siblings")?)?; }
+    for (rank, id) in siblings.iter().enumerate() {
+        power.set_priority(
+            id,
+            u16::try_from(rank).map_err(|_| "too many priority siblings")?,
+        )?;
+    }
     Ok(())
 }
 
@@ -386,9 +441,18 @@ pub fn tick_power_brownout_advisory(
         if !std::mem::take(&mut brownout_state.locked_changed) {
             continue;
         }
-        let cuts: std::collections::HashSet<_> = power.0.network().groups.iter()
-            .filter(|(_, group)| group.cut).map(|(id, _)| id.0.clone()).collect();
-        let mut newly_cut: Vec<_> = cuts.difference(&brownout_state.notified_groups).cloned().collect();
+        let cuts: std::collections::HashSet<_> = power
+            .0
+            .network()
+            .groups
+            .iter()
+            .filter(|(_, group)| group.cut)
+            .map(|(id, _)| id.0.clone())
+            .collect();
+        let mut newly_cut: Vec<_> = cuts
+            .difference(&brownout_state.notified_groups)
+            .cloned()
+            .collect();
         newly_cut.sort();
         brownout_state.notified_groups = cuts;
 
@@ -444,198 +508,4 @@ pub const OWN_SHIP_WEAPONS_COLD_FLAG: &str = "weapons_cold.own_ship";
 /// take.
 pub fn weapons_cold_flag(name: &str) -> String {
     format!("weapons_cold.{name}")
-}
-
-pub fn publish_power_blackboard(
-    power_res: Option<Res<ShipPowerSystem>>,
-    config_res: Option<Res<PowerConfigResource>>,
-    multipliers_res: Option<Res<PowerMultiplierResource>>,
-    ship_q: Query<
-        (
-            &ShipPowerSystem,
-            Option<&PowerConfigResource>,
-            Option<&PowerMultiplierResource>,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    // The authored hull, for each group's `min_level` (issue #1004). Read via
-    // its OWN query for the same reason `control_sources_q` below is: the
-    // primary `ship_q` requires a per-entity `ShipPowerSystem`, so a LocalShip
-    // running off the global resources would silently contribute nothing and
-    // every group would publish the fallback floor instead of its authored one.
-    ship_config_q: Query<
-        &crate::ship_plugin::ShipConfigComponent,
-        With<crate::server_app::LocalShip>,
-    >,
-    control_sources_q: Query<
-        &crate::ship_plugin::ShipSystemControlSources,
-        With<crate::server_app::LocalShip>,
-    >,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
-    >,
-) {
-    use crate::ship::system_registry::{
-        POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID, POWER_SYSTEM_ID,
-    };
-
-    // Prefer per-entity components on LocalShip; fall back to global Resources.
-    let entity_view = ship_q.single().ok();
-    let power_default;
-    let power: &ShipPowerSystem = match entity_view.map(|(p, _, _)| p) {
-        Some(p) => p,
-        None => match power_res.as_deref() {
-            Some(p) => p,
-            None => {
-                power_default =
-                    ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default());
-                &power_default
-            }
-        },
-    };
-    let config_default;
-    let config: &PowerConfigResource = match entity_view.and_then(|(_, c, _)| c) {
-        Some(c) => c,
-        None => match config_res.as_deref() {
-            Some(c) => c,
-            None => {
-                config_default = PowerConfigResource::default();
-                &config_default
-            }
-        },
-    };
-    let multipliers_default;
-    let multipliers: &PowerMultiplierResource = match entity_view.and_then(|(_, _, m)| m) {
-        Some(m) => m,
-        None => match multipliers_res.as_deref() {
-            Some(m) => m,
-            None => {
-                multipliers_default = PowerMultiplierResource::default();
-                &multipliers_default
-            }
-        },
-    };
-    // Per-fine-system online state, derived from offline_systems on the
-    // LocalShip's control sources. Read via a separate query so the
-    // fine-system online flags survive test setups that spawn a LocalShip
-    // with `ShipSystemControlSources` but no per-entity `ShipPowerSystem`
-    // component (the primary `ship_q` above requires the latter).
-    let control_sources = control_sources_q.single().ok();
-    let reactor_id = crate::ship::system_registry::power_reactor_system_id();
-    let battery_id = crate::ship::system_registry::power_battery_system_id();
-    let reactor_online = control_sources
-        .map(|cs| !cs.0.is_offline(&reactor_id))
-        .unwrap_or(true);
-    let battery_online = control_sources
-        .map(|cs| !cs.0.is_offline(&battery_id))
-        .unwrap_or(true);
-
-    let ship_config = ship_config_q.single().ok();
-
-    let entries: Vec<PowerGroupEntry> = power
-        .0
-        .iter()
-        .map(|(gid, _)| gid.clone())
-        .filter(|gid| {
-            multipliers.multipliers.contains_key(gid)
-                || config
-                    .0
-                    .strike_reserve
-                    .as_ref()
-                    .is_some_and(|r| r.group == gid.0)
-        })
-        .map(|gid| {
-            let max_level = multipliers
-                .multipliers
-                .get(&gid)
-                .map(|arr| arr.len() as u8)
-                .unwrap_or(4);
-            // This group's own authored floor — the lowest level it may be
-            // commanded to (issue #1004, made a real engine clamp by #1395). A
-            // hull that declares no `[power_groups.*]` block has none to read,
-            // so the parse default stands in, which is also the floor
-            // `PowerSystem` seeds. Read off the hull rather than off the
-            // multiplier table, since the table's LENGTH is a ceiling and says
-            // nothing about where the rungs start.
-            //
-            // The same number the reactor is holding: `PowerSystem::floor_for`
-            // was seeded from this very field at spawn. Published from the
-            // config rather than from the reactor because the blackboard is
-            // built from the hull throughout, and the two cannot disagree.
-            let min_level = ship_config
-                .and_then(|sc| sc.0.power_groups.get(&gid))
-                .map(|g| g.min_level)
-                .unwrap_or_else(crate::ship::config::default_min_power_level);
-            PowerGroupEntry {
-                id: gid.0.clone(),
-                label: ship_config
-                    .filter(|_| {
-                        config
-                            .0
-                            .strike_reserve
-                            .as_ref()
-                            .is_some_and(|r| r.group == gid.0)
-                    })
-                    .and_then(|sc| sc.0.power_groups.get(&gid))
-                    .map(|group| group.label.clone())
-                    .unwrap_or_else(|| power_group_label(gid.0.as_str()).into()),
-                level: power_level_for(&power.0, &gid),
-                // The standing order, so the panel's +/- can step from what was
-                // ASKED for rather than from what a battery floor has left the
-                // group running at (issue #952).
-                commanded_level: power.0.commanded_level_for(&gid),
-                min_level,
-                max_level,
-            }
-        })
-        .collect();
-
-    let bb = PowerBlackboard {
-        energy: None,
-        strike_reserve: power.0.strike_read(&config.0),
-        groups: entries,
-        total: power.0.total(),
-        total_max: power.0.max_commanded_total(),
-        battery_charge: power.0.battery_charge(),
-        battery_max: config.0.capacity,
-        draining: power.0.is_draining(&config.0),
-        charging: power.0.is_charging(&config.0),
-        locked: power.0.locked(),
-    };
-    // Fine blackboards (issue #513) — reactor owns the allocation surface,
-    // battery owns the emergency-reserve pool. Emitted alongside the legacy
-    // coarse `Power` blackboard so downstream JS panels can pick either or both.
-    let reactor_bb = PowerReactorBlackboard {
-        total_allocation: power.0.total(),
-        max_allocation: power.0.max_commanded_total(),
-        is_online: reactor_online,
-        draining: power.0.is_draining(&config.0),
-    };
-    let emergency_threshold = if config.0.capacity > 0.0 {
-        (config.0.emergency_threshold / config.0.capacity).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let battery_bb = PowerBatteryBlackboard {
-        charge: power.0.battery_charge(),
-        capacity: config.0.capacity,
-        is_online: battery_online,
-        emergency_threshold,
-    };
-
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
-        bbs.0.insert(
-            SystemId(POWER_SYSTEM_ID.to_string()),
-            SystemBlackboard::Power(bb),
-        );
-        bbs.0.insert(
-            SystemId(POWER_REACTOR_SYSTEM_ID.to_string()),
-            SystemBlackboard::PowerReactor(reactor_bb),
-        );
-        bbs.0.insert(
-            SystemId(POWER_BATTERY_SYSTEM_ID.to_string()),
-            SystemBlackboard::PowerBattery(battery_bb),
-        );
-    }
 }

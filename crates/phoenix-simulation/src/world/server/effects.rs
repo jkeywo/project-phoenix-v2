@@ -1109,21 +1109,17 @@ pub(crate) fn apply_dispatch_result(
             // flag is NOT written here: `weapons_cold.*` is mirrored off the
             // reactor, so a scenario's order and an Engineering officer's order
             // produce the same transition event.
-            ActionCmd::SetGroupPower {
-                entity,
-                group,
-                level,
-            } => {
+            ActionCmd::SetWeaponsRestraint { entity, held } => {
                 let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
                     bevy::log::warn!(
-                        "{log_ctx}: SetGroupPower: no entity named '{entity}' in this \
+                        "{log_ctx}: SetWeaponsRestraint: no entity named '{entity}' in this \
                          world — ignoring"
                     );
                     continue;
                 };
                 effects
                     .power_orders
-                    .push(crate::modifiers::power_system::PendingGroupPower { uuid, group, level });
+                    .push(crate::modifiers::power_system::PendingGroupPower { uuid, held });
             }
 
             // Issue #1028, and the same shape for the same reason: the applier

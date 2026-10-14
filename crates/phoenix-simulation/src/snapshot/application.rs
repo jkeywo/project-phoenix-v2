@@ -1202,7 +1202,10 @@ pub(super) fn apply_entity_state_with(
     }
     if let Some(power) = &row.power {
         if let Some(mut reactor) = entity_mut.get_mut::<crate::ship::power::ShipPowerSystem>() {
-            reactor.0.restore_continuation(power);
+            reactor
+                .0
+                .restore_continuation(power)
+                .expect("energy continuation preflight passed");
         }
     }
     if let Some(surface) = row.pass_surface {

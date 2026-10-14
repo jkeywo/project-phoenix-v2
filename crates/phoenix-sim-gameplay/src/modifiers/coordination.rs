@@ -6,8 +6,7 @@ use crate::core::messages::FlagKind;
 use crate::core::messages::{ModifierSlot, ModifierSource, PowerGroupId};
 use crate::entities::spawner::{EntityUuid, RegionEffectsSection};
 use crate::modifiers::power_system::{
-    Channel1Read, PowerReadState, PowerSystem, HELM_POWER_GROUP, SHIELDS_POWER_GROUP,
-    WEAPONS_POWER_GROUP,
+    PowerReadState, PowerSystem, HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::regions::effects::RegionEffectKind;
@@ -278,48 +277,24 @@ pub fn apply_power_modifiers_from_read_state(
     power: &PowerReadState,
     multipliers: &HashMap<PowerGroupId, [f32; 4]>,
 ) {
-    let default_mult = [-0.5, 0.0, 0.25, 0.5];
-    let channel_1 = Channel1Read::new(power);
-
-    let helm_id = PowerGroupId(HELM_POWER_GROUP.into());
-    let weapons_id = PowerGroupId(WEAPONS_POWER_GROUP.into());
-    let shields_id = PowerGroupId(SHIELDS_POWER_GROUP.into());
-
-    let helm_level = channel_1.power_level(&helm_id).unwrap_or(2);
-    let helm_level = (helm_level as usize).saturating_sub(1).min(3);
-    let helm_bonus = multipliers.get(&helm_id).unwrap_or(&default_mult)[helm_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(helm_id.clone()),
-        slot: ModifierSlot::MaxSpeed,
-        bonus: helm_bonus,
-    });
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(helm_id),
-        slot: ModifierSlot::MaxYawRate,
-        bonus: helm_bonus,
-    });
-
-    let weapons_level = channel_1.power_level(&weapons_id).unwrap_or(2);
-    let weapons_level = (weapons_level as usize).saturating_sub(1).min(3);
-    let weapons_bonus = multipliers.get(&weapons_id).unwrap_or(&default_mult)[weapons_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(weapons_id),
-        slot: ModifierSlot::PhaserDamage,
-        bonus: weapons_bonus,
-    });
-
-    // SHIELDS buys RECOVERY (issue #952) — see this function's doc comment.
-    // This block took over from the `sensors` → `RadarRange` one: that slot now
-    // has no power producer at all, only radar hull damage and region
-    // dampening.
-    let shields_level = channel_1.power_level(&shields_id).unwrap_or(2);
-    let shields_level = (shields_level as usize).saturating_sub(1).min(3);
-    let shields_bonus = multipliers.get(&shields_id).unwrap_or(&default_mult)[shields_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::PowerGroup(shields_id),
-        slot: ModifierSlot::ShieldRegen,
-        bonus: shields_bonus,
-    });
+    // Incoming flow replenishes local reserves. It never amplifies machinery.
+    // Clear contributions left by restored/fixture modifier collections.
+    let _ = (power, multipliers);
+    for (group, slots) in [
+        (
+            HELM_POWER_GROUP,
+            &[ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate][..],
+        ),
+        (WEAPONS_POWER_GROUP, &[ModifierSlot::PhaserDamage][..]),
+        (SHIELDS_POWER_GROUP, &[ModifierSlot::ShieldRegen][..]),
+    ] {
+        for slot in slots {
+            modifiers.remove(
+                &ModifierSource::PowerGroup(PowerGroupId(group.into())),
+                slot,
+            );
+        }
+    }
 }
 
 /// Apply region effects from a single region to `ShipModifiers`.

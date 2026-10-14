@@ -120,6 +120,8 @@ pub enum SimStream {
     /// [`Self::BeamCycleJitter`]. Anyone adding the ninth stream should expect
     /// the same and not read it as a determinism regression.
     CommsBackfillChoice,
+    /// Incoming energy-flow cuts; isolated from damage and Comms decisions.
+    PowerFlowCuts,
     /// **Retired, but deliberately still declared (issue #907).**
     ///
     /// This stream used to allocate entity UUIDs. Nothing draws from it any
@@ -144,7 +146,7 @@ pub enum SimStream {
 
 impl SimStream {
     /// Every stream, in declaration order. Used to build the resource.
-    pub const ALL: [SimStream; 8] = [
+    pub const ALL: [SimStream; 9] = [
         SimStream::CollisionDamage,
         SimStream::RegionDamage,
         SimStream::BeamDamage,
@@ -152,6 +154,7 @@ impl SimStream {
         SimStream::BlasterDamage,
         SimStream::BeamCycleJitter,
         SimStream::CommsBackfillChoice,
+        SimStream::PowerFlowCuts,
         SimStream::EntityUuid,
     ];
 
@@ -168,6 +171,7 @@ impl SimStream {
             SimStream::BlasterDamage => "blaster-damage",
             SimStream::BeamCycleJitter => "beam-cycle-jitter",
             SimStream::CommsBackfillChoice => "comms-backfill-choice",
+            SimStream::PowerFlowCuts => "power-flow-cuts",
             SimStream::EntityUuid => "entity-uuid",
         }
     }
@@ -531,6 +535,7 @@ pub type TorpedoRng = StreamRng<{ SimStream::TorpedoDamage as usize }>;
 pub type BlasterRng = StreamRng<{ SimStream::BlasterDamage as usize }>;
 pub type BeamCycleRng = StreamRng<{ SimStream::BeamCycleJitter as usize }>;
 pub type CommsChoiceRng = StreamRng<{ SimStream::CommsBackfillChoice as usize }>;
+pub type PowerFlowRng = StreamRng<{ SimStream::PowerFlowCuts as usize }>;
 
 /// Replace the aggregate and every live stream handle together at an exclusive
 /// boot/fleet/restore boundary. Never retain handles from a replaced seed/state.
@@ -549,6 +554,7 @@ pub fn install(world: &mut World, rng: SimRng) {
     stream!(BlasterRng, BlasterDamage);
     stream!(BeamCycleRng, BeamCycleJitter);
     stream!(CommsChoiceRng, CommsBackfillChoice);
+    stream!(PowerFlowRng, PowerFlowCuts);
     world.insert_resource(rng);
 }
 

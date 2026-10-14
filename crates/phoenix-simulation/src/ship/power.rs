@@ -1,11 +1,12 @@
 use crate::core::broadcast::sim::SimProducer;
 use bevy::prelude::*;
 
+pub use super::energy_publication::publish_power_blackboard;
+pub use super::energy_runtime::tick_power_system;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::core::messages::{PowerGroupId, ServerMessage, SystemId};
 use crate::modifiers::power_system::{
-    PendingGroupPower, PowerSystem, ScriptedPowerLevel, HELM_POWER_GROUP, SHIELDS_POWER_GROUP,
-    WEAPONS_POWER_GROUP,
+    PendingGroupPower, HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
@@ -26,7 +27,14 @@ impl Plugin for ShipPowerPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::ship::system_registry::POWER_REACTOR_KIND,
             crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID,
-        ).with_feedback(crate::command_admission::FeedbackAddress::MatcherSpelling, &[crate::core::messages::SystemControlPayloadDiscriminants::SetPowerGroupAllocation]));
+        ).with_feedback(crate::command_admission::FeedbackAddress::MatcherSpelling, &[
+            crate::core::messages::SystemControlPayloadDiscriminants::SetPowerGroupAllocation,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyReactor,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyGroup,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyPriority,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergyMode,
+            crate::core::messages::SystemControlPayloadDiscriminants::SetEnergySystemFlow,
+        ]));
         app.init_resource::<crate::core::messages::InterSystemQueue>()
             .add_message::<CoordinationEnqueue>();
         // The scripted power-order queue `drain_scripted_power_orders` drains
@@ -40,65 +48,62 @@ impl Plugin for ShipPowerPlugin {
                 crate::authoritative::StateClass::ClearedAtFold,
                 "digest-exclusion-classes",
             );
-        app.insert_resource(ShipPowerSystem(PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<PowerMultiplierResource>()
-            .add_systems(
-                FixedUpdate,
+        app.add_systems(
+            FixedUpdate,
+            (
+                // In `SimSet::Physics`, not Input (issue #831, mirroring
+                // shields #826): `admit_system_commands` clears every
+                // ship's `AdmittedCommands` before Input each tick, and the
+                // AI decide system (`console_ai::server::ai_power_allocation`,
+                // Physics) refills it same-tick via `validate_and_admit` —
+                // so the applier must consume in Physics *after* the AI emit
+                // or AI power commands would be silently lost. `ConsoleAiPlugin`
+                // declares the explicit
+                // `ai_power_allocation.before(handle_power_messages)` edge.
+                //
+                // `tick_power_system` is ALSO in Physics and also takes
+                // `&mut ShipPowerSystem`, so set membership alone leaves
+                // their order unspecified. The explicit
+                // `.before(tick_power_system)` edge restores the guarantee
+                // the old Input placement gave for free: a same-tick
+                // reallocation is applied before this tick's battery
+                // integration reads `total()`. (Unlike shields, whose
+                // `tick_shields` lives in the later `Modifiers` set, so set
+                // ordering sufficed there.)
+                handle_power_messages
+                    .in_set(crate::sim_sets::FixedStep::HandlePowerMessages)
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(tick_power_system),
+                tick_power_system
+                    .in_set(crate::sim_sets::FixedStep::TickPowerSystem)
+                    .in_set(crate::sim_sets::SimSet::Physics),
+                tick_power_brownout_advisory
+                    .in_set(crate::sim_sets::FixedStep::TickPowerBrownoutAdvisory)
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
+                // The scenario's half of the restraint lever, and its
+                // mirror (issue #1398). Both in `Modifiers`, chained: a
+                // scripted order lands and is mirrored in the same tick, so
+                // an `on_flag_set` handler chaining off it fires on the next
+                // pipeline pass exactly as an Engineering officer's order
+                // does.
                 (
-                    // In `SimSet::Physics`, not Input (issue #831, mirroring
-                    // shields #826): `admit_system_commands` clears every
-                    // ship's `AdmittedCommands` before Input each tick, and the
-                    // AI decide system (`console_ai::server::ai_power_allocation`,
-                    // Physics) refills it same-tick via `validate_and_admit` —
-                    // so the applier must consume in Physics *after* the AI emit
-                    // or AI power commands would be silently lost. `ConsoleAiPlugin`
-                    // declares the explicit
-                    // `ai_power_allocation.before(handle_power_messages)` edge.
-                    //
-                    // `tick_power_system` is ALSO in Physics and also takes
-                    // `&mut ShipPowerSystem`, so set membership alone leaves
-                    // their order unspecified. The explicit
-                    // `.before(tick_power_system)` edge restores the guarantee
-                    // the old Input placement gave for free: a same-tick
-                    // reallocation is applied before this tick's battery
-                    // integration reads `total()`. (Unlike shields, whose
-                    // `tick_shields` lives in the later `Modifiers` set, so set
-                    // ordering sufficed there.)
-                    handle_power_messages
-                        .in_set(crate::sim_sets::FixedStep::HandlePowerMessages)
-                        .in_set(crate::sim_sets::SimSet::Physics)
-                        .before(tick_power_system),
-                    tick_power_system
-                        .in_set(crate::sim_sets::FixedStep::TickPowerSystem)
-                        .in_set(crate::sim_sets::SimSet::Physics),
-                    tick_power_brownout_advisory
-                        .in_set(crate::sim_sets::FixedStep::TickPowerBrownoutAdvisory)
-                        .in_set(crate::sim_sets::SimSet::Modifiers),
-                    // The scenario's half of the restraint lever, and its
-                    // mirror (issue #1398). Both in `Modifiers`, chained: a
-                    // scripted order lands and is mirrored in the same tick, so
-                    // an `on_flag_set` handler chaining off it fires on the next
-                    // pipeline pass exactly as an Engineering officer's order
-                    // does.
-                    (
-                        drain_scripted_power_orders
-                            .in_set(crate::sim_sets::FixedStep::DrainScriptedPowerOrders),
-                        mirror_weapons_cold_flags
-                            .in_set(crate::sim_sets::FixedStep::MirrorWeaponsColdFlags),
-                    )
-                        .chain()
-                        .in_set(crate::sim_sets::SimSet::Modifiers),
-                    // Distinct registered keys; tests/publisher_ordering.rs checks
-                    // the exact shared access and ordinary/opposed-order outputs.
-                    publish_power_blackboard
-                        .in_set(crate::sim_sets::FixedStep::PublishPowerBlackboard)
-                        .in_set(crate::sim_sets::SimSet::Publish)
-                        .ambiguous_with(crate::ship::shields::publish_shields_blackboard)
-                        .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
-                ),
-            )
-            .add_plugins(power_state_broadcaster());
+                    drain_scripted_power_orders
+                        .in_set(crate::sim_sets::FixedStep::DrainScriptedPowerOrders),
+                    mirror_weapons_cold_flags
+                        .in_set(crate::sim_sets::FixedStep::MirrorWeaponsColdFlags),
+                )
+                    .chain()
+                    .in_set(crate::sim_sets::SimSet::Modifiers),
+                // Distinct registered keys; tests/publisher_ordering.rs checks
+                // the exact shared access and ordinary/opposed-order outputs.
+                publish_power_blackboard
+                    .in_set(crate::sim_sets::FixedStep::PublishPowerBlackboard)
+                    .in_set(crate::sim_sets::SimSet::Publish)
+                    .ambiguous_with(crate::ship::shields::publish_shields_blackboard)
+                    .ambiguous_with(crate::console::repair::server::publish_repair_blackboard),
+            ),
+        )
+        .add_plugins(power_state_broadcaster());
     }
 }
 
@@ -144,7 +149,7 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
                 helm: power.0.level_for(&PowerGroupId(HELM_POWER_GROUP.into())),
                 weapons: power.0.level_for(&PowerGroupId(WEAPONS_POWER_GROUP.into())),
                 shields: power.0.level_for(&PowerGroupId(SHIELDS_POWER_GROUP.into())),
-                battery_charge: power.0.battery_charge,
+                battery_charge: power.0.battery_charge(),
                 draining: power.0.is_draining(&config.0),
                 locked: power.0.locked(),
             }]
@@ -165,43 +170,15 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 
 // ── Scripted restraint (issue #1398) ─────────────────────────────────────────
 
-/// Drain the scenario's queued power orders onto their ships (issue #1398).
-///
-/// The scripted half of the reactor, and it writes the SAME state an
-/// Engineering officer's console command does: `hold_fire(name)` in a world
-/// script and `SetPowerGroupAllocation { group: "weapons", level: 0 }` from a
-/// Power console both land in
-/// [`PowerSystem::set_group_allocation`](crate::modifiers::power_system::PowerSystem::set_group_allocation),
-/// so the fire gate has one thing to read and [`mirror_weapons_cold_flags`]
-/// below has one thing to publish.
-///
-/// It writes the reactor directly rather than manufacturing an admitted
-/// command, which is the shape every other scripted world effect already has
-/// (`destroy_entity`, `damage_infrastructure`, `set_workforce_disposition`).
-/// Admission is the boundary between an OPERATOR and the ship — human or AI, the
-/// same table either way — and the world is not an operator. What it is not is a
-/// bypass: the order goes through the very setter a console order does, so the
-/// group's authored `min_level` clamps it exactly the same way. A hull whose
-/// `[power_groups.weapons]` says `min_level = 1` cannot be silenced by a script
-/// any more than by its own crew, and that refusal is a designer's decision in
-/// the entity TOML rather than this system's.
-///
-/// [`ScriptedPowerLevel::AuthoredDefault`] is resolved HERE and nowhere else,
-/// because here is the first place that holds both the ship and its
-/// [`crate::ship_plugin::ShipConfigComponent`]: the Rhai closure that pushed the
-/// order has no world access at all, and a script that wrote `2` would be
-/// authoring one hull's number into every scenario that used the verb.
+/// Apply scripted restraint to the same canonical owner as Tactical controls.
+/// This does not cut battery intake or erase any allocation intent.
 pub fn drain_scripted_power_orders(
     // The scripted power-order queue, owned and declared by [`ShipPowerPlugin`].
     // `Option` so a reduced test app that runs this system without the
     // registering plugin is a no-op rather than a panic.
     power_orders: Option<ResMut<crate::effect_queue::EffectQueue<PendingGroupPower>>>,
     mut ships: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &mut ShipPowerSystem,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-        ),
+        (&crate::entities::spawner::EntityUuid, &mut ShipPowerSystem),
         With<crate::server_app::Ship>,
     >,
 ) {
@@ -216,25 +193,12 @@ pub fn drain_scripted_power_orders(
     let queued = std::mem::take(&mut power_orders.0);
     for order in queued {
         let mut found = false;
-        for (ship_uuid, mut power, ship_config) in ships.iter_mut() {
+        for (ship_uuid, mut power) in ships.iter_mut() {
             if ship_uuid.0 != order.uuid {
                 continue;
             }
             found = true;
-            let level = match order.level {
-                ScriptedPowerLevel::Exact(level) => level,
-                ScriptedPowerLevel::AuthoredDefault => ship_config
-                    .and_then(|config| config.0.power_groups.get(&order.group))
-                    .map(|group| group.default_level)
-                    .unwrap_or_else(crate::ship::config::default_power_level),
-            };
-            if let Err(err) = power.0.set_group_allocation(&order.group, level) {
-                // A machine token, not prose: `crates/phoenix-simulation/src/ship/power.rs` is on
-                // `check-strings.mjs`'s wire-visible allowlist, where every
-                // prose literal in the production region is an error — spaces
-                // and capitals included, so the uuid rides a colon.
-                warn!("power.scripted_order_ignored:{}:{err:?}", order.uuid);
-            }
+            power.0.set_weapons_restrained(order.held);
         }
         if !found {
             warn!("power.scripted_order_unknown_ship:{}", order.uuid);
@@ -293,10 +257,9 @@ pub fn mirror_weapons_cold_flags(
     if ships.is_empty() {
         return;
     }
-    let weapons = PowerGroupId(WEAPONS_POWER_GROUP.to_string());
     let mut writes: Vec<(String, bool)> = Vec::new();
     for (power, name, is_local) in ships.iter() {
-        let cold = power.0.is_group_cold(&weapons);
+        let cold = power.0.weapons_restrained();
         if is_local {
             writes.push((OWN_SHIP_WEAPONS_COLD_FLAG.to_string(), cold));
         }

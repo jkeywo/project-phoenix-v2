@@ -11,6 +11,8 @@ pub mod coordination_systems;
 pub mod damage;
 pub mod damage_sync;
 pub mod eligibility;
+mod energy_publication;
+pub mod energy_runtime;
 pub mod helm;
 pub mod helm_admission;
 pub mod helm_ai;

@@ -4867,3 +4867,47 @@ workshop.weapon.param.screenshake_magnitude,Workshop weapon authoring,Screen sha
 workshop.weapon.param.load_time,Workshop weapon authoring,Tube load time (optional seconds),Rohrladezeit (optionale Sekunden),Tube load time (optional seconds),machine
 workshop.weapon.param.volley_max,Workshop weapon authoring,Tube volley capacity,Rohrsalvenkapazität,Tube volley capacity,machine
 workshop.weapon.param.ai_target_count,Workshop weapon authoring,AI loaded-round target (optional),KI-Ziel für geladene Munition (optional),AI loaded-round target (optional),machine
+workshop.energy.title,Workshop local energy authoring,Energy and thermal equipment,Energie- und Wärmeausrüstung,Energy and thermal equipment,machine
+workshop.energy.hint,Workshop local energy authoring,"Author local reserves, work costs, reactor output, coolant connections and nested control groups. Creating a model explicitly adds starter values; validate and tune them for this hull. Cooling uses a real coolant capacity configured under Resources.","Lokale Reserven, Arbeitskosten, Reaktorleistung, Kühlmittelverbindungen und verschachtelte Regelgruppen erstellen. Das Erstellen eines Modells fügt ausdrücklich Startwerte hinzu; für diesen Rumpf validieren und abstimmen. Kühlung nutzt einen unter Ressourcen konfigurierten echten Kühlmittelvorrat.","Author local reserves, work costs, reactor output, coolant connections and nested control groups. Creating a model explicitly adds starter values; validate and tune them for this hull. Cooling uses a real coolant capacity configured under Resources.",machine
+workshop.energy.create,Workshop local energy authoring,Create energy model,Energiemodell erstellen,Create energy model,machine
+workshop.energy.apply,Workshop local energy authoring,Apply hardware settings,Ausrüstungseinstellungen anwenden,Apply hardware settings,machine
+workshop.energy.template,Workshop local energy authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.energy.subject,Workshop local energy authoring,Equipment or control group,Ausrüstung oder Regelgruppe,Equipment or control group,machine
+workshop.energy.materialise,Workshop local energy authoring,Materialise the complete inherited energy profile,Das vollständige geerbte Energieprofil übernehmen,Materialise the complete inherited energy profile,machine
+workshop.energy.parent,Workshop local energy authoring,Parent control group,Übergeordnete Regelgruppe,Parent control group,machine
+workshop.energy.no_parent,Workshop local energy authoring,No parent group,Keine übergeordnete Gruppe,No parent group,machine
+workshop.energy.coolant,Workshop local energy authoring,Coolant link,Kühlmittelverbindung,Coolant link,machine
+workshop.energy.endpoint_kind,Workshop local energy authoring,Binding kind,Verbindungstyp,Binding kind,machine
+workshop.energy.endpoint,Workshop local energy authoring,Coolant endpoint,Kühlmittelziel,Coolant endpoint,machine
+workshop.energy.service,Workshop local energy authoring,Named service,Benannter Dienst,Named service,machine
+workshop.energy.capacity,Workshop local energy authoring,Explicit capacity,Expliziter Vorrat,Explicit capacity,machine
+workshop.energy.hardware,Workshop local energy authoring,Hardware and work costs,Ausrüstung und Arbeitskosten,Hardware and work costs,machine
+workshop.energy.reserve,Workshop local energy authoring,Local reserve and thermal hardware,Lokale Reserve und Wärmeregelung,Local reserve and thermal hardware,machine
+workshop.energy.reactor,Workshop local energy authoring,Reactor capacitor,Reaktorkondensator,Reactor capacitor,machine
+workshop.energy.consumer,Workshop local energy authoring,System: {id},System: {id},System: {id},machine
+workshop.energy.group,Workshop local energy authoring,Control group: {id},Regelgruppe: {id},Control group: {id},machine
+workshop.energy.ready,Workshop local energy authoring,Energy profile ready to edit.,Energieprofil zur Bearbeitung bereit.,Energy profile ready to edit.,machine
+workshop.energy.empty,Workshop local energy authoring,No energy profile. Create one explicitly after configuring coolant stores.,Kein Energieprofil. Nach Konfiguration der Kühlmittelvorräte ausdrücklich eines erstellen.,No energy profile. Create one explicitly after configuring coolant stores.,machine
+workshop.energy.refused,Workshop local energy authoring,Energy edit refused: {reason},Energieänderung abgelehnt: {reason},Energy edit refused: {reason},machine
+workshop.energy.field.capacity,Workshop local energy authoring,Reserve capacity,Reservekapazität,Reserve capacity,machine
+workshop.energy.field.max_intake_per_sec,Workshop local energy authoring,Maximum incoming flow per second,Maximaler Zufluss pro Sekunde,Maximum incoming flow per second,machine
+workshop.energy.field.passive_loss_at_full_per_sec,Workshop local energy authoring,Passive loss per second at full reserve,Passiver Verlust pro Sekunde bei voller Reserve,Passive loss per second at full reserve,machine
+workshop.energy.field.charge_heat_per_unit,Workshop local energy authoring,Heat per unit charged,Wärme pro geladener Einheit,Heat per unit charged,machine
+workshop.energy.field.discharge_heat_per_unit,Workshop local energy authoring,Heat per unit depleted,Wärme pro verbrauchter Einheit,Heat per unit depleted,machine
+workshop.energy.field.passive_cooling_per_sec,Workshop local energy authoring,Passive cooling per second,Passive Kühlung pro Sekunde,Passive cooling per second,machine
+workshop.energy.field.coolant_heat_per_unit,Workshop local energy authoring,Heat removed per coolant unit,Abgeführte Wärme pro Kühlmitteleinheit,Heat removed per coolant unit,machine
+workshop.energy.field.trip_heat,Workshop local energy authoring,Thermal stop threshold,Wärmeabschaltgrenze,Thermal stop threshold,machine
+workshop.energy.field.recover_heat,Workshop local energy authoring,Thermal recovery threshold,Wärmewiederanlaufgrenze,Thermal recovery threshold,machine
+workshop.energy.field.sustainable_output_per_sec,Workshop local energy authoring,Sustainable reactor output per second,Dauerhafte Reaktorleistung pro Sekunde,Sustainable reactor output per second,machine
+workshop.energy.field.max_output_per_sec,Workshop local energy authoring,Maximum reactor output per second,Maximale Reaktorleistung pro Sekunde,Maximum reactor output per second,machine
+workshop.energy.field.ramp_per_sec,Workshop local energy authoring,Output ramp per second,Leistungsänderung pro Sekunde,Output ramp per second,machine
+workshop.energy.field.initial_output_per_sec,Workshop local energy authoring,Initial reactor output per second,Anfängliche Reaktorleistung pro Sekunde,Initial reactor output per second,machine
+workshop.energy.field.initial_energy,Workshop local energy authoring,Initial stored energy,Anfänglich gespeicherte Energie,Initial stored energy,machine
+workshop.energy.field.initial_heat,Workshop local energy authoring,Initial heat,Anfängliche Wärme,Initial heat,machine
+workshop.energy.field.continuous_cost_per_sec,Workshop local energy authoring,Continuous work cost per second,Kontinuierliche Arbeitskosten pro Sekunde,Continuous work cost per second,machine
+workshop.energy.field.discrete_cost,Workshop local energy authoring,Discrete action cost,Kosten einer Einzelaktion,Discrete action cost,machine
+workshop.energy.field.max_flow_per_sec,Workshop local energy authoring,Maximum group flow per second,Maximaler Gruppenzufluss pro Sekunde,Maximum group flow per second,machine
+workshop.energy.field.default_flow_per_sec,Workshop local energy authoring,Initial group flow per second,Anfänglicher Gruppenzufluss pro Sekunde,Initial group flow per second,machine
+workshop.energy.field.max_cooling_per_sec,Workshop local energy authoring,Maximum group cooling per second,Maximale Gruppenkühlung pro Sekunde,Maximum group cooling per second,machine
+workshop.energy.field.default_cooling_per_sec,Workshop local energy authoring,Initial group cooling per second,Anfängliche Gruppenkühlung pro Sekunde,Initial group cooling per second,machine
+workshop.energy.field.priority,Workshop local energy authoring,Group priority (lower first),Gruppenpriorität (niedrigere zuerst),Group priority (lower first),machine

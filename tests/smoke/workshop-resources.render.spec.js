@@ -172,7 +172,28 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await weapon('fire_arc_deg').fill('-1'); await weapon('save').click();
     await expect(weapon('status')).toContainText('refused');
     expect(await sourceOf(page)).toBe(afterWeapon);
-    const edited = afterWeapon;
+    // Local energy/thermal authoring is another accepted-source operation;
+    // changing inherited hardware requires explicit profile materialisation.
+    await revealWorkshopPanel(page, 'composition');
+    const energy = id => page.locator('#workshop-energy-' + id);
+    await energy('template').selectOption(HULL);
+    await expect(energy('apply')).toBeEnabled();
+    await energy('subject').selectOption('consumer:impulse');
+    const reserve = Number(await energy('reserve-capacity').inputValue());
+    await energy('reserve-capacity').fill(String(reserve + 10)); await energy('apply').click();
+    await expect(energy('status')).toContainText('materialise');
+    expect(await sourceOf(page)).toBe(afterWeapon);
+    await revealWorkshopPanel(page, 'composition'); await energy('materialise').check();
+    await energy('apply').click(); await expect(energy('status')).toHaveText(ts('workshop.changed'));
+    const afterEnergy = await sourceOf(page);
+    expect(parse(afterEnergy).energy.consumer.find(row => row.system === 'impulse').reserve.capacity).toBe(reserve + 10);
+    await page.locator('#workshop-undo').click(); await expect.poll(() => sourceOf(page)).toBe(afterWeapon);
+    await page.locator('#workshop-redo').click(); await expect.poll(() => sourceOf(page)).toBe(afterEnergy);
+    await revealWorkshopPanel(page, 'composition'); await energy('materialise').check();
+    await energy('reserve-trip_heat').fill('0'); await energy('apply').click();
+    await expect(energy('status')).toContainText('refused');
+    expect(await sourceOf(page)).toBe(afterEnergy);
+    const edited = afterEnergy;
     expect(parse(edited).torpedoes.count).toBe(32);
     expect(await sourceOf(page, BASE)).toBe(BASE_TEXT);
 

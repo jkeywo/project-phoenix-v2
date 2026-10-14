@@ -364,6 +364,11 @@ pub fn is_atomic_energy_profile(path: &str) -> bool {
     path == "energy"
 }
 
+/// Placement, connectivity and team homes form one validated physical layout.
+pub fn is_atomic_interior(path: &str) -> bool {
+    path == "interior"
+}
+
 fn merge_at(
     path: &str,
     template: &toml::Value,
@@ -374,7 +379,8 @@ fn merge_at(
         (toml::Value::Table(_), toml::Value::Table(_))
             if is_atomic_resource_endpoint(path)
                 || is_atomic_weapon_delivery(path)
-                || is_atomic_energy_profile(path) =>
+                || is_atomic_energy_profile(path)
+                || is_atomic_interior(path) =>
         {
             override_.clone()
         }

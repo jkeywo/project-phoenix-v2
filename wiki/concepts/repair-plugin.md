@@ -63,9 +63,27 @@ The shipped repair workflow fragment reproduces current behavior.
 
 Canonical jobs and private continuation are captured once in RepairState.jobs,
 validated against the authored owner/crew/workflow on restore, and folded in the
-internal-repair namespace. Snapshot 41/rules 0.13 explicitly reject older state.
+internal-repair namespace. Snapshot 45/rules 0.17 explicitly reject older state.
 Permitted Repair blackboards expose assignment/outcome rows to the shared read-only
 work list. It does not expose private memory, concealed damage or extra controls.
+
+## Physical layout and access
+
+`ship/interior.rs` validates authored decks, compartment geometry, System homes
+and explicit connections, then compiles stable minimum-cost routes. System
+placement is independent of Console ownership. `jobs/repair_navigation.rs`
+adapts the retained phase executor: teams must physically arrive before spending
+repair work or exposing on-site diagnosis. Cross-room sweeps travel, redirects
+finish committed crossings and blocked routes wait or replan. Canonical positions
+live once in `RepairJobState.navigation`, including external commitments.
+
+`ship/access.rs` applies ordinary admitted access-gate controls and scoped
+per-System trees. Protected seal requests block entry while existing crossings
+clear; actuator intent and actual boundary state remain distinct. Offline
+actuators preserve their transition. Immutable `InteriorLayout` geometry is
+installed independently of team count and projected through permitted Repair
+publications. The shared interior map retains deck selection through existing
+Console working-view admission. Co-hosting and read-only feeds grant no controls.
 
 ## External repairs
 

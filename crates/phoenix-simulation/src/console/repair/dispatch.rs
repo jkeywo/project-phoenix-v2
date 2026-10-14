@@ -468,6 +468,11 @@ fn resolve_repair_target(
         // wildcard so a future `RepairTarget` variant still fails to compile
         // until someone decides what a repair team walks to for it.
         RepairTarget::External => None,
+        RepairTarget::System(id) => {
+            // A visit reveals no condition until the team arrives.
+            hull?.get(id)?;
+            Some(id.clone())
+        }
         RepairTarget::Core => {
             let hull = hull?;
             let literal = SystemId("core".into());

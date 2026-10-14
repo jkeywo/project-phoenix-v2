@@ -14,6 +14,7 @@ export function consoleReadState(state, definition) {
   }
   const select = source => Object.fromEntries(Object.entries(source || {}).filter(([id]) => allowed.has(id)));
   const view = { ...state, blackboards: select(state.blackboards), blackboardKinds: select(state.blackboardKinds),
+    controlSystemIds: [...(definition.systems || [])],
     blackboardPresentation: select(state.blackboardPresentation),
     consoleSystems: { [definition.id]: definition.systems || [] } };
   // The recipient may host several screens. Exact hull rows follow this

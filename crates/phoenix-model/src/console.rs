@@ -16,6 +16,8 @@ pub struct ConsoleHostSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct ConsoleWorkingView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interior_deck: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_depth: Option<crate::energy::EnergyControlDepth>,
     pub inspected_record: Option<uuid::Uuid>,
     pub comms_thread: Option<String>,
@@ -34,7 +36,7 @@ pub struct NavigationWorkingView {
 
 impl ConsoleWorkingView {
     pub fn is_valid(&self) -> bool {
-        [&self.comms_thread, &self.overlay]
+        [&self.comms_thread, &self.overlay, &self.interior_deck]
             .into_iter()
             .all(|value| {
                 value.as_ref().is_none_or(|s| {

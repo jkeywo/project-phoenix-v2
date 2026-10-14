@@ -68,6 +68,12 @@ export const renderStation = makeCaptainRender({
       repairEl.state = {
         teams: repair.teams || [],
         jobs: repair.jobs || [],
+        interior: repair.interior || null,
+        navigation: repair.navigation || [],
+        boundaries: repair.boundaries || [],
+        console_id: s.console_id || null,
+        console_view: s.console_view || null,
+        damageable_systems: repair.damageable_systems || [],
         auto: !!repair.repair_auto,
         summary: !!repair.repair_summary,
         targets: repair.dispatch_targets || [],

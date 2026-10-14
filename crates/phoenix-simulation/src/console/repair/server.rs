@@ -131,6 +131,7 @@ impl Plugin for RepairPlugin {
         // is idempotent, so `RepairPlugin` used standalone still gets
         // `AiTickReady` inserted rather than panicking on a missing `Res`.
         crate::ai::cadence::register_ai_cadence(app);
+        crate::ship::access::register(app);
         // The dispatch router registers itself in Physics, pinning its own
         // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
         super::dispatch::register_repair_dispatch(app);
@@ -384,6 +385,7 @@ pub fn tick_repair_teams(
             Has<crate::lockstep::FleetSlotOf>,
             Has<crate::server_app::LocalShip>,
             Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship::access::InteriorAccess>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -395,8 +397,18 @@ pub fn tick_repair_teams(
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, mut queue, modifiers, mut hull, ship_uuid, config, fleet, local, mut power) in
-        ship_q.iter_mut()
+    for (
+        teams_comp,
+        mut queue,
+        modifiers,
+        mut hull,
+        ship_uuid,
+        config,
+        fleet,
+        local,
+        mut power,
+        access,
+    ) in ship_q.iter_mut()
     {
         // Crew wrecks remain for identity and cinematic spectating. A queued
         // repair must not revive them on the next tick and reopen admission.
@@ -425,10 +437,15 @@ pub fn tick_repair_teams(
             })
             .collect();
         let before = hull.0.total_current();
-        teams.0.tick_with_work(
+        let blocked = access
+            .zip(teams.0.layout())
+            .map(|(access, layout)| access.blocked_connections(layout))
+            .unwrap_or_default();
+        teams.0.tick_with_access(
             dt * repair_mult,
             &mut hull.0,
             config.map(|c| &c.0),
+            &blocked,
             |owner, work_dt| {
                 power.as_deref_mut().map_or(0.0, |power| {
                     power
@@ -487,23 +504,22 @@ pub fn tick_repair_teams(
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
-    mut ship_q: Query<
-        (
-            Option<&ShipRepairTeams>,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&RepairRequestQueue>,
-            // External repair-team dispatch (issue #1161). Present only on a
-            // hull that authored `[repair.external_dispatch]`; a hull without it
-            // leaves every external-dispatch field `None` and is byte-identical
-            // on the wire to one built before this existed.
-            Option<&super::external_server::ExternalRepairDispatch>,
-            Option<&crate::console::weapons::beam::TacticalRadarSelection>,
-            Option<&Transform>,
-            &mut crate::server_app::ShipSystemBlackboards,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut ship_q: Query<(
+        Option<&ShipRepairTeams>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&RepairRequestQueue>,
+        // External repair-team dispatch (issue #1161). Present only on a
+        // hull that authored `[repair.external_dispatch]`; a hull without it
+        // leaves every external-dispatch field `None` and is byte-identical
+        // on the wire to one built before this existed.
+        Option<&super::external_server::ExternalRepairDispatch>,
+        Option<&crate::console::weapons::beam::TacticalRadarSelection>,
+        Option<&Transform>,
+        &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship::access::InteriorAccess>,
+        Option<&crate::ship::access::InteriorLayout>,
+    )>,
     // Resolve a dispatched target's world entity-name id for the readout — no
     // English crosses the wire, exactly as the tractor publisher reports its
     // coupled target's name.
@@ -530,6 +546,8 @@ pub(crate) fn publish_repair_blackboard(
         selection,
         position,
         mut blackboards,
+        access,
+        layout,
     ) in ship_q.iter_mut()
     {
         let default_teams;
@@ -537,7 +555,7 @@ pub(crate) fn publish_repair_blackboard(
             Some(t) => t,
             None => {
                 default_teams =
-                    ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::default());
+                    ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(0));
                 &default_teams
             }
         };
@@ -661,6 +679,9 @@ pub(crate) fn publish_repair_blackboard(
             .map(|config| repair_group_definitions(&config.0, &damageable_systems))
             .unwrap_or_default();
         let bb = RepairBlackboard {
+            boundaries: access.map(|access| access.statuses()).unwrap_or_default(),
+            interior: layout.map(|layout| layout.0.clone()),
+            navigation: teams.0.navigation().unwrap_or_default().to_vec(),
             repair_groups,
             teams: team_slots,
             jobs: teams.0.work_list(),

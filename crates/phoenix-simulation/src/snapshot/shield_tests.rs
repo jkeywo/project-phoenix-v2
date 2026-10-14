@@ -1,4 +1,4 @@
-//! Real Snapshot 44 coverage for paid shield work and its private AI frames.
+//! Real snapshot coverage for paid shield work and private AI continuation.
 use super::*;
 use crate::ai::state_tree_runtime::{ShipAiTreePrograms, ShipAiTreeRuntime};
 use crate::core::messages::AdmittedCommands;
@@ -246,8 +246,7 @@ fn arm_mid_work(
 }
 
 #[test]
-fn snapshot44_resumes_mid_recovery_partial_interception_and_private_tree_execution() {
-    assert_eq!(SNAPSHOT_FORMAT, 44);
+fn shield_snapshot_resumes_mid_recovery_partial_interception_and_private_tree_execution() {
     let (mut live, entity, donor, recipient, partial) = fixture();
     arm_mid_work(&mut live, entity, &donor, &recipient, &partial);
     let saved: PhoenixSnapshot =
@@ -325,7 +324,7 @@ fn snapshot44_resumes_mid_recovery_partial_interception_and_private_tree_executi
 }
 
 #[test]
-fn snapshot44_rejects_invalid_shield_recovery_before_writing_any_entity_or_clock() {
+fn shield_snapshot_rejects_invalid_recovery_before_writing_any_entity_or_clock() {
     let (mut source, entity, donor, recipient, partial) = fixture();
     arm_mid_work(&mut source, entity, &donor, &recipient, &partial);
     let mut invalid = capture(source.world());
@@ -352,5 +351,58 @@ fn snapshot44_rejects_invalid_shield_recovery_before_writing_any_entity_or_clock
         serde_json::to_value(capture(target.world())).unwrap(),
         before,
         "preflight must reject before alert, clock, reserves, charge or AI memory changes"
+    );
+}
+
+#[test]
+fn interior_snapshot_rejects_missing_team_owner_before_writing_any_entity_or_clock() {
+    fn with_teams() -> (App, Entity) {
+        let (mut app, entity, _, _, _) = fixture();
+        let content = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .unwrap();
+        let count = content.repair.as_ref().unwrap().repair_team_count as usize;
+        let graph = phoenix_sim_gameplay::ship::interior::InteriorGraph::compile(
+            content.interior.as_ref().unwrap(),
+            content.ship_config.as_ref().unwrap(),
+            count,
+        )
+        .unwrap();
+        let mut teams = crate::modifiers::repair_teams::RepairTeams::new(count);
+        teams.install_layout(graph);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(ShipRepairTeams(teams));
+        (app, entity)
+    }
+    let (source, _) = with_teams();
+    let mut invalid = capture(source.world());
+    assert!(invalid.entities[0]
+        .repair
+        .as_ref()
+        .unwrap()
+        .jobs
+        .as_ref()
+        .unwrap()
+        .navigation
+        .is_some());
+    invalid.entities[0].repair = None;
+    invalid.entities[0].red_alert = Some(true);
+    invalid.tick = 999;
+    let (mut target, _) = with_teams();
+    let before = serde_json::to_value(capture(target.world())).unwrap();
+    let report = restore(target.world_mut(), &invalid);
+    assert!(
+        report
+            .gaps
+            .iter()
+            .any(|gap| matches!(gap, RestoreGap::RepairJobsInvalid { .. })),
+        "{report:?}"
+    );
+    assert_eq!(report.entities_restored, 0);
+    assert_eq!(
+        serde_json::to_value(capture(target.world())).unwrap(),
+        before
     );
 }

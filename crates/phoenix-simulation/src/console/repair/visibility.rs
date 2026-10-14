@@ -569,6 +569,9 @@ impl HullVisibility {
         bb: &RepairBlackboard,
     ) -> RepairBlackboard {
         RepairBlackboard {
+            boundaries: bb.boundaries.clone(),
+            interior: bb.interior.clone(),
+            navigation: bb.navigation.clone(),
             system_hull: self.entries_for(viewer),
             queue_depth: self.queue_entries_for(viewer, &bb.queue_depth),
             aggregate_hull_fraction: self.aggregate_fraction(),
@@ -672,6 +675,9 @@ impl HullVisibility {
 /// is ever shown again.
 fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
     RepairBlackboard {
+        boundaries: vec![],
+        interior: None,
+        navigation: vec![],
         teams: vec![],
         jobs: vec![],
         travel_duration_secs: bb.travel_duration_secs,

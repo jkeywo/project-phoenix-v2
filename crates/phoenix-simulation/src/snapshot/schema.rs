@@ -145,6 +145,8 @@ pub struct EntityState {
     /// The repair crew — see [`RepairState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<Vec<phoenix_model::interior::BoundaryStatus>>,
     /// The Weapons→Helm arc-bearing seam — see [`ArcRequestState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_request: Option<ArcRequestState>,

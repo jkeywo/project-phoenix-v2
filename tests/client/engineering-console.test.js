@@ -97,6 +97,8 @@ describe('cruiser engineering renderStation', () => {
       teams: [{ id: 't1' }], auto: true, summary, targets: [{ id: 'dt1' }],
       damaged: [{ id: 'ds1' }],
       reports: [], jobs: [], observation_tick: undefined,
+      interior: null, navigation: [], boundaries: [], damageable_systems: [],
+      console_id: null, console_view: null,
       external_dispatch: null,
     });
   });

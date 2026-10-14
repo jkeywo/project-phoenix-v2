@@ -40,6 +40,143 @@ fn timings() -> RepairTimings {
         repair_rate_hp_per_sec: 2.0,
     }
 }
+
+fn physical_teams() -> (RepairTeams, ShipConfig) {
+    let ship: ShipConfig = serde_json::from_value(serde_json::json!({
+        "system":[{"id":"a","kind":"sensors"},{"id":"b","kind":"comms"}]
+    }))
+    .unwrap();
+    let interior:crate::ship::interior::InteriorConfig=serde_json::from_value(serde_json::json!({
+        "deck":[{"id":"main","label":"test.main","damage_weight":1.0}],
+        "compartment":[
+            {"id":"home","deck":"main","label":"test.home","x":0.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead"},
+            {"id":"engine","deck":"main","label":"test.engine","x":5.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead"}],
+        "connection":[{"id":"hall","from":"home","to":"engine","travel_secs":2.0}],
+        "placements":{"a":"engine","b":"home"},"team_homes":["home"]
+    })).unwrap();
+    let graph = crate::ship::interior::InteriorGraph::compile(&interior, &ship, 1).unwrap();
+    let mut teams = RepairTeams::new_with_timings(
+        1,
+        RepairTimings {
+            travel_duration: 1.0,
+            repair_rate_hp_per_sec: 100.0,
+        },
+    );
+    teams.install_layout(graph);
+    (teams, ship)
+}
+#[test]
+fn physical_routes_gate_work_and_cross_room_sweep_knowledge() {
+    let (mut teams, ship) = physical_teams();
+    let mut hull = SystemHull::from_config(&[(sid("a"), 100.0), (sid("b"), 100.0)]);
+    hull.set_hp(&sid("a"), 50.0);
+    hull.set_hp(&sid("b"), 50.0);
+    teams.dispatch(0, sid("a"), "A".into());
+    teams.tick(1.0, &mut hull, Some(&ship));
+    assert_eq!(hull.current_for(&sid("a")), Some(50.0));
+    assert!(teams.on_site_systems().next().is_none());
+    teams.tick(1.0, &mut hull, Some(&ship));
+    assert_eq!(
+        teams.on_site_systems().cloned().collect::<Vec<_>>(),
+        vec![sid("a")]
+    );
+    teams.tick(1.0, &mut hull, Some(&ship));
+    assert_eq!(hull.current_for(&sid("a")), Some(100.0));
+    assert_eq!(hull.current_for(&sid("b")), Some(50.0));
+    assert!(
+        teams.on_site_systems().next().is_none(),
+        "sweep cannot teleport to the next room"
+    );
+    teams.tick(2.0, &mut hull, Some(&ship));
+    assert_eq!(hull.current_for(&sid("b")), Some(50.0));
+    teams.tick(0.5, &mut hull, Some(&ship));
+    assert_eq!(hull.current_for(&sid("b")), Some(100.0));
+}
+#[test]
+fn blocked_route_resume_and_recall_preserve_actual_crossing() {
+    let (mut teams, ship) = physical_teams();
+    let mut hull = hull();
+    teams.dispatch(0, sid("a"), "A".into());
+    let blocked = BTreeSet::from(["hall".into()]);
+    teams.tick_with_access(10.0, &mut hull, Some(&ship), &blocked, |_, _| {
+        panic!("blocked team cannot work")
+    });
+    assert!(teams.navigation().unwrap()[0].blocked);
+    teams.tick(1.0, &mut hull, Some(&ship));
+    let saved: RepairJobState =
+        serde_json::from_str(&serde_json::to_string(&teams.save_state()).unwrap()).unwrap();
+    let (mut resumed, _) = physical_teams();
+    resumed.restore_state(&saved).unwrap();
+    assert!(resumed.recall(0));
+    resumed.tick_with_access(1.0, &mut hull, Some(&ship), &blocked, |_, _| {
+        panic!("recall cannot repair")
+    });
+    assert!(
+        matches!(&resumed.navigation().unwrap()[0].location,crate::ship::interior::TeamLocation::Compartment {compartment} if compartment=="engine")
+    );
+    assert_eq!(resumed.lowest_free_team(), None);
+    resumed.tick(2.0, &mut hull, Some(&ship));
+    assert_eq!(resumed.lowest_free_team(), Some(0));
+    assert_eq!(
+        resumed.work_list()[0].id,
+        saved.teams[0].as_ref().unwrap().id
+    );
+    assert_eq!(resumed.work_list()[0].outcome, Some(JobOutcome::Cancelled));
+}
+#[test]
+fn navigation_restore_cannot_detach_external_commitment_or_forge_on_site_detail() {
+    let (mut teams, ship) = physical_teams();
+    let before = teams.save_state();
+    let mut saved = before.clone();
+    saved.navigation.as_mut().unwrap()[0].location =
+        crate::ship::interior::TeamLocation::External {
+            target: "fake".into(),
+        };
+    assert!(teams.restore_state(&saved).is_err());
+    assert_eq!(teams.save_state(), before);
+    teams.dispatch(0, sid("a"), "A".into());
+    let mut hull = hull();
+    teams.tick(2.0, &mut hull, Some(&ship));
+    let before = teams.save_state();
+    let mut saved = before.clone();
+    saved.navigation.as_mut().unwrap()[0].location =
+        crate::ship::interior::TeamLocation::Compartment {
+            compartment: "home".into(),
+        };
+    assert!(teams.restore_state(&saved).is_err());
+    assert_eq!(teams.save_state(), before);
+}
+#[test]
+fn paused_physical_team_clears_committed_crossing_without_starting_work() {
+    let (mut teams, ship) = physical_teams();
+    let mut hull = hull();
+    teams.dispatch(0, sid("a"), "A".into());
+    teams.tick(1.0, &mut hull, Some(&ship));
+    let saved = teams.save_state();
+    let mut config = repair_workflow::default_config();
+    config.tree[0].state[0].task.push(TaskDef {
+        id: "pause-travel".into(),
+        when: vec![],
+        action: TaskAction::Write {
+            channel: "advance_travel".into(),
+            value: BoolSource::Literal { value: false },
+        },
+    });
+    let mut paused =
+        RepairTeams::new_with_workflow(1, teams.phases().timings(), sid("repair"), Some(&config))
+            .unwrap();
+    paused.install_layout(teams.layout.as_ref().unwrap().clone());
+    paused.restore_state(&saved).unwrap();
+    let blocked = BTreeSet::from(["hall".into()]);
+    paused.tick_with_access(5.0, &mut hull, Some(&ship), &blocked, |_, _| {
+        panic!("paused team cannot work")
+    });
+    assert!(matches!(&paused.navigation().unwrap()[0].location,
+        crate::ship::interior::TeamLocation::Compartment {compartment} if compartment == "engine"));
+    assert!(paused.on_site_systems().next().is_none());
+    assert!(paused.work_list()[0].paused);
+    assert_eq!(hull.current_for(&sid("a")), Some(50.0));
+}
 #[test]
 fn default_job_keeps_phase_timing_identity_and_bounded_outcomes() {
     let mut teams = RepairTeams::new_with_timings(1, timings());

@@ -915,6 +915,7 @@ to = "engineering"
 travel_secs = 5
 
 [interior.placements]
+red-alert = "bridge"
 dock = "engineering"
 helm-thrust = "engineering"
 helm-steering = "engineering"

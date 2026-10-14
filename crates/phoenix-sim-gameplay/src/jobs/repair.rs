@@ -15,13 +15,29 @@ pub enum RepairActivity {
     Internal { phase: TeamSlot, cancelled: bool },
     External { target: String },
 }
-pub type RepairJobState = TeamJobs<RepairActivity>;
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RepairJobState {
+    pub jobs: TeamJobs<RepairActivity>,
+    pub navigation: Option<Vec<crate::ship::interior::TeamNavigation>>,
+}
+impl std::ops::Deref for RepairJobState {
+    type Target = TeamJobs<RepairActivity>;
+    fn deref(&self) -> &Self::Target {
+        &self.jobs
+    }
+}
+impl std::ops::DerefMut for RepairJobState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.jobs
+    }
+}
 #[derive(Clone, Debug)]
 pub struct RepairTeams {
     state: RepairJobState,
     timings: RepairTimings,
     program: Program,
     readout: Vec<TeamSlot>,
+    layout: Option<crate::ship::interior::InteriorGraph>,
 }
 impl RepairTeams {
     pub fn new(count: usize) -> Self {
@@ -38,14 +54,30 @@ impl RepairTeams {
         workflow: Option<&AiTreeConfig>,
     ) -> Result<Self, TreeError> {
         Ok(Self {
-            state: TeamJobs::new(count, owner),
+            state: RepairJobState {
+                jobs: TeamJobs::new(count, owner),
+                navigation: None,
+            },
             timings,
             program: repair_workflow::compile_workflow(workflow)?,
             readout: vec![TeamSlot::Idle; count],
+            layout: None,
         })
     }
     pub fn timings(&self) -> RepairTimings {
         self.timings
+    }
+    /// Bind accepted immutable content once. Navigation remains in the canonical
+    /// job state; this graph is a derived routing cache, never a second team owner.
+    pub fn install_layout(&mut self, layout: crate::ship::interior::InteriorGraph) {
+        self.state.navigation = Some(layout.initial_teams());
+        self.layout = Some(layout);
+    }
+    pub fn layout(&self) -> Option<&crate::ship::interior::InteriorConfig> {
+        self.layout.as_ref().map(|graph| &graph.config)
+    }
+    pub fn navigation(&self) -> Option<&[crate::ship::interior::TeamNavigation]> {
+        self.state.navigation.as_deref()
     }
     pub fn owner(&self) -> &SystemId {
         &self.state.owner
@@ -113,17 +145,67 @@ impl RepairTeams {
         self.refresh();
     }
     pub fn has_job_history(&self) -> bool {
-        self.state.next_id != 1 || self.state.teams.iter().any(Option::is_some)
+        self.state.navigation.is_some()
+            || self.state.next_id != 1
+            || self.state.teams.iter().any(Option::is_some)
     }
     pub fn save_state(&self) -> RepairJobState {
         self.state.clone()
     }
     pub fn restore_state(&mut self, state: &RepairJobState) -> Result<(), String> {
+        match (&self.layout, &state.navigation) {
+            (Some(layout), Some(navigation)) => layout.validate_navigation(navigation)?,
+            (None, None) => {}
+            _ => return Err("repair navigation does not match authored interior".into()),
+        }
         if state.teams.len() != self.state.teams.len()
             || state.owner != self.state.owner
             || state.next_id == 0
         {
             return Err("repair job owner/team count mismatch".into());
+        }
+        if let (Some(layout), Some(navigation)) = (&self.layout, &state.navigation) {
+            use crate::ship::interior::TeamLocation;
+            for (index, team) in navigation.iter().enumerate() {
+                let active = state.teams[index]
+                    .as_ref()
+                    .filter(|job| job.outcome.is_none());
+                match (active.map(|job| &job.activity), &team.location) {
+                    (
+                        Some(RepairActivity::External { target }),
+                        TeamLocation::External { target: location },
+                    ) if target == location => {}
+                    (Some(RepairActivity::External { .. }), _)
+                    | (_, TeamLocation::External { .. }) => {
+                        return Err(
+                            "external team location does not match its active commitment".into(),
+                        )
+                    }
+                    (
+                        Some(RepairActivity::Internal {
+                            phase:
+                                TeamSlot::Repairing {
+                                    system_id: Some(id),
+                                    ..
+                                },
+                            ..
+                        }),
+                        location,
+                    ) => {
+                        if !matches!(location,TeamLocation::Compartment {compartment} if layout.compartment_for_system(id)==Some(compartment))
+                        {
+                            return Err(
+                                "on-site repair phase does not match its physical compartment"
+                                    .into(),
+                            );
+                        }
+                    }
+                    (None, TeamLocation::Crossing { .. }) => {
+                        return Err("idle team cannot retain an unowned crossing".into())
+                    }
+                    _ => {}
+                }
+            }
         }
         let mut ids = BTreeSet::new();
         let mut external = 0;
@@ -145,6 +227,34 @@ impl RepairTeams {
                     }
                 }
                 RepairActivity::Internal { phase, .. } => {
+                    if let Some(layout) = &self.layout {
+                        let known = |id: &SystemId| layout.compartment_for_system(id).is_some();
+                        let valid = match phase {
+                            TeamSlot::Travelling { system_id, .. } => {
+                                system_id.as_ref().is_some_and(known)
+                            }
+                            TeamSlot::Repairing {
+                                system_id,
+                                priority_system_id,
+                                ..
+                            } => {
+                                system_id.as_ref().is_some_and(known)
+                                    && priority_system_id.as_ref().is_none_or(known)
+                            }
+                            TeamSlot::Returning {
+                                system_id,
+                                queued_system_id,
+                                ..
+                            } => {
+                                system_id.as_ref().is_none_or(known)
+                                    && queued_system_id.as_ref().is_none_or(known)
+                            }
+                            TeamSlot::Idle => false,
+                        };
+                        if !valid {
+                            return Err("repair phase refers to equipment without an authored physical home".into());
+                        }
+                    }
                     if matches!(phase, TeamSlot::Idle) {
                         return Err("internal job has no activity".into());
                     }
@@ -228,6 +338,26 @@ impl RepairTeams {
         }
         let mut phases = self.phases();
         phases.dispatch(team, target, label);
+        if self.layout.is_some() {
+            // Redirect directly from the physical position, after any crossing
+            // already in progress. The phase executor's old return timer must
+            // not introduce an invented trip home.
+            let mut slots = phases.slots().to_vec();
+            if let TeamSlot::Returning {
+                queued_system_id: Some(id),
+                queued_display_name,
+                ..
+            } = &slots[team]
+            {
+                slots[team] = TeamSlot::Travelling {
+                    system_id: Some(id.clone()),
+                    display_name: queued_display_name.clone(),
+                    elapsed: 0.0,
+                    priority: None,
+                };
+                phases.restore_slots(&slots);
+            }
+        }
         if self.state.teams[team]
             .as_ref()
             .is_none_or(|job| job.outcome.is_some())
@@ -320,9 +450,19 @@ impl RepairTeams {
         dt: f32,
         hull: &mut SystemHull,
         config: Option<&ShipConfig>,
+        grant: impl FnMut(&SystemId, f32) -> f32,
+    ) {
+        self.tick_with_access(dt, hull, config, &BTreeSet::new(), grant);
+    }
+    pub fn tick_with_access(
+        &mut self,
+        dt: f32,
+        hull: &mut SystemHull,
+        config: Option<&ShipConfig>,
+        blocked: &BTreeSet<String>,
         mut grant: impl FnMut(&SystemId, f32) -> f32,
     ) {
-        let enabled: Vec<_> = self
+        let mut enabled: Vec<_> = self
             .state
             .teams
             .iter_mut()
@@ -337,6 +477,16 @@ impl RepairTeams {
             })
             .collect();
         let mut phases = self.phases();
+        if let (Some(layout), Some(navigation)) = (&self.layout, &mut self.state.navigation) {
+            super::repair_navigation::prepare(
+                layout,
+                navigation,
+                &mut phases,
+                dt,
+                &mut enabled,
+                blocked,
+            );
+        }
         let work: Vec<_> = phases
             .slots()
             .iter()
@@ -366,6 +516,9 @@ impl RepairTeams {
             })
             .collect();
         phases.tick_with_repair_work(dt, hull, config, &enabled, &work);
+        if let (Some(layout), Some(navigation)) = (&self.layout, &self.state.navigation) {
+            super::repair_navigation::guard_arrival(layout, navigation, &mut phases);
+        }
         self.commit_phases(&phases);
     }
     pub fn external_team(&self) -> Option<usize> {
@@ -407,6 +560,19 @@ impl RepairTeams {
             return false;
         }
         let result = self.state.assign(team, RepairActivity::External { target });
+        if result {
+            let target = self
+                .external_target()
+                .expect("new external claim")
+                .to_owned();
+            if let Some(navigation) = &mut self.state.navigation {
+                navigation[team].location =
+                    crate::ship::interior::TeamLocation::External { target };
+                navigation[team].destination = None;
+                navigation[team].route.clear();
+                navigation[team].blocked = false;
+            }
+        }
         self.refresh();
         result
     }
@@ -421,6 +587,9 @@ impl RepairTeams {
             JobOutcome::Cancelled
         });
         job.paused = false;
+        if let (Some(layout), Some(navigation)) = (&self.layout, &mut self.state.navigation) {
+            navigation[team] = layout.initial_teams()[team].clone();
+        }
         self.refresh();
         true
     }

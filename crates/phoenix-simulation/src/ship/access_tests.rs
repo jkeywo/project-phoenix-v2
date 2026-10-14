@@ -146,6 +146,33 @@ fn fixture(source: ControlSource) -> (App, Entity) {
     fixture_with(content(), source)
 }
 
+#[test]
+fn gate_only_equipment_publishes_layout_without_inventing_repair_teams() {
+    let layout = content().interior.unwrap();
+    let (mut app, entity) = fixture(ControlSource::Human);
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(InteriorLayout(layout.clone()));
+    app.world_mut()
+        .run_system_once(crate::console::repair::server::publish_repair_blackboard)
+        .unwrap();
+    let boards = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap();
+    let SystemBlackboard::Repair(board) = &boards.0[&SystemId("repair".into())] else {
+        panic!("Repair publication")
+    };
+    assert_eq!(board.interior, Some(layout));
+    assert_eq!(board.boundaries.len(), 1);
+    assert!(board.teams.is_empty());
+    assert!(board.navigation.is_empty());
+    assert!(app
+        .world()
+        .get::<crate::console::repair::server::ShipRepairTeams>(entity)
+        .is_none());
+}
+
 fn send(app: &mut App, token: &str, target: SystemId, payload: Control) {
     app.world_mut()
         .resource_mut::<Messages<InboundMessage>>()

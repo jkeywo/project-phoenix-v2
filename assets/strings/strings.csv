@@ -5114,3 +5114,14 @@ shield.error.invalid_charge,Shield state validation,Invalid saved shield charge 
 "workshop.interior.team_count_edit","Workshop interior authoring","Change repair team count and explicit team homes together in Interiors.","Anzahl der Reparaturteams und explizite Team-Heimatabteile gemeinsam unter Innenräume ändern.","Change repair team count and explicit team homes together in Interiors.","machine"
 "workshop.interior.repair_target","Workshop interior authoring","Legacy repair target","Bisheriges Reparaturziel","Legacy repair target","machine"
 "workshop.interior.repair_placement","Workshop interior authoring","Repair target compartment","Abteil des Reparaturziels","Repair target compartment","machine"
+interior.map.deck,Ship interior map,Deck,Deck,Deck,machine
+interior.map.layout,Ship interior map,Ship interior,Schiffsinneres,Ship interior,machine
+interior.map.teams,Ship interior map,Teams: {teams},Teams: {teams},Teams: {teams},machine
+interior.map.location,Ship interior map,Team {n}: {place},Team {n}: {place},Team {n}: {place},machine
+interior.map.blocked,Ship interior map,Team {n}: blocked at {place},Team {n}: bei {place} blockiert,Team {n}: blocked at {place},machine
+interior.boundary.open,Interior access boundary,Open,Offen,Open,machine
+interior.boundary.sealing,Interior access boundary,Sealing,Wird versiegelt,Sealing,machine
+interior.boundary.sealed,Interior access boundary,Sealed,Versiegelt,Sealed,machine
+interior.boundary.opening,Interior access boundary,Opening,Wird geöffnet,Opening,machine
+interior.boundary.seal,Interior access boundary,Seal passage,Durchgang versiegeln,Seal passage,machine
+interior.boundary.release,Interior access boundary,Release seal,Versiegelung aufheben,Release seal,machine

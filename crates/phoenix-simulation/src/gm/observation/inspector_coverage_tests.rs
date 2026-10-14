@@ -338,6 +338,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         comms_console: _,
         power: _,
         energy: _,
+        interior: _,
         sensors_console: _,
         navigation_console: _,
         shields_console: _,

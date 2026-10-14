@@ -38,6 +38,7 @@ describe('ACTION_MAP', () => {
       'select_player_ship',
       'select_scenario',
       'select_ship_slot',
+      'set_access_seal',
       'set_boost',
       'set_console_view',
       'set_energy_group',
@@ -86,6 +87,16 @@ describe('ACTION_MAP', () => {
 
 function mkSend() { return vi.fn(); }
 function mkMutate() { return vi.fn(); }
+
+describe('set_access_seal',()=>{
+  it('uses the exact boundary System through ordinary correlated admission',()=>{
+    const send=mkSend();ACTION_MAP.set_access_seal({control_system_id:'weapons-access',sealed:true,correlation:'test'},send);
+    expect(send).toHaveBeenCalledWith('ControlSystemCorrelated',{
+      correlation:'test',target:'weapons-access',payload:{type:'SetAccessSeal',data:{sealed:true}},
+    });
+    send.mockClear();ACTION_MAP.set_access_seal({sealed:'true'},send);expect(send).not.toHaveBeenCalled();
+  });
+});
 
 describe('fire_phaser', () => {
   it('calls send FirePhaser with bank when bank is provided', () => {

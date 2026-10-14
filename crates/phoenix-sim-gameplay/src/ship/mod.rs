@@ -37,4 +37,6 @@ pub mod sensors;
 
 pub mod helm_planner;
 
+pub mod access;
 pub mod composition;
+pub mod interior;

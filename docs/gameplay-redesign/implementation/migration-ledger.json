@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 9,
+  "current_increment": 10,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -172,12 +172,17 @@
     {
       "id": 10,
       "title": "Decks, compartments and internal routes",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         9
       ],
       "completion": "Workshop authors layouts/materials/System placement; team travel uses shared routes and access boundaries before damage changes.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/interior-layout-and-team-routes.yaml",
+        "pasm/spec/architecture/interior-routes.yaml",
+        "docs/gameplay-redesign/implementation/increment-10.md",
+        "docs/acceptance/1562-interiors.md"
+      ]
     },
     {
       "id": 11,

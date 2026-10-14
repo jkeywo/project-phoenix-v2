@@ -270,3 +270,21 @@ and unconverted packs through existing compatibility checks. Existing transport
 and Station displays are retained. Full continuation, browser/native, balance,
 performance and human-workload acceptance remain open; this is an initial
 implementation, not a verified exit.
+
+## Increment 10 — decks, compartments and internal routes
+
+The [implementation contract](increment-10.md), accepted interior PASM decisions
+and [acceptance record](../../acceptance/1562-interiors.md) cover authored layouts,
+physical repair-team travel and ordinary access-gate Systems. Layout placement is
+independent of Console ownership. Minimum-cost routes retain committed crossings;
+protected seals block new entry and wait for those crossings to clear. Actual
+arrival gates repair work and local diagnosis. Existing percentage damage remains
+until increment 11 replaces damage and restoration together.
+
+Snapshot 45/rules 0.17 retain canonical navigation and access continuation.
+Immutable geometry is rebuilt independently of team count, so equipment without
+repair teams still publishes its permitted map. Workshop supports the same
+layout, connection and placement definitions. Focused native/client checks and
+independent source review are recorded separately from pending matching-browser,
+balance, performance, multiplayer and physical acceptance. This is an initial
+implementation while pinned validation continues, not a verified exit.

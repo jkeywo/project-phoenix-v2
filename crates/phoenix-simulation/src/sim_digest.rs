@@ -457,6 +457,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("collisions", fold_collisions),
     ("security", fold_security_namespace),
     ("internal-repair", fold_internal_repair_namespace),
+    ("interior-access", fold_access_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -2419,6 +2420,13 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 return None;
             }
             let mut state = teams.0.save_state();
+            for team in state.navigation.iter_mut().flatten() {
+                if let phoenix_model::interior::TeamLocation::Crossing { elapsed, .. } =
+                    &mut team.location
+                {
+                    *elapsed = f32::from_bits(canon_f32(*elapsed));
+                }
+            }
             for job in state.teams.iter_mut().flatten() {
                 if let crate::jobs::repair::RepairActivity::Internal { phase, .. } =
                     &mut job.activity
@@ -2441,6 +2449,22 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
 }
 
 /// Canonical stock/claims in the retained owner; labels and bindings are content.
+fn fold_access_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "interior-access",
+        |access: &crate::ship::access::InteriorAccess| {
+            let mut statuses = access.statuses();
+            for state in &mut statuses {
+                state.elapsed = f32::from_bits(canon_f32(state.elapsed));
+            }
+            Some(statuses)
+        },
+        |acc, states| fold_serde(acc, &states),
+    )
+}
+
 fn fold_resource_stock(mut acc: u64, stock: &crate::resources::Stock) -> u64 {
     acc = fold_u64(acc, stock.level as u64);
     acc = fold_u64(acc, stock.ceiling as u64);

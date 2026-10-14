@@ -1,0 +1,20 @@
+entities:
+  - component: interior-routes-and-boundary-state
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Physical Interiors and Access Boundaries
+      summary: "Model carries authored decks, compartments, connections and permitted physical team positions. Gameplay compiles the immutable graph, keeps team navigation in RepairJobState and owns canonical InteriorAccess actuator channels, explicit seal requests and transition state. Simulation joins ordinary admitted controls, individual closed state trees, shared boundary processing, repair travel, scoped Repair publications and continuation."
+      rationale:
+        - "[ai] Increment 10 implementation is in progress. Physical placement is independent of Console ownership. A deliberate seal constrains the actuator, and cannot be cleared by an AI actuator output. Requested closure blocks new entry while already committed crossings clear before actual sealing."
+        - "[ai] Snapshot 45/rules 0.17 record navigation and boundary state immediately. Restore preflights against rebuilt content; derived route graphs are not additional authoritative state. Existing damage, work rates and repair outcomes remain unchanged."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      reads: [shared-job-execution-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/interior.rs, crates/phoenix-sim-gameplay/src/ship/interior.rs, crates/phoenix-sim-gameplay/src/ship/access.rs, crates/phoenix-sim-gameplay/src/jobs/repair_navigation.rs, crates/phoenix-simulation/src/ship/access.rs, gui/interior-map.js]
+      symbols: [InteriorGraph, InteriorAccess, TeamNavigation, renderInteriorMap]
+      tests: [crates/phoenix-sim-gameplay/src/ship/interior_tests.rs, tests/client/interior-map.test.js]

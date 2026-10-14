@@ -31,11 +31,18 @@ pub enum SystemComponentConfig {
     PowerInput {
         id: String,
     },
+    AccessBoundary {
+        id: String,
+        sealed_channel: String,
+        transition_secs: f32,
+    },
 }
 impl SystemComponentConfig {
     pub fn id(&self) -> &str {
         match self {
-            Self::DockMating { id, .. } | Self::PowerInput { id } => id,
+            Self::DockMating { id, .. }
+            | Self::PowerInput { id }
+            | Self::AccessBoundary { id, .. } => id,
         }
     }
 }
@@ -127,6 +134,29 @@ fn valid_id(id: &str) -> bool {
 }
 
 pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    if system.kind == super::system_registry::ACCESS_GATE_KIND {
+        let [SystemComponentConfig::AccessBoundary {
+            id,
+            sealed_channel,
+            transition_secs,
+        }] = system.components.as_slice()
+        else {
+            return Err("Access gate requires exactly one access_boundary component".into());
+        };
+        if !valid_id(id) || !transition_secs.is_finite() || *transition_secs <= 0.0 {
+            return Err(
+                "Access boundary requires a valid component id and positive finite transition_secs"
+                    .into(),
+            );
+        }
+        if system.channels.len() != 1
+            || system.channels[0].name != *sealed_channel
+            || system.channels[0].kind != CommandChannelKind::Boolean
+        {
+            return Err("Access boundary requires its declared boolean sealed channel".into());
+        }
+        return Ok(());
+    }
     if system.kind != super::system_registry::DOCK_KIND {
         if !system.components.is_empty() || !system.channels.is_empty() {
             return Err(format!(

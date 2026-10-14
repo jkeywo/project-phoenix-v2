@@ -1862,22 +1862,22 @@ manual_overview = "You keep the ship alive. Allocate reactor power between helm,
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical"]
+detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Guided"
 automated_systems = []
-detailed_systems = ["power-reactor","power-battery","tractor","umbilical"]
+detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["repair"]
-detailed_systems = ["power-reactor","power-battery","tractor","umbilical"]
+detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Maintenance"
 automated_systems = ["repair","power-reactor","power-battery"]
-detailed_systems = ["tractor","umbilical"]
+detailed_systems = ["tractor","umbilical","weapons-access"]
 
 
 # Authored star ladder, most detailed first (issues #1059, #1083).

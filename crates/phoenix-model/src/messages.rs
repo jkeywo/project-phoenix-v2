@@ -1921,6 +1921,7 @@ pub struct RepairGroupDefinition {
 pub enum RepairTarget {
     Station(StationId),
     Console(ConsoleId),
+    System(SystemId),
     Core,
     /// **The field target off the ship** (issue #1386): whatever Tactical
     /// currently holds locked, worked by a team sent abroad.
@@ -1966,6 +1967,14 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    /// Protect or release an explicit access seal through its owning System.
+    SetAccessSeal {
+        sealed: bool,
+    },
+    /// Operate the shared actuator channel without clearing a deliberate seal.
+    SetAccessActuator {
+        sealed: bool,
+    },
     /// Set the ship's Red Alert state to an explicit desired value (issue
     /// #748). Targets `red-alert`. Replaces the former `ToggleRedAlert`: the
     /// captain UI and the Captain AI both send the desired end state, so a
@@ -5287,6 +5296,12 @@ pub struct QueueEntryPreview {
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RepairBlackboard {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundaries: Vec<crate::interior::BoundaryStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interior: Option<crate::interior::InteriorConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation: Vec<crate::interior::TeamNavigation>,
     /// Permitted assignment/outcome work list from the single job owner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub jobs: Vec<crate::job::JobWorkItem>,

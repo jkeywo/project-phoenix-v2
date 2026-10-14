@@ -921,8 +921,20 @@ pub(super) fn validate_entity_repair_jobs(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    match (
+        world.get::<crate::ship::access::InteriorAccess>(entity),
+        row.access.as_ref(),
+    ) {
+        (Some(access), Some(states)) => access.clone().restore(states)?,
+        (None, None) => {}
+        _ => return Err("saved access boundaries disagree with authored equipment".into()),
+    }
     let Some(stored) = row.repair.as_ref() else {
-        return Ok(());
+        return if world.get::<ShipRepairTeams>(entity).is_some() {
+            Err("saved repair state is missing for the authored team owner".into())
+        } else {
+            Ok(())
+        };
     };
     match (world.get::<ShipRepairTeams>(entity), stored.jobs.as_ref()) {
         (Some(teams), Some(jobs)) => teams.0.clone().restore_state(jobs),
@@ -972,6 +984,12 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut access), Some(states)) = (
+        entity_mut.get_mut::<crate::ship::access::InteriorAccess>(),
+        row.access.as_ref(),
+    ) {
+        access.restore(states).expect("preflighted access state");
+    }
     // Reconcile the canonical LOD bundle before applying any of the
     // continuations it owns. A High capture restored onto a Low bootstrap
     // needs those components inserted so the writes below have somewhere to

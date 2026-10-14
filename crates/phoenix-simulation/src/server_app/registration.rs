@@ -594,6 +594,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Folded,
                 "dock-relationship-state",
             )
+            .declare_state::<crate::ship::access::InteriorAccess>(
+                StateClass::Folded,
+                "interior-routes-and-boundary-state",
+            )
+            .declare_state::<crate::ship::access::InteriorLayout>(
+                StateClass::Derived,
+                "interior-routes-and-boundary-state",
+            )
             .declare_state::<crate::console::repair::external_server::ExternalRepairDispatch>(
                 StateClass::Derived,
                 "shared-job-execution-state",

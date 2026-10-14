@@ -1,5 +1,6 @@
 //! Canonical named-team commitments, with repair as the first workflow consumer.
 pub mod repair;
+mod repair_navigation;
 pub mod repair_workflow;
 use crate::ai::state_tree::TreeRuntime;
 use crate::core::messages::SystemId;

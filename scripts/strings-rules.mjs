@@ -57,6 +57,8 @@ export function isLocalisableName(header, prefix) {
  */
 export function isLocalisable(key, header, prefix) {
   if (!LOCALISABLE.has(key)) return false;
+  // Passage endpoints are stable compartment references, not message senders.
+  if (key === 'from' && /(?:^|\.)interior\.connection$/.test(header)) return false;
   if (key === 'name') return isLocalisableName(header, prefix);
   return true;
 }

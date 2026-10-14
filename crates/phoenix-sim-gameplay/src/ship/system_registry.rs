@@ -177,6 +177,7 @@ pub const TRACTOR_KIND: &str = "tractor";
 /// docked relationship this forms is what the umbilical (#1160) gates on.
 pub const DOCK_SYSTEM_ID: &str = "dock";
 pub const DOCK_KIND: &str = "dock";
+pub const ACCESS_GATE_KIND: &str = "access-gate";
 
 /// Wire `SystemId` for the transfer umbilical (issue #1160).
 ///
@@ -537,6 +538,7 @@ impl SystemKindRegistry {
         registry.register_commandable(TRACTOR_KIND, ConsoleFamily::Tractor)?;
         // Dock is rendered by Helm regardless of either instance/station id.
         registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
+        registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;
         // Transfer umbilical (issue #1160).
         registry.register_commandable(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
         // Security teams (issue #1346). Its OWN presentation family, the way the

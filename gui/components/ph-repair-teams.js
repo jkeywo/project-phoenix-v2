@@ -6,6 +6,7 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { observationDetails } from '../observation-details.js';
 import { renderJobWorkList } from '../job-work-list.js';
+import { renderInteriorMap } from '../interior-map.js';
 import {
   REPAIR_DISPATCH_ACTION_ID,
   REPAIR_PRIORITY_ACTION_ID,
@@ -169,6 +170,7 @@ export class PhRepairTeams extends PhElement {
   <div id="teams-container"></div>
   <div id="observation-reports"></div>
   <div id="job-work-list" role="status"></div>
+  <div id="interior-map"></div>
 `;
   }
 
@@ -487,6 +489,12 @@ export class PhRepairTeams extends PhElement {
 
   #render() {
     const s = this.#state || {};
+    renderInteriorMap(this.shadowRoot.getElementById('interior-map'), {
+      ...s, selectedTeam: this.#selectedTeamId,
+    }, t, system => activateEngineeringAction(this, REPAIR_DISPATCH_ACTION_ID,
+      {team_idx:this.#selectedTeamId, target:{type:'System',data:system}}, 'dispatch_repair_team'),
+    (system,sealed) => this.sendAction('set_access_seal',{control_system_id:system,sealed}),
+    view => {if(s.console_id) this.sendAction('set_console_view',{console:s.console_id,view});});
     const teams = Array.isArray(s.teams) ? s.teams : [];
     renderJobWorkList(this.shadowRoot.getElementById('job-work-list'), s.jobs, teams);
     const reports = this.shadowRoot.getElementById('observation-reports');

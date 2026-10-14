@@ -123,3 +123,19 @@ The following are implementation judgments within the approved milestone.
   are introduced with restoration in increment 11. Local stock routing follows
   in increment 12. Component/System/compartment template conveniences use the
   existing Workshop document model and may be refined after basic composition.
+
+## Bounded migration adapter
+
+Existing hull damage includes repairable buckets that are not installed Systems,
+including Core and Science and the monolithic NPC Captain bucket. Their explicit
+`interior.repair_placements` map gives those existing visits physical homes.
+Validation requires exactly the legacy hull rows outside the installed System
+set. This creates neither additional Systems nor another damage owner. Remove
+this adapter in increment 11 when compartment damage and restoration replace the
+legacy buckets together.
+
+Access uses a distinct presentation family, preventing a gate's authored order
+from changing the representative System used for Repair commands. Its ordinary
+AI reads a permitted typed Repair publication, required explicitly at load. A
+Console may receive that publication without gaining team or foreign gate control.
+Unavailable actuators retain intent and transition progress until recovery.

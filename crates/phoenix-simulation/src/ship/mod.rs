@@ -45,4 +45,5 @@ pub mod viewscreen;
 
 pub mod console_publication;
 
+pub mod access;
 pub mod composition;

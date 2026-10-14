@@ -68,6 +68,21 @@ pub fn compile_ship_trees_with_energy(
                 &booleans,
                 &numbers,
             )
+        } else if system.kind == crate::ship::system_registry::ACCESS_GATE_KIND {
+            let [phoenix_sim_gameplay::ship::composition::SystemComponentConfig::AccessBoundary {
+                sealed_channel,
+                ..
+            }] = system.components.as_slice()
+            else {
+                return Err(format!(
+                    "System {} requires access boundary composition",
+                    system.id.0
+                ));
+            };
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::ship::access::bindings(sealed_channel),
+            )
         } else {
             let dock = dock_composition(&system.components)
                 .ok_or_else(|| format!("System {} has no supported tree bindings", system.id.0))?;

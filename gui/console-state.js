@@ -1618,7 +1618,18 @@ export function buildRepairConsoleState(state, systemIds = []) {
   if (bb) {
     const rawTeams = bb.teams || [];
     const travelDur = bb.travel_duration_secs ?? 5.0;
-    const teams = rawTeams.map((slot, idx) => normalizeTeamSlot(slot, idx, travelDur));
+    const teams = rawTeams.map((slot, idx) => {
+      const team = normalizeTeamSlot(slot, idx, travelDur);
+      if (bb.interior && ['travelling', 'returning'].includes(team.status)) {
+        // The retained phase timer is a transition marker. Only the actual
+        // current passage can supply physical travel progress.
+        const location = bb.navigation?.[idx]?.location;
+        const passage = bb.interior.connection?.find(link => link.id === location?.connection);
+        team.progress_pct = location?.kind === 'crossing' && passage?.travel_secs > 0
+          ? Math.max(0, Math.min(location.elapsed / passage.travel_secs, 1)) : 0;
+      }
+      return team;
+    });
     // `system_hull` is what the HOST decided this recipient may see (issue
     // #737): core detail, this station's own systems, and any system a repair
     // team is currently on site at. The console renders what it was given and
@@ -1633,6 +1644,11 @@ export function buildRepairConsoleState(state, systemIds = []) {
       teams,
       reports: bb.queue_depth || [],
       jobs: bb.jobs || [],
+      interior: bb.interior || null,
+      navigation: bb.navigation || [],
+      boundaries: (bb.boundaries || []).map(boundary => ({...boundary,
+        controllable: (state.controlSystemIds || systemIds).includes(boundary.system)
+          && state.controlSources?.[boundary.system] === 'Human'})),
       observation_tick: observationTickFor(state, entry.systemId),
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
@@ -2453,6 +2469,7 @@ const FAMILY_BUILDERS = Object.freeze({
   shields: Object.freeze({ build: buildShieldsConsoleState }),
   power: Object.freeze({ build: buildPowerConsoleState, autoField: 'power_auto', autoScope: 'first' }),
   repair: Object.freeze({ build: buildRepairConsoleState, autoField: 'repair_auto', autoScope: 'first' }),
+  access: Object.freeze({ build: (state,ids) => ({...buildRepairConsoleState(state,ids),repair_auto:true}) }),
   // No `autoField` here: the per-card `command_auto` above (keyed by each
   // card's own `command_system_id`) is already authoritative, so the generic
   // top-level overlay in `buildFamilyConsoleView` would only ever write a

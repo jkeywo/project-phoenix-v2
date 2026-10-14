@@ -1379,6 +1379,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .then(|| capture_arc_requests(entity))
                         .flatten(),
                     power: capture_power(entity),
+                    access: entity
+                        .get::<crate::ship::access::InteriorAccess>()
+                        .map(|access| access.statuses()),
                     pass_surface: capture_pass_surfaces(entity),
                     motion_plan: capture_motion_plans(entity, context.motion_plan),
                     infrastructure: capture_infrastructure(entity),

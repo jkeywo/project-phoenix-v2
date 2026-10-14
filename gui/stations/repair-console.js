@@ -34,6 +34,7 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
+import { familyView } from '../console-payload.js';
 
 /**
  * Build a Repair `renderStation(s, doc)` for one hull from its `variant`.
@@ -45,6 +46,11 @@ export function makeRepairRender(variant) {
   const ids = variant.ids || {};
 
   return function renderStation(s, doc) {
+    const context=s;
+    if (s?.systems) {
+      const repair=familyView(s,'repair');
+      s=Object.keys(repair).length ? repair : familyView(s,'access');
+    }
     doc = doc || (typeof document !== 'undefined' ? document : null);
     if (!doc || !s) return;
 
@@ -63,6 +69,12 @@ export function makeRepairRender(variant) {
         teams: s.teams || [],
         reports: s.reports || [],
         jobs: s.jobs || [],
+        interior: s.interior || null,
+        navigation: s.navigation || [],
+        boundaries: s.boundaries || [],
+        console_id: context.console_id || null,
+        console_view: context.console_view || null,
+        damageable_systems: s.damageable_systems || [],
         observation_tick: s.observation_tick,
         auto: !!s.repair_auto,
         summary: !!s.repair_summary,

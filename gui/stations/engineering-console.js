@@ -101,7 +101,8 @@ export function makeEngineeringRender(variant) {
     }
 
     // ── Repair / Hull ───────────────────────────────────────────────────
-    const r = familyView(s, 'repair');
+    const repairView = familyView(s, 'repair');
+    const r = Object.keys(repairView).length ? repairView : familyView(s,'access');
     // Overall ship-wide hull (every damageable system), not just this
     // station's own systems.
     const oh = r.overall_hull || {};
@@ -119,6 +120,12 @@ export function makeEngineeringRender(variant) {
         teams: r.teams || [],
         reports: r.reports || [],
         jobs: r.jobs || [],
+        interior: r.interior || null,
+        navigation: r.navigation || [],
+        boundaries: r.boundaries || [],
+        console_id: s.console_id || null,
+        console_view: s.console_view || null,
+        damageable_systems: r.damageable_systems || [],
         observation_tick: r.observation_tick,
         auto: !!r.repair_auto,
         summary: !!r.repair_summary,

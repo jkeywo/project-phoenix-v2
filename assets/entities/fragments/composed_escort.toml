@@ -320,6 +320,7 @@ to = "engineering"
 travel_secs = 5
 
 [interior.placements]
+red-alert = "bridge"
 helm-thrust = "engineering"
 helm-steering = "engineering"
 helm-impulse = "engineering"

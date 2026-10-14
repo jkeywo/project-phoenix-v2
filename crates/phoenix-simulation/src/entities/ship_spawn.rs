@@ -53,7 +53,13 @@ pub(super) fn install(
         insert_ai_policies(config, cmds);
         insert_power_multipliers_and_modifiers(config, build_power_multipliers(config), cmds);
         insert_ship_markers_and_trackers(cmds);
-    } else if config.energy.is_some() {
+    } else if config.energy.is_some()
+        || config.ship_config.as_ref().is_some_and(|ship| {
+            ship.systems
+                .iter()
+                .any(|system| system.kind == crate::ship::system_registry::ACCESS_GATE_KIND)
+        })
+    {
         // Physical equipment keeps the same System/Console ownership and energy
         // owner on a static entity. This adds neither crew seats nor ship AI.
         let seed = ShipSpawnSeed::backfill(config);
@@ -69,6 +75,15 @@ pub(super) fn install(
         insert_power_state(config, &[], cmds);
     }
     // These capabilities also belong to independently authored nonship entities.
+    if let Some(layout) = &config.interior {
+        cmds.insert(crate::ship::access::InteriorLayout(layout.clone()));
+    }
+    if let Some(ship) = &config.ship_config {
+        let access = crate::ship::access::InteriorAccess::from_ship(ship);
+        if !access.controls.is_empty() {
+            cmds.insert(access);
+        }
+    }
     insert_shield_tuning(config, cmds);
     install_weapons(config, cmds);
     install_torpedoes(config, cmds);
@@ -208,6 +223,14 @@ fn insert_power_state(
     _power_group_seed: &[crate::modifiers::power_system::AuthoredPowerGroup],
     cmds: &mut EntityCommands,
 ) {
+    if let Some(ship) = &config.ship_config {
+        let trees = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(
+            ship,
+            config.energy.as_ref(),
+        )
+        .expect("validated System AI trees");
+        cmds.insert(trees);
+    }
     let Some(hardware) = config.energy.as_ref() else {
         // Reduced test entities may omit machinery; accepted playable content
         // is required to declare its physical energy profile at validation.
@@ -229,12 +252,6 @@ fn insert_power_state(
         .with_strike_reserve(legacy.0.strike_reserve.clone())
         .expect("validated strike overdrive");
     cmds.insert((crate::ship::power::ShipPowerSystem(power), legacy));
-    let trees: (
-        crate::ai::state_tree_runtime::ShipAiTreePrograms,
-        crate::ai::state_tree_runtime::ShipAiTreeRuntime,
-    ) = crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
-        .expect("validated System AI trees");
-    cmds.insert(trees);
 }
 
 /// Per-entity power multipliers, defaulted then overridden by any per-console
@@ -499,7 +516,20 @@ fn insert_power_multipliers_and_modifiers(
                 crate::ship::system_registry::repair_system_id(),
                 repair_cfg.workflow.as_ref(),
             ) {
-                Ok(teams) => {
+                Ok(mut teams) => {
+                    if let (Some(interior), Some(ship)) = (&config.interior, &config.ship_config) {
+                        match phoenix_sim_gameplay::ship::interior::InteriorGraph::compile(
+                            interior,
+                            ship,
+                            repair_cfg.repair_team_count as usize,
+                        ) {
+                            Ok(layout) => teams.install_layout(layout),
+                            Err(error) => {
+                                error!("refusing repair teams with invalid interior: {error}");
+                                return;
+                            }
+                        }
+                    }
                     cmds.insert(crate::console::repair::server::ShipRepairTeams(teams));
                 }
                 Err(error) => {

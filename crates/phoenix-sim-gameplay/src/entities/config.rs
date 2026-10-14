@@ -87,6 +87,8 @@ pub struct EntityConfig {
     pub power: Option<PowerConfigSection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy: Option<EnergyConfigSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interior: Option<crate::ship::interior::InteriorConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
     /// Unified shields config. Contains focus tuning at the top level and
@@ -449,7 +451,9 @@ impl EntityConfig {
                 .as_ref()
                 .is_some_and(|console| console.base.is_some())
         {
-            return Err(SerdeError::custom("Shield equipment requires explicit [[shield_arc]] definitions with energy profiles and ordinary System AI (increment 9). The shields_console.base table supplies shared tuning only; convert this content in Workshop or use its original game version."));
+            return Err(SerdeError::custom(
+                "Shield equipment requires explicit [[shield_arc]] definitions with energy profiles and ordinary System AI (increment 9). The shields_console.base table supplies shared tuning only; convert this content in Workshop or use its original game version.",
+            ));
         }
         if let Some(power) = config.power.as_ref() {
             validate_power_config(power).map_err(SerdeError::custom)?;
@@ -812,7 +816,9 @@ impl EntityConfig {
                     .any(|system| requires_energy_profile(&system.kind))
             })
         {
-            return Err(SerdeError::custom("Physical ship Systems require an explicit [energy] hardware profile (increment 8): author the reactor, each local reserve and allocation group, and a real coolant service/stock. Convert this content in Workshop or use its original game version."));
+            return Err(SerdeError::custom(
+                "Physical ship Systems require an explicit [energy] hardware profile (increment 8): author the reactor, each local reserve and allocation group, and a real coolant service/stock. Convert this content in Workshop or use its original game version.",
+            ));
         }
         if let Some(energy) = &config.energy {
             let ship = config.ship_config.as_ref().ok_or_else(|| {
@@ -834,6 +840,53 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             shield_energy::validate_shield_arc_energy(&config.shield_arcs, ship, energy)
                 .map_err(SerdeError::custom)?;
+        }
+
+        if config.interior.is_none()
+            && config
+                .ship_config
+                .as_ref()
+                .is_some_and(|ship| !ship.systems.is_empty())
+        {
+            return Err(SerdeError::custom("Installed Systems require an explicit [interior] layout in increment 10. Place every System, legacy hull repair bucket and team home in authored compartments; convert this content in Workshop or use its original game version."));
+        }
+        if let Some(interior) = &config.interior {
+            let ship = config
+                .ship_config
+                .as_ref()
+                .ok_or_else(|| SerdeError::custom("[interior] requires authored ship Systems"))?;
+            let count = config
+                .repair
+                .as_ref()
+                .map_or(0, |repair| repair.repair_team_count as usize);
+            crate::ship::interior::InteriorGraph::compile(interior, ship, count)
+                .map_err(SerdeError::custom)?;
+            let legacy: std::collections::BTreeSet<_> = config
+                .hull
+                .as_ref()
+                .map(|hull| {
+                    let ids: Vec<_> = if hull.system_hull.is_empty() && hull.hull_integrity > 0.0 {
+                        vec![crate::core::messages::SystemId("captain".into())]
+                    } else {
+                        hull.system_hull
+                            .iter()
+                            .map(|row| row.system_id.clone())
+                            .collect()
+                    };
+                    ids.into_iter()
+                        .filter(|id| ship.system(id).is_none())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if interior
+                .repair_placements
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+                != legacy
+            {
+                return Err(SerdeError::custom("interior.repair_placements must explicitly place every legacy hull damage bucket that is not an installed System; these temporary placements are replaced with compartment damage in increment 11"));
+            }
         }
 
         // Validation: a [scan] table has to describe a fidelity ladder that can
@@ -962,6 +1015,40 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::ACCESS_GATE_KIND {
+                    let source = crate::core::messages::SystemId("repair".into());
+                    let publications = std::collections::HashMap::from([(
+                        source.clone(),
+                        crate::core::messages::SystemBlackboard::Repair(Default::default()),
+                    )]);
+                    if ship
+                        .observations_for_system(&system.id, &publications)
+                        .get(&source)
+                        .is_none()
+                    {
+                        return Err(SerdeError::custom(format!("Access gate '{}' requires its controlling Console to own the Repair publication or declare an explicit typed feed source='repair', kind='Repair'; co-hosting does not share knowledge",system.id.0)));
+                    }
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom("Access gate requires explicit config.ai state tree")
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(SerdeError::custom)?;
+                    let [crate::ship::composition::SystemComponentConfig::AccessBoundary {
+                        sealed_channel,
+                        ..
+                    }] = system.components.as_slice()
+                    else {
+                        return Err(SerdeError::custom(
+                            "Access gate requires validated access_boundary composition",
+                        ));
+                    };
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::ship::access::bindings(sealed_channel),
+                    )
+                    .map_err(SerdeError::custom)?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::SHIELD_ARC_KIND {
                     let arc = config
                         .shield_arcs
@@ -1377,7 +1464,9 @@ impl EntityConfig {
             .and_then(|sc| sc.ai_policy.as_ref())
         {
             if !config.shield_arcs.is_empty() {
-                return Err(SerdeError::custom("Shield arc Systems use [shield_arc.ai] state trees. Remove retired [shields_console.ai_policy] rather than authoring two controllers; convert this pack in Workshop or use its original game version."));
+                return Err(SerdeError::custom(
+                    "Shield arc Systems use [shield_arc.ai] state trees. Remove retired [shields_console.ai_policy] rather than authoring two controllers; convert this pack in Workshop or use its original game version.",
+                ));
             }
             validate_fine_system_ai_policy_for(
                 &ai_hosts::SHIELDS_FOCUS,
@@ -1399,7 +1488,9 @@ impl EntityConfig {
         // reserve fails the entity load here, before any live tick.
         if let Some(ai) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
             if config.energy.is_some() {
-                return Err(SerdeError::custom("Energy hardware uses the reactor System config.ai state tree. Remove retired [power.ai_policy] rather than authoring two Power controllers; convert the pack in Workshop or use its original game version."));
+                return Err(SerdeError::custom(
+                    "Energy hardware uses the reactor System config.ai state tree. Remove retired [power.ai_policy] rather than authoring two Power controllers; convert the pack in Workshop or use its original game version.",
+                ));
             }
             // …and where the hull authors NO `[power_groups.*]` at all, the
             // channel set is the canonical trio the runtime seeds it with.

@@ -162,6 +162,16 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  set_transfer_resource: (a, send) => {
+    if (typeof a.resource !== 'string' || !a.resource) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: controlSystemId(a, 'umbilical'),
+      payload: { type: 'SetTransferResource', data: { resource: a.resource } },
+    });
+  },
+
   /** Stop the transfer umbilical's flow (issue #1160). What has moved has moved. */
   stop_transfer: (a, send) => {
     const correlated = typeof a.correlation === 'string' && a.correlation;

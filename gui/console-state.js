@@ -2358,6 +2358,8 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
   return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     capacity: bb.capacity ?? null,
+    selected_resource: bb.selected_resource ?? bb.capacity ?? null,
+    allowed_resources: bb.allowed_resources ?? [],
     rate: bb.rate ?? 0,
     direction: bb.direction ?? null,
     running: !!bb.running,

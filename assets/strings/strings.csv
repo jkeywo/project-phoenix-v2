@@ -5005,3 +5005,6 @@ semantic_action.power.energy_system.label,Local energy semantic action,Set indiv
 semantic_action.power.energy_system.accessibility,Local energy semantic action,Set individual System flow,Individuellen Systemzufluss festlegen,Set individual System flow,machine
 semantic_action.tactical.weapons_restraint.label,Weapon restraint semantic action,Toggle weapons hold,Feuersperre umschalten,Toggle weapons hold,machine
 semantic_action.tactical.weapons_restraint.accessibility,Weapon restraint semantic action,Toggle weapons hold,Feuersperre umschalten,Toggle weapons hold,machine
+console.umbilical.resource,Transfer resource selector,Resource,Ressource,Resource,machine
+semantic_action.engineering.transfer_resource.label,Transfer resource semantic action,Select transfer resource,Transferressource auswählen,Select transfer resource,machine
+semantic_action.engineering.transfer_resource.accessibility,Transfer resource semantic action,Select transfer resource,Transferressource auswählen,Select transfer resource,machine

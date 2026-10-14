@@ -66,6 +66,7 @@ describe('ACTION_MAP', () => {
       'set_strike_boost',
       'set_target',
       'set_torpedo_volley_target',
+      'set_transfer_resource',
       'set_view',
       'set_weapons_restraint',
       'show_on_screen',

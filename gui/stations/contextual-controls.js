@@ -1,5 +1,7 @@
 import { familyView, familySystemId } from '../console-payload.js';
 import { t } from '../strings.js';
+import { UMBILICAL_RESOURCE_ACTION_ID } from './engineering-actions.js';
+import { activateEngineeringAction } from './engineering-action-control.js';
 
 const mounted = new WeakMap();
 
@@ -141,6 +143,27 @@ export function renderUmbilicalPanel(s, doc, tr) {
     return;
   }
   panel.hidden = false;
+  let selector = panel.querySelector('[data-transfer-resource]');
+  if (!selector && Array.isArray(um.allowed_resources) && um.allowed_resources.length > 0) {
+    const label = doc.createElement('label'), caption = doc.createElement('span');
+    caption.textContent = tr('console.umbilical.resource'); selector = doc.createElement('select');
+    selector.dataset.transferResource = ''; selector.style.minHeight = '44px';
+    selector.onchange = () => activateEngineeringAction({ sendAction: (...args) => doc.defaultView?.sendAction?.(...args) },
+      UMBILICAL_RESOURCE_ACTION_ID, { resource: selector.value, control_system_id: selector.dataset.systemId }, 'set_transfer_resource');
+    label.append(caption, selector); panel.append(label);
+  }
+  if (selector) {
+    const choices = um.allowed_resources || [], signature = JSON.stringify(choices);
+    if (selector.dataset.choices !== signature) {
+      selector.replaceChildren(...choices.map(resource => { const option = doc.createElement('option'); option.value = resource;
+        option.textContent = resource === 'coolant' ? tr('energy.coolant') : tr(resource); return option; }));
+      selector.dataset.choices = signature;
+    }
+    selector.dataset.systemId = umbilicalSystemId;
+    selector.parentElement.hidden = choices.length === 0;
+    selector.disabled = !!um.umbilical_auto;
+    selector.value = um.selected_resource || um.capacity || '';
+  }
   const running = !!um.running;
   const btn = doc.getElementById('umbilical-btn');
   if (btn) {

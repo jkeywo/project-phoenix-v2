@@ -13784,6 +13784,13 @@ fn restrain_local_ship_weapons(app: &mut bevy::prelude::App) {
 /// again after release. Its target and ordinary authored AI remain unchanged.
 #[test]
 fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() {
+    fn incoming_fire(app: &mut App) -> Option<f32> {
+        let mut query = app.world_mut().query_filtered::<
+            &project_phoenix::ship::combat_activity::RecentCombatActivity,
+            With<LocalShip>,
+        >();
+        query.single(app.world()).unwrap().last_hostile_fire_taken
+    }
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&restraint_args(dt, 24.0)).expect("app should build");
 
@@ -13816,7 +13823,14 @@ fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() 
     // The order lands at t=4. Sampled well after it, and compared against the
     // instant of the last shot rather than against a shot count — the claim is
     // "nothing has been fired since", which is what a stopped gun means.
-    run(&mut app, ticks_for_sim_seconds(3.5, dt));
+    run(&mut app, ticks_for_sim_seconds(1.0, dt));
+    let held_incoming = incoming_fire(&mut app).expect("the picket attacked the crew before hold");
+    run(&mut app, ticks_for_sim_seconds(2.5, dt));
+    assert_eq!(
+        incoming_fire(&mut app),
+        Some(held_incoming),
+        "restraint stops the existing beam's physical work too"
+    );
     assert!(
         restraint_flag(&app, "enforcer_ordered_to_hold"),
         "precondition: the scenario has issued the hold"
@@ -13842,10 +13856,10 @@ fn explicit_restraint_silences_an_always_armed_hull_and_release_restores_fire() 
     run(&mut app, ticks_for_sim_seconds(6.0, dt));
     assert!(restraint_flag(&app, "enforcer_released"));
     assert!(!weapons_are_restrained(&mut app, R_ENFORCER));
-    let after_release = last_shot_secs(&mut app, R_ENFORCER).expect("still firing");
+    let after_release = incoming_fire(&mut app).expect("the existing beam resumes");
     assert!(
-        after_release > during_hold,
-        "restored, the same hull is shooting again — {after_release} > {during_hold}"
+        after_release > held_incoming,
+        "release resumes physical fire from the same hull — {after_release} > {held_incoming}"
     );
 }
 

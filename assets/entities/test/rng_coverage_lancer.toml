@@ -1347,55 +1347,6 @@ emergency_threshold = 25.0
 # draw sites it reaches LESS stable, not more. Nothing here exercises the
 # thrust-axis rule shape for its own sake, so there is no coverage to lose. The
 # HOLD rule below is the one addition; the elevate and baseline are untouched.
-[power.ai_policy.param]
-thrust_threshold = 0.7
-# [ai] Band width 0.1, matching the fleet. See fleet_baseline for the rationale.
-thrust_release_threshold = 0.6
-min_reserve_helm = 50.0
-min_reserve_weapons = 10.0
-min_reserve_baseline = 0.0
-
-# HOLD, above the elevate: helm is already at 3 and the throttle has not yet
-# fallen past the RELEASE floor, so keep it. Reads `min_reserve_helm` on the
-# battery axis exactly as the elevate does — the single floor is preserved, and
-# only the thrust axis carries a band.
-[[power.ai_policy.rule]]
-priority = 15
-channel = "helm"
-when = "fact(power_helm) >= 3 and fact(thrust) >= param(thrust_release_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 10
-channel = "helm"
-when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "helm"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 2
-
-[[power.ai_policy.rule]]
-priority = 10
-channel = "weapons"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "weapons"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 2
-
-
-# Explicit control surfaces and permitted observation publications.
 [[console]]
 id = "captain"
 name = "Captain"

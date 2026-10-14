@@ -687,13 +687,15 @@ impl EntityConfig {
                     "strike reserve charging group cannot also supply equipment",
                 ));
             }
-            if config.ship_config.as_ref().is_some_and(|ship| {
-                ship.power_groups
-                    .values()
-                    .map(|group| u16::from(group.default_level))
-                    .sum::<u16>()
-                    > u16::from(config.power.as_ref().unwrap().max_commanded_total)
-            }) {
+            if config.energy.is_none()
+                && config.ship_config.as_ref().is_some_and(|ship| {
+                    ship.power_groups
+                        .values()
+                        .map(|group| u16::from(group.default_level))
+                        .sum::<u16>()
+                        > u16::from(config.power.as_ref().unwrap().max_commanded_total)
+                })
+            {
                 return Err(SerdeError::custom(
                     "strike reserve initial allocations exceed the generation budget",
                 ));
@@ -1345,6 +1347,9 @@ impl EntityConfig {
         // a wrong verb, an unparseable guard, or an undeclared `param(...)`
         // reserve fails the entity load here, before any live tick.
         if let Some(ai) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
+            if config.energy.is_some() {
+                return Err(SerdeError::custom("Energy hardware uses the reactor System config.ai state tree. Remove retired [power.ai_policy] rather than authoring two Power controllers; convert the pack in Workshop or use its original game version."));
+            }
             // …and where the hull authors NO `[power_groups.*]` at all, the
             // channel set is the canonical trio the runtime seeds it with.
             // `PowerSystem::from_authored_groups` falls back to

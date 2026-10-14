@@ -2155,69 +2155,6 @@ default_level = 0
 min_level = 0
 max_level = 4
 
-[power.ai_policy.param]
-reserve_full = 100.0
-reserve_empty = 0.0
-
-[[power.ai_policy.rule]]
-priority = 20
-channel = "strike-reserve"
-when = "fact(strike_boost_enabled) < 1 and fact(battery_pct) >= param(reserve_empty) and fact(battery_pct) < param(reserve_full)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 21
-channel = "strike-reserve"
-when = "fact(strike_boost_enabled) > 0 or fact(battery_pct) >= param(reserve_full)"
-verb = "set_power_group_allocation"
-level = 0
-
-# Rule arrays replace inherited arrays: retain the ordinary demand rules.
-# Demand elevations remain ordinary authored allocation bids.
-
-[[power.ai_policy.rule]]
-priority = 15
-channel = "helm"
-when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_release_threshold) and fact(power_helm) >= 3 and fact(battery_pct) >= param(min_reserve_helm)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 10
-channel = "helm"
-when = "fact(red_alert) > 0 and fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_restore_helm)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "helm"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 2
-
-[[power.ai_policy.rule]]
-priority = 15
-channel = "weapons"
-when = "fact(red_alert) > 0 and fact(power_weapons) >= 3 and fact(battery_pct) >= param(min_reserve_weapons)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 10
-channel = "weapons"
-when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_restore_weapons)"
-verb = "set_power_group_allocation"
-level = 3
-
-[[power.ai_policy.rule]]
-priority = 0
-channel = "weapons"
-when = "fact(battery_pct) >= param(min_reserve_baseline)"
-verb = "set_power_group_allocation"
-level = 2
-
 [power.strike_reserve.weapons.phaser-fore]
 cost = 12
 damage_multiplier = 1.15

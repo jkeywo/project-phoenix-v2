@@ -1256,6 +1256,67 @@ fn shipped_content_has_no_entity_findings() {
     assert!(catalog.fields.iter().any(|field| field.local));
 }
 
+#[test]
+fn shield_energy_uses_existing_exact_source_authoring_and_runtime_validation() {
+    const CRUISER: &str = "assets/entities/alliance_cruiser.toml";
+    let mut files = BTreeMap::new();
+    text_members_under("assets", &mut files);
+    let dependencies = WorkshopDependencies::default();
+    let original = files[CRUISER].clone();
+    let view = catalog(&files, &dependencies, CRUISER);
+    assert!(view.fields.iter().any(|field| {
+        field.address == "shield_arc[id=fore].energy.upkeep_per_sec" && field.local
+    }));
+    let field_path = |field: &str| {
+        vec![
+            Segment::Key("shield_arc".into()),
+            Segment::Index(0),
+            Segment::Key("energy".into()),
+            Segment::Key(field.into()),
+        ]
+    };
+    let edit = request(
+        &files,
+        CRUISER,
+        vec![Edit::Set {
+            path: field_path("upkeep_per_sec"),
+            value_source: "0.1".into(),
+        }],
+    );
+    let changed = compose(&files, &dependencies, &edit).unwrap();
+    assert!(changed.contains("# [ai] Increment 9 tuning"));
+    files.insert(CRUISER.into(), changed);
+    assert!(
+        compose(&files, &dependencies, &edit).is_err(),
+        "stale source refuses atomically"
+    );
+    let resolved = resolve_template(CRUISER, &files).unwrap();
+    let parsed = EntityConfig::from_toml(&toml::to_string(&resolved.value).unwrap()).unwrap();
+    assert_eq!(parsed.shield_arcs[0].energy.upkeep_per_sec, 0.1);
+    let invalid = request(
+        &files,
+        CRUISER,
+        vec![Edit::Set {
+            path: field_path("recovery_energy_per_hp"),
+            value_source: "1.0".into(),
+        }],
+    );
+    assert!(
+        compose(&files, &dependencies, &invalid).is_err(),
+        "energy creation is refused before installation"
+    );
+    assert_eq!(
+        files[CRUISER],
+        edit.expected_source
+            .replacen("upkeep_per_sec = 0.05", "upkeep_per_sec = 0.1", 1)
+    );
+    files.insert(CRUISER.into(), original);
+    assert!(
+        findings(&files, &BTreeMap::new()).is_empty(),
+        "undo restores a valid authored fleet"
+    );
+}
+
 /// The same two readings over SHIPPED content, because this is not a fixture
 /// shape: every hull that overrides part of an inherited component is local and
 /// inherited at once, and the control the panel renders for it has to be one the

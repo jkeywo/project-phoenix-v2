@@ -47,7 +47,9 @@ impl ShieldArcEnergyConfig {
         if self.recharge_energy_per_hp <= 0.0 {
             return Err("shield energy recharge_energy_per_hp must be positive".into());
         }
-        if self.recovery_enabled() && self.recovery_energy_per_hp >= self.recharge_energy_per_hp {
+        if self.recovery_energy_per_hp > 0.0
+            && self.recovery_energy_per_hp >= self.recharge_energy_per_hp
+        {
             return Err("shield energy recovery_energy_per_hp must be strictly below recharge_energy_per_hp".into());
         }
         Ok(())

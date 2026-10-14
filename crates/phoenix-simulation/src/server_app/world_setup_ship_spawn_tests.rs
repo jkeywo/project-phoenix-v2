@@ -3,6 +3,9 @@ use crate::console::weapons::PhaserCombatConfigResource;
 use crate::entities::{ai_declaration_manifest::AiDeclarationMode, config::EntityConfig, spawner};
 use crate::ship_plugin::{ImpulseConfigResource, ShipConfigComponent, ShipPhysicsConfigResource};
 
+#[path = "../entities/shield_fixture.rs"]
+mod shield_fixture;
+
 fn config(text: &str) -> EntityConfig {
     EntityConfig::from_toml_in_mode(text, AiDeclarationMode::Lenient).unwrap()
 }
@@ -388,7 +391,7 @@ fn shared_spawn_static_defence_and_nonship_capabilities_keep_their_classificatio
         crate::entities::include_resolve::load_entity_config("assets/entities/station_axiom.toml")
             .unwrap();
     assert!(station.is_static_point_defence());
-    let nonship = config(
+    let nonship = config(&shield_fixture::with_energy(
         r#"
 tags = ["ship"]
 [helm_console]
@@ -404,7 +407,7 @@ width_deg = 360.0
 max_hp = 15
 regen_per_sec = 0.0
 "#,
-    );
+    ));
     assert!(nonship.ship_config.is_some(), "arcs synthesize topology");
     let mut app = App::new();
     let station = spawner::spawn_entity(

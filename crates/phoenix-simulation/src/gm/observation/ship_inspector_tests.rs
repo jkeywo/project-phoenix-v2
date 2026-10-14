@@ -83,6 +83,7 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
             label: "Fore".into(),
             center_deg: 0.0,
             width_deg: 180.0,
+            energy: Default::default(),
             max_hp: None,
             regen_per_sec: None,
             offline_duration: None,

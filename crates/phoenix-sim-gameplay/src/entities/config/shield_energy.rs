@@ -44,7 +44,7 @@ pub(super) fn validate_shield_arc_energy(
                     target.0
                 ));
             }
-            if arc.energy.recovery_enabled()
+            if arc.energy.recovery_energy_per_hp > 0.0
                 && arc.energy.recovery_energy_per_hp >= recipient.energy.recharge_energy_per_hp
             {
                 return Err(format!(

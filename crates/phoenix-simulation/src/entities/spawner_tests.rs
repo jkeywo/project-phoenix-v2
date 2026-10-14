@@ -2,6 +2,9 @@ use super::*;
 use crate::entities::config::*;
 use crate::regions::shape::RegionShape;
 
+#[path = "shield_fixture.rs"]
+mod shield_fixture;
+
 /// Helper: build a minimal Bevy app for spawning tests.
 fn test_app() -> App {
     let mut app = App::new();
@@ -1048,7 +1051,8 @@ regen_per_sec = 0.0
 "#;
     let read = |toml: &str| {
         let mut app = test_app();
-        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        let config =
+            EntityConfig::from_toml(&shield_fixture::with_energy(toml)).expect("toml must parse");
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let s = app

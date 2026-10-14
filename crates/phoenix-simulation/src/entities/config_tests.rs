@@ -4,6 +4,9 @@ use super::*;
 use crate::entities::tags::EntityTag;
 use crate::simmath;
 
+#[path = "shield_fixture.rs"]
+mod shield_fixture;
+
 /// Minimal `[helm_console]` fixture with only `max_speed` set — reused by
 /// the tests that assert every *other* helm-console field defaults to
 /// `None`/absent when the TOML omits it.
@@ -2275,7 +2278,8 @@ label = "Fore"
 center_deg = 0
 width_deg = 90
 "#;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
+        .expect("parse must succeed");
     assert_eq!(config.shield_arcs.len(), 1);
     assert_eq!(config.shield_arcs[0].id, "fore");
 
@@ -2330,7 +2334,8 @@ id = "shields"
 kind = "shields"
 console = "shield-screen"
 "#;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
+        .expect("parse must succeed");
     let ship_config = config.ship_config.expect("ship_config present");
     assert_eq!(ship_config.systems.len(), 3);
     for sys in &ship_config.systems {
@@ -2541,7 +2546,8 @@ hull_damaged_threshold_pct = 0.60
 hull_disabled_threshold_pct = 0.20
 hull_debuff_magnitude = 0.30
 "#;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
+        .expect("parse must succeed");
     let arc = &config.shield_arcs[0];
     assert_eq!(arc.hull_max_hp, 7.0);
     assert!((arc.hull_damaged_threshold_pct - 0.60).abs() < 1e-6);
@@ -2561,7 +2567,8 @@ center_deg = 0
 width_deg = 90
 hull_max_hp = 6
 "#;
-    let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+    let config = EntityConfig::from_toml(&shield_fixture::with_energy(toml_str))
+        .expect("parse must succeed");
     let arc = &config.shield_arcs[0];
     assert!((arc.hull_damaged_threshold_pct - 0.75).abs() < 1e-6);
     assert!((arc.hull_disabled_threshold_pct - 0.25).abs() < 1e-6);
@@ -9603,7 +9610,7 @@ console = "phaser-fore-scope"
 ai_only = true
 "#;
     let config = EntityConfig::from_toml_in_mode(
-        toml_str,
+        &shield_fixture::with_energy(toml_str),
         crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
     )
     .expect("fixture must parse");

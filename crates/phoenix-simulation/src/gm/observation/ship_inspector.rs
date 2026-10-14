@@ -482,6 +482,14 @@ pub fn projection<'a>(
                     "string",
                     None,
                 );
+            }
+            // Both damage owners use the same checked GM effect panel. This
+            // links to its scope reducer; it does not expose a generic HP setter.
+            if ship
+                .physical
+                .is_some_and(|damage| damage.definition.interior.placements.contains_key(id))
+                || ship.hull.is_some_and(|hull| hull.get(id).is_some())
+            {
                 insert(
                     &mut values,
                     &mut fields,

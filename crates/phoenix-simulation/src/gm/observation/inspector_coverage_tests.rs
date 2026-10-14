@@ -153,6 +153,7 @@ fn active_domain_sources() -> (
         ..Default::default()
     };
     let system = SystemInstanceConfig {
+        damage_components: Vec::new(),
         components: Vec::new(),
         channels: Vec::new(),
         console: Some(console.id.clone()),
@@ -342,6 +343,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         power: _,
         energy: _,
         interior: _,
+        damage: _,
         sensors_console: _,
         navigation_console: _,
         shields_console: _,
@@ -398,6 +400,152 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
                 let _ = $name as fn($type);
             };
         }
+    // Physical definitions are authored structure, never generic Live setters.
+    // The descriptor walk classifies their leaves RecreateRequired. Explicit
+    // nested patterns also catch optional future leaves absent from today's hulls.
+    exhaustive_struct!(
+        damage_schema,
+        phoenix_model::damage::DamageConfig,
+        materials,
+        remedies
+    );
+    exhaustive_struct!(
+        material_schema,
+        phoenix_model::damage::MaterialConfig,
+        resistance,
+        residual_fraction
+    );
+    exhaustive_struct!(
+        remedy_schema,
+        phoenix_model::damage::RemedyConfig,
+        work_secs,
+        manual_work_fraction,
+        structural_hp,
+        outcome,
+        requirements
+    );
+    exhaustive_struct!(
+        part_requirement_schema,
+        phoenix_model::damage::PartRequirement,
+        resource,
+        service,
+        amount
+    );
+    exhaustive_struct!(
+        damage_component_schema,
+        phoenix_model::damage::DamageComponentConfig,
+        id,
+        binding,
+        susceptibility,
+        fault_dose_threshold,
+        degraded_factor,
+        full_remedy,
+        patch_remedy,
+        field_replaceable
+    );
+    exhaustive_struct!(
+        impact_schema,
+        phoenix_model::damage::DamageProfile,
+        damage_type,
+        penetration
+    );
+    exhaustive_struct!(
+        interior_schema,
+        phoenix_model::interior::InteriorConfig,
+        decks,
+        compartments,
+        connections,
+        placements,
+        team_homes
+    );
+    exhaustive_struct!(
+        deck_schema,
+        phoenix_model::interior::DeckConfig,
+        id,
+        label,
+        damage_weight
+    );
+    exhaustive_struct!(
+        compartment_schema,
+        phoenix_model::interior::CompartmentConfig,
+        id,
+        deck,
+        label,
+        x,
+        z,
+        width,
+        depth,
+        material,
+        max_hp,
+        recovery_fraction,
+        structural_remedy
+    );
+    exhaustive_struct!(
+        connection_schema,
+        phoenix_model::interior::ConnectionConfig,
+        id,
+        from,
+        to,
+        travel_secs,
+        boundary
+    );
+    exhaustive_struct!(
+        physical_system_status_schema,
+        phoenix_model::damage::PhysicalSystemStatus,
+        compartment,
+        structural_hp,
+        structural_max_hp,
+        structurally_disabled,
+        components
+    );
+    exhaustive_struct!(
+        physical_component_status_schema,
+        phoenix_model::damage::PhysicalComponentStatus,
+        id,
+        binding,
+        condition
+    );
+    // Private dose/source are intentionally absent from permitted status and
+    // never become Live controls. Their persistence remains the damage owner.
+    exhaustive_struct!(
+        private_component_state_schema,
+        phoenix_model::damage::ComponentState,
+        condition,
+        dose,
+        last_source
+    );
+    fn closed_damage_type(value: phoenix_model::damage::DamageType) {
+        match value {
+            phoenix_model::damage::DamageType::Physical
+            | phoenix_model::damage::DamageType::Laser => {}
+        }
+    }
+    fn closed_damage_binding(value: phoenix_model::damage::DamageBinding) {
+        match value {
+            phoenix_model::damage::DamageBinding::Operation
+            | phoenix_model::damage::DamageBinding::Intake
+            | phoenix_model::damage::DamageBinding::Cooling => {}
+        }
+    }
+    fn closed_remedy_outcome(value: phoenix_model::damage::RemedyOutcome) {
+        match value {
+            phoenix_model::damage::RemedyOutcome::Structural
+            | phoenix_model::damage::RemedyOutcome::Full => {}
+            phoenix_model::damage::RemedyOutcome::Patch { factor: _ } => {}
+        }
+    }
+    fn closed_component_condition(value: phoenix_model::damage::ComponentCondition) {
+        match value {
+            phoenix_model::damage::ComponentCondition::Healthy
+            | phoenix_model::damage::ComponentCondition::Damaged
+            | phoenix_model::damage::ComponentCondition::Destroyed => {}
+            phoenix_model::damage::ComponentCondition::Patched { factor: _ } => {}
+        }
+    }
+    let _ = closed_damage_type as fn(phoenix_model::damage::DamageType);
+    let _ = closed_damage_binding as fn(phoenix_model::damage::DamageBinding);
+    let _ = closed_remedy_outcome as fn(phoenix_model::damage::RemedyOutcome);
+    let _ = closed_component_condition as fn(phoenix_model::damage::ComponentCondition);
     exhaustive_struct!(
         energy_schema,
         crate::entities::config::EnergyConfigSection,
@@ -498,6 +646,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         system_instance_schema,
         crate::ship::config::SystemInstanceConfig,
+        damage_components,
         components,
         channels,
         console,
@@ -613,6 +762,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         phaser_bank_schema,
         crate::entities::config::PhaserBankConfig,
+        impact,
         id,
         facing_deg,
         fire_arc_deg,
@@ -630,6 +780,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         blaster_bank_schema,
         crate::entities::config::BlasterBankConfig,
+        impact,
         id,
         facing_deg,
         fire_arc_deg,
@@ -670,6 +821,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedo_tube_schema,
         crate::entities::config::TorpedoTubeConfig,
+        impact,
         id,
         facing_deg,
         fire_arc_deg,
@@ -763,6 +915,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         shield_arc_schema,
         crate::entities::config::ShieldArcConfig,
+        damage_components,
         energy,
         ai,
         id,
@@ -772,10 +925,6 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         max_hp,
         regen_per_sec,
         offline_duration,
-        hull_max_hp,
-        hull_damaged_threshold_pct,
-        hull_disabled_threshold_pct,
-        hull_debuff_magnitude,
         priority,
         frequency,
     );
@@ -1431,3 +1580,47 @@ fn region_and_presentation_variant_schemas_are_exhaustively_mapped() {
 }
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;
+
+#[test]
+fn physical_authored_domains_and_every_weapon_profile_require_recreation() {
+    let sources = active_domain_sources();
+    let inventory = build(&sources).unwrap();
+    let physical: Vec<_> = inventory
+        .iter()
+        .filter(|row| {
+            row.domain == LiveInspectorDomain::Ship
+                && !row.runtime.starts_with("runtime.")
+                && (row.runtime.starts_with("damage.")
+                    || row.runtime.starts_with("interior.")
+                    || row.runtime.contains(".damage_component[")
+                    || row.runtime.contains(".impact."))
+        })
+        .collect();
+    assert!(!physical.is_empty());
+    for row in &physical {
+        assert_eq!(
+            row.mutability,
+            LiveMutability::RecreateRequired,
+            "{}",
+            row.runtime
+        );
+        assert!(row.action_panel.is_none(), "{}", row.runtime);
+    }
+    for required in [
+        "damage.materials.",
+        "damage.remedies.",
+        "interior.compartment[].max_hp",
+        "interior.compartment[].recovery_fraction",
+        "interior.compartment[].structural_remedy",
+        "system[].damage_component[].fault_dose_threshold",
+        "shield_arc[].damage_component[].binding",
+        "weapons_console.phaser_banks[].impact.penetration",
+        "weapons_console.blaster_banks[].impact.damage_type",
+        "torpedoes.tubes[].impact.penetration",
+    ] {
+        assert!(
+            physical.iter().any(|row| row.runtime.starts_with(required)),
+            "unmapped physical schema {required}"
+        );
+    }
+}

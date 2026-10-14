@@ -1,4 +1,28 @@
 id,context,en,de,de_source,de_provenance
+workshop.shield.title,Workshop shield authoring,Shields,Schilde,Shields,machine
+workshop.shield.hint,Workshop shield authoring,"Edit protection geometry and physical work costs. New arcs add a local reserve and allocation group using provisional tuning. Configure the reactor and real coolant store in Energy and Resources first. Recovery destinations receive energy for ordinary timed recharge.","Schutzgeometrie und physische Arbeitskosten bearbeiten. Neue Schildbögen erhalten eine lokale Reserve und Regelgruppe mit vorläufigen Werten. Zuerst Reaktor und echten Kühlmittelvorrat unter Energie und Ressourcen einrichten. Rückgewinnungsziele erhalten Energie für das normale zeitabhängige Aufladen.","Edit protection geometry and physical work costs. New arcs add a local reserve and allocation group using provisional tuning. Configure the reactor and real coolant store in Energy and Resources first. Recovery destinations receive energy for ordinary timed recharge.",machine
+workshop.shield.template,Workshop shield authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.shield.existing,Workshop shield authoring,Existing shield arc,Vorhandener Schildbogen,Existing shield arc,machine
+workshop.shield.new,Workshop shield authoring,New shield arc,Neuer Schildbogen,New shield arc,machine
+workshop.shield.save,Workshop shield authoring,Apply shield settings,Schildeinstellungen anwenden,Apply shield settings,machine
+workshop.shield.remove,Workshop shield authoring,Remove shield arc and local reserve,Schildbogen und lokale Reserve entfernen,Remove shield arc and local reserve,machine
+workshop.shield.materialise,Workshop shield authoring,Materialise inherited shield and energy data,Geerbte Schild- und Energiedaten lokal übernehmen,Materialise inherited shield and energy data,machine
+workshop.shield.id,Workshop shield authoring,Arc identity,Bogenkennung,Arc identity,machine
+workshop.shield.label,Workshop shield authoring,Display label,Anzeigetext,Display label,machine
+workshop.shield.center_deg,Workshop shield authoring,Centre bearing (degrees),Mittlere Peilung (Grad),Centre bearing (degrees),machine
+workshop.shield.width_deg,Workshop shield authoring,Arc width (degrees),Bogenbreite (Grad),Arc width (degrees),machine
+workshop.shield.max_hp,Workshop shield authoring,Strength capacity (blank uses base),Schutzkapazität (leer nutzt Basiswert),Strength capacity (blank uses base),machine
+workshop.shield.regen_per_sec,Workshop shield authoring,Recharge HP per second (blank uses base),Aufladung in HP pro Sekunde (leer nutzt Basiswert),Recharge HP per second (blank uses base),machine
+workshop.shield.offline_duration,Workshop shield authoring,Damage-collapse delay (blank uses base),Verzögerung nach Schadenskollaps (leer nutzt Basiswert),Damage-collapse delay (blank uses base),machine
+workshop.shield.upkeep_per_sec,Workshop shield authoring,Raised upkeep energy per second,Energiebedarf pro Sekunde bei aktivem Schild,Raised upkeep energy per second,machine
+workshop.shield.recharge_energy_per_hp,Workshop shield authoring,Recharge energy per HP,Energie pro HP beim Aufladen,Recharge energy per HP,machine
+workshop.shield.recovery_energy_per_hp,Workshop shield authoring,Recovered energy per HP removed,Rückgewonnene Energie pro entnommenem HP,Recovered energy per HP removed,machine
+workshop.shield.discharge_hp_per_sec,Workshop shield authoring,Maximum discharge HP per second,Maximale Entladung in HP pro Sekunde,Maximum discharge HP per second,machine
+workshop.shield.targets,Workshop shield authoring,Eligible recovery batteries (multiple selection),Zulässige Rückgewinnungsbatterien (Mehrfachauswahl),Eligible recovery batteries (multiple selection),machine
+workshop.shield.reset_ai,Workshop shield authoring,Reset affected shield AI to the standard policy,Betroffene Schild-KI auf Standardverhalten zurücksetzen,Reset affected shield AI to the standard policy,machine
+workshop.shield.ready,Workshop shield authoring,Shield work configuration ready,Schild-Arbeitskonfiguration bereit,Shield work configuration ready,machine
+workshop.shield.empty,Workshop shield authoring,No shield arc selected,Kein Schildbogen ausgewählt,No shield arc selected,machine
+workshop.shield.refused,Workshop shield authoring,Shield edit refused: {reason},Schildänderung abgelehnt: {reason},Shield edit refused: {reason},machine
 world.alliance_convoy.global.title,Convoy scenario title,Alliance Convoy Escort,Geleitschutz für den Allianzkonvoi,Alliance Convoy Escort,machine
 world.alliance_convoy.global.description,Convoy scenario description,Protect three civilian transports through hostile space and account for every arrival and loss.,Schützen Sie drei zivile Transportschiffe auf dem Weg durch feindliches Gebiet und erfassen Sie jede Ankunft und jeden Verlust.,Protect three civilian transports through hostile space and account for every arrival and loss.,machine
 world.alliance_convoy.slot.lead,Convoy escort slot,Convoy command,Konvoi-Kommando,Convoy command,machine

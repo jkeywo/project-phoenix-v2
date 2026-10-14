@@ -122,17 +122,9 @@ trail_lifetime_secs = 0.55
 # Port bank: facing -90° (left side), wide auto-arc so the cruiser can
 # fire one bank or the other depending on relative bearing without
 # perfect alignment.
-[[weapons_console.phaser_banks]]
-id = "port"
-facing_deg = -90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
-beam_range = 50.0
-beam_damage_per_sec = 8.0
-beam_duration_secs = 5.0
-cooldown_secs = 4.0
-shield_pierce = 0.1
-beam_color = [1.0, 0.22, 0.08, 1.0]
+[[weapon]]
+id = "phaser-port"
+strategy_id = "port"
 marker = "phasers_port"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -140,7 +132,22 @@ marker = "phasers_port"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = -90
+fire_arc_deg = 180
+range = 50
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 8
+duration_secs = 5
+cooldown_secs = 4
+auto_arc_deg = 180
+color = [ 1, 0.22, 0.08, 1 ]
+shield_pierce = 0.1
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -149,24 +156,16 @@ marker = "phasers_port"
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # Starboard bank: facing +90° (right side).
-[[weapons_console.phaser_banks]]
-id = "starboard"
-facing_deg = 90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
-beam_range = 50.0
-beam_damage_per_sec = 8.0
-beam_duration_secs = 5.0
-cooldown_secs = 4.0
-shield_pierce = 0.1
-beam_color = [1.0, 0.22, 0.08, 1.0]
+[[weapon]]
+id = "phaser-starboard"
+strategy_id = "starboard"
 marker = "phasers_starboard"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -174,7 +173,22 @@ marker = "phasers_starboard"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 90
+fire_arc_deg = 180
+range = 50
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 8
+duration_secs = 5
+cooldown_secs = 4
+auto_arc_deg = 180
+color = [ 1, 0.22, 0.08, 1 ]
+shield_pierce = 0.1
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -183,7 +197,7 @@ marker = "phasers_starboard"
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"

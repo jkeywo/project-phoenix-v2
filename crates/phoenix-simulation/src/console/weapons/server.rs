@@ -911,7 +911,7 @@ fn tick_weapons_arc_request(
             }
         };
         let geometry = |range: f32, facing_deg: f32, arc_deg: f32| {
-            crate::weapons::phaser::target_geometry(
+            crate::weapons::mount::target_geometry(
                 tx,
                 tz,
                 physics.x,

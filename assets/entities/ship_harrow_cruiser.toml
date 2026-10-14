@@ -425,17 +425,9 @@ channel = "arc_bearing_third"
 when = "true"
 verb = "bring_torpedoes_to_bear"
 
-[[weapons_console.phaser_banks]]
-id = "fore"
-facing_deg = 0
-fire_arc_deg = 270
-auto_arc_deg = 270
-beam_range = 55
-beam_damage_per_sec = 6
-beam_duration_secs = 5
-cooldown_secs = 4
-shield_pierce = 0.1
-beam_color = [1.0, 0.22, 0.08, 1.0]
+[[weapon]]
+id = "phaser-fore"
+strategy_id = "fore"
 marker = "phasers_fore"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -443,7 +435,22 @@ marker = "phasers_fore"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 270
+range = 55
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 6
+duration_secs = 5
+cooldown_secs = 4
+auto_arc_deg = 270
+color = [ 1, 0.22, 0.08, 1 ]
+shield_pierce = 0.1
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -452,23 +459,15 @@ marker = "phasers_fore"
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
-[[weapons_console.phaser_banks]]
-id = "aft"
-facing_deg = 180
-fire_arc_deg = 270
-auto_arc_deg = 270
-beam_range = 55
-beam_damage_per_sec = 6
-beam_duration_secs = 5
-cooldown_secs = 4
-shield_pierce = 0.1
-beam_color = [1.0, 0.22, 0.08, 1.0]
+[[weapon]]
+id = "phaser-aft"
+strategy_id = "aft"
 marker = "phasers_aft"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -476,7 +475,22 @@ marker = "phasers_aft"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 180
+fire_arc_deg = 270
+range = 55
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 6
+duration_secs = 5
+cooldown_secs = 4
+auto_arc_deg = 270
+color = [ 1, 0.22, 0.08, 1 ]
+shield_pierce = 0.1
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -485,7 +499,7 @@ marker = "phasers_aft"
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
@@ -543,19 +557,27 @@ detonation_radius = 4.0
 # that the orbit — which holds the target abeam by construction — can never
 # satisfy it, so the cruiser genuinely has to break off and point. Widen it and
 # the manoeuvre becomes decoration.
-[[torpedoes.tubes]]
-id = "bow_port"
-facing_deg = 0.0
-fire_arc_deg = 24.0
-volley_max = 2
-ai_target_count = 2
+[[weapon]]
+id = "torpedo-tube-bow_port"
+strategy_id = "bow_port"
 
   # The per-tube doctrine (issue #791) — the first hull in the set to author one.
   #
   # LOAD is unconditional: the tubes are kept full between opportunities, because
   # a tube that starts loading when the shield goes down has already missed the
   # window (`load_time` is 9 s; the window is a few).
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 24
+range = 270
+
+[weapon.delivery]
+kind = "guided"
+volley_max = 2
+ai_target_count = 2
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -564,7 +586,7 @@ ai_target_count = 2
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
@@ -585,24 +607,32 @@ ai_target_count = 2
   #
   # Any of the three going false holds fire on the next tick without the tube
   # needing to be told the opportunity is over.
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
   verb = "launch_torpedo"
 
-[[torpedoes.tubes]]
-id = "bow_starboard"
-facing_deg = 0.0
-fire_arc_deg = 24.0
-volley_max = 2
-ai_target_count = 2
+[[weapon]]
+id = "torpedo-tube-bow_starboard"
+strategy_id = "bow_starboard"
 
   # Identical doctrine to `bow_port`: the tubes fire as one salvo, so they must
   # answer their channels the same way. Authored per tube rather than shared
   # because a tube's policy is a property of the tube — a later refit that gives
   # one of them a different arc would change its answer and not the other's.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 24
+range = 270
+
+[weapon.delivery]
+kind = "guided"
+volley_max = 2
+ai_target_count = 2
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -611,13 +641,13 @@ ai_target_count = 2
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"

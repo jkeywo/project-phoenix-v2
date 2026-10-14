@@ -510,7 +510,7 @@ pub(crate) fn handle_fire_phaser(
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                        let (rx, ry) = crate::weapons::mount::ship_local(
                             tx,
                             tz,
                             physics.x,
@@ -520,7 +520,7 @@ pub(crate) fn handle_fire_phaser(
                         let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                             <= effective_bank_range * effective_bank_range;
                         range_ok
-                            && crate::weapons::phaser::in_arc(
+                            && crate::weapons::mount::in_arc(
                                 rx,
                                 ry,
                                 bank_cfg.facing_deg,
@@ -917,7 +917,7 @@ pub(crate) fn ai_phaser_auto_fire(
                     };
                     let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
                         <= effective_range * effective_range;
-                    let (rx, ry) = crate::weapons::phaser::ship_local(
+                    let (rx, ry) = crate::weapons::mount::ship_local(
                         tx,
                         tz,
                         physics.x,
@@ -925,7 +925,7 @@ pub(crate) fn ai_phaser_auto_fire(
                         physics.yaw,
                     );
                     let arc_ok =
-                        crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
+                        crate::weapons::mount::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
                     if !(range_ok && arc_ok) {
                         return None;
                     }
@@ -1209,7 +1209,7 @@ pub(crate) fn tick_beams_prepare(
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                        let (rx, ry) = crate::weapons::mount::ship_local(
                             tx,
                             tz,
                             shooter_physics.x,
@@ -1220,7 +1220,7 @@ pub(crate) fn tick_beams_prepare(
                             + (tz - shooter_physics.z).powi(2)
                             <= effective_bank_range * effective_bank_range;
                         range_ok
-                            && crate::weapons::phaser::in_arc(
+                            && crate::weapons::mount::in_arc(
                                 rx,
                                 ry,
                                 bank_cfg.facing_deg,
@@ -1679,10 +1679,12 @@ pub(crate) fn tick_beams_apply_damage(
                 if all_offline {
                     (base_damage as f32, 0.0f32)
                 } else {
-                    let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
-                        base_damage as f32,
-                        state.shield_pierce,
-                    );
+                    let (pierced, absorbed) = crate::weapons::mount::DamageDelivery {
+                        damage_hull: base_damage as f32,
+                        damage_shields: base_damage as f32,
+                        shield_pierce: state.shield_pierce,
+                    }
+                    .split(true);
                     // Which facing takes the hit.
                     //
                     // A CREWED hull routes by the shooter's bearing to the

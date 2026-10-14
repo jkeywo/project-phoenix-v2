@@ -191,11 +191,23 @@ selects = [ "ship", "station", "asteroid", "planet" ]
 # Exactly one weapon. No [[weapons_console.phaser_banks]] and no [torpedoes]:
 # both spawn paths read `phaser_banks.first()`, so an absent list is a ship
 # with no phasers rather than a ship with a default one.
-[[weapons_console.blaster_banks]]
-id = "fore"
+[[weapon]]
+id = "blaster-fore"
+strategy_id = "fore"
 marker = "blaster_fore"
+
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
+  # channel: unconditional, with the host still enforcing availability,
+  # cooldown, range, arc and target validity before the volley starts.
+
+[weapon.mount]
 facing_deg = 0
 fire_arc_deg = 45
+range = 35
+
+[weapon.delivery]
+kind = "bolt"
 volley_count = 3
 volley_interval_secs = 0.5
 cooldown_secs = 5
@@ -204,13 +216,8 @@ collision_radius = 0.8
 visual_scale = 0.5
 damage = 15
 shield_pierce = 0.1
-range = 35
 
-  # Open-fire policy for this bank (issue #781), AUTHORED rather than
-  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
-  # channel: unconditional, with the host still enforcing availability,
-  # cooldown, range, arc and target validity before the volley starts.
-  [weapons_console.blaster_banks.ai]
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -220,7 +227,7 @@ range = 35
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[weapons_console.blaster_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "blaster_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"

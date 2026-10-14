@@ -454,7 +454,7 @@ impl WeaponsProjectionInputs<'_, '_> {
                 // Explicit legacy bank is a 180° forward arc, facing 0 — matches
                 // `radar::is_fire_ready_with_range`.
                 let geometry = target_live_pos.map(|(tx, tz)| {
-                    crate::weapons::phaser::target_geometry(
+                    crate::weapons::mount::target_geometry(
                         tx,
                         tz,
                         ship_x,
@@ -494,7 +494,7 @@ impl WeaponsProjectionInputs<'_, '_> {
                         crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                     };
                     let geometry = target_live_pos.map(|(tx, tz)| {
-                        crate::weapons::phaser::target_geometry(
+                        crate::weapons::mount::target_geometry(
                             tx,
                             tz,
                             ship_x,
@@ -692,7 +692,7 @@ fn build_bank_states(
         // Explicit legacy bank is a 180° forward arc, facing 0 — matches
         // `radar::is_fire_ready_with_range`.
         let geometry = target_live_pos.map(|(tx, tz)| {
-            crate::weapons::phaser::target_geometry(
+            crate::weapons::mount::target_geometry(
                 tx,
                 tz,
                 physics.x,
@@ -732,7 +732,7 @@ fn build_bank_states(
                     crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
                 let geometry = target_live_pos.map(|(tx, tz)| {
-                    crate::weapons::phaser::target_geometry(
+                    crate::weapons::mount::target_geometry(
                         tx,
                         tz,
                         physics.x,
@@ -833,7 +833,7 @@ fn tube_readiness(
     is_online: bool,
 ) -> crate::core::messages::WeaponReadiness {
     let geometry = target_live_pos.map(|(tx, tz)| {
-        crate::weapons::phaser::target_geometry(
+        crate::weapons::mount::target_geometry(
             tx,
             tz,
             physics.x,

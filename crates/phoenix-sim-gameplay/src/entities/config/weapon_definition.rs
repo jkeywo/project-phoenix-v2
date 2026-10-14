@@ -170,7 +170,9 @@ impl WeaponDefinition {
                         "bolt requires a nonempty firing cycle and nonnegative damage".into(),
                     );
                 }
-                positive("volley_interval_secs", *volley_interval_secs)?;
+                // Zero is the shipped simultaneous-volley cadence; the
+                // schedule still contains its authored finite shot count.
+                nonnegative("volley_interval_secs", *volley_interval_secs)?;
                 nonnegative("cooldown_secs", *cooldown_secs)?;
                 positive("projectile_speed", *projectile_speed)?;
                 positive("collision_radius", *collision_radius)?;

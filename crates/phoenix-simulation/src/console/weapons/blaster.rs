@@ -212,14 +212,14 @@ pub(crate) fn handle_fire_blaster(
                     .iter()
                     .find(|b| b.config.id == bank_id)
                     .map(|bank| {
-                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                        let (rx, ry) = crate::weapons::mount::ship_local(
                             tx,
                             tz,
                             physics.x,
                             physics.z,
                             physics.yaw,
                         );
-                        crate::weapons::phaser::in_arc(
+                        crate::weapons::mount::in_arc(
                             rx,
                             ry,
                             bank.config.facing_deg,
@@ -440,8 +440,8 @@ pub(crate) fn tick_blaster_auto_fire(
             let dz = tz - physics.z;
             let in_range = dx * dx + dz * dz <= bank.config.range * bank.config.range;
             let (rx, ry) =
-                crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
-            let in_arc = crate::weapons::phaser::in_arc(
+                crate::weapons::mount::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
+            let in_arc = crate::weapons::mount::in_arc(
                 rx,
                 ry,
                 bank.config.facing_deg,
@@ -937,7 +937,7 @@ pub(crate) fn handle_blaster_hits(
         projectile_id: String,
         target_uuid: String,
         damage: i32,
-        shield_pierce: f32,
+        delivery: crate::weapons::mount::DamageDelivery,
         /// Who fired it — needed for balance attribution, since the firing
         /// ship is long out of scope by the time damage is applied. `None`
         /// when the shooter had no `EntityUuid`: the projectile carries `""`
@@ -979,7 +979,7 @@ pub(crate) fn handle_blaster_hits(
                         projectile_id: proj_id,
                         target_uuid,
                         damage: hit_data.damage,
-                        shield_pierce: hit_data.shield_pierce,
+                        delivery: hit_data.delivery(),
                         source_uuid: Some(hit_data.source_uuid).filter(|u| !u.is_empty()),
                     });
                 }
@@ -1044,10 +1044,7 @@ pub(crate) fn handle_blaster_hits(
             let shield_amount = if let Some(ref mut shields) = shield_comp {
                 let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
                 if !all_offline {
-                    let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
-                        det.damage as f32,
-                        det.shield_pierce,
-                    );
+                    let (pierced, absorbed) = det.delivery.split(true);
                     let leak = shields.0.apply_damage(absorbed.round() as i32, 0.0);
                     let shielded = (absorbed - leak as f32).max(0.0);
                     hull_damage = pierced + leak as f32;

@@ -280,16 +280,9 @@ shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region
 selects = [ "ship", "station", "asteroid" ]
 
 # Standard fore + aft phaser banks — fore bank deals double-damage (8.0 dps = 2× Cruiser's 4.0)
-[[weapons_console.phaser_banks]]
-id = "fore"
-facing_deg = 0
-fire_arc_deg = 270
-auto_arc_deg = 180
-beam_range = 40
-beam_damage_per_sec = 8.0
-beam_duration_secs = 6
-cooldown_secs = 6
-beam_color = [ 0.25, 0.75, 1, 1 ]
+[[weapon]]
+id = "phaser-fore"
+strategy_id = "fore"
 marker = "phasers_fore"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -297,7 +290,21 @@ marker = "phasers_fore"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 270
+range = 40
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 8
+duration_secs = 6
+cooldown_secs = 6
+auto_arc_deg = 180
+color = [ 0.25, 0.75, 1, 1 ]
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -307,22 +314,15 @@ marker = "phasers_fore"
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
-[[weapons_console.phaser_banks]]
-id = "aft"
-facing_deg = 180
-fire_arc_deg = 270
-auto_arc_deg = 180
-beam_range = 40
-beam_damage_per_sec = 4
-beam_duration_secs = 6
-cooldown_secs = 6
-beam_color = [ 0.25, 0.75, 1, 1 ]
+[[weapon]]
+id = "phaser-aft"
+strategy_id = "aft"
 marker = "phasers_aft"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
@@ -330,7 +330,21 @@ marker = "phasers_aft"
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 180
+fire_arc_deg = 270
+range = 40
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 4
+duration_secs = 6
+cooldown_secs = 6
+auto_arc_deg = 180
+color = [ 0.25, 0.75, 1, 1 ]
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -340,7 +354,7 @@ marker = "phasers_aft"
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
@@ -352,34 +366,41 @@ marker = "phasers_aft"
 #   t=0.0s  → barrel 0 (port)
 #   t=0.6s  → barrel 1 (starboard)
 #   t=1.2s  → barrels 0 AND 1 together (simultaneous)
-[[weapons_console.blaster_banks]]
-id = "heavy-fore"
+[[weapon]]
+id = "blaster-heavy-fore"
+strategy_id = "heavy-fore"
 marker = "blaster_fore"
 barrels = [ "blaster_fore_port", "blaster_fore_starboard" ]
+
+
+[weapon.mount]
 facing_deg = 0
 fire_arc_deg = 22.5
-charge_time_secs = 3.0
-volley_count = 3
-volley_interval_secs = 1.0
-cooldown_secs = 12.0
-projectile_speed = 35.0
-collision_radius = 3.0
-visual_scale = 3.0
-damage = 80
-shield_pierce = 0.15
-recoil_impulse = 6.0
-screenshake_magnitude = 1.0
-range = 50.0
+range = 50
 
-[[weapons_console.blaster_banks.pattern]]
+[weapon.delivery]
+kind = "bolt"
+volley_count = 3
+volley_interval_secs = 1
+cooldown_secs = 12
+projectile_speed = 35
+collision_radius = 3
+visual_scale = 3
+damage = 80
+charge_time_secs = 3
+shield_pierce = 0.15
+recoil_impulse = 6
+screenshake_magnitude = 1
+
+[[weapon.pattern]]
 barrels = [ 0 ]
 offset_secs = 0.0
 
-[[weapons_console.blaster_banks.pattern]]
+[[weapon.pattern]]
 barrels = [ 1 ]
 offset_secs = 0.6
 
-[[weapons_console.blaster_banks.pattern]]
+[[weapon.pattern]]
 barrels = [ 0, 1 ]
 offset_secs = 1.2
 
@@ -387,7 +408,7 @@ offset_secs = 1.2
   # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
   # channel: unconditional, with the host still enforcing availability,
   # cooldown, range, arc and target validity before the volley starts.
-  [weapons_console.blaster_banks.ai]
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -397,7 +418,7 @@ offset_secs = 1.2
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[weapons_console.blaster_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "blaster_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
@@ -436,12 +457,9 @@ burst_interval_secs = 0.5
 # 10-round broadside with 20 in reserve.
 ai_volley_target = 2
 
-[[torpedoes.tubes]]
-id = "fore-port"
-facing_deg = 0
-fire_arc_deg = 90
-load_time = 3
-volley_max = 3
+[[weapon]]
+id = "torpedo-tube-fore-port"
+strategy_id = "fore-port"
 marker = "torpedo_port"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
@@ -460,7 +478,18 @@ marker = "torpedo_port"
   # way. A hull that wants to spend rounds differently edits this line;
   # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
   # and `idle = true` of declining launches altogether.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 90
+range = 300
+
+[weapon.delivery]
+kind = "guided"
+load_time = 3
+volley_max = 3
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -470,24 +499,21 @@ marker = "torpedo_port"
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
-[[torpedoes.tubes]]
-id = "fore-starboard"
-facing_deg = 0
-fire_arc_deg = 90
-load_time = 3
-volley_max = 3
+[[weapon]]
+id = "torpedo-tube-fore-starboard"
+strategy_id = "fore-starboard"
 marker = "torpedo_starboard"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
@@ -506,7 +532,18 @@ marker = "torpedo_starboard"
   # way. A hull that wants to spend rounds differently edits this line;
   # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
   # and `idle = true` of declining launches altogether.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 90
+range = 300
+
+[weapon.delivery]
+kind = "guided"
+load_time = 3
+volley_max = 3
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -516,13 +553,13 @@ marker = "torpedo_starboard"
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
@@ -537,23 +574,31 @@ marker = "torpedo_starboard"
 #   round 1 → barrel 1 (starboard)
 #   round 2 → barrel 0, round 3 → barrel 1 (the [0,1] step's barrels, one
 #            per loaded round — a torpedo leaves one barrel per burst tick)
-[[torpedoes.tubes]]
-id = "fore-centre"
-facing_deg = 0
-fire_arc_deg = 90
-load_time = 3
-volley_max = 3
+[[weapon]]
+id = "torpedo-tube-fore-centre"
+strategy_id = "fore-centre"
 barrels = [ "torpedo_centre_port", "torpedo_centre_starboard" ]
 
-[[torpedoes.tubes.pattern]]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 90
+range = 300
+
+[weapon.delivery]
+kind = "guided"
+load_time = 3
+volley_max = 3
+
+[[weapon.pattern]]
 barrels = [ 0 ]
 offset_secs = 0.0
 
-[[torpedoes.tubes.pattern]]
+[[weapon.pattern]]
 barrels = [ 1 ]
 offset_secs = 0.5
 
-[[torpedoes.tubes.pattern]]
+[[weapon.pattern]]
 barrels = [ 0, 1 ]
 offset_secs = 1.0
 
@@ -573,7 +618,7 @@ offset_secs = 1.0
   # way. A hull that wants to spend rounds differently edits this line;
   # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
   # and `idle = true` of declining launches altogether.
-  [torpedoes.tubes.ai]
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -583,24 +628,21 @@ offset_secs = 1.0
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
-[[torpedoes.tubes]]
-id = "aft-port"
-facing_deg = 180
-fire_arc_deg = 90
-load_time = 4
-volley_max = 3
+[[weapon]]
+id = "torpedo-tube-aft-port"
+strategy_id = "aft-port"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
@@ -618,7 +660,18 @@ volley_max = 3
   # way. A hull that wants to spend rounds differently edits this line;
   # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
   # and `idle = true` of declining launches altogether.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 180
+fire_arc_deg = 90
+range = 300
+
+[weapon.delivery]
+kind = "guided"
+load_time = 4
+volley_max = 3
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -628,24 +681,21 @@ volley_max = 3
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
   verb = "launch_torpedo"
 
-[[torpedoes.tubes]]
-id = "aft-starboard"
-facing_deg = 180
-fire_arc_deg = 90
-load_time = 4
-volley_max = 3
+[[weapon]]
+id = "torpedo-tube-aft-starboard"
+strategy_id = "aft-starboard"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
@@ -663,7 +713,18 @@ volley_max = 3
   # way. A hull that wants to spend rounds differently edits this line;
   # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
   # and `idle = true` of declining launches altogether.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 180
+fire_arc_deg = 90
+range = 300
+
+[weapon.delivery]
+kind = "guided"
+load_time = 4
+volley_max = 3
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
   # is the SAME text on every armed hull in the fleet. Only this threshold
@@ -673,13 +734,13 @@ volley_max = 3
   # guard and the weapon is ungated again — the gate is content, not code.
   param = { min_alert_to_fire = 1.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"

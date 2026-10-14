@@ -342,10 +342,22 @@ escape_boost_secs = 4.0
 # the bow.
 [weapons_console]
 
-[[weapons_console.blaster_banks]]
-id = "harrow-lance-port"
+[[weapon]]
+id = "blaster-harrow-lance-port"
+strategy_id = "harrow-lance-port"
+
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
+  # channel: unconditional, with the host still enforcing availability,
+  # cooldown, range, arc and target validity before the volley starts.
+
+[weapon.mount]
 facing_deg = 0
 fire_arc_deg = 45
+range = 60
+
+[weapon.delivery]
+kind = "bolt"
 volley_count = 3
 volley_interval_secs = 0.35
 cooldown_secs = 4
@@ -354,13 +366,8 @@ collision_radius = 0.8
 visual_scale = 0.5
 damage = 12
 shield_pierce = 0.15
-range = 60
 
-  # Open-fire policy for this bank (issue #781), AUTHORED rather than
-  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
-  # channel: unconditional, with the host still enforcing availability,
-  # cooldown, range, arc and target validity before the volley starts.
-  [weapons_console.blaster_banks.ai]
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -369,16 +376,28 @@ range = 60
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.blaster_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "blaster_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
-[[weapons_console.blaster_banks]]
-id = "harrow-lance-starboard"
+[[weapon]]
+id = "blaster-harrow-lance-starboard"
+strategy_id = "harrow-lance-starboard"
+
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
+  # channel: unconditional, with the host still enforcing availability,
+  # cooldown, range, arc and target validity before the volley starts.
+
+[weapon.mount]
 facing_deg = 0
 fire_arc_deg = 45
+range = 60
+
+[weapon.delivery]
+kind = "bolt"
 volley_count = 3
 volley_interval_secs = 0.35
 cooldown_secs = 4
@@ -387,13 +406,8 @@ collision_radius = 0.8
 visual_scale = 0.5
 damage = 12
 shield_pierce = 0.15
-range = 60
 
-  # Open-fire policy for this bank (issue #781), AUTHORED rather than
-  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
-  # channel: unconditional, with the host still enforcing availability,
-  # cooldown, range, arc and target validity before the volley starts.
-  [weapons_console.blaster_banks.ai]
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -402,7 +416,7 @@ range = 60
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.blaster_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "blaster_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"

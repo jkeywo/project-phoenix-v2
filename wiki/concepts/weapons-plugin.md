@@ -3,7 +3,7 @@ title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
 sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
-updated: 2026-10-05
+updated: 2026-10-14
 ---
 
 # WeaponsPlugin
@@ -30,7 +30,13 @@ legacy weapon configurations retain their existing construction rules.
 | `crates/phoenix-sim-gameplay/src/console/weapons/shared.rs` | Cross-family helpers and one-tick handoff resources. |
 | `crates/phoenix-simulation/src/console/weapons/server_tests.rs` | The large plugin integration suite included from `crates/phoenix-simulation/src/console/weapons/server.rs`. |
 
-Pure weapon state machines and geometry used by these adapters live under `crates/phoenix-simulation/src/weapons/`.
+Pure weapon state machines used by these adapters live in Gameplay
+`crates/phoenix-sim-gameplay/src/weapons/`; Simulation retains compatibility
+exports. `mount.rs` owns shared geometry and damage delivery; `pattern.rs` owns
+common barrel planning. The beam, bolt and guided adapters consume those
+mechanisms without changing their cycle state, impact-facing policies or
+admitted command vocabulary. `entities/config/weapon_definition.rs` compiles
+the common authored form into the same strategy parameters at content load.
 
 ## Command symmetry
 

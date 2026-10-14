@@ -1,0 +1,37 @@
+entities:
+  - component: configurable-weapon-compilation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Configurable Weapon Compilation
+      summary: "Authored weapon entries combine a common mount, supported beam/bolt/guided delivery parameters, markers, firing patterns and individual AI declarations. Content compiles them once into the existing strategy parameters. Stable strategy IDs preserve System and command addressing; no duplicate weapon state or controller is installed. Shipped armament uses the common authored form."
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-content/src/entity_override.rs, editor/workshop-weapons.js, gui/workshop-weapon-panel.js]
+      symbols: [WeaponDefinition, WeaponDeliveryConfig, compile_weapons]
+      tests: [crates/phoenix-sim-gameplay/src/entities/config/weapon_definition_tests.rs]
+  - component: shared-weapon-mount-and-delivery
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Weapon Mount and Delivery
+      summary: "Gameplay owns reusable planar geometry and shield/hull payload routing. Beam, bolt and guided consumers use these contracts while retaining their authoritative cycle/projectile lifecycles, impact-facing policies and RNG order. A down shield receives the hull payload; an up shield routes its own payload through existing pierce/overflow arithmetic."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/phaser.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs]
+      symbols: [MountConfig, DamageDelivery, target_geometry]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/mount_tests.rs, crates/phoenix-simulation/src/console/weapons/server_tests.rs]
+  - component: shared-weapon-barrel-planning
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Shared Weapon Barrel Planning
+      summary: "The existing barrel-pattern owner resolves stable offset-ordered firing schedules and barrel-origin sequences. Bolts use timed simultaneous/alternating launches. Guided rounds retain loaded-round count and burst cadence, consuming only their barrel-origin sequence. Pattern resolution cannot create ammunition or change authoritative continuation."
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs]
+      symbols: [firing_schedule, barrel_sequence]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/pattern_tests.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo_tests.rs]

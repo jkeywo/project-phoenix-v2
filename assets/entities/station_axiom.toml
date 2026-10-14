@@ -79,20 +79,27 @@ channel = "arc_bearing_first"
 when = "true"
 verb = "bring_phasers_to_bear"
 
-[[weapons_console.phaser_banks]]
-id = "defence"
+[[weapon]]
+id = "phaser-defence"
+strategy_id = "defence"
+
+
+[weapon.mount]
 facing_deg = 0
 fire_arc_deg = 360
-auto_arc_deg = 360
-beam_range = 60
-beam_damage_per_sec = 15
-beam_duration_secs = 4
+range = 60
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 15
+duration_secs = 4
 cooldown_secs = 4
-beam_color = [ 0.25, 0.75, 1, 1 ]
+auto_arc_deg = 360
+color = [ 0.25, 0.75, 1, 1 ]
 
-  [weapons_console.phaser_banks.ai]
+  [weapon.ai]
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "true"

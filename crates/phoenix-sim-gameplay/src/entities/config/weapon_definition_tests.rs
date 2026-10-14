@@ -203,6 +203,10 @@ fn generic_definitions_refuse_unsupported_or_invalid_composition() {
         ),
         (BOLT.replace("barrels=[1]", "barrels=[2]"), "barrel index"),
         (
+            BOLT.replace("offset_secs=0.2", "offset_secs=0.2, unsupported=true"),
+            "unknown field",
+        ),
+        (
             BOLT.replace("damage = 20", "damage = 20\nunsupported = true"),
             "unknown field",
         ),
@@ -238,4 +242,14 @@ fn generic_guided_requires_actual_payload_tuning() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("requires [torpedoes]"), "{error}");
+}
+
+#[test]
+fn simultaneous_bolt_volley_retains_zero_cadence() {
+    let source = BOLT.replace("volley_interval_secs = 0.15", "volley_interval_secs = 0.0");
+    let config = parse(&source).unwrap();
+    assert_eq!(
+        config.weapons_console.unwrap().blaster_banks[0].volley_interval_secs,
+        0.0
+    );
 }

@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 /// `barrels` lists zero-based indices into the owner's authored barrel-marker
 /// list. All listed barrels fire together at `offset_secs`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct BarrelPatternStep {
     /// Zero-based barrel indices that fire on this step, simultaneously.
     pub barrels: Vec<u32>,

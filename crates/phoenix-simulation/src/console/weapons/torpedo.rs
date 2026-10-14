@@ -1077,9 +1077,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     #[derive(Clone, Debug)]
     struct Detonation {
         target_uuid: String,
-        damage_hull: i32,
-        damage_shields: i32,
-        shield_pierce: f32,
+        delivery: crate::weapons::mount::DamageDelivery,
         /// Who launched it — the firing ship is out of scope by phase 2, so
         /// balance attribution has to ride along with the detonation.
         source_uuid: Option<String>,
@@ -1168,9 +1166,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
             detonations.push(Detonation {
                 target_uuid,
-                damage_hull: det.damage_hull,
-                damage_shields: det.damage_shields,
-                shield_pierce: det.shield_pierce,
+                delivery: det.delivery(),
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
                 impact_x: det.impact_x,
@@ -1215,9 +1211,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             ));
             detonations.push(Detonation {
                 target_uuid,
-                damage_hull: det.damage_hull,
-                damage_shields: det.damage_shields,
-                shield_pierce: det.shield_pierce,
+                delivery: det.delivery(),
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
                 impact_x: det.impact_x,
@@ -1353,11 +1347,8 @@ pub(crate) fn tick_torpedo_lifecycle(
                 .as_ref()
                 .map(|s| s.0.hp_facing_bearing(bearing))
                 .unwrap_or(0);
-            let payload = if struck_arc_hp > 0 {
-                det.damage_shields as f32
-            } else {
-                det.damage_hull as f32
-            };
+            let delivery = det.delivery;
+            let payload = delivery.payload(struck_arc_hp > 0);
             match shield_comp {
                 // The arc is up, so the round meets it. `shield_pierce` is the
                 // fraction of THIS payload that gets past the screen, exactly as
@@ -1378,8 +1369,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 // survived long enough to start climbing keeps climbing. Pinned by
                 // `server_tests::an_arc_online_at_zero_hp_reads_as_down_and_does_not_get_re_suppressed`.
                 Some(ref mut shields) if struck_arc_hp > 0 => {
-                    let (pierced, absorbed) =
-                        crate::ship::damage::split_damage_for_pierce(payload, det.shield_pierce);
+                    let (pierced, absorbed) = delivery.split(true);
                     let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
                     shield_absorbed = (absorbed - leak as f32).max(0.0);
                     hull_damage += pierced + leak as f32;

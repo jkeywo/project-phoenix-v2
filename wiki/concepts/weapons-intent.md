@@ -10,6 +10,20 @@ updated: 2026-10-14
 
 Tactical controls three independent, ship-authored weapon families through admitted `ControlSystem` commands.
 
+Shipped armament is authored as `[[weapon]]` entries with a common
+`weapon.mount`, a typed `weapon.delivery`, markers/patterns and its ordinary AI
+declaration. `strategy_id` preserves the existing bank/tube identity where the
+composition entry uses a unique name. Entity loading validates and compiles
+these definitions once into the beam, bolt or guided strategy parameters;
+there is no second runtime weapon store. Family-specific authored blocks remain
+supported parameter shorthand and cannot duplicate the same strategy identity.
+
+Gameplay `weapons/mount.rs` owns the common planar geometry and impact payload
+contract. The existing `weapons/pattern.rs` resolves schedules and barrel
+sequences in stable authored order. Bolts use timed firing steps; torpedoes use
+the sequence for origins while loaded rounds and burst cadence retain authority
+over ammunition. These shared mechanisms introduce no new combat controller.
+
 - **Phasers:** sustained, target-locked beams. A ready bank must have its target inside its arc and range; damage accumulates during the beam, then that bank cools down.
 - **Blasters:** straight, non-homing projectile volleys. Each bank predicts target motion at firing time, may require holding to charge, then fires its configured volley; bolts have their own speed, range-derived lifetime, collision radius, damage, and shield pierce.
 - **Torpedoes:** guided, proximity-detonating projectiles. Tubes have arcs and load state, share a magazine, and snapshot damage/pierce at launch.

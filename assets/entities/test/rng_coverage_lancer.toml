@@ -128,28 +128,35 @@ max_bank_deg = 5.0
 # Omni phaser. 360° so the beam site fires without waiting on a facing
 # solution — this hull exists to make damage happen, not to be tactically
 # interesting.
-[[weapons_console.phaser_banks]]
-id = "lash"
-facing_deg = 0.0
-fire_arc_deg = 360.0
-auto_arc_deg = 360.0
-beam_range = 90.0
-beam_damage_per_sec = 1.5
-beam_duration_secs = 6.0
-cooldown_secs = 3.0
+[[weapon]]
+id = "phaser-lash"
+strategy_id = "lash"
 # No pierce: the beam's job here is to strip the player's shields, because
 # NPC torpedo auto-fire only unlocks once the target's online shield facings
 # are at zero. A high-pierce beam would bypass the shields, leave them up, and
 # the torpedo chokepoint would never fire.
-shield_pierce = 0.0
-beam_color = [1.0, 0.3, 0.1, 1.0]
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). One unconditional rule: when the host offers the bank a
   # decision it fires. Every readiness gate — availability, cooldown, range,
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
-  [weapons_console.phaser_banks.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 360
+range = 90
+
+[weapon.delivery]
+kind = "beam"
+damage_per_sec = 1.5
+duration_secs = 6
+cooldown_secs = 3
+auto_arc_deg = 360
+color = [ 1, 0.3, 0.1, 1 ]
+shield_pierce = 0
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -158,7 +165,7 @@ beam_color = [1.0, 0.3, 0.1, 1.0]
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.phaser_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "phaser_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
@@ -166,25 +173,32 @@ beam_color = [1.0, 0.3, 0.1, 1.0]
 
 # Omni blaster bank, matched to the phaser's engagement envelope so the
 # blaster chokepoint fires whenever the beam one does.
-[[weapons_console.blaster_banks]]
-id = "spike"
-facing_deg = 0.0
-fire_arc_deg = 360.0
-volley_count = 2
-volley_interval_secs = 0.5
-cooldown_secs = 3.0
-projectile_speed = 60.0
-collision_radius = 1.0
-visual_scale = 0.5
-damage = 2
-shield_pierce = 0.3
-range = 80.0
+[[weapon]]
+id = "blaster-spike"
+strategy_id = "spike"
 
   # Open-fire policy for this bank (issue #781), AUTHORED rather than
   # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
   # channel: unconditional, with the host still enforcing availability,
   # cooldown, range, arc and target validity before the volley starts.
-  [weapons_console.blaster_banks.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 360
+range = 80
+
+[weapon.delivery]
+kind = "bolt"
+volley_count = 2
+volley_interval_secs = 0.5
+cooldown_secs = 3
+projectile_speed = 60
+collision_radius = 1
+visual_scale = 0.5
+damage = 2
+shield_pierce = 0.3
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -193,7 +207,7 @@ range = 80.0
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[weapons_console.blaster_banks.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "blaster_fire"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
@@ -223,12 +237,9 @@ lifespan = 12.0
 load_time = 2.0
 detonation_radius = 6.0
 
-[[torpedoes.tubes]]
-id = "lance"
-facing_deg = 0.0
-fire_arc_deg = 360.0
-load_time = 3.0
-volley_max = 2
+[[weapon]]
+id = "torpedo-tube-lance"
+strategy_id = "lance"
 
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
@@ -236,7 +247,18 @@ volley_max = 2
   # the round would strike is down (issue #956 moved that second clause out of
   # `auto_fire_torpedo` and into the tube's own guard). Loaded state, magazine
   # stock, target validity, range and arc stay host-side gates.
-  [torpedoes.tubes.ai]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 360
+range = 360
+
+[weapon.delivery]
+kind = "guided"
+load_time = 3
+volley_max = 2
+
+  [weapon.ai]
   # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
   # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
   # clears whether the alert is up or not. It has no bridge crew to call red
@@ -245,13 +267,13 @@ volley_max = 2
   # exists to start.
   param = { min_alert_to_fire = 0.0 }
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_load"
   when = "true"
   verb = "load_torpedo"
 
-  [[torpedoes.tubes.ai.rule]]
+  [[weapon.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
   when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"

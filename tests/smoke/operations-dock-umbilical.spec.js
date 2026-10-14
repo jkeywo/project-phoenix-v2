@@ -303,7 +303,8 @@ async function runTransferChain(context, world, ammunition = false) {
       const stock = await latestBlackboard(engineer, 'umbilical');
       return [stock?.operator_level, stock?.partner_level];
     }, { timeout: 30_000 }).toEqual([6, 99]);
-    expect((await latestBlackboard(tactical, 'torpedo-magazine'))?.torpedoes_remaining).toBe(6);
+    await expect.poll(async () => (await latestBlackboard(tactical, 'torpedo-magazine'))?.torpedoes_remaining,
+      { timeout: 30_000 }).toBe(6);
     await tactical.close();
   }
   await helm.close();

@@ -271,7 +271,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::console::weapons::shared::BeamContext",
     "phoenix_simulation::console::weapons::shared::TorpedoTargetSnapshot",
     "phoenix_simulation::console::weapons::torpedo::TorpedoMagazineAiPolicy",
-    "phoenix_simulation::console::weapons::torpedo::TorpedoSystemResource",
     "phoenix_simulation::console::weapons::torpedo::TorpedoTubeAiPolicies",
     "phoenix_simulation::core::messages::AdmittedCommands",
     "phoenix_simulation::core::telemetry::RunTelemetry",

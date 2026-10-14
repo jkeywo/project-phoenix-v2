@@ -622,6 +622,9 @@ impl PhaserCombatConfig {
 pub struct TorpedoesConfig {
     #[serde(default = "default_torpedo_count")]
     pub count: u32,
+    /// Initial magazine stock; count remains its physical ammunition ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_count: Option<u32>,
     /// What a round delivers when the facing arc it strikes is DOWN: the whole
     /// figure lands on the hull, unabsorbed and unpierced (issue #929).
     #[serde(default = "default_torpedo_damage_hull")]
@@ -726,6 +729,7 @@ impl Default for TorpedoesConfig {
     fn default() -> Self {
         Self {
             count: default_torpedo_count(),
+            initial_count: None,
             damage_hull: default_torpedo_damage_hull(),
             damage_shields: default_torpedo_damage_shields(),
             speed: default_torpedo_speed(),
@@ -743,11 +747,21 @@ impl Default for TorpedoesConfig {
 }
 
 impl TorpedoesConfig {
+    pub fn validate_initial_stock(&self) -> Result<(), String> {
+        if self
+            .initial_count
+            .is_some_and(|initial| initial > self.count)
+        {
+            return Err("torpedoes.initial_count exceeds count capacity".into());
+        }
+        Ok(())
+    }
     /// Convert this TOML config into a runtime `TorpedoConfig`.
     /// Performs the degrees → radians conversion on `turn_rate_deg_per_sec`.
     pub fn to_runtime(&self) -> crate::weapons::torpedo::TorpedoConfig {
         crate::weapons::torpedo::TorpedoConfig {
             count: self.count,
+            initial_count: self.initial_count,
             damage_hull: self.damage_hull,
             damage_shields: self.damage_shields,
             speed: self.speed,

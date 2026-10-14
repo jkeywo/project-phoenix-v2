@@ -182,69 +182,78 @@ impl InteriorGraph {
             return Err("interior team count mismatch".into());
         }
         for team in teams {
-            if team
-                .destination
-                .as_ref()
-                .is_some_and(|room| !self.adjacency.contains_key(room))
-            {
-                return Err("unknown team destination".into());
-            }
-            match &team.location {
-                TeamLocation::Compartment { compartment }
-                    if self.adjacency.contains_key(compartment) => {}
-                TeamLocation::External { target } if !target.is_empty() => {}
+            self.validate_cursor(team)?;
+        }
+        Ok(())
+    }
+    /// A generic traveller uses the same physical route proof without a crew
+    /// count or personnel commitment. Activity owners constrain External use.
+    pub fn validate_cursor(
+        &self,
+        team: &phoenix_model::interior::RouteCursor,
+    ) -> Result<(), String> {
+        if team
+            .destination
+            .as_ref()
+            .is_some_and(|room| !self.adjacency.contains_key(room))
+        {
+            return Err("unknown team destination".into());
+        }
+        match &team.location {
+            TeamLocation::Compartment { compartment }
+                if self.adjacency.contains_key(compartment) => {}
+            TeamLocation::External { target } if !target.is_empty() => {}
+            TeamLocation::Crossing {
+                connection,
+                from,
+                to,
+                elapsed,
+            } if self.config.connections.iter().any(|link| {
+                &link.id == connection
+                    && ((&link.from == from && &link.to == to)
+                        || (&link.to == from && &link.from == to))
+                    && elapsed.is_finite()
+                    && *elapsed >= 0.0
+                    && *elapsed < link.travel_secs
+            }) => {}
+            _ => return Err("invalid physical team location".into()),
+        }
+        if team
+            .route
+            .iter()
+            .any(|key| !self.config.connections.iter().any(|link| &link.id == key))
+        {
+            return Err("unknown team route connection".into());
+        }
+        if !team.route.is_empty() {
+            let mut room = match &team.location {
+                TeamLocation::Compartment { compartment } => compartment.clone(),
                 TeamLocation::Crossing {
-                    connection,
-                    from,
-                    to,
-                    elapsed,
-                } if self.config.connections.iter().any(|link| {
-                    &link.id == connection
-                        && ((&link.from == from && &link.to == to)
-                            || (&link.to == from && &link.from == to))
-                        && elapsed.is_finite()
-                        && *elapsed >= 0.0
-                        && *elapsed < link.travel_secs
-                }) => {}
-                _ => return Err("invalid physical team location".into()),
-            }
-            if team
-                .route
-                .iter()
-                .any(|key| !self.config.connections.iter().any(|link| &link.id == key))
-            {
-                return Err("unknown team route connection".into());
-            }
-            if !team.route.is_empty() {
-                let mut room = match &team.location {
-                    TeamLocation::Compartment { compartment } => compartment.clone(),
-                    TeamLocation::Crossing {
-                        connection, from, ..
-                    } if team.route.first() == Some(connection) => from.clone(),
-                    _ => return Err("team route is detached from its physical location".into()),
-                };
-                let mut used = BTreeSet::new();
-                for id in &team.route {
-                    let link = self
-                        .config
-                        .connections
-                        .iter()
-                        .find(|link| &link.id == id)
-                        .expect("checked route id");
-                    if !used.insert(id) {
-                        return Err("team route repeats a connection".into());
-                    }
-                    if room == link.from {
-                        room = link.to.clone();
-                    } else if room == link.to {
-                        room = link.from.clone();
-                    } else {
-                        return Err("team route has disconnected steps".into());
-                    }
+                    connection, from, ..
+                } if team.route.first() == Some(connection) => from.clone(),
+                _ => return Err("team route is detached from its physical location".into()),
+            };
+            let mut used = BTreeSet::new();
+            for id in &team.route {
+                let link = self
+                    .config
+                    .connections
+                    .iter()
+                    .find(|link| &link.id == id)
+                    .expect("checked route id");
+                if !used.insert(id) {
+                    return Err("team route repeats a connection".into());
                 }
-                if team.destination.as_ref() != Some(&room) {
-                    return Err("team route does not reach its destination".into());
+                if room == link.from {
+                    room = link.to.clone();
+                } else if room == link.to {
+                    room = link.from.clone();
+                } else {
+                    return Err("team route has disconnected steps".into());
                 }
+            }
+            if team.destination.as_ref() != Some(&room) {
+                return Err("team route does not reach its destination".into());
             }
         }
         Ok(())
@@ -253,20 +262,34 @@ impl InteriorGraph {
     /// New entry observes blockers; already committed crossings may clear them.
     pub fn advance(
         &self,
-        team: &mut TeamNavigation,
+        cursor: &mut TeamNavigation,
         destination: &str,
         dt: f32,
         blocked: &BTreeSet<String>,
     ) -> bool {
+        self.advance_with_time(cursor, destination, dt, blocked).0
+    }
+
+    /// Report actual eligible route time, so a consumer can stage movement and
+    /// fund only progress rather than blocked waiting or unused arrival time.
+    pub fn advance_with_time(
+        &self,
+        team: &mut TeamNavigation,
+        destination: &str,
+        dt: f32,
+        blocked: &BTreeSet<String>,
+    ) -> (bool, f32) {
         if team.destination.as_deref() != Some(destination) {
             team.route.clear();
         }
         team.destination = Some(destination.into());
         team.blocked = false;
         let mut remaining = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
+        let offered = remaining;
+        let mut spent = 0.0f32;
         loop {
             match team.location.clone() {
-                TeamLocation::External { .. } => return false,
+                TeamLocation::External { .. } => return (false, spent.min(offered)),
                 TeamLocation::Crossing {
                     connection,
                     from,
@@ -280,10 +303,11 @@ impl InteriorGraph {
                         .find(|link| link.id == connection)
                     else {
                         team.blocked = true;
-                        return false;
+                        return (false, spent.min(offered));
                     };
                     let step = remaining.min((link.travel_secs - elapsed).max(0.0));
                     remaining -= step;
+                    spent += step;
                     if elapsed + step < link.travel_secs {
                         team.location = TeamLocation::Crossing {
                             connection,
@@ -291,7 +315,7 @@ impl InteriorGraph {
                             to,
                             elapsed: elapsed + step,
                         };
-                        return false;
+                        return (false, spent.min(offered));
                     }
                     team.location = TeamLocation::Compartment { compartment: to };
                     if team.route.first() == Some(&connection) {
@@ -301,19 +325,19 @@ impl InteriorGraph {
                 TeamLocation::Compartment { compartment } => {
                     if compartment == destination {
                         team.route.clear();
-                        return true;
+                        return (true, spent.min(offered));
                     }
                     if team.route.is_empty() || team.route.iter().any(|link| blocked.contains(link))
                     {
                         let Some(route) = self.route(&compartment, destination, blocked) else {
                             team.route.clear();
                             team.blocked = true;
-                            return false;
+                            return (false, spent.min(offered));
                         };
                         team.route = route;
                     }
                     if remaining <= 0.0 {
-                        return false;
+                        return (false, spent.min(offered));
                     }
                     let link = self
                         .config

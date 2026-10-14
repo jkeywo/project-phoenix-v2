@@ -76,6 +76,10 @@ pub struct TeamNavigation {
     pub blocked: bool,
 }
 
+/// Generic route values retain the existing team continuation shape.
+pub type RouteCursor = TeamNavigation;
+pub type RouteLocation = TeamLocation;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoundaryPhase {

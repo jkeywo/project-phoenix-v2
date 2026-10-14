@@ -8,6 +8,8 @@ pub struct Stock {
     pub level: i64,
     pub ceiling: i64,
     pub reserved: BTreeMap<String, i64>,
+    /// Promised receiving room, never held source quantity or spendable stock.
+    pub incoming: BTreeMap<String, i64>,
 }
 
 #[derive(Deserialize)]
@@ -17,6 +19,8 @@ struct StockData {
     ceiling: i64,
     #[serde(default)]
     reserved: BTreeMap<String, i64>,
+    #[serde(default)]
+    incoming: BTreeMap<String, i64>,
 }
 impl TryFrom<StockData> for Stock {
     type Error = String;
@@ -25,6 +29,7 @@ impl TryFrom<StockData> for Stock {
             level: data.level,
             ceiling: data.ceiling,
             reserved: data.reserved,
+            incoming: data.incoming,
         };
         stock.validate()?;
         Ok(stock)
@@ -36,6 +41,7 @@ impl Stock {
             level,
             ceiling,
             reserved: BTreeMap::new(),
+            incoming: BTreeMap::new(),
         };
         stock.validate()?;
         Ok(stock)
@@ -56,6 +62,24 @@ impl Stock {
         if total > self.level {
             return Err("stock reservations exceed physical level".into());
         }
+        let mut incoming = 0i64;
+        for (id, amount) in &self.incoming {
+            if id.trim().is_empty() || *amount <= 0 {
+                return Err(
+                    "incoming reservation requires a nonempty id and positive amount".into(),
+                );
+            }
+            incoming = incoming
+                .checked_add(*amount)
+                .ok_or("incoming reservations overflow")?;
+        }
+        if self
+            .level
+            .checked_add(incoming)
+            .is_none_or(|occupied| occupied > self.ceiling)
+        {
+            return Err("stock and incoming reservations exceed capacity".into());
+        }
         Ok(())
     }
     pub fn reserved_total(&self) -> i64 {
@@ -68,7 +92,53 @@ impl Stock {
         self.level.saturating_sub(self.reserved_total()).max(0)
     }
     pub fn headroom(&self) -> i64 {
-        self.ceiling.saturating_sub(self.level).max(0)
+        self.ceiling
+            .saturating_sub(self.level)
+            .saturating_sub(self.incoming_total())
+            .max(0)
+    }
+    pub fn incoming_total(&self) -> i64 {
+        self.incoming
+            .values()
+            .copied()
+            .fold(0i64, i64::saturating_add)
+    }
+    pub fn reserve_incoming(&mut self, id: &str, amount: i64) -> Result<(), String> {
+        self.validate()?;
+        if id.trim().is_empty() || amount <= 0 {
+            return Err("incoming reservation needs a nonempty id and positive amount".into());
+        }
+        if let Some(existing) = self.incoming.get(id) {
+            return if *existing == amount {
+                Ok(())
+            } else {
+                Err("incoming claim already has a different quantity".into())
+            };
+        }
+        if amount > self.headroom() {
+            return Err("incoming reservation exceeds receiving room".into());
+        }
+        self.incoming.insert(id.into(), amount);
+        Ok(())
+    }
+    pub fn release_incoming(&mut self, id: &str) -> Option<i64> {
+        self.incoming.remove(id)
+    }
+    pub fn receive(&mut self, id: &str, amount: i64) -> Result<(), String> {
+        self.validate()?;
+        if amount <= 0 || self.incoming.get(id) != Some(&amount) {
+            return Err("arrival does not match its incoming reservation".into());
+        }
+        let next = self
+            .level
+            .checked_add(amount)
+            .ok_or("arrival quantity overflows")?;
+        if next > self.ceiling {
+            return Err("arrival exceeds stock capacity".into());
+        }
+        self.incoming.remove(id);
+        self.level = next;
+        Ok(())
     }
     pub fn reserve(&mut self, id: &str, amount: i64) -> Result<(), String> {
         self.validate()?;
@@ -102,10 +172,10 @@ impl Stock {
     /// Returns the effective change, which may be less than the requested delta.
     pub fn adjust(&mut self, delta: i64) -> i64 {
         let before = self.level;
-        self.level = self
-            .level
-            .saturating_add(delta)
-            .clamp(self.reserved_total(), self.ceiling);
+        self.level = self.level.saturating_add(delta).clamp(
+            self.reserved_total(),
+            self.ceiling.saturating_sub(self.incoming_total()),
+        );
         self.level - before
     }
 }
@@ -147,6 +217,10 @@ pub fn plan_transfer(amount: i64, source_available: i64, destination_headroom: i
         .min(destination_headroom)
         .max(0)
 }
+
+#[cfg(test)]
+#[path = "stock_incoming_tests.rs"]
+mod incoming_tests;
 
 #[cfg(test)]
 mod tests {

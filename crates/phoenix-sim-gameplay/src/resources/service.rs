@@ -2,12 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ResourceEndpoint {
-    Capacity { id: String },
-    TorpedoMagazine {},
-}
+pub use phoenix_model::logistics::ResourceEndpoint;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,23 +16,6 @@ pub struct ResourceLink {
 impl ResourceLink {
     pub fn is_empty(&self) -> bool {
         self.service.is_none() && self.provider.is_none()
-    }
-}
-
-impl ResourceEndpoint {
-    pub fn validate_resource(&self, resource: &str) -> Result<(), String> {
-        if resource.trim().is_empty() {
-            return Err("resource must have a non-empty name".into());
-        }
-        match self {
-            Self::Capacity { id } if id.trim().is_empty() => {
-                Err("capacity endpoint must have a non-empty id".into())
-            }
-            Self::TorpedoMagazine {} if resource != "torpedoes" => Err(format!(
-                "torpedo_magazine endpoint only supports resource \"torpedoes\", got {resource:?}"
-            )),
-            _ => Ok(()),
-        }
     }
 }
 

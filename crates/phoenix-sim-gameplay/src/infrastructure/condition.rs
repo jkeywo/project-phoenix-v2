@@ -641,6 +641,30 @@ impl InfrastructureState {
             .map(|c| &c.stock)
     }
 
+    /// Commit a validated transaction's stock without changing endpoint identity,
+    /// authored ceiling or labels. Invalid candidates leave every flag untouched.
+    pub fn replace_capacity_stock(
+        &mut self,
+        id: &str,
+        stock: crate::resources::Stock,
+    ) -> Result<Vec<FlagChange>, String> {
+        stock.validate()?;
+        let index = self
+            .capacities
+            .iter()
+            .position(|row| row.id == id)
+            .ok_or("replacement references an unknown capacity")?;
+        if stock.ceiling != self.capacities[index].stock.ceiling {
+            return Err("stock replacement changes the authored capacity ceiling".into());
+        }
+        let mut staged = self.clone();
+        staged.capacities[index].stock = stock;
+        staged.validate_stocks()?;
+        let changes = staged.recompute_flags();
+        *self = staged;
+        Ok(changes)
+    }
+
     /// Atomic repair-stage transaction against the actual capacity stocks.
     /// The staged copy exists only for validation; it is committed together.
     pub fn repair_parts(
@@ -920,3 +944,7 @@ mod tests;
 #[cfg(test)]
 #[path = "repair_claim_tests.rs"]
 mod repair_claim_tests;
+
+#[cfg(test)]
+#[path = "stock_replacement_tests.rs"]
+mod stock_replacement_tests;

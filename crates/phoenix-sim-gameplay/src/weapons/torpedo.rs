@@ -37,6 +37,7 @@ pub enum TorpedoWork<'a> {
 pub struct TorpedoConfig {
     /// Total torpedoes available (shared pool).
     pub count: u32,
+    pub initial_count: Option<u32>,
     /// What the round delivers when the arc it strikes is DOWN — landing in
     /// full on the hull, with no screen in the way to absorb or pierce
     /// (issue #929).
@@ -93,6 +94,7 @@ impl Default for TorpedoConfig {
     fn default() -> Self {
         Self {
             count: 10,
+            initial_count: None,
             damage_hull: 50,
             damage_shields: 5,
             speed: 15.0,
@@ -490,6 +492,7 @@ impl TorpedoSystem {
     /// Production code should use [`Self::from_configs`].
     pub fn new(config: TorpedoConfig) -> Self {
         let count = config.count;
+        let initial = config.initial_count.unwrap_or(count);
         let load_time = config.load_time;
         // Legacy tubes are all `volley_max: 1`, so the ship-wide AI default
         // clamps to at most one round per tube.
@@ -547,7 +550,7 @@ impl TorpedoSystem {
         Self {
             tubes,
             config,
-            magazine: Stock::new(i64::from(count), i64::from(count))
+            magazine: Stock::new(i64::from(initial), i64::from(count))
                 .expect("u32 ammunition is bounded"),
             in_flight: Vec::new(),
             burst_states: Vec::new(),
@@ -589,10 +592,11 @@ impl TorpedoSystem {
             })
             .collect();
         let count = config.count;
+        let initial = config.initial_count.unwrap_or(count);
         Self {
             tubes,
             config,
-            magazine: Stock::new(i64::from(count), i64::from(count))
+            magazine: Stock::new(i64::from(initial), i64::from(count))
                 .expect("u32 ammunition is bounded"),
             in_flight: Vec::new(),
             burst_states: Vec::new(),
@@ -724,6 +728,7 @@ impl TorpedoSystem {
             }
         }
         if self.magazine.level
+            + self.magazine.incoming_total()
             + self
                 .tubes
                 .iter()
@@ -1425,3 +1430,7 @@ use super::arc_geometry::signed_difference as angle_diff;
 #[cfg(test)]
 #[path = "torpedo_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "torpedo_logistics_tests.rs"]
+mod logistics_tests;

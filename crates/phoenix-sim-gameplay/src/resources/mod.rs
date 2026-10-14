@@ -4,4 +4,6 @@ pub use stock::*;
 pub mod energy;
 pub mod energy_ai;
 pub mod energy_network;
+pub mod logistics;
+pub mod logistics_ai;
 pub mod service;

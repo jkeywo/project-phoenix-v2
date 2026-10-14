@@ -30,6 +30,8 @@ mod consoles;
 pub use consoles::*;
 mod power;
 pub use power::*;
+mod energy;
+pub use energy::*;
 mod shields;
 pub use shields::*;
 mod repair;

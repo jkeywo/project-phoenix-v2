@@ -23842,6 +23842,7 @@ fn external_repair_args(dt: f64) -> HeadlessArgs {
 }
 
 // Read-only test projection; canonical commitments remain in ShipRepairTeams.
+#[derive(Debug)]
 struct ExternalDispatchView {
     dispatched_target: Option<String>,
     team: Option<usize>,

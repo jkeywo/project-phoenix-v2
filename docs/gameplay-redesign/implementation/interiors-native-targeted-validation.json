@@ -159,5 +159,10 @@
     "The fresh bootstrap differs. Actual snapshot JSON restore succeeds. For 360 consecutive steps, whole-world digests and canonical jobs/routes/access match, and funded on-site repair advances.",
     "Two actual ships exist per peer with distinct LocalShip owners. Real Mesh frames are exchanged across 720 whole-world comparisons. Four distinct positive crossing witnesses and repair progress on both hulls on both peers are required.",
     "Admitted correlated dispatch applies only on its due tick. Repeated ordinary Identify retains complete permitted Repair/Hull cohorts, hides off-site HP, and preserves complete wires/shared state across fresh default/default/pinned child processes."
-  ]
+  ],
+  "receipt_review": {
+    "reviewer": "Independent weapon_workshop agent",
+    "result": "PASS",
+    "scope": "Acceptance Markdown and receipt JSON; all six referenced raw log SHA256 values recomputed and matched. Failure/correction/ignored-run distinctions and historical/pending boundaries confirmed. No gates or edits."
+  }
 }

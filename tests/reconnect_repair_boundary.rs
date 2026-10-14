@@ -97,6 +97,37 @@ fn assert_human(app: &App, ship: Entity) {
     }
 }
 
+fn assert_tactical_destination(
+    app: &App,
+    ship: Entity,
+    selected: &Option<SystemId>,
+    target: &SystemId,
+) {
+    let selected = selected
+        .as_ref()
+        .expect("real selected System representative");
+    let config = &app
+        .world()
+        .get::<project_phoenix::ship_plugin::ShipConfigComponent>(ship)
+        .unwrap()
+        .0;
+    assert!(config
+        .systems_for_station(&StationId("tactical".into()))
+        .any(|system| &system.id == selected));
+    let layout = &app
+        .world()
+        .get::<ShipDamage>(ship)
+        .unwrap()
+        .definition
+        .interior;
+    // The Station request can choose any actually damaged System in this room;
+    // structure belongs to the room, and arrival diagnoses every occupant.
+    assert_eq!(
+        layout.placements.get(selected),
+        layout.placements.get(target)
+    );
+}
+
 fn caches(app: &App) -> Value {
     let world = app.world();
     let mut boards: Vec<_> = world
@@ -597,12 +628,12 @@ fn repair_identify_child() {
             .slots()[0]
         {
             TeamSlot::Travelling { system_id, .. } => {
-                assert_eq!(system_id.as_ref(), Some(&target));
+                assert_tactical_destination(&apps[0], ships[0], system_id, &target);
                 travelling += 1;
                 assert_eq!(exposed, Some(false), "travelling is not on-site visibility");
             }
             TeamSlot::Repairing { system_id, .. } => {
-                assert_eq!(system_id.as_ref(), Some(&target));
+                assert_tactical_destination(&apps[0], ships[0], system_id, &target);
                 on_site += 1;
                 if on_site >= 2 {
                     assert_eq!(

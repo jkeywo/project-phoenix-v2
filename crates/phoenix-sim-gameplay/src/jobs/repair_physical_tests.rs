@@ -84,6 +84,15 @@ fn unpowered_team_restores_its_room_with_real_finite_parts_and_parallel_componen
         .get_mut("operation")
         .unwrap()
         .condition = ComponentCondition::Destroyed;
+    if let Some(component) = damage
+        .components
+        .get_mut(&SystemId("engine".into()))
+        .and_then(|rows| rows.get_mut("operation"))
+    {
+        if component.condition != ComponentCondition::Healthy {
+            component.last_source = Some("test-hit".into());
+        }
+    }
     teams.dispatch_physical(0, SystemId("engine".into()), None, "Engine".into());
     teams.dispatch_physical(1, SystemId("engine".into()), None, "Engine".into());
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
@@ -122,6 +131,15 @@ fn unpowered_team_restores_its_room_with_real_finite_parts_and_parallel_componen
 fn redirect_releases_stage_claims_and_preserves_job_identity_and_crossing() {
     let (mut teams, mut damage, mut stock, services) = fixture(4);
     damage.compartments.get_mut("front").unwrap().hp = 50.0;
+    if let Some(component) = damage
+        .components
+        .get_mut(&SystemId("engine".into()))
+        .and_then(|rows| rows.get_mut("operation"))
+    {
+        if component.condition != ComponentCondition::Healthy {
+            component.last_source = Some("test-hit".into());
+        }
+    }
     teams.dispatch_physical(0, SystemId("engine".into()), None, "Engine".into());
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
@@ -157,6 +175,13 @@ fn typed_tasks_are_exclusive_and_continue_with_exact_claim_and_work_progress() {
     assert!(teams.dispatch_physical(0, SystemId("engine".into()), target.clone(), "Front".into()));
     assert!(!teams.dispatch_physical(1, SystemId("engine".into()), target, "Front".into()));
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
+    advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
+    assert!(!stock.capacity_stock("parts").unwrap().reserved.is_empty());
+    assert!(teams
+        .save_state()
+        .physical_work
+        .values()
+        .any(|work| work.progress > 0.0));
     let saved: RepairJobState =
         serde_json::from_str(&serde_json::to_string(&teams.save_state()).unwrap()).unwrap();
     let mut restored = teams.clone();
@@ -188,6 +213,13 @@ fn patched_component_accepts_later_full_work_but_never_another_patch() {
         .get_mut("operation")
         .unwrap()
         .condition = ComponentCondition::Patched { factor: 0.25 };
+    damage
+        .components
+        .get_mut(&SystemId("engine".into()))
+        .unwrap()
+        .get_mut("operation")
+        .unwrap()
+        .last_source = Some("test-hit".into());
     let target = Some(RepairWorkTarget::Component {
         system: SystemId("engine".into()),
         component: "operation".into(),
@@ -216,6 +248,15 @@ fn patched_component_accepts_later_full_work_but_never_another_patch() {
 fn continuation_rejects_incompatible_recipe_and_remote_component_work() {
     let (mut teams, mut damage, mut stock, services) = fixture(4);
     damage.compartments.get_mut("front").unwrap().hp = 50.0;
+    if let Some(component) = damage
+        .components
+        .get_mut(&SystemId("engine".into()))
+        .and_then(|rows| rows.get_mut("operation"))
+    {
+        if component.condition != ComponentCondition::Healthy {
+            component.last_source = Some("test-hit".into());
+        }
+    }
     teams.dispatch_physical(0, SystemId("engine".into()), None, "Engine".into());
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);
     advance(&mut teams, &mut damage, &mut stock, &services, 0.5);

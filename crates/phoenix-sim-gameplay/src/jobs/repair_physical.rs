@@ -66,7 +66,38 @@ impl RepairTeams {
         }) {
             return false;
         }
-        self.dispatch(team, system.clone(), label);
+        let redirected = if target.is_some() {
+            if let Some(job) = self
+                .state
+                .jobs
+                .teams
+                .get_mut(team)
+                .and_then(Option::as_mut)
+                .filter(|job| job.outcome.is_none())
+            {
+                if let RepairActivity::Internal { phase, cancelled } = &mut job.activity {
+                    *phase = TeamSlot::Travelling {
+                        system_id: Some(system.clone()),
+                        display_name: Some(label.clone()),
+                        elapsed: 0.0,
+                        priority: None,
+                    };
+                    *cancelled = false;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if redirected {
+            self.refresh();
+        } else {
+            self.dispatch(team, system.clone(), label);
+        }
         if let Some(job) = self
             .state
             .jobs
@@ -211,16 +242,28 @@ impl RepairTeams {
             let work = self.state.jobs.teams[index]
                 .as_ref()
                 .and_then(|job| self.state.physical_work.get(&job.id.0));
-            let exact_room =
-                work.and_then(|work| work.requested_target.as_ref().or(work.target.as_ref()))
-                    .and_then(|target| match target {
-                        RepairWorkTarget::Compartment { compartment } => Some(compartment.as_str()),
-                        RepairWorkTarget::Component { system, component } => definition
-                            .component_room(&ComponentRef {
-                                system: system.clone(),
-                                component: component.clone(),
-                            }),
-                    });
+            let exact_room = work
+                .and_then(|work| {
+                    work.requested_target.as_ref().or_else(|| {
+                        let current = match slot {
+                            TeamSlot::Travelling { system_id, .. }
+                            | TeamSlot::Repairing { system_id, .. } => system_id.as_ref(),
+                            _ => None,
+                        };
+                        (current == Some(&work.system))
+                            .then_some(work.target.as_ref())
+                            .flatten()
+                    })
+                })
+                .and_then(|target| match target {
+                    RepairWorkTarget::Compartment { compartment } => Some(compartment.as_str()),
+                    RepairWorkTarget::Component { system, component } => {
+                        definition.component_room(&ComponentRef {
+                            system: system.clone(),
+                            component: component.clone(),
+                        })
+                    }
+                });
             match slot {
                 TeamSlot::Travelling {
                     system_id, elapsed, ..
@@ -454,28 +497,31 @@ impl RepairTeams {
             let grant = tools(&self.state.jobs.owner, dt).clamp(0.0, 1.0);
             let rate = recipe.manual_work_fraction + (1.0 - recipe.manual_work_fraction) * grant;
             work.progress = (work.progress + dt * rate).min(recipe.work_secs);
-            if work.progress >= recipe.work_secs
-                && stock(RepairStockAction::Consume, &claim, recipe)
-            {
-                match work.target.as_ref().expect("reserved work has target") {
-                    RepairWorkTarget::Compartment { compartment } => {
-                        let _ = state.restore_structure(
+            if work.progress >= recipe.work_secs {
+                let mut restored = state.clone();
+                let restoration = match work.target.as_ref().expect("reserved work has target") {
+                    RepairWorkTarget::Compartment { compartment } => restored
+                        .restore_structure(
                             &definition,
                             compartment,
                             recipe.structural_hp.unwrap_or(0.0),
-                        );
-                    }
-                    RepairWorkTarget::Component { system, component } => {
-                        let _ = state.remedy_component(
+                        )
+                        .map(|_| ()),
+                    RepairWorkTarget::Component { system, component } => restored
+                        .remedy_component(
                             &definition,
                             &ComponentRef {
                                 system: system.clone(),
                                 component: component.clone(),
                             },
                             name,
-                        );
-                    }
+                        )
+                        .map(|_| ()),
+                };
+                if restoration.is_err() || !stock(RepairStockAction::Consume, &claim, recipe) {
+                    continue;
                 }
+                *state = restored;
                 if matches!(
                     recipe.outcome,
                     phoenix_model::damage::RemedyOutcome::Patch { .. }

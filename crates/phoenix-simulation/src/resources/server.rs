@@ -89,9 +89,7 @@ pub fn tick_resource_transfers(
             else {
                 continue;
             };
-            if let Some((mut stock, held)) =
-                endpoint_stock(endpoint, infrastructure, torpedoes.as_deref())
-            {
+            if let Some((mut stock, held)) = endpoint_stock(endpoint, infrastructure, torpedoes) {
                 if let ResourceEndpoint::Capacity { id } = endpoint {
                     for delta in capacities
                         .0

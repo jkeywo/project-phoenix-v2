@@ -219,7 +219,7 @@ fn prepare(pinned: bool) -> (App, [Entity; 2]) {
         assert_eq!(tube.loaded_count, 0);
         assert_eq!(tube.load_state, TubeLoadState::Unloaded);
         assert!(torpedo.0.torpedoes_remaining() > 0);
-        torpedo.0.magazine.adjust(-(1 as i64));
+        torpedo.0.magazine.adjust(-1_i64);
         let tube = torpedo.0.tube_mut("fore").unwrap();
         tube.loaded_count = 1;
         tube.target_count = 1;

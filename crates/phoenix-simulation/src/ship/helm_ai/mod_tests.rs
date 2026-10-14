@@ -10036,7 +10036,7 @@ fn spend_the_magazine(app: &mut App) {
     let mut torpedoes = entity
         .get_mut::<crate::console::weapons::TorpedoSystemResource>()
         .expect("the cruiser carries a torpedo system");
-    torpedoes.0.magazine.level = (0) as i64 + torpedoes.0.magazine.reserved_total();
+    torpedoes.0.magazine.level = torpedoes.0.magazine.reserved_total();
     for tube in &mut torpedoes.0.tubes {
         tube.loaded_count = 0;
         tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;

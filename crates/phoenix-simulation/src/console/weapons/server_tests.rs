@@ -7019,7 +7019,7 @@ fn cold_torpedo_system() -> crate::console::weapons::TorpedoSystemResource {
     let mut system = crate::weapons::torpedo::TorpedoSystem::new(
         crate::weapons::torpedo::TorpedoConfig::default(),
     );
-    system.magazine.level = (0) as i64 + system.magazine.reserved_total();
+    system.magazine.level = system.magazine.reserved_total();
     assert!(
         !system.tubes.is_empty(),
         "fixture must actually carry tubes or the test asserts nothing"
@@ -10923,7 +10923,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
     };
     let mut torp =
         crate::weapons::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
-    torp.magazine.adjust(-(2 as i64));
+    torp.magazine.adjust(-2_i64);
     torp.tube_mut("fore-centre").unwrap().loaded_count = 2;
 
     // Distinct barrel-marker positions (identity base) so the origin's X
@@ -11775,7 +11775,7 @@ fn magazine_claim_refused_when_empty() {
             .world_mut()
             .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
         let mut ts = q.single_mut(app.world_mut()).unwrap();
-        ts.0.magazine.level = (0) as i64 + ts.0.magazine.reserved_total();
+        ts.0.magazine.level = ts.0.magazine.reserved_total();
     }
 
     push(
@@ -11826,7 +11826,7 @@ fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
                 .world_mut()
                 .get_mut::<TorpedoSystemResource>(ship)
                 .unwrap();
-            ts.0.magazine.level = (1) as i64 + ts.0.magazine.reserved_total();
+            ts.0.magazine.level = 1_i64 + ts.0.magazine.reserved_total();
         }
 
         // Two competing claims, in a fixed queue order.

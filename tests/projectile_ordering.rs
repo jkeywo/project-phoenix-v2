@@ -153,7 +153,7 @@ fn observe_simultaneous_projectile_identity_assignment() {
             ..Default::default()
         },
     );
-    torp.magazine.adjust(-(3 as i64));
+    torp.magazine.adjust(-3_i64);
     for (id, count) in [("fore_port", 2), ("fore_starboard", 1)] {
         let tube = torp.tube_mut(id).unwrap();
         tube.loaded_count = count;

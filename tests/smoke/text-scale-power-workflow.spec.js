@@ -1,412 +1,89 @@
 import { test, expect } from '@playwright/test';
-import {
-  DEVICE_MATRIX,
-  TEXT_SCALES,
-  BROWSER_ZOOMS,
-} from '../fixtures/device-matrix.mjs';
+import { DEVICE_MATRIX, TEXT_SCALES, BROWSER_ZOOMS } from '../fixtures/device-matrix.mjs';
+import { energyConsolePayload } from '../fixtures/energy-console.mjs';
+import { ts } from './strings';
 
-/**
- * tests/smoke/text-scale-power-workflow.spec.js — issue #1422 (PRD #1418
- * stories 1, 2, 4, 9, 10, 16, 17).
- *
- * ONE complete console workflow — Power allocation on the battleship's Power
- * seat — carried through the shell, its console iframe and the allocation
- * controls at 100%, 150% and 200% text, and separately under browser zoom and
- * forced colours. This is the half `tests/client/accessibility-200-percent.js`
- * cannot do: only a real engine lays out `max(px, rem)` type ramps, resolves
- * `clamp()` root sizes against a real viewport, honours `clip-path` when
- * deciding whether a focus ring survives, and repaints a page in a forced
- * palette.
- *
- * Viewports, scales and zoom steps come from `tests/fixtures/device-matrix.mjs`
- * (issue #1421) rather than from literals here, so this spec and the human
- * acceptance kit in `docs/acceptance/1421-device-matrix.md` exercise the same
- * matrix.
- *
- * ── Which bundle ──────────────────────────────────────────────────────────
- * Everything below is served from `/client/...`, i.e. `node
- * scripts/build-client.mjs` output. The Power console is pure HTML + `gui/*`
- * modules with no WASM, so this spec never needs the Trunk host bundle that
- * `/gui/...`-rooted specs depend on.
- */
-
-// The devices this workflow is carried on. Deliberately a NAMED subset of
-// DEVICE_MATRIX rather than all of it: PRD #1418's own starting regression
-// cases (390x844 phone, 1280x720 landscape) plus the landscape phone and the
-// native split-pane floor, which is the geometry the reflow contract in
-// src/native_host/setup_accessibility.rs is actually about. Running all
-// fourteen rows x three scales in a workers:1 suite would buy repetition, not
-// coverage.
-const CARRIED_ON = [
-  'phone-390x844-portrait',
-  'phone-844x390-landscape',
-  'tablet-1280x720-interim-landscape',
-  'native-split-pane-floor',
-];
-
-const device = (id) => {
-  const found = DEVICE_MATRIX.find((d) => d.id === id);
-  if (!found) throw new Error(`device-matrix.mjs has no row '${id}'`);
-  return found;
-};
-
-/**
- * The viewport to exercise `entry` at, for text scale `scale`.
- *
- * A split-pane row is not a device: it is a per-pane FLOOR quoted at text
- * scale 1.0, and `MIN_CONSOLE_LOGICAL_WIDTH_PX` scales linearly with the text
- * multiplier (the height floor does not — consoles scroll). So the supported
- * pane at 200% is 640 logical px wide, not 320, and testing 320x320 at 200%
- * would be asserting a case the Rust contract explicitly says is TOO SMALL.
- * Every other row is a real viewport and is used as authored.
- */
-function viewportFor(entry, scale) {
-  if (entry.kind !== 'split-pane') return { width: entry.width, height: entry.height };
-  return { width: Math.round(entry.width * scale), height: entry.height };
-}
-
-/** A realistic allocation: one group held below its commanded level by the
- *  battery floor, one switched off, one ordinary. */
-const POWER_PAYLOAD = {
-  groups: [
-    { id: 'helm', label: 'PROPULSION', level: 2, commanded_level: 2, min_level: 1, max_level: 4 },
-    { id: 'weapons', label: 'WEAPONS', level: 1, commanded_level: 3, min_level: 0, max_level: 4 },
-    { id: 'shields', label: 'SHIELDS', level: 0, commanded_level: 0, min_level: 0, max_level: 4 },
-  ],
-  power_auto: false,
-  battery_online: true,
-  charging: true,
-  battery_charge: 72,
-  battery_max: 100,
-  total: 3,
-  total_max: 12,
-  draining: false,
-};
-
+// Carry the actual Energy workflow through text scaling, browser zoom, native
+// controls, forced colours and the shell/Console boundary.
+const CARRIED_ON = ['phone-390x844-portrait', 'phone-844x390-landscape', 'tablet-1280x720-interim-landscape', 'native-split-pane-floor'];
+const device = id => { const found = DEVICE_MATRIX.find(row => row.id === id); if (!found) throw new Error(id); return found; };
+const viewportFor = (entry, scale) => ({ width: entry.kind === 'split-pane' ? Math.round(entry.width * scale) : entry.width, height: entry.height });
+const POWER_PAYLOAD = energyConsolePayload();
 const POWER_URL = '/client/gui/battleship/power.html';
-
-/** Open the Power console, capture the commands it would send, and push a
- *  realistic allocation into it. Returns nothing; the page is ready to probe. */
 async function openPowerConsole(page) {
-  await page.goto(POWER_URL);
-  await page.waitForFunction(() =>
-    typeof window.__updateConsole === 'function'
-    && !!document.querySelector('ph-power-controls')?.shadowRoot);
-  // The console's outbound path, captured rather than stubbed away: this is the
-  // real `activateSemanticAction` seam every visible Engineering control uses.
-  await page.evaluate(() => {
-    window.__commands = [];
-    window.activateSemanticAction = (actionId, payload) => {
-      window.__commands.push({ actionId, ...payload });
-      return true;
-    };
-  });
-  await page.evaluate(
-    (state) => window.__updateConsole('power', JSON.stringify(state)),
-    POWER_PAYLOAD,
-  );
-  await page.evaluate(() => document.fonts.ready);
+  await page.goto(POWER_URL); await page.waitForFunction(() => typeof window.__updateConsole === 'function');
+  await page.evaluate(() => { window.__commands = []; window.activateSemanticAction = (actionId, payload) => { window.__commands.push({ actionId, ...payload }); return true; }; });
+  await page.evaluate(state => window.__updateConsole('power', JSON.stringify(state)), POWER_PAYLOAD);
+  await expect(page.locator('ph-energy-controls')).toBeVisible(); await page.evaluate(() => document.fonts.ready);
 }
-
-/** Apply a text scale through the SHIPPED profile modules, not by poking CSS. */
 async function applyTextScale(page, scale) {
-  await page.evaluate(async (value) => {
-    const { applyEffectsToRoot, resolveEffects } = await import(
-      '/client/gui/accessibility-profile.js');
-    applyEffectsToRoot(
-      document.documentElement,
-      resolveEffects({ presentation: { textScale: value } }),
-    );
-  }, scale);
+  await page.evaluate(async value => { const { applyEffectsToRoot, resolveEffects } = await import('/client/gui/accessibility-profile.js');
+    applyEffectsToRoot(document.documentElement, resolveEffects({ presentation: { textScale: value } })); }, scale);
 }
-
-/** Every rendered string this workflow depends on, with its computed size. */
 async function textSizes(page) {
   return page.evaluate(() => {
-    const px = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : null);
-    const shadow = document.querySelector('ph-power-controls').shadowRoot;
-    return {
-      root: px(document.documentElement),
-      batteryLabel: px(document.getElementById('bat-val')),
-      batteryCaption: px(document.querySelector('.readout [data-i18n]')),
-      groupLabel: px(shadow.querySelector('.group-label')),
-      levelText: px(shadow.querySelector('.level-text')),
-      stepper: px(shadow.querySelector('.mini-btn')),
-      coldTag: px(shadow.querySelector('.cold-tag')),
-    };
+    const shadow = document.querySelector('ph-power-controls').shadowRoot.querySelector('ph-energy-controls').shadowRoot;
+    const size = element => element ? parseFloat(getComputedStyle(element).fontSize) : null;
+    return { root: size(document.documentElement), battery: size(document.getElementById('bat-val')), group: size(shadow.querySelector('[data-energy-group] legend')),
+      status: size(shadow.querySelector('[data-energy-group] .stats')), selector: size(shadow.getElementById('depth')), value: size(shadow.querySelector('output')) };
   });
 }
-
-/** Is every control and status of the workflow actually on the page and
- *  reachable — laid out with a real box, and no sideways scroll to reach it? */
 async function reachability(page) {
   return page.evaluate(() => {
-    const shadow = document.querySelector('ph-power-controls').shadowRoot;
-    const boxed = (el) => {
-      if (!el) return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-    const steppers = Array.from(shadow.querySelectorAll('.mini-btn'));
-    const pips = Array.from(shadow.querySelectorAll('.pip'));
-    const doc = document.documentElement;
-    return {
-      groups: shadow.querySelectorAll('.group').length,
-      steppers: steppers.length,
-      pips: pips.length,
-      everyStepperBoxed: steppers.every(boxed),
-      everyPipBoxed: pips.every(boxed),
-      // One tab stop for the panel, arrows between the steppers (roving
-      // tabindex) — enlargement must not turn one stop into six or none.
-      tabStops: steppers.filter((b) => b.getAttribute('tabindex') === '0').length,
-      // Status, in words: the running level, the held gap, the cold group and
-      // the battery percentage.
-      levelTexts: Array.from(shadow.querySelectorAll('.level-text'))
-        .map((el) => el.textContent.trim()).filter(Boolean).length,
-      // The switched-off group's COLD tag: shown, and laid out. Its two
-      // neighbours keep theirs hidden, which is why this reads the shields row
-      // rather than any `.cold-tag`.
-      coldVisible: boxed(shadow.querySelector('[data-group-id="shields"] .cold-tag'))
-        && !shadow.querySelector('[data-group-id="shields"] .cold-tag').hidden
-        && shadow.querySelectorAll('.cold-tag:not([hidden])').length === 1,
-      battery: (document.getElementById('bat-val') || {}).textContent,
-      // Panels may wrap, stack and scroll; what they may not do is put content
-      // sideways off the page where no scroll reaches it.
-      horizontalOverflow: doc.scrollWidth - doc.clientWidth,
-      verticalScrollAvailable: doc.scrollHeight >= doc.clientHeight,
-    };
+    const shadow = document.querySelector('ph-power-controls').shadowRoot.querySelector('ph-energy-controls').shadowRoot;
+    const boxed = element => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0; };
+    const sliders = [...shadow.querySelectorAll('input[type="range"]')].filter(boxed);
+    return { groups: [...shadow.getElementById('groups').children].filter(boxed).length, sliders: sliders.length,
+      nativeControls: [...shadow.querySelectorAll('select,input,button')].filter(boxed).every(element => !element.disabled),
+      statuses: [...shadow.querySelectorAll('[data-energy-group] .stats')].filter(boxed).map(node => node.textContent),
+      battery: document.getElementById('bat-val').textContent,
+      horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
   });
 }
-
-// ── 1. The workflow at 100% / 150% / 200% on each carried surface ──────────
-
-for (const id of CARRIED_ON) {
-  const entry = device(id);
-
-  test(`Power allocation is reachable and readable at every text scale on ${id}`, async ({ page }) => {
-    const baseline = {};
-
-    for (const scale of TEXT_SCALES) {
-      const viewport = viewportFor(entry, scale);
-      await page.setViewportSize(viewport);
-      await openPowerConsole(page);
-      await applyTextScale(page, scale);
-      await page.evaluate(() => document.fonts.ready);
-
-      const where = `${id} @ ${scale}x (${viewport.width}x${viewport.height})`;
-
-      // ── Controls and status are all there and all laid out ──────────────
-      const reach = await reachability(page);
-      expect(reach.groups, `${where}: groups`).toBe(3);
-      expect(reach.steppers, `${where}: steppers`).toBe(6);
-      expect(reach.pips, `${where}: pips`).toBe(12);
-      expect(reach.everyStepperBoxed, `${where}: every stepper laid out`).toBe(true);
-      expect(reach.everyPipBoxed, `${where}: every rung laid out`).toBe(true);
-      expect(reach.tabStops, `${where}: one tab stop into the panel`).toBe(1);
-      expect(reach.levelTexts, `${where}: a level readout per group`).toBe(3);
-      expect(reach.coldVisible, `${where}: the cold group still says so`).toBe(true);
-      expect(reach.battery, `${where}: battery status`).toBe('72%');
-
-      // Reflow, do not clip: vertical growth is absorbed by the console's own
-      // scroll, and nothing is pushed sideways out of reach.
-      expect(reach.horizontalOverflow, `${where}: horizontal overflow`).toBeLessThanOrEqual(1);
-      expect(reach.verticalScrollAvailable, `${where}: vertical scroll`).toBe(true);
-
-      // ── Nothing shrinks ─────────────────────────────────────────────────
-      const sizes = await textSizes(page);
-      for (const [key, value] of Object.entries(sizes)) {
-        expect(value, `${where}: ${key} rendered`).toBeGreaterThan(0);
-      }
-      if (scale === 1) {
-        Object.assign(baseline, sizes);
-      } else {
-        for (const [key, value] of Object.entries(sizes)) {
-          // PRD #1418: "Do not silently shrink text to preserve the original
-          // composition." Every string is at least as large as it was at 100%.
-          expect(value, `${where}: ${key} vs 100% (${baseline[key]}px)`)
-            .toBeGreaterThanOrEqual(baseline[key]);
-        }
-        // And the multiplier is genuinely applied, not merely not-shrunk.
-        expect(sizes.root, `${where}: root font-size grew`)
-          .toBeGreaterThan(baseline.root);
-      }
-    }
-  });
-}
-
-// ── 2. The keyboard path through the workflow at the ceiling ───────────────
-
-test('the whole allocation workflow is operable from the keyboard at 200% text', async ({ page }) => {
-  const entry = device('phone-390x844-portrait');
-  await page.setViewportSize({ width: entry.width, height: entry.height });
-  await openPowerConsole(page);
-  await applyTextScale(page, 2);
-
-  // One Tab reaches the panel; arrows rove between the steppers.
-  await page.evaluate(() => document.querySelector('ph-power-controls')
-    .shadowRoot.querySelector('.mini-btn').focus());
-  const focused = () => page.evaluate(() => {
-    const el = document.querySelector('ph-power-controls').shadowRoot.activeElement;
-    return el && {
-      group: el.closest('[data-group-id]').dataset.groupId,
-      action: el.dataset.action,
-      // The ring is drawn on the recessed body, so a visible focus indicator
-      // means that body actually carries one.
-      ringed: getComputedStyle(el.querySelector('.mini-bg')).boxShadow !== 'none',
-    };
-  });
-  expect(await focused()).toMatchObject({ group: 'helm', action: 'decr' });
-
-  await page.keyboard.press('ArrowDown');
-  expect(await focused()).toMatchObject({ group: 'helm', action: 'incr' });
-  await page.keyboard.press('ArrowDown');
-  expect(await focused()).toMatchObject({ group: 'weapons', action: 'decr' });
-
-  // Activate it: the authoritative order goes out unchanged by the text size.
-  await page.keyboard.press('Enter');
-  expect(await page.evaluate(() => window.__commands)).toEqual([
-    { actionId: 'power.decrease-allocation', source: 'control', detail: { target: 'weapons', level: 2 } },
-  ]);
-});
-
-// ── 3. Browser zoom, tested separately from Phoenix text scale ─────────────
-
-test('browser zoom is usable alongside the Phoenix text setting', async ({ browser }) => {
-  // PRD #1418: "Verify browser zoom separately; do not assume a universally
-  // available browser query for the Windows text-size percentage." Browser
-  // zoom is emulated the way the browser itself does it — the CSS viewport
-  // shrinks by the zoom factor while the device pixel ratio grows — rather than
-  // by writing a CSS `zoom`, which is a page-authored effect and not the same
-  // thing at all.
-  const entry = device('tablet-1280x720-interim-landscape');
-  for (const zoom of BROWSER_ZOOMS) {
-    const context = await browser.newContext({
-      viewport: {
-        width: Math.round(entry.width / zoom),
-        height: Math.round(entry.height / zoom),
-      },
-      deviceScaleFactor: zoom,
-    });
-    const page = await context.newPage();
-    try {
-      await openPowerConsole(page);
-      // Phoenix's own setting stays at its default here: the point is that the
-      // browser's zoom works on its own, without Phoenix compensating for it.
-      const reach = await reachability(page);
-      const where = `browser zoom ${zoom * 100}%`;
-      expect(reach.groups, where).toBe(3);
-      expect(reach.steppers, where).toBe(6);
-      expect(reach.everyStepperBoxed, where).toBe(true);
-      expect(reach.coldVisible, where).toBe(true);
-      expect(reach.battery, where).toBe('72%');
-      expect(reach.horizontalOverflow, where).toBeLessThanOrEqual(1);
-
-      // And the two are additive rather than exclusive: the Phoenix ceiling on
-      // top of browser zoom still enlarges, and still reaches everything.
-      const before = (await textSizes(page)).root;
-      await applyTextScale(page, 2);
-      const after = await textSizes(page);
-      expect(after.root, `${where}: 200% text on top of zoom`).toBeGreaterThan(before);
-      const zoomed = await reachability(page);
-      expect(zoomed.steppers, `${where} + 200%`).toBe(6);
-      expect(zoomed.everyStepperBoxed, `${where} + 200%`).toBe(true);
-      expect(zoomed.horizontalOverflow, `${where} + 200%`).toBeLessThanOrEqual(1);
-    } finally {
-      await context.close();
-    }
+for (const id of CARRIED_ON) test(`Energy allocation stays readable and reachable at every text scale on ${id}`, async ({ page }) => {
+  const entry = device(id); let baseline;
+  for (const scale of TEXT_SCALES) {
+    await page.setViewportSize(viewportFor(entry, scale)); await openPowerConsole(page); await applyTextScale(page, scale); await page.evaluate(() => document.fonts.ready);
+    const reach = await reachability(page), sizes = await textSizes(page), where = `${id} @ ${scale}x`;
+    expect(reach.groups, where).toBe(3); expect(reach.sliders, where).toBe(8); expect(reach.nativeControls, where).toBe(true);
+    expect(reach.statuses, where).toHaveLength(3); expect(reach.statuses.join(' '), where).toContain(ts('energy.controls.flow_cut'));
+    expect(reach.battery, where).toBe('72%'); expect(reach.horizontalOverflow, where).toBeLessThanOrEqual(1);
+    for (const [key, value] of Object.entries(sizes)) { expect(value, `${where}:${key}`).toBeGreaterThan(0); if (baseline) expect(value, `${where}:${key}`).toBeGreaterThanOrEqual(baseline[key]); }
+    if (!baseline) baseline = sizes; else expect(sizes.root, where).toBeGreaterThan(baseline.root);
   }
 });
 
-// ── 4. Contrast and forced colours ─────────────────────────────────────────
-
-test('the Phoenix contrast choice changes the palette; forced colours overrule it', async ({ page }) => {
-  const entry = device('tablet-1280x720-interim-landscape');
-  await page.setViewportSize({ width: entry.width, height: entry.height });
-  await openPowerConsole(page);
-
-  const setContrast = (value) => page.evaluate(async (v) => {
-    const { applyEffectsToRoot, resolveEffects } = await import(
-      '/client/gui/accessibility-profile.js');
-    applyEffectsToRoot(document.documentElement, resolveEffects({ presentation: { contrast: v } }));
-  }, value);
-
-  const ringColour = () => page.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue('--focus-ring').trim());
-  const panelEdge = () => page.evaluate(() =>
-    getComputedStyle(document.querySelector('ph-power-controls').shadowRoot
-      .querySelector('.group')).borderTopColor);
-
-  // ── Phoenix's own contrast setting, with no forced palette in play ──────
-  await setContrast('off');
-  const standardRing = await ringColour();
-  const standardEdge = await panelEdge();
-  await setContrast('on');
-  expect(await ringColour(), 'the high-contrast ring differs').not.toBe(standardRing);
-  expect(await panelEdge(), 'the high-contrast edge differs').not.toBe(standardEdge);
-
-  // ── Forced colours: the browser's palette, not Phoenix's ────────────────
-  // PRD #1418: "A Phoenix contrast selection is not permission to defeat
-  // browser-enforced colours." So under forced colours the ring must be the
-  // SAME whichever Phoenix contrast the operator picked — the setting stops
-  // having a say.
-  await page.emulateMedia({ forcedColors: 'active' });
-  await setContrast('on');
-  const forcedWithContrast = await ringColour();
-  await setContrast('off');
-  const forcedWithout = await ringColour();
-  expect(forcedWithout, 'forced colours are not overridden by the Phoenix setting')
-    .toBe(forcedWithContrast);
-  expect(forcedWithout, 'the forced ring is a real colour').not.toBe('');
-  expect(forcedWithout, 'the forced ring is not the authored one').not.toBe(standardRing);
-
-  // Borders survive: a group's edge is drawn, not collapsed away with the
-  // background ramp.
-  const forcedEdge = await panelEdge();
-  expect(forcedEdge).not.toBe('rgba(0, 0, 0, 0)');
-  expect(forcedEdge).not.toBe('transparent');
+test('Energy native flow controls remain keyboard operable at 200% text', async ({ page }) => {
+  await page.setViewportSize(viewportFor(device('phone-390x844-portrait'), 2)); await openPowerConsole(page); await applyTextScale(page, 2);
+  await page.locator('ph-energy-controls #flow-helm').focus(); await page.keyboard.press('ArrowRight');
+  expect(await page.evaluate(() => window.__commands)).toEqual([{ actionId: 'power.energy-group', source: 'control', detail: { group: 'helm', flow_per_sec: 5, cooling_per_sec: 1 } }]);
+  await page.locator('ph-energy-controls #depth').selectOption('min');
+  await page.locator('ph-energy-controls [data-energy-group="helm"] .row button:last-child').focus(); await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => window.__commands.at(-1))).toMatchObject({ actionId: 'power.energy-priority', detail: { group: 'helm', priority: 1 } });
 });
 
-test('under forced colours the focus ring and the lit rungs are still visible', async ({ page }) => {
+test('browser zoom and Phoenix text scaling independently retain Energy controls', async ({ browser }) => {
   const entry = device('tablet-1280x720-interim-landscape');
-  await page.setViewportSize({ width: entry.width, height: entry.height });
-  await page.emulateMedia({ forcedColors: 'active' });
-  await openPowerConsole(page);
+  for (const zoom of BROWSER_ZOOMS) {
+    const context = await browser.newContext({ viewport: { width: Math.round(entry.width / zoom), height: Math.round(entry.height / zoom) }, deviceScaleFactor: zoom });
+    try { const page = await context.newPage(); await openPowerConsole(page); const before = await textSizes(page);
+      for (const scale of [1, 2]) { await applyTextScale(page, scale); const reach = await reachability(page);
+        expect(reach.sliders).toBe(8); expect(reach.nativeControls).toBe(true); expect(reach.horizontalOverflow).toBeLessThanOrEqual(1); }
+      expect((await textSizes(page)).root).toBeGreaterThan(before.root);
+    } finally { await context.close(); }
+  }
+});
 
-  // A forced-colours mode DROPS box-shadow, and the chamfered control family
-  // draws its focus ring as an inset shadow after setting `outline: none` —
-  // which is why gui/components/ph-console-styles.js redraws it as a border in
-  // that mode. Without that, this stepper would show no keyboard focus at all.
-  await page.evaluate(() => document.querySelector('ph-power-controls')
-    .shadowRoot.querySelector('.mini-btn').focus());
-  const ring = await page.evaluate(() => {
-    const btn = document.querySelector('ph-power-controls').shadowRoot
-      .querySelector('.mini-btn');
-    const bg = getComputedStyle(btn.querySelector('.mini-bg'));
-    return { width: parseFloat(bg.borderTopWidth), colour: bg.borderTopColor };
-  });
-  expect(ring.width, 'the focus border is drawn').toBeGreaterThan(0);
-  expect(ring.colour).not.toBe('rgba(0, 0, 0, 0)');
-
-  // The allocation readout must not collapse to twelve identical circles: a lit
-  // rung and an unlit one still differ.
-  const pips = await page.evaluate(() => {
-    const shadow = document.querySelector('ph-power-controls').shadowRoot;
-    const of = (sel) => {
-      const s = getComputedStyle(shadow.querySelector(sel));
-      return { background: s.backgroundColor, borderStyle: s.borderTopStyle };
-    };
-    return {
-      active: of('[data-group-id="helm"] .pip[data-level="1"]'),
-      inactive: of('[data-group-id="helm"] .pip[data-level="4"]'),
-      held: of('[data-group-id="weapons"] .pip[data-level="3"]'),
-    };
-  });
-  expect(pips.active.background, 'a lit rung differs from an unlit one')
-    .not.toBe(pips.inactive.background);
-  // The held rung — commanded but refused by the battery floor — is told apart
-  // by its border STYLE, which a forced palette keeps when it flattens colour.
-  expect(pips.held.borderStyle).toBe('dashed');
-  expect(pips.inactive.borderStyle).not.toBe('dashed');
+test('forced colours retain native focus, group boundaries and textual intake status', async ({ page }) => {
+  await page.setViewportSize(viewportFor(device('tablet-1280x720-interim-landscape'), 1)); await openPowerConsole(page);
+  await page.evaluate(async () => { const { applyEffectsToRoot, resolveEffects } = await import('/client/gui/accessibility-profile.js');
+    applyEffectsToRoot(document.documentElement, resolveEffects({ presentation: { contrast: 'on' } })); });
+  await page.emulateMedia({ forcedColors: 'active' }); await page.locator('ph-energy-controls #depth').focus(); await page.keyboard.press('Tab');
+  const styles = await page.evaluate(() => { const shadow = document.querySelector('ph-power-controls').shadowRoot.querySelector('ph-energy-controls').shadowRoot;
+    const focused = getComputedStyle(shadow.activeElement), group = getComputedStyle(shadow.querySelector('[data-energy-group]'));
+    return { outline: focused.outlineStyle, outlineWidth: parseFloat(focused.outlineWidth), border: parseFloat(group.borderTopWidth), colour: group.borderTopColor }; });
+  expect(styles.outline).not.toBe('none'); expect(styles.outlineWidth).toBeGreaterThan(0); expect(styles.border).toBeGreaterThan(0); expect(styles.colour).not.toBe('rgba(0, 0, 0, 0)');
+  expect((await reachability(page)).statuses.join(' ')).toContain(ts('energy.controls.flow_cut'));
 });
 
 // ── 5. Shell -> console iframe: one choice, both sides of the boundary ─────
@@ -428,7 +105,7 @@ test('the text choice reaches the shell and the console inside its iframe', asyn
 
   await page.evaluate(async () => {
     const { mountConsoles, applyConsoleVisibility } = await import('/client/gui/console-mount.js');
-    const ship = { stations: [{ id: 'power', name: 'Power', console: 'gui/battleship/power.html' }] };
+    const ship = { stations: [{ id: 'power', name: 'Power' }], consoles: [{ id: 'power', name: 'Power', home_station: 'power', screen: 'gui/battleship/power.html' }] };
     let container = document.getElementById('console-container');
     if (!container) {
       container = document.createElement('div');
@@ -465,7 +142,7 @@ test('the text choice reaches the shell and the console inside its iframe', asyn
     control: parseFloat(getComputedStyle(
       document.getElementById('power-iframe').contentDocument
         .querySelector('ph-power-controls').shadowRoot
-        .querySelector('.group-label')).fontSize),
+        .querySelector('ph-energy-controls').shadowRoot.querySelector('[data-energy-group] legend')).fontSize),
   }));
 
   const applied = [];

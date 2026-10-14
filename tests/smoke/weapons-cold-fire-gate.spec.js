@@ -1,20 +1,5 @@
-// Issue #1396 — a COLD weapons group cannot fire.
-//
-// Restraint moved from the captain's hidden Weapons Hold toggle to the reactor
-// (PRD #1371, plan §8.3): a power group authored with `min_level = 0` may be
-// commanded to level 0, and while it is there the systems that draw from it do
-// not shoot. This spec drives that end to end through the real seams — an
-// Engineering client's `SetPowerGroupAllocation`, a Tactical client's
-// `FirePhaser` — rather than through a Rust fixture, because the claim is about
-// what the crew can and cannot do to each other's stations.
-//
-// Both halves are asserted in ONE run on ONE hull, with nothing changing between
-// them but the reactor level:
-//   1. weapons at 0 → the fire order produces no `BeamStarted` at all;
-//   2. weapons back at its boot level → the identical order lights the beam.
-// The second half is what makes the first half's negative assertion mean
-// something: a fixture that could never fire would pass step 1 for the wrong
-// reason.
+// Tactical restraint is independent of incoming energy flow. A held fire
+// command is refused; releasing the same latch lets the identical bank fire.
 
 import {
   test,
@@ -27,9 +12,7 @@ import {
 
 // Self-contained smoke-test world, the same shape `tactical-fire-flow.spec.js`
 // uses: the player's cruiser at the origin facing -Z, one hostile 15.8 units off
-// the port bow — inside the fore bank's arc and well inside its reach — so
-// nothing has to be steered. The cruiser is the hull that authors
-// `[power_groups.weapons] min_level = 0`, which is what makes it coldable.
+// the port bow, inside the fore bank's arc, so Helm need not steer.
 const MINIMAL_TEST_WORLD = `
 [global]
 seed = 42
@@ -58,7 +41,7 @@ transform     = { position = [-15.0, 0.0, -5.0] }
 spawn_on      = "game_start"
 `;
 
-const POWER_GROUP = 'weapons';
+
 
 /** Send SelectStation and wait for a StationAssigned for *this* client's token. */
 async function selectAndWait(client, station, timeout = 5_000) {
@@ -72,28 +55,18 @@ async function selectAndWait(client, station, timeout = 5_000) {
   );
 }
 
-/** Ask Engineering's reactor for an absolute level on the weapons group. */
-async function setWeaponsPower(engineering, level) {
-  await engineering.send('ControlSystem', {
-    target: 'power-reactor',
-    payload: {
-      type: 'SetPowerGroupAllocation',
-      data: { group: POWER_GROUP, level },
-    },
-  });
-}
-
-/** Wait until the newest PowerState reports the weapons group at `level`. */
-async function waitForWeaponsPower(engineering, level, timeout = 15_000) {
-  await engineering.page.waitForFunction(
-    (want) => {
-      const msgs = window.__messages || [];
-      const last = msgs.filter((m) => m.type === 'PowerState').pop();
-      return !!last && last.data.weapons === want;
-    },
-    level,
-    { timeout },
-  );
+async function setRestraint(tactical, held) {
+  const correlation = held ? 'hold-weapons' : 'release-weapons';
+  await tactical.send('ControlSystemCorrelated', { target: 'tactical-radar', correlation,
+    payload: { type: 'SetWeaponsRestraint', data: { held } } });
+  await tactical.page.waitForFunction(({ correlation, held }) => {
+    const messages = window.__messages || [];
+    const accepted = messages.some(message => message.type === 'ActionFeedback'
+      && message.data.correlation === correlation && message.data.outcome === 'Applied');
+    const latest = messages.filter(message => message.type === 'BlackboardUpdate').reverse()
+      .flatMap(message => message.data.updates || []).find(([, board]) => typeof board?.data?.weapons_restrained === 'boolean');
+    return accepted && latest?.[1]?.data.weapons_restrained === held;
+  }, { correlation, held }, { timeout: 15000 });
 }
 
 /** How many `BeamStarted` messages this client has seen. */
@@ -132,10 +105,8 @@ async function startGame(context) {
   await waitForWasmReady(serverPage);
   const hostId = await readHostPeerId(serverPage);
 
-  // Three stations, three claims: Helm to fly, Tactical to shoot, Engineering to
-  // hold the reactor. Engineering must be HUMAN-held — an AI-backfilled Power
-  // officer would restore the group its authored policy wants and warm the guns
-  // back up mid-test.
+  // Three human stations keep their ordinary AI controllers delegated while
+  // Tactical demonstrates restraint and Engineering deliberately cuts intake.
   const helm = await createTestClient(context, hostId, { name: 'Helm' });
   const tactical = await createTestClient(context, hostId, { name: 'Tac' });
   const engineering = await createTestClient(context, hostId, { name: 'Eng' });
@@ -153,7 +124,7 @@ async function startGame(context) {
   return { helm, tactical, engineering, serverCrashes };
 }
 
-test('a cold weapons group cannot fire, and power gives the fire back', { tag: '@core' }, async ({ context }) => {
+test('Tactical holds and releases firing independently of Engineering flow', { tag: '@core' }, async ({ context }) => {
   test.setTimeout(180_000);
   const { helm, tactical, engineering, serverCrashes } = await startGame(context);
 
@@ -167,22 +138,8 @@ test('a cold weapons group cannot fire, and power gives the fire back', { tag: '
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid = raider.uuid;
 
-  // The level the hull BOOTS its weapons group at, read off the wire rather than
-  // pinned to the TOML (issue #941): the test restores what it found.
-  await engineering.page.waitForFunction(
-    () => (window.__messages || []).some(
-      (m) => m.type === 'PowerState' && typeof m.data.weapons === 'number',
-    ),
-    undefined,
-    { timeout: 15_000 },
-  );
-  const bootLevel = await engineering.page.evaluate(
-    () => (window.__messages || []).filter((m) => m.type === 'PowerState').pop().data.weapons,
-  );
-  expect(bootLevel, 'the cruiser must boot its weapons group above cold').toBeGreaterThan(0);
-
   // Lock the raider and wait until a bank reports itself fire-ready, so every
-  // gate but the reactor is known to be open before the guns are switched off.
+  // other firing prerequisites are satisfied before Tactical holds fire.
   await tactical.send('ControlSystem', {
     target: 'tactical-radar',
     payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
@@ -198,33 +155,21 @@ test('a cold weapons group cannot fire, and power gives the fire back', { tag: '
     { timeout: 20_000 },
   );
 
-  // ── COLD ────────────────────────────────────────────────────────────────
-  await setWeaponsPower(engineering, 0);
-  await waitForWeaponsPower(engineering, 0);
-  expect(await beamCount(tactical), 'nothing has fired before the order').toBe(0);
-
-  await tactical.send('ControlSystem', {
-    target: 'phaser-fore',
-    payload: { type: 'FirePhaser' },
-  });
-  // A generous window: the host page is backgrounded, so its sim runs well
-  // behind wall clock. The powered half below fires inside a shorter one, which
-  // is what says this window was long enough to have seen a beam.
-  await tactical.page.waitForTimeout(10_000);
-  expect(
-    await beamCount(tactical),
-    'weapons at level 0: the fire order must produce no beam at all',
-  ).toBe(0);
-
-  // ── POWERED ─────────────────────────────────────────────────────────────
-  await setWeaponsPower(engineering, bootLevel);
-  await waitForWeaponsPower(engineering, bootLevel);
-
-  await tactical.send('ControlSystem', {
-    target: 'phaser-fore',
-    payload: { type: 'FirePhaser' },
-  });
-  const beamStarted = await tactical.waitForMessage('BeamStarted', 20_000);
+  // Engineering may stop incoming flow without suppressing an already
+  // charged local weapon reserve. Tactical's explicit restraint does suppress it.
+  await engineering.send('ControlSystemCorrelated', { target: 'power-reactor', correlation: 'flow-cut',
+    payload: { type: 'SetEnergyGroup', data: { group: 'weapons', flow_per_sec: 0, cooling_per_sec: 0 } } });
+  await engineering.page.waitForFunction(() => window.__messages?.some(message => message.type === 'ActionFeedback'
+    && message.data.correlation === 'flow-cut' && message.data.outcome === 'Applied'));
+  await setRestraint(tactical, true);
+  expect(await beamCount(tactical)).toBe(0);
+  await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'held-fire', payload: { type: 'FirePhaser' } });
+  await tactical.page.waitForFunction(() => window.__messages?.some(message => message.type === 'ActionFeedback'
+    && message.data.correlation === 'held-fire' && message.data.outcome === 'Refused'), undefined, { timeout: 15000 });
+  expect(await beamCount(tactical), 'an acknowledged held fire order produces no beam').toBe(0);
+  await setRestraint(tactical, false);
+  await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'released-fire', payload: { type: 'FirePhaser' } });
+  const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
   expect(beamStarted.data.target_uuid).toBe(raiderUuid);
 
   expect(serverCrashes).toEqual([]);
@@ -232,4 +177,18 @@ test('a cold weapons group cannot fire, and power gives the fire back', { tag: '
   await helm.close();
   await tactical.close();
   await engineering.close();
+});
+
+test('Tactical visible restraint targets its radar independently of weapon delegation', async ({ page }) => {
+  await page.goto('/client/gui/battleship/tactical.html');
+  await page.waitForFunction(() => typeof window.__updateConsole === 'function');
+  await page.evaluate(() => { window.__restraintActions = []; window.__sendAction = json => window.__restraintActions.push(JSON.parse(json)); });
+  const payload = { tactical_auto: true, weapons_restraint_auto: false, weapons_restrained: false, tactical_radar_system_id: 'radar-instance' };
+  await page.evaluate(value => window.__updateConsole('tactical', JSON.stringify(value)), payload);
+  const control = page.locator('[data-weapons-restraint]'); await expect(control).toBeEnabled(); await expect(control).toHaveAttribute('aria-pressed', 'false');
+  await control.click();
+  expect(await page.evaluate(() => window.__restraintActions)).toContainEqual(expect.objectContaining({ action: 'set_weapons_restraint', held: true,
+    control_system_id: 'radar-instance', semantic_action: 'tactical.weapons-restraint', correlation: expect.any(String) }));
+  await page.evaluate(value => window.__updateConsole('tactical', JSON.stringify(value)), { ...payload, tactical_auto: false, weapons_restraint_auto: true, weapons_restrained: true });
+  await expect(control).toBeDisabled(); await expect(control).toHaveAttribute('aria-pressed', 'true');
 });

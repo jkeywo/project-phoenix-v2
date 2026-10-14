@@ -1,32 +1,5 @@
-// Issue #1397 — Smoke test: one ship's weapons are COLD, another ship's Sensors
-// say so.
-//
-// Restraint is expressed as POWER (issue #1395): a hull may author its weapons
-// group with a floor of 0 and boot it switched off, and a ship that has done
-// that cannot fire. This spec proves the OTHER half of that — that the fact is
-// legible from outside the hull, on the one surface allowed to see it.
-//
-// The chain, end to end on the real WASM host over the actual wire:
-//
-//   1. SHIP A ("cold_hauler") boots with its `weapons` power group at level 0.
-//      No AI arm can quietly raise it: `plan_allocation` filters cold groups out
-//      of the bidding entirely, so what the hull authored is what stays true.
-//   2. SHIP B is the player cruiser. Its SCIENCE seat — the seat that owns the
-//      `sensors` and `sensor-radar` systems on that hull — designates ship A,
-//      sending exactly the ControlSystem envelope `set_sensors_target` sends
-//      (gui/action-map.js).
-//   3. SHIP B's sensor-radar blackboard comes back carrying
-//      `selected_target_weapons_cold: true` — the target-scoped replica the host
-//      publishes only for a selection whose reactor actually tracks a weapons
-//      group.
-//   4. THE OPERATOR READS IT: that live blackboard goes through the real client
-//      builder (`buildSensorsConsoleState`) into the real shipped Sensors
-//      console, which paints a WEAPONS / COLD row on the scan card.
-//
-// Then the same four steps against a second, otherwise identical hull whose
-// weapons are up, which must read POWERED. Two targets rather than one because
-// a constant would pass the first assertion on its own: what is under test is a
-// per-target lookup keyed on the selection, not a field that happens to be set.
+// Sensors report the selected ship’s explicit restraint. Incoming power flow
+// and a weapon’s charged local reserve do not imply a decision to hold fire.
 
 import {
   test,
@@ -38,18 +11,7 @@ import {
 } from './fixtures';
 import { ts } from './strings';
 
-// A self-contained world: the player cruiser plus two Harrow tugs.
-//
-// `ship_harrow_tug.toml` is the NPC hull here because it is the one shipped
-// NPC that authors a real `[power_groups.*]` block including `weapons`, so the
-// cold ship needs a two-key override rather than a whole reactor written out in
-// the fixture. Its doctrine is `hold-station`, so neither tug goes looking for a
-// fight and nothing in the run can change the levels under the assertions.
-//
-// `min_level = 0` alongside `default_level = 0` is not belt-and-braces:
-// `PowerSystem::from_authored_groups` clamps the boot level to the group's own
-// floor, so a level of 0 under the hull's default floor of 1 would seed at 1 —
-// warm, and the spec would be asserting nothing.
+// Two otherwise identical stationary tugs; scenario restraint holds one.
 const WEAPONS_COLD_WORLD = `
 [global]
 seed = 1397
@@ -67,17 +29,16 @@ transform     = { position = [0.0, 0.0, 0.0] }
 spawn_on      = "game_start"
 overrides     = { tags = ["ship"] }
 
-# SHIP A — weapons switched off at the reactor.
+# SHIP A — scenario explicitly holds weapons.
 [[entity]]
 template_path = "assets/entities/ship_harrow_tug.toml"
 id            = "cold-hauler"
 name          = "cold_hauler"
 transform     = { position = [300.0, 0.0, -300.0] }
 spawn_on      = "game_start"
-overrides     = { tags = ["ship", "npc"], power_groups = { weapons = { default_level = 0, min_level = 0 } } }
+overrides     = { tags = ["ship", "npc"] }
 
-# The control: the same hull with its weapons group left as the template
-# authors it (level 2). Proves the reading is looked up per selection.
+# The control leaves its ordinary explicit restraint released.
 [[entity]]
 template_path = "assets/entities/ship_harrow_tug.toml"
 id            = "armed-hauler"
@@ -85,6 +46,12 @@ name          = "armed_hauler"
 transform     = { position = [-300.0, 0.0, -300.0] }
 spawn_on      = "game_start"
 overrides     = { tags = ["ship", "npc"] }
+
+[script]
+setup = """
+on_timer(1, "hold_fixture");
+fn hold_fixture(ctx) { ctx.effects.hold_fire("cold_hauler"); }
+"""
 `;
 
 async function waitForStation(client, timeout = 5_000) {
@@ -112,7 +79,7 @@ async function uuidOfWorldEntity(client, id) {
 
 // Designate `uuid` as the Science Target and wait for this ship's own
 // sensor-radar blackboard to come back describing it. Returns that blackboard.
-async function designateAndReadRadar(client, uuid) {
+async function designateAndReadRadar(client, uuid, expectedCold) {
   let bb = null;
   for (let attempt = 0; attempt < 20 && !bb; attempt += 1) {
     await client.send('ControlSystem', {
@@ -121,18 +88,18 @@ async function designateAndReadRadar(client, uuid) {
     });
     try {
       const handle = await client.page.waitForFunction(
-        (wanted) => {
+        ({ wanted, expectedCold }) => {
           const msgs = window.__messages || [];
           for (let i = msgs.length - 1; i >= 0; i -= 1) {
             const m = msgs[i];
             if (m.type !== 'BlackboardUpdate') continue;
             const entry = (m.data.updates || []).find(([sid]) => sid === 'sensor-radar');
             const data = entry && entry[1] && entry[1].data;
-            if (data && data.selected_target === wanted) return data;
+            if (data && data.selected_target === wanted && data.selected_target_weapons_cold === expectedCold) return data;
           }
           return null;
         },
-        uuid,
+        { wanted: uuid, expectedCold },
         { timeout: 3_000 },
       );
       bb = await handle.jsonValue();
@@ -174,7 +141,7 @@ async function scanCardTextFor(consolePage, radarBlackboard) {
   return consolePage.locator('ph-sensor-panel').locator('#scan-data');
 }
 
-test("a target that powered its weapons down reads WEAPONS COLD on another ship's Sensors", { tag: '@core' }, async ({
+test("a target with explicit restraint reads WEAPONS COLD on another ship's Sensors", { tag: '@core' }, async ({
   context,
 }) => {
   test.setTimeout(90_000);
@@ -217,12 +184,12 @@ test("a target that powered its weapons down reads WEAPONS COLD on another ship'
   expect(coldUuid, 'the cold hull must reach the client as a contact').toBeTruthy();
   expect(armedUuid, 'the armed hull must reach the client as a contact').toBeTruthy();
 
-  // ── Ship A: weapons at 0 ────────────────────────────────────────────────
-  const coldRadar = await designateAndReadRadar(science, coldUuid);
+  // ── Ship A: explicit restraint ────────────────────────────────────────────────
+  const coldRadar = await designateAndReadRadar(science, coldUuid, true);
   expect(coldRadar, "Science must receive its ship's sensor-radar blackboard").not.toBeNull();
   expect(
     coldRadar.selected_target_weapons_cold,
-    'a selected ship whose weapons group sits at level 0 reads cold',
+    'a selected ship with explicit restraint reads cold',
   ).toBe(true);
 
   const consolePage = await context.newPage();
@@ -232,7 +199,7 @@ test("a target that powered its weapons down reads WEAPONS COLD on another ship'
   await expect(coldScan).toContainText(ts('component.sensor_panel.weapons_cold'));
 
   // ── The control: the same hull with its weapons up ──────────────────────
-  const armedRadar = await designateAndReadRadar(science, armedUuid);
+  const armedRadar = await designateAndReadRadar(science, armedUuid, false);
   expect(armedRadar, 'the second designation must publish too').not.toBeNull();
   expect(
     armedRadar.selected_target_weapons_cold,

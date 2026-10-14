@@ -178,7 +178,9 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     const energy = id => page.locator('#workshop-energy-' + id);
     await energy('template').selectOption(HULL);
     await expect(energy('apply')).toBeEnabled();
-    await energy('subject').selectOption('consumer:impulse');
+    const consumer = await energy('subject').evaluate(select => [...select.options].find(option => option.value.startsWith('consumer:'))?.value);
+    expect(consumer).toBeTruthy(); const consumerId = consumer.slice('consumer:'.length);
+    await energy('subject').selectOption(consumer);
     const reserve = Number(await energy('reserve-capacity').inputValue());
     await energy('reserve-capacity').fill(String(reserve + 10)); await energy('apply').click();
     await expect(energy('status')).toContainText('materialise');
@@ -186,7 +188,7 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await revealWorkshopPanel(page, 'composition'); await energy('materialise').check();
     await energy('apply').click(); await expect(energy('status')).toHaveText(ts('workshop.changed'));
     const afterEnergy = await sourceOf(page);
-    expect(parse(afterEnergy).energy.consumer.find(row => row.system === 'impulse').reserve.capacity).toBe(reserve + 10);
+    expect(parse(afterEnergy).energy.consumer.find(row => row.system === consumerId).reserve.capacity).toBe(reserve + 10);
     await page.locator('#workshop-undo').click(); await expect.poll(() => sourceOf(page)).toBe(afterWeapon);
     await page.locator('#workshop-redo').click(); await expect.poll(() => sourceOf(page)).toBe(afterEnergy);
     await revealWorkshopPanel(page, 'composition'); await energy('materialise').check();

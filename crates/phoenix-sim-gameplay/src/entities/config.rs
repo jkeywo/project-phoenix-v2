@@ -392,6 +392,9 @@ impl EntityConfig {
                     if v.get("energy").is_none() {
                         return Err(SerdeError::custom("Shield arcs require an explicit [shield_arc.energy] work configuration (increment 9): author upkeep, recharge/recovery energy per HP, discharge rate and eligible recovery_targets. Convert this content in Workshop or use its original game version."));
                     }
+                    if v.get("ai").is_none() {
+                        return Err(SerdeError::custom("Shield arcs require an explicit [shield_arc.ai] state tree (increment 9). Author supported shield controls in Workshop or use this pack's original game version."));
+                    }
                     v.try_into::<ShieldArcConfig>()
                 })
                 .collect::<Result<_, _>>()?,
@@ -440,6 +443,14 @@ impl EntityConfig {
         };
         let mut config: EntityConfig = value.try_into()?;
         config.shield_arcs = shield_arcs;
+        if config.shield_arcs.is_empty()
+            && config
+                .shields_console
+                .as_ref()
+                .is_some_and(|console| console.base.is_some())
+        {
+            return Err(SerdeError::custom("Shield equipment requires explicit [[shield_arc]] definitions with energy profiles and ordinary System AI (increment 9). The shields_console.base table supplies shared tuning only; convert this content in Workshop or use its original game version."));
+        }
         if let Some(power) = config.power.as_ref() {
             validate_power_config(power).map_err(SerdeError::custom)?;
         }
@@ -520,6 +531,14 @@ impl EntityConfig {
                     || SerdeError::custom(format!("shield_arc id {:?} is empty", arc.id)),
                 )?;
                 let mut synthesised_config = toml::value::Table::new();
+                synthesised_config.insert(
+                    "ai".into(),
+                    toml::Value::try_from(&arc.ai).map_err(SerdeError::custom)?,
+                );
+                synthesised_config.insert(
+                    "shield_energy".into(),
+                    toml::Value::try_from(&arc.energy).map_err(SerdeError::custom)?,
+                );
                 synthesised_config.insert(
                     "center_deg".into(),
                     toml::Value::Float(arc.center_deg as f64),
@@ -943,6 +962,27 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::SHIELD_ARC_KIND {
+                    let arc = config
+                        .shield_arcs
+                        .iter()
+                        .find(|arc| {
+                            crate::ship::system_registry::shield_arc_system_id(&arc.id).as_ref()
+                                == Some(&system.id)
+                        })
+                        .ok_or_else(|| {
+                            SerdeError::custom(
+                                "shield arc System requires its authored shield_arc definition",
+                            )
+                        })?;
+                    let (booleans, numbers) =
+                        crate::ship::shield_ai::bindings(&arc.energy.recovery_targets);
+                    crate::ai::state_tree::compile_with_numbers(&arc.ai, &booleans, &numbers)
+                        .map_err(|error| {
+                            SerdeError::custom(format!("Shield arc '{}' AI: {error}", arc.id))
+                        })?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
                     && config.energy.is_some()
                 {
@@ -1336,6 +1376,9 @@ impl EntityConfig {
             .as_ref()
             .and_then(|sc| sc.ai_policy.as_ref())
         {
+            if !config.shield_arcs.is_empty() {
+                return Err(SerdeError::custom("Shield arc Systems use [shield_arc.ai] state trees. Remove retired [shields_console.ai_policy] rather than authoring two controllers; convert this pack in Workshop or use its original game version."));
+            }
             validate_fine_system_ai_policy_for(
                 &ai_hosts::SHIELDS_FOCUS,
                 ai,

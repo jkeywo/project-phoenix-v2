@@ -59,4 +59,18 @@ describe('Shield operations shared console controls',()=>{
     expect(activate).not.toHaveBeenCalled();
     expect(ring.getAttribute('role')).toBe('group');
   });
+  it('explains visible recovery constraints without reading a hidden recipient',()=>{
+    const {el,ring,facings}=fixture();
+    facings[1].operation.reserve={energy:10,capacity:10,heat:0,trip_heat:10};
+    ring.state={facings,auto:false};
+    expect(el.shadowRoot.querySelector('.recovery-state').textContent).toContain('Destination battery full');
+    facings[1].operation.reserve.thermal_stopped=true;
+    ring.state={facings,auto:false};
+    expect(el.shadowRoot.querySelector('.recovery-state').textContent).toContain('Destination overheated');
+    ring.state={facings:[facings[0]],auto:false};
+    expect(el.shadowRoot.querySelector('.recovery-state').textContent).not.toContain('overheated');
+    facings[0].operation.reserve.thermal_stopped=true;
+    ring.state={facings:[facings[0]],auto:false};
+    expect(el.shadowRoot.querySelector('.recovery-state').textContent).toContain('Generator overheated');
+  });
 });

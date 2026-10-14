@@ -1418,7 +1418,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 .map(|s| s.0.hp_facing_bearing(bearing))
                 .unwrap_or(0);
             let delivery = det.delivery;
-            let payload = delivery.payload(struck_arc_hp > 0);
+            let mut payload = delivery.payload(struck_arc_hp > 0);
             match shield_comp {
                 // The arc is up, so the round meets it. `shield_pierce` is the
                 // fraction of THIS payload that gets past the screen, exactly as
@@ -1438,11 +1438,11 @@ pub(crate) fn tick_torpedo_lifecycle(
                 // deliberate and it favours the defender: a screen that has
                 // survived long enough to start climbing keeps climbing. Pinned by
                 // `server_tests::an_arc_online_at_zero_hp_reads_as_down_and_does_not_get_re_suppressed`.
-                Some(ref mut shields) if struck_arc_hp > 0 => {
-                    let (pierced, absorbed) = delivery.split(true);
-                    let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
-                    shield_absorbed = (absorbed - leak as f32).max(0.0);
-                    hull_damage += pierced + leak as f32;
+                Some(ref mut shields) => {
+                    let impact = shields.0.apply_delivery(delivery, bearing, false);
+                    shield_absorbed = impact.shield_absorbed;
+                    hull_damage += impact.hull_damage;
+                    payload = impact.payload;
                 }
                 _ => hull_damage += payload,
             }

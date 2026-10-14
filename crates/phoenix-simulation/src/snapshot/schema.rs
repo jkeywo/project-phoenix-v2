@@ -797,6 +797,8 @@ pub struct WeaponState {
     /// the wire.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shield_charge: Vec<(String, i32, f32, f32, bool)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shield_operations: Vec<crate::weapons::shield::ShieldOperationState>,
     /// Every blaster bank's volley/cooldown cycle and bolts, in the authored
     /// bank order the component keeps — see [`BlasterRuntime`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

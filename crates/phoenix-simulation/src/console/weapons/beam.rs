@@ -1706,60 +1706,53 @@ pub(crate) fn tick_beams_apply_damage(
 
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
-                let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
-                if all_offline {
-                    (base_damage as f32, 0.0f32)
-                } else {
-                    let (pierced, absorbed) = crate::weapons::mount::DamageDelivery {
-                        damage_hull: base_damage as f32,
-                        damage_shields: base_damage as f32,
-                        shield_pierce: state.shield_pierce,
+                let delivery = crate::weapons::mount::DamageDelivery {
+                    damage_hull: base_damage as f32,
+                    damage_shields: base_damage as f32,
+                    shield_pierce: state.shield_pierce,
+                };
+                // Which facing takes the hit.
+                //
+                // A CREWED hull routes by the shooter's bearing to the
+                // appropriate facing; anything else takes it on arc zero,
+                // which is what a shield with one facing means anyway.
+                //
+                // The predicate used to be `target_is_local` and is now
+                // `target_is_fleet_ship` (issue #1116). That is a spelling
+                // fix rather than a rule change: the rule was always "a
+                // player hull routes by bearing", and `LocalShip` spelled it
+                // as "the hull THIS host projects". With two hosts running
+                // one mission that is a different ship on each, so a peer's
+                // four-facing player hull took every hit on one arc here and
+                // on the bearing arc there — the two leaked different
+                // amounts through to hull and the fleet split over a single
+                // point of damage. `FleetSlotOf` says "a hull some host in
+                // this fleet flies", which every host agrees about.
+                //
+                // Solo it is the same ship and the same answer, so no
+                // engagement moved; NPC durability is untouched, which
+                // `the_composed_player_cruiser_rings_its_target_and_breaks_
+                // off_to_bear_its_tubes` is sensitive enough to have caught.
+                //
+                // Falls back to 0.0 when the target has no Transform, as it
+                // always did.
+                let bearing = if target_is_fleet_ship {
+                    let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
+                    match target_tf {
+                        Some(tf) => crate::weapons::shield::attacker_bearing_relative(
+                            state.shooter_x,
+                            state.shooter_z,
+                            tf.translation.x,
+                            tf.translation.z,
+                            target_yaw,
+                        ),
+                        None => 0.0,
                     }
-                    .split(true);
-                    // Which facing takes the hit.
-                    //
-                    // A CREWED hull routes by the shooter's bearing to the
-                    // appropriate facing; anything else takes it on arc zero,
-                    // which is what a shield with one facing means anyway.
-                    //
-                    // The predicate used to be `target_is_local` and is now
-                    // `target_is_fleet_ship` (issue #1116). That is a spelling
-                    // fix rather than a rule change: the rule was always "a
-                    // player hull routes by bearing", and `LocalShip` spelled it
-                    // as "the hull THIS host projects". With two hosts running
-                    // one mission that is a different ship on each, so a peer's
-                    // four-facing player hull took every hit on one arc here and
-                    // on the bearing arc there — the two leaked different
-                    // amounts through to hull and the fleet split over a single
-                    // point of damage. `FleetSlotOf` says "a hull some host in
-                    // this fleet flies", which every host agrees about.
-                    //
-                    // Solo it is the same ship and the same answer, so no
-                    // engagement moved; NPC durability is untouched, which
-                    // `the_composed_player_cruiser_rings_its_target_and_breaks_
-                    // off_to_bear_its_tubes` is sensitive enough to have caught.
-                    //
-                    // Falls back to 0.0 when the target has no Transform, as it
-                    // always did.
-                    let bearing = if target_is_fleet_ship {
-                        let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
-                        match target_tf {
-                            Some(tf) => crate::weapons::shield::attacker_bearing_relative(
-                                state.shooter_x,
-                                state.shooter_z,
-                                tf.translation.x,
-                                tf.translation.z,
-                                target_yaw,
-                            ),
-                            None => 0.0,
-                        }
-                    } else {
-                        0.0
-                    };
-                    let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
-                    let shielded = (absorbed - leak as f32).max(0.0);
-                    (pierced + leak as f32, shielded)
-                }
+                } else {
+                    0.0
+                };
+                let impact = shields.0.apply_delivery(delivery, bearing, true);
+                (impact.hull_damage, impact.shield_absorbed)
             } else {
                 (base_damage as f32, 0.0f32)
             };

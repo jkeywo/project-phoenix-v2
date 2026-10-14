@@ -209,6 +209,23 @@ max_hp = 90
 regen_per_sec = 2.0
 offline_duration = 8.0
 
+[shield_arc.ai]
+root = "shields"
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+[[shield_arc.ai.tree.state]]
+id = "operate"
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+action = { kind = "write", channel = "raised", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+action = { kind = "write", channel = "focus", value = { source = "fact", name = "preferred_focus" } }
+
+
 [collider]
 shape = "Capsule"
 radius = 3.0

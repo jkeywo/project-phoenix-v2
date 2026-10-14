@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 8,
+  "current_increment": 9,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -158,12 +158,16 @@
     {
       "id": 9,
       "title": "Shield energy and protection",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         8
       ],
       "completion": "Shield upkeep, recharge and battery-mediated redistribution use shared resources/conditions and remain independently usable.",
-      "evidence": []
+      "evidence": [
+        "pasm/spec/design/shield-energy-and-protection.yaml",
+        "docs/gameplay-redesign/implementation/increment-9.md",
+        "docs/acceptance/1562-shield-energy.md"
+      ]
     },
     {
       "id": 10,

@@ -5045,8 +5045,19 @@ shield.operation.cancel,Shield operation controls,Cancel discharge,Entladung abb
 shield.operation.lower,Shield operation controls,Lower shield,Schild senken,Lower shield,machine
 shield.operation.raise,Shield operation controls,Raise shield,Schild aktivieren,Raise shield,machine
 shield.operation.no_recovery,Shield operation controls,No discharge,Keine Entladung,No discharge,machine
-shield.operation.recovering,Shield operation controls,Discharging into,Entladung in,Discharging into,machine
+shield.operation.recovering,Shield operation controls,Discharge destination,Entladungsziel,Discharge destination,machine
 semantic_action.science.shield_raised.label,Shield operation controls,Raise or lower shield,Schild aktivieren oder senken,Raise or lower shield,machine
 semantic_action.science.shield_raised.accessibility,Shield operation controls,Raise or lower this shield arc,Diesen Schildsektor aktivieren oder senken,Raise or lower this shield arc,machine
 semantic_action.science.shield_recovery.label,Shield operation controls,Shield energy recovery,Schildenergie zurückgewinnen,Shield energy recovery,machine
 semantic_action.science.shield_recovery.accessibility,Shield operation controls,Discharge this shield into an eligible battery or cancel discharge,Diesen Schild in eine geeignete Batterie entladen oder Entladung abbrechen,Discharge this shield into an eligible battery or cancel discharge,machine
+shield.operation.wait.thermal,Shield recovery status,Generator overheated,Generator überhitzt,Generator overheated,machine
+shield.operation.wait.collapse,Shield recovery status,Generator recovering from collapse,Generator erholt sich nach Zusammenbruch,Generator recovering from collapse,machine
+shield.operation.wait.target_thermal,Shield recovery status,Destination overheated,Ziel überhitzt,Destination overheated,machine
+shield.operation.wait.target_full,Shield recovery status,Destination battery full,Zielbatterie voll,Destination battery full,machine
+shield.error.invalid_discharge,Shield state validation,Invalid shield discharge,Ungültige Schildentladung,Invalid shield discharge,machine
+shield.error.operations_mismatch,Shield state validation,Saved shield operations do not match installed arcs,Gespeicherte Schildvorgänge passen nicht zu den installierten Sektoren,Saved shield operations do not match installed arcs,machine
+shield.error.unknown_operation_arc,Shield state validation,Unknown saved shield arc,Unbekannter gespeicherter Schildsektor,Unknown saved shield arc,machine
+shield.error.invalid_operation,Shield state validation,Invalid saved shield operation,Ungültiger gespeicherter Schildvorgang,Invalid saved shield operation,machine
+shield.error.charge_mismatch,Shield state validation,Saved shield charge does not match installed arcs,Gespeicherte Schildladung passt nicht zu den installierten Sektoren,Saved shield charge does not match installed arcs,machine
+shield.error.unknown_charge_arc,Shield state validation,Unknown saved shield charge arc,Unbekannter gespeicherter Schildladungssektor,Unknown saved shield charge arc,machine
+shield.error.invalid_charge,Shield state validation,Invalid saved shield charge or collapse state,Ungültige gespeicherte Schildladung oder Ausfallzeit,Invalid saved shield charge or collapse state,machine

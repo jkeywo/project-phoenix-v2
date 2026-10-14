@@ -1049,34 +1049,13 @@ verb = "engage_impulse"
 [helm_console.boost_ai]
 idle = true
 
-# Shields focus — two rules on one channel, both emitting the value-less
-# `focus_shield_arc`. WHICH of the four arcs is focused is not in the policy: it
-# comes from the retained ranking kernel, which reads the four params below
-# directly out of `param`. `damage_window_secs`, `min_damage_window_secs` and
-# `health_ratio_threshold` are therefore live tunables even though no `when`
-# names them — do not delete them for looking unreferenced.
-#
-# The priority-10 damage rule and the priority-0 fallback emit the same verb and
-# the fallback is unconditional, so today the channel resolves identically
-# whatever `recent_damage_pct_max` reads. The rule is transcribed as-is because
-# this migration changes no behaviour; the redundancy is recorded on #885.
-[shields_console.ai_policy.param]
+# Damage observation window and shared arc-ranking tuning; commands are
+# authored by each shield arc's ordinary System state tree.
+[shields_console.ai]
 damage_window_secs = 4.0
 min_damage_window_secs = 1.0
 damage_pct_threshold = 50.0
 health_ratio_threshold = 50.0
-
-[[shields_console.ai_policy.rule]]
-priority = 10
-channel = "shield_focus"
-when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
-verb = "focus_shield_arc"
-
-[[shields_console.ai_policy.rule]]
-priority = 0
-channel = "shield_focus"
-when = "true"
-verb = "focus_shield_arc"
 
 # Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
 # this hull ran on before it declared the section: authoring

@@ -1070,6 +1070,11 @@ fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
             sources.set(id.clone(), crate::ship::control_source::ControlSource::Ai);
             let (bindings, numeric) =
                 phoenix_sim_gameplay::ship::shield_ai::bindings(&arc.energy.recovery_targets);
+            let channel_defaults: BTreeMap<_, _> = bindings
+                .channels
+                .iter()
+                .map(|name| (name.clone(), false))
+                .collect();
             let mut tick = 0;
             for preferred in [false, true] {
                 let mut facts: BTreeMap<_, _> = bindings
@@ -1089,7 +1094,7 @@ fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
                     programs.0.get(&id),
                     &facts,
                     &numbers,
-                    &BTreeMap::new(),
+                    &channel_defaults,
                     frames.0.get_mut(&id).unwrap(),
                     tick,
                 )
@@ -1123,13 +1128,15 @@ fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
                     facts.insert(format!("recovering-{}", target.0), !expected);
                     numbers.insert("strength_fraction".into(), donor);
                     numbers.insert(format!("target-strength-{}", target.0), recipient);
+                    let mut channels = channel_defaults.clone();
+                    channels.insert(format!("recover-{}", target.0), !expected);
                     let TreeHostOutcome::Evaluated(result) = decide_tree_with_numbers(
                         &sources,
                         &id,
                         programs.0.get(&id),
                         &facts,
                         &numbers,
-                        &BTreeMap::new(),
+                        &channels,
                         frames.0.get_mut(&id).unwrap(),
                         tick,
                     )

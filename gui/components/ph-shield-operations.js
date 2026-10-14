@@ -120,8 +120,15 @@ export class PhShieldOperations extends PhElement {
       refs.target.value = operation.recovery_target || '';
       refs.target.disabled = !facing.controllable || eligible.length === 0;
       refs.cancel.disabled = !facing.controllable || !operation.recovery_target;
+      const recipient = state.facings.find(f => f.system_id === operation.recovery_target);
+      const targetReserve = recipient?.operation?.reserve;
+      const waiting = reserve?.thermal_stopped ? 'thermal'
+        : facing.offline_remaining > 0 ? 'collapse'
+        : targetReserve?.thermal_stopped ? 'target_thermal'
+        : targetReserve && targetReserve.energy >= targetReserve.capacity ? 'target_full'
+        : null;
       refs.status.textContent = operation.recovery_target
-        ? `${t('shield.operation.recovering')}: ${state.facings.find(f => f.system_id === operation.recovery_target)?.label || operation.recovery_target}` : '';
+        ? `${t('shield.operation.recovering')}: ${recipient?.label || operation.recovery_target}${waiting ? ` — ${t(`shield.operation.wait.${waiting}`)}` : ''}` : '';
     }
   }
 }

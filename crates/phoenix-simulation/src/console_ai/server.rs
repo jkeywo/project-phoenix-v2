@@ -38,6 +38,8 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
+#[path = "shields_tree.rs"]
+mod shields_tree;
 
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub use phoenix_sim_gameplay::AI_RULE_TORPEDO_AUTO_FIRE;
@@ -112,10 +114,9 @@ impl Plugin for ConsoleAiPlugin {
                 // explicit ordering between them — admission clears
                 // AdmittedCommands before Input each tick, so the applier
                 // must consume same-tick after this emit.
-                ai_shield_focus
+                shields_tree::ai_shields
                     .in_set(crate::sim_sets::FixedStep::AiShieldFocus)
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::shields::handle_shields_messages)
                     .run_if(crate::ai::cadence::ai_tick_ready),
                 // Decide only (issue #831, mirroring shields #826): emits
@@ -128,7 +129,6 @@ impl Plugin for ConsoleAiPlugin {
                 ai_power_allocation
                     .in_set(crate::sim_sets::FixedStep::AiPowerAllocation)
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::power::handle_power_messages)
                     .run_if(crate::ai::cadence::ai_tick_ready),
                 // Decide only. The apply half is
@@ -202,6 +202,7 @@ impl Plugin for ConsoleAiPlugin {
 /// intended 36 ticks into `36.000001...` and therefore 37 after `ceil`.
 /// Validation keeps production inputs finite and non-negative; the guards keep
 /// the helper deterministic in focused unit tests too.
+#[cfg(test)]
 fn shield_window_ticks(window_secs: f32, sim_tick_hz: f32) -> u64 {
     if !window_secs.is_finite()
         || window_secs <= 0.0
@@ -259,6 +260,7 @@ fn shield_window_ticks(window_secs: f32, sim_tick_hz: f32) -> u64 {
 /// broadcast catches up), the decision is skipped. `AiWorldEntity.shields`
 /// remains the unpopulated placeholder `build_world_snapshot` always writes
 /// (`None`) — not used here, since the live component is fresher anyway.
+#[cfg(test)]
 pub(crate) fn ai_shield_focus(
     sim_tick: Res<crate::sim_tick::SimTick>,
     world_config: Res<crate::world::config::WorldConfig>,

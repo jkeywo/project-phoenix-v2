@@ -52,6 +52,22 @@ pub fn compile_ship_trees_with_energy(
                 &phoenix_sim_gameplay::ai::state_tree::SupportedBindings::default(),
                 &phoenix_sim_gameplay::resources::energy_ai::power_numeric_bindings(energy),
             )
+        } else if system.kind == crate::ship::system_registry::SHIELD_ARC_KIND {
+            let profile: phoenix_sim_gameplay::entities::config::ShieldArcEnergyConfig = system
+                .config
+                .as_ref()
+                .and_then(|value| value.get("shield_energy"))
+                .ok_or("missing shield energy bindings")?
+                .clone()
+                .try_into()
+                .map_err(|error| format!("shield energy bindings: {error}"))?;
+            let (booleans, numbers) =
+                phoenix_sim_gameplay::ship::shield_ai::bindings(&profile.recovery_targets);
+            phoenix_sim_gameplay::ai::state_tree::compile_with_numbers(
+                &definition,
+                &booleans,
+                &numbers,
+            )
         } else {
             let dock = dock_composition(&system.components)
                 .ok_or_else(|| format!("System {} has no supported tree bindings", system.id.0))?;

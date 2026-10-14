@@ -32,7 +32,7 @@ commits both ends conservatively. Infrastructure adjustments retain their
 existing drain, counter publication and threshold events; ammunition movement
 uses the magazine owner. The transaction view lasts only for that drain.
 
-Snapshot 43/rules 0.15 preserve stocks, claims and fractional flow carry.
+Snapshot 44/rules 0.16 preserve stocks, claims and fractional flow carry.
 Preflight validates tube identity, capacity, timers and claim relationships
 before writes. Resource digests include magazine/tube commitments and facility
 stocks. Other weapon effect state retains its existing deferred fold boundary.

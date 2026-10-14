@@ -1658,6 +1658,10 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
         if !stored.shield_charge.is_empty() {
             shields.0.restore_facings(&stored.shield_charge);
         }
+        shields
+            .0
+            .restore_operations(&stored.shield_operations)
+            .expect("shield operation continuation passed preflight");
     }
     if let Some(mut torpedoes) = entity.get_mut::<TorpedoSystemResource>() {
         let system = &mut torpedoes.0;

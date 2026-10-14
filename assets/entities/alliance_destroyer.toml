@@ -852,6 +852,51 @@ width_deg = 180
 energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.4, recovery_energy_per_hp = 0.2, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-aft"] }
 hull_max_hp = 6
 
+[shield_arc.ai]
+root = "shields"
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+[[shield_arc.ai.tree.state]]
+id = "operate"
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+action = { kind = "write", channel = "raised", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+action = { kind = "write", channel = "focus", value = { source = "fact", name = "preferred_focus" } }
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "fact", name = "recovering-shield-arc-aft" } }
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+when = [{ value = { source = "fact", name = "preferred_focus" }, equals = false }, { value = { source = "fact", name = "target-visible-shield-arc-aft" }, equals = true }, { value = { source = "fact", name = "target-preferred-shield-arc-aft" }, equals = true }, { value = { source = "fact", name = "target-ready-shield-arc-aft" }, equals = true }, { value = { source = "number_compare", name = "strength_fraction", comparison = "greater_or_equal", value = 0.85 }, equals = true }, { value = { source = "number_compare", name = "target-strength-shield-arc-aft", comparison = "less", value = 0.4 }, equals = true }, { value = { source = "number_compare", name = "target-reserve-shield-arc-aft", comparison = "less", value = 0.75 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+when = [{ value = { source = "number_compare", name = "strength_fraction", comparison = "less_or_equal", value = 0.6 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+when = [{ value = { source = "number_compare", name = "target-strength-shield-arc-aft", comparison = "greater_or_equal", value = 0.8 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+when = [{ value = { source = "fact", name = "target-visible-shield-arc-aft" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+when = [{ value = { source = "fact", name = "target-preferred-shield-arc-aft" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+when = [{ value = { source = "fact", name = "target-ready-shield-arc-aft" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-aft", value = { source = "literal", value = false } }
+
+
 [[shield_arc]]
 id = "aft"
 label = "shield_arc.aft.label"
@@ -860,6 +905,51 @@ width_deg = 180
 # [ai] Increment 9 tuning: preserve nominal recharge cost; recovery is lossy.
 energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.4, recovery_energy_per_hp = 0.2, discharge_hp_per_sec = 5, recovery_targets = ["shield-arc-fore"] }
 hull_max_hp = 5
+
+[shield_arc.ai]
+root = "shields"
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+[[shield_arc.ai.tree.state]]
+id = "operate"
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+action = { kind = "write", channel = "raised", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+action = { kind = "write", channel = "focus", value = { source = "fact", name = "preferred_focus" } }
+[[shield_arc.ai.tree.state.task]]
+id = "retain-0"
+when = []
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "fact", name = "recovering-shield-arc-fore" } }
+[[shield_arc.ai.tree.state.task]]
+id = "recover-0"
+when = [{ value = { source = "fact", name = "preferred_focus" }, equals = false }, { value = { source = "fact", name = "target-visible-shield-arc-fore" }, equals = true }, { value = { source = "fact", name = "target-preferred-shield-arc-fore" }, equals = true }, { value = { source = "fact", name = "target-ready-shield-arc-fore" }, equals = true }, { value = { source = "number_compare", name = "strength_fraction", comparison = "greater_or_equal", value = 0.85 }, equals = true }, { value = { source = "number_compare", name = "target-strength-shield-arc-fore", comparison = "less", value = 0.4 }, equals = true }, { value = { source = "number_compare", name = "target-reserve-shield-arc-fore", comparison = "less", value = 0.75 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "protect-donor-0"
+when = [{ value = { source = "number_compare", name = "strength_fraction", comparison = "less_or_equal", value = 0.6 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "restored-0"
+when = [{ value = { source = "number_compare", name = "target-strength-shield-arc-fore", comparison = "greater_or_equal", value = 0.8 }, equals = true }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-0"
+when = [{ value = { source = "fact", name = "target-visible-shield-arc-fore" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-1"
+when = [{ value = { source = "fact", name = "target-preferred-shield-arc-fore" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = false } }
+[[shield_arc.ai.tree.state.task]]
+id = "stop-0-2"
+when = [{ value = { source = "fact", name = "target-ready-shield-arc-fore" }, equals = false }]
+action = { kind = "write", channel = "recover-shield-arc-fore", value = { source = "literal", value = false } }
+
 
 [power]
 capacity = 70

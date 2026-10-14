@@ -5456,6 +5456,9 @@ fn system_blackboard_power_battery_serde_fields() {
 #[test]
 fn system_blackboard_shield_arc_serde_fields() {
     let bb = SystemBlackboard::ShieldArc(ShieldArcBlackboard {
+        arc_id: "aft".into(),
+        operation: None,
+        recent_damage: 0.0,
         label: "Aft".into(),
         hp: 0,
         max_hp: 75,

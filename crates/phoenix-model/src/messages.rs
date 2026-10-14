@@ -26,7 +26,9 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// Revision 7 separates incoming energy flow from explicit weapons restraint;
+/// an older client's level-zero control would otherwise suggest hold fire.
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -2149,6 +2151,12 @@ pub enum SystemControlPayload {
         /// targets a specific `shield-arc-<id>` SystemId and sends the
         /// desired new focus state for that arc.
         focused: bool,
+    },
+    SetShieldRaised {
+        raised: bool,
+    },
+    SetShieldRecovery {
+        target: Option<SystemId>,
     },
     SetNavigationWaypoint {
         x: f32,
@@ -4333,6 +4341,8 @@ pub struct PowerBatteryBlackboard {
 /// fine blackboards instead of unpacking the aggregate facings vec.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ShieldArcBlackboard {
+    #[serde(default)]
+    pub arc_id: String,
     /// Human-readable arc label (e.g. `"Fore"`, `"All"`).
     pub label: String,
     /// Current HP for this arc.
@@ -4357,6 +4367,24 @@ pub struct ShieldArcBlackboard {
     pub center_deg: f32,
     /// Arc angular width in degrees.
     pub width_deg: f32,
+    #[serde(default)]
+    pub recent_damage: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<ShieldOperationBlackboard>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ShieldOperationBlackboard {
+    pub raised: bool,
+    pub can_recharge: bool,
+    pub protection_fraction: f32,
+    pub reserve: Option<crate::energy::ConsumerEnergyReading>,
+    pub upkeep_per_sec: f32,
+    pub recharge_energy_per_hp: f32,
+    pub recovery_energy_per_hp: f32,
+    pub discharge_hp_per_sec: f32,
+    pub recovery_target: Option<SystemId>,
+    pub recovery_targets: Vec<SystemId>,
 }
 
 /// Raw sim truth for the Weapons (Tactical) system, published each tick into

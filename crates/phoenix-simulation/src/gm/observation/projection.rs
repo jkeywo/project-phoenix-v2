@@ -142,6 +142,7 @@ struct GmStationPresentation<'w, 's> {
             Option<&'static crate::dock::server::DockControl>,
             Option<&'static crate::ship::power::ShipPowerSystem>,
             Option<&'static crate::dock::server::DockMarkers>,
+            Option<&'static crate::ship::shields::ShipShields>,
         ),
     >,
     world_data: Option<Res<'w, crate::lobby::server::WorldResource>>,
@@ -1806,19 +1807,21 @@ fn publish_station_projection(
                         .project_snapshots_for_ship(&uuid.0, scoped_objectives);
                 }
                 let system_status = if detailed {
-                    let (_, dock, power, markers) = presentation
+                    let (_, dock, power, markers, shields) = presentation
                         .status_sources
                         .iter()
                         .find(|(id, ..)| id.0 == uuid.0)
-                        .unwrap_or((uuid, None, None, None));
-                    crate::server_app::system_status::project(
+                        .unwrap_or((uuid, None, None, None, None));
+                    let mut status = crate::server_app::system_status::project(
                         &config.0,
                         hull.map(|h| &h.0),
                         &sources.0,
                         dock,
                         power,
                         markers,
-                    )
+                    );
+                    crate::server_app::system_status::apply_shields(&mut status, shields);
+                    status
                 } else {
                     BTreeMap::new()
                 };

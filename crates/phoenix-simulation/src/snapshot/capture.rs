@@ -794,6 +794,9 @@ pub(super) fn weapon_state(
                     .collect()
             })
             .unwrap_or_default(),
+        shield_operations: shields
+            .map(|shields| shields.0.capture_operations())
+            .unwrap_or_default(),
         shield_charge: shields
             .map(|s| {
                 s.0.facings

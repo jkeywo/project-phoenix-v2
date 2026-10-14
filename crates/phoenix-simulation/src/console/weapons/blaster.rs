@@ -1047,16 +1047,9 @@ pub(crate) fn handle_blaster_hits(
                 .unwrap_or_default();
 
             let shield_amount = if let Some(ref mut shields) = shield_comp {
-                let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
-                if !all_offline {
-                    let (pierced, absorbed) = det.delivery.split(true);
-                    let leak = shields.0.apply_damage(absorbed.round() as i32, 0.0);
-                    let shielded = (absorbed - leak as f32).max(0.0);
-                    hull_damage = pierced + leak as f32;
-                    shielded
-                } else {
-                    0.0
-                }
+                let impact = shields.0.apply_delivery(det.delivery, 0.0, true);
+                hull_damage = impact.hull_damage;
+                impact.shield_absorbed
             } else {
                 0.0
             };

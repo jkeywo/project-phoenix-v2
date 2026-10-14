@@ -1745,6 +1745,28 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         acc = fold_str(acc, &key.id);
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
+        if let Some(shields) = world.get::<crate::ship::shields::ShipShields>(entity) {
+            acc = fold_str(acc, "shield-energy-operations");
+            acc = fold_serde(acc, &shields.0.capture_operations());
+            let charge: Vec<_> = shields
+                .0
+                .facings
+                .iter()
+                .map(|facing| {
+                    (
+                        &facing.id,
+                        facing.hp,
+                        facing.hp_frac(),
+                        facing.offline_remaining,
+                        facing.is_focused,
+                    )
+                })
+                .collect();
+            acc = fold_serde(acc, &charge);
+            if let Some(history) = world.get::<crate::ship::shields::ShieldsDamageHistory>(entity) {
+                acc = fold_serde(acc, &(&history.arcs, &history.last_hp));
+            }
+        }
         if let Some(power) = power {
             acc = fold_str(acc, "local-energy-network");
             acc = fold_serde(acc, &power);

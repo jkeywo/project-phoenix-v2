@@ -99,6 +99,17 @@ impl DamageDelivery {
             (self.damage_hull, 0.0)
         }
     }
+
+    /// Partial protection intercepts the funded part of the shield payload;
+    /// its unfunded part uses the ordinary hull payload. Apply this once.
+    pub fn split_for_protection(&self, fraction: f32) -> (f32, f32) {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let (pierced, shielded) = self.split(true);
+        (
+            self.damage_hull * (1.0 - fraction) + pierced * fraction,
+            shielded * fraction,
+        )
+    }
 }
 
 /// World-space target expressed in the existing ship-local radar frame.

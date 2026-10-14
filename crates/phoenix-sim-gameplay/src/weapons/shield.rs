@@ -33,6 +33,7 @@
 /// knocked back to 0 and collapses again for a fresh `offline_duration`, so
 /// sustained fire keeps a shield down rather than letting it flicker back.
 use crate::simmath;
+use serde::{Deserialize, Serialize};
 use std::f32::consts::TAU;
 
 /// A snapshot of a single shield facing, suitable for serialisation and UI.
@@ -55,6 +56,24 @@ pub struct ShieldFacingSnapshot {
     pub width_deg: f32,
     /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
     pub priority: u32,
+}
+
+/// Saved operation state alongside the existing strength/collapse continuation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShieldOperationState {
+    pub id: String,
+    pub raised: bool,
+    pub recovery_target: Option<crate::core::messages::SystemId>,
+    pub protection_fraction: f32,
+    pub interception_remainder: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShieldImpact {
+    pub hull_damage: f32,
+    pub shield_absorbed: f32,
+    pub payload: f32,
 }
 
 /// Configuration for the entire shield system.
@@ -163,6 +182,15 @@ pub struct ShieldFacing {
     /// Damage multiplier applied to incoming damage on this facing.
     /// Set by `ShieldSystem::recalculate_focus` based on focus state.
     pub damage_multiplier: f32,
+    /// Physical energy tuning, not another stored battery.
+    pub energy_config: crate::entities::config::ShieldArcEnergyConfig,
+    /// Operator intent survives starvation, thermal stops and hosting changes.
+    pub raised: bool,
+    pub recovery_target: Option<crate::core::messages::SystemId>,
+    /// Derived for this funded interval; incoming damage uses this exact value.
+    pub protection_fraction: f32,
+    /// Carries sub-hit interception across damage events and save/resume.
+    pub interception_remainder: f64,
 }
 
 impl ShieldFacing {
@@ -188,6 +216,11 @@ impl ShieldFacing {
             base_regen_per_sec: regen_per_sec,
             priority: 1,
             damage_multiplier: 1.0,
+            energy_config: Default::default(),
+            raised: true,
+            recovery_target: None,
+            protection_fraction: 1.0,
+            interception_remainder: 0.0,
         }
     }
 
@@ -220,12 +253,41 @@ impl ShieldFacing {
             base_regen_per_sec: regen_per_sec,
             priority,
             damage_multiplier: 1.0,
+            energy_config: Default::default(),
+            raised: true,
+            recovery_target: None,
+            protection_fraction: 1.0,
+            interception_remainder: 0.0,
         }
     }
 
     /// Whether this facing is currently active (not offline).
     pub fn is_online(&self) -> bool {
         self.offline_remaining <= 0.0
+    }
+
+    pub fn is_protecting(&self) -> bool {
+        self.is_online() && self.raised && self.protection_fraction > 0.0
+    }
+
+    /// Strength and its existing fractional accumulator are one quantity.
+    /// Voluntary discharge never invokes impact-collapse or damage reporting.
+    pub fn stored_strength(&self) -> f64 {
+        (self.hp as f64 + self.hp_frac as f64).max(0.0)
+    }
+
+    pub fn discharge_strength(&mut self, amount: f64) -> Result<(), String> {
+        if !amount.is_finite() || amount < 0.0 || amount > self.stored_strength() {
+            return Err("shield.error.invalid_discharge".into());
+        }
+        let remaining = (self.stored_strength() - amount).max(0.0);
+        self.hp = remaining.floor() as i32;
+        let exact_fraction = remaining - self.hp as f64;
+        self.hp_frac = exact_fraction as f32;
+        if self.hp_frac as f64 > exact_fraction {
+            self.hp_frac = f32::from_bits(self.hp_frac.to_bits() - 1);
+        }
+        Ok(())
     }
 
     /// The sub-integer regen/decay accumulator — the fractional HP carried
@@ -251,25 +313,25 @@ impl ShieldFacing {
     /// - If the facing absorbs the hit and HP drops to 0, the facing goes offline
     ///   and any overflow damage passes through to the hull.
     pub fn apply_damage(&mut self, amount: i32) -> i32 {
-        if !self.is_online() {
+        if !self.is_protecting() || amount <= 0 {
             return amount;
         }
-        let effective = (amount as f32 * self.damage_multiplier).round().max(0.0) as i32;
-        if effective <= self.hp {
-            self.hp -= effective;
-            // `effective > 0` matters since #788: a facing may now legitimately
-            // sit at 0 HP while ONLINE (the first tick of its regen ramp), and a
-            // zero-damage hit on it must not re-arm the offline timer.
-            if self.hp == 0 && effective > 0 {
-                self.offline_remaining = self.offline_duration;
-            }
-            0
-        } else {
-            let overflow = effective - self.hp;
-            self.hp = 0;
+        let permitted =
+            amount as f64 * self.protection_fraction as f64 + self.interception_remainder;
+        let intercepted = permitted.floor().min(amount as f64) as i32;
+        self.interception_remainder = permitted - intercepted as f64;
+        let bypass = amount - intercepted;
+        (bypass as f64 + self.absorb_intercepted(intercepted as f64)).min(i32::MAX as f64) as i32
+    }
+
+    fn absorb_intercepted(&mut self, amount: f64) -> f64 {
+        let effective = (amount * self.damage_multiplier as f64).round().max(0.0);
+        let consumed = effective.min(self.hp as f64);
+        self.hp -= consumed as i32;
+        if self.hp == 0 && effective > 0.0 {
             self.offline_remaining = self.offline_duration;
-            overflow
         }
+        effective - consumed
     }
 
     /// Advance the facing by `dt` seconds: tick offline timer and regen at the
@@ -316,7 +378,7 @@ impl ShieldFacing {
             label: self.label.clone(),
             hp: self.hp,
             max_hp: self.max_hp,
-            online: self.is_online(),
+            online: self.is_protecting(),
             offline_remaining: self.offline_remaining,
             is_focused: self.is_focused,
             center_deg: self.center_deg,
@@ -410,6 +472,7 @@ pub struct ArcRuntimeConfig {
     /// Hit-routing priority. Higher value wins when multiple arcs cover the same bearing.
     /// Default 1 (matches `default_arc_priority()` in `entities/config.rs`).
     pub priority: u32,
+    pub energy: crate::entities::config::ShieldArcEnergyConfig,
 }
 
 /// The complete shield system, owning all facings.
@@ -431,6 +494,89 @@ pub struct ShieldSystem {
 }
 
 impl ShieldSystem {
+    /// Common beam/bolt/guided impact boundary. Fractional shield work carries
+    /// across impacts; the unprotected hull payload is never scaled twice.
+    /// Guided impacts retain their existing zero-strength recovery grace.
+    pub fn apply_delivery(
+        &mut self,
+        delivery: super::mount::DamageDelivery,
+        bearing: f32,
+        suppress_zero_strength: bool,
+    ) -> ShieldImpact {
+        let index = self.facing_index_for_bearing(bearing);
+        let facing = &mut self.facings[index];
+        let fraction = if facing.is_protecting() && (suppress_zero_strength || facing.hp > 0) {
+            facing.protection_fraction
+        } else {
+            0.0
+        };
+        let (direct, routed) = delivery.split_for_protection(fraction);
+        let pending = routed as f64 + facing.interception_remainder;
+        let whole = pending.floor();
+        facing.interception_remainder = pending - whole;
+        let leak = facing.absorb_intercepted(whole);
+        ShieldImpact {
+            hull_damage: (direct as f64 + leak).min(f32::MAX as f64) as f32,
+            shield_absorbed: (whole - leak).max(0.0).min(f32::MAX as f64) as f32,
+            payload: delivery.damage_hull * (1.0 - fraction) + delivery.damage_shields * fraction,
+        }
+    }
+    pub fn capture_operations(&self) -> Vec<ShieldOperationState> {
+        self.facings
+            .iter()
+            .map(|facing| ShieldOperationState {
+                id: facing.id.clone(),
+                raised: facing.raised,
+                recovery_target: facing.recovery_target.clone(),
+                protection_fraction: facing.protection_fraction,
+                interception_remainder: facing.interception_remainder,
+            })
+            .collect()
+    }
+
+    pub fn validate_operations(&self, saved: &[ShieldOperationState]) -> Result<(), String> {
+        if saved.len() != self.facings.len() {
+            return Err("shield.error.operations_mismatch".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for row in saved {
+            let facing = self
+                .facings
+                .iter()
+                .find(|facing| facing.id == row.id)
+                .ok_or("shield.error.unknown_operation_arc")?;
+            if !ids.insert(&row.id)
+                || !row.protection_fraction.is_finite()
+                || !(0.0..=1.0).contains(&row.protection_fraction)
+                || !row.interception_remainder.is_finite()
+                || !(0.0..1.0).contains(&row.interception_remainder)
+                || row.recovery_target.as_ref().is_some_and(|target| {
+                    !facing.energy_config.recovery_targets.contains(target)
+                        || facing.energy_config.recovery_energy_per_hp <= 0.0
+                        || facing.energy_config.discharge_hp_per_sec <= 0.0
+                })
+            {
+                return Err("shield.error.invalid_operation".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn restore_operations(&mut self, saved: &[ShieldOperationState]) -> Result<(), String> {
+        self.validate_operations(saved)?;
+        for row in saved {
+            let facing = self
+                .facings
+                .iter_mut()
+                .find(|facing| facing.id == row.id)
+                .expect("validated-shield-arc");
+            facing.raised = row.raised;
+            facing.recovery_target = row.recovery_target.clone();
+            facing.protection_fraction = row.protection_fraction;
+            facing.interception_remainder = row.interception_remainder;
+        }
+        Ok(())
+    }
     /// Create a new shield system from the given config (evenly-spaced arcs).
     ///
     /// Legacy constructor kept for tests and any code path that pre-dates
@@ -492,7 +638,7 @@ impl ShieldSystem {
         let facings: Vec<ShieldFacing> = arcs
             .iter()
             .map(|a| {
-                ShieldFacing::new_arc(
+                let mut facing = ShieldFacing::new_arc(
                     a.id.clone(),
                     a.label.clone(),
                     a.max_hp.unwrap_or(ship_wide.max_hp),
@@ -501,7 +647,9 @@ impl ShieldSystem {
                     a.center_deg,
                     a.width_deg,
                     a.priority,
-                )
+                );
+                facing.energy_config = a.energy.clone();
+                facing
             })
             .collect();
         // Each facing already carries its own per-arc baseline in
@@ -524,6 +672,42 @@ impl ShieldSystem {
     pub fn set_focused_facing(&mut self, facing: Option<usize>) {
         self.focused_facing = facing;
         self.recalculate_focus();
+    }
+
+    /// Preflight charge before any save restoration writes authoritative state.
+    pub fn validate_facings(&self, charge: &[(String, i32, f32, f32, bool)]) -> Result<(), String> {
+        if charge.len() != self.facings.len() {
+            return Err("shield.error.charge_mismatch".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let mut focused = 0;
+        for (id, hp, fraction, offline, focus) in charge {
+            let facing = self
+                .facings
+                .iter()
+                .find(|facing| &facing.id == id)
+                .ok_or("shield.error.unknown_charge_arc")?;
+            focused += usize::from(*focus);
+            // An arc may retain previously focused strength while it decays.
+            let maximum = facing
+                .base_max_hp
+                .saturating_add(self.focus_config.bonus_max_hp.max(0));
+            if !ids.insert(id)
+                || *hp < 0
+                || *hp > maximum
+                || !fraction.is_finite()
+                || *fraction <= -1.0
+                || *fraction >= 1.0
+                || (*hp as f64 + *fraction as f64) < 0.0
+                || !offline.is_finite()
+                || *offline < 0.0
+                || *offline > facing.offline_duration
+                || focused > 1
+            {
+                return Err("shield.error.invalid_charge".into());
+            }
+        }
+        Ok(())
     }
 
     /// Restore ONLY the runtime charge state of each facing from a snapshot,
@@ -686,7 +870,7 @@ impl ShieldSystem {
                 let candidate = in_arc
                     .iter()
                     .filter(|(_, p)| p == tier)
-                    .find(|(i, _)| self.facings[*i].is_online())
+                    .find(|(i, _)| self.facings[*i].is_protecting())
                     .map(|(i, _)| *i);
                 if let Some(idx) = candidate {
                     return idx;
@@ -784,7 +968,7 @@ impl ShieldSystem {
     /// mean the same thing at launch and at impact.
     pub fn hp_facing_bearing(&self, bearing_relative: f32) -> i32 {
         let facing = &self.facings[self.facing_index_for_bearing(bearing_relative)];
-        if facing.is_online() {
+        if facing.is_protecting() {
             facing.hp
         } else {
             0

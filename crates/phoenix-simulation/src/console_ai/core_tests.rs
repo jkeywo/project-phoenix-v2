@@ -37,51 +37,34 @@ fn make_input(
         current_tick,
     }
 }
+fn shipped_shield_tuning() -> crate::entities::config::ShieldsAiConfigToml {
+    crate::entities::include_resolve::load_entity_config("assets/entities/alliance_cruiser.toml")
+        .unwrap()
+        .shields_console
+        .unwrap()
+        .ai
+        .unwrap()
+}
+
 #[test]
-fn default_focus_policy_params_equal_the_typed_knobs() {
-    // Baseline preservation: the canonical default policy seeds its four
-    // `param`s from the retained typed `default_shields_ai_*()` values, so a
-    // ship that omits `[shields_console.ai_policy]` feeds the kernel exactly
-    // the windows/thresholds it always did.
-    let policy = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus")
-        .to_policy()
-        .unwrap();
+fn shipped_observation_tuning_matches_the_typed_defaults() {
+    let authored = shipped_shield_tuning();
     let typed = crate::ship::shields::ShieldsAiConfigResource::default();
+    assert_eq!(authored.damage_window_secs, typed.damage_window_secs);
     assert_eq!(
-        policy
-            .params
-            .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM),
-        Some(typed.damage_window_secs as f64)
+        authored.min_damage_window_secs,
+        typed.min_damage_window_secs
     );
+    assert_eq!(authored.damage_pct_threshold, typed.damage_pct_threshold);
     assert_eq!(
-        policy
-            .params
-            .get(crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM),
-        Some(typed.min_damage_window_secs as f64)
-    );
-    assert_eq!(
-        policy
-            .params
-            .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM),
-        Some(typed.damage_pct_threshold as f64)
-    );
-    assert_eq!(
-        policy
-            .params
-            .get(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM),
-        Some(typed.health_ratio_threshold as f64)
+        authored.health_ratio_threshold,
+        typed.health_ratio_threshold
     );
 }
 
 #[test]
-fn params_sourced_windows_produce_the_same_kernel_decision_as_typed_knobs() {
-    // The kernel is unchanged: feeding it windows/thresholds read from the
-    // default policy `param` map yields the identical decision to feeding the
-    // typed defaults directly, over a concentrated-damage scenario.
-    let policy = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus")
-        .to_policy()
-        .unwrap();
-    let p = |name: &str| policy.params.get(name).unwrap() as f32;
+fn authored_observation_windows_preserve_the_concentrated_damage_ranking() {
+    let authored = shipped_shield_tuning();
 
     let mut history = empty_history(4);
     history[1].push(DamageRecord {
@@ -103,12 +86,10 @@ fn params_sourced_windows_produce_the_same_kernel_decision_as_typed_knobs() {
         facings: facings.clone(),
         shields_is_low: true,
         damage_history: history.clone(),
-        damage_window_ticks: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM).ceil()
-            as u64,
-        min_damage_window_ticks: p(crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM)
-            .ceil() as u64,
-        damage_pct_threshold: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM),
-        health_ratio_threshold: p(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM),
+        damage_window_ticks: authored.damage_window_secs.ceil() as u64,
+        min_damage_window_ticks: authored.min_damage_window_secs.ceil() as u64,
+        damage_pct_threshold: authored.damage_pct_threshold,
+        health_ratio_threshold: authored.health_ratio_threshold,
         current_tick: 4,
     };
     let typed_input = make_input(facings, true, history, 4);

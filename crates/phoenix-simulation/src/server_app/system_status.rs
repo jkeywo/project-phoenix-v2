@@ -148,6 +148,40 @@ pub(crate) fn project(
         .collect()
 }
 
+/// Refine equipment availability with actual funded shield operation.
+pub(crate) fn apply_shields(
+    status: &mut BTreeMap<SystemId, SystemStatus>,
+    shields: Option<&crate::ship::shields::ShipShields>,
+) {
+    let Some(shields) = shields else {
+        return;
+    };
+    for facing in &shields.0.facings {
+        let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id) else {
+            continue;
+        };
+        let Some(status) = status.get_mut(&id) else {
+            continue;
+        };
+        if status.availability == Availability::Unavailable {
+            continue;
+        }
+        if !facing.raised || !facing.is_online() {
+            status.unavailable(StatusReasonCode::Offline, None);
+        } else if facing.protection_fraction <= 0.0 {
+            status.unavailable(StatusReasonCode::Unpowered, None);
+        } else if facing.protection_fraction < 1.0 {
+            status.availability = Availability::Degraded;
+            status
+                .reasons
+                .push(phoenix_model::system_status::StatusReason {
+                    code: StatusReasonCode::Unpowered,
+                    component_id: None,
+                });
+        }
+    }
+}
+
 /// Detailed status follows live Console tenure, never an identically named seat.
 pub(crate) fn visible_to(
     id: &SystemId,

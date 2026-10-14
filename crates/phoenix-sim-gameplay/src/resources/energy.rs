@@ -247,6 +247,44 @@ impl EnergyState {
         Ok(true)
     }
 
+    /// Credit an actual physical delivery using the caller's remaining intake
+    /// budget. This does not advance time, repeat passive loss or provide cooling.
+    /// The provider removes only the returned accepted quantity.
+    pub fn accept_charge(
+        &mut self,
+        config: &EnergyConfig,
+        offered: f32,
+        available_intake: f32,
+    ) -> Result<f32, String> {
+        self.validate_against(config)?;
+        finite_nonnegative("offered charge", offered)?;
+        finite_nonnegative("available intake", available_intake)?;
+        let offered_limit = offered
+            .min(available_intake)
+            .min((config.capacity - self.energy).max(0.0));
+        let mut next = *self;
+        let exact = (next.energy as f64 + offered_limit as f64).min(config.capacity as f64);
+        next.energy = finite_result("energy", exact)?;
+        if next.energy as f64 > exact {
+            next.energy = f32::from_bits(next.energy.to_bits() - 1);
+        }
+        // Credit rounds down and provider debit rounds up. Sub-ulp deliveries
+        // are refused instead of silently creating charge in a full reservoir.
+        let credited = next.energy as f64 - self.energy as f64;
+        let mut accepted = credited as f32;
+        if (accepted as f64) < credited {
+            accepted = f32::from_bits(accepted.to_bits() + 1);
+        }
+        next.heat = finite_result(
+            "heat",
+            next.heat as f64 + accepted as f64 * config.charge_heat_per_unit as f64,
+        )?;
+        next.trip_if_hot(config);
+        next.validate_against(config)?;
+        *self = next;
+        Ok(accepted)
+    }
+
     /// Entire step commits atomically; malformed offers, requests or impossible
     /// finite results cannot leave a partly changed reserve or thermal state.
     pub fn step(

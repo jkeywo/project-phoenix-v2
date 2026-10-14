@@ -45,7 +45,7 @@ profiles, supported numeric trees and physical consumer composition through its
 existing source/history/validation/Preview/Test workflow. Old packs require
 explicit energy hardware and cannot install both old and new Power controllers.
 
-Snapshot 43/rules 0.15 carry local reserves, thermal/ramp state, allocation intent,
+Snapshot 44/rules 0.16 carry local reserves, thermal/ramp state, allocation intent,
 cut/restoration state, fine overrides, funded-work readings and coolant credit.
 Preflight validates identities and physical stock references before restoration;
 all energy owners participate in deterministic digests. Existing transport and

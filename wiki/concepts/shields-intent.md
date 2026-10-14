@@ -2,43 +2,47 @@
 title: Shields Runtime
 type: concept
 tags: [shields, ai, damage, focus, coordination, pasm]
-sources: [crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-sim-gameplay/src/ship/config.rs, crates/phoenix-simulation/src/core/broadcast/audience.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-sim-gameplay/src/console_ai/core.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, pasm/spec/architecture/coordination-blackboards.yaml]
-updated: 2026-08-28
+sources: [crates/phoenix-sim-gameplay/src/entities/config/shields.rs, crates/phoenix-sim-gameplay/src/ship/shields.rs, crates/phoenix-sim-gameplay/src/ship/shield_ai.rs, crates/phoenix-sim-gameplay/src/weapons/shield.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/ship/shield_evidence.rs, crates/phoenix-simulation/src/console_ai/shields_tree.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, gui/components/ph-shield-operations.js, pasm/spec/design/shield-energy-and-protection.yaml]
+updated: 2026-10-14
 ---
 
 # Shields Runtime
 
-Shield focus is an admitted fine-system command. Human controls and `ai_shield_focus` emit the same `SetShieldArcFocus` payload; `handle_shields_messages` is the shared applier for each ship's authoritative `ShipShields` state.
+Each authored shield arc is an ordinary System with its own local energy reserve,
+command authority and state-tree continuation. `ShipShields` stores protection
+strength, collapse time, raised intent and recovery destination. It does not own
+a second battery. The canonical Power network owns energy and thermal state.
 
-Sensors can send a typed `ThreatBearing` through the shared Coordination
-lag. `process_coordination_lag` resolves the explicit Station at delivery time:
-AI produces `DeliveredCoordination`, Human receives the ordinary popup, and
-Offline consumes without delivery. `receive_shields_coordination` lives in the
-Shields module, verifies that the address is the authored owner of the ship's
-shield arcs and that the authored Shields focus capability still operates AI,
-then latches the exact bearing in `PendingShieldsThreatBearing`. On the
-following Shields AI decision, the pending value takes priority over damage
-analysis and focuses the authored arc whose centre is closest to the bearing.
+`tick_shields` runs after reactor intake and admitted shield commands, before
+weapon impacts. All arcs pay upkeep before discretionary work. Funded upkeep
+determines effective interception; unfunded damage uses the ordinary hull
+payload. Lowered shields retain strength. Recharge spends local battery energy
+for actual strength restored and generates ordinary depletion heat.
 
-The generic lag router never reads or writes `PendingShieldsThreatBearing`.
-That component is private Shields-domain state, written by the Shields receiver
-and consumed once by the Shields AI.
+Recovery removes donor strength only for energy actually accepted by an authored
+eligible battery. Recovery and reactor intake share the destination's intake
+budget. The recipient still performs its own timed recharge. Thermal trips clear
+effective protection while preserving intent. The same physical processing and
+admitted command applier serve static equipped entities.
 
-`ShipShieldsPlugin` also owns Shields replication lifecycle. The periodic and
-reconnect paths share one `ShieldStatus` builder and the same
-`HoldingSystemKind("shields")` audience resolution against the LocalShip's
-authored topology. The instance id remains hull-authored rather than becoming
-a hidden protocol constant. Reconnect therefore reaches only the current
-holder of the actual owning Station, and because Shields has no delta cache it
-cannot disturb another recipient's next live snapshot.
+Humans and individual arc trees emit the same `SetShieldRaised`,
+`SetShieldRecovery` and `SetShieldArcFocus` commands through System admission.
+The tree host reads only its Console's permitted publications. Fine `ShieldArc`
+observations contain operation readiness, battery, thermal state and recent
+damage; broad `ShieldStatus` contains no private energy data. Explicit feeds
+provide information without command authority.
 
-Without a pending bearing, the authored policy examines timestamped recent
-damage and normalized arc health: concentrated incoming damage wins, then a
-disproportionately weak arc, otherwise focus is cleared. Single-arc ships have
-nothing to focus. Human Shields retains exclusive focus control whenever the
-hull's authored Shields focus capability is human-operated.
+The physical damage-history producer runs regardless of delegation. Recharge,
+focus decay and voluntary recovery adjust its comparison baseline and do not
+become incoming-damage reports. Arc trees can use permitted threat/lock bearings,
+recent damage and normalized strength for defensive preference. Their authored
+recovery thresholds provide hysteresis.
 
-The policy thresholds and windows come from the hull's AI policy parameters. The pure decision kernel is `tick_shield_focus_ai` in `crates/phoenix-sim-gameplay/src/console_ai/core.rs`; the Bevy host in `crates/phoenix-simulation/src/console_ai/server.rs` supplies current per-ship state and emits the admitted command. High-fidelity gating and the shared AI cadence keep the decision deterministic.
+Snapshots and digests include raised intent, recovery destination, partial
+interception carry, charge and damage history. Restore preflights arc identities
+and physical bounds. Existing Console layouts mount shared operation cards from
+permitted fine observations, keeping strength, battery, heat and protection
+separate. Delegated arcs use the ordinary status summaries.
 
 ## Related
 

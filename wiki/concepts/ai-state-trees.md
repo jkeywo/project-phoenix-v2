@@ -8,8 +8,8 @@ updated: 2026-10-14
 
 # Individual System AI State Trees
 
-Dock is the first System running the shared state-tree evaluator. Other
-capabilities retain their existing policy/selector controllers. Each System
+Dock, the reactor and individual shield arcs run the shared state-tree evaluator.
+Other capabilities retain their existing policy/selector controllers. Each System
 has one controller and its own execution state; reusing a definition shares
 neither private memory nor another Console's observations.
 
@@ -46,8 +46,8 @@ No authored expressions or custom code nodes are supported.
 `ShipAiTreeRuntime` holds a deterministic map keyed by SystemId: active states,
 private memory, nested calls/completion and last evaluation tick. Snapshot capture,
 restore and the `system-ai-trees` digest stage include that state. Snapshot format
-41 and simulation rules 0.13 are the current compatibility boundary, including
-repair job continuation.
+44 and simulation rules 0.16 include shield operational continuation alongside
+energy networks and repair jobs.
 
 The shared `dock_state_tree.toml` library provides a derived standard controller
 and reusable operation call. Adoption and withdrawal ownership are authored memory,
@@ -71,6 +71,17 @@ private continuation. The ordinary repair selector still chooses work through
 System admission; these trees execute that work rather than replacing its AI.
 `validate_runtime` checks stored frames without running tasks during restoration.
 Workshop mounts separate System AI and Repair Job contexts over one editor.
+
+## Physical equipment controllers
+
+The reactor host uses closed numeric hardware bindings. Each shield arc uses
+boolean raise/focus/recovery outputs and numeric strength, reserve and heat facts.
+Eligible recovery endpoints determine its supported target vocabulary. Both
+hosts evaluate frozen permitted Console observations and emit ordinary admitted
+System commands. A shared Console does not combine private execution frames.
+Shield definitions live in canonical `shield_arc.ai`; the loader generates their
+System configuration. Workshop edits that source rather than adding a duplicate
+generated System.
 
 ## Related
 

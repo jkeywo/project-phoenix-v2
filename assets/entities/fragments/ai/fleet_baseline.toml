@@ -146,23 +146,11 @@ idle = true
 # authored arbiter layered on top, which is where a hull would ration rounds
 # between tubes.
 
-[shields_console.ai_policy.param]
+[shields_console.ai]
 damage_window_secs = 4.0
 min_damage_window_secs = 1.0
 damage_pct_threshold = 50.0
 health_ratio_threshold = 50.0
-
-[[shields_console.ai_policy.rule]]
-priority = 10
-channel = "shield_focus"
-when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
-verb = "focus_shield_arc"
-
-[[shields_console.ai_policy.rule]]
-priority = 0
-channel = "shield_focus"
-when = "true"
-verb = "focus_shield_arc"
 
 # Comms dialogue response — answer an open hail with its FIRST response. Guarded
 # twice, and both guards matter: an unguarded rule would re-emit a response the

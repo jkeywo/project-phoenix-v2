@@ -95,6 +95,23 @@ energy = { upkeep_per_sec = 0.05, recharge_energy_per_hp = 0.5, recovery_energy_
 max_hp = 5
 regen_per_sec = 0.0
 
+[shield_arc.ai]
+root = "shields"
+[[shield_arc.ai.tree]]
+id = "shields"
+initial = "operate"
+[[shield_arc.ai.tree.state]]
+id = "operate"
+[[shield_arc.ai.tree.state.task]]
+id = "raise"
+when = []
+action = { kind = "write", channel = "raised", value = { source = "literal", value = true } }
+[[shield_arc.ai.tree.state.task]]
+id = "focus"
+when = []
+action = { kind = "write", channel = "focus", value = { source = "fact", name = "preferred_focus" } }
+
+
 [collider]
 shape = "Capsule"
 radius = 4.0

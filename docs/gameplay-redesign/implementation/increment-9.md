@@ -1,10 +1,13 @@
 # Increment 9: shield energy and protection
 
-This is the implementation contract prepared from the selected redesign and
-the increment 8 runtime. It is not evidence that increment 9 has started or
-passed. Adopt the [PASM decisions](../../../pasm/spec/design/shield-energy-and-protection.yaml)
-before runtime changes. Increment 8 still needs its initial playable exit;
-preparing this document does not advance the migration ledger.
+This contract was adopted with its
+[PASM decisions](../../../pasm/spec/design/shield-energy-and-protection.yaml)
+before runtime changes, in `24947e0f`. Implementation is in progress; see the
+[acceptance record](../../acceptance/1562-shield-energy.md) for verified results
+and remaining work. Under the user's approved parallel-validation workflow,
+increment 8 continues verification in a pinned worktree while main implements
+this increment. Neither an initial commit nor this contract establishes a
+completed playable exit.
 
 ## Selected design and scope
 

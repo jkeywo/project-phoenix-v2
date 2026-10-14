@@ -759,6 +759,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         shield_arc_schema,
         crate::entities::config::ShieldArcConfig,
+        energy,
+        ai,
         id,
         label,
         center_deg,

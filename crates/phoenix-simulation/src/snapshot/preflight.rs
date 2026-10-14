@@ -445,6 +445,26 @@ pub(super) fn validate_entity_resources(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    let saved_shields = row
+        .weapons
+        .as_ref()
+        .map(|state| state.shield_operations.as_slice())
+        .unwrap_or(&[]);
+    match world.get::<crate::ship::shields::ShipShields>(entity) {
+        Some(live) => {
+            live.0.validate_operations(saved_shields)?;
+            live.0.validate_facings(
+                row.weapons
+                    .as_ref()
+                    .map(|state| state.shield_charge.as_slice())
+                    .unwrap_or(&[]),
+            )?;
+        }
+        None if !saved_shields.is_empty() => {
+            return Err("shield operations have no installed arcs".into())
+        }
+        None => {}
+    }
     match (
         world.get::<crate::ship::power::ShipPowerSystem>(entity),
         &row.power,

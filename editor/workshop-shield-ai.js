@@ -29,8 +29,8 @@ export function initialShieldTree(recoveryTargets = []) {
     task.push(write(`restored-${index}`, channel, literal(false), [
       number(`target-strength-${target}`, 'greater_or_equal', 0.8),
     ]));
-    for (const name of [`target-visible-${target}`, `target-preferred-${target}`, `target-ready-${target}`]) {
-      task.push(write(`stop-${index}-${name}`, channel, literal(false), [condition(fact(name), false)]));
+    for (const [stop, name] of [`target-visible-${target}`, `target-preferred-${target}`, `target-ready-${target}`].entries()) {
+      task.push(write(`stop-${index}-${stop}`, channel, literal(false), [condition(fact(name), false)]));
     }
   });
   return { root: 'shields', tree: [{ id: 'shields', initial: 'operate', state: [{ id: 'operate', task }] }] };

@@ -319,6 +319,47 @@ impl PowerSystem {
     pub fn last_work_fraction(&self, system: &SystemId) -> Option<f32> {
         self.last_work_fraction.get(system).copied()
     }
+
+    /// A recovered physical delivery shares this interval's intake limit with
+    /// reactor delivery and earlier recoveries. Canonical reserve/heat are the
+    /// only credited state; failed or saturated deliveries consume no source.
+    pub fn accept_recovered_energy(
+        &mut self,
+        system: &SystemId,
+        dt: f32,
+        offered: f32,
+    ) -> Result<f32, String> {
+        if !dt.is_finite() || dt <= 0.0 || !offered.is_finite() || offered < 0.0 {
+            return Err(
+                "recovered energy requires positive time and finite nonnegative charge".into(),
+            );
+        }
+        let consumer = self
+            .hardware
+            .consumers
+            .iter()
+            .find(|consumer| &consumer.system == system)
+            .ok_or("unknown recovery destination")?;
+        let state = self
+            .network
+            .consumers
+            .get_mut(system)
+            .ok_or("missing recovery destination state")?;
+        if state.thermal_stopped {
+            return Ok(0.0);
+        }
+        let previous = self.last_intake_per_sec.get(system).copied().unwrap_or(0.0);
+        let budget = (((consumer.reserve.max_intake_per_sec as f64 - previous as f64).max(0.0)
+            * dt as f64)
+            .min(f32::MAX as f64)) as f32;
+        let accepted = state.accept_charge(&consumer.reserve, offered, budget)?;
+        self.last_intake_per_sec.insert(
+            system.clone(),
+            (previous as f64 + accepted as f64 / dt as f64)
+                .min(consumer.reserve.max_intake_per_sec as f64) as f32,
+        );
+        Ok(accepted)
+    }
     pub fn set_weapons_restrained(&mut self, restrained: bool) {
         self.weapons_restrained = restrained;
     }

@@ -184,6 +184,7 @@ pub enum FixedStep {
     AiTorpedoAutoFire,
     AiPowerAllocation,
     AiShieldFocus,
+    TrackShieldDamageHistory,
     HandleFireTorpedo,
     HandleTorpedoMagazineInterSystem,
     HandlePowerMessages,

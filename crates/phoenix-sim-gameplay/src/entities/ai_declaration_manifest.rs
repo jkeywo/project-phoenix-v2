@@ -266,13 +266,19 @@ const POWER_TREE_HOST: AiHost = AiHost {
     history_fold: None,
     facts: &[],
 };
+const SHIELD_TREE_HOST: AiHost = AiHost {
+    system: "Shield arc System state tree",
+    block: "[shield_arc.ai] on each physical arc",
+    flag_chain: ai_flag_hosts::FlagChain::Empty,
+    history_fold: None,
+    facts: &[],
+};
 const POWER_TREE_INSTALLER: &[EvalSite] = &[site(
     "crates/phoenix-simulation/src/entities/ship_spawn.rs",
     "insert_power_state",
 )];
 
-/// Roll call, ordered to mirror [`ai_flag_hosts::AI_HOSTS`]: fifteen policy
-/// kinds, then five selector kinds.
+/// Roll call of declaration-tracked policy, selector and migrated tree families.
 pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     FineSystemKind {
         key: FineSystemKey::Captain,
@@ -372,11 +378,11 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     },
     FineSystemKind {
         key: FineSystemKey::ShieldsFocus,
-        controller: DeclarationController::PolicyOrSelector,
-        host: &ai_flag_hosts::SHIELDS_FOCUS,
-        component: "ShieldsFocusAiPolicy",
-        idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SHIP_INSTALLER,
+        controller: DeclarationController::SystemStateTree,
+        host: &SHIELD_TREE_HOST,
+        component: "ShipAiTreePrograms",
+        idle_lever: IdleLever::StateTree,
+        spawn_sites: POWER_TREE_INSTALLER,
     },
     FineSystemKind {
         key: FineSystemKey::Power,
@@ -533,13 +539,26 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
         FineSystemKey::Vertical => ship_level(helm(|h| h.vertical_ai.is_some())),
         FineSystemKey::Impulse => ship_level(helm(|h| h.impulse_ai.is_some())),
         FineSystemKey::Boost => ship_level(helm(|h| h.boost_ai.is_some())),
-        FineSystemKey::ShieldsFocus => ship_level(
-            c.shields_console
-                .as_ref()
-                .is_some_and(|x| x.ai_policy.is_some()),
-        ),
+        FineSystemKey::ShieldsFocus => c
+            .ship_config
+            .as_ref()
+            .into_iter()
+            .flat_map(|ship| &ship.systems)
+            .filter(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+            .map(|system| Slot {
+                kind,
+                instance: Some(system.id.0.clone()),
+                declared: declared_from(
+                    system
+                        .config
+                        .as_ref()
+                        .and_then(|value| value.get("ai"))
+                        .is_some(),
+                ),
+            })
+            .collect(),
         FineSystemKey::Power => {
-            if c.energy.is_none() || (c.behaviour.is_none() && !c.is_static_point_defence()) {
+            if c.energy.is_none() {
                 return Vec::new();
             }
             c.ship_config

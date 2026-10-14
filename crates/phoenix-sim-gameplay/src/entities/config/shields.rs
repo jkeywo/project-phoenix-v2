@@ -246,6 +246,7 @@ pub struct ShieldArcConfig {
     /// Explicit operating/recharge/recovery work. A missing block is an
     /// actionable content-version mismatch, rather than free physical shields.
     pub energy: ShieldArcEnergyConfig,
+    pub ai: crate::ai::state_tree::AiTreeConfig,
     /// Per-arc override for max HP; falls back to `[shields_console.base] max_hp`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_hp: Option<i32>,

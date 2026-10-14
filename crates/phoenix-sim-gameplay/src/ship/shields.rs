@@ -64,7 +64,7 @@ impl ShipShields {
 }
 
 /// A single damage event recorded for the shields AI damage-tracking window.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct DamageRecord {
     /// Absolute logical simulation tick on which damage was recorded.
     pub recorded_tick: u64,
@@ -291,37 +291,102 @@ pub fn receive_shields_coordination(
     }
 }
 
-/// Tick shield regen and offline timers each frame for every ship
-/// (player + NPCs). PR-7 (issue #597) unifies this with the old
-/// `tick_npc_shield_regen` — one system iterating all ships with `Ship` marker.
-///
-/// Each ship regenerates at its own [`ModifierSlot::ShieldRegen`] multiplier
-/// (issue #952), which the `shields` power group drives through
-/// `modifiers::coordination::apply_power_modifiers_from_read_state`. A ship
-/// without a `ShipModifiers` component regenerates at ×1.0 — its arcs'
-/// authored rates, unchanged.
-///
-/// Runs in `SimSet::Modifiers`, i.e. AFTER `translate_power_modifiers`, so a
-/// reallocation made this tick is already in the slot when it is read here.
+/// Fund physical shield work for every equipped entity, including static actors.
+/// Runs after reactor intake and shield commands, before this tick's impacts.
+/// Upkeep precedes recovery and recharge; ordinary modifiers scale the desired
+/// recharge rate, while the canonical local reserve pays the actual work.
 pub fn tick_shields(
     time: Res<Time>,
-    mut shields_q: Query<
-        (
-            &mut ShipShields,
-            Option<&crate::modifiers::ShipModifiers>,
-            Option<&mut crate::ship::power::ShipPowerSystem>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut shields_q: Query<(
+        &mut ShipShields,
+        Option<&crate::modifiers::ShipModifiers>,
+        Option<&mut crate::ship::power::ShipPowerSystem>,
+        Option<&ShipSystemControlSources>,
+        Option<&mut ShieldsDamageHistory>,
+    )>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
         return;
     }
-    for (mut shield, mods, mut power) in shields_q.iter_mut() {
+    for (mut shield, mods, mut power, sources, mut history) in shields_q.iter_mut() {
+        let before_work: Vec<_> = shield.0.facings.iter().map(|facing| facing.hp).collect();
         let regen_scale = mods
             .map(|m| m.get(&crate::core::messages::ModifierSlot::ShieldRegen))
             .unwrap_or(1.0);
+        let mut order: Vec<_> = (0..shield.0.facings.len()).collect();
+        order.sort_by(|a, b| shield.0.facings[*a].id.cmp(&shield.0.facings[*b].id));
+        // Every arc pays upkeep before any arc gets discretionary recharge.
+        for &index in &order {
+            let facing = &mut shield.0.facings[index];
+            let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id) else {
+                facing.protection_fraction = 0.0;
+                continue;
+            };
+            let available = sources.is_none_or(|sources| !sources.0.is_offline(&id));
+            facing.protection_fraction = if available && facing.raised && facing.is_online() {
+                power.as_deref_mut().map_or(0.0, |power| {
+                    power
+                        .0
+                        .spend_continuous(&id, facing.energy_config.upkeep_per_sec * dt)
+                        .map_or(0.0, |grant| grant.fraction)
+                })
+            } else {
+                0.0
+            };
+        }
+
+        // Recovery credits canonical batteries before the recipient's ordinary
+        // recharge. A donor being discharged does not also recharge this tick.
+        for &index in &order {
+            let facing = &mut shield.0.facings[index];
+            let Some(target) = facing.recovery_target.as_ref() else {
+                continue;
+            };
+            let config = &facing.energy_config;
+            let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id) else {
+                continue;
+            };
+            if !config.recovery_targets.contains(target)
+                || sources.is_some_and(|sources| sources.0.is_offline(&id))
+                || !facing.is_online()
+                || config.recovery_energy_per_hp <= 0.0
+                || config.discharge_hp_per_sec <= 0.0
+            {
+                continue;
+            }
+            let wanted = facing
+                .stored_strength()
+                .min(config.discharge_hp_per_sec as f64 * dt as f64);
+            let exact_offer = (wanted * config.recovery_energy_per_hp as f64).min(f32::MAX as f64);
+            let mut offered = exact_offer as f32;
+            if offered as f64 > exact_offer {
+                offered = f32::from_bits(offered.to_bits() - 1);
+            }
+            let Some(power) = power.as_deref_mut() else {
+                continue;
+            };
+            if power
+                .0
+                .network()
+                .consumers
+                .get(&id)
+                .is_none_or(|state| state.thermal_stopped)
+            {
+                continue;
+            }
+            // Stage both owners: malformed numerical state cannot credit the
+            // recipient and then fail to debit its donor.
+            let mut staged = power.0.clone();
+            let Ok(accepted) = staged.accept_recovered_energy(target, dt, offered) else {
+                continue;
+            };
+            let removal = accepted as f64 / config.recovery_energy_per_hp as f64;
+            if removal > wanted || facing.discharge_strength(removal).is_err() {
+                continue;
+            }
+            power.0 = staged;
+        }
         let grants: Vec<_> = shield
             .0
             .facings
@@ -330,29 +395,51 @@ pub fn tick_shields(
             .map(|(index, facing)| {
                 let decaying = shield.0.focused_facing != Some(index) && facing.hp > facing.max_hp;
                 if !facing.is_online()
+                    || !facing.raised
+                    || facing.recovery_target.is_some()
                     || decaying
                     || facing.hp >= facing.max_hp
                     || facing.regen_per_sec <= 0.0
                 {
                     return 0.0;
                 }
-                // At capacity stop spending immediately, including the fractional
-                // HP already paid in previous ticks. Shield upkeep is increment 9.
                 let wanted_hp = ((facing.max_hp - facing.hp) as f32 - facing.hp_frac()).max(0.0);
-                let activity = regen_scale
-                    .max(0.0)
-                    .min(wanted_hp / (facing.regen_per_sec * dt));
                 let Some(id) = crate::ship::system_registry::shield_arc_system_id(&facing.id)
                 else {
                     return 0.0;
                 };
+                if sources.is_some_and(|sources| sources.0.is_offline(&id)) {
+                    return 0.0;
+                }
+                let wanted_hp = wanted_hp.min(facing.regen_per_sec * dt * regen_scale.max(0.0));
+                let cost = wanted_hp * facing.energy_config.recharge_energy_per_hp;
                 power.as_deref_mut().map_or(0.0, |p| {
-                    p.0.work_continuous(&id, dt, activity)
-                        .map_or(0.0, |grant| activity * grant.fraction)
+                    p.0.spend_continuous(&id, cost).map_or(0.0, |grant| {
+                        wanted_hp * grant.fraction / (facing.regen_per_sec * dt)
+                    })
                 })
             })
             .collect();
         shield.0.tick_with_regen_scales(dt, &grants);
+        for (index, facing) in shield.0.facings.iter_mut().enumerate() {
+            if let Some(baseline) = history
+                .as_deref_mut()
+                .and_then(|history| history.last_hp.get_mut(index))
+            {
+                *baseline = (*baseline as i64 + facing.hp as i64 - before_work[index] as i64)
+                    .clamp(0, i32::MAX as i64) as i32;
+            }
+            let stopped = crate::ship::system_registry::shield_arc_system_id(&facing.id)
+                .and_then(|id| {
+                    power
+                        .as_deref()
+                        .and_then(|power| power.0.network().consumers.get(&id))
+                })
+                .is_none_or(|state| state.thermal_stopped);
+            if stopped {
+                facing.protection_fraction = 0.0;
+            }
+        }
     }
 }
 
@@ -369,7 +456,7 @@ pub fn tick_shields(
 /// commands per arc target. Setting `focused = true` on one arc clears
 /// focus on any other arc (the shield system carries a single focus slot).
 pub fn handle_shields_messages(
-    mut ship_query: Query<(&AdmittedCommands, &mut ShipShields), With<crate::server_app::Ship>>,
+    mut ship_query: Query<(&AdmittedCommands, &mut ShipShields)>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
@@ -397,6 +484,45 @@ pub fn handle_shields_messages(
 
         for (arc_id, sid) in &arc_targets {
             for cmd in admitted.for_target(&sid.0) {
+                let index = shields
+                    .0
+                    .facings
+                    .iter()
+                    .position(|f| f.id == *arc_id)
+                    .expect("target collected from this shield");
+                match &cmd.payload {
+                    SystemControlPayload::SetShieldRaised { raised } => {
+                        shields.0.facings[index].raised = *raised;
+                        crate::command_admission::finish_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            ActionFeedbackOutcome::Applied,
+                        );
+                        continue;
+                    }
+                    SystemControlPayload::SetShieldRecovery { target } => {
+                        let config = &shields.0.facings[index].energy_config;
+                        let valid = target.as_ref().is_none_or(|target| {
+                            config.recovery_energy_per_hp > 0.0
+                                && config.discharge_hp_per_sec > 0.0
+                                && config.recovery_targets.contains(target)
+                        });
+                        if valid {
+                            shields.0.facings[index].recovery_target = target.clone();
+                        }
+                        crate::command_admission::finish_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            if valid {
+                                ActionFeedbackOutcome::Applied
+                            } else {
+                                ActionFeedbackOutcome::Refused
+                            },
+                        );
+                        continue;
+                    }
+                    _ => {}
+                }
                 let SystemControlPayload::SetShieldArcFocus { focused } = &cmd.payload else {
                     continue;
                 };
@@ -411,11 +537,8 @@ pub fn handle_shields_messages(
                     // currently focused arc — matches the "toggle off"
                     // behaviour of the previous SetShieldFocus{ facing: None }
                     // payload.
-                    let current_focus_arc_id = shields
-                        .0
-                        .focused_facing
-                        .and_then(|i| shields.0.facings.get(i).map(|f| f.id.clone()));
-                    if current_focus_arc_id.as_deref() == Some(arc_id.as_str()) {
+                    let effective_focus = new_focus.unwrap_or(shields.0.focused_facing);
+                    if effective_focus == Some(index) {
                         new_focus = Some(None);
                     }
                 }
@@ -662,17 +785,16 @@ pub fn shields_delta_projection(
 /// from, and it clears to `None` itself (`ship::sensors::tick_sensors_threat_warning`)
 /// the moment Sensors reports no hostile in range.
 pub fn publish_shields_blackboard(
-    mut ships_q: Query<
-        (
-            &ShipShields,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&crate::ship_plugin::ShipSystemControlSources>,
-            Option<&crate::ship::state::ShipPhysics>,
-            Option<&crate::ship::sensors::SensorsThreatState>,
-            &mut crate::server_app::ShipSystemBlackboards,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut ships_q: Query<(
+        &ShipShields,
+        Option<&crate::ship::power::ShipPowerSystem>,
+        Option<&ShieldsDamageHistory>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::ship_plugin::ShipSystemControlSources>,
+        Option<&crate::ship::state::ShipPhysics>,
+        Option<&crate::ship::sensors::SensorsThreatState>,
+        &mut crate::server_app::ShipSystemBlackboards,
+    )>,
     asteroid_q: Query<
         (&crate::server_app::AsteroidUuid, &Transform),
         Without<crate::entities::spawner::EntityUuid>,
@@ -682,7 +804,9 @@ pub fn publish_shields_blackboard(
         Without<crate::server_app::AsteroidUuid>,
     >,
 ) {
-    for (shields, hull, control_sources, physics, sensors_threat, mut bbs) in ships_q.iter_mut() {
+    for (shields, power, history, hull, control_sources, physics, sensors_threat, mut bbs) in
+        ships_q.iter_mut()
+    {
         let physics = physics.copied().unwrap_or_default();
         // Frozen Combat Lock from this ship's viewscreen blackboard (written in
         // the previous tick's PublishAggregate — this system runs in Publish).
@@ -774,9 +898,43 @@ pub fn publish_shields_blackboard(
                     .map(|cs| cs.0.is_offline(&sid))
                     .unwrap_or(false);
                 let is_online = snap.online && !hull_offline;
+                let facing = shields
+                    .0
+                    .facings
+                    .iter()
+                    .find(|facing| facing.id == snap.id)?;
+                let reserve = power.and_then(|power| {
+                    let profile = power
+                        .0
+                        .config()
+                        .consumers
+                        .iter()
+                        .find(|profile| profile.system == sid)?;
+                    let state = power.0.network().consumers.get(&sid)?;
+                    Some(phoenix_model::energy::ConsumerEnergyReading {
+                        system: sid.clone(),
+                        group: power
+                            .0
+                            .ship_config()
+                            .systems
+                            .iter()
+                            .find(|system| system.id == sid)
+                            .and_then(|system| system.power_group.clone()),
+                        energy: state.energy,
+                        capacity: profile.reserve.capacity,
+                        heat: state.heat,
+                        trip_heat: profile.reserve.trip_heat,
+                        recover_heat: profile.reserve.recover_heat,
+                        thermal_stopped: state.thermal_stopped,
+                        intake_per_sec: power.0.last_intake_per_sec(&sid).unwrap_or(0.0),
+                        max_intake_per_sec: profile.reserve.max_intake_per_sec,
+                        flow_override_per_sec: power.0.network().fine_flows.get(&sid).copied(),
+                    })
+                });
                 Some((
                     sid,
                     ShieldArcBlackboard {
+                        arc_id: snap.id.clone(),
                         label: snap.label.clone(),
                         hp: snap.hp,
                         max_hp: snap.max_hp,
@@ -785,6 +943,36 @@ pub fn publish_shields_blackboard(
                         offline_remaining: snap.offline_remaining,
                         center_deg: snap.center_deg,
                         width_deg: snap.width_deg,
+                        recent_damage: shields
+                            .0
+                            .facings
+                            .iter()
+                            .position(|facing| facing.id == snap.id)
+                            .and_then(|index| history.and_then(|history| history.arcs.get(index)))
+                            .map_or(0.0, |records| {
+                                records
+                                    .iter()
+                                    .map(|record| record.amount as f64)
+                                    .sum::<f64>()
+                                    .min(f32::MAX as f64) as f32
+                            }),
+                        operation: Some(crate::core::messages::ShieldOperationBlackboard {
+                            raised: facing.raised,
+                            can_recharge: facing.raised
+                                && facing.is_online()
+                                && !hull_offline
+                                && reserve
+                                    .as_ref()
+                                    .is_some_and(|reserve| !reserve.thermal_stopped),
+                            protection_fraction: facing.protection_fraction,
+                            reserve,
+                            upkeep_per_sec: facing.energy_config.upkeep_per_sec,
+                            recharge_energy_per_hp: facing.energy_config.recharge_energy_per_hp,
+                            recovery_energy_per_hp: facing.energy_config.recovery_energy_per_hp,
+                            discharge_hp_per_sec: facing.energy_config.discharge_hp_per_sec,
+                            recovery_target: facing.recovery_target.clone(),
+                            recovery_targets: facing.energy_config.recovery_targets.clone(),
+                        }),
                     },
                 ))
             })
@@ -805,3 +993,7 @@ pub fn angular_distance_deg(a: f32, b: f32) -> f32 {
     let diff = (a - b).abs() % 360.0;
     diff.min(360.0 - diff)
 }
+
+#[cfg(test)]
+#[path = "shields_tests.rs"]
+mod tests;

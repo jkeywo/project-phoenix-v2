@@ -252,3 +252,21 @@ new state; protocol 6 and the existing transport are retained. Native ownership,
 AI and continuation tests and matching-bundle browser checks continue in pinned
 validation worktrees. Gameplay balance and physical/device acceptance are pending;
 the increment has not yet passed its verified playable exit.
+
+## Increment 9 — shield energy and protection
+
+The [implementation contract](increment-9.md) and adopted shield-energy PASM
+decisions now have a working runtime. Each arc pays upkeep and actual recharge
+from its existing reserve; lossy recovery credits an eligible battery before
+ordinary timed recharge. Human controls and individual arc trees share admitted
+commands and permitted Console publications. Workshop edits the same coefficients,
+destinations and closed trees. Static equipment uses the same physical owner.
+
+The [acceptance record](../../acceptance/1562-shield-energy.md) distinguishes
+passing mechanical, scoped AI, content and real headless schedule/determinism
+checks from pending validation. Snapshot 44/rules 0.16 retain operational intent
+and fractional work. Protocol 7/base-content epoch 2 reject mismatched clients
+and unconverted packs through existing compatibility checks. Existing transport
+and Station displays are retained. Full continuation, browser/native, balance,
+performance and human-workload acceptance remain open; this is an initial
+implementation, not a verified exit.

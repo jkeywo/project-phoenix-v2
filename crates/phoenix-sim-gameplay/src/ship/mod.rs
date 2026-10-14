@@ -30,6 +30,7 @@ pub mod physics_systems;
 pub mod intent_narration;
 
 pub mod power;
+pub mod shield_ai;
 pub mod shields;
 
 pub mod sensors;

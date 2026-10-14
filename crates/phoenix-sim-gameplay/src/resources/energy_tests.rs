@@ -1,5 +1,34 @@
 use super::*;
 
+#[test]
+fn recovered_charge_uses_remaining_intake_and_preserves_passive_state() {
+    let config = config();
+    let mut state = EnergyState::new(&config, 96.0, 3.0).unwrap();
+    assert_eq!(state.accept_charge(&config, 20.0, 2.0).unwrap(), 2.0);
+    assert_eq!(state.energy, 98.0);
+    assert_eq!(state.heat, 7.0);
+    assert_eq!(state.accept_charge(&config, 20.0, 10.0).unwrap(), 2.0);
+    assert_eq!(state.energy, 100.0);
+    let full = state;
+    assert_eq!(state.accept_charge(&config, 1.0, 10.0).unwrap(), 0.0);
+    assert_eq!(state, full);
+    assert!(state.accept_charge(&config, f32::NAN, 10.0).is_err());
+    assert_eq!(state, full);
+}
+
+#[test]
+fn tiny_recovery_cannot_round_into_free_stored_energy() {
+    let config = config();
+    let mut state = EnergyState::new(&config, 90.0, 0.0).unwrap();
+    for offer in [f32::EPSILON, 0.00001, 0.1, 0.3, 0.7] {
+        let before = state.energy;
+        let debit = state.accept_charge(&config, offer, offer).unwrap();
+        let credit = state.energy as f64 - before as f64;
+        assert!(credit <= debit as f64);
+        assert!(debit <= offer);
+    }
+}
+
 fn config() -> EnergyConfig {
     EnergyConfig {
         capacity: 100.0,

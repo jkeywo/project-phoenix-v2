@@ -2,6 +2,136 @@ use super::*;
 use std::f32::consts::PI;
 
 #[test]
+fn shared_delivery_selects_the_actual_up_and_down_payload_fractions_once() {
+    let delivery = super::super::mount::DamageDelivery {
+        damage_hull: 100.0,
+        damage_shields: 16.0,
+        shield_pierce: 0.25,
+    };
+    for (fraction, expected_hull, expected_strength) in
+        [(0.0, 100.0, 100), (0.25, 76.0, 97), (1.0, 4.0, 88)]
+    {
+        let mut shields = ShieldSystem::new(&ShieldConfig::default());
+        shields.facings[0].protection_fraction = fraction;
+        let impact = shields.apply_delivery(delivery, 0.0, true);
+        assert_eq!(impact.hull_damage, expected_hull);
+        assert_eq!(shields.facings[0].hp, expected_strength);
+    }
+    let mut lowered = ShieldSystem::new(&ShieldConfig::default());
+    lowered.facings[0].raised = false;
+    assert_eq!(
+        lowered.apply_delivery(delivery, 0.0, true).hull_damage,
+        100.0
+    );
+}
+
+#[test]
+fn fractional_delivery_and_pierce_preserve_subdivided_hit_conservation() {
+    let small = super::super::mount::DamageDelivery {
+        damage_hull: 1.0,
+        damage_shields: 1.0,
+        shield_pierce: 0.0,
+    };
+    let mut split = ShieldSystem::new(&ShieldConfig::default());
+    split.facings[0].protection_fraction = 0.25;
+    let hull: f32 = (0..20)
+        .map(|_| split.apply_delivery(small, 0.0, true).hull_damage)
+        .sum();
+    assert_eq!(hull, 15.0);
+    assert_eq!(split.facings[0].hp, 95);
+    assert_eq!(split.facings[0].interception_remainder, 0.0);
+    let piercing = super::super::mount::DamageDelivery {
+        damage_hull: 100.0,
+        damage_shields: 16.0,
+        shield_pierce: 1.0,
+    };
+    assert_eq!(split.apply_delivery(piercing, 0.0, true).hull_damage, 79.0);
+    assert_eq!(split.facings[0].hp, 95);
+}
+
+#[test]
+fn guided_delivery_preserves_zero_strength_recovery_grace() {
+    let delivery = super::super::mount::DamageDelivery {
+        damage_hull: 100.0,
+        damage_shields: 16.0,
+        shield_pierce: 0.25,
+    };
+    let mut shields = ShieldSystem::new(&ShieldConfig::default());
+    shields.facings[0].hp = 0;
+    assert_eq!(
+        shields.apply_delivery(delivery, 0.0, false).hull_damage,
+        100.0
+    );
+    assert_eq!(shields.facings[0].offline_remaining, 0.0);
+    assert_eq!(
+        shields.apply_delivery(delivery, 0.0, true).hull_damage,
+        16.0
+    );
+    assert!(shields.facings[0].offline_remaining > 0.0);
+}
+
+#[test]
+fn partial_upkeep_splits_interception_without_destroying_stored_strength() {
+    let mut facing = ShieldFacing::new("fore", 100, 2.0, 10.0);
+    facing.protection_fraction = 0.25;
+    assert_eq!(facing.apply_damage(20), 15);
+    assert_eq!(facing.hp, 95);
+    facing.protection_fraction = 0.0;
+    assert_eq!(facing.apply_damage(20), 20);
+    assert_eq!(facing.hp, 95);
+    facing.protection_fraction = 1.0;
+    assert_eq!(facing.apply_damage(20), 0);
+    assert_eq!(facing.hp, 75);
+}
+
+#[test]
+fn subdivided_hits_preserve_fractional_interception_through_resume() {
+    let mut split = ShieldSystem::new(&ShieldConfig::default());
+    split.facings[0].protection_fraction = 0.25;
+    let first: i32 = (0..3).map(|_| split.facings[0].apply_damage(1)).sum();
+    let operations = split.capture_operations();
+    let mut resumed = ShieldSystem::new(&ShieldConfig::default());
+    resumed.facings[0].hp = split.facings[0].hp;
+    resumed.restore_operations(&operations).unwrap();
+    let rest: i32 = (0..17).map(|_| resumed.facings[0].apply_damage(1)).sum();
+    let mut whole = ShieldFacing::new("fore", 100, 2.0, 10.0);
+    whole.protection_fraction = 0.25;
+    assert_eq!(first + rest, whole.apply_damage(20));
+    assert_eq!(resumed.facings[0].hp, whole.hp);
+    assert_eq!(resumed.facings[0].interception_remainder, 0.0);
+}
+
+#[test]
+fn lowered_and_voluntarily_empty_arcs_preserve_intent_without_impact_collapse() {
+    let mut facing = ShieldFacing::new("fore", 100, 2.0, 10.0);
+    facing.raised = false;
+    assert_eq!(facing.apply_damage(5), 5);
+    assert_eq!(facing.hp, 100);
+    facing.discharge_strength(99.75).unwrap();
+    assert_eq!(facing.stored_strength(), 0.25);
+    facing.discharge_strength(0.25).unwrap();
+    assert_eq!(facing.hp, 0);
+    assert_eq!(facing.offline_remaining, 0.0);
+    assert!(!facing.raised);
+    assert!(facing.discharge_strength(1.0).is_err());
+}
+
+#[test]
+fn malformed_shield_operation_restore_refuses_without_partial_mutation() {
+    let mut shields = ShieldSystem::new(&ShieldConfig::default());
+    let original = shields.capture_operations();
+    let mut saved = original.clone();
+    saved[0].raised = false;
+    saved[1].interception_remainder = f64::NAN;
+    assert!(shields.restore_operations(&saved).is_err());
+    assert_eq!(shields.capture_operations(), original);
+    saved = original.clone();
+    saved[0].recovery_target = Some(crate::core::messages::SystemId("other-ship".into()));
+    assert!(shields.restore_operations(&saved).is_err());
+    assert_eq!(shields.capture_operations(), original);
+}
+
+#[test]
 fn independent_regen_grants_do_not_pool_facing_energy() {
     let mut shields = ShieldSystem::new(&ShieldConfig {
         num_facings: 2,
@@ -618,6 +748,7 @@ fn from_arcs_builds_one_facing_per_input() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
         ArcRuntimeConfig {
             id: "port".into(),
@@ -628,6 +759,7 @@ fn from_arcs_builds_one_facing_per_input() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
     ];
     let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -650,6 +782,7 @@ fn from_arcs_per_arc_overrides_take_precedence() {
         regen_per_sec: Some(0.5),
         offline_duration: Some(3.0),
         priority: 1,
+        energy: Default::default(),
     }];
     let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
     assert_eq!(s.facings[0].max_hp, 50);
@@ -679,6 +812,7 @@ fn from_arcs_per_arc_overrides_preserved_across_focus_recalc() {
             regen_per_sec: Some(4.0),
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
         ArcRuntimeConfig {
             id: "aft".into(),
@@ -689,6 +823,7 @@ fn from_arcs_per_arc_overrides_preserved_across_focus_recalc() {
             regen_per_sec: Some(1.0),
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
     ];
     let mut s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -760,6 +895,7 @@ fn from_arcs_ship_wide_defaults_fill_in_when_arc_omits_field() {
         regen_per_sec: None,
         offline_duration: None,
         priority: 1,
+        energy: Default::default(),
     }];
     let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
     assert_eq!(s.facings[0].max_hp, 100);
@@ -784,6 +920,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
         // Narrow port + starboard.
         ArcRuntimeConfig {
@@ -795,6 +932,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
         ArcRuntimeConfig {
             id: "starboard".into(),
@@ -805,6 +943,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
     ];
     let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
@@ -839,6 +978,7 @@ fn from_arcs_snapshot_carries_id_and_geometry() {
         regen_per_sec: None,
         offline_duration: None,
         priority: 1,
+        energy: Default::default(),
     }];
     let s = ShieldSystem::from_arcs(&arcs, &ship_wide());
     let snap = &s.snapshot()[0];
@@ -868,6 +1008,7 @@ fn two_priority_arcs(priority_arc_offline: bool) -> ShieldSystem {
                 regen_per_sec: None,
                 offline_duration: Some(999.0),
                 priority: 2,
+                energy: Default::default(),
             },
             ArcRuntimeConfig {
                 id: "lo".into(),
@@ -878,6 +1019,7 @@ fn two_priority_arcs(priority_arc_offline: bool) -> ShieldSystem {
                 regen_per_sec: None,
                 offline_duration: Some(999.0),
                 priority: 1,
+                energy: Default::default(),
             },
         ],
         &wide,
@@ -935,6 +1077,7 @@ fn snapshot_carries_priority() {
             regen_per_sec: None,
             offline_duration: None,
             priority: 5,
+            energy: Default::default(),
         }],
         &wide,
     );
@@ -964,6 +1107,43 @@ fn focused_arc_gets_configured_damage_multiplier() {
         (s.facings[0].damage_multiplier - 0.7).abs() < 1e-6,
         "focused arc should get damage reduction"
     );
+}
+
+#[test]
+fn saved_charge_preflight_rejects_nonphysical_or_duplicate_arcs() {
+    let shield = ShieldSystem::default();
+    let rows: Vec<_> = shield
+        .facings
+        .iter()
+        .map(|facing| {
+            (
+                facing.id.clone(),
+                facing.hp,
+                facing.hp_frac(),
+                facing.offline_remaining,
+                facing.is_focused,
+            )
+        })
+        .collect();
+    assert!(shield.validate_facings(&rows).is_ok());
+    let mut invalid = rows.clone();
+    invalid[0].2 = f32::NAN;
+    assert!(shield.validate_facings(&invalid).is_err());
+    invalid[0].2 = -1.0;
+    assert!(shield.validate_facings(&invalid).is_err());
+    invalid = rows.clone();
+    invalid[0].1 = i32::MAX;
+    assert!(shield.validate_facings(&invalid).is_err());
+    invalid = rows.clone();
+    invalid[0].0 = invalid[1].0.clone();
+    assert!(shield.validate_facings(&invalid).is_err());
+    invalid = rows.clone();
+    invalid[0].4 = true;
+    invalid[1].4 = true;
+    assert!(shield.validate_facings(&invalid).is_err());
+    invalid = rows;
+    invalid[0].3 = -0.5;
+    assert!(shield.validate_facings(&invalid).is_err());
 }
 
 #[test]
@@ -1042,6 +1222,7 @@ fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
             regen_per_sec: Some(4.0),
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
         ArcRuntimeConfig {
             id: "aft".into(),
@@ -1052,6 +1233,7 @@ fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
             regen_per_sec: Some(1.0),
             offline_duration: None,
             priority: 1,
+            energy: Default::default(),
         },
     ];
     let mut s = ShieldSystem::from_arcs(&arcs, &ship_wide());

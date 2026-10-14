@@ -53,8 +53,23 @@ pub(super) fn install(
         insert_ai_policies(config, cmds);
         insert_power_multipliers_and_modifiers(config, build_power_multipliers(config), cmds);
         insert_ship_markers_and_trackers(cmds);
+    } else if config.energy.is_some() {
+        // Physical equipment keeps the same System/Console ownership and energy
+        // owner on a static entity. This adds neither crew seats nor ship AI.
+        let seed = ShipSpawnSeed::backfill(config);
+        cmds.insert((
+            seed.ship_config,
+            seed.control_sources,
+            seed.active_ratings,
+            crate::server_app::ShipSystemBlackboards::default(),
+            crate::core::messages::AdmittedCommands::default(),
+            crate::ship_plugin::CoordinationQueue::default(),
+            crate::ship::shields::ShieldsDamageHistory::default(),
+        ));
+        insert_power_state(config, &[], cmds);
     }
     // These capabilities also belong to independently authored nonship entities.
+    insert_shield_tuning(config, cmds);
     install_weapons(config, cmds);
     install_torpedoes(config, cmds);
     install_blasters(config, cmds);
@@ -388,36 +403,6 @@ fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
     if let Some(cadence) = comms_response_cadence {
         cmds.insert(cadence);
     }
-    // Per-ship tuning is independent of whether shield equipment is present.
-    cmds.insert(
-        config
-            .shields_console
-            .as_ref()
-            .and_then(|sc| sc.ai.as_ref())
-            .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
-                damage_window_secs: ai.damage_window_secs,
-                min_damage_window_secs: ai.min_damage_window_secs,
-                damage_pct_threshold: ai.damage_pct_threshold,
-                health_ratio_threshold: ai.health_ratio_threshold,
-                ..Default::default()
-            })
-            .unwrap_or_default(),
-    );
-    // Shields focus AI policy (issue #783) — the inline stateless
-    // `shield_focus` policy from the authored `[shields_console.ai_policy]`
-    // block, so `ai_shield_focus` resolves a data-authored gate + reads the
-    // authored windows/thresholds from the policy `param` map rather than the
-    // retired `ai_cfg.*` reads. `to_policy` cannot fail here: the block was
-    // validated in `EntityConfig::from_toml`.
-    if let Some(ai) = config
-        .shields_console
-        .as_ref()
-        .and_then(|sc| sc.ai_policy.as_ref())
-    {
-        cmds.insert(crate::ship::shields::ShieldsFocusAiPolicy(
-            ai.to_policy().unwrap_or_default(),
-        ));
-    }
     // Captain AI policy (issue #775) — the inline stateless Red Alert
     // policy from the authored `[captain_console.ai]` block, so
     // `operate_captain_ai` reads a data-authored policy rather than a
@@ -457,6 +442,28 @@ fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
         }
         cmds.insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
     }
+}
+
+/// Damage observation and ranking tuning belongs to the equipped entity,
+/// independently of whether it has mobile ship behaviour.
+fn insert_shield_tuning(config: &EntityConfig, cmds: &mut EntityCommands) {
+    if config.shield_arcs.is_empty() {
+        return;
+    }
+    cmds.insert(
+        config
+            .shields_console
+            .as_ref()
+            .and_then(|console| console.ai.as_ref())
+            .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
+                damage_window_secs: ai.damage_window_secs,
+                min_damage_window_secs: ai.min_damage_window_secs,
+                damage_pct_threshold: ai.damage_pct_threshold,
+                health_ratio_threshold: ai.health_ratio_threshold,
+                ..Default::default()
+            })
+            .unwrap_or_default(),
+    );
 }
 
 /// Inserts the [`PowerMultiplierResource`] built by [`build_power_multipliers`],
@@ -757,6 +764,9 @@ fn install_shields(config: &EntityConfig, cmds: &mut EntityCommands) {
             .map(|a| a.frequency)
             .unwrap_or(sc.frequency);
         let mut shields = crate::ship::shields::ShipShields(shield_system, freq);
+        for facing in &mut shields.0.facings {
+            facing.protection_fraction = 0.0;
+        }
         shields.0.focus_config = ShieldFocusConfig {
             bonus_max_hp: sc.focus_bonus_max_hp,
             bonus_regen: sc.focus_bonus_regen,
@@ -774,7 +784,10 @@ fn install_shields(config: &EntityConfig, cmds: &mut EntityCommands) {
         use crate::weapons::shield::ShieldSystem;
         let ship_wide = crate::weapons::shield::ShieldConfig::default();
         let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
-        let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
+        let mut shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
+        for facing in &mut shield_system.facings {
+            facing.protection_fraction = 0.0;
+        }
         let freq = config
             .shield_arcs
             .first()

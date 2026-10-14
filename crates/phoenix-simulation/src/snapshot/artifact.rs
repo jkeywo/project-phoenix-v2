@@ -422,7 +422,8 @@ use super::*;
 /// `41` — canonical repair jobs, team commitments and private workflow continuation.
 /// 42: canonical stocks, tube reservations and fractional resource-flow continuation.
 /// 43: local energy networks, thermal hysteresis, finite coolant credit and flow restoration.
-pub const SNAPSHOT_FORMAT: u32 = 43;
+/// 44: raised shield intent, battery recovery and partial-interception continuation.
+pub const SNAPSHOT_FORMAT: u32 = 44;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -502,7 +503,7 @@ pub const SNAPSHOT_FORMAT: u32 = 43;
 /// "0.11" — Dock runs one authored state-tree controller with persistent private memory.
 /// "0.12" — explicit repair report reduction and observation continuity.
 /// "0.13" — canonical repair assignments and restricted per-job workflows.
-pub const SIMULATION_RULES: &str = "0.15";
+pub const SIMULATION_RULES: &str = "0.16";
 
 /// The authored data, computed rather than remembered.
 ///

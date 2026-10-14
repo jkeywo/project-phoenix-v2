@@ -26,7 +26,10 @@ fn every_controller_family_has_exact_declaration_and_host_coverage() {
         .collect();
     let validated_policies: BTreeSet<_> = ai_flag_hosts::AI_HOSTS
         .iter()
-        .filter(|host| host.block != ai_flag_hosts::POWER_ALLOCATION.block)
+        .filter(|host| {
+            host.block != ai_flag_hosts::POWER_ALLOCATION.block
+                && host.block != ai_flag_hosts::SHIELDS_FOCUS.block
+        })
         .map(|host| host.block)
         .collect();
     assert_eq!(
@@ -39,10 +42,11 @@ fn every_controller_family_has_exact_declaration_and_host_coverage() {
         .collect();
     assert_eq!(
         trees.len(),
-        1,
+        2,
         "the Power policy family has migrated to an explicitly counted System tree"
     );
-    assert_eq!(trees[0].key, FineSystemKey::Power);
+    assert_eq!(trees[0].key, FineSystemKey::ShieldsFocus);
+    assert_eq!(trees[1].key, FineSystemKey::Power);
     assert_eq!(trees[0].component, "ShipAiTreePrograms");
     assert_eq!(trees[0].idle_lever, IdleLever::StateTree);
     assert_eq!(trees[0].host.flag_chain, ai_flag_hosts::FlagChain::Empty);
@@ -395,7 +399,6 @@ fn strict_mode_rejects_an_undeclared_policy_and_names_the_worklist() {
         // `FineSystemAiPolicies` map, so the strict-mode error names that
         // component for the lateral slot rather than a per-axis newtype.
         ("[helm_console.lateral_ai]", "FineSystemAiPolicies"),
-        ("[shields_console.ai_policy]", "ShieldsFocusAiPolicy"),
         ("[comms_console.ai]", "CommsResponseAiPolicy"),
     ] {
         assert!(
@@ -509,16 +512,18 @@ fn attached(w: &World, e: Entity, slot: &Slot) -> Option<Attached> {
                 .and_then(|c| c.0.get(&id).cloned())
                 .map(Attached::Policy)
         }
-        FineSystemKey::ShieldsFocus => w
-            .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
-            .map(|c| Attached::Policy(c.0.clone())),
-        FineSystemKey::Power => {
+        FineSystemKey::ShieldsFocus | FineSystemKey::Power => {
             let id = crate::core::messages::SystemId(slot.instance.as_ref()?.clone());
             let definition = w
                 .get::<crate::ship_plugin::ShipConfigComponent>(e)?
                 .0
                 .system(&id)?;
-            if definition.kind != crate::ship::system_registry::POWER_REACTOR_KIND {
+            let expected = if slot.kind.key == FineSystemKey::Power {
+                crate::ship::system_registry::POWER_REACTOR_KIND
+            } else {
+                crate::ship::system_registry::SHIELD_ARC_KIND
+            };
+            if definition.kind != expected {
                 return None;
             }
             w.get::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(e)?
@@ -609,10 +614,7 @@ fn attached_count(w: &World, e: Entity, key: FineSystemKey) -> usize {
             w.get::<crate::ship::helm_ai::FineSystemAiPolicies>(e)
                 .map_or(0, |c| usize::from(c.0.contains_key(&id)))
         }
-        FineSystemKey::ShieldsFocus => one(w
-            .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
-            .is_some()),
-        FineSystemKey::Power => {
+        FineSystemKey::ShieldsFocus | FineSystemKey::Power => {
             let Some(config) = w.get::<crate::ship_plugin::ShipConfigComponent>(e) else {
                 return 0;
             };
@@ -620,7 +622,14 @@ fn attached_count(w: &World, e: Entity, key: FineSystemKey) -> usize {
                 .0
                 .systems
                 .iter()
-                .filter(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
+                .filter(|system| {
+                    system.kind
+                        == if key == FineSystemKey::Power {
+                            crate::ship::system_registry::POWER_REACTOR_KIND
+                        } else {
+                            crate::ship::system_registry::SHIELD_ARC_KIND
+                        }
+                })
                 .filter(|system| {
                     w.get::<crate::ai::state_tree_runtime::ShipAiTreePrograms>(e)
                         .is_some_and(|programs| programs.0.contains_key(&system.id))

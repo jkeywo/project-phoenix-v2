@@ -900,11 +900,13 @@ fn build_system_status(
         Option<&crate::dock::server::DockControl>,
         Option<&crate::ship::power::ShipPowerSystem>,
         Option<&crate::dock::server::DockMarkers>,
+        Option<&crate::ship::shields::ShipShields>,
     ), With<LocalShip>>();
-    let Some((config, sources, hull, dock, power, markers)) = query.iter(world).next() else {
+    let Some((config, sources, hull, dock, power, markers, shields)) = query.iter(world).next()
+    else {
         return Default::default();
     };
-    let status = super::system_status::project(
+    let mut status = super::system_status::project(
         &config.0,
         hull.map(|h| &h.0),
         &sources.0,
@@ -912,6 +914,7 @@ fn build_system_status(
         power,
         markers,
     );
+    super::system_status::apply_shields(&mut status, shields);
     let owners = config
         .0
         .systems

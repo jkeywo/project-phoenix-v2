@@ -30,11 +30,13 @@ describe('Workshop energy form', () => {
   it('edits coolant and nested control groups; authoritative refusal leaves draft unchanged', async () => {
     const { current, runtime, panel } = fixture(); await settle();
     control('subject').value = 'group:propulsion'; control('subject').dispatchEvent(new Event('change'));
-    control('parent').value = 'reactor'; control('field-priority').value = '2'; control('apply').click(); await settle();
-    expect(parse(current.read(path)).energy.group.find(row => row.id === 'propulsion')).toMatchObject({ parent: 'reactor', priority: 2 });
+    control('parent').value = 'reactor'; control('field-priority').value = '2'; control('field-restore_delay_secs').value = '1.5'; control('apply').click(); await settle();
+    expect(parse(current.read(path)).energy.group.find(row => row.id === 'propulsion')).toMatchObject({ parent: 'reactor', priority: 2, restore_delay_secs: 1.5 });
     control('subject').value = 'reactor:'; control('subject').dispatchEvent(new Event('change'));
     control('endpoint-kind').value = 'capacity'; control('endpoint-kind').dispatchEvent(new Event('change')); control('endpoint').value = 'tank';
+    control('field-max_cooling_per_sec').value = '6'; control('field-default_cooling_per_sec').value = '2';
     control('apply').click(); await settle(); expect(parse(current.read(path)).energy.reactor.coolant).toEqual({ provider: { kind: 'capacity', id: 'tank' } });
+    expect(parse(current.read(path)).energy.reactor).toMatchObject({ max_cooling_per_sec: 6, default_cooling_per_sec: 2 });
     const before = current.read(path); runtime.validate.mockResolvedValueOnce({ accepted: false, findings: [{ message: 'initial energy exceeds capacity' }] });
     control('field-initial_energy').value = '999'; control('apply').click(); await settle(); expect(current.read(path)).toBe(before);
     expect(control('status').textContent).toContain('initial energy exceeds capacity'); panel.dispose();

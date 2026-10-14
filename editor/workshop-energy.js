@@ -4,9 +4,9 @@ import { acceptWorkshopChanges } from './workshop-acceptance.js';
 
 export const ENERGY_RESERVE_FIELDS = Object.freeze(['capacity', 'max_intake_per_sec', 'passive_loss_at_full_per_sec',
   'charge_heat_per_unit', 'discharge_heat_per_unit', 'passive_cooling_per_sec', 'coolant_heat_per_unit', 'trip_heat', 'recover_heat']);
-export const ENERGY_REACTOR_FIELDS = Object.freeze(['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'initial_output_per_sec', 'initial_energy', 'initial_heat']);
+export const ENERGY_REACTOR_FIELDS = Object.freeze(['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'initial_output_per_sec', 'initial_energy', 'initial_heat', 'max_cooling_per_sec', 'default_cooling_per_sec']);
 export const ENERGY_CONSUMER_FIELDS = Object.freeze(['initial_energy', 'initial_heat', 'continuous_cost_per_sec', 'discrete_cost']);
-export const ENERGY_GROUP_FIELDS = Object.freeze(['max_flow_per_sec', 'default_flow_per_sec', 'max_cooling_per_sec', 'default_cooling_per_sec', 'priority']);
+export const ENERGY_GROUP_FIELDS = Object.freeze(['max_flow_per_sec', 'default_flow_per_sec', 'max_cooling_per_sec', 'default_cooling_per_sec', 'priority', 'restore_delay_secs']);
 const clone = value => structuredClone(value);
 export const energyAliases = kind => ['power', 'power_reactor', 'power_battery'].includes(kind);
 const reserve = () => ({ capacity: 100, max_intake_per_sec: 20, passive_loss_at_full_per_sec: 1, charge_heat_per_unit: 0.1,
@@ -14,10 +14,10 @@ const reserve = () => ({ capacity: 100, max_intake_per_sec: 20, passive_loss_at_
 export const defaultEnergyConsumer = system => ({ system, initial_energy: 50, initial_heat: 0, continuous_cost_per_sec: 1,
   discrete_cost: 1, reserve: reserve(), coolant: { service: 'coolant' } });
 export const defaultEnergyGroup = id => ({ id, max_flow_per_sec: 20, default_flow_per_sec: 10,
-  max_cooling_per_sec: 5, default_cooling_per_sec: 1, priority: 0 });
+  max_cooling_per_sec: 5, default_cooling_per_sec: 1, priority: 0, restore_delay_secs: 0.5 });
 export function createEnergyModel(value) {
   return { reactor: { sustainable_output_per_sec: 100, max_output_per_sec: 200, ramp_per_sec: 20, initial_output_per_sec: 100,
-    initial_energy: 50, initial_heat: 0, reserve: reserve(), coolant: { service: 'coolant' } },
+    initial_energy: 50, initial_heat: 0, max_cooling_per_sec: 5, default_cooling_per_sec: 1, reserve: reserve(), coolant: { service: 'coolant' } },
   consumer: (value.system || []).filter(system => system.power_group && !energyAliases(system.kind)).map(system => defaultEnergyConsumer(system.id)),
   group: Object.keys(value.power_groups || {}).sort().map(defaultEnergyGroup) };
 }

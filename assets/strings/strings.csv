@@ -4908,6 +4908,7 @@ workshop.energy.field.continuous_cost_per_sec,Workshop local energy authoring,Co
 workshop.energy.field.discrete_cost,Workshop local energy authoring,Discrete action cost,Kosten einer Einzelaktion,Discrete action cost,machine
 workshop.energy.field.max_flow_per_sec,Workshop local energy authoring,Maximum group flow per second,Maximaler Gruppenzufluss pro Sekunde,Maximum group flow per second,machine
 workshop.energy.field.default_flow_per_sec,Workshop local energy authoring,Initial group flow per second,Anfänglicher Gruppenzufluss pro Sekunde,Initial group flow per second,machine
-workshop.energy.field.max_cooling_per_sec,Workshop local energy authoring,Maximum group cooling per second,Maximale Gruppenkühlung pro Sekunde,Maximum group cooling per second,machine
-workshop.energy.field.default_cooling_per_sec,Workshop local energy authoring,Initial group cooling per second,Anfängliche Gruppenkühlung pro Sekunde,Initial group cooling per second,machine
+workshop.energy.field.max_cooling_per_sec,Workshop local energy authoring,Maximum cooling per second,Maximale Kühlung pro Sekunde,Maximum cooling per second,machine
+workshop.energy.field.default_cooling_per_sec,Workshop local energy authoring,Initial cooling per second,Anfängliche Kühlung pro Sekunde,Initial cooling per second,machine
 workshop.energy.field.priority,Workshop local energy authoring,Group priority (lower first),Gruppenpriorität (niedrigere zuerst),Group priority (lower first),machine
+workshop.energy.field.restore_delay_secs,Workshop local energy authoring,Flow restoration feasibility delay (seconds),Verzögerung für möglichen Zuflusswiederanlauf (Sekunden),Flow restoration feasibility delay (seconds),machine

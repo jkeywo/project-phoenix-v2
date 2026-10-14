@@ -26,6 +26,8 @@ pub struct EnergyReactorConfig {
     pub initial_output_per_sec: f32,
     pub initial_energy: f32,
     pub initial_heat: f32,
+    pub max_cooling_per_sec: f32,
+    pub default_cooling_per_sec: f32,
     pub reserve: EnergyConfig,
     #[serde(default = "default_coolant_link")]
     pub coolant: ResourceLink,
@@ -55,6 +57,7 @@ pub struct EnergyGroupConfig {
     pub max_cooling_per_sec: f32,
     pub default_cooling_per_sec: f32,
     pub priority: u16,
+    pub restore_delay_secs: f32,
 }
 
 fn default_coolant_link() -> ResourceLink {
@@ -136,6 +139,8 @@ impl EnergyConfigSection {
             ("max_output_per_sec", reactor.max_output_per_sec),
             ("ramp_per_sec", reactor.ramp_per_sec),
             ("initial_output_per_sec", reactor.initial_output_per_sec),
+            ("max_cooling_per_sec", reactor.max_cooling_per_sec),
+            ("default_cooling_per_sec", reactor.default_cooling_per_sec),
         ] {
             finite_nonnegative("energy.reactor", field, value)?;
         }
@@ -143,8 +148,9 @@ impl EnergyConfigSection {
             || reactor.max_output_per_sec < reactor.sustainable_output_per_sec
             || reactor.initial_output_per_sec > reactor.max_output_per_sec
             || reactor.ramp_per_sec <= 0.0
+            || reactor.default_cooling_per_sec > reactor.max_cooling_per_sec
         {
-            return Err("energy.reactor requires positive sustainable output/ramp, sustainable <= maximum and initial output <= maximum".into());
+            return Err("energy.reactor requires positive sustainable output/ramp, sustainable <= maximum, initial output <= maximum and initial cooling <= maximum".into());
         }
         coolant_link("energy.reactor", &reactor.coolant, services, capacities)?;
         let groups: BTreeMap<_, _> = self.groups.iter().map(|group| (&group.id, group)).collect();
@@ -161,6 +167,7 @@ impl EnergyConfigSection {
                 ("default_flow_per_sec", group.default_flow_per_sec),
                 ("max_cooling_per_sec", group.max_cooling_per_sec),
                 ("default_cooling_per_sec", group.default_cooling_per_sec),
+                ("restore_delay_secs", group.restore_delay_secs),
             ] {
                 finite_nonnegative(&owner, field, value)?;
             }
@@ -230,6 +237,11 @@ impl EnergyConfigSection {
                 consumer.continuous_cost_per_sec,
             )?;
             finite_nonnegative(&owner, "discrete_cost", consumer.discrete_cost)?;
+            if consumer.discrete_cost > consumer.reserve.capacity {
+                return Err(format!(
+                    "{owner}.discrete_cost exceeds reserve capacity and can never be afforded"
+                ));
+            }
             coolant_link(&owner, &consumer.coolant, services, capacities)?;
         }
         for system in &ship.systems {
@@ -305,6 +317,8 @@ mod tests {
                 initial_output_per_sec: 20.0,
                 initial_energy: 80.0,
                 initial_heat: 0.0,
+                max_cooling_per_sec: 5.0,
+                default_cooling_per_sec: 1.0,
                 reserve: reserve(),
                 coolant: default_coolant_link(),
             },
@@ -325,6 +339,7 @@ mod tests {
                 max_cooling_per_sec: 5.0,
                 default_cooling_per_sec: 1.0,
                 priority: 0,
+                restore_delay_secs: 0.5,
             }],
         };
         (
@@ -466,5 +481,32 @@ mod tests {
         for field in ["power_multipliers = [1.0, 2.0]\n", "capacity = 99.0\n"] {
             assert!(toml::from_str::<EnergyConfigSection>(&format!("{field}{source}")).is_err());
         }
+    }
+    #[test]
+    fn rejects_unaffordable_actions_invalid_restoration_delay_and_excess_reactor_cooling() {
+        let (mut energy, ship, services, capacities) = fixture();
+        energy.consumers[0].discrete_cost = energy.consumers[0].reserve.capacity + 1.0;
+        assert!(
+            energy
+                .validate(&ship, &services, &capacities)
+                .unwrap_err()
+                .contains("can never be afforded")
+        );
+        energy.consumers[0].discrete_cost = 1.0;
+        energy.groups[0].restore_delay_secs = f32::INFINITY;
+        assert!(
+            energy
+                .validate(&ship, &services, &capacities)
+                .unwrap_err()
+                .contains("finite")
+        );
+        energy.groups[0].restore_delay_secs = 0.5;
+        energy.reactor.default_cooling_per_sec = energy.reactor.max_cooling_per_sec + 1.0;
+        assert!(
+            energy
+                .validate(&ship, &services, &capacities)
+                .unwrap_err()
+                .contains("cooling")
+        );
     }
 }

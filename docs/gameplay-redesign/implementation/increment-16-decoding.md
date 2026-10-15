@@ -14,13 +14,14 @@ terrain, field, jamming and receiver-protection path function as normal radio.
 Ignore final audience and key compatibility for this measurement only. Do not
 search historical messages that were never physically emitted during reception.
 
-The first consumer measures the original emitter only. Relay-hop interception
-requires a later explicit emitted-hop consumer; the private selected route does
-not create a remotely observable emitter. Original one-shot emissions are
-eligible on their actual emission tick. Existing sustained requests/outcomes are
-eligible only while their ordinary continuously paid delivery service actually
-runs. Synthetic plot/internal messages have no physical emitter and cannot be
-captured. Retain at most one capture per actual original emission and listener.
+The first consumer measures original actual emission events only, on their paid
+emission tick. Existing source records stamp emitted_tick only after successful
+actual payment and canonical source-copy creation. A retained archive or paid
+carrier does not rebroadcast historical traffic. Retried/hop interception requires
+an explicit real retransmission event in its existing owner; the private selected
+route or final-recipient deduplication does not create a remotely observable
+emitter. Synthetic plot/internal messages cannot be captured. Retain at most one
+capture per actual original emission and listener.
 
 Capture supported text and immutable typed text/request/outcome content only.
 Human audio/video bytes, device recordings and media history are excluded. A
@@ -52,8 +53,11 @@ ticks per level and optional positive held-key decode ticks. A genuinely held
 matching key permits that authored cheaper/higher-level route only when installed
 equipment supports it; otherwise levels above the ceiling remain unavailable.
 Supported lower levels need paid work rather than possession of a secret key.
-Held keys come only from actual own accepted equipment/content evidence, never
-from inspecting an enemy profile. Key acquisition remains separately authored.
+This first slice uses the owning RadioProfile's immutable accepted equipment
+keys only, never an enemy profile. It has no runtime key acquisition/revocation.
+Future changing-key content must adopt its actual provenance/history consumer
+and preserve completed decoding when a later key expires; replacing accepted
+equipment/content is not a silent live key change or a save-conversion bypass.
 Changing a key cannot recover a transmission that was never captured.
 
 Human Comms selects one captured handle or pauses through ordinary System
@@ -67,12 +71,12 @@ Decode consumes additional actual continuous Comms work. Advance a bounded
 integer work frontier from the actual paid fraction, once per fixed interval;
 unavailable/damaged/unfunded operation pauses it. Round partial grant downward,
 with positive full-payment progress, and retain original start/completion clocks.
-Taking a supported key midway may shorten remaining work only after a paid tick.
 Unprotected intercepted text is immediately readable after actual capture;
 protected traffic never becomes plaintext from elapsed wall time alone.
 
-The capture history has a documented technical row bound, deterministic oldest
-retirement and no message-capacity stock, quotas, traffic budget or replenishment.
+The capture history has a technical 256-row bound and deterministic oldest-
+emission retirement with a private monotonic retirement watermark. It has no
+message-capacity stock, quotas, traffic budget or replenishment.
 Retiring the selected row clears only that work selection. This is an operational
 memory bound, never a scenario economy or congestion game.
 

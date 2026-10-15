@@ -210,15 +210,46 @@ fn missing_actual_source_never_offers_control_or_changes_retained_intent() {
 
 #[test]
 fn priority_choices_use_the_actual_own_equipment_display_label() {
-    let (world, entity) = super::super::tests::fixture();
+    // Projection-only legacy metadata fixture: the actual physical Alliance
+    // fixture has ShipDamage and intentionally does not install this wrapper.
+    // Keep one hull owner here; no duplicate physical HP pool or work is added.
+    let config = super::super::tests::config().ship_config.unwrap();
+    let state = ShipSignalProtection::from_ship(&config).unwrap();
+    let binding =
+        protection_composition(&config.system(&id("signal-protection")).unwrap().components)
+            .unwrap();
+    let hull = crate::ship::damage::SystemHull::from_config_with_display_names(
+        binding
+            .config
+            .systems
+            .keys()
+            .map(|id| {
+                (
+                    id.clone(),
+                    format!("observed-own-label/{}", id.0),
+                    100.0,
+                    crate::ship::damage::ConsoleTierConfig::default(),
+                )
+            })
+            .collect(),
+    );
+    let mut world = World::new();
+    let entity = world
+        .spawn((
+            ShipConfigComponent(config),
+            state,
+            crate::entities::spawner::EntitySystemHull(hull),
+        ))
+        .id();
     let view = project(&world, entity, &id("signal-protection")).unwrap();
     let hull = world
-        .get::<crate::ship::damage::SystemHull>(entity)
+        .get::<crate::entities::spawner::EntitySystemHull>(entity)
         .unwrap();
+    assert!(!view.systems.is_empty());
     for choice in view.systems {
         assert_eq!(
             choice.display_name,
-            hull.get(&choice.system).unwrap().display_name
+            hull.0.get(&choice.system).unwrap().display_name
         );
     }
 }

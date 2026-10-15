@@ -154,8 +154,8 @@ pub(crate) fn project(
                     phoenix_model::protection_ui::ProtectionSystemOption {
                         system: id.clone(),
                         display_name: world
-                            .get::<crate::ship::damage::SystemHull>(entity)
-                            .and_then(|hull| hull.get(id))
+                            .get::<crate::entities::spawner::EntitySystemHull>(entity)
+                            .and_then(|hull| hull.0.get(id))
                             .map_or_else(|| id.0.clone(), |entry| entry.display_name.clone()),
                         cost: *cost,
                         home_station: config.0.system_home_station(system).cloned(),

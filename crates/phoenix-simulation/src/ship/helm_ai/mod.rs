@@ -417,8 +417,9 @@ pub(crate) fn ai_policy_state_tick(
             // This ship's OWN tubes and rounds in flight (issue #791). Read-only,
             // and unlike the shields above this one DOES carry an ordering
             // question — `handle_fire_torpedo` appends to `in_flight` and
-            // `tick_torpedo_lifecycle` removes from it, both in `SimSet::Physics`
-            // — so `ship_plugin` pins this system after both of them.
+            // `advance_torpedo_flights` advances it in `SimSet::Physics`.
+            // `ship_plugin` pins this system after both; Damage settles terminal
+            // removals afterward, visible here on the next tick.
             Option<&crate::console::weapons::TorpedoSystemResource>,
             // This ship's OWN blaster banks (issue #792), read for their authored
             // `range`/`projectile_speed` alone. Bank CONFIG never changes at

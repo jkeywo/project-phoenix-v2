@@ -922,6 +922,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         torpedoes_schema,
         crate::entities::config::TorpedoesConfig,
         durability,
+        seeker,
+        receiver,
         count,
         initial_count,
         damage_hull,

@@ -84,6 +84,7 @@ fn incoming() -> super::super::TorpedoSystemResource {
             collision_interval_secs: None,
             lifespan_remaining: profile.lifespan,
             target_uuid: None,
+            last_guidance: None,
             source_uuid: Some("remote-launcher".into()),
             tube_id: "remote".into(),
         });

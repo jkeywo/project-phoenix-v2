@@ -155,7 +155,7 @@ impl Plugin for ConsoleAiPlugin {
                 // it emits has to be consumed in the SAME tick, exactly as
                 // `operate_captain_ai` is ordered before
                 // `handle_set_red_alert`. That also puts `target_count` in
-                // place before `tick_torpedo_lifecycle` (Physics) runs its
+                // place before `advance_torpedo_flights` (Physics) runs its
                 // auto-load block, so a tube starts loading the tick the order
                 // is given rather than the tick after.
                 //

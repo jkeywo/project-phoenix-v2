@@ -1406,6 +1406,8 @@ pub fn operate_repair_ai(
             // held abroad against a designated target, and so unavailable to the
             // hull's own damage-control sweep (AGENTS.md rule 6).
             Option<&super::external_server::ExternalRepairDispatch>,
+            Option<&crate::resources::fitting_server::CompiledShipFitting>,
+            Option<&crate::resources::fitting_server::ShipFitting>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -1423,6 +1425,8 @@ pub fn operate_repair_ai(
         red_alert_comp,
         physical,
         _external_dispatch,
+        fitting_profile,
+        fitting,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -1436,6 +1440,45 @@ pub fn operate_repair_ai(
             .operate_ai
         {
             continue;
+        }
+        // Fitting is another request handled by Repair's sole ordinary
+        // controller. Outstanding damage reports take priority. A permitted
+        // fitting request grants no control over its target machinery.
+        if let (Some(profile), Some(fitting), Some(teams), Some(queue), Some(config)) = (
+            fitting_profile,
+            fitting,
+            teams_comp,
+            repair_queue_comp,
+            config_comp,
+        ) {
+            if queue.is_empty() {
+                let pending = crate::resources::fitting_server::pending_requests(
+                    profile,
+                    fitting,
+                    &config.0,
+                    &repair_system_id(),
+                );
+                // Both lists are deterministic and each free team is consumed
+                // locally once. The admitted applier owns all actual writes.
+                let mut dispatched = false;
+                for (team, slot) in teams.0.free_team_indices(None).into_iter().zip(pending) {
+                    dispatched |= emit_ai_command(
+                        entity_uuid,
+                        repair_system_id(),
+                        crate::core::messages::SystemControlPayload::DispatchRefit {
+                            team_idx: team as u32,
+                            slot,
+                        },
+                        sources,
+                        &sessions,
+                        Some(config),
+                        &mut admitted,
+                    );
+                }
+                if dispatched {
+                    continue;
+                }
+            }
         }
         if let Some(damage) = physical {
             if let (Some(teams), Some(queue), Some(config), Some(selector)) =

@@ -635,3 +635,31 @@ consumer, prove advisory Human high-work operation, ordinary authored AI respons
 and urgency context, Console isolation, actual signature consequences, authoring
 and complete fresh-JSON continuation/no-write checks. No S027 runtime is claimed
 by this contract; the actual concealment host proof has priority first.
+
+
+### Adopted S027 composition and public boundary
+
+The first consumer authors an optional closed `emission_profile` block inside
+the existing actual Command System's `config`. It selects the initial Normal or
+LowEmission intent and a finite positive advisory rate threshold. Exactly one
+Command System may provide this capability on a hull; its actual System and
+Console identities remain the admission and knowledge owners. This adds no
+Entity-level owner or second Command controller.
+
+The Command publication carries the selected intent only. Existing per-System
+details derive their own current paid work rate, or actual generated output for
+the reactor, and its shared signature cause. A warning is visible only when
+that System has an explicit permitted Command publication with LowEmission
+selected and its actual rate exceeds the authored advisory threshold. The
+Command screen receives no automatic machinery census. The measurements are
+derived at the ordinary publication phase from the current completed work
+interval, never from desired allocations or retained previous-frame work.
+
+The first policy demonstration uses an optional transponder fit: its one
+ordinary state tree reads the permitted profile and existing alert context,
+quietens under LowEmission during normal operation, and may emit under high
+alert. An absent profile/feed cannot invent the quiet intent. Human transponder
+and reactor controls remain ordinary usable controls throughout. The authoring
+validator, Workshop transaction, runtime and continuation guards all use this
+same actual System binding. Central messages, registration, status mounts and
+snapshot/digest hooks remain integration-owned; a leaf alone closes no S027 exit.

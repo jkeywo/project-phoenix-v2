@@ -304,6 +304,7 @@ fn human_intrusive_question_resumes_under_ordinary_ai_and_its_real_receiver_driv
     );
     let mut detected = heard_scan(&live, receiver);
     let mut same_request_during_work = false;
+    let mut ordinary_ai_asked_after_completion = false;
     release(&mut live);
     let work = records(&live, observer)
         .focused
@@ -369,6 +370,26 @@ fn human_intrusive_question_resumes_under_ordinary_ai_and_its_real_receiver_driv
             serde_json::to_value(capture(resumed.world())).unwrap(),
             "complete continuation {step}"
         );
+        let completed = records(&live, observer)
+            .history
+            .iter()
+            .any(|reading| reading.intrusive && reading.aim == FocusedAim::Resources);
+        ordinary_ai_asked_after_completion |= completed
+            && live
+                .world()
+                .get::<project_phoenix::core::messages::AdmittedCommands>(observer)
+                .unwrap()
+                .for_target("sensors")
+                .any(|command| {
+                    matches!(
+                        &command.payload,
+                        Control::ScanTarget {
+                            aim: FocusedAim::General,
+                            intrusive: false,
+                            ..
+                        }
+                    )
+                });
         detected |= heard_scan(&live, receiver);
         same_request_during_work |= matching_mission_request(&live, observer);
         if let Some(work) = records(&live, observer).focused.as_ref().filter(|_| {
@@ -383,6 +404,8 @@ fn human_intrusive_question_resumes_under_ordinary_ai_and_its_real_receiver_driv
         live.update();
         resumed.update();
     }
+    assert!(ordinary_ai_asked_after_completion,
+        "ordinary bound AI still admits the pending default request once the human's work completes");
     assert!(
         same_request_during_work,
         "an actually observed matching mission request must exercise the bound AI handoff"

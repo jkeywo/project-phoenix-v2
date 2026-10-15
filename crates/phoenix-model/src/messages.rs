@@ -47,7 +47,8 @@ use uuid::Uuid;
 /// Revision 31 carries own physical concealment controls and current equipment status.
 /// Revision 32 carries own optional-work offer context and inspected opportunity history.
 /// Revision 33 carries finite carried-personnel destinations and escort controls.
-pub const PROTOCOL_VERSION: u32 = 33;
+/// Revision 34 binds officer dispatch to the destination request actually shown.
+pub const PROTOCOL_VERSION: u32 = 34;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

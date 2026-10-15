@@ -618,7 +618,8 @@ pub const SNAPSHOT_FORMAT: u32 = 77;
 /// finite shared execution and retained source, promise and release frontiers.
 /// "0.58" moves actual retained personnel through owned finite carried berths
 /// using existing exclusive teams, routes, Bay claims and ordinary Repair AI.
-pub const SIMULATION_RULES: &str = "0.58";
+/// "0.59" refuses stale officer dispatch before any job, claim or identity mint.
+pub const SIMULATION_RULES: &str = "0.59";
 
 /// The authored data, computed rather than remembered.
 ///

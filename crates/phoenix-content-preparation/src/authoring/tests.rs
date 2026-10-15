@@ -999,10 +999,41 @@ fn jamming_palette_uses_actual_closed_profile_and_shared_bound_tree_host() {
             "config.mount.facing_deg",
             "config.mount.fire_arc_deg",
             "config.mount.range",
+            "config.effect",
             "config.falloff",
             "config.strength",
             "config.maximum_sample_age_secs",
             "config.reading_ticks"
         ]
     );
+}
+
+#[test]
+fn protection_palette_uses_ordered_channels_and_the_same_local_tree_host() {
+    let schema = super::ship_schema();
+    assert!(schema
+        .channel_kinds
+        .iter()
+        .any(|kind| kind == "system_priority"));
+    assert!(schema
+        .ai_state_tree
+        .system_kinds
+        .iter()
+        .any(|kind| kind == "signal-protection"));
+    assert_eq!(
+        schema.ai_state_tree.hosts["signal-protection"],
+        crate::ai::state_tree::schema_metadata(
+            &phoenix_sim_gameplay::electronic::protection::bindings("enabled")
+        )
+    );
+    let fields = &schema.component_fields["signal_protection"];
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.name == "priorities_channel"
+                && field.kind == "system_priority_channel")
+    );
+    assert!(fields
+        .iter()
+        .any(|field| field.name == "config.systems" && field.kind == "json"));
 }

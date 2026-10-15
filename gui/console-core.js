@@ -1,3 +1,4 @@
+import { registerProtectionActions } from './stations/protection-actions.js';
 import { registerJammingActions } from './stations/jamming-actions.js';
 import { registerIlluminationActions } from './stations/illumination-actions.js';
 import { registerGuidanceActions } from './stations/guidance-actions.js';
@@ -125,7 +126,7 @@ import { preserveLocaleEditContext } from './locale-edit-context.js';
 export { preserveLocaleEditContext as preserveConsoleEditContext } from './locale-edit-context.js';
 
 const preserveConsoleEditContext = preserveLocaleEditContext;
-const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming'];
+const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming', 'protection'];
 
 export function initConsole({
   name,
@@ -448,6 +449,7 @@ export function initConsole({
   registerLogisticsActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerFittingActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerGuidanceActions(_semanticActions, { getState: () => _latestState, sendAction });
+  registerProtectionActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerJammingActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerIlluminationActions(_semanticActions, { getState: () => _latestState, sendAction });
 

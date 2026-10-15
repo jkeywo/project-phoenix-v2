@@ -80,7 +80,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const systemAdd = button('workshop-ship-system-add', 'workshop.ship.add_system', () => ({ type: 'system-add', id: systemId.value,
     kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined,
     compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
-    ...(['dock', 'access-gate', 'illumination', 'jamming'].includes(systemKind.value) ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
+    ...(['dock', 'access-gate', 'illumination', 'jamming', 'signal-protection'].includes(systemKind.value) ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
   const systemApply = button('workshop-ship-system-apply', 'workshop.ship.apply_system', () => ({ type: 'system-update', id: systems.value,
     compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
     fields: { kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined } }));
@@ -225,7 +225,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     jobTreeEditor.refresh(inspection?.repair, schema, held);
     const composingNewSystem = !system || systemId.value !== system.id;
     componentEditor.refresh(composingNewSystem ? { id: null, kind: systemKind.value, local: true }
-      : { ...system, kind: systemKind.value }, schema, held);
+      : { ...system, kind: systemKind.value }, schema, held, getDraft());
     stateTreeEditor.refresh(composingNewSystem ? { id: null, kind: systemKind.value, local: true }
       : { ...system, kind: systemKind.value }, schema, held);
   }

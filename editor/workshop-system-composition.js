@@ -1,3 +1,5 @@
+import {validateChannelInitials} from './workshop-protection.js';
+export {initialProtection, validateProtectionComposition} from './workshop-protection.js';
 import { parse, stringify } from 'smol-toml';
 
 export const turretKinds = ['phaser_bank', 'blaster_bank', 'torpedo_tube', 'passive_receiver'];
@@ -13,7 +15,7 @@ export const initialIllumination = () => ({
   channels: [{name:'enabled',kind:'boolean'},{name:'target',kind:'entity_target'}],
 });
 export const initialJamming = () => ({
-  components: [{kind:'power_input',id:'input'}, {kind:'jamming_emitter',id:'emitter',power_input:'input',enabled_channel:'enabled',target_channel:'target',config:{mount:{facing_deg:0,fire_arc_deg:60,range:200},falloff:'linear',strength:4,maximum_sample_age_secs:2,reading_ticks:30}}],
+  components: [{kind:'power_input',id:'input'}, {kind:'jamming_emitter',id:'emitter',power_input:'input',enabled_channel:'enabled',target_channel:'target',config:{mount:{facing_deg:0,fire_arc_deg:60,range:200},falloff:'linear',effect:'comms',strength:4,maximum_sample_age_secs:2,reading_ticks:30}}],
   channels: [{name:'enabled',kind:'boolean'},{name:'target',kind:'entity_target'}],
 });
 const finiteEmitterNumber=value=>typeof value==='number'&&Number.isFinite(Math.fround(value));
@@ -27,8 +29,8 @@ export function validateIlluminationComposition(system, components, channels) {
 export function validateJammingComposition(system, components, channels) {
   if(system.kind!=='jamming')return;
   validateMountedEmitter(system,components,channels,'jamming_emitter',config=>
-    Object.keys(config).every(key=>['mount','falloff','strength','maximum_sample_age_secs','reading_ticks'].includes(key))
-    && ['step','linear','smooth'].includes(config.falloff)&&positiveEmitterNumber(config.strength)&&positiveEmitterNumber(config.maximum_sample_age_secs));
+    Object.keys(config).every(key=>['mount','falloff','strength','maximum_sample_age_secs','reading_ticks','effect'].includes(key))
+    && [undefined,'comms','sensors'].includes(config.effect) && ['step','linear','smooth'].includes(config.falloff)&&positiveEmitterNumber(config.strength)&&positiveEmitterNumber(config.maximum_sample_age_secs));
 }
 function validateMountedEmitter(system,components,channels,emitterKind,validProfile) {
   const emitter=components.find(row=>row.kind===emitterKind), config=emitter?.config, mount=config?.mount;
@@ -92,6 +94,7 @@ export function writeSystemComposition(source, id, operation, effective) {
   const end = headers.slice(start + 1).find(next => next.name === 'system' || !next.name.startsWith('system.'))?.start ?? source.length;
   const local = parse(source.slice(first.start, end)).system[0];
   const components = structuredClone(operation.components || []), channels = structuredClone(operation.channels || []);
+  validateChannelInitials(channels);
   for (const [key, identity, next] of [['component', 'id', components], ['channel', 'name', channels]]) {
     const inherited = (effective[key] || []).filter(row => !(local[key] || []).some(own => own[identity] === row[identity]
       && !own._remove && JSON.stringify(own) === JSON.stringify(row)));

@@ -8,7 +8,7 @@ export const ENERGY_GROUP_FIELDS = Object.freeze(['max_flow_per_sec', 'default_f
 export const energyAliases = kind => ['power', 'power_reactor', 'power_battery', 'shields', 'phaser_control', 'command', 'captain', 'red_alert', 'viewscreen'].includes(kind);
 const mandatoryKinds = new Set(['helm_thrust', 'helm_steering', 'lateral_thrust', 'vertical_thrust', 'helm_impulse', 'helm_boost', 'helm_radar',
   'passive_receiver', 'tactical_radar', 'sensor_radar', 'sensors', 'navigation', 'comms', 'repair', 'tractor', 'dock', 'umbilical', 'transporter', 'security',
-  'illumination', 'jamming', 'resource-recovery', 'fabrication', 'logistics', 'torpedo_magazine', 'phaser_bank', 'blaster_bank', 'torpedo_tube', 'shield_arc']);
+  'illumination', 'jamming', 'signal-protection', 'resource-recovery', 'fabrication', 'logistics', 'torpedo_magazine', 'phaser_bank', 'blaster_bank', 'torpedo_tube', 'shield_arc']);
 export const requiresEnergy = system => !energyAliases(system.kind) && (system.power_group || mandatoryKinds.has(system.kind));
 export function requireCoolantStore(value, link = { service: 'coolant' }) {
   const endpoint = link.provider || value.resource_services?.[link.service || 'coolant'];

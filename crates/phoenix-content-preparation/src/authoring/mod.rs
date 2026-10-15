@@ -193,10 +193,28 @@ pub fn ship_schema() -> WorkshopShipSchema {
                     ("config.mount.facing_deg", "number"),
                     ("config.mount.fire_arc_deg", "number"),
                     ("config.mount.range", "number"),
+                    ("config.effect", "text"),
                     ("config.falloff", "text"),
                     ("config.strength", "number"),
                     ("config.maximum_sample_age_secs", "number"),
                     ("config.reading_ticks", "integer"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+            (
+                "signal_protection".into(),
+                [
+                    ("enabled_channel", "boolean_channel"),
+                    ("priorities_channel", "system_priority_channel"),
+                    ("power_input", "power_input_component"),
+                    ("config.capacity", "integer"),
+                    ("config.strength", "number"),
+                    ("config.systems", "json"),
                 ]
                 .into_iter()
                 .map(|(name, kind)| WorkshopComponentField {
@@ -278,9 +296,14 @@ pub fn ship_schema() -> WorkshopShipSchema {
         ]
         .into_iter()
         .collect(),
-        channel_kinds: vec!["boolean".into(), "entity_target".into()],
+        channel_kinds: vec![
+            "boolean".into(),
+            "entity_target".into(),
+            "system_priority".into(),
+        ],
         ai_state_tree: WorkshopAiTreeSchema {
             system_kinds: vec![
+                crate::ship::system_registry::SIGNAL_PROTECTION_KIND.into(),
                 crate::ship::system_registry::ILLUMINATION_KIND.into(),
                 crate::ship::system_registry::JAMMING_KIND.into(),
                 crate::ship::system_registry::DOCK_KIND.into(),
@@ -296,6 +319,12 @@ pub fn ship_schema() -> WorkshopShipSchema {
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::SIGNAL_PROTECTION_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::electronic::protection::bindings("enabled"),
+                    ),
+                ),
                 (
                     crate::ship::system_registry::JAMMING_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

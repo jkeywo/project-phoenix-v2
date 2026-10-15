@@ -65,6 +65,8 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  signal_protection_enabled: logisticsCommand('SetSignalProtectionEnabled', ['enabled']),
+  signal_protection_priorities: logisticsCommand('SetSignalProtectionPriorities', ['systems']),
   jamming_target: logisticsCommand('SetJammingTarget', ['target_uuid']),
   jamming_enabled: logisticsCommand('SetJammingEnabled', ['enabled']),
   illumination_target: logisticsCommand('SetIlluminationTarget', ['target_uuid']),

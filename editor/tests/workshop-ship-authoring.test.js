@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import {resolveTemplate} from '../entity-includes.js';
 import { parse, stringify } from 'smol-toml';
 import { createStoreZip } from '../mod-pack-export.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { applyShipOperation, inspectShipAuthoring, prepareShipOperation } from '../workshop-ship-authoring.js';
-import { initialTurret, initialIllumination, initialJamming } from '../workshop-system-composition.js';
+import { initialTurret, initialIllumination, initialJamming, initialProtection } from '../workshop-system-composition.js';
 
 const manifest = '[pack]\nformat=1\nid="mine"\nversion="1"\nname="Mine"\n[pack.requires]\ncontent_id="phoenix-base"\ncontent_epoch=1\n';
 const source = `# ship comments stay
@@ -266,4 +268,19 @@ it('rebinds both jamming AI output meanings when a destination collides with tem
  const actual=parse(draft.read(op({}).path)).system.find(row=>row.id==='comms-jam');
  expect(actual.config.ai.tree.find(tree=>tree.id==='support'&&!tree._remove).state[0].task.map(task=>task.action.channel)).toEqual(['workshop-rebind-1','subject']);
  expect(actual.component[1]).toMatchObject({enabled_channel:'workshop-rebind-1',target_channel:'subject'});
+});
+
+it('applies one protection composition transaction, retaining initial priorities and renaming only the enabled tree output',async()=>{
+ const draft=pack(),data=resolveTemplate('assets/entities/protection_cruiser.toml',{read:path=>fs.existsSync(path)?fs.readFileSync(path,'utf8'):null},parse).resolved.value;
+ const owner=data.system.find(row=>row.id==='signal-protection'),candidate={components:structuredClone(owner.component),channels:structuredClone(owner.channel)};
+ draft.edit(op({}).path,stringify(data));
+ candidate.channels[0].name='active';candidate.channels[1].name='ordered';candidate.components[1].enabled_channel='active';candidate.components[1].priorities_channel='ordered';candidate.channels[1].initial.value=['sensors','comms'];
+ const feeds=data.console.flatMap(row=>row.feed||[]);
+ const runtime={shipSchema:async()=>({...schema,system_kinds:[...new Set(data.system.map(row=>row.kind))],console_publication_kinds:Object.fromEntries(feeds.map(row=>[row.source,row.kind])),console_feed_kinds:[...new Set(feeds.map(row=>row.kind))],console_stock_publication_kind:'Stock'}),dependencies:async()=>dependencies,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+ const before=draft.read(op({}).path);await applyShipOperation({draft,runtime,operation:op({type:'system-composition-set',id:owner.id,...candidate})});
+ const actual=parse(draft.read(op({}).path)).system.find(row=>row.id===owner.id);
+ expect(actual.config.ai.tree.find(tree=>!tree._remove).state[0].task[0].action.channel).toBe('active');expect(actual.channel).toEqual(candidate.channels);expect(actual.component).toEqual(candidate.components);
+ expect(runtime.validate).toHaveBeenCalledOnce();expect(draft.read(op({}).path)).not.toBe(before);
+ const accepted=draft.read(op({}).path),bad=structuredClone(candidate);bad.components[1].config.systems['helm-thrust']=1;
+ await expect(applyShipOperation({draft,runtime,operation:op({type:'system-composition-set',id:owner.id,...bad})})).rejects.toThrow(/compatible/);expect(draft.read(op({}).path)).toBe(accepted);expect(runtime.validate).toHaveBeenCalledOnce();
 });

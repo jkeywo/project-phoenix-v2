@@ -153,7 +153,10 @@ pub(crate) fn project(
                 config.0.system(id).map(|system| {
                     phoenix_model::protection_ui::ProtectionSystemOption {
                         system: id.clone(),
-                        display_name: id.0.clone(),
+                        display_name: world
+                            .get::<crate::ship::damage::SystemHull>(entity)
+                            .and_then(|hull| hull.get(id))
+                            .map_or_else(|| id.0.clone(), |entry| entry.display_name.clone()),
                         cost: *cost,
                         home_station: config.0.system_home_station(system).cloned(),
                     }

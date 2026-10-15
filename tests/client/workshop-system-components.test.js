@@ -112,3 +112,17 @@ it('stages independent jammer evidence/strength/falloff fields through one compo
  expect(el('field-enabled_channel').value).toBe('radiating');change(el('field-config-strength'),'2.5');change(el('field-config-maximum_sample_age_secs'),'1.5');change(el('field-config-falloff'),'smooth');
  expect(apply).not.toHaveBeenCalled();el('apply').click();expect(apply.mock.calls[0][0]()).toMatchObject({id:'comms-jam',components:[{kind:'power_input'},{kind:'jamming_emitter',enabled_channel:'radiating',config:{strength:2.5,maximum_sample_age_secs:1.5,falloff:'smooth'}}]});
 });
+
+it('keeps protection costs and typed initials in one draft and resets on same-source document replacement',()=>{
+ document.body.innerHTML='<main></main>';const apply=vi.fn(),editor=mountSystemComponents({root:document.querySelector('main'),apply});
+ const schema={component_fields:{power_input:[],signal_protection:[{name:'enabled_channel',kind:'boolean_channel'},{name:'priorities_channel',kind:'system_priority_channel'},{name:'power_input',kind:'power_input_component'},{name:'config.capacity',kind:'integer'},{name:'config.strength',kind:'number'},{name:'config.systems',kind:'json'}]}};
+ const owner={id:'guard',kind:'signal-protection',local:true,power_group:'science'},first={},replacement={};
+ editor.refresh(owner,schema,false,first);change(el('channels').querySelector('[aria-label="system_priority"]'),'ordered');
+ const initial=el('channels').querySelector('[aria-label="initial priorities"]');change(initial,'{"kind":"system_priority","value":["sensors"]}');
+ el('list').value='1';el('list').dispatchEvent(new Event('change'));
+ change(el('field-config-systems'),'bad JSON');expect(()=>editor.value()).toThrow();
+ change(el('field-config-systems'),'{"sensors":1}');expect(editor.value().components[1].priorities_channel).toBe('ordered');
+ el('apply').click();expect(apply.mock.calls[0][0]()).toMatchObject({id:'guard',components:[{kind:'power_input'},{kind:'signal_protection',config:{systems:{sensors:1}}}],channels:[{initial:{kind:'boolean',value:true}},{name:'ordered',initial:{kind:'system_priority',value:['sensors']}}]});
+ editor.refresh(owner,schema,false,first);expect(editor.value().channels[1].name).toBe('ordered');
+ editor.refresh(owner,schema,false,replacement);expect(editor.value().channels[1].name).toBe('priorities');expect(editor.value().components[1].config.systems).toEqual({});
+});

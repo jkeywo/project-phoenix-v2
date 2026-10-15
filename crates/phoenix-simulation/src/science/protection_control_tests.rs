@@ -207,3 +207,18 @@ fn missing_actual_source_never_offers_control_or_changes_retained_intent() {
     );
     assert_eq!(world.get::<ShipSignalProtection>(entity), Some(&before));
 }
+
+#[test]
+fn priority_choices_use_the_actual_own_equipment_display_label() {
+    let (world, entity) = super::super::tests::fixture();
+    let view = project(&world, entity, &id("signal-protection")).unwrap();
+    let hull = world
+        .get::<crate::ship::damage::SystemHull>(entity)
+        .unwrap();
+    for choice in view.systems {
+        assert_eq!(
+            choice.display_name,
+            hull.get(&choice.system).unwrap().display_name
+        );
+    }
+}

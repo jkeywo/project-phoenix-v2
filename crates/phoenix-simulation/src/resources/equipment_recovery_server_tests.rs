@@ -75,7 +75,7 @@ fn start_beam(world: &mut World, actor: Entity, source: Entity) -> Result<(), St
         &owner,
         &uuid,
         "fore-beam",
-        "engineering-equipment",
+        "support-equipment",
     )
 }
 fn equipment(world: &World, actor: Entity) -> &ShipFitting {
@@ -116,10 +116,12 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
         let source_power = power(&world, source);
         let actor_power = power(&world, actor);
         let options = project(&world, actor).unwrap().options;
-        assert!(options
-            .iter()
-            .any(|item| item.slot == "fore-beam"
-                && item.destination_locker == "engineering-equipment"));
+        assert!(
+            options
+                .iter()
+                .any(|item| item.slot == "fore-beam"
+                    && item.destination_locker == "support-equipment")
+        );
         start_beam(&mut world, actor, source).unwrap();
         for tick in 1..120 {
             advance(&mut world, actor, tick, 0.25);
@@ -142,7 +144,7 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
             .contains_key(&actual));
         let recovered = &equipment(&world, actor).equipment.assemblies[&actual];
         assert!(
-            matches!(&recovered.location,EquipmentLocation::Stored { locker } if locker == "engineering-equipment")
+            matches!(&recovered.location,EquipmentLocation::Stored { locker } if locker == "support-equipment")
         );
         assert_eq!(
             recovered.condition.as_ref().unwrap().condition,
@@ -197,7 +199,7 @@ fn cancellation_retains_paid_cost_and_source_item_and_releases_actual_space_clai
     assert_eq!(
         reserved_space(
             world.get::<ShipEquipmentRecovery>(actor).unwrap(),
-            "engineering-equipment",
+            "support-equipment",
             profile
         ),
         1
@@ -239,7 +241,7 @@ fn major_assemblies_are_reported_but_require_a_supported_facility_extraction_ada
             &owner,
             &uuid,
             "reactor",
-            "engineering-equipment"
+            "support-equipment"
         )
         .unwrap_err(),
         "major_equipment_requires_facility"
@@ -269,10 +271,16 @@ fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_i
             }
             2 => {
                 let mut fitting = world.get_mut::<ShipFitting>(actor).unwrap();
-                let item = fitting.equipment.assemblies.values_mut().find(|item| matches!(&item.location,EquipmentLocation::Stored { locker } if locker == "weapons-equipment")).unwrap();
-                item.location = EquipmentLocation::Stored {
-                    locker: "engineering-equipment".into(),
-                };
+                for item in fitting
+                    .equipment
+                    .assemblies
+                    .values_mut()
+                    .filter(|item| matches!(&item.location, EquipmentLocation::Stored { .. }))
+                {
+                    item.location = EquipmentLocation::Stored {
+                        locker: "support-equipment".into(),
+                    };
+                }
             }
             _ => {
                 world

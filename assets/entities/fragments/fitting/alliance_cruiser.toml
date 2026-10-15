@@ -31,6 +31,13 @@ id = "engineering-equipment"
 compartment = "engineering"
 space = 2
 
+# [ai] Dedicated finite receiving space at the actual fitted Recovery tool.
+# This does not enlarge fungible cargo or move equipment to installation rooms.
+[[fitting.locker]]
+id = "support-equipment"
+compartment = "support"
+space = 2
+
 [[fitting.equipment]]
 id = "cruiser-beam-standard"
 interface = "cruiser-beam"

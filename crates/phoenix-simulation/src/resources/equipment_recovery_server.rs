@@ -24,6 +24,7 @@ pub struct EquipmentRecoveryWork {
     pub target_uuid: String,
     pub source_slot: String,
     pub source_system: SystemId,
+    pub source_component: String,
     pub assembly: String,
     pub definition: String,
     pub destination_locker: String,
@@ -67,7 +68,7 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         tick.in_set(crate::sim_sets::SimSet::Modifiers)
             .after(crate::infrastructure::server::tick_infrastructure_condition)
-            .before(crate::resources::recovery_server::tick),
+            .after(crate::resources::recovery_server::tick),
     );
 }
 
@@ -224,7 +225,7 @@ fn prepare(
         .ok_or("no_equipment_storage")?
         .0;
     let slot = source_profile.slot(&work.source_slot)?;
-    if slot.system != work.source_system {
+    if slot.system != work.source_system || slot.operation_component != work.source_component {
         return Err("source_slot_changed".into());
     }
     let source_state = world
@@ -398,6 +399,7 @@ fn start(
         target_uuid: target.into(),
         source_slot: slot.into(),
         source_system: profile.slot(slot)?.system.clone(),
+        source_component: profile.slot(slot)?.operation_component.clone(),
         assembly: assembly.id.clone(),
         definition: assembly.definition.clone(),
         destination_locker: locker.into(),
@@ -494,7 +496,7 @@ fn advance(world: &mut World, actor: Entity, now: u64, dt: f32) {
     };
     match result {
         Err(reason) => {
-            job.activity.waiting = reason;
+            job.activity.waiting = waiting_reason(reason);
             job.paused = true;
         }
         Ok(prepared) => {
@@ -627,6 +629,7 @@ pub fn validate_state(
                 &work.target_uuid,
                 &work.source_slot,
                 &work.source_system.0,
+                &work.source_component,
                 &work.assembly,
                 &work.definition,
                 &work.destination_locker,
@@ -684,6 +687,7 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
                         target_uuid: uuid.clone(),
                         source_slot: slot.id.clone(),
                         source_system: slot.system.clone(),
+                        source_component: slot.operation_component.clone(),
                         assembly: item.id.clone(),
                         definition: item.definition.clone(),
                         destination_locker: locker.id.clone(),
@@ -746,6 +750,23 @@ fn option(world: &World, work: &EquipmentRecoveryWork) -> EquipmentRecoveryOptio
         equipment: work.definition.clone(),
         destination_locker: work.destination_locker.clone(),
         blocked_reason: None,
+    }
+}
+
+fn waiting_reason(reason: String) -> String {
+    match reason.as_str() {
+        "unknown_target"
+        | "source_unavailable"
+        | "out_of_range"
+        | "no_room"
+        | "source_active"
+        | "physical_task_claimed"
+        | "equipment_destroyed"
+        | "recovery_unavailable"
+        | "no_power"
+        | "safe_shutdown"
+        | "source_equipment_changed" => reason,
+        _ => "unsupported_equipment".into(),
     }
 }
 

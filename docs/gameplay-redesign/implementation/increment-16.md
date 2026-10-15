@@ -445,3 +445,56 @@ no errors or warnings. Owner tests added for exact binding, missing feed/contact
 ordinary Cruiser policy reading, handoff and unavailable/undeclared operation
 remain unexecuted until root runs the joined native source. Independent craft
 source review passed after correcting the optional publication API arguments.
+
+## Adopted next real action: Formation coordination
+
+[ai] Join increment 18's received-formation-intent-stages contract with the
+closed `FormUp { slot: [i32; 2] }` request in existing World x/z axes. The
+request contains no leader UUID: the genuine sender and literal callsign on
+its actually received inbox copy provide coordination provenance. Bound each
+integer to the supported finite World coordinate/slot limit. Existing text
+transport, fixed audiences, actual radio payment/path, own Console publication,
+positive AI reading, Human reply and independently paid outcomes remain the
+owners. Existing ReportStatus wire representation and meaning stay intact.
+
+Add a distinct `Accept` decision for FormUp, with no CommsStatusReport. This
+means coordination accepted only; it never claims Navigation selected a leader,
+Helm engaged, a ship reached its slot or a drive is ready. ReportStatus retains
+Report/Decline and its actual local report. FormUp exposes Accept coordination/
+Decline and uses the same correlated RespondToMessage path. The ordinary
+Comms policy handles the supported typed request at its existing cadence; no
+second controller, plot flag, foreign actuator command or fake JobId is added.
+
+Order FormUp intent using a positive source sequence stored on that immutable
+transmission and its returned reference. Derive the next value from the actual
+source's retained sent FormUp history at successful emission; no parallel
+counter or request queue is saved. Canonical structured history cannot be
+retired by the plot placeholder/removal path. Source sequences increase in
+actual commit order and never depend on recipient count, private delivery or
+receipt success. All copies/returns retain the exact source sequence. Full
+candidate validation rejects mismatched, duplicate or out-of-order source
+lineage before writes. ReportStatus has no Formation sequence.
+
+The first formation suggestion is explicitly durable: it remains selectable
+until a newer FormUp from that same source has actually been accepted by this
+receiver, or a local participant declines/breaks away through its own controls.
+An older delayed or duplicate request cannot overwrite a newer accepted
+coordination request. A replacement not yet received has no effect. Comms
+supersession changes its coordination records only; it cannot directly replace
+Navigation intent or engage/disengage a Human Helm. Already accepted onboard
+work retains its own lifecycle and link-loss behaviour. There is no universal
+formation obligation, automatic compliance or timer slider on every send.
+
+Navigation consumes only its explicitly permitted genuinely received and
+accepted suggestions. Its Human independently chooses an earned leader alias;
+its ordinary AI requires uniquely matured observed identity/callsign or actual
+held reference evidence. Matching private Broad source IDs to a Comms route is
+not correlation evidence. Navigation and Helm retain separate authority and
+current-observation requirements, with honest local stages. Supported later
+stage reports must use a real typed ordinary Comms producer; Accept is never
+a remote readiness report.
+
+The increment 22 CommunicationReportStatus primitive and template remain
+ReportStatus-only when this enum grows. A Formation planner operator requires
+its own real Navigation consumer and evidence contract. This adopted contract
+claims no implementation, native/browser evidence or increment exit.

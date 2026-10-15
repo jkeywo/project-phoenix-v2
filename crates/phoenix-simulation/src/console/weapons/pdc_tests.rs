@@ -510,7 +510,11 @@ fn actual_paid_crossing_prevents_same_step_endpoint_payload_but_unopposed_round_
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs(1));
         app.insert_resource(time)
-            .init_resource::<TorpedoSystemResource>()
+            .insert_resource(TorpedoSystemResource(
+                crate::weapons::torpedo::TorpedoSystem::new(
+                    crate::weapons::torpedo::TorpedoConfig::default(),
+                ),
+            ))
             .init_resource::<super::super::shared::TorpedoTargetSnapshot>();
         let target = app
             .world_mut()

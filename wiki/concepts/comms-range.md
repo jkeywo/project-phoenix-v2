@@ -22,6 +22,16 @@ issuing slot's physical gate; clearing and AI candidacy retirement affect only
 that source. Snapshot capture/restore and the ordered digest retain the same
 source-scoped history. The local roster remains a presentation projection.
 
+Authored `[comms.radio]` equipment is installed by `comms/radio.rs`. It spends
+ordinary continuous work for listening and discrete work for each emission.
+Receiver copies require matching channel/protection configuration, actual
+operation, finite endpoint reach and the existing field/terrain path. Source
+feedback records local emission only; received copies retain the original
+identity and tick. Both remain in the existing recipient-scoped inbox. The
+source's next message identity is independent of conditional receiver count.
+Model `comms_channel::validate_transmissions` preflights the entire saved inbox
+before restore writes, and `sim_digest.rs` folds transmission metadata.
+
 ## Related
 
 - [Comms Panel](./comms-panel.md)

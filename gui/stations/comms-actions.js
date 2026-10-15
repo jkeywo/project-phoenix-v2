@@ -20,6 +20,7 @@ export const COMMS_SELECT_MESSAGE_ACTION_ID = 'comms.select-message';
 export const COMMS_RESPOND_ACTION_ID = 'comms.respond';
 export const COMMS_CLEAR_ACTION_ID = 'comms.clear';
 export const COMMS_SHOW_ON_SCREEN_ACTION_ID = 'comms.show-on-screen';
+export const COMMS_SEND_TEXT_ACTION_ID = 'comms.send-text';
 
 function action(id, label, keyboardBinding, gamepadBinding, feedback = 'authoritative') {
   return defineStationAction({ id, contexts: [COMMS_ACTION_CONTEXT], labelKey: `comms.${label}`,
@@ -58,6 +59,7 @@ export const COMMS_ACTIONS = Object.freeze([
   COMMS_RESPOND_ACTION,
   COMMS_CLEAR_ACTION,
   COMMS_SHOW_ON_SCREEN_ACTION,
+  action(COMMS_SEND_TEXT_ACTION_ID, 'send_text', keyboard('Enter', { ctrlKey: true }), gamepad('button', 'face-top')),
 ]);
 
 /** Resolve either the flat battleship payload or the cruiser's family slice. */
@@ -88,6 +90,7 @@ export function registerCommsActions(registry, options = {}) {
     throw new TypeError('comms action registration requires a registry');
   }
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
+  const getRadioDraft = typeof options.getRadioDraft === 'function' ? options.getRadioDraft : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
   const selectMessage = typeof options.selectMessage === 'function'
@@ -115,6 +118,24 @@ export function registerCommsActions(registry, options = {}) {
     if (!targetUuid) return false;
     return send(actionId, correlation, inputMs, 'hail', {
       target_uuid: targetUuid,
+    });
+  });
+
+  registry.register(COMMS_ACTIONS.find(entry => entry.id === COMMS_SEND_TEXT_ACTION_ID), ({ actionId, correlation, inputMs, detail } = {}) => {
+    const view = commsActionView(getState());
+    const draft = detail ?? getRadioDraft();
+    if (!view || view.comms_auto || !sendAction || !draft
+        || !(view.channels || []).some(channel => channel.id === draft.channel)
+        || typeof draft.body !== 'string' || !draft.body.trim()
+        || new TextEncoder().encode(draft.body).length > 4096
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(draft.body)) return false;
+    const audience = draft.audience;
+    if (!audience || !['all', 'fleet', 'contact'].includes(audience.kind)) return false;
+    if (audience.kind === 'contact' && !(view.contacts || []).some(contact => contactId(contact) === audience.target_uuid)) return false;
+    return send(actionId, correlation, inputMs, 'send_comms_text', {
+      channel: draft.channel,
+      audience: audience.kind === 'contact' ? {kind: 'contact', target_uuid: audience.target_uuid} : {kind: audience.kind},
+      body: draft.body,
     });
   });
 

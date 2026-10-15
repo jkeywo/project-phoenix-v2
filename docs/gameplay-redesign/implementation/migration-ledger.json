@@ -268,7 +268,8 @@
       "evidence": [
         "docs/gameplay-redesign/implementation/increment-16.md",
         "docs/acceptance/1562-shared-comms.md",
-        "docs/gameplay-redesign/implementation/comms-checkpoint.json"
+        "docs/gameplay-redesign/implementation/comms-checkpoint.json",
+        "docs/gameplay-redesign/implementation/comms-radio-checkpoint.json"
       ]
     },
     {

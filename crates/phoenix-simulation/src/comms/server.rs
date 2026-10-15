@@ -404,6 +404,7 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
             crate::command_admission::FeedbackAddress::MatcherSpelling,
             &[
                 Payload::Hail,
+                Payload::SendCommsText,
                 Payload::RespondToMessage,
                 Payload::ClearComms,
                 Payload::ShowOnScreen,
@@ -415,6 +416,7 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
 impl Plugin for CommsWorldPlugin {
     fn build(&self, app: &mut App) {
         register_comms_consumer(app);
+        crate::comms::radio::register(app);
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<OnScreenMessage>()

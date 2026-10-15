@@ -191,6 +191,8 @@ export function makeCommsRender(variant) {
     // The comms view the panels read from — `s` itself for the battleship's
     // flat `comms` family, a metadata-selected family slice for the cruiser.
     const view = commsView(s);
+    const composer = doc.getElementById('comms-text-composer');
+    if (composer) composer.state = view;
     const msgs = Array.isArray(view.messages) ? view.messages : [];
     if (pendingThreadId && msgs.some(message => effectiveThreadId(message) === pendingThreadId)) {
       selectedThreadId = pendingThreadId;
@@ -366,5 +368,8 @@ export function makeCommsRender(variant) {
     selectedThreadId = null;
   };
 
+  renderStation.radioDraft = function radioDraft() {
+    return typeof document === 'undefined' ? null : document.getElementById('comms-text-composer')?.draft?.();
+  };
   return renderStation;
 }

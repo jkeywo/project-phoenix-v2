@@ -898,6 +898,16 @@ export const ACTION_MAP = Object.freeze({
     }
   },
 
+  /** Emit literal radio text through the existing Comms System boundary. */
+  send_comms_text: (a, send) => {
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: 'comms',
+      payload: { type: 'SendCommsText', data: { channel: a.channel, audience: a.audience, body: a.body } },
+    });
+  },
+
   /** Clear all read/acknowledged comms messages from the inbox. */
   clear_comms: (a, send) => {
     const correlated = typeof a.correlation === 'string' && a.correlation;

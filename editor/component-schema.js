@@ -351,6 +351,18 @@ export const COMPONENT_SCHEMA = {
     label: 'Comms',
     fields: [
       { key: 'range', type: 'number' },
+      { key: 'hailable', type: 'boolean', default: false, optional: true },
+      { key: 'display_name', type: 'string', optional: true },
+      { key: 'radio', type: 'subobject', optional: true, subfields: [
+        { key: 'system', type: 'string' },
+        { key: 'keys', type: 'array', items: 'string', default: [] },
+        { key: 'channel', type: 'array-of-tables', entryFields: [
+          { key: 'id', type: 'string' },
+          { key: 'range', type: 'number' },
+          { key: 'work_units', type: 'number', default: 1 },
+          { key: 'key', type: 'string', optional: true },
+        ] },
+      ] },
     ],
   },
 

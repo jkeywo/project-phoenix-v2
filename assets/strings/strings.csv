@@ -1,4 +1,15 @@
 id,context,en,de,de_source,de_provenance
+comms.send_text,Comms radio,Send text,Text senden,Send text,machine
+semantic_action.comms.send_text.label,Comms radio,Send radio text,Funktext senden,Send radio text,machine
+semantic_action.comms.send_text.accessibility,Comms radio,Send the current radio draft,Aktuellen Funktext senden,Send the current radio draft,machine
+comms.radio.title,Comms radio,Radio text,Funktext,Radio text,machine
+comms.radio.channel,Comms radio,Channel,Kanal,Channel,machine
+comms.radio.audience,Comms radio,To,An,To,machine
+comms.radio.body,Comms radio,Message text,Nachrichtentext,Message text,machine
+comms.radio.fleet,Comms radio,Own fleet,Eigene Flotte,Own fleet,machine
+comms.radio.all,Comms radio,All,Alle,All,machine
+comms.radio.sent,Comms radio,Sent,Gesendet,Sent,machine
+comms.radio.received,Comms radio,Received,Empfangen,Received,machine
 sensing.sharing.title,Sharing,Sharing,Teilen,Sharing,machine
 navigation.sharing.received,Navigation sharing,Received chart and waypoints,Empfangene Karte und Wegpunkte,Received chart and waypoints,machine
 navigation.sharing.apply,Navigation sharing,Apply as own waypoint,Als eigenen Wegpunkt übernehmen,Apply as own waypoint,machine

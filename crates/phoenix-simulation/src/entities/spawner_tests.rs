@@ -426,6 +426,7 @@ fn spawn_entity_with_comms_inserts_comms_range_component() {
             range: 8000.0,
             hailable: false,
             display_name: None,
+            radio: None,
         }),
         ..Default::default()
     };
@@ -453,6 +454,7 @@ fn spawn_entity_with_hailable_comms_inserts_the_opt_in_marker() {
             range: 800.0,
             hailable: true,
             display_name: Some("Relay Outpost".into()),
+            radio: None,
         }),
         ..EntityConfig::default()
     };

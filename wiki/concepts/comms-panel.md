@@ -3,7 +3,7 @@ title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
 sources: [gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
-updated: 2026-10-05
+updated: 2026-10-15
 ---
 
 # Comms Panel
@@ -18,7 +18,13 @@ The Cruiser shares one document between Comms and auxiliary Navigation. `gui/cru
 
 ## Actions and feedback
 
-`gui/stations/comms-actions.js` registers hail, message selection, response, clear, and show-on-screen under the shared `comms` action context. Every action has two remappable keyboard/gamepad slots and visible controls call the same semantic activation seam as keys and gamepads. The contact adapter preserves the authoritative wire `uuid`; the response adapter reads the renderer's selected-or-automatic current thread and preserves exact message id/index, availability, and important-response confirmation.
+`gui/stations/comms-actions.js` registers hail, message selection, response, clear, show-on-screen and radio text under the shared `comms` action context. Every action has two remappable keyboard/gamepad slots and visible controls call the same semantic activation seam as keys and gamepads. The contact adapter preserves the authoritative wire `uuid`; the response adapter reads the renderer's selected-or-automatic current thread and preserves exact message id/index, availability, and important-response confirmation.
+
+`gui/components/ph-comms-text-composer.js` keeps only the local text draft. The
+shared renderer supplies the owning Console's published channels and contacts.
+`SendCommsText` uses the normal Comms System command boundary. A sent inbox fact
+clears a matching unchanged draft; invoking Send or receiving another ship's text
+does not. Sent and received labels report only the recorded local fact.
 
 Hail, response, clear, and show-on-screen use correlated commands. Their existing server consumers return `Applied` only after consuming the command and `Refused` at their existing rejection points. Message selection is local because the server has no selection-state consumer: the shared renderer validates the requested live message, updates the list, current thread and battleship footer synchronously, and only then lets the lifecycle report `Applied`. It sends no `SelectCommsMessage`; a stale request returns unhandled instead of falsely completing. The established `CommsResponseRejected` message remains alongside shared `ActionFeedback`, so a refused response still identifies and flashes its exact button.
 

@@ -565,7 +565,7 @@ service = "coolant"
 system = "comms"
 initial_energy = 7.5
 initial_heat = 0
-continuous_cost_per_sec = 0
+continuous_cost_per_sec = 0.05
 discrete_cost = 1
 
 [energy.consumer.reserve]

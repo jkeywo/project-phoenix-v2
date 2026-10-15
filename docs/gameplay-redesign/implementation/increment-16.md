@@ -8,6 +8,19 @@ The integrator's [parallel-work contract](parallel-work.md) governs dispatch.
 
 ## Outcome and selected scope
 
+Initial text-radio checkpoint: optional `[comms.radio]` channels now use the
+existing Comms System, real energy consumer and recipient-scoped inbox. The
+four Alliance hulls have public/protected channel profiles and the existing
+Comms screens have one shared text composer. Local sent records and actual
+received copies remain distinct; a send result cannot claim reception.
+Recipient-copy identity does not advance a shared counter conditionally.
+
+This is partial implementation. Generic requests/receipts, automatic AI chatter,
+capture/decoding, relays and selected human media remain to be implemented.
+Workshop radio-form work is in its parallel authoring slice. Positive continuous
+listening cost 0.05/sec and public/fleet discrete work 1/4 are provisional data,
+not balance acceptance. See `comms-radio-checkpoint.json` for exact evidence.
+
 Let human and AI crews converse, request useful action and learn what a distant
 recipient actually acknowledged, through equipment-supported in-world channels.
 Keep concurrent persistent threads and preserve local specialist authority.

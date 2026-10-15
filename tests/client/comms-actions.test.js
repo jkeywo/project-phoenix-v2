@@ -9,10 +9,12 @@ import {
   COMMS_RESPOND_ACTION_ID,
   COMMS_SELECT_MESSAGE_ACTION_ID,
   COMMS_SHOW_ON_SCREEN_ACTION_ID,
+  COMMS_SEND_TEXT_ACTION_ID,
   createCommsActionRegistry,
   currentCommsMessage,
 } from '../../gui/stations/comms-actions.js';
 import { NAVIGATION_ACTIONS } from '../../gui/stations/navigation-actions.js';
+import { RADAR_SHARING_ACTION } from '../../gui/stations/radar-sharing-actions.js';
 
 let sequence = 0;
 
@@ -41,6 +43,7 @@ describe('Comms semantic action family', () => {
       COMMS_RESPOND_ACTION_ID,
       COMMS_CLEAR_ACTION_ID,
       COMMS_SHOW_ON_SCREEN_ACTION_ID,
+      COMMS_SEND_TEXT_ACTION_ID,
     ]);
     for (const action of COMMS_ACTIONS) {
       expect(action.contexts).toEqual([COMMS_ACTION_CONTEXT]);
@@ -58,6 +61,7 @@ describe('Comms semantic action family', () => {
       .toEqual([
         ...COMMS_ACTIONS,
         ...NAVIGATION_ACTIONS.filter((entry) => entry.contexts.includes(COMMS_ACTION_CONTEXT)),
+        RADAR_SHARING_ACTION,
       ].map((entry) => entry.id));
   });
 

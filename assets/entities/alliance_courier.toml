@@ -240,6 +240,22 @@ selects = [ "station", "planet", "star", "region" ]
 [comms]
 range = 1000
 
+# Authored first text channels; lower-work public traffic has shorter reach.
+[comms.radio]
+system = "comms"
+keys = ["alliance-fleet"]
+
+[[comms.radio.channel]]
+id = "public"
+range = 200
+work_units = 1
+
+[[comms.radio.channel]]
+id = "fleet"
+range = 1000
+work_units = 4
+key = "alliance-fleet"
+
 [captain_console]
 
 [radar_appearance]

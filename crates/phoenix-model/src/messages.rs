@@ -32,7 +32,7 @@ use uuid::Uuid;
 /// port service/order projections; earlier clients cannot operate those views.
 /// Revision 14 carries per-bank assignment views, active-beam operation controls
 /// and acquired combat evidence; older clients cannot represent those views.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -798,6 +798,7 @@ pub struct CommsMessage {
     /// Literal transmission text bypasses String Table lookup/interpolation.
     /// The sender remains the fictional identity on every crew surface.
     pub literal_body: bool,
+    pub transmission: Option<crate::comms_channel::CommsTransmission>,
     /// Available response options. Empty while awaiting a reply (loading).
     ///
     /// Promoted from `Vec<String>` (issue #761) to a per-response view so the
@@ -842,6 +843,8 @@ struct CommsMessageWire {
     recipient_ship: Option<crate::wire::ShipKey>,
     #[serde(default)]
     literal_body: bool,
+    #[serde(default)]
+    transmission: Option<crate::comms_channel::CommsTransmission>,
     responses: Vec<CommsResponseView>,
     selected_response: Option<usize>,
     is_read: bool,
@@ -893,6 +896,7 @@ impl<'de> Deserialize<'de> for CommsMessage {
             body_params: wire.body_params,
             recipient_ship: wire.recipient_ship,
             literal_body: wire.literal_body,
+            transmission: wire.transmission,
             responses: wire.responses,
             selected_response: wire.selected_response,
             is_read: wire.is_read,
@@ -912,7 +916,7 @@ impl Serialize for CommsMessage {
         use serde::ser::SerializeStruct;
 
         let priority = self.effective_priority();
-        let field_count = if self.body_params.is_empty() { 15 } else { 16 };
+        let field_count = if self.body_params.is_empty() { 16 } else { 17 };
         let mut wire = serializer.serialize_struct("CommsMessage", field_count)?;
         wire.serialize_field("id", &self.id)?;
         wire.serialize_field("sender_uuid", &self.sender_uuid)?;
@@ -924,6 +928,7 @@ impl Serialize for CommsMessage {
         }
         wire.serialize_field("recipient_ship", &self.recipient_ship)?;
         wire.serialize_field("literal_body", &self.literal_body)?;
+        wire.serialize_field("transmission", &self.transmission)?;
         wire.serialize_field("responses", &self.responses)?;
         wire.serialize_field("selected_response", &self.selected_response)?;
         wire.serialize_field("is_read", &self.is_read)?;
@@ -982,6 +987,7 @@ impl CommsMessage {
             body_params,
             recipient_ship: None,
             literal_body: false,
+            transmission: None,
             responses,
             selected_response: None,
             is_read: false,
@@ -2263,6 +2269,11 @@ pub enum SystemControlPayload {
     },
     Hail {
         target_uuid: String,
+    },
+    SendCommsText {
+        channel: String,
+        audience: crate::comms_channel::CommsAudience,
+        body: String,
     },
     SelectCommsMessage {
         message_id: String,
@@ -5647,6 +5658,8 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    #[serde(default)]
+    pub channels: Vec<crate::comms_channel::CommsChannelView>,
     /// Current inbox messages for the Comms holder, in insertion order.
     pub messages: Vec<CommsMessage>,
     /// Mission objectives visible to Comms.

@@ -190,7 +190,7 @@ export class PhCommsCurrentMessage extends PhElement {
       if (!node) {
         node = document.createElement('div');
         node.className = 'msg';
-        node.innerHTML = '<span class="speaker"></span><span class="text"></span>';
+        node.innerHTML = '<span class="speaker"></span><span class="radio-status"></span><span class="text"></span>';
         this.#msgCache.set(key, node);
       }
       // The order has to follow the projection, but ONLY where it differs:
@@ -203,6 +203,10 @@ export class PhCommsCurrentMessage extends PhElement {
       // a single message the header above already says it.
       node.querySelector('.speaker').textContent = multiSpeaker
         ? ((m && m.sender_name) || '') : '';
+      node.querySelector('.radio-status').textContent = m?.transmission
+        ? t(m.transmission.received_tick == null ? 'comms.radio.sent' : 'comms.radio.received') + ' ' : '';
+      node.querySelector('.radio-status').textContent = m?.transmission
+        ? t(m.transmission.received_tick == null ? 'comms.radio.sent' : 'comms.radio.received') + ' ' : '';
       node.querySelector('.text').textContent = (m && m.body) || '(empty)';
     });
 

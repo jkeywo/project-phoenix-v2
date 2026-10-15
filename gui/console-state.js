@@ -2278,6 +2278,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
       messages:   bb.messages   ?? [],
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
+      channels:   bb.channels   ?? [],
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
       // Dossiers ride their own blackboard (issue #1030), so they are read from
@@ -2299,6 +2300,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
   return {
     messages:  state.commsMessages || [],
     contacts:  state.commsContacts || [],
+    channels: [],
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     dossiers:  dossiersPayload(state),

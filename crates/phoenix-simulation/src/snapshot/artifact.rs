@@ -438,7 +438,8 @@ use super::*;
 /// cannot be assigned to a fleet hull without inventing ownership.
 /// `55` retains original burst launch identity, dated guidance provenance and
 /// source-owned issued/heard order knowledge separately from physical flight.
-pub const SNAPSHOT_FORMAT: u32 = 55;
+// 56 adds canonical per-axis Helm intent and dated recipient-scoped radio facts.
+pub const SNAPSHOT_FORMAT: u32 = 56;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -534,7 +535,9 @@ pub const SNAPSHOT_FORMAT: u32 = 55;
 /// "0.26" applies fleet hails and their anti-repeat history per issuing hull.
 /// "0.27" delivers paid source orders through finite paired receiver links;
 /// guidance received after movement steers on the following advance.
-pub const SIMULATION_RULES: &str = "0.27";
+/// "0.28" retains paid per-axis direct/assisted intent and makes authored radio
+/// listening/emission physical work, with original sent/received facts.
+pub const SIMULATION_RULES: &str = "0.28";
 
 /// The authored data, computed rather than remembered.
 ///

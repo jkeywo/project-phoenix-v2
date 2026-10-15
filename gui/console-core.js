@@ -302,6 +302,7 @@ export function initConsole({
   if (_actionContexts.has(COMMS_ACTION_CONTEXT)) {
     registerCommsActions(_semanticActions, {
       getState: function() { return _latestState; },
+      getRadioDraft: function() { return render.radioDraft?.(); },
       // Comms message selection is presentation-only, but it is still a real
       // operation: the shared renderer owns the selected id and repaints both
       // the list and current-message panel synchronously. The semantic local

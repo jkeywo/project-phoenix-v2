@@ -1600,6 +1600,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             if message.literal_body {
                 acc = fold_str(acc, "literal-body");
             }
+            if let Some(transmission) = &message.transmission {
+                acc = fold_serde(fold_str(acc, "radio-transmission"), transmission);
+            }
             acc = fold_u64(acc, u64::from(message.sender_in_range));
             acc = fold_u64(acc, message.responses.len() as u64);
             for response in &message.responses {

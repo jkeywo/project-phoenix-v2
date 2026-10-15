@@ -980,6 +980,7 @@ impl EntityConfig {
                     .map_err(SerdeError::custom)?;
             }
         }
+        comms::validate_radio(&config).map_err(SerdeError::custom)?;
         if let Some(controls) = &config.helm_control {
             crate::ship::helm_control::validate_profile(controls, &config)
                 .map_err(SerdeError::custom)?;

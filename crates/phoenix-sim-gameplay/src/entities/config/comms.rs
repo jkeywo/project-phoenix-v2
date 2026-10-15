@@ -31,4 +31,42 @@ pub struct CommsConfig {
     /// Only meaningful alongside `hailable = true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Explicit supported radio channels. Absence retains legacy plot hails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radio: Option<phoenix_model::comms_channel::CommsRadioConfig>,
 }
+
+pub(super) fn validate_radio(config: &EntityConfig) -> Result<(), String> {
+    let Some(comms) = &config.comms else {
+        return Ok(());
+    };
+    let Some(radio) = &comms.radio else {
+        return Ok(());
+    };
+    radio.validate(comms.range)?;
+    let ship = config
+        .ship_config
+        .as_ref()
+        .ok_or("radio channels require actual System ownership")?;
+    // Preserve the existing Comms consumer's single canonical System boundary.
+    if radio.system.0 != crate::ship::system_registry::COMMS_SYSTEM_ID
+        || ship
+            .system(&radio.system)
+            .is_none_or(|system| system.kind != crate::ship::system_registry::COMMS_KIND)
+        || ship.console_for_system(&radio.system).is_none()
+        || config.energy.as_ref().is_none_or(|energy| {
+            !energy.consumers.iter().any(|consumer| {
+                consumer.system == radio.system
+                    && consumer.continuous_cost_per_sec > 0.0
+                    && consumer.discrete_cost > 0.0
+            })
+        })
+    {
+        return Err("radio channels require the installed Comms System, its controlling Console and real energy consumer".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "comms_tests.rs"]
+mod tests;

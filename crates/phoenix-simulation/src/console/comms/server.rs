@@ -95,25 +95,39 @@ pub(crate) fn publish_comms_blackboard(
             Option<&crate::ship::compartment_damage::ShipDamage>,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship::components::HumanSeekingHosts>,
+            Option<&crate::comms::radio::RadioProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let key = crate::ship::system_registry::comms_system_id();
-    for (is_local, slot, uuid, alert, hull, damage, mut boards, hosts) in &mut ships {
+    for (is_local, slot, uuid, alert, hull, damage, mut boards, hosts, radio) in &mut ships {
         let mut bb = CommsBlackboard::default();
+        bb.channels = radio
+            .into_iter()
+            .flat_map(|radio| &radio.0.channels)
+            .map(|channel| phoenix_model::comms_channel::CommsChannelView {
+                id: channel.id.clone(),
+                range: channel.range,
+                work_units: channel.work_units,
+                protected: channel.key.is_some(),
+            })
+            .collect();
+        // Ordinary non-roster radio equipment receives its own addressed text
+        // view too. Legacy scenario plot access retains its existing boundary.
+        bb.messages = inbox
+            .as_ref()
+            .map(|inbox| {
+                inbox
+                    .0
+                    .messages()
+                    .into_iter()
+                    .filter(|m| m.is_for_ship(uuid.map(|id| id.0.as_str())))
+                    .filter(|m| is_local || slot.is_some() || m.transmission.is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
         if is_local || slot.is_some() {
-            bb.messages = inbox
-                .as_ref()
-                .map(|inbox| {
-                    inbox
-                        .0
-                        .messages()
-                        .into_iter()
-                        .filter(|m| m.is_for_ship(uuid.map(|id| id.0.as_str())))
-                        .collect()
-                })
-                .unwrap_or_default();
             if let Some(runtime) = runtime.as_deref() {
                 for message in &mut bb.messages {
                     message.sender_in_range = slot.map_or_else(

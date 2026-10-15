@@ -19,6 +19,7 @@
 pub mod ai_choice;
 pub mod component;
 pub mod content;
+pub mod radio;
 pub mod range;
 pub mod roster;
 pub mod scripted;

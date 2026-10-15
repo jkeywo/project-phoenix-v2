@@ -118,6 +118,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             AiShieldFocus,
             HandlePowerMessages,
             TickPowerSystem,
+            TickCommsRadio,
             HandleShieldsMessages,
             TickShieldFrequencyCycle,
             TickShields,

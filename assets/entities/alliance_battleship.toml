@@ -728,6 +728,22 @@ selects = [ "station", "planet", "star", "region" ]
 [comms]
 range = 1000
 
+# Authored first text channels; lower-work public traffic has shorter reach.
+[comms.radio]
+system = "comms"
+keys = ["alliance-fleet"]
+
+[[comms.radio.channel]]
+id = "public"
+range = 200
+work_units = 1
+
+[[comms.radio.channel]]
+id = "fleet"
+range = 1000
+work_units = 4
+key = "alliance-fleet"
+
 # Shields — Cruiser baseline × 1.4
 # max_hp: 100 × 1.4 = 140; regen_per_sec: 2.5 × 1.4 = 3.5
 [shields_console]

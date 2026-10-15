@@ -1,0 +1,26 @@
+{
+  "increment": 16,
+  "status": "partial",
+  "date": "2026-10-15",
+  "scope": "Initial paid radio text consumer, actual per-recipient inbox copies and shared existing-screen composer",
+  "source_review": "Refit independent bounded source PASS, including both corrected identity/preflight findings",
+  "model": {
+    "command": "cargo test -p phoenix-model --lib -- comms_channel helm_control",
+    "result": "7 passed, 0 failed",
+    "log": ".phoenix/comms-radio-model-reviewed.log"
+  },
+  "client": {
+    "command": "npx vitest run tests/client/comms-radio.test.js tests/client/comms-actions.test.js tests/client/helm-movement.test.js tests/client/helm-actions.test.js tests/client/console-state.test.js tests/client/workshop-helm-movement-panel.test.js editor/tests/workshop-helm-movement.test.js tests/client/ph-comms-current-message.test.js",
+    "result": "480 passed across 8 suites",
+    "log": ".phoenix/comms-helm-client-reviewed-retry.log"
+  },
+  "native": {
+    "command": "cargo test -p phoenix-simulation --lib --no-default-features -- comms:: guided_ guidance_ helm_movement console::helm::control flight_carrier:: pdc:: assignments:: mounts::",
+    "result": "226 passed, 3 failed; both initial radio handler cases passed",
+    "log": ".phoenix/parallel-channels-native-retry.log",
+    "diagnosis": "Three new movement/guidance fixtures expected observed velocity/evidence before the authored sample interval or serialized runtime hull state that omits authored shields. Reviewed fixture corrections integrated separately as 04877c3a and c660e16e. Retry pending.",
+    "untested_changes": "Post-review repeated-send identity regression, positive listening-cost validation/data and new 360-step radio JSON/no-write continuation case await native execution. Previous radio tests do not establish these results."
+  },
+  "compatibility": "Integrated command vocabulary 15; snapshot 56 and simulation rules 0.28 include the newly joined canonical Helm movement and dated radio facts. Unsupported older saves/peers must fail explicitly.",
+  "limits": "Initial checkpoint, not a verified increment exit. No updated native continuation result, whole-host radio demonstration, browser/native device acceptance, balance/performance result, complete ordinary-AI radio policy, generic requests, receipts, interception/decoding, relays or media is claimed. No push or full integration gate run."
+}

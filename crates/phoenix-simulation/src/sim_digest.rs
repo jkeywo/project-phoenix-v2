@@ -460,6 +460,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("interior-access", fold_access_namespace),
     ("logistics", fold_logistics_namespace),
     ("production", fold_production_namespace),
+    ("recovery", fold_recovery_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2523,9 +2524,28 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
 
 /// Canonical stock/claims in the retained owner; labels and bindings are content.
 fn fold_production_namespace(world: &World, acc: u64) -> u64 {
-    fold_optional_namespace(world, acc, "production",
+    fold_optional_namespace(
+        world,
+        acc,
+        "production",
         |owner: &crate::resources::production_server::ShipProduction| Some(owner.0.clone()),
-        |acc, state| fold_serde(acc, &state))
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_recovery_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "recovery",
+        |owner: &crate::resources::recovery_server::ShipRecovery| {
+            owner
+                .0
+                .validate_settlement()
+                .expect("recovery receipts must settle before deterministic fold");
+            Some(owner.0.clone())
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
 }
 fn fold_logistics_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(

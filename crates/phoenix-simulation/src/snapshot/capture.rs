@@ -1410,6 +1410,15 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .then(|| capture_arc_requests(entity))
                         .flatten(),
                     power: capture_power(entity),
+                    recovery: entity
+                        .get::<crate::resources::recovery_server::ShipRecovery>()
+                        .map(|owner| {
+                            owner
+                                .0
+                                .validate_settlement()
+                                .expect("recovery receipts must settle before snapshot capture");
+                            owner.0.clone()
+                        }),
                     production: entity
                         .get::<crate::resources::production_server::ShipProduction>()
                         .map(|owner| owner.0.clone()),

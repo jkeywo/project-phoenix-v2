@@ -368,7 +368,10 @@ pub fn is_atomic_energy_profile(path: &str) -> bool {
 
 /// Locations, recipes and their bindings form complete validated profiles.
 pub fn is_atomic_logistics_profile(path: &str) -> bool {
-    matches!(path, "logistics" | "production")
+    matches!(
+        path,
+        "logistics" | "production" | "recovery" | "recoverable"
+    )
 }
 
 /// Placement, connectivity and team homes form one validated physical layout.

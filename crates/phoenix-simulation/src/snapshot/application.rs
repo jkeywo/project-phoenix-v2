@@ -927,6 +927,33 @@ pub(super) fn validate_entity_repair_jobs(
 ) -> Result<(), String> {
     validate_entity_logistics(world, entity, row)?;
     match (
+        world.get::<crate::resources::recovery_server::CompiledShipRecovery>(entity),
+        world.get::<crate::resources::recovery_server::ShipRecovery>(entity),
+        row.recovery.as_ref(),
+    ) {
+        (Some(profile), Some(_), Some(state)) => {
+            if state.target.as_deref() == Some(row.uuid.as_str()) {
+                return Err("recovery cannot target its own entity".into());
+            }
+            state.validate(&profile.0, state.last_tick)?;
+            if let Some(destination) = &state.destination_store {
+                let logistics = world
+                    .get::<crate::resources::logistics_server::CompiledShipLogistics>(entity)
+                    .ok_or("saved recovery has no fitted logistics profile")?;
+                let store = logistics.0.store(destination)?;
+                if store.role != phoenix_model::logistics::StoreRole::Main
+                    || state.resource.as_ref() != Some(&store.resource)
+                    || logistics.0.graph().compartment_for_system(&state.owner)
+                        != Some(&store.compartment)
+                {
+                    return Err("saved recovery destination is not a compatible Main store in the tool compartment".into());
+                }
+            }
+        }
+        (None, None, None) => {}
+        _ => return Err("saved recovery owner disagrees with authored equipment".into()),
+    }
+    match (
         world.get::<crate::ship::compartment_damage::ShipDamage>(entity),
         row.physical_damage.as_ref(),
     ) {
@@ -1047,15 +1074,24 @@ fn validate_entity_logistics(
                 };
                 stocks.insert(binding.endpoint.clone(), value);
             }
-            match (world.get::<crate::resources::production_server::CompiledShipProduction>(entity),
-                world.get::<crate::resources::production_server::ShipProduction>(entity), &row.production) {
-                (Some(production), Some(_), Some(work)) => work.validate(&production.0, &stocks, state),
+            match (
+                world.get::<crate::resources::production_server::CompiledShipProduction>(entity),
+                world.get::<crate::resources::production_server::ShipProduction>(entity),
+                &row.production,
+            ) {
+                (Some(production), Some(_), Some(work)) => {
+                    work.validate(&production.0, &stocks, state)
+                }
                 (None, None, None) => state.validate(&profile.0, &stocks),
                 _ => Err("saved production owner disagrees with authored equipment".into()),
             }
         }
         (None, None, None) => {
-            if row.production.is_some() || world.get::<crate::resources::production_server::ShipProduction>(entity).is_some() {
+            if row.production.is_some()
+                || world
+                    .get::<crate::resources::production_server::ShipProduction>(entity)
+                    .is_some()
+            {
                 return Err("saved production has no fitted logistics owner".into());
             }
             let incoming = row.infrastructure.as_ref().is_some_and(|owner| {
@@ -1184,9 +1220,18 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut recovery), Some(state)) = (
+        entity_mut.get_mut::<crate::resources::recovery_server::ShipRecovery>(),
+        row.recovery.as_ref(),
+    ) {
+        recovery.0 = state.clone();
+    }
     if let (Some(mut production), Some(state)) = (
-        entity_mut.get_mut::<crate::resources::production_server::ShipProduction>(), row.production.as_ref(),
-    ) { production.0 = state.clone(); }
+        entity_mut.get_mut::<crate::resources::production_server::ShipProduction>(),
+        row.production.as_ref(),
+    ) {
+        production.0 = state.clone();
+    }
     if let (Some(mut logistics), Some(state)) = (
         entity_mut.get_mut::<crate::resources::logistics_server::ShipLogistics>(),
         row.logistics.as_ref(),

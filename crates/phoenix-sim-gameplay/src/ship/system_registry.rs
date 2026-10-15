@@ -179,6 +179,7 @@ pub const DOCK_SYSTEM_ID: &str = "dock";
 pub const DOCK_KIND: &str = "dock";
 pub const ACCESS_GATE_KIND: &str = "access-gate";
 pub const FABRICATION_KIND: &str = crate::resources::production::FABRICATION_KIND;
+pub const RECOVERY_KIND: &str = crate::resources::recovery::RECOVERY_KIND;
 pub const LOGISTICS_KIND: &str = "logistics";
 
 /// Wire `SystemId` for the transfer umbilical (issue #1160).
@@ -543,6 +544,7 @@ impl SystemKindRegistry {
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;
         registry.register_commandable(LOGISTICS_KIND, ConsoleFamily::Logistics)?;
         registry.register_commandable(FABRICATION_KIND, ConsoleFamily::Production)?;
+        registry.register_commandable(RECOVERY_KIND, ConsoleFamily::Recovery)?;
         // Transfer umbilical (issue #1160).
         registry.register_commandable(UMBILICAL_KIND, ConsoleFamily::Umbilical)?;
         // Security teams (issue #1346). Its OWN presentation family, the way the
@@ -1009,6 +1011,7 @@ pub fn instance_publication_kinds(
         (DOCK_KIND, Kind::Dock),
         (LOGISTICS_KIND, Kind::Logistics),
         (FABRICATION_KIND, Kind::Production),
+        (RECOVERY_KIND, Kind::Recovery),
     ]
     .into_iter()
     .map(|(kind, observation)| (kind.to_owned(), observation))

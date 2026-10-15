@@ -12,4 +12,5 @@ pub mod production_ai;
 pub mod production_profile;
 pub mod recovery;
 pub mod recovery_ai;
+pub mod recovery_profile;
 pub mod service;

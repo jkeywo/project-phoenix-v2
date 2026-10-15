@@ -345,6 +345,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         interior: _,
         logistics: _,
         production: _,
+        recovery: _,
+        recoverable: _,
         damage: _,
         sensors_console: _,
         navigation_console: _,
@@ -446,6 +448,20 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         recipes,
         initial_recipe,
         initial_target
+    );
+    exhaustive_struct!(
+        recovery_schema,
+        phoenix_model::recovery::RecoveryToolConfig,
+        system,
+        range,
+        units_per_sec,
+        resources
+    );
+    exhaustive_struct!(
+        recoverable_schema,
+        phoenix_model::recovery::RecoverableSourceConfig,
+        availability,
+        resources
     );
     exhaustive_struct!(
         production_recipe_schema,

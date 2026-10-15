@@ -154,6 +154,8 @@ fn supported_components_are_serdes_own_field_list() {
             "resource_services",
             "logistics",
             "production",
+            "recovery",
+            "recoverable",
             "scan",
             "debris",
             "tractor",

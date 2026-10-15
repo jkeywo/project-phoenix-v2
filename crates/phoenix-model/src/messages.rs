@@ -1970,9 +1970,24 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
-    SetProductionEnabled { enabled: bool },
-    SetProductionTarget { amount: i64 },
-    SelectProductionRecipe { recipe: Option<String>, target: i64 },
+    SetRecoveryEnabled {
+        enabled: bool,
+    },
+    SetRecoverySelection {
+        target_uuid: Option<String>,
+        resource: Option<String>,
+        destination_store: Option<String>,
+    },
+    SetProductionEnabled {
+        enabled: bool,
+    },
+    SetProductionTarget {
+        amount: i64,
+    },
+    SelectProductionRecipe {
+        recipe: Option<String>,
+        target: i64,
+    },
     StartProduction {},
     SetLogisticsEnabled {
         enabled: bool,
@@ -4524,6 +4539,7 @@ pub struct WeaponsBlackboard {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data")]
 pub enum SystemBlackboard {
+    Recovery(crate::recovery_ui::RecoveryBlackboard),
     Production(crate::production_ui::ProductionBlackboard),
     Stock(crate::logistics_ui::SystemStockBlackboard),
     Logistics(crate::logistics_ui::LogisticsBlackboard),

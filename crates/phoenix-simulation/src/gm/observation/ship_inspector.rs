@@ -276,6 +276,8 @@ pub fn projection<'a>(
                     "interior",
                     "logistics",
                     "production",
+                    "recovery",
+                    "recoverable",
                     "hull",
                     "helm_console",
                     "helm_capability",

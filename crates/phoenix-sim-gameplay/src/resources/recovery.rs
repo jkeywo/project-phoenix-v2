@@ -153,6 +153,7 @@ impl RecoveryState {
 
     pub fn validate(&self, profile: &RecoveryToolConfig, snapshot_tick: u64) -> Result<(), String> {
         profile.validate()?;
+        self.validate_settlement()?;
         validate_selection(
             profile,
             self.target.as_deref(),
@@ -164,17 +165,27 @@ impl RecoveryState {
             || !(0.0..1.0).contains(&self.fraction)
             || self.last_tick > snapshot_tick
             || (self.target.is_none() && self.fraction != 0.0)
+        {
+            return Err("recovery continuation owner, fraction or receipt is invalid".into());
+        }
+        Ok(())
+    }
+
+    /// The receipt queue is ephemeral and must settle before a tick boundary.
+    pub fn validate_settlement(&self) -> Result<(), String> {
+        if (self.last_tick == 0) != self.last_outcome.is_none()
             || self.last_outcome.as_ref().is_some_and(|r| {
-                r.tick > self.last_tick
+                r.tick != self.last_tick
                     || r.offered < 0
                     || r.moved < 0
                     || r.moved > r.offered
                     || !r.settled
             })
         {
-            return Err("recovery continuation owner, fraction or receipt is invalid".into());
+            Err("recovery work has an invalid or unsettled transfer receipt".into())
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 

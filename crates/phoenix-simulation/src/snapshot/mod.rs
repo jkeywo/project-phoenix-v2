@@ -246,6 +246,8 @@ mod artifact;
 #[cfg(test)]
 mod physical_preflight_tests;
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod shield_tests;
 #[cfg(test)]
 #[path = "../snapshot_tests.rs"]

@@ -93,6 +93,10 @@ pub struct EntityConfig {
     pub logistics: Option<phoenix_model::logistics::LogisticsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub production: Option<phoenix_model::production::ProductionConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<phoenix_model::recovery::RecoveryToolConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recoverable: Option<phoenix_model::recovery::RecoverableSourceConfig>,
     pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
@@ -851,6 +855,10 @@ impl EntityConfig {
 
         crate::resources::production_profile::compile_entity_production(&config)
             .map_err(SerdeError::custom)?;
+        crate::resources::recovery_profile::compile_entity_recovery(&config)
+            .map_err(SerdeError::custom)?;
+        crate::resources::recovery_profile::validate_recoverable_source(&config)
+            .map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
 
@@ -1050,10 +1058,30 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::RECOVERY_KIND {
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom("Recovery requires an explicit config.ai state tree")
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(SerdeError::custom)?;
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::resources::recovery_ai::bindings(),
+                    )
+                    .map_err(SerdeError::custom)?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::FABRICATION_KIND {
-                    let authored = authored.ok_or_else(|| SerdeError::custom("Fabrication requires an explicit config.ai state tree"))?;
-                    let tree: crate::ai::state_tree::AiTreeConfig = authored.clone().try_into().map_err(SerdeError::custom)?;
-                    crate::ai::state_tree::compile(&tree, &crate::resources::production_ai::bindings()).map_err(SerdeError::custom)?;
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom("Fabrication requires an explicit config.ai state tree")
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(SerdeError::custom)?;
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::resources::production_ai::bindings(),
+                    )
+                    .map_err(SerdeError::custom)?;
                     continue;
                 }
                 if system.kind == crate::ship::system_registry::LOGISTICS_KIND {

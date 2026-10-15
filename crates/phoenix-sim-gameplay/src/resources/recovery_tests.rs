@@ -240,6 +240,17 @@ fn malformed_time_power_bounds_and_continuation_refuse_without_state_commit() {
         }
         assert!(bad.validate(&profile, 1).is_err());
     }
+    let mut frontier = before;
+    frontier
+        .advance(&profile, 1, 0.0, 1, |_, _| panic!("zero time"))
+        .unwrap();
+    frontier.validate(&profile, 1).unwrap();
+    let mut older_receipt = frontier.clone();
+    older_receipt.last_outcome.as_mut().unwrap().tick = 0;
+    assert!(older_receipt.validate(&profile, 1).is_err());
+    let mut deleted_receipt = frontier;
+    deleted_receipt.last_outcome = None;
+    assert!(deleted_receipt.validate(&profile, 1).is_err());
 }
 
 #[test]

@@ -215,6 +215,7 @@ pub struct SystemId(pub String);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConsoleFamily {
+    Recovery,
     Production,
     Logistics,
     Captain,
@@ -249,6 +250,7 @@ pub enum ConsoleFamily {
 impl ConsoleFamily {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Recovery => "recovery",
             Self::Logistics => "logistics",
             Self::Production => "production",
             Self::Captain => "captain",

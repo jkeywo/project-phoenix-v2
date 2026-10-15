@@ -8,6 +8,7 @@ entities:
       rationale:
         - "Selected G061 and S013/S017/S019/S061/S083–84/S086/S092–94/S100–101; detailed scope/evidence lives in docs/gameplay-redesign/implementation/increment-19.md. Static work may follow 15 initial integration/targeted checks after 19/20 custody adoption. Remote/carried craft join 16/18, deception 17, passengers 20; full completion requires verified 16/17/18 exits. Preparation starts no runtime."
         - "[ai] First actual battery-only engineless probe performs physical deploy, dated sensor acquisition and recovery, then a finite-round stationary turret reuses the same lifecycle. Actual entity/config/spawn, energy/damage, jobs/navigation, portable condition and Stock owners remain authoritative. 15 emitted-shot carriers are not craft storage or an operable deployable."
+        - "[ai] Battery-only equipment uses the same EnergyNetwork with explicitly zero sustainable generation, finite source/local reserves and existing paid work/losses. Initial validation and profile reconfiguration accept zero generation but retain all finite nonnegative output/ramp/reserve/thermal checks. Existing powered profiles do not change. An actual authored finite probe consumes this capability; this prerequisite does not itself complete physical deployment/recovery."
   - decision: redesign-deployables-one-identity-and-shared-custody
     core:
       status: accepted

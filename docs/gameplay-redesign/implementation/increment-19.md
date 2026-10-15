@@ -60,6 +60,18 @@ admitted commands and permitted Console knowledge; no swarm/wing/central control
 
 ## One actual craft and equipment owner
 
+The battery-only consumer uses the existing energy network with explicitly zero
+sustainable generation. Its finite shared source capacitor may export stored
+energy, and its ordinary local reserves pay work and losses. Zero generation
+must be supported by initial validation and accepted profile reconfiguration;
+negative/nonfinite generation, invalid output/ramp and inconsistent saved
+reserves still refuse. No new battery controller or per-deployable energy store
+is introduced. A zero-generation authored probe is the first consumer; unchanged
+powered hulls retain their existing coefficients. Exhaustion stops actual sensing
+and transmission through the usual paid work owners, without clearing acquired
+history or refilling on restore. This prerequisite alone does not implement
+physical deploy/recover or close the first lifecycle slice.
+
 Preserve a stable craft/deployable identity and actual equipment/resource/condition
 state through carried, launching, deployed, recovering and lost/destroyed phases.
 For the first supported adapter, retain the actual ordinary entity/continuation

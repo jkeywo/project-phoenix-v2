@@ -1,0 +1,38 @@
+# Optional increment15 missile reference; provisional equipment/doctrine tuning.
+# Keeps the actual Cruiser seats, finite stocks, damage, loading and energy.
+includes = ["alliance_cruiser.toml", "fragments/ai/movement_artillery.toml"]
+name = "entity.missile_cruiser.name"
+
+[torpedoes]
+speed = 5
+lifespan = 120
+seeker = { range = 600.0, fire_arc_deg = 180.0, minimum_transmission = 0.1 }
+receiver = { range = 600.0, minimum_transmission = 0.1, maximum_sample_age_secs = 2.0 }
+
+# Ordinary paid acquisition and its existing identity/classification/assessment
+# times remain. Reach is an explicit property of this optional instrument.
+[weapons_console.radar]
+range = 600
+
+[[weapon]]
+id = "torpedo-tube-fore_port"
+[weapon.mount]
+range = 600
+
+[[weapon]]
+id = "torpedo-tube-fore_starboard"
+[weapon.mount]
+range = 600
+
+[[weapon]]
+id = "torpedo-tube-aft"
+[weapon.mount]
+range = 600
+
+[helm_console.engines_ai.param]
+max_artillery_range = 100.0
+artillery_hold_range = 80.0
+
+[helm_console.steering_ai.param]
+max_artillery_range = 100.0
+artillery_hold_range = 80.0

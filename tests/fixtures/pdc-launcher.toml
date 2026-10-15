@@ -1,9 +1,9 @@
-# Runtime-only PDC probe equipment. The actual Cruiser tubes, finite ammunition,
-# paid loading, radar acquisition and doctrine remain inherited unchanged.
+# Runtime-only firing filters over the optional authored missile-artillery hull.
+# Its actual finite ammunition, paid loading and observation gates remain.
 # Suppress beam offence through its existing authored alert threshold, retaining
 # exact installed hardware. Aft/second tubes use the supported hold filter, so
 # one genuine guided round is the baseline, not an injected projectile.
-includes = ["../../assets/entities/alliance_cruiser.toml"]
+includes = ["../../assets/entities/missile_cruiser.toml"]
 name = "PDC probe launcher"
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 [[weapon]]

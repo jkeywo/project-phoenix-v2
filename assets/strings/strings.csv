@@ -1,4 +1,5 @@
 id,context,en,de,de_source,de_provenance
+entity.missile_cruiser.name,Optional missile reference,Missile Cruiser,Raketenkreuzer,Missile Cruiser,machine
 comms.send_text,Comms radio,Send text,Text senden,Send text,machine
 semantic_action.comms.send_text.label,Comms radio,Send radio text,Funktext senden,Send radio text,machine
 semantic_action.comms.send_text.accessibility,Comms radio,Send the current radio draft,Aktuellen Funktext senden,Send the current radio draft,machine

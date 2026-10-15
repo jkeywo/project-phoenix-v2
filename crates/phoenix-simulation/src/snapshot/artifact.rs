@@ -446,7 +446,8 @@ use super::*;
 // 61 retains independent jammer command intent; paid current influence is derived.
 // 62 retains actual Transit order phases, accepted-course/fuel and arrival receipts.
 // 63 retains immutable HTN method choice and original primitive release ticks.
-pub const SNAPSHOT_FORMAT: u32 = 63;
+/// `64` retains original bounded capability-refusal explanations on PlanChoice.
+pub const SNAPSHOT_FORMAT: u32 = 64;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -574,7 +575,9 @@ pub const SNAPSHOT_FORMAT: u32 = 63;
 /// classification in the actual paid Broad ordnance producer.
 /// "0.43" decomposes imported maintenance plans over actual activity owners
 /// and retains their choice, causal release and original job evidence once.
-pub const SIMULATION_RULES: &str = "0.43";
+/// "0.44" validates original deterministic method selection and explanations
+/// and recognises validated physical flight carriers on delayed rebuild.
+pub const SIMULATION_RULES: &str = "0.44";
 
 /// The authored data, computed rather than remembered.
 ///

@@ -199,6 +199,10 @@ fn prepare_capture_fixture(app: &mut App) {
         .init_resource::<crate::core::report::MissionReport>()
         .add_systems(
             Update,
+            crate::regions::server::rebuild_region_read_cache.before(tick_scans),
+        )
+        .add_systems(
+            Update,
             (
                 crate::science::passive::publish,
                 crate::ship::sensors::publish_sensor_radar_blackboard,

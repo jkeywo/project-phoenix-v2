@@ -1,7 +1,7 @@
 use super::{
-    Program, TreeError,
     compile::{descend, fail, path},
     schema::*,
+    Program, TreeError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

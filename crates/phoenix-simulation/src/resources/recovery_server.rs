@@ -170,7 +170,7 @@ fn operate_ai(
         &mut AdmittedCommands,
     )>,
 ) {
-    use phoenix_sim_gameplay::ai::host::{TreeHostOutcome, decide_tree};
+    use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
     for (uuid, sources, state, equipment, config, boards, programs, mut runtimes, mut admitted) in
         &mut ships
     {

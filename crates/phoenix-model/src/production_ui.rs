@@ -1,6 +1,6 @@
 //! Console-scoped production readouts; authoritative work lives in Gameplay.
-use serde::{Deserialize, Serialize};
 use crate::production::ProductionAmount;
+use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProductionBlackboard {

@@ -34,16 +34,15 @@ fn reference_metadata_has_one_immutable_held_finding_and_keeps_original_age() {
         Ok(false)
     );
     assert_eq!(log, first);
-    assert!(
-        log.append_reference(
+    assert!(log
+        .append_reference(
             "other",
             "reference.other",
             EvidenceProvenance::Records,
             200,
             Some(marked)
         )
-        .is_err()
-    );
+        .is_err());
     assert_eq!(log, first);
     let restored: EvidenceLog =
         serde_json::from_str(&serde_json::to_string(&log).unwrap()).unwrap();

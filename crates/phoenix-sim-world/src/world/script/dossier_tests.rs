@@ -10,13 +10,11 @@ fn append_optional_reference_is_closed_typed_metadata_on_the_existing_effect() {
     let commands = run(
         r#"fn on_x(ctx) { ctx.dossier.append(#{subject:"known",text:"reference.text",provenance:"records",reference:#{id:"unusual-record",unusual:true,reading_ticks:120}}); }"#,
     );
-    let [
-        ActionCmd::RecordDossierEvidence {
-            reference: Some(reference),
-            gathered_at_tick,
-            ..
-        },
-    ] = &commands[..]
+    let [ActionCmd::RecordDossierEvidence {
+        reference: Some(reference),
+        gathered_at_tick,
+        ..
+    }] = &commands[..]
     else {
         panic!("existing append effect expected")
     };
@@ -142,11 +140,9 @@ fn every_provenance_is_authorable_under_its_own_name() {
             provenance.as_str()
         ));
         match &cmds[..] {
-            [
-                ActionCmd::RecordDossierEvidence {
-                    provenance: got, ..
-                },
-            ] => {
+            [ActionCmd::RecordDossierEvidence {
+                provenance: got, ..
+            }] => {
                 assert_eq!(*got, provenance)
             }
             other => panic!("expected one append, got {other:?}"),

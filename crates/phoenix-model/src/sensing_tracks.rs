@@ -79,7 +79,8 @@ impl ObservedElevation {
         {
             return Err("invalid observed elevation".into());
         }
-        Ok(())    }
+        Ok(())
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

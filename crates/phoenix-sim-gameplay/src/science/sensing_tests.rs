@@ -9,11 +9,9 @@ fn explicit_actuator_binding_selects_one_real_owner_without_merging_observations
     validate_sensing(&profile, &config).unwrap();
     let mut missing = profile.clone();
     missing.control.science_target = None;
-    assert!(
-        validate_sensing(&missing, &config)
-            .unwrap_err()
-            .contains("science_target")
-    );
+    assert!(validate_sensing(&missing, &config)
+        .unwrap_err()
+        .contains("science_target"));
     let mut wrong = profile.clone();
     wrong.control.combat_lock = Some(crate::core::messages::SystemId("sensors".into()));
     assert!(validate_sensing(&wrong, &config).is_err());
@@ -65,7 +63,7 @@ fn configured_producer_and_canonical_typed_scan_feed_are_required_together() {
 
 #[test]
 fn focused_and_targeting_closed_trees_keep_policy_outputs_and_private_frames() {
-    use crate::ai::state_tree::{TreeRuntime, compile, step};
+    use crate::ai::state_tree::{compile, step, TreeRuntime};
     let program = compile(
         &crate::science::sensing_ai::focused_tree(),
         &crate::science::sensing_ai::focused_bindings(),
@@ -379,11 +377,9 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
         .find(|system| system.id == id)
         .unwrap()
         .config = None;
-    assert!(
-        validate_sensing(&profile, &entity)
-            .unwrap_err()
-            .contains("state tree")
-    );
+    assert!(validate_sensing(&profile, &entity)
+        .unwrap_err()
+        .contains("state tree"));
     let mut bad = profile.clone();
     bad.passive.first_mut().unwrap().bearing_error_rad = 4.0;
     assert!(bad.validate().is_err());

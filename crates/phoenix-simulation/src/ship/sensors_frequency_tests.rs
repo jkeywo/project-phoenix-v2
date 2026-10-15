@@ -15,13 +15,12 @@ fn low_hint_needs_acquired_history_and_never_samples_live_shields() {
         ))
         .id();
     tick(&mut app);
-    assert!(
-        !app.world()
-            .resource::<EnqueueLog>()
-            .0
-            .iter()
-            .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. }))
-    );
+    assert!(!app
+        .world()
+        .resource::<EnqueueLog>()
+        .0
+        .iter()
+        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
     acquire_local_hint(&mut app, "unprobed-target", 0.71);
     tick(&mut app);
     assert!(app.world().resource::<EnqueueLog>().0.iter().any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { frequency } if frequency == 0.71)));

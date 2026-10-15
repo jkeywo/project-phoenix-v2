@@ -1,7 +1,7 @@
 //! Accepted instrument composition. Geometry delegates to actual weapon mounts.
 use crate::entities::config::EntityConfig;
 use crate::ship::system_registry::{
-    HELM_RADAR_KIND, PASSIVE_RECEIVER_KIND, SENSOR_RADAR_KIND, SENSORS_KIND, TACTICAL_RADAR_KIND,
+    HELM_RADAR_KIND, PASSIVE_RECEIVER_KIND, SENSORS_KIND, SENSOR_RADAR_KIND, TACTICAL_RADAR_KIND,
 };
 pub use phoenix_model::sensing::*;
 

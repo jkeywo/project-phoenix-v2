@@ -40,11 +40,9 @@ fn repeated_receipt_and_relay_retain_original_point_pose_and_clocks() {
         third.projection()[0].provenance.observer_position,
         Some([10.0, 20.0])
     );
-    assert!(
-        !serde_json::to_string(&third.projection())
-            .unwrap()
-            .contains("private-actor")
-    );
+    assert!(!serde_json::to_string(&third.projection())
+        .unwrap()
+        .contains("private-actor"));
 }
 #[test]
 fn later_course_can_choose_an_older_held_measurement_without_renewing_its_age() {
@@ -99,9 +97,7 @@ fn self_echo_and_duplicate_originals_cannot_create_more_history() {
     receiver
         .validate_owner("b", &SystemId("navigation-b".into()), 2)
         .unwrap();
-    assert!(
-        receiver
-            .validate_owner("a", &SystemId("navigation-b".into()), 2)
-            .is_err()
-    );
+    assert!(receiver
+        .validate_owner("a", &SystemId("navigation-b".into()), 2)
+        .is_err());
 }

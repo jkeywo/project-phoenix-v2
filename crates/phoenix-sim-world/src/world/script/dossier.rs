@@ -118,8 +118,8 @@ use rhai::{EvalAltResult, Map};
 
 use crate::dossier::evidence::{EvidenceLog, EvidenceProvenance};
 use crate::world::dispatch::ActionCmd;
-use crate::world::script::effects::{EffectSink, map_str, raise};
-use crate::world::script::registry::{HostRegistry, host_fn};
+use crate::world::script::effects::{map_str, raise, EffectSink};
+use crate::world::script::registry::{host_fn, HostRegistry};
 
 /// The `dossier` custom type handed to a script call.
 ///

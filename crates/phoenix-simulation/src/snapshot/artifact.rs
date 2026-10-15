@@ -450,7 +450,8 @@ use super::*;
 /// `65` retains actual onboard signal-protection command intent.
 /// `66` retains canonical crew presence, dated temporal decisions, actual probe
 /// custody/Bay work and complete shared Security jobs, including consumed IDs.
-pub const SNAPSHOT_FORMAT: u32 = 66;
+/// `67` distinguishes physical JobIds from actual transmission execution identity.
+pub const SNAPSHOT_FORMAT: u32 = 67;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -584,7 +585,8 @@ pub const SNAPSHOT_FORMAT: u32 = 66;
 /// actual Comms, Broad, Focused and Passive receiver owners.
 /// "0.46" uses actual compatible paid relay routes, dated crew-bound scheduling,
 /// canonical stored probe lifecycles and complete shared Security commitments.
-pub const SIMULATION_RULES: &str = "0.46";
+/// "0.47" validates activity evidence against its closed execution family.
+pub const SIMULATION_RULES: &str = "0.47";
 
 /// The authored data, computed rather than remembered.
 ///

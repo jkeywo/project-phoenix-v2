@@ -1,6 +1,6 @@
 //! Whole-candidate physical custody and actual Bay Job continuation.
 use super::*;
-use crate::entities::craft::{PhysicalProbe, ProbeCustody, ShipBayJobs};
+use crate::entities::craft::{PhysicalProbe, ProbeCustody};
 use phoenix_model::craft::{BayOperation, CraftLocation, ProbeProfile};
 use std::collections::{BTreeMap, BTreeSet};
 

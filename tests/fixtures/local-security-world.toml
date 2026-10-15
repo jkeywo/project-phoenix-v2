@@ -1,0 +1,11 @@
+# Quiet actual-host proof of local teams and the inherited Cruiser machinery.
+[global]
+seed = 156220
+[player_spawn]
+position = [0,0,0]
+[[entity]]
+template_path = "assets/entities/security_cruiser.toml"
+id = "security-reference"
+name = "security-reference"
+spawn_on = "game_start"
+transform = { position = [0,0,0] }

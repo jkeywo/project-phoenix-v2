@@ -164,10 +164,13 @@ receiver opt-in; it does not choose Tactical's target or replace a round's targe
 intent. The optional six-seat illumination Cruiser supplies actual finite energy,
 damage and compartment bindings. Supported guided profile authoring and exact-owner
 controls are included. The integrated test compile check and 548-test client run
-pass. After the authored power-group correction `ba716438`, five actual emitter
-cases pass. The AI case exposed missing fixture schedule resources, corrected by
-`4770c21a` and awaiting rebuilt execution. Snapshot and full-host illumination
-journeys remain unverified; see the [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json).
+pass. The later rebuilt owner suite passes all six actual emitter cases and both
+illumination snapshot cases after `ba716438` and `4770c21a`. The suite reports
+343 passes and seven failures in other areas. Full-host illumination remains
+unverified. The full-host PDC probes still produce no foe launch after the
+ship-local torpedo rating correction `d859208e`; source sensing and launch
+conditions remain under investigation. Neither probe has reached its continuation
+exit; see the [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json).
 This does not close the combat exit above.
 
 Repository integration gates run once on the integrated result before a push.

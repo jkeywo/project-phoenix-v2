@@ -57,6 +57,7 @@ struct Trace {
     initial_energy: f32,
     before_payload_hp: Option<f64>,
     payload_damaged_own_hull: bool,
+    producer_initial: Option<serde_json::Value>,
 }
 
 impl std::fmt::Debug for Trace {
@@ -427,6 +428,8 @@ fn prepare(world: &str) -> (App, Entity, String) {
         app.update();
     }
     let (contact, route) = ship_contact(&app, own).expect("actual paid identified hostile ship");
+    let producer_initial = launcher_diagnostics(&mut app, &route);
+    app.world_mut().resource_mut::<Trace>().producer_initial = Some(producer_initial);
     assert_ne!(contact, route);
     app.world_mut().resource_mut::<Trace>().launcher = route.clone();
     control(
@@ -515,6 +518,49 @@ fn launcher_entity(app: &mut App, uuid: &str) -> Entity {
         .map(|(entity, _)| entity)
         .unwrap()
 }
+
+/// Failure-only inspection of the actual producer. This grants no game input
+/// or observation and is never consumed by a controller.
+fn launcher_diagnostics(app: &mut App, uuid: &str) -> serde_json::Value {
+    let entity = launcher_entity(app, uuid);
+    let world = app.world();
+    let pose = world
+        .get::<project_phoenix::ship::state::ShipPhysics>(entity)
+        .unwrap();
+    let boards: BTreeMap<_, _> = world
+        .get::<ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .iter()
+        .filter(|(owner, _)| {
+            matches!(
+                owner.0.as_str(),
+                "viewscreen" | "tactical-radar" | "sensor-radar" | "captain"
+            )
+        })
+        .map(|(owner, board)| (owner.0.clone(), board))
+        .collect();
+    let sources: BTreeMap<_, _> = world
+        .get::<ShipSystemControlSources>(entity)
+        .unwrap()
+        .0
+        .entries()
+        .map(|(owner, source)| (owner.0.clone(), format!("{source:?}")))
+        .collect();
+    let tubes: Vec<_> = world.get::<TorpedoSystemResource>(entity).unwrap().0.tubes.iter()
+        .map(|tube| serde_json::json!({"id":tube.id,"loaded":tube.loaded_count,"desired":tube.target_count,"loading":tube.load_progress(),"targets":tube.targets})).collect();
+    serde_json::json!({
+        "pose":[pose.x,pose.y,pose.z,pose.yaw],
+        "high_fidelity":world.get::<project_phoenix::ai::server::AiHighFidelity>(entity).is_some(),
+        "red_alert":world.get::<project_phoenix::ship::state::ShipRedAlert>(entity).map(|alert| alert.0),
+        "ratings":world.get::<project_phoenix::ship_plugin::ActiveStationRatings>(entity).map(|ratings| &ratings.0),
+        "energy":world.get::<ShipPowerSystem>(entity).map(|power| power.0.network()),
+        "captain_policy":world.get::<project_phoenix::console::captain::server::CaptainAiPolicy>(entity).map(|policy| format!("{:?}", policy.0)),
+        "world_entities":world.get_resource::<project_phoenix::ai::server::WorldSnapshot>().map(|snapshot| snapshot.entities.iter().map(|row| serde_json::json!({"uuid":row.uuid,"faction":row.faction,"position":row.position})).collect::<Vec<_>>()),
+        "selection":world.get::<TacticalRadarSelection>(entity).map(|selection| &selection.0),
+        "sources":sources,"tubes":tubes,"boards":boards
+    })
+}
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
     match (a, b) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
@@ -550,8 +596,16 @@ fn ordinary_pdc_intercepts_and_survives_launcher_removal_with_exact_json_continu
         }
         live.update();
     }
+    let producer = launcher_diagnostics(&mut live, &launcher);
+    let producer_initial = live
+        .world()
+        .resource::<Trace>()
+        .producer_initial
+        .as_ref()
+        .map(serde_json::Value::to_string)
+        .unwrap_or_default();
     assert!(live.world().resource::<Trace>().automatic_with_ship_primary,
-        "normal bank AI must actually use a measured missile while retaining the ship primary: {:?}",
+        "normal bank AI must actually use a measured missile while retaining the ship primary: {:?}; producer: {producer}; producer_initial: {producer_initial}",
         live.world().resource::<Trace>());
     let departing = flights(&mut live);
     assert!(

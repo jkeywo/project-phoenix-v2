@@ -42,8 +42,11 @@ fractional work followed by 360 exact existing-owner comparisons. These cases
 were unexecuted at the initial source checkpoint. The later integrated native
 run found five fixture failures: the legacy finite-stock visitor had no actual
 damage/repair owners. `5e66d584` supplies those owners from the accepted Cruiser
-without changing stocks, power or behavioral assertions. Rebuilt execution is
-pending; see the [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json).
+without changing stocks, power or behavioral assertions. The rebuilt suite passes
+four of those five cases, including the 360-step JSON owner continuation. The
+external repair case still lacked the actual ResourceServices binding;
+`1d5c18de` supplies it from the same accepted hull. Execution of that final
+correction remains pending; see the [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json).
 The JSON case is an owner continuation test, not a full-host capture/digest or
 mesh proof.
 

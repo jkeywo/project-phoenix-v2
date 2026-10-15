@@ -28,9 +28,10 @@ fixes. Neither result establishes native gameplay or device acceptance.
 ## Outstanding proof and scope
 
 The [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json)
-records 287 native passes and eight failures. The actual renamed lateral feed
-case passes. The two movement fixture bootstrap corrections are integrated as
-`9f657b83`; their rebuilt execution remains pending.
+records a later rebuilt suite with 343 native passes and seven failures. The
+actual renamed lateral feed, four Boost cases and both movement fixture
+bootstrap corrections pass. Other failures and their unexecuted corrections
+remain recorded separately.
 
 Run actual paid Direct movement, coasting, turning and ordinary AI handoff in the
 full host. Compare fresh JSON restore using complete captures/digests for 360
@@ -38,14 +39,20 @@ fixed steps and exercise malformed candidate no-write cases. Execute actual
 renamed-owner and Boost tests, then record the exact tested revisions and logs.
 
 The first full-host attempt stopped at a neutral-coast grant-ratio assertion.
-`e606b4c1` now checks actual work on every tick, retaining the same momentum and
-displacement proof. Corrected execution and its later continuation remain pending.
+`e606b4c1` checks actual work on every tick, retaining the same momentum and
+displacement proof. `44e9f9a2` removes an incorrect net-reserve expectation:
+passive battery drain continues while propulsion emits no work. The retry passes
+the movement/coasting assertions and fails at the first complete JSON comparison
+after restore. The exact continuation assertion remains; its state difference
+is under investigation.
 
 Paid Dock separation is integrated as `370baf93`, with whole-candidate preflight
 and compatibility joins in `fcf386de`. Explicit moving equipment uses the existing
 physical pose and paid work; stationary providers release without moving their
 body. The merged Dock/illumination client suites pass 30 tests, and protocol 18
-client/Workshop builds pass. Native Dock execution remains pending.
+client/Workshop builds pass. Six of nine new Dock cases pass in the rebuilt native
+suite. `c46733dd` corrects the missing-physics lifecycle report and two legacy
+tests that moved Transform without canonical ShipPhysics. Their retry is pending.
 
 Local and inter-system transit, formation requests, the small-craft join and their actual fuel/arrival
 continuation remain open. Browser/native device controls, performance, balance and

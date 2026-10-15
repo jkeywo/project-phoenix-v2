@@ -24,6 +24,26 @@ const ENGINEER: &str = "movement-engineer";
 fn id(value: &str) -> SystemId {
     SystemId(value.into())
 }
+fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
+    match (a, b) {
+        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+            let keys: std::collections::BTreeSet<_> = a.keys().chain(b.keys()).collect();
+            keys.into_iter().find_map(|key| {
+                first_difference(
+                    a.get(key).unwrap_or(&serde_json::Value::Null),
+                    b.get(key).unwrap_or(&serde_json::Value::Null),
+                    &format!("{path}.{key}"),
+                )
+            })
+        }
+        (serde_json::Value::Array(a), serde_json::Value::Array(b)) if a.len() == b.len() => a
+            .iter()
+            .zip(b)
+            .enumerate()
+            .find_map(|(index, (a, b))| first_difference(a, b, &format!("{path}[{index}]"))),
+        _ => (a != b).then(|| format!("{path}: {a} != {b}")),
+    }
+}
 fn local(app: &mut App) -> Entity {
     app.world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -364,10 +384,12 @@ fn joined_direct_force_coast_and_turn_resume_before_ordinary_ai_assisted_handoff
     let mut ai_assisted = false;
     let mut ai_demand = false;
     for step in 0..360 {
-        assert_eq!(
-            serde_json::to_value(capture(live.world())).unwrap(),
-            serde_json::to_value(capture(resumed.world())).unwrap(),
-            "complete JSON continuation {step}"
+        let original = serde_json::to_value(capture(live.world())).unwrap();
+        let restored = serde_json::to_value(capture(resumed.world())).unwrap();
+        assert!(
+            original == restored,
+            "complete JSON continuation {step}: {:?}",
+            first_difference(&original, &restored, "$")
         );
         assert_eq!(
             world_digest(live.world()),

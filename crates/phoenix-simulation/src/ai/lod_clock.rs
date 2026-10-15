@@ -17,7 +17,10 @@ pub(crate) fn from_world(world: &World) -> f64 {
             .get_resource::<crate::sim_tick::SimTick>()
             .map(|tick| tick.0),
         fixed.map(|time| time.timestep().as_secs_f64()),
-        fixed.map_or(0.0, |time| f64::from(time.elapsed_secs())),
+        fallback_clock(
+            world,
+            fixed.map_or(0.0, |time| f64::from(time.elapsed_secs())),
+        ),
     )
 }
 
@@ -33,7 +36,13 @@ pub(crate) fn restore_timestamp(world: &World, tick: u64, age: f64, fallback: f6
             return libm::round(tick as f64 - age / period) * period;
         }
     }
-    fallback - age
+    fallback_clock(world, fallback) - age
+}
+
+fn fallback_clock(world: &World, fallback: f64) -> f64 {
+    world
+        .get_resource::<Time>()
+        .map_or(fallback, |time| f64::from(time.elapsed_secs()))
 }
 
 #[cfg(test)]

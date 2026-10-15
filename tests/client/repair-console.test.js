@@ -57,6 +57,7 @@ describe('battleship repair renderStation', () => {
       interior: null, navigation: [], boundaries: [], damageable_systems: [],
       console_id: null, console_view: null,
       external_dispatch: null,
+      personnel: null, planned_requests: [], planned_controllable: false,
     });
   });
 

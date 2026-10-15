@@ -137,7 +137,7 @@ fn imported_domain_waits_for_existing_source_queue_then_freezes_exact_closure() 
     .unwrap();
     assert!(ready.pending.is_empty());
     let compiled = ready.planning.unwrap();
-    assert_eq!(compiled.libraries().len(), 1);
+    assert_eq!(compiled.libraries().count(), 1);
     let denied = discover(
         ROOT,
         &world,

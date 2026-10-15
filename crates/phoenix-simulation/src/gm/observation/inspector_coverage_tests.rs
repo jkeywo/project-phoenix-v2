@@ -1247,6 +1247,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     let crate::world::config::WorldConfig {
         situation_definitions: _,
         situations: _,
+        planning: _,
+        compiled_planning: _,
         global: _,
         scenario_detail_floor: _,
         anchors: _,

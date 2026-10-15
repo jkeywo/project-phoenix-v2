@@ -445,7 +445,8 @@ use super::*;
 // 60 retains real activity outcomes/situations and explicit bootstrap slot provenance.
 // 61 retains independent jammer command intent; paid current influence is derived.
 // 62 retains actual Transit order phases, accepted-course/fuel and arrival receipts.
-pub const SNAPSHOT_FORMAT: u32 = 62;
+// 63 retains immutable HTN method choice and original primitive release ticks.
+pub const SNAPSHOT_FORMAT: u32 = 63;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -571,7 +572,9 @@ pub const SNAPSHOT_FORMAT: u32 = 62;
 /// accepted navigation and static arrival policy through the existing physics owner.
 /// "0.42" honours explicit instrument Missile selection and normal acquired
 /// classification in the actual paid Broad ordnance producer.
-pub const SIMULATION_RULES: &str = "0.42";
+/// "0.43" decomposes imported maintenance plans over actual activity owners
+/// and retains their choice, causal release and original job evidence once.
+pub const SIMULATION_RULES: &str = "0.43";
 
 /// The authored data, computed rather than remembered.
 ///

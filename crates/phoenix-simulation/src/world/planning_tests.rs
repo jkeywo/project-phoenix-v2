@@ -36,7 +36,7 @@ fn setup(count: u32) -> (App, Entity) {
         .unwrap()
         .team_homes
         .truncate(count as usize);
-    crate::ship::interior::InteriorGraph::compile(
+    phoenix_sim_gameplay::ship::interior::InteriorGraph::compile(
         config.interior.as_ref().unwrap(),
         config.ship_config.as_ref().unwrap(),
         count as usize,

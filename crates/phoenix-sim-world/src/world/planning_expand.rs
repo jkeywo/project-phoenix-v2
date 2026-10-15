@@ -1,6 +1,6 @@
 use super::*;
 use crate::world::activities::{
-    ActivityRequest, SituationConfig, SituationDefinition, SituationInstances,
+    ActivityRequest, SituationCondition, SituationConfig, SituationDefinition, SituationInstances,
 };
 use std::collections::{BTreeMap, BTreeSet};
 

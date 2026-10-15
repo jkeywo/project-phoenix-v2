@@ -67,10 +67,15 @@ pub(super) fn preflight_missing_entities(
         }
     }
     for row in snapshot.entities.iter().filter(|row| {
-        row.guided_flight_carrier && !present.iter().any(|(uuid, ..)| uuid == &row.uuid)
+        row.weapon_flight_carrier && !present.iter().any(|(uuid, ..)| uuid == &row.uuid)
     }) {
         let entity =
-            crate::console::weapons::guided_flight::spawn_empty(&mut staging, row.uuid.clone());
+            crate::console::weapons::flight_carrier::spawn_empty(&mut staging, row.uuid.clone());
+        crate::console::weapons::flight_carrier::seed_banks(
+            &mut staging,
+            entity,
+            &row.carrier_bolt_banks,
+        );
         staged.push((entity, row));
     }
     // Existing attackers can retain samples of targets that are materialized by
@@ -190,11 +195,15 @@ pub(super) fn restore_entities(
         if present.iter().any(|(_, uuid)| uuid == &row.uuid) {
             continue;
         }
-        match if row.guided_flight_carrier {
-            Some(crate::console::weapons::guided_flight::spawn_empty(
+        match if row.weapon_flight_carrier {
+            let entity =
+                crate::console::weapons::flight_carrier::spawn_empty(world, row.uuid.clone());
+            crate::console::weapons::flight_carrier::seed_banks(
                 world,
-                row.uuid.clone(),
-            ))
+                entity,
+                &row.carrier_bolt_banks,
+            );
+            Some(entity)
         } else {
             row.spawn
                 .as_ref()

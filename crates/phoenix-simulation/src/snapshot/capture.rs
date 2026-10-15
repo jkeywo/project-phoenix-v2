@@ -1388,13 +1388,17 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                 } else {
                     Default::default()
                 };
-                let (weapons, repair, blackboards, patrol_cursors) = if context.machines || entity.contains::<crate::console::weapons::guided_flight::GuidedFlightCarrier>() {
+                let (weapons, repair, blackboards, patrol_cursors) = if context.machines || entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>() {
                     capture_weapons_and_repair(entity)
                 } else {
                     Default::default()
                 };
                 EntityState {
-                    guided_flight_carrier: entity.contains::<crate::console::weapons::guided_flight::GuidedFlightCarrier>(),
+                    weapon_flight_carrier: entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>(),
+                    carrier_bolt_banks: if entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>() {
+                        entity.get::<crate::console::weapons::blaster::BlasterSystemResource>()
+                            .map(|owner| owner.0.iter().map(|bank| bank.config.id.clone()).collect()).unwrap_or_default()
+                    } else {Vec::new()},
                     mesh_crew: capture_mesh_crew(entity),
                     npc_doctrine: entity
                         .get::<crate::gm::operations::npc::NpcDoctrineState>()

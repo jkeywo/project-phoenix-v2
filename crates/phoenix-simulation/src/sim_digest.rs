@@ -1780,10 +1780,15 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     for (key, entity, physics, hull, alert, power) in rows {
         acc = fold_str(acc, &key.id);
         if world
-            .get::<crate::console::weapons::guided_flight::GuidedFlightCarrier>(entity)
+            .get::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>(entity)
             .is_some()
         {
-            acc = fold_str(acc, "guided-flight-carrier");
+            acc = fold_str(acc, "weapon-flight-carrier");
+            let banks: Vec<_> = world
+                .get::<crate::console::weapons::blaster::BlasterSystemResource>(entity)
+                .map(|owner| owner.0.iter().map(|bank| bank.config.id.as_str()).collect())
+                .unwrap_or_default();
+            acc = fold_serde(acc, &banks);
         }
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());

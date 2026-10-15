@@ -16,30 +16,30 @@ entities:
       status: accepted
       confidence: confirmed
       title: Launched Guided Rounds Outlive Their Launcher
-      summary: "Actual source removal or capability replacement moves the same already-launched TorpedoSystem vector into a nonspatial carrier, retaining round identity, attribution, frozen profile and remaining flight. The carrier has no ship, control, AI, launch tube, stock, pending burst or energy consumer."
+      summary: "Actual source removal or capability replacement drains both existing already-emitted TorpedoSystem and BlasterSystem vectors in one source transaction into the same nonspatial carrier, retaining round identity, attribution, frozen profile and remaining flight. The carrier has no ship, control, AI, launch tube, stock, pending burst or energy consumer."
       rationale:
-        - "[ai] The ordinary lifecycle and observation producers continue to read that actual vector; there is no second projectile pool or controller. Closed carrier continuation is recreated directly, with full-candidate shape and identity checks. Empty carriers are removed after ordinary expiry, interception or detonation."
+        - "[ai] The first component replacement/removal hook drains both families; the second sees empty vectors and mints nothing, so ComponentId/archetype registration order cannot swap carrier identities. The ordinary lifecycle and observation producers continue to read those actual vectors; there is no second projectile pool or controller. Snapshot-only ordered bolt bank IDs derive from actual flight-only bank configs and recreate that closed shape without another runtime ID store. Closed carrier continuation is recreated directly, with full-candidate shape and identity checks. After ordinary Physics and Damage, one common settlement prunes empty flight-only bolt banks and removes a carrier only when both actual projectile families are empty; snapshots never park finished empty banks or carriers."
         - "[ai] Exclusive snapshot roster replacement suppresses carrier creation from discarded bootstrap state. Replacement launcher copies cannot duplicate or upgrade already-launched IDs. A body GM inverse whose capture contains launched guided or bolt rounds is refused before spawning, including after those old rounds have hit or expired; deliberate current-flight rejoining is not part of this increment checkpoint."
-  - state: guided-flight-carrier-state
+  - state: weapon-flight-carrier-state
     core:
       status: implemented
       confidence: confirmed
-      title: Guided Flight Carrier Identity
-      summary: "A folded zero-sized entity marker distinguishes a nonspatial continued flight owner from an operable ship. Actual physical flight remains in the existing TorpedoSystemResource."
+      title: Weapon Flight Carrier Identity
+      summary: "A folded zero-sized entity marker distinguishes a nonspatial continued flight owner from an operable ship. Actual physical flight remains in the existing TorpedoSystemResource or BlasterSystemResource."
     architecture:
       classification: authoritative
       owner: shared-weapon-mount-and-delivery
       writers: [shared-weapon-mount-and-delivery]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/guided_flight.rs, crates/phoenix-simulation/src/snapshot/guided_carriers.rs]
-      symbols: [GuidedFlightCarrier]
-      tests: [crates/phoenix-simulation/src/console/weapons/guided_flight_tests.rs]
-  - state: guided-flight-restore-guard
+      paths: [crates/phoenix-simulation/src/console/weapons/flight_carrier.rs, crates/phoenix-simulation/src/snapshot/flight_carriers.rs]
+      symbols: [WeaponFlightCarrier]
+      tests: [crates/phoenix-simulation/src/console/weapons/flight_carrier_tests.rs]
+  - state: weapon-flight-restore-guard
     core:
       status: implemented
       confidence: confirmed
-      title: Guided Flight Restore Write Guard
+      title: Weapon Flight Restore Write Guard
       summary: "Transient exclusive restore context prevents discarded bootstrap flight vectors from becoming extra carriers. It has no saved or folded value and is restored after the roster replacement."
     architecture:
       classification: derived
@@ -47,6 +47,6 @@ entities:
       writers: [shared-weapon-mount-and-delivery]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/weapons/guided_flight.rs, crates/phoenix-simulation/src/snapshot/restore.rs]
+      paths: [crates/phoenix-simulation/src/console/weapons/flight_carrier.rs, crates/phoenix-simulation/src/snapshot/restore.rs]
       symbols: [RestoreGuard]
-      tests: [crates/phoenix-simulation/src/console/weapons/guided_flight_tests.rs]
+      tests: [crates/phoenix-simulation/src/console/weapons/flight_carrier_tests.rs]

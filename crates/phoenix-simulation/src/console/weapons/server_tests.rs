@@ -17725,7 +17725,7 @@ mod disablement_tests;
 mod sustained_tests;
 #[test]
 fn actual_torpedo_lifecycle_expires_and_disposes_a_removed_launchers_carrier() {
-    use crate::console::weapons::guided_flight::GuidedFlightCarrier;
+    use crate::console::weapons::flight_carrier::WeaponFlightCarrier;
     use bevy::ecs::system::RunSystemOnce;
     let mut app = test_app();
     app.insert_resource(State::new(GamePhase::InProgress));
@@ -17766,13 +17766,16 @@ fn actual_torpedo_lifecycle_expires_and_disposes_a_removed_launchers_carrier() {
     app.world_mut().flush();
     let mut query = app
         .world_mut()
-        .query_filtered::<Entity, With<GuidedFlightCarrier>>();
+        .query_filtered::<Entity, With<WeaponFlightCarrier>>();
     assert_eq!(query.iter(app.world()).count(), 1);
     app.world_mut()
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs_f32(0.5));
     app.world_mut()
         .run_system_once(crate::console::weapons::torpedo::tick_torpedo_lifecycle)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::console::weapons::flight_carrier::settle_carriers)
         .unwrap();
     app.world_mut().flush();
     assert_eq!(query.iter(app.world()).count(), 0);

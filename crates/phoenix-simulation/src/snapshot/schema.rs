@@ -12,7 +12,11 @@ pub struct EntityState {
     pub weapon_targets: Option<phoenix_sim_gameplay::weapons::assignments::WeaponTargetAssignments>,
     /// Nonspatial owner of already-launched rounds after launcher removal.
     #[serde(default, skip_serializing_if = "is_false")]
-    pub guided_flight_carrier: bool,
+    pub weapon_flight_carrier: bool,
+    /// Ordered bank IDs recreate emitted bolts without a ship recipe.
+    /// Derived from actual flight-only banks; no separate runtime ID list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub carrier_bolt_banks: Vec<String>,
     /// Physical bearings only; target/enabled intent belongs to each System.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mounts: Option<crate::weapons::mounts::ShipMounts>,

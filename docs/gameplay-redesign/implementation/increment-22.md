@@ -583,3 +583,61 @@ profile, and no released work before the effective commitment. Inspect original
 and revised decisions separately. Simulation supplies only the same real
 participation/control projection already used at first choice; no local Session
 fallback, hypothetical job, method swap or fresh mission clock is introduced.
+
+
+### Communication activity joins actual shared-channel execution
+
+Adopted with increment16's existing ReportStatus consumer. Generalise the existing
+activity execution reference to a closed identity: actual actor/System plus either
+physical JobId or actual communication origin ID, recipient UUID and emission
+tick. Keep ActivityJob as the physical helper. ActivityFact and SituationInstance
+hold this one typed reference; no fake JobId, duplicate job, separate communication
+mission journal or copied Comms controller state is introduced.
+
+A communication primitive declares its actual issuing actor/System, a declared
+base-world recipient reference, channel and ReportStatus request. First-recipient
+scope is an existing base-world actor; launch-slot/dynamic recipient resolution
+must refuse explicitly until its accepted bootstrap relation is supported. The
+issuer keeps existing base/launch-slot support. Content validation checks both
+references and actual issuing Comms equipment/channel across offered hulls.
+
+Release arms the same bounded situation owner. Its ordinary Comms publication
+includes a planned request only while the resolved recipient UUID is already in
+that issuing Console's permitted current Comms contacts. It supplies no new contact
+or hidden identity. Human and ordinary per-System AI use the same SendCommsRequest
+with optional planned_request instance context, current known recipient and real
+channel. Existing radio route, ownership, operation and finite energy gates remain
+required. No World script sends on behalf of a human-owned System.
+
+Before payment validate the exact released/unaccepted instance, issuing actor/
+System and declared recipient/channel/request. After a successful ordinary paid
+emission, bind its actual minted origin ID and emission tick at that same commit.
+Duplicate or stale contexts refuse before another payment. An unrelated ordinary
+request cannot be retrospectively attached; disappearance/route failure leaves
+this instruction waiting without fabricating an accepted request.
+
+The adapter observes only the issuing actor's actual sent Request and heard
+returned Outcome lineage. A matching heard read receipt can acknowledge Read;
+a heard Report or Decline acknowledges the distinct terminal outcome. Retain
+original read/report clocks and the actual receipt time. Do not inspect a foreign
+private inbox to tell the actor a request was read. A terminal receipt can supply
+its original read evidence if the separate earlier receipt was not heard. Existing
+saved pending World events retain these two bounded facts until acknowledgement;
+the same SituationInstances own their historical evidence and Scenario effects.
+
+A status report is factual evidence, not permission. Only an explicit authored
+Scenario transition may create a distinct in-world permission or consequence.
+No hypothetical report, AI decision or elapsed reading estimate satisfies that
+transition. Source libraries gain the closed communication operator, typed actor
+binding and read/reported/declined conditions; existing Workshop validated source
+history/Test and privileged inspection edit and explain those same definitions.
+
+Candidate preflight validates exact accepted source/recipient/owner/channel and
+causal emission/read/report/receipt clocks before writes, and reconciles ongoing
+bindings with candidate Comms records. Terminal historical facts keep their scoped
+identity after ordinary message retention, just as completed Repair jobs outlive
+team-slot reuse. Save/digest this owner once. Prove actual Human/ordinary AI send,
+reading/return, unpaid/unknown/disconnected refusal, no unrelated receipt credit,
+Scenario permission separation and full JSON/digest continuation. This extends
+22C's real activity vocabulary; it does not finish continuing modes or opportunity
+search by itself.

@@ -8,11 +8,11 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use super::shared::{
-    DirectFireGeometry, any_blaster_bank_operates_ai, live_entity_xz, system_is_registered,
+    any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, DirectFireGeometry,
 };
 use super::{
-    AsteroidDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS, ShipDestroyedVfx, WeaponActionRefusal,
-    WeaponActionResult,
+    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponActionRefusal, WeaponActionResult,
+    DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
 use crate::core::messages::{GamePhase, ServerMessage, SystemControlPayload};
 use crate::lobby::{Sessions, Target};

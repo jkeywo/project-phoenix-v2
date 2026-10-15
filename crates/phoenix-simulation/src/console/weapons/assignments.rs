@@ -221,7 +221,7 @@ impl WeaponAimInputs<'_, '_> {
             return false;
         };
         if assignments
-            .and_then(|state| state.0.0.get(owner))
+            .and_then(|state| state.0 .0.get(owner))
             .is_some_and(|state| !state.follows_primary())
         {
             return true;
@@ -252,7 +252,7 @@ impl WeaponAimInputs<'_, '_> {
             .get(entity)
             .ok()
             .and_then(|row| row.4)
-            .and_then(|state| state.0.0.get(owner));
+            .and_then(|state| state.0 .0.get(owner));
         if resolved.is_some() || assignment.is_some_and(|state| state.has_explicit_order()) {
             return resolved;
         }
@@ -265,7 +265,7 @@ impl WeaponAimInputs<'_, '_> {
             .get(entity)
             .ok()
             .and_then(|row| row.4)
-            .and_then(|state| state.0.0.get(owner))
+            .and_then(|state| state.0 .0.get(owner))
             .is_some_and(|state| state.has_explicit_order())
     }
 
@@ -275,7 +275,7 @@ impl WeaponAimInputs<'_, '_> {
             .ok()?
             .4?
             .0
-            .0
+             .0
             .get(owner)?
             .automatic
             .clone()
@@ -677,7 +677,7 @@ pub fn effective_weapon_contact_filtered(
         Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.as_deref(),
         _ => None,
     };
-    let assignment = assignments.and_then(|state| state.0.0.get(owner));
+    let assignment = assignments.and_then(|state| state.0 .0.get(owner));
     let normalise = |selected: &str, allow_route: bool| {
         if !crate::science::contact_routing::measured_machinery(broad, controls) {
             return Some(selected.to_owned());

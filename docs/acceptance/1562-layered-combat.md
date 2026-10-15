@@ -75,6 +75,40 @@ with path-canonicalization warnings retained in its log. The affected wiki lint
 resolved 57 source references and all 71 index links. The restored Workshop build
 script passed `node --check`; a full browser bundle is not claimed.
 
+## Measured defensive targeting checkpoint, 15 October 2026
+
+Source `d767ee99` retains automatic fallback in the canonical per-System assignment,
+settles admitted human/AI target commands before Physics, and uses permitted dated
+elevation for missile eligibility and full spatial range. Explicit individual/group
+orders, including Hold, remain decisive. The ordinary bank AI selects from current
+permitted approaching observations using its own known relative motion; it reads
+neither launcher allegiance nor private projectile orders. Actual finite turrets
+consume the same filtered designation. This is an integration checkpoint, not the
+completed interception/launch journey.
+
+| Targeted evidence | Result | Limits |
+|---|---|---|
+| Pure interception geometry | 2 passed | Actual moving lead and spatial sweep rules |
+| Pure elevation, assignment precedence and 3D flight | 12 passed | Includes paid sample/error bounds, sample-derived vertical motion, inherited observations and frozen emitted motion |
+| Automatic-target client projections | 11 passed | Public pending/unavailable/override controls; no device acceptance |
+| Native assignments, physical mounts and spatial bolt snapshots | 15 passed | Includes missing height, full spatial range, own relative velocity, explicit Hold, current Conceal, real refit freeze and exact settled JSON continuation |
+
+The renderer-free Simulation check passed after correcting the composed Bevy query
+tuple limit. The first native build found three older measurement test literals
+missing the new optional elevation field; those fixtures now explicitly retain
+unknown height. The affected native selection then passed. No test or threshold was
+removed or relaxed. `increment15-aim-proof.json` in the ignored integration directory
+pins the source hashes, formatting-only dirty files and log hashes. Subsequent
+Rust 2021 formatting changes do not alter these tested behaviours.
+
+Logs: `increment15-parallel-joined-pure-tests.log`,
+`increment15-parallel-elevation-assignment-tests.log`,
+`increment15-auto-target-client-tests.log`,
+`increment15-aim-elevation-check-retry.log` and
+`increment15-aim-elevation-native-tests-retry.log`. The later native run is 15 tests;
+it does not replace earlier failed batches or claim the remaining physical PDC,
+launcher-loss, guidance, complete-host, balance, performance or human exits.
+
 ## Remaining exit work
 
 Complete and verify guided-flight/pending-burst continuation, independent flight

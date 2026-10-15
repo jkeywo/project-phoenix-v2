@@ -219,14 +219,13 @@ fn actual_member_commands_preserve_override_and_do_not_command_other_members() {
         Some(contact.as_str())
     );
     command(&mut app, ship, &fore.0, Payload::FollowPrimaryTarget);
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
 }
 #[test]
 fn guessed_private_contacts_nonmembers_and_current_conceal_cannot_mutate_intent() {
@@ -248,14 +247,13 @@ fn guessed_private_contacts_nonmembers_and_current_conceal_cannot_mutate_intent(
             uuid: Some(contact.clone()),
         },
     );
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
     crate::gm::operations::contact::set(
         &mut app
             .world_mut()
@@ -273,14 +271,13 @@ fn guessed_private_contacts_nonmembers_and_current_conceal_cannot_mutate_intent(
             uuid: Some(contact),
         },
     );
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
     command(
         &mut app,
         ship,
@@ -292,7 +289,7 @@ fn guessed_private_contacts_nonmembers_and_current_conceal_cannot_mutate_intent(
             .get::<ShipWeaponTargets>(ship)
             .unwrap()
             .0
-            .0
+             .0
             .len(),
         1
     );
@@ -321,20 +318,18 @@ fn losing_a_selected_publication_withholds_aim_without_forgetting_own_assignment
         .0
         .clear();
     let world = app.world();
-    assert!(
-        effective_weapon_contact(
-            &world
-                .get::<crate::ship_plugin::ShipConfigComponent>(ship)
-                .unwrap()
-                .0,
-            &owner,
-            world.get::<ShipSystemBlackboards>(ship).unwrap(),
-            world.get::<BroadTracks>(ship),
-            None,
-            world.get::<ShipWeaponTargets>(ship)
-        )
-        .is_none()
-    );
+    assert!(effective_weapon_contact(
+        &world
+            .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+            .unwrap()
+            .0,
+        &owner,
+        world.get::<ShipSystemBlackboards>(ship).unwrap(),
+        world.get::<BroadTracks>(ship),
+        None,
+        world.get::<ShipWeaponTargets>(ship)
+    )
+    .is_none());
     assert_eq!(world.get::<ShipWeaponTargets>(ship).unwrap().0, saved);
 }
 
@@ -348,20 +343,16 @@ fn fitted_observations_without_their_console_scope_never_fall_back_to_scene_trut
     let mut state = SystemState::<WeaponAimInputs>::new(app.world_mut());
     let inputs = state.get(app.world());
     let owner = SystemId("phaser-fore".into());
-    assert!(
-        inputs
-            .resolve_reference(ship, &owner, &contact, |_| panic!(
-                "missing scope read private geometry"
-            ))
-            .is_none()
-    );
-    assert!(
-        inputs
-            .active(ship, &owner, "private-actor", |_| panic!(
-                "active cycle read private geometry"
-            ))
-            .is_none()
-    );
+    assert!(inputs
+        .resolve_reference(ship, &owner, &contact, |_| panic!(
+            "missing scope read private geometry"
+        ))
+        .is_none());
+    assert!(inputs
+        .active(ship, &owner, "private-actor", |_| panic!(
+            "active cycle read private geometry"
+        ))
+        .is_none());
 }
 
 #[test]
@@ -434,14 +425,13 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
                 uuid: Some(supplied.into()),
             },
         );
-        assert!(
-            app.world()
-                .get::<ShipWeaponTargets>(ship)
-                .unwrap()
-                .0
-                .0
-                .is_empty()
-        );
+        assert!(app
+            .world()
+            .get::<ShipWeaponTargets>(ship)
+            .unwrap()
+            .0
+             .0
+            .is_empty());
     }
     // Unsupported ownership is tested while this same handle is observable.
     command(
@@ -452,14 +442,13 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
             uuid: Some(contact.clone()),
         },
     );
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
     command(
         &mut app,
         ship,
@@ -469,7 +458,7 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
         },
     );
     assert_eq!(
-        app.world().get::<ShipWeaponTargets>(ship).unwrap().0.0[&owner]
+        app.world().get::<ShipWeaponTargets>(ship).unwrap().0 .0[&owner]
             .automatic
             .as_deref(),
         Some(contact.as_str())
@@ -529,7 +518,7 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
         &owner.0,
         Payload::SetAutomaticWeaponTarget { uuid: None },
     );
-    let kept = &app.world().get::<ShipWeaponTargets>(ship).unwrap().0.0[&owner];
+    let kept = &app.world().get::<ShipWeaponTargets>(ship).unwrap().0 .0[&owner];
     assert!(kept.automatic.is_none() && kept.has_explicit_order());
     command(&mut app, ship, &owner.0, Payload::FollowPrimaryTarget);
     command(
@@ -540,14 +529,13 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
             uuid: Some(contact.clone()),
         },
     );
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
     crate::gm::operations::contact::set(
         &mut app
             .world_mut()
@@ -570,12 +558,11 @@ fn automatic_command_uses_the_same_current_permitted_contact_boundary_and_clear_
             uuid: Some(contact),
         },
     );
-    assert!(
-        app.world()
-            .get::<ShipWeaponTargets>(ship)
-            .unwrap()
-            .0
-            .0
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(ship)
+        .unwrap()
+        .0
+         .0
+        .is_empty());
 }

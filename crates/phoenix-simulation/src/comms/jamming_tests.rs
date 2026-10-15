@@ -40,7 +40,7 @@ fn fixture_with_faction(faction: Option<&str>) -> (World, Entity, Entity, String
         |faction| {
             crate::entities::loader::apply_overrides(
                 &target_config,
-                &toml::toml! { faction = faction },
+                &toml::Value::Table(toml::toml! { faction = faction }),
             )
             .unwrap()
         },

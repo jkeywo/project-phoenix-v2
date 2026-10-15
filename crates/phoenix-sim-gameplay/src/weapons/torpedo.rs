@@ -249,6 +249,7 @@ impl TubeLoadState {
 
 #[derive(Clone, Debug)]
 pub struct TorpedoTube {
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Tube identifier from TOML (e.g. `"fore_port"`, `"aft"`).
     pub id: TorpedoTubeId,
@@ -520,6 +521,7 @@ impl TorpedoSystem {
         let ai_target_count = config.ai_volley_target.unwrap_or(1).min(1);
         let tubes = vec![
             TorpedoTube {
+                targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_port".to_string(),
                 facing_deg: -30.0,
@@ -536,6 +538,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_starboard".to_string(),
                 facing_deg: 30.0,
@@ -552,6 +555,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "aft".to_string(),
                 facing_deg: 180.0,
@@ -588,6 +592,7 @@ impl TorpedoSystem {
         let tubes = tubes
             .iter()
             .map(|c| TorpedoTube {
+                targets: c.targets.clone(),
                 impact: c.impact,
                 id: c.id.clone(),
                 facing_deg: c.facing_deg,

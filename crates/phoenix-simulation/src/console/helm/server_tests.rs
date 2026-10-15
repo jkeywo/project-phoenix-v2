@@ -5,6 +5,38 @@ use crate::core::messages::{
 };
 use crate::server_app::ShipSystemBlackboards;
 use crate::ship::boost::BoostState;
+use crate::ship::system_registry::helm_radar_system_id;
+
+/// Publication fixtures need an actual funded processing receipt. This runs
+/// the real reserve debit once; publishing does not manufacture more work.
+fn paid_radar(owner: &SystemId) -> crate::ship::power::ShipPowerSystem {
+    let content = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let mut ship = content.ship_config.unwrap();
+    let mut hardware = content.energy.unwrap();
+    let system = ship
+        .systems
+        .iter_mut()
+        .find(|system| system.kind == crate::ship::system_registry::HELM_RADAR_KIND)
+        .unwrap();
+    let original = system.id.clone();
+    system.id = owner.clone();
+    hardware
+        .consumers
+        .iter_mut()
+        .find(|consumer| consumer.system == original)
+        .unwrap()
+        .system = owner.clone();
+    let mut power =
+        crate::modifiers::power_system::PowerSystem::from_energy(hardware, ship).unwrap();
+    let before = power.network().consumers[owner].energy;
+    let work = power.work_continuous(owner, 1.0 / 60.0, 1.0).unwrap();
+    assert_eq!(work.fraction, 1.0);
+    assert!(power.network().consumers[owner].energy < before);
+    crate::ship::power::ShipPowerSystem(power)
+}
 
 fn base_app() -> App {
     let mut app = App::new();
@@ -22,6 +54,7 @@ fn base_app() -> App {
         ShipBoost::default(),
         crate::modifiers::ShipModifiers::new(),
         crate::ship_plugin::LastHelmInput::default(),
+        paid_radar(&helm_radar_system_id()),
     ));
     app
 }
@@ -352,6 +385,7 @@ fn spawn_npc_ship(app: &mut App, radar_range: f32) -> Entity {
             ShipSystemBlackboards::default(),
             crate::modifiers::ShipModifiers::new(),
             crate::entities::spawner::HelmConsoleSection(helm_config),
+            paid_radar(&helm_radar_system_id()),
         ))
         .id()
 }
@@ -465,6 +499,7 @@ fn arc_overlay_app(red_alert: bool, local: bool) -> App {
         crate::ship_plugin::LastHelmInput::default(),
         crate::entities::spawner::FactionComponent(OWN_FACTION),
         crate::ship::state::ShipRedAlert(red_alert),
+        paid_radar(&helm_radar_system_id()),
     ));
     if local {
         ship.insert(crate::server_app::LocalShip);
@@ -811,9 +846,10 @@ console = "helm-console"
         &["helm_radar"],
     )
     .unwrap();
-    app.world_mut()
-        .entity_mut(npc)
-        .insert(crate::ship::components::ShipConfigComponent(config));
+    app.world_mut().entity_mut(npc).insert((
+        crate::ship::components::ShipConfigComponent(config),
+        paid_radar(&sid),
+    ));
     let mut hull = SystemHull::from_config_with_tiers(&[(
         sid.clone(),
         20.0,

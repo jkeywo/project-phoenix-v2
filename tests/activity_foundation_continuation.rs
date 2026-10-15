@@ -545,6 +545,7 @@ fn actual_repair_and_delivery_credit_once_across_partial_work_json_and_360_host_
         resumed.update();
     }
     assert_same(&live, &resumed, 360);
+
     assert!(
         paid_repair && paid_delivery,
         "both ordinary consumers must actually spend finite energy"
@@ -972,6 +973,67 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
         resumed.update();
     }
     assert_same(&live, &resumed, 360);
+    if !paid_delivery
+        && live
+            .world()
+            .resource::<ActivityPaymentWitness>()
+            .delivery
+            .is_none()
+    {
+        // Read-only failure evidence from the ordinary owner, its exact permitted
+        // publication and actual World frontiers. No dispatch or work is seeded.
+        let logistics = &live.world().get::<ShipLogistics>(actor).unwrap().0;
+        let owner = &logistics.owner;
+        let sources = &live
+            .world()
+            .get::<ShipSystemControlSources>(actor)
+            .unwrap()
+            .0;
+        let config = &live.world().get::<ShipConfigComponent>(actor).unwrap().0;
+        let boards = &live
+            .world()
+            .get::<project_phoenix::server_app::ShipSystemBlackboards>(actor)
+            .unwrap()
+            .0;
+        let permitted = config.observations_for_system(owner, boards);
+        let snapshot = capture(live.world());
+        let actor_row = snapshot
+            .entities
+            .iter()
+            .find(|row| row.uuid == runtime(&live).plan_choice.as_ref().unwrap().actor_uuid)
+            .unwrap();
+        let tree = live
+            .world()
+            .get::<project_phoenix::ai::state_tree_runtime::ShipAiTreeRuntime>(actor)
+            .and_then(|trees| trees.0.get(owner));
+        let diagnostic = serde_json::json!({
+            "tick": snapshot.tick,
+            "demand_sent": demand_sent,
+            "owner": owner,
+            "source": format!("{:?}", sources.source_for(owner)),
+            "has_actual_source": sources.entries().any(|(id, _)| id == owner),
+            "host": project_phoenix::command_admission::policy::station_for_system(config, live.world().get::<HumanSeekingHosts>(actor), owner),
+            "ratings": live.world().get::<project_phoenix::ship_plugin::ActiveStationRatings>(actor).map(|ratings| &ratings.0),
+            "enabled": logistics.enabled,
+            "goals": logistics.goals,
+            "replenishing": logistics.replenishing,
+            "jobs": actor_row.logistics,
+            "power": actor_row.power,
+            "permitted_logistics": permitted.get(owner),
+            "tree": tree,
+            "situations": runtime(&live).situations,
+            "choice": runtime(&live).plan_choice,
+            "credits": [runtime(&live).flags.counter("htn_repair_credit"), runtime(&live).flags.counter("htn_return_credit"), runtime(&live).flags.counter("htn_delivery_credit")],
+        });
+        eprintln!(
+            "HTN delivery owner diagnostic: {}",
+            diagnostic
+                .to_string()
+                .chars()
+                .take(16000)
+                .collect::<String>()
+        );
+    }
     assert!(
         (paid_repair || live.world().resource::<ActivityPaymentWitness>().repair.is_some())
             && (paid_delivery || live.world().resource::<ActivityPaymentWitness>().delivery.is_some()),

@@ -2171,6 +2171,15 @@ pub enum SystemControlPayload {
     FireTorpedo {
         target_uuid: Option<String>,
     },
+    /// Issue through the actual source tube; target_uuid is a permitted public contact handle.
+    RetargetGuidedRound {
+        round_uuid: String,
+        target_uuid: String,
+    },
+    /// Cancels guidance only if the emitted receiver actually hears this order.
+    StopGuidedRoundGuidance {
+        round_uuid: String,
+    },
     LoadTube,
     UnloadTube,
     /// Send one NAMED repair team to a destination: a station, the ownerless

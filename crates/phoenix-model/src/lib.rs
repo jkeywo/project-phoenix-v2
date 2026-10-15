@@ -26,6 +26,7 @@ pub mod field;
 pub mod fitting;
 pub mod focused_enquiry;
 pub mod guided_guidance;
+pub mod guided_orders;
 pub mod guided_round;
 pub mod interior;
 pub mod job;

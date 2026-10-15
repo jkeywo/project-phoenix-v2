@@ -3,6 +3,7 @@ pub mod assignments;
 pub mod beam_render;
 pub mod blaster;
 pub mod guidance;
+pub mod guided_orders;
 pub mod mount;
 pub mod operation;
 pub mod pattern;

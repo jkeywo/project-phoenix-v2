@@ -891,6 +891,11 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
         "port terms are reconstructed from authored content"
     );
     assert!(!authoritative.contains("CompiledPortService"));
+    assert!(
+        excluded.contains("StaticTransitScopes"),
+        "accepted World routes and static body recipes rebuild from content"
+    );
+    assert!(!authoritative.contains("StaticTransitScopes"));
     // RenderInterp OUT: it must never be declared authoritative. It is declared
     // `Presentation` at `RendererPlugin::build`, a plugin the headless run never
     // adds, so it never registers here (see `census_excluded_short_names` above),

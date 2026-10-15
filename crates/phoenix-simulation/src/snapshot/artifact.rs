@@ -458,7 +458,8 @@ use super::*;
 /// `71` retains an accepted root mission promise and received formation lineage.
 /// `72` retains actual identity-emitter intent, never prepaid physical emissions.
 /// `73` requires the single retained personnel roster, including removed origins.
-pub const SNAPSHOT_FORMAT: u32 = 73;
+/// `74` retains original Transit scopes and the latest successful World arrival.
+pub const SNAPSHOT_FORMAT: u32 = 74;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -604,7 +605,9 @@ pub const SNAPSHOT_FORMAT: u32 = 73;
 /// substitutes measured identity after ordinary sensor acquisition.
 /// "0.53" retains finite named personnel across actual origin-actor removal,
 /// with shared care/posting consumers and accepted creation provenance.
-pub const SIMULATION_RULES: &str = "0.53";
+/// "0.54" uses actual paid Transit and tracked layers for authored World routes,
+/// retaining original drive receipts and the current accepted arrival context.
+pub const SIMULATION_RULES: &str = "0.54";
 
 /// The authored data, computed rather than remembered.
 ///

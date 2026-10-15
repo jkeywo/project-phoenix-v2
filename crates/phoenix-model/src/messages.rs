@@ -43,7 +43,8 @@ use uuid::Uuid;
 /// Revision 27 carries actual personnel condition and Treatment controls.
 /// Revision 28 carries explicit formation coordination through ordinary Comms.
 /// Revision 29 carries paid identity-emitter controls and permitted status.
-pub const PROTOCOL_VERSION: u32 = 29;
+/// Revision 30 carries permitted authored World routes in Navigation.
+pub const PROTOCOL_VERSION: u32 = 30;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

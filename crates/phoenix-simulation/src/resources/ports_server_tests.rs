@@ -723,6 +723,38 @@ fn trusted_mission_approval_uses_actual_permission_visit_and_normal_later_work()
 }
 
 #[test]
+fn ineligible_visit_cannot_query_actual_provider_availability() {
+    let (mut app, ship, facility) = rig(PortServicePolicy::ManualOffer);
+    assert!(
+        app.world()
+            .get::<TransferUmbilical>(ship)
+            .unwrap()
+            .port_view
+            .as_ref()
+            .unwrap()
+            .offers[0]
+            .available_lots
+            > 0
+    );
+    app.world_mut()
+        .get_mut::<CompiledPortService>(facility)
+        .unwrap()
+        .0
+        .eligible_factions
+        .clear();
+    app.update();
+    let view = app
+        .world()
+        .get::<TransferUmbilical>(ship)
+        .unwrap()
+        .port_view
+        .as_ref()
+        .unwrap();
+    assert!(!view.eligible);
+    assert!(view.offers.iter().all(|offer| offer.available_lots == 0));
+}
+
+#[test]
 fn free_legacy_fuel_donation_and_collection_use_real_named_endpoints_without_main_store() {
     let (mut app, ship, facility) =
         rig_with(PortServicePolicy::FreeAlliedReplenishment, |content| {
@@ -876,6 +908,38 @@ fn zero_quota_offer_cannot_create_an_invalid_donation_meter_or_buy_work() {
         .0
         .network()
         .clone();
+    let direct = PortTransfer {
+        operator: VISITOR.into(),
+        provider: PROVIDER.into(),
+        visit: app
+            .world()
+            .get::<PortProviderState>(facility)
+            .unwrap()
+            .0
+            .visitors[VISITOR]
+            .visit,
+        offer: "parts".into(),
+        destination: ResourceEndpoint::Capacity {
+            id: "reserve_fuel".into(),
+        },
+        store: None,
+        lots: 1,
+        tick: app.world().resource::<crate::sim_tick::SimTick>().0,
+        ordered: false,
+        inbound: true,
+        maintain_goal: false,
+    };
+    let ledger = app
+        .world()
+        .get::<PortProviderState>(facility)
+        .unwrap()
+        .0
+        .clone();
+    assert!(crate::resources::server::settle_port_exchange(app.world_mut(), &direct).is_err());
+    assert_eq!(
+        app.world().get::<PortProviderState>(facility).unwrap().0,
+        ledger
+    );
     send(&mut app, "engineer", "umbilical", Control::StartTransfer);
     for _ in 0..5 {
         app.update();

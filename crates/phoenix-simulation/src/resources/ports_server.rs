@@ -450,10 +450,11 @@ fn prepare(world: &mut World) {
             .offers
             .iter()
             .map(|offer| {
-                let destination = stores
+                let destinations: Vec<_> = stores
                     .iter()
-                    .find(|store| store.resource == offer.resource)
-                    .and_then(|store| actual_store(world, entity, &store.id, &offer.resource));
+                    .filter(|store| store.resource == offer.resource)
+                    .filter_map(|store| actual_store(world, entity, &store.id, &offer.resource))
+                    .collect();
                 PortOfferView {
                     id: offer.id.clone(),
                     resource: offer.resource.clone(),
@@ -462,9 +463,17 @@ fn prepare(world: &mut World) {
                         .remaining(profile, &uuid, visit, &offer.id)
                         .unwrap_or(0),
                     costs: offer.costs.clone(),
-                    available_lots: destination.as_ref().map_or(0, |destination| {
-                        affordable(world, *provider, entity, offer, destination)
-                    }),
+                    available_lots: if allowed {
+                        destinations
+                            .iter()
+                            .map(|destination| {
+                                affordable(world, *provider, entity, offer, destination)
+                            })
+                            .max()
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    },
                 }
             })
             .collect();

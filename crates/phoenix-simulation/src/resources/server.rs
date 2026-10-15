@@ -296,6 +296,9 @@ fn port_exchange(
         .clone();
     let quota = ledger.remaining(&profile, &request.operator, request.visit, &request.offer)?;
     let offer = profile.offer(&request.offer).ok_or("unknown port offer")?;
+    if offer.quota == 0 {
+        return Err("zero-quota port offer is disabled in both directions".into());
+    }
     if request.inbound
         && profile.policy != phoenix_model::ports::PortServicePolicy::FreeAlliedReplenishment
     {

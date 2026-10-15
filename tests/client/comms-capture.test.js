@@ -5,9 +5,34 @@ import { CAPTURE_SELECT_ACTION, registerCaptureActions } from '../../gui/station
 import { mountCommsCaptureControls } from '../../gui/components/comms-capture-controls.js';
 import { createSemanticActionRegistry } from '../../gui/semantic-action-registry.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
+import { buildCommsConsoleState } from '../../gui/console-state.js';
+import { dispatchConsoleAction } from '../../gui/action-map.js';
+import { makeCommsRender } from '../../gui/stations/comms-console.js';
 const row = () => ({ capture: 1, channel: 'fleet', level: 2, captured_tick: 20,
   feasible: true, selected: false, progress_per_mille: 100, decoded_tick: null });
 const view = () => capturedPayload({ rows: [row()] }, 'comms', true);
+
+it('projects only the permitted typed feed and grants controls only to its actual Human owner', () => {
+  const state = { blackboards: { 'own-radio': {captured:{rows:[row()]}} },
+    blackboardKinds:{'own-radio':'Comms'},controlSources:{'own-radio':'Human'} };
+  expect(buildCommsConsoleState(state,['own-radio']).comms_capture).toMatchObject({system:'own-radio',controllable:true});
+  expect(buildCommsConsoleState(state,['other-system']).comms_capture.controllable).toBe(false);
+  expect(buildCommsConsoleState({...state,blackboards:{}}).comms_capture).toBeUndefined();
+  const send=vi.fn();dispatchConsoleAction({action:'comms_capture_select',control_system_id:'own-radio',capture:1,correlation:'capture-proof',source:'private'},send);
+  expect(send).toHaveBeenCalledWith('ControlSystemCorrelated',{correlation:'capture-proof',target:'own-radio',payload:{type:'SelectCommsCapture',data:{capture:1}}});
+  send.mockClear();dispatchConsoleAction({action:'comms_capture_select',control_system_id:'own-radio',capture:9007199254740992},send);expect(send).not.toHaveBeenCalled();
+});
+
+it('mounts the independent controls in the existing Comms renderer and hides an absent feed', () => {
+  document.body.innerHTML='<section id="comms-capture-host" hidden></section><section id="capture-thread" hidden></section>';
+  const render=makeCommsRender({ids:{threadPanel:'capture-thread'}});
+  render({messages:[],contacts:[],comms_capture:view()},document);
+  const host=document.querySelector('[data-comms-capture]');expect(host.hidden).toBe(false);
+  expect(document.getElementById('comms-capture-host').hidden).toBe(false);
+  expect(document.getElementById('capture-thread').contains(host)).toBe(false);
+  render({messages:[],contacts:[]},document);expect(host.hidden).toBe(true);
+  expect(document.getElementById('comms-capture-host').hidden).toBe(true);
+});
 afterEach(() => { document.body.replaceChildren(); delete window.activateSemanticAction; });
 it('keeps undecoded headers opaque and refuses premature or malformed plaintext', () => {
   const decoded = { ...row(), decoded_tick: 30, evidence: { sender_name: 'Literal source', body: 'Literal text', literal_body: true, kind: 'request', emitted_tick: 10 } };

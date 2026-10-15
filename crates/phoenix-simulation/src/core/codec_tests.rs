@@ -4670,6 +4670,8 @@ fn comms_control_system_payloads_round_trip() {
         SystemControlPayload::Hail {
             target_uuid: "starbase-1".into(),
         },
+        SystemControlPayload::SelectCommsCapture { capture: Some(7) },
+        SystemControlPayload::SelectCommsCapture { capture: None },
         SystemControlPayload::SetCommsMediaCall {
             origin_id: Some("media-call".into()),
         },

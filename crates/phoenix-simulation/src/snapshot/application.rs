@@ -1303,6 +1303,14 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         );
         return;
     }
+    if let Err(reason) = super::comms_capture::validate_single(world, entity, row, tick) {
+        bevy::log::error!(
+            "refused captured evidence restore for {}: {}",
+            row.uuid,
+            reason
+        );
+        return;
+    }
     if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
         bevy::log::error!("refused resource restore for {}: {}", row.uuid, reason);
         return;
@@ -1675,6 +1683,11 @@ pub(super) fn apply_entity_state_with(
     }
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
+    }
+    if let Some(saved) = &row.comms_capture {
+        entity_mut.insert(saved.clone());
+    } else {
+        entity_mut.remove::<crate::comms::capture::ShipCommsCapture>();
     }
     if let Some(saved) = &row.comms_media {
         entity_mut.insert(saved.clone());

@@ -181,3 +181,34 @@ full-host partially paid JSON360/digest/no-write proof, explicit-feed isolation 
 actual Workshop Preview/Test. It is not replaced by the pure state JSON test or
 the focused GUI/history fixtures. Dynamic keys and retransmission/hop capture
 remain explicit later consumers within 16; other unfinished 16/17 scope remains.
+
+### Central integration checkpoint — 16 October 2026
+
+The prepared media branch now joins the capture modules, accepted Radio fields,
+ordinary Comms admission/controller/publication, existing-screen controls, canonical
+snapshot state and complete digest namespace. Capture work remains before media's
+final paid-carrier derivation on the same existing radio pass. There is no new
+controller, schedule step, clock or prepaid state.
+
+Whole-candidate validation uses the saved graph and exact receiving recipe rather
+than the bootstrap inbox. Available candidate source equipment and surviving
+original/heard copies constrain captured metadata and content. Absent historical
+emitters remain valid. The single-row inverse uses retained live evidence, while
+the shared structural guard does not read bootstrap source state. A saved Comms
+capture display may withhold information; any supplied view must equal the exact
+canonical paid decoder projection and cannot reveal premature plaintext.
+
+Central owner tests cover actual paid acquisition, missing/foreign state, forged
+content/channel/self-source/clock/display, single-row and whole-candidate no-write,
+Disabled receiver lookup and absent materializable receiver recipes. Admission
+tests cover Human/AI handle bounds and wrong System kinds. Digest tests preserve
+the exact empty-stage contribution and stable actual-receiver order, including
+Disabled canonical actors. These Rust tests are authored, not executed here.
+
+Focused client checks passed: four capture/Comms/core files, 59 tests (2.28s), then
+three Console projection/Workshop files, 432 tests (4.73s). Layer rules passed;
+strict strings found 6,419 IDs with zero errors/warnings after removing four
+duplicate media IDs introduced by the capture donor while keeping the prepared
+media definitions. Owned Rust formatting and diff checks passed. No Cargo, full
+integration gates, device/native execution or milestone exit is claimed. Root
+owns compatibility epochs, final integration and native continuation evidence.

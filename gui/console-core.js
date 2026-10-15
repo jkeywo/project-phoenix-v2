@@ -1,3 +1,4 @@
+import { registerCaptureActions } from './stations/comms-capture-actions.js';
 import {registerIdentityActions} from './stations/identity-actions.js';
 import {registerConcealmentActions} from './stations/concealment-actions.js';
 import { registerProtectionActions } from './stations/protection-actions.js';
@@ -78,7 +79,7 @@ import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 // wrapped to the keyed shape here, at the one seam every console's state push
 // passes through, before `render` ever sees it. See normalizeConsolePayload's
 // own doc comment for the full contract.
-import { normalizeConsolePayload } from './console-payload.js';
+import { normalizeConsolePayload, familyView } from './console-payload.js';
 // The shell's Station Bar selects this console's overlay panels as tabs
 // (issue #1373). `setConsoleOverlay` is the SET half of the overlay module —
 // the bar pushes a known selection in, it does not ask the console to flip.
@@ -307,6 +308,11 @@ export function initConsole({
     });
   }
   if (_actionContexts.has(COMMS_ACTION_CONTEXT)) {
+    _actionContexts.add('comms-capture');
+    registerCaptureActions(_semanticActions, { getState: () => {
+      const projected = familyView(_latestState || {}, 'comms');
+      return Object.keys(projected).length ? projected : _latestState;
+    }, sendAction });
     registerCommsActions(_semanticActions, {
       getState: function() { return _latestState; },
       getRadioDraft: function() { return render.radioDraft?.(); },

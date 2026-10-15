@@ -390,10 +390,11 @@ mod shield_enquiry;
 mod spatial_fields;
 mod transit;
 
+mod comms_capture;
+mod comms_media;
+mod concealment;
 mod guided_source;
 mod identity;
-mod concealment;
-mod comms_media;
 mod illumination;
 mod jamming;
 mod protection;

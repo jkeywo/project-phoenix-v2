@@ -14,6 +14,7 @@
 //! Comms console System — and are registered here so the Input → Broadcast
 //! chain is owned by one plugin.
 
+use crate::authoritative::DeclareState;
 use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -421,6 +422,7 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
                 Payload::SendCommsText,
                 Payload::SendCommsRequest,
                 Payload::SetCommsMediaCall,
+                Payload::SelectCommsCapture,
                 Payload::MarkCommsRead,
                 Payload::RespondToMessage,
                 Payload::ClearComms,
@@ -435,6 +437,10 @@ impl Plugin for CommsWorldPlugin {
         register_comms_consumer(app);
         crate::comms::radio::register(app);
         crate::comms::media_control::register(app);
+        app.declare_state::<crate::comms::capture::ShipCommsCapture>(
+            crate::authoritative::StateClass::Folded,
+            "ship-comms-capture",
+        );
         crate::comms::requests::register(app);
         crate::comms::jamming::register(app);
         app.init_resource::<CommsRuntime>()

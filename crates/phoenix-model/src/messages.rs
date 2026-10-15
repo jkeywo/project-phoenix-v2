@@ -2350,6 +2350,10 @@ pub enum SystemControlPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         planned_request: Option<String>,
     },
+    /// Select one locally observed decoder handle; does not address its source.
+    SelectCommsCapture {
+        capture: Option<u64>,
+    },
     /// Select an actually accepted/heard call; device consent remains local.
     SetCommsMediaCall {
         origin_id: Option<String>,
@@ -5797,6 +5801,8 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<crate::comms_capture::CommsCaptureControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_capability: Option<crate::comms_media::MediaMode>,
     /// Own released tasks; recipients must already exist in this Console's contacts.

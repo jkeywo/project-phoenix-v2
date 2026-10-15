@@ -13,6 +13,8 @@ pub struct CommsChannelConfig {
     pub relay: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    #[serde(default = "default_protection_level")]
+    pub protection_level: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,12 +24,18 @@ pub struct CommsRadioConfig {
     /// Explicit actual equipment capability; absent equipment cannot carry media.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<crate::comms_media::MediaMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<crate::comms_capture::CommsCaptureConfig>,
     #[serde(default = "default_request_reading_ticks")]
     pub request_reading_ticks: u32,
     #[serde(default)]
     pub keys: Vec<String>,
     #[serde(rename = "channel")]
     pub channels: Vec<CommsChannelConfig>,
+}
+
+fn default_protection_level() -> u8 {
+    1
 }
 
 fn default_request_reading_ticks() -> u32 {
@@ -153,6 +161,9 @@ pub fn valid_text(value: &str) -> bool {
 impl CommsRadioConfig {
     pub fn validate(&self, endpoint_range: f32) -> Result<(), &'static str> {
         use std::collections::BTreeSet;
+        if let Some(capture) = &self.capture {
+            capture.validate()?;
+        }
         let mut channels = BTreeSet::new();
         let mut keys = BTreeSet::new();
         if !identity(&self.system.0)
@@ -165,7 +176,8 @@ impl CommsRadioConfig {
                 .iter()
                 .any(|key| !identity(key) || !keys.insert(key.clone()))
             || self.channels.iter().any(|channel| {
-                !channel_id(&channel.id)
+                !(1..=3).contains(&channel.protection_level)
+                    || !channel_id(&channel.id)
                     || !channels.insert(channel.id.clone())
                     || !channel.range.is_finite()
                     || channel.range <= 0.0

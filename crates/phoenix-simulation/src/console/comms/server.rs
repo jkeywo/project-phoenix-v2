@@ -96,6 +96,7 @@ pub(crate) fn publish_comms_blackboard(
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship::components::HumanSeekingHosts>,
             Option<&crate::comms::radio::RadioProfile>,
+            Option<&crate::comms::capture::ShipCommsCapture>,
             Option<&crate::ship::state::ShipPhysics>,
             Option<&Transform>,
             Option<&crate::modifiers::ShipModifiers>,
@@ -118,6 +119,7 @@ pub(crate) fn publish_comms_blackboard(
         mut boards,
         hosts,
         radio,
+        captured,
         physics,
         transform,
         modifiers,
@@ -125,6 +127,9 @@ pub(crate) fn publish_comms_blackboard(
     {
         let mut bb = CommsBlackboard::default();
         bb.media_capability = radio.and_then(|profile| profile.0.media);
+        bb.captured = captured
+            .zip(radio)
+            .and_then(|(captured, radio)| crate::comms::capture::views(captured, &radio.0));
         bb.receiver_interference = if modifiers.is_some_and(|modifiers| {
             modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed)
         }) {
@@ -2424,6 +2429,7 @@ pub fn operate_comms_response_ai(
     // `&mut AdmittedCommands` for one ship — not because any of it is local.
     let mut answers: Vec<(Entity, String, usize)> = Vec::new();
     let mut planned_requests = Vec::new();
+    let mut decode_choices = Vec::new();
 
     // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
     //
@@ -2512,6 +2518,17 @@ pub fn operate_comms_response_ai(
         let comms_available = comms_system_available(hull, damage);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
         if let (Some(config), Some(boards), Some(radio)) = (_ship_config, boards, radio) {
+            if let Some(capture) = crate::comms::capture_ai::decision(
+                config,
+                boards,
+                sources,
+                radio,
+                policy,
+                &flag_chain,
+                comms_available,
+            ) {
+                decode_choices.push((entity, radio.0.system.clone(), capture));
+            }
             if let Some(request) = crate::comms::planned::decision(
                 &operator_uuid.0,
                 config,
@@ -2780,6 +2797,23 @@ pub fn operate_comms_response_ai(
                 },
                 request: request.request,
                 planned_request: Some(request.id),
+            },
+            sources,
+            &sessions,
+            config,
+            &mut admitted,
+        );
+    }
+
+    for (entity, owner, capture) in decode_choices {
+        let Ok((_, uuid, _, sources, config, mut admitted, ..)) = ships.get_mut(entity) else {
+            continue;
+        };
+        crate::command_admission::ai_emit::emit_ai_command(
+            uuid,
+            owner,
+            crate::core::messages::SystemControlPayload::SelectCommsCapture {
+                capture: Some(capture),
             },
             sources,
             &sessions,

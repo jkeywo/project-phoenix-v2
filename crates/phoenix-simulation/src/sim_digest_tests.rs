@@ -138,6 +138,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("ship-identity-emitter-intent", 13509907477215362722),
             ("ship-concealment-emitter-intent", 13509907477215362722),
             ("ship-comms-media-intent", 13509907477215362722),
+            ("ship-comms-capture", 13509907477215362722),
             ("broad-tracks", 13509907477215362722),
             ("navigation-sharing", 13509907477215362722),
             ("navigation-request", 13509907477215362722),
@@ -153,6 +154,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
     registered.register_component::<crate::ai::state_tree_runtime::ShipAiTreeRuntime>();
     registered.register_component::<crate::console::repair::ShipRepairTeams>();
     registered.register_component::<ShipSecurityTeams>();
+    registered.register_component::<crate::comms::capture::ShipCommsCapture>();
     for world in [World::new(), registered] {
         for fold in [
             fold_authored_ship_slots_namespace,
@@ -165,10 +167,44 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
             fold_internal_repair_namespace,
             fold_umbilical_namespace,
             fold_security_namespace,
+            fold_comms_capture_namespace,
         ] {
             assert_eq!(fold(&world, 12345), 12345);
         }
     }
+}
+
+#[test]
+fn capture_namespace_orders_actual_receivers_and_keeps_disabled_canonical_rows() {
+    use crate::comms::capture::ShipCommsCapture;
+    use phoenix_sim_gameplay::electronic::capture::CaptureState;
+    fn fixture(reverse: bool) -> World {
+        let mut world = World::new();
+        let names = if reverse {
+            ["decoder-b", "decoder-a"]
+        } else {
+            ["decoder-a", "decoder-b"]
+        };
+        for name in names {
+            world.spawn((
+                EntityUuid(name.into()),
+                ShipCommsCapture(CaptureState::new(SystemId("comms".into()))),
+            ));
+        }
+        world
+    }
+    let mut forward = fixture(false);
+    let reverse = fixture(true);
+    let expected = fold_comms_capture_namespace(&forward, FOLD_SEED);
+    assert_ne!(expected, FOLD_SEED);
+    assert_eq!(fold_comms_capture_namespace(&reverse, FOLD_SEED), expected);
+    let actor = forward.query::<Entity>().iter(&forward).next().unwrap();
+    forward
+        .entity_mut(actor)
+        .insert(bevy::ecs::entity_disabling::Disabled);
+    assert_eq!(fold_comms_capture_namespace(&forward, FOLD_SEED), expected);
+    forward.entity_mut(actor).remove::<ShipCommsCapture>();
+    assert_ne!(fold_comms_capture_namespace(&forward, FOLD_SEED), expected);
 }
 
 #[test]

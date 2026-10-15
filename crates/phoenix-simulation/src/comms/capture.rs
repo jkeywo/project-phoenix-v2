@@ -7,7 +7,7 @@ use crate::core::messages::{SystemBlackboard, SystemControlPayload};
 use bevy::prelude::*;
 use phoenix_sim_gameplay::electronic::capture::{CaptureState, CapturedPayload};
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShipCommsCapture(pub CaptureState);
 
 pub(crate) fn install(

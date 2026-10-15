@@ -12,10 +12,8 @@ workshop.comms_radio.capture_level,Comms capture equipment,Codebreaking ceiling 
 workshop.comms_radio.capture_ticks,Comms capture equipment,Paid ticks per protection level,Bezahlte Takte je Schutzstufe,Paid ticks per protection level,machine
 workshop.comms_radio.capture_key_ticks,Comms capture equipment,Held-key decode ticks (blank disables),Entschlüsselungstakte mit eigenem Schlüssel (leer deaktiviert),Held-key decode ticks (blank disables),machine
 workshop.comms_radio.protection_level,Comms protected channel,Protected level (1–3; blank uses 1),Schutzstufe (1–3; leer nutzt 1),Protected level (1–3; blank uses 1),machine
-workshop.comms_radio.media,Comms media authoring,Human media capability,Medienfähigkeit für Spieler,Human media capability,machine
-workshop.comms_radio.media_none,Comms media authoring,Text only,Nur Text,Text only,machine
-workshop.comms_radio.media_audio,Comms media authoring,Audio,Audio,Audio,machine
-workshop.comms_radio.media_video,Comms media authoring,Audio and video,Audio und Video,Audio and video,machine
+semantic_action.comms.capture.select.label,Comms decoder action,Decode captured traffic,Abgefangenen Funk entschlüsseln,Decode captured traffic,machine
+semantic_action.comms.capture.select.accessibility,Comms decoder action,Select or pause paid decoding of one captured transmission,Bezahlte Entschlüsselung einer abgefangenen Übertragung auswählen oder pausieren.,Select or pause paid decoding of one captured transmission,machine
 entity.missile_cruiser.name,Optional missile reference,Missile Cruiser,Raketenkreuzer,Missile Cruiser,machine
 comms.send_text,Comms radio,Send text,Text senden,Send text,machine
 semantic_action.comms.send_text.label,Comms radio,Send radio text,Funktext senden,Send radio text,machine

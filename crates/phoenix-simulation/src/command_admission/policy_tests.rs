@@ -4,6 +4,73 @@ use crate::core::messages::{RepairTarget, SystemId};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship_plugin::ShipSystemControlSources;
 
+#[test]
+fn capture_handle_bounds_and_actual_comms_owner_apply_to_human_and_ai_admission() {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/capture_cruiser.toml",
+    )
+    .unwrap();
+    let config = authored.ship_config.unwrap();
+    let owner = SystemId("comms".into());
+    let station = config
+        .system_home_station(config.system(&owner).unwrap())
+        .unwrap()
+        .clone();
+    let mut sessions = crate::lobby::Sessions::default();
+    sessions
+        .0
+        .register("decoder".into(), "Decoder".into())
+        .unwrap();
+    sessions.0.set_station("decoder", Some(station));
+    let mut sources = ShipSystemControlSources::default();
+    for (token, source) in [
+        ("decoder", ControlSource::Human),
+        ("ai:decoder", ControlSource::Ai),
+    ] {
+        sources.0.set(owner.clone(), source);
+        for capture in [
+            None,
+            Some(1),
+            Some(phoenix_model::comms_capture::MAX_CAPTURE_SEQUENCE),
+        ] {
+            assert!(is_command_authorized(
+                token,
+                &owner,
+                &SystemControlPayload::SelectCommsCapture { capture },
+                &sources,
+                &sessions,
+                &config,
+                None
+            ));
+        }
+        for capture in [
+            Some(0),
+            Some(phoenix_model::comms_capture::MAX_CAPTURE_SEQUENCE + 1),
+        ] {
+            assert!(!is_command_authorized(
+                token,
+                &owner,
+                &SystemControlPayload::SelectCommsCapture { capture },
+                &sources,
+                &sessions,
+                &config,
+                None
+            ));
+        }
+    }
+    let wrong = SystemId("helm-thrust".into());
+    sources.0.set(wrong.clone(), ControlSource::Human);
+    assert!(!is_command_authorized(
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        &wrong,
+        &SystemControlPayload::SelectCommsCapture { capture: None },
+        &sources,
+        &sessions,
+        &config,
+        None
+    ));
+}
+
 /// A minimal hull with a repair station that owns one repair system, so
 /// `station_for_system` can resolve `repair` → the `repair` station.
 fn config() -> crate::ship::config::ShipConfig {

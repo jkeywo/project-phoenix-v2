@@ -1,3 +1,4 @@
+pub mod capture;
 pub mod concealment;
 pub mod identity;
 pub mod jamming;

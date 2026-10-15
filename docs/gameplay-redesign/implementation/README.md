@@ -7,6 +7,46 @@ complete [migration ledger](./migration-ledger.json). The
 [mechanism reconciliation](../architecture/feature-reconciliation.html) and
 [architecture decisions](../architecture/README.md) constrain implementation.
 
+## Per-increment progress — 15 October 2026
+
+Only increment 0 is formally closed. Increments 1–7 have recorded automated
+exits; physical-device and human-workload acceptance remain open. Later initial
+commits are implementation checkpoints, not verified increment exits. The latest
+focused host results cover 21 tests across 13 targets after a clearance fixture
+correction; they do not replace the full integrated gate.
+
+| Increment | Implementation state | Material remaining work |
+|---|---|---|
+| 0 — Baseline | Complete | None within the baseline scope. |
+| 1 — Consoles | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 2 — Components/status | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 3 — State trees | Implemented; automated exit passed | Human acceptance; other controllers migrate with their capabilities. |
+| 4 — Observations/reports | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 7 — Configurable weapons | Implemented; automated exit passed | Physical-device and human acceptance. |
+| 8 — Energy/thermal | Core implemented | Full integrated, balance, performance and playable acceptance. |
+| 9 — Shield energy | Core implemented | Full integrated and playable acceptance. |
+| 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
+| 11 — Damage/restoration | Core implemented | Full integrated and playable acceptance. |
+| 12 — Logistics/production | Implemented in slices | Cross-system coverage and full acceptance. |
+| 13 — Equipment fitting | Supported beam/reactor implementation | Cross-system coverage and full acceptance. |
+| 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
+| 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
+| 16 — Comms/orders | Channels, requests and relay operational | Human media, decoding, remaining operations and acceptance. |
+| 17 — Electronic operations | Jamming/protection/identity operational | Concealment in progress; low-emission advice and disruption remain. |
+| 18 — Movement/transit | Local jumps verified; sector code integrated | Sector native proof, formations, remaining assistance and acceptance. |
+| 19 — Craft/deployables | Physical probe handling verified | Other craft/deployables, sorties, remote operation and acceptance. |
+| 20 — Personnel | Officers, care and retained roster operational | Transfer in progress; boarding/away/rescue/capture and acceptance. |
+| 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
+| 22 — Authored HTN execution | Working scheduling/activity core | Broader operator/scenario coverage and full integration. |
+| 23 — Continuing modes | Accepted-commitment foundation | Patrol, War and Sandbox are not delivered. |
+| 24 — Discovery/Director | Maintenance opportunity consumer in isolated development | Admission/physical-work proof, broader generation/pacing and final audits. |
+
+Current source pins, failures and retries are recorded in
+[the integration checkpoint](parallel-checkpoint.json). Parallel worktree code is
+not reported as integrated or native-tested before its donor and evidence land.
+
 ## Revised future increments 22–24
 
 Approved 14 October 2026. These plans replace the earlier summaries for 22–24;

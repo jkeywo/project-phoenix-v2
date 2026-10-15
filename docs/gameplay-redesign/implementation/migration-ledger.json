@@ -381,13 +381,14 @@
     {
       "id": 23,
       "title": "Continuing modes and persistent mission consequences",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         22
       ],
       "completion": "Authored Patrol, then War, then Sandbox retain real assets, commitments and consequences across encounters. Capture, service, vessel return and evacuation prove persistence, actual transport, outside-actor outcomes and correct objective credit.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-23.md"
+        "docs/gameplay-redesign/implementation/increment-23.md",
+        "tests/committed_assistance_continuation.rs"
       ],
       "subincrements": [
         {
@@ -415,7 +416,7 @@
     {
       "id": 24,
       "title": "Opportunity discovery, adaptive direction and final integration",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         23
       ],

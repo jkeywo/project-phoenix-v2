@@ -12,6 +12,13 @@ fn bare_world() -> World {
     world.insert_resource(SimTick(3));
     world.insert_resource(Time::<Fixed>::default());
     world.insert_resource(crate::world::server::WorldContentRuntime::default());
+    // Match the ordinary host's run-scope owners. Their absence is a different
+    // digest fact from the empty canonical state restored by a snapshot.
+    world.init_resource::<crate::gm::actions::action::SimulationPaused>();
+    world.init_resource::<crate::gm::actions::action::GmActionJournal>();
+    world.init_resource::<crate::gm::operations::puppet::StationPuppets>();
+    world.init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
+    world.init_resource::<crate::core::report::MissionReport>();
     world.register_component::<ShipPhysics>();
     world.register_component::<EntitySystemHull>();
     world.register_component::<ShipRedAlert>();
@@ -228,7 +235,9 @@ fn port_json_restore_preserves_actual_barter_quota_and_paid_lot_work() {
     assert_eq!(capture(&fresh), saved);
     assert_eq!(
         crate::sim_digest::world_digest(&fresh),
-        crate::sim_digest::world_digest(&world)
+        crate::sim_digest::world_digest(&world),
+        "first divergent scope: {:?}",
+        crate::sim_digest::first_divergent_scope(&fresh, &crate::sim_digest::digest_stages(&world))
     );
 }
 

@@ -135,6 +135,30 @@ fn provider_invalid_refresh_or_quota_never_partially_commits() {
 }
 
 #[test]
+fn first_physical_visit_can_begin_at_tick_zero_without_reissuing_its_quota() {
+    let config = profile();
+    let visitors = BTreeSet::from([visitor(2)]);
+    let mut state = PortVisitState::default();
+    state.refresh(&config, 0, &visitors).unwrap();
+    assert!(state.initialized);
+    let visit = state.visitors[&visitor(2)].visit;
+    state
+        .record_delivery(&config, &visitor(2), visit, "parts", 1)
+        .unwrap();
+    let before = state.clone();
+    state.refresh(&config, 0, &visitors).unwrap();
+    assert_eq!(state, before);
+    assert!(state.refresh(&config, 0, &BTreeSet::new()).is_err());
+    assert_eq!(state, before);
+    state.refresh(&config, 1, &visitors).unwrap();
+    assert_eq!(state.visitors[&visitor(2)].visit, visit);
+    assert_eq!(state.visitors[&visitor(2)].delivered["parts"], 1);
+    state.refresh(&config, 2, &BTreeSet::new()).unwrap();
+    state.refresh(&config, 3, &visitors).unwrap();
+    assert_ne!(state.visitors[&visitor(2)].visit, visit);
+}
+
+#[test]
 fn lot_work_uses_actual_units_paid_fraction_and_exact_immutable_receipts() {
     let mut state = order();
     assert_eq!(advance(&mut state, 1, 1.0, 3, 0.5), 0);

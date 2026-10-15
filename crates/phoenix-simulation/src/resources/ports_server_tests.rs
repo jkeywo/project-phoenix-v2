@@ -676,6 +676,15 @@ fn partial_operation_reduces_yield_for_the_same_paid_work_and_zero_pauses() {
         .get_mut(&component)
         .unwrap()
         .condition = phoenix_model::damage::ComponentCondition::Patched { factor: 0.5 };
+    damage
+        .state
+        .components
+        .get_mut(&system)
+        .unwrap()
+        .get_mut(&component)
+        .unwrap()
+        .last_source = Some(PROVIDER.into());
+    damage.state.validate(&damage.definition).unwrap();
     impaired
         .world_mut()
         .entity_mut(impaired_ship)

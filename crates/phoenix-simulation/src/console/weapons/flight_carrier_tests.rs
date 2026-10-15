@@ -527,6 +527,48 @@ fn bolt_carrier_recipe_json_continuation_and_forged_work_are_closed() {
 }
 
 #[test]
+fn forged_carrier_identity_is_refused_before_roster_or_clock_writes() {
+    let mut app = host();
+    let source = app
+        .world_mut()
+        .spawn((EntityUuid("source".into()), emitted_bolts()))
+        .id();
+    app.world_mut().despawn(source);
+    app.world_mut().flush();
+    let before = crate::snapshot::capture(app.world());
+    assert_eq!(before.entities.len(), 1);
+    assert!(before.entities[0].weapon_flight_carrier);
+    let before_digest = crate::sim_digest::world_digest(app.world());
+    for invalid in [
+        String::new(),
+        "  ".into(),
+        "carrier\nforged".into(),
+        "x".repeat(129),
+        "é".repeat(65),
+    ] {
+        let mut bad = before.clone();
+        bad.tick = bad.tick.saturating_add(1);
+        bad.entities[0].uuid = invalid.clone();
+        let report = crate::snapshot::restore(app.world_mut(), &bad);
+        assert!(!report.is_complete(), "invalid identity {invalid:?}");
+        assert!(format!("{:?}", report.gaps).contains("bounded physical identity"));
+        app.world_mut().flush();
+        assert_eq!(crate::snapshot::capture(app.world()), before);
+        assert_eq!(crate::sim_digest::world_digest(app.world()), before_digest);
+        assert_eq!(carriers(app.world_mut()).len(), 1);
+    }
+    let mut fresh = host();
+    let report = crate::snapshot::restore(fresh.world_mut(), &before);
+    assert!(report.is_complete(), "{report:?}");
+    fresh.world_mut().flush();
+    assert_eq!(crate::snapshot::capture(fresh.world()), before);
+    assert_eq!(
+        crate::sim_digest::world_digest(fresh.world()),
+        before_digest
+    );
+}
+
+#[test]
 fn settlement_drops_only_empty_bolt_banks_and_removes_only_fully_drained_carriers() {
     use crate::console::weapons::blaster::BlasterSystemResource;
     use bevy::ecs::system::RunSystemOnce;

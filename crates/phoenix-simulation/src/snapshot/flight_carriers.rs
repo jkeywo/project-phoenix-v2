@@ -27,6 +27,15 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             }
             continue;
         }
+        if row.uuid.trim().is_empty()
+            || row.uuid.len() > 128
+            || row.uuid.chars().any(char::is_control)
+        {
+            return Err((
+                row.uuid.clone(),
+                "weapon-flight carrier requires a nonempty bounded physical identity".into(),
+            ));
+        }
         if snapshot
             .entities
             .iter()

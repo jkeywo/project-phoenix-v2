@@ -248,6 +248,26 @@ pub(crate) fn settle_port_exchange(
     world: &mut World,
     request: &crate::resources::ports_server::PortTransfer,
 ) -> Result<i64, String> {
+    port_exchange(world, request, true)
+}
+
+/// Quote the exact final-owner transaction before buying machinery time.
+/// This stages the same finite stocks and quota but performs no live writes.
+pub(crate) fn preview_port_exchange(
+    world: &mut World,
+    request: &crate::resources::ports_server::PortTransfer,
+) -> Result<i64, String> {
+    port_exchange(world, request, false)
+}
+
+fn port_exchange(
+    world: &mut World,
+    request: &crate::resources::ports_server::PortTransfer,
+    commit: bool,
+) -> Result<i64, String> {
+    if !world.contains_resource::<crate::world::server::WorldContentRuntime>() {
+        return Err("port settlement requires the actual infrastructure publication owner".into());
+    }
     use crate::resources::ports_server::{
         eligible, endpoint, entity_for, CompiledPortService, PortProviderState,
     };
@@ -281,7 +301,7 @@ pub(crate) fn settle_port_exchange(
     {
         return Err("manual port cannot accept legacy purchase flow".into());
     }
-    if profile.policy == phoenix_model::ports::PortServicePolicy::ManualOffer {
+    if commit && profile.policy == phoenix_model::ports::PortServicePolicy::ManualOffer {
         let order = &world
             .get::<crate::umbilical::TransferUmbilical>(visitor)
             .ok_or("missing Umbilical")?
@@ -321,40 +341,117 @@ pub(crate) fn settle_port_exchange(
     } else {
         (provider, remote, visitor, request.destination.clone())
     };
-    let mut legs = vec![(
+    let legs = vec![(
         source,
         source_endpoint,
         destination,
         destination_endpoint,
         offer.unit_amount,
     )];
+    let mut cost_plans = Vec::new();
     for cost in &offer.costs {
         let stores = world
             .get::<CompiledShipLogistics>(visitor)
             .ok_or("barter requires actual Main cost stores")?;
-        let local = stores
+        let receiving_compartment = stores
             .0
             .config()
             .stores
             .iter()
-            .find(|store| {
+            .find(|store| store.endpoint == request.destination)
+            .map(|store| store.compartment.as_str());
+        let mut local: Vec<_> = stores
+            .0
+            .config()
+            .stores
+            .iter()
+            .filter(|store| {
                 store.role == phoenix_model::logistics::StoreRole::Main
                     && store.resource == cost.resource
             })
-            .ok_or("barter cost has no compatible Main store")?
-            .endpoint
-            .clone();
-        legs.push((
-            visitor,
-            local,
-            provider,
+            .map(|store| {
+                (
+                    if store.endpoint == request.destination {
+                        0
+                    } else if Some(store.compartment.as_str()) == receiving_compartment {
+                        1
+                    } else {
+                        2
+                    },
+                    store.id.clone(),
+                    store.endpoint.clone(),
+                )
+            })
+            .collect();
+        local.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+        if local.is_empty() {
+            return Err("barter cost has no compatible Main store".into());
+        }
+        let mut sources = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for (_, _, endpoint) in local {
+            if !seen.insert(endpoint.clone()) {
+                continue;
+            }
+            let (stock, _) = endpoint_stock(
+                &endpoint,
+                world.get::<InfrastructureCondition>(visitor),
+                world.get::<TorpedoSystemResource>(visitor),
+            )
+            .ok_or("missing actual barter cost endpoint")?;
+            let available = source_available(
+                &stock,
+                &endpoint,
+                world.get::<CompiledShipLogistics>(visitor),
+                world.get::<ShipLogistics>(visitor),
+            );
+            sources.push((endpoint, available));
+        }
+        cost_plans.push((
             endpoint(world, provider, &cost.resource)?,
             cost.amount,
+            sources,
         ));
     }
     let mut limit = request.lots.max(0);
     if !request.inbound {
         limit = limit.min(quota);
+    }
+    if request.maintain_goal {
+        let store_id = request
+            .store
+            .as_ref()
+            .ok_or("maintained port flow requires an explicit Main store")?;
+        let state = world
+            .get::<ShipLogistics>(visitor)
+            .ok_or("maintained port flow requires actual stock targets")?;
+        let goal = state
+            .0
+            .goals
+            .get(store_id)
+            .copied()
+            .ok_or("maintained store has no actual goal")?;
+        let (stock, held) = endpoint_stock(
+            &request.destination,
+            world.get::<InfrastructureCondition>(visitor),
+            world.get::<TorpedoSystemResource>(visitor),
+        )
+        .ok_or("maintained destination vanished")?;
+        let occupied = stock
+            .level
+            .saturating_add(stock.incoming_total())
+            .saturating_add(held);
+        limit = limit.min(goal.saturating_sub(occupied).max(0) / offer.unit_amount);
+    }
+    for (_, amount, sources) in &cost_plans {
+        let total: i128 = sources
+            .iter()
+            .map(|(_, available)| i128::from(*available))
+            .sum();
+        limit = limit.min(
+            i64::try_from((total / i128::from(*amount)).min(i128::from(i64::MAX)))
+                .map_err(|_| "barter availability overflow")?,
+        );
     }
     // Each source is checked before any credit. Multiple cost/goods legs using
     // one endpoint share this exact independent available amount.
@@ -382,6 +479,7 @@ pub(crate) fn settle_port_exchange(
     // withdrawal can make room for its purchased output, but never for itself.
     let stage = |lots: i64| -> Result<Vec<_>, String> {
         let mut updates: BTreeMap<Entity, BTreeMap<ResourceEndpoint, Stock>> = BTreeMap::new();
+        let mut deltas: BTreeMap<(Entity, ResourceEndpoint), i128> = BTreeMap::new();
         for (source, source_endpoint, destination, destination_endpoint, per_lot) in &legs {
             let amount = per_lot
                 .checked_mul(lots)
@@ -390,20 +488,38 @@ pub(crate) fn settle_port_exchange(
                 (*source, source_endpoint, -amount),
                 (*destination, destination_endpoint, amount),
             ] {
-                let owner = updates.entry(entity).or_default();
-                if !owner.contains_key(endpoint) {
-                    let (stock, _) = endpoint_stock(
-                        endpoint,
-                        world.get::<InfrastructureCondition>(entity),
-                        world.get::<TorpedoSystemResource>(entity),
-                    )
-                    .ok_or("port stock owner missing")?;
-                    owner.insert(endpoint.clone(), stock);
-                }
-                if owner.get_mut(endpoint).unwrap().adjust(delta) != delta {
-                    return Err("port endpoint cannot fit the complete lot".into());
+                let total = deltas.entry((entity, endpoint.clone())).or_default();
+                *total = total
+                    .checked_add(i128::from(delta))
+                    .ok_or("port endpoint delta overflow")?;
+            }
+        }
+        for (remote, per_lot, sources) in &cost_plans {
+            let mut needed = per_lot.checked_mul(lots).ok_or("barter cost overflow")?;
+            for (local, available) in sources {
+                let amount = needed.min(*available);
+                if amount > 0 {
+                    *deltas.entry((visitor, local.clone())).or_default() -= i128::from(amount);
+                    *deltas.entry((provider, remote.clone())).or_default() += i128::from(amount);
+                    needed -= amount;
                 }
             }
+            if needed != 0 {
+                return Err("barter cost cannot be funded by pre-existing available stock".into());
+            }
+        }
+        for ((entity, endpoint), delta) in deltas {
+            let delta = i64::try_from(delta).map_err(|_| "port net endpoint delta overflow")?;
+            let (mut stock, _) = endpoint_stock(
+                &endpoint,
+                world.get::<InfrastructureCondition>(entity),
+                world.get::<TorpedoSystemResource>(entity),
+            )
+            .ok_or("port stock owner missing")?;
+            if stock.adjust(delta) != delta {
+                return Err("port endpoint cannot fit the complete lot".into());
+            }
+            updates.entry(entity).or_default().insert(endpoint, stock);
         }
         let mut staged = Vec::new();
         for (entity, updates) in updates {
@@ -422,6 +538,12 @@ pub(crate) fn settle_port_exchange(
             }
             staged.push((entity, next));
         }
+        staged.sort_by(|(a, _), (b, _)| {
+            world
+                .get::<EntityUuid>(*a)
+                .map(|id| &id.0)
+                .cmp(&world.get::<EntityUuid>(*b).map(|id| &id.0))
+        });
         Ok(staged)
     };
     let (mut low, mut high) = (0, limit);
@@ -435,6 +557,9 @@ pub(crate) fn settle_port_exchange(
     }
     if low == 0 {
         return Ok(0);
+    }
+    if !commit {
+        return Ok(low);
     }
     let staged = stage(low)?;
     if !request.inbound {

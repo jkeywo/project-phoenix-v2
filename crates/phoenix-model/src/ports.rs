@@ -26,6 +26,8 @@ pub struct PortOfferConfig {
     pub id: String,
     pub resource: String,
     /// Maximum whole lots delivered to one visitor in one physical visit.
+    /// Zero disables this offer, including inbound donations. Positive-quota
+    /// free donations do not consume its outbound delivered-lot allowance.
     pub quota: i64,
     /// Actual resource units delivered per whole lot.
     pub unit_amount: i64,

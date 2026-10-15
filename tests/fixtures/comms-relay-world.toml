@@ -1,0 +1,23 @@
+# Quiet physical three-hull relay, without scripted deadlines/resource grants.
+[global]
+seed = 156216
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "assets/entities/relay_cruiser.toml"
+id = "signal-relay"
+name = "signal-relay"
+spawn_on = "game_start"
+transform = { position = [175, 0, 0] }
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "status-reporter"
+name = "status-reporter"
+spawn_on = "game_start"
+transform = { position = [350, 0, 0] }

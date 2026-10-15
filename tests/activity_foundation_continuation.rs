@@ -457,7 +457,7 @@ fn actual_repair_and_delivery_credit_once_across_partial_work_json_and_360_host_
             .as_ref()
             .unwrap()
             .id,
-        repair.job
+        repair.physical_job().expect("accepted physical repair")
     );
     assert!(live
         .world()
@@ -465,7 +465,7 @@ fn actual_repair_and_delivery_credit_once_across_partial_work_json_and_360_host_
         .unwrap()
         .0
         .batches
-        .contains_key(&delivery.job));
+        .contains_key(&delivery.physical_job().expect("accepted physical delivery")));
     assert!(
         live.world()
             .get::<ShipRepairTeams>(actor)

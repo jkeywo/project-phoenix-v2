@@ -153,6 +153,7 @@ pub fn compatible(
             AiDirective::Hail { .. } | AiDirective::Order { .. } => false,
             AiDirective::Scan { .. } => has(SENSORS_KIND),
             AiDirective::Illuminate { .. } => has(ILLUMINATION_KIND),
+            AiDirective::Jam { .. } => has(JAMMING_KIND),
             AiDirective::Tow { .. }
             | AiDirective::Stabilise { .. }
             | AiDirective::Escort { .. } => has(TRACTOR_KIND),

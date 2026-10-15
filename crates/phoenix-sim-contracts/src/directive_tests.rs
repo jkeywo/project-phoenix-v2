@@ -163,3 +163,32 @@ fn illumination_uses_existing_world_and_doctrine_target_codec_with_science_relev
     );
     assert!(interpret(&doctrine).is_err());
 }
+
+#[test]
+fn jamming_uses_existing_world_and_doctrine_target_codec_with_comms_relevance_only() {
+    let mut request = world("Jam");
+    assert!(matches!(
+        interpret(&request),
+        Err(DirectiveError::MissingField { .. })
+    ));
+    request.push_text(DirectiveField::WorldTarget, Some("observed-subject".into()));
+    let expected = AiDirective::Jam {
+        target: "observed-subject".into(),
+    };
+    assert_eq!(interpret(&request).unwrap(), expected);
+    assert_eq!(
+        crate::objective_utility::directive_relevance(&expected),
+        vec![phoenix_model::messages::SystemAffinity::Comms]
+    );
+    let mut doctrine = world("Jam");
+    doctrine.push_text(
+        DirectiveField::DoctrineOperateTarget,
+        Some("observed-subject".into()),
+    );
+    assert_eq!(interpret(&doctrine).unwrap(), expected);
+    doctrine.push_text(
+        DirectiveField::DoctrineScanTarget,
+        Some("unrelated-scan".into()),
+    );
+    assert!(interpret(&doctrine).is_err());
+}

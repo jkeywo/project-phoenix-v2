@@ -96,13 +96,41 @@ pub(crate) fn publish_comms_blackboard(
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship::components::HumanSeekingHosts>,
             Option<&crate::comms::radio::RadioProfile>,
+            Option<&crate::ship::state::ShipPhysics>,
+            Option<&Transform>,
+            Option<&crate::modifiers::ShipModifiers>,
         ),
         With<crate::server_app::Ship>,
     >,
+    paths: crate::regions::signal_path::RegionSignalQuery,
 ) {
     let key = crate::ship::system_registry::comms_system_id();
-    for (is_local, slot, uuid, alert, hull, damage, mut boards, hosts, radio) in &mut ships {
+    for (
+        is_local,
+        slot,
+        uuid,
+        alert,
+        hull,
+        damage,
+        mut boards,
+        hosts,
+        radio,
+        physics,
+        transform,
+        modifiers,
+    ) in &mut ships
+    {
         let mut bb = CommsBlackboard::default();
+        bb.receiver_interference = if modifiers.is_some_and(|modifiers| {
+            modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed)
+        }) {
+            Some(true)
+        } else {
+            physics
+                .map(|pose| Vec3::new(pose.x, pose.y, pose.z))
+                .or_else(|| transform.map(|transform| transform.translation))
+                .and_then(|point| paths.comms_receiver_interference(point))
+        };
         bb.channels = radio
             .into_iter()
             .flat_map(|radio| &radio.0.channels)

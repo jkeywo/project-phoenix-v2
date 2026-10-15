@@ -1,0 +1,48 @@
+entities:
+  - component: comms-electronic-equipment
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Paid Comms Electronic Equipment
+      summary: "One actual Comms-owned jammer uses generic enabled/target intent, shared paid mount, permitted original-time measurements and ordinary individual AI. Input work precedes the same Hail range owner; all real Comms link consumers share one private physical receiver exposure factor."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [ship-jamming-intent, jamming-paid-emission-view]
+      writes: [ship-jamming-intent, jamming-paid-emission-view]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/electronic/jamming.rs, crates/phoenix-simulation/src/comms/jamming.rs, crates/phoenix-simulation/src/regions/signal_path.rs]
+      symbols: [ShipJamming, JammingEmissions, receiver_factor]
+  - state: ship-jamming-intent
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Retained Jamming Generic Channels
+      summary: "Exactly the accepted emitter's typed enabled and target channels; no second mount target, controller, victim list or energy state."
+    architecture:
+      classification: authoritative
+      owner: comms-electronic-equipment
+      writers: [comms-electronic-equipment]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/jamming.rs]
+      symbols: [ShipJamming]
+  - state: jamming-paid-emission-view
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Current Paid Physical Jammer Emission
+      summary: "Derived current-tick actual emitter pose/bearing/profile/grant, recomputed only by ordinary paid Input work. No reusable bootstrap credit, receiver census or saved effect store; missing current boundary fails link use closed."
+    architecture:
+      classification: derived
+      owner: comms-electronic-equipment
+      writers: [comms-electronic-equipment]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/jamming.rs]
+      symbols: [JammingEmissions]

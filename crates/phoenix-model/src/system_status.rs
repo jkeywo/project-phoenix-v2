@@ -49,6 +49,8 @@ pub struct SystemStatus {
     pub guidance: Option<crate::guided_orders::GuidanceControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub illumination: Option<crate::illumination_ui::IlluminationControlsView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jamming: Option<crate::jamming_ui::JammingControlsView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +128,7 @@ impl SystemStatus {
             equipment_recovery: None,
             guidance: None,
             illumination: None,
+            jamming: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

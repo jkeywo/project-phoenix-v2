@@ -113,7 +113,7 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // these from its local scored pool and issues the same typed `Hail`
         // command a human Comms officer sends. No consumer filters Hail on
         // `Captain`, so Comms is the sole relevant affinity.
-        AiDirective::Hail { .. } => vec![SystemAffinity::Comms],
+        AiDirective::Hail { .. } | AiDirective::Jam { .. } => vec![SystemAffinity::Comms],
         // A civilian order belongs to Navigation. It is not a Helm travel goal:
         // the ordered craft's own doctrine and helm fly the resulting route.
         AiDirective::Order { .. } => vec![SystemAffinity::Navigation],

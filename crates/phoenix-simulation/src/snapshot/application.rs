@@ -1608,6 +1608,17 @@ pub(super) fn apply_entity_state_with(
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
     }
+    if let Some(saved) = &row.jamming {
+        entity_mut.insert((
+            saved.clone(),
+            crate::comms::jamming::JammingEmissions::default(),
+        ));
+    } else {
+        entity_mut.remove::<(
+            crate::comms::jamming::ShipJamming,
+            crate::comms::jamming::JammingEmissions,
+        )>();
+    }
     if let Some(saved) = &row.illumination {
         entity_mut.insert((
             saved.clone(),

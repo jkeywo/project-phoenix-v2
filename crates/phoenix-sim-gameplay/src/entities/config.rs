@@ -1394,6 +1394,17 @@ impl EntityConfig {
                     continue;
                 }
                 if system.kind == crate::ship::system_registry::JAMMING_KIND {
+                    if config.damage.is_none()
+                        || config
+                            .interior
+                            .as_ref()
+                            .is_none_or(|interior| !interior.placements.contains_key(&system.id))
+                        || !system.damage_components.iter().any(|component| {
+                            component.binding == phoenix_model::damage::DamageBinding::Operation
+                        })
+                    {
+                        return Err(SerdeError::custom("jamming requires actual interior placement and canonical Operation damage owner"));
+                    }
                     let authored = authored.ok_or_else(|| SerdeError::custom(format!("Jamming System '{}' requires an explicit supported config.ai state tree",system.id.0)))?;
                     let tree: crate::ai::state_tree::AiTreeConfig =
                         authored.clone().try_into().map_err(|error| {

@@ -988,6 +988,7 @@ fn build_system_status(
     for (owner, row) in &mut status {
         row.guidance = crate::console::weapons::guidance_ui::project(world, entity, owner);
         row.illumination = crate::console::weapons::illumination::project(world, entity, owner);
+        row.jamming = crate::comms::jamming::project(world, entity, owner);
     }
     let owners = config
         .0

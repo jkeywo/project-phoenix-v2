@@ -313,6 +313,7 @@ fn tick(
         (
             Option<&crate::science::passive::PassiveState>,
             Option<&crate::console::weapons::illumination::ShipIllumination>,
+            Option<&crate::comms::jamming::ShipJamming>,
         ),
         &crate::core::messages::AdmittedCommands,
         Option<(
@@ -338,7 +339,7 @@ fn tick(
             tracks,
             controls,
             assignments,
-            (passive, illumination),
+            (passive, illumination, jamming),
             admitted,
             fitting,
         )) = ships.iter_mut().find(|(id, ..)| id.0 == uuid)
@@ -360,7 +361,15 @@ fn tick(
             let is_illumination = config.0.system(owner).is_some_and(|system| {
                 system.kind == crate::ship::system_registry::ILLUMINATION_KIND
             });
-            let contact = if is_illumination {
+            let is_jamming = config
+                .0
+                .system(owner)
+                .is_some_and(|system| system.kind == crate::ship::system_registry::JAMMING_KIND);
+            let contact = if is_jamming {
+                jamming
+                    .and_then(|state| state.target(&config.0, owner))
+                    .map(str::to_owned)
+            } else if is_illumination {
                 illumination
                     .and_then(|state| state.target(&config.0, owner))
                     .map(str::to_owned)
@@ -389,6 +398,31 @@ fn tick(
                 )
             };
             let point = contact.as_deref().and_then(|contact| {
+                if is_jamming {
+                    let binding = phoenix_sim_gameplay::ship::composition::jamming_composition(
+                        &config.0.system(owner)?.components,
+                    )?;
+                    let observer = crate::entities::spawner::EntityUuid(uuid.clone());
+                    let context = crate::console::weapons::guidance_link::GuidanceContext {
+                        observer: &observer,
+                        config,
+                        boards,
+                        tracks: tracks?,
+                        controls,
+                        tick: tick.0,
+                        runtime: runtime.as_deref(),
+                    };
+                    return context
+                        .sample(owner, contact)
+                        .filter(|sample| {
+                            binding.config.sample_fresh(
+                                sample.sampled_tick,
+                                tick.0,
+                                time.timestep().as_secs_f64(),
+                            )
+                        })
+                        .map(|sample| [sample.position[0], sample.position[2]]);
+                }
                 current_point(
                     &config.0,
                     boards,
@@ -427,8 +461,11 @@ fn tick(
                     .unwrap_or(false);
             let emitter_enabled = !is_illumination
                 || illumination.is_some_and(|state| state.enabled(&config.0, owner));
+            let jammer_enabled =
+                !is_jamming || jamming.is_some_and(|state| state.enabled(&config.0, owner));
             let enabled = receiver_enabled
                 && emitter_enabled
+                && jammer_enabled
                 && fitting.is_none_or(|(profile, state)| {
                     !crate::resources::fitting_server::unavailable(profile, state, owner)
                 })

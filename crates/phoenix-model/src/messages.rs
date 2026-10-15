@@ -2187,6 +2187,12 @@ pub enum SystemControlPayload {
     },
     /// Issue through the actual source tube; target_uuid is a permitted public contact handle.
     /// Independent mounted Science emitter; target is a permitted Console handle.
+    SetJammingTarget {
+        target_uuid: Option<String>,
+    },
+    SetJammingEnabled {
+        enabled: bool,
+    },
     SetIlluminationTarget {
         target_uuid: Option<String>,
     },
@@ -5699,6 +5705,9 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    /// Own receiver's supported notice, never an emitter attribution/census.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_interference: Option<bool>,
     #[serde(default)]
     pub channels: Vec<crate::comms_channel::CommsChannelView>,
     /// Current inbox messages for the Comms holder, in insertion order.
@@ -5969,23 +5978,32 @@ pub enum AiDirective {
     #[default]
     None,
     /// Destroy the named target entity.
-    Destroy { target: String },
+    Destroy {
+        target: String,
+    },
     /// Patrol between the listed anchors in order.
     Patrol {
         anchors: Vec<String>,
         loop_path: bool,
     },
     /// Reach the named anchor position.
-    Reach { anchor: String },
+    Reach {
+        anchor: String,
+    },
     /// Hail the named target entity.
-    Hail { target: String },
+    Hail {
+        target: String,
+    },
     /// Order the named civilian onto the named authored route (issue #1141).
     ///
     /// Navigation owns the concrete command. The directive carries the same two
     /// pieces of authored intent the human traffic-control button publishes;
     /// its AI host turns them into `OrderCivilian { Divert { route } }` through
     /// command admission rather than mutating civilian state.
-    Order { target: String, route: String },
+    Order {
+        target: String,
+        route: String,
+    },
     /// Scan the named target entity (issue #1139).
     ///
     /// Sensors resolves the mission/doctrine name to the target's live UUID and
@@ -5993,11 +6011,20 @@ pub enum AiDirective {
     /// sends. The scan applier remains `science::server::tick_scans`, so this
     /// directive names intent rather than bypassing range, capability or the
     /// subject's live condition.
-    Scan { target: String },
+    Scan {
+        target: String,
+    },
     /// Independently illuminate this known target through the Science emitter.
-    Illuminate { target: String },
+    Illuminate {
+        target: String,
+    },
+    Jam {
+        target: String,
+    },
     /// Retreat to the named anchor position.
-    Retreat { anchor: String },
+    Retreat {
+        anchor: String,
+    },
     /// Proceed to and berth at the named structure (issue #1028).
     ///
     /// A *destination* directive, not a mover: the target is resolved to a live
@@ -6007,7 +6034,9 @@ pub enum AiDirective {
     /// helm's existing waypoint hand-off. The close-in berthing manoeuvre is the
     /// existing `DockingMotionIntent` one. Named by a world entity name or a
     /// UUID, exactly like `Destroy`.
-    Dock { target: String },
+    Dock {
+        target: String,
+    },
     /// Tow the named target (issue #1162): Engineering locks it and engages the
     /// tractor. A *per-verb operate directive* — it lives upstream of admission
     /// and names WHAT to operate on, not the concrete command; the tractor seat
@@ -6016,26 +6045,36 @@ pub enum AiDirective {
     /// tractor"; the target's held-response (#1158) differentiates the effect —
     /// a `Tow` drags a derelict, a `Stabilise` arrests a failing structure's
     /// decline, an `Escort` holds a partner on the formation rig.
-    Tow { target: String },
+    Tow {
+        target: String,
+    },
     /// Stabilise the named target (issue #1162): the same "lock + engage the
     /// tractor" resolution as `Tow`, aimed at a structure whose held-response is
     /// `arrest-decline`. Routes to Engineering.
-    Stabilise { target: String },
+    Stabilise {
+        target: String,
+    },
     /// Escort the named target (issue #1162): the same "lock + engage the
     /// tractor" resolution as `Tow`, carried for symmetry with the fleet-doctrine
     /// vocabulary. Routes to Engineering.
-    Escort { target: String },
+    Escort {
+        target: String,
+    },
     /// Transfer supplies to the named target (issue #1162): Helm docks with it
     /// and Engineering runs the umbilical over the mated dock. Routes to BOTH
     /// Helm (the dock seat decides `Dock`/`Undock`) and Engineering (the
     /// umbilical seat decides `StartTransfer`/`StopTransfer`), because the
     /// operation is a chain no single seat completes.
-    Transfer { target: String },
+    Transfer {
+        target: String,
+    },
     /// Field-repair the named target (issue #1162): Repair locks it and
     /// dispatches a team abroad. Routes to Repair; the dispatch seat decides
     /// `DispatchExternalRepair`/`RecallExternalRepair`, and the shared free-team
     /// availability answer keeps it from starving the hull's own repairs.
-    FieldRepair { target: String },
+    FieldRepair {
+        target: String,
+    },
     /// Secure the named target (issue #1346): Tactical sends a Security team
     /// across to do whatever that target authors as the most urgent work
     /// available there. Routes to Security.
@@ -6049,7 +6088,9 @@ pub enum AiDirective {
     /// DOES buy is urgency: an active `Secure` order promotes that target's
     /// authored work to `urgent_objective` in the backfill ranking, and never
     /// below what it already was.
-    Secure { target: String },
+    Secure {
+        target: String,
+    },
     /// Rescue the civilians aboard the named target (issue #1348): Engineering
     /// selects the discovered contact and runs the transporter until everyone is
     /// recovered. Routes to Engineering, the transporter's owner.
@@ -6065,7 +6106,9 @@ pub enum AiDirective {
     /// whichever objective the scenario's utility scoring ranks higher is the one
     /// the seat serves that tick (AGENTS.md rule 6 — the seat has one pair of
     /// hands, and the scored pool decides which life-saving order wins it).
-    Rescue { target: String },
+    Rescue {
+        target: String,
+    },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.

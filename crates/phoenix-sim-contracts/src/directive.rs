@@ -20,6 +20,7 @@ pub enum DirectiveKind {
     Hail,
     Scan,
     Illuminate,
+    Jam,
     Dock,
     Tow,
     Stabilise,
@@ -35,7 +36,7 @@ pub enum DirectiveKind {
 }
 
 impl DirectiveKind {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::None,
         Self::Patrol,
         Self::Destroy,
@@ -44,6 +45,7 @@ impl DirectiveKind {
         Self::Hail,
         Self::Scan,
         Self::Illuminate,
+        Self::Jam,
         Self::Dock,
         Self::Tow,
         Self::Stabilise,
@@ -65,6 +67,7 @@ impl DirectiveKind {
             Self::Hail => "Hail",
             Self::Scan => "Scan",
             Self::Illuminate => "Illuminate",
+            Self::Jam => "Jam",
             Self::Dock => "Dock",
             Self::Tow => "Tow",
             Self::Stabilise => "Stabilise",
@@ -98,6 +101,7 @@ impl DirectiveKind {
             Self::Hail
             | Self::Scan
             | Self::Illuminate
+            | Self::Jam
             | Self::Dock
             | Self::Tow
             | Self::Stabilise
@@ -229,6 +233,7 @@ impl DirectiveField {
                     | DirectiveKind::Secure
                     | DirectiveKind::Rescue
                     | DirectiveKind::Illuminate
+                    | DirectiveKind::Jam
                     | DirectiveKind::Order
             ),
             Self::DoctrineDestroyTarget => matches!(kind, DirectiveKind::Destroy),
@@ -245,6 +250,7 @@ impl DirectiveField {
                     | DirectiveKind::Secure
                     | DirectiveKind::Rescue
                     | DirectiveKind::Illuminate
+                    | DirectiveKind::Jam
             ),
             Self::DoctrineOrderTarget | Self::WorldRoute | Self::DoctrineOrderRoute => {
                 matches!(kind, DirectiveKind::Order)
@@ -541,7 +547,8 @@ fn expected_field(
             | DirectiveKind::FieldRepair
             | DirectiveKind::Secure
             | DirectiveKind::Rescue
-            | DirectiveKind::Illuminate => DirectiveField::DoctrineOperateTarget,
+            | DirectiveKind::Illuminate
+            | DirectiveKind::Jam => DirectiveField::DoctrineOperateTarget,
             DirectiveKind::Order => DirectiveField::DoctrineOrderTarget,
             _ => DirectiveField::DoctrineDestroyTarget,
         },
@@ -609,6 +616,9 @@ pub fn interpret(raw: &AuthoredDirective) -> Result<AiDirective, DirectiveError>
             target: values.target.expect("required above"),
         },
         DirectiveKind::Illuminate => AiDirective::Illuminate {
+            target: values.target.expect("required above"),
+        },
+        DirectiveKind::Jam => AiDirective::Jam {
             target: values.target.expect("required above"),
         },
         DirectiveKind::Dock => AiDirective::Dock {

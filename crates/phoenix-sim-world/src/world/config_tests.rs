@@ -1795,7 +1795,8 @@ fn doctrine_and_world_adapters_match_for_every_directive_kind_and_absence() {
             | DirectiveKind::FieldRepair
             | DirectiveKind::Secure
             | DirectiveKind::Rescue
-            | DirectiveKind::Illuminate => {
+            | DirectiveKind::Illuminate
+            | DirectiveKind::Jam => {
                 doctrine.directive_operate_target = Some("casualty".into());
                 world.target = Some("casualty".into());
             }

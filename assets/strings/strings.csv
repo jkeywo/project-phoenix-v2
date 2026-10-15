@@ -6109,3 +6109,15 @@ workshop.activities.outcome.failed,Physical activity authoring,Failed,Failed,Fai
 workshop.activities.goal.structure,Physical activity authoring,Structural restoration,Structural restoration,Structural restoration,source
 workshop.activities.goal.patch,Physical activity authoring,Component patch,Component patch,Component patch,source
 workshop.activities.goal.full,Physical activity authoring,Full component remedy,Full component remedy,Full component remedy,source
+jamming.title,Comms interference equipment,Comms interference equipment,Störsender,Comms interference equipment,machine
+jamming.target,Comms interference equipment,Observed aim,Beobachtetes Ziel,Observed aim,machine
+jamming.enabled,Comms interference equipment,Enable interference,Störung aktivieren,Enable interference,machine
+jamming.apply,Comms interference equipment,Select observed aim,Beobachtetes Ziel wählen,Select observed aim,machine
+jamming.clear,Comms interference equipment,Clear aim,Ziel löschen,Clear aim,machine
+jamming.emitting,Comms interference equipment,Emitting; receiver effects unknown,Sendet; Empfängerwirkung unbekannt,Emitting; receiver effects unknown,machine
+jamming.waiting,Comms interference equipment,Enabled; awaiting own readiness and evidence,Aktiv; wartet auf eigene Bereitschaft und Messung,Enabled; awaiting own readiness and evidence,machine
+jamming.off,Comms interference equipment,Emitter off,Sender aus,Emitter off,machine
+jamming.enable,Comms interference equipment,Enable emitter,Sender aktivieren,Enable emitter,machine
+jamming.disable,Comms interference equipment,Disable emitter,Sender deaktivieren,Disable emitter,machine
+jamming.receiver_interference,Comms interference equipment,Own receiver interference detected,Störung des eigenen Empfängers erkannt,Own receiver interference detected,machine
+entity.jamming_cruiser.name,Comms interference equipment,Interference Cruiser,Störkreuzer,Interference Cruiser,machine

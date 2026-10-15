@@ -384,6 +384,7 @@ mod spatial_fields;
 
 mod guided_source;
 mod illumination;
+mod jamming;
 #[cfg(test)]
 mod sustained_beam_tests;
 mod weapon_targets;

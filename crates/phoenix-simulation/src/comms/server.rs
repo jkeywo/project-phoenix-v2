@@ -422,6 +422,7 @@ impl Plugin for CommsWorldPlugin {
         register_comms_consumer(app);
         crate::comms::radio::register(app);
         crate::comms::requests::register(app);
+        crate::comms::jamming::register(app);
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<OnScreenMessage>()
@@ -758,8 +759,16 @@ pub(crate) fn signal_comms_in_range(
 ) -> bool {
     let transmission =
         signals.transmission(start, end, crate::regions::signal_path::SignalClass::Comms);
+    let own_factor = signals.comms_receiver_factor(start);
+    let other_factor = signals.comms_receiver_factor(end);
     transmission > 0.0
-        && crate::comms::in_range(start.distance(end) / transmission, own_range, other_range)
+        && own_factor > 0.0
+        && other_factor > 0.0
+        && crate::comms::in_range(
+            start.distance(end) / transmission,
+            own_range * own_factor,
+            other_range * other_factor,
+        )
 }
 
 /// Fictional feeds obey fitted radio availability and environmental jamming.

@@ -123,3 +123,16 @@ owner work, explicit outcome resolution and fresh JSON continuation. This bounde
 consumer establishes acceptance/history plumbing. It does not deliver proposals
 for multiple roots, physical capacity reservations or the Patrol capture/transport/
 reception demonstration, which still needs the actual20/19/21 custody consumers.
+
+
+The first source consumer `committed-assistance-world.toml` presents an ordinary
+scripted Comms offer with explicit zero AI choice weights. Only a normal Human
+response records the existing promise; decline leaves the optional root dormant.
+The real ReportStatus and internal Repair operators use the same imported domain
+contracts as22. A positive actual Repair achievement explicitly keeps the promise.
+The native probe delegates Comms through normal Station release, resumes real
+partial reading from fresh JSON, introduces a later incident through Damage only
+after its Repair instruction exists, and compares1200 complete updates with
+forged-ledger no-write checks. These tests await integrator execution. This is
+accepted assistance rather than Patrol capture/evacuation: no custody, capacity,
+passenger transfer or operational ownership transition is claimed.

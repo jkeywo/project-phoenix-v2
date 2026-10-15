@@ -387,3 +387,58 @@ fn instruction_does_not_diagnose_damage_and_only_actual_acknowledged_work_releas
         "real remedy consumed finite parts"
     );
 }
+
+#[test]
+fn existing_promise_acceptance_gates_new_root_without_revoking_ongoing_work() {
+    let (mut app, actor) = setup(2);
+    let mut base = app.world().resource::<WorldConfig>().clone();
+    let mut source = base.planning.take().unwrap();
+    source.required_commitment = Some("assistance".into());
+    let (compiled, _) =
+        phoenix_sim_world::world::planning::CompiledPlanning::load(source.clone(), |path| {
+            crate::content_fs::read_to_string(path).ok()
+        })
+        .unwrap();
+    base.planning = Some(source);
+    base.compiled_planning = Some(compiled);
+    app.insert_resource(base);
+    advance(&mut app, actor);
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(
+        runtime.plan_choice.is_none() && runtime.situations.is_empty(),
+        "proposed work has no released instruction"
+    );
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .commitments
+        .record("assistance", "maintenance-team", "terms", "resolution", 20)
+        .unwrap();
+    advance(&mut app, actor);
+    let original = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .plan_choice
+        .clone()
+        .unwrap();
+    assert_eq!(original.required_commitment.as_deref(), Some("assistance"));
+    assert!(!original.released.is_empty());
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .commitments
+        .resolve(
+            "assistance",
+            crate::world::commitments::CommitmentOutcome::Broken,
+            21,
+        )
+        .unwrap();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 22;
+    advance(&mut app, actor);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .plan_choice
+            .as_ref(),
+        Some(&original),
+        "resolving a promise does not abandon accepted physical work"
+    );
+}

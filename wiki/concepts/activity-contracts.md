@@ -130,3 +130,16 @@ chain. Preflight checks causal, nonfuture and nondecreasing clocks; inspection
 shows the application clock separately from the underlying physical/radio fact.
 This records a historical authored consequence and does not create another
 permission inventory or prove arbitrary past script effects from current state.
+
+
+An opt-in root can name `planning.required_commitment`. The existing unique
+World promise must be Open before Simulation first chooses that root; offers and
+declines do not release mission instructions. PlanChoice retains that exact ID,
+and preflight validates its original made/resolved interval from the same saved
+CommitmentLedger. Later Kept/Broken resolution preserves accepted work and clocks.
+A same-tick script acceptance can await the next collection pass; an older open
+interval cannot explain a missing accepted root. The existing Workshop source
+transaction edits this binding and privileged Scenario inspection displays it.
+The committed-assistance probe exercises ordinary Comms acceptance and actual
+machinery evidence; native execution, physical custody and full Patrol acceptance
+remain separate from this source checkpoint.

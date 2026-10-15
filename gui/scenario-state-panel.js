@@ -284,6 +284,7 @@ export function buildScenarioStatePanel(payload, opts = {}) {
     field('root', plan.source?.task);
     field('chosen', choice?.chosen_tick);
     field('actor', choice?.actor_uuid);
+    if (plan.source?.required_commitment != null) field('required_commitment', choice?.required_commitment ?? plan.source.required_commitment);
     for (const [node, method] of Object.entries(choice?.methods || {})) {
       field('method', `${node}: ${method.task?.library_path}::${method.task?.task} / ${method.method}`);
     }

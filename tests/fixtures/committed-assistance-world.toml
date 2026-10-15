@@ -1,0 +1,50 @@
+# Optional accepted assistance through ordinary Comms dialogue.
+# The native probe supplies a later incident through the actual Damage owner.
+[global]
+seed=1562224
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="planned-ship"
+name="planned-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[[entity]]
+template_path="tests/fixtures/hailable-cruiser.toml"
+id="status-reporter"
+name="status-reporter"
+spawn_on="game_start"
+transform={position=[80,0,0]}
+[planning]
+required_commitment="maintenance-assistance"
+id="committed-assistance"
+task="contact::restore-after-report"
+arguments={actor={kind="actor",value="planned-ship"}}
+import=[{path="assets/worlds/domains/committed-assistance.toml",as="contact",names=["restore-after-report"]}]
+[script]
+setup='''
+on_world_loaded("offer_assistance");
+fn offer_assistance(ctx) {
+    ctx.effects.open_comms(#{ from: "_self", node_fn: "assistance_offer" });
+}
+fn assistance_offer(ctx) {
+    #{ message: "world.committed_assistance.offer", responses: [
+        #{ text: "world.committed_assistance.accept", on_pick: "accept_assistance", ai_weight: 0 },
+        #{ text: "world.committed_assistance.decline", on_pick: "decline_assistance", ai_weight: 0 },
+    ] }
+}
+fn accept_assistance(ctx) {
+    ctx.commitments.record(#{
+        id: "maintenance-assistance", made_to: "maintenance-coordinator",
+        terms: "world.committed_assistance.terms",
+        resolves_when: "world.committed_assistance.resolves",
+    });
+}
+fn decline_assistance(ctx) { ctx.flags.increment("assistance_declined", 1); }
+fn credit_report(ctx) { ctx.flags.increment("actual_status_report", 1); }
+fn complete_assistance(ctx) {
+    ctx.commitments.keep("maintenance-assistance");
+    ctx.flags.increment("assistance_work_achieved", 1);
+}
+'''

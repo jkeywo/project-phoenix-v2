@@ -120,6 +120,7 @@ fn planning_frontier(
     let compiled = base.and_then(|base| base.compiled_planning.as_ref());
     match (&stored.plan_choice, compiled) {
         (Some(choice), Some(compiled)) => {
+            compiled.validate_required_commitment(choice, &stored.commitments, snapshot.tick)?;
             let base = base.ok_or("missing plan base-world definition")?;
             let actor = compiled.actor_reference()?;
             base.validate_situation_actor(actor)?;
@@ -193,7 +194,9 @@ fn planning_frontier(
                             })
                     })
             };
-            if initially_resolved {
+            if initially_resolved
+                && !compiled.dormant_commitment_allowed(&stored.commitments, snapshot.tick)?
+            {
                 return Err(
                     "resolved maintenance plan lost its saved method/release frontier".into(),
                 );

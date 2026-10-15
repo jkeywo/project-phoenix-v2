@@ -73,3 +73,16 @@ describe('temporal declaration and primitive source authoring',()=>{
     draft.undo();expect(draft.toFiles()).toEqual(before);draft.redo();expect(parse(draft.read(path)).planning.temporal.profile).toHaveLength(2);
   });
 });
+
+
+describe('existing promise root binding authoring',()=>{
+  it('roundtrips optional required commitment through backend validation and ordinary accepted history',async()=>{
+    const draft=pack(),inspection=inspectPlanning(draft,deps(),path),before=draft.toFiles(),root=parse(inspection.rootSource);
+    root.planning.required_commitment='maintenance-assistance';
+    const runtime={validate:vi.fn(async(_,candidate)=>({accepted:parse(candidate.read(path)).planning.required_commitment==='maintenance-assistance'}))};
+    await applyPlanning({draft,runtime,dependencies:deps(),path,rootSource:stringify(root)});
+    expect(runtime.validate).toHaveBeenCalledOnce();expect(inspectPlanning(new WorkshopDocument(draft.archive()),deps(),path).root.required_commitment).toBe('maintenance-assistance');
+    expect(parse(draft.read(path)).script).toEqual(parse(world()).script);
+    draft.undo();expect(draft.toFiles()).toEqual(before);draft.redo();expect(parse(draft.read(path)).planning.required_commitment).toBe('maintenance-assistance');
+  });
+});

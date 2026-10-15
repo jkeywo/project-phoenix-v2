@@ -158,6 +158,7 @@ impl CompiledPlanning {
         Ok(PlanSelection {
             choice: PlanChoice {
                 id: self.config.id.clone(),
+                required_commitment: self.config.required_commitment.clone(),
                 root_arguments: self.config.arguments.clone(),
                 chosen_tick: tick,
                 actor_uuid: actor_uuid.into(),
@@ -175,6 +176,7 @@ impl CompiledPlanning {
     /// damage, resources, equipment or command availability.
     pub fn derive(&self, choice: &PlanChoice) -> Result<Decomposition, String> {
         if choice.id != self.config.id
+            || choice.required_commitment != self.config.required_commitment
             || choice.root_arguments != self.config.arguments
             || choice.actor_uuid.trim().is_empty()
             || choice.actor_uuid.len() > 256

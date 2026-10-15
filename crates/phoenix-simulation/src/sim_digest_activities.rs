@@ -213,6 +213,7 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
     acc = fold_str(acc, "world-plan-choice");
     acc = fold_str(acc, &value.id);
     acc = fold_u64(acc, value.chosen_tick);
+    acc = fold_optional_str(acc, value.required_commitment.as_deref());
     acc = fold_str(acc, &value.actor_uuid);
     acc = fold_u64(acc, value.root_arguments.len() as u64);
     for (name, arg) in &value.root_arguments {

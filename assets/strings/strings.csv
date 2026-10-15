@@ -6303,3 +6303,11 @@ comms.request.accept_coordination,Formation coordination,Accept coordination,,,
 comms.request.accepted_at,Formation coordination,Coordination accepted at tick {tick},,,
 comms.request.formation_slot_title,Formation coordination,Formation slot in World coordinates,,,
 comms.request.formation_slot,Formation coordination,Formation offset X {x} / Z {z},,,
+
+settings.debug.scenario.planning.required_commitment,Bound existing promise,[Required promise],,,
+
+world.committed_assistance.offer,Optional planner acceptance probe,[Can you obtain our status report and restore your Engineering compartment if it needs work?],,,
+world.committed_assistance.accept,Optional planner acceptance probe,[Accept assistance],,,
+world.committed_assistance.decline,Optional planner acceptance probe,[Decline assistance],,,
+world.committed_assistance.terms,Existing promise terms,[Obtain the report and restore Engineering],,,
+world.committed_assistance.resolves,Existing promise resolution,[The report is heard and useful structural repair is completed],,,

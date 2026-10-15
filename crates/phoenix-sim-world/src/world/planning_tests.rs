@@ -133,6 +133,7 @@ fn library(ordered: bool) -> DomainLibrary {
 }
 fn config() -> PlanningConfig {
     PlanningConfig {
+        required_commitment: None,
         temporal: None,
         id: "maintenance".into(),
         task: "care::maintain".into(),
@@ -482,4 +483,89 @@ fn dependency_waits_for_actual_authored_callback_not_just_preceding_fact() {
             .is_err(),
         "dependency must name an explicit callback"
     );
+}
+
+#[test]
+fn required_promise_gates_only_first_choice_and_retains_its_original_open_interval() {
+    use crate::world::commitments::{CommitmentLedger, CommitmentOutcome};
+    let mut root = config();
+    root.required_commitment = Some("assistance".into());
+    let compiled = CompiledPlanning::load(root, |path| {
+        (path == LIB).then(|| toml::to_string(&library(true)).unwrap())
+    })
+    .unwrap()
+    .0;
+    let mut ledger = CommitmentLedger::default();
+    assert!(!compiled.commitment_ready(&ledger, 10).unwrap());
+    assert!(compiled.dormant_commitment_allowed(&ledger, 10).unwrap());
+    ledger
+        .record("assistance", "maintenance-team", "terms", "resolution", 10)
+        .unwrap();
+    assert!(compiled.commitment_ready(&ledger, 10).unwrap());
+    assert!(
+        compiled.dormant_commitment_allowed(&ledger, 10).unwrap(),
+        "same-tick script acceptance awaits collection"
+    );
+    assert!(
+        !compiled.dormant_commitment_allowed(&ledger, 11).unwrap(),
+        "past open promise cannot erase the root"
+    );
+    let choice = compiled
+        .choose("actual-crew", 11, |_| Ok(()))
+        .unwrap()
+        .choice;
+    assert_eq!(choice.required_commitment.as_deref(), Some("assistance"));
+    compiled
+        .validate_required_commitment(&choice, &ledger, 11)
+        .unwrap();
+    let original = choice.clone();
+    ledger
+        .resolve("assistance", CommitmentOutcome::Kept, 20)
+        .unwrap();
+    assert!(!compiled.commitment_ready(&ledger, 20).unwrap());
+    assert!(
+        !compiled.dormant_commitment_allowed(&ledger, 20).unwrap(),
+        "later resolution cannot launder lost accepted history"
+    );
+    for now in 20..380 {
+        compiled
+            .validate_required_commitment(&choice, &ledger, now)
+            .unwrap();
+    }
+    assert_eq!(
+        choice, original,
+        "resolution has no physical cancellation or deadline effect"
+    );
+    for fault in 0..6 {
+        let mut bad = ledger.clone();
+        match fault {
+            0 => bad.records.clear(),
+            1 => {
+                bad.records.push(bad.records[0].clone());
+            }
+            2 => bad.records[0].made_at_tick = 12,
+            3 => bad.records[0].resolved_at_tick = Some(10),
+            4 => bad.records[0].resolved_at_tick = None,
+            _ => bad.records[0].resolved_at_tick = Some(31),
+        }
+        assert!(
+            compiled
+                .validate_required_commitment(&choice, &bad, 30)
+                .is_err(),
+            "malformed promise {fault}"
+        );
+    }
+    let mut instantaneous = CommitmentLedger::default();
+    instantaneous
+        .record("assistance", "party", "terms", "resolution", 10)
+        .unwrap();
+    instantaneous
+        .resolve("assistance", CommitmentOutcome::Broken, 10)
+        .unwrap();
+    assert!(compiled
+        .dormant_commitment_allowed(&instantaneous, 30)
+        .unwrap());
+    let mut forged = choice;
+    forged.required_commitment = None;
+    assert!(compiled.derive(&forged).is_err());
 }

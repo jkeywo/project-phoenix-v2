@@ -89,11 +89,15 @@ pub(crate) fn advance_with_forecast(
         return Ok(());
     }
     let (mut choice, graph) = if let Some(choice) = &runtime.plan_choice {
+        compiled.validate_required_commitment(choice, &runtime.commitments, tick)?;
         (
             choice.clone(),
             compiled.validate_history(choice, &runtime.situations, tick)?,
         )
     } else {
+        if !compiled.commitment_ready(&runtime.commitments, tick)? {
+            return Ok(());
+        }
         // A missing bootstrap owner is a readiness barrier before choosing,
         // never an accepted default-Human refusal or a method retry.
         if compiled.config().temporal.is_some() && forecast.is_none() {

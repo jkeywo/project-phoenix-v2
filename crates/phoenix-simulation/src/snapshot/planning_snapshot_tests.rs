@@ -347,3 +347,64 @@ fn immutable_recipe_missing_capability_cannot_borrow_live_replacement_equipment(
     assert_eq!(capture(&world), before);
     assert_eq!(crate::sim_digest::world_digest(&world), digest);
 }
+
+#[test]
+fn accepted_root_promise_and_its_original_clocks_preflight_before_any_writes() {
+    let (mut world, _, _) = prepared();
+    let mut base = world
+        .resource::<crate::world::config::WorldConfig>()
+        .clone();
+    let mut source = base.planning.take().unwrap();
+    source.required_commitment = Some("assistance".into());
+    let (compiled, _) =
+        phoenix_sim_world::world::planning::CompiledPlanning::load(source.clone(), |path| {
+            crate::content_fs::read_to_string(path).ok()
+        })
+        .unwrap();
+    base.planning = Some(source);
+    base.compiled_planning = Some(compiled);
+    world.insert_resource(base);
+    let mut runtime = world.resource_mut::<WorldContentRuntime>();
+    let chosen = runtime.plan_choice.as_ref().unwrap().chosen_tick;
+    runtime.plan_choice.as_mut().unwrap().required_commitment = Some("assistance".into());
+    runtime
+        .commitments
+        .record("assistance", "party", "terms", "resolution", chosen - 1)
+        .unwrap();
+    drop(runtime);
+    let saved = capture(&world);
+    crate::snapshot::activities::validate(&world, &saved).unwrap();
+    let before = capture(&world);
+    let digest = crate::sim_digest::world_digest(&world);
+    for fault in 0..6 {
+        let mut forged = saved.clone();
+        let state = forged.scenario.as_mut().unwrap();
+        match fault {
+            0 => state.commitments.records.clear(),
+            1 => {
+                state
+                    .commitments
+                    .records
+                    .push(state.commitments.records[0].clone());
+            }
+            2 => state.commitments.records[0].made_at_tick = chosen + 1,
+            3 => {
+                state.commitments.records[0].state =
+                    crate::world::commitments::CommitmentState::Kept;
+                state.commitments.records[0].resolved_at_tick = Some(chosen - 1);
+            }
+            4 => state.plan_choice.as_mut().unwrap().required_commitment = None,
+            _ => {
+                state.plan_choice = None;
+                state.situations.instances.clear();
+            }
+        }
+        assert!(
+            crate::snapshot::activities::validate(&world, &forged).is_err(),
+            "forged promise binding {fault}"
+        );
+        assert!(!restore(&mut world, &forged).is_complete());
+        assert_eq!(capture(&world), before);
+        assert_eq!(crate::sim_digest::world_digest(&world), digest);
+    }
+}

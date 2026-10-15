@@ -17,6 +17,9 @@ mod runtime;
 #[path = "planning_temporal.rs"]
 pub mod temporal;
 
+#[path = "planning_commitment.rs"]
+mod commitment;
+
 #[cfg(test)]
 #[path = "planning_tests.rs"]
 mod tests;

@@ -102,6 +102,8 @@ pub struct DomainImport {
 #[serde(deny_unknown_fields)]
 pub struct PlanningConfig {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_commitment: Option<String>,
     pub task: String,
     pub arguments: BTreeMap<String, Value>,
     #[serde(rename = "import")]
@@ -235,6 +237,8 @@ pub struct MethodChoice {
 #[serde(deny_unknown_fields)]
 pub struct PlanChoice {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_commitment: Option<String>,
     pub root_arguments: BTreeMap<String, Value>,
     pub chosen_tick: u64,
     /// Accepted physical identity, validated through existing base/slot provenance.

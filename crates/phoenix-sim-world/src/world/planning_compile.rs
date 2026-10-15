@@ -176,7 +176,13 @@ impl CompiledPlanning {
         config: PlanningConfig,
         mut read: impl FnMut(&str) -> Option<String>,
     ) -> Result<(Self, Vec<DomainSource>), String> {
-        if !identifier(&config.id) || config.arguments.len() > 32 {
+        if !identifier(&config.id)
+            || config.arguments.len() > 32
+            || config
+                .required_commitment
+                .as_ref()
+                .is_some_and(|id| !text(id))
+        {
             return Err("invalid planning root identity/arguments".into());
         }
         validate_imports(&config.imports)?;

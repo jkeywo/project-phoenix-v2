@@ -55,11 +55,20 @@ pub(crate) fn fixture_for_effect(
         .iter_mut()
         .find(|component| component["kind"].as_str() == Some("jamming_emitter"))
         .unwrap();
-    component["config"]["effect"] = match effect {
-        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms => "comms",
-        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors => "sensors",
-    }
-    .into();
+    // The shipped profile omits the default Comms effect. TOML's IndexMut
+    // requires an existing key; insert this actual authored test variation.
+    component
+        .get_mut("config")
+        .and_then(toml::Value::as_table_mut)
+        .expect("actual jamming component has a configuration table")
+        .insert(
+            "effect".into(),
+            match effect {
+                phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms => "comms",
+                phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors => "sensors",
+            }
+            .into(),
+        );
     if effect == phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors {
         // Explicit accepted finite source receiver: self-exposure must not make
         // this intended sustained producer lose its own20-unit measured aim.
@@ -68,6 +77,22 @@ pub(crate) fn fixture_for_effect(
     }
     let config =
         crate::entities::config::EntityConfig::from_toml(&toml::to_string(&raw).unwrap()).unwrap();
+    assert_eq!(
+        phoenix_sim_gameplay::ship::composition::jamming_composition(
+            &config
+                .ship_config
+                .as_ref()
+                .unwrap()
+                .system(&id(OWNER))
+                .unwrap()
+                .components
+        )
+        .unwrap()
+        .config
+        .effect,
+        effect,
+        "fixture must select actual accepted effect hardware"
+    );
     let target_config = crate::entities::include_resolve::load_entity_config(if protected {
         "assets/entities/protection_cruiser.toml"
     } else {

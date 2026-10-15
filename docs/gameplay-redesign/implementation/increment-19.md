@@ -366,3 +366,25 @@ one Presentation visibility owner. Deployed is never an instruction to show an
 actor. Remove a hide only when all current reasons clear, restoring that owner's
 recorded prior Visibility. The same owner runs without an observer gate in
 serverless previews; it never changes simulation or saved custody.
+
+
+### Next fixed equipment consumer: battery beam turret
+
+Adopt the existing `EntityConfig::is_static_point_defence` spawn consumer for an
+optional fixed beam turret. Its actual AI-only TacticalRadar and PhaserBank
+Systems use explicit Console feeds and the existing Broad/weapon target, generic
+beam, local EnergyNetwork and common Ship bundle. This is a narrow additional
+accepted fixed equipment composition; it does not admit propulsion, behaviour,
+projectile/magazine families, passengers or unrelated actuators. Existing sensor
+probes/pods remain accepted unchanged. No profile-specific controller or marker
+is introduced.
+
+The turret keeps the existing finite paid Bay lifecycle, one custody and physical
+identity, damage and stored Disabled boundary. Deployed onboard ordinary AI uses
+only its own earned radar picture, including own/hostile filtering, independently
+of a parent communications link. Add actual Human/AI launch, paid acquired firing,
+stored inactivity and whole-JSON360/custody/no-write evidence plus accepted
+Workshop composition/Preview/Test. Native execution, physical-device journeys and
+full increment19 completion remain separate from source checkpoints. An identity
+emitter decoy follows this coherent turret checkpoint; finite-round and moving
+craft remain later supported compositions.

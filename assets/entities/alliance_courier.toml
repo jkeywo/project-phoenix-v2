@@ -3278,3 +3278,9 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Ordinary ships expose an explicit selectable Target capability to paid radar.
+# Faction relations, observed identity and existing command admission still decide use.
+[target]
+tags = ["ship"]
+threat_level = "none"

@@ -2,6 +2,13 @@
 # response is scoped to this declared capability and its unobstructed geometry;
 # an intrusive request is not universally detectable by every subject.
 includes = ["../../assets/entities/alliance_cruiser.toml"]
+# Public subject identity is deliberately unique; mission references are not hidden UUID aliases.
+name = "survey-cache"
+
+# This scenario explicitly exposes the subject as a selectable ship contact.
+[target]
+tags = ["ship"]
+threat_level = "none"
 
 [infrastructure]
 publish = false
@@ -11,12 +18,90 @@ property = { kind = "capacity", capacity = "machinery_parts" }
 intrusive = true
 step = 1
 
+# Sensing is an atomic profile. Keep all inherited actual instruments while
+# changing only this receiver's authored detection geometry and sensitivity.
+[[sensing.focused]]
+reading_ticks = 120
+system = "sensors"
+work_secs = 2
+history_limit = 64
+unfinished_retention_secs = 0
+# Provisional forecast horizon: conditional on the last observed trend continuing.
+forecast = { horizon_secs = 120 }
+
+# [ai] First supported enquiry adapters, provisional relative work tuning.
+# General retains its existing work and energy use. Additional questions share
+# this same scanner, and only subjects with explicit observation rules answer.
+[[sensing.focused.aims]]
+aim = "environment"
+work_multiplier = 1
+resource_multiplier = 1
+
+[[sensing.focused.aims]]
+aim = "resources"
+work_multiplier = 1
+resource_multiplier = 2
+intrusive = true
+
+[[sensing.focused.aims]]
+aim = "anomaly"
+work_multiplier = 2
+resource_multiplier = 1
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
 [[sensing.passive]]
 system = "passive-receiver"
 sample_interval_secs = 0.1
 min_signal_strength = 0.000001
 bearing_error_rad = 0.01
+
 [sensing.passive.mount]
 facing_deg = 0
 arc_deg = 360
 range = 200
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "helm-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"
+# Sharing is an explicit operator choice; reception alone does not publish a feed.
+[[sensing.sharing]]
+system = "sensor-radar"
+share_own_faction = false
+receive = true
+
+[[sensing.sharing]]
+system = "tactical-radar"
+share_own_faction = false
+receive = true

@@ -264,6 +264,19 @@ fn external_stage_world() -> (
         .physical_work
         .values()
         .all(|work| work.target.is_none() && work.requested_target.as_ref() == Some(&work_target)));
+    // This bare work-owner fixture has no Publish schedule. Populate the same
+    // actual fitted observation views that restore rebuilds, so the complete
+    // continuation comparison starts at a supported publication boundary.
+    use bevy::ecs::system::RunSystemOnce;
+    world
+        .run_system_once(crate::science::server::publish_scan_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::science::passive::publish)
+        .unwrap();
+    world
+        .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+        .unwrap();
     (world, source, target, work_target)
 }
 
@@ -379,9 +392,16 @@ fn duplicate_cross_actor_work_or_wrong_source_reservation_refuses_without_writes
             .spawned_entities
             .clone();
         let report = restore(&mut world, &payload);
-        assert!(report.gaps.iter().any(|gap| matches!(gap, RestoreGap::RepairJobsInvalid { reason, .. }
-            if reason.contains(if wrong_stock { "source inventory claims disagree" } else { "same physical task" })
-        )), "{report:?}");
+        assert!(
+            report.gaps.iter().any(|gap| match gap {
+                RestoreGap::RepairJobsInvalid { reason, .. } if wrong_stock =>
+                    reason.contains("source inventory claims disagree"),
+                RestoreGap::ResourceStateInvalid { reason, .. } if !wrong_stock =>
+                    reason == "multiple jobs own the same physical equipment task",
+                _ => false,
+            }),
+            "{report:?}"
+        );
         assert_eq!(report.entities_spawned, 0);
         assert_eq!(world.entities().len(), count);
         assert_eq!(

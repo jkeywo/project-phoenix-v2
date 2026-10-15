@@ -325,7 +325,19 @@ fn prepare_capture_fixture(app: &mut App) {
         .init_resource::<crate::gm::actions::action::GmActionJournal>()
         .init_resource::<crate::gm::operations::puppet::StationPuppets>()
         .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
-        .init_resource::<crate::core::report::MissionReport>();
+        .init_resource::<crate::core::report::MissionReport>()
+        .add_systems(
+            Update,
+            crate::regions::server::rebuild_region_read_cache.before(tick_scans),
+        )
+        .add_systems(
+            Update,
+            (
+                crate::science::passive::publish,
+                crate::ship::sensors::publish_sensor_radar_blackboard,
+            )
+                .after(publish_scan_blackboard),
+        );
     let world = app.world_mut();
     // Production installs these optional legacy row types. Registering a type
     // creates no actor state: the existing capture gate can now see the actual

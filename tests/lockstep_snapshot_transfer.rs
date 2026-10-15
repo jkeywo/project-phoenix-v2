@@ -131,21 +131,66 @@ fn boot_to_restore_point(snapshot: &PhoenixSnapshot) -> App {
 
 /// The liveness guard: refuse a capture of a world at rest, or the agreement
 /// below is agreement about two hulls coasting.
-fn assert_capture_is_alive(payload: &PhoenixSnapshot) {
+fn assert_capture_is_alive(payload: &PhoenixSnapshot, world: &bevy::prelude::World) {
     assert!(!payload.entities.is_empty(), "the capture found no ships");
     let moving = payload.entities.iter().any(|e| {
         e.physics
             .is_some_and(|p| p[4] != 0.0 || p[6] != 0.0 || p[7] != 0.0)
     });
     assert!(moving, "no captured ship has any velocity");
-    let damaged = payload.entities.iter().any(|e| {
-        e.hull
-            .as_ref()
-            .is_some_and(|rows| rows.iter().any(|(_, current, max)| current < max))
+    let mut owners = world
+        .try_query::<(
+            &EntityUuid,
+            &project_phoenix::ship::compartment_damage::ShipDamage,
+        )>()
+        .expect("the running host registers its physical damage owner");
+    let definitions: std::collections::BTreeMap<_, _> = owners
+        .iter(world)
+        .map(|(uuid, damage)| (uuid.0.as_str(), &damage.definition))
+        .collect();
+    let damaged = payload.entities.iter().any(|row| {
+        let Some(damage) = &row.physical_damage else {
+            return false;
+        };
+        definitions
+            .get(row.uuid.as_str())
+            .expect("captured physical damage has its actual accepted owner")
+            .interior
+            .compartments
+            .iter()
+            .any(|room| damage.compartments[&room.id].hp < f64::from(room.max_hp))
     });
+    let observed: Vec<_> = payload
+        .entities
+        .iter()
+        .map(|row| {
+            let views: Vec<_> = row
+                .blackboards
+                .iter()
+                .filter_map(|(source, board)| {
+                    let tracks = project_phoenix::science::contact_routing::observations(board)?;
+                    Some((
+                        source,
+                        tracks
+                            .iter()
+                            .map(|track| {
+                                (
+                                    &track.contact_id,
+                                    track.selectable,
+                                    track.predicted,
+                                    &track.identity,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .collect();
+            (&row.uuid, &row.control, views)
+        })
+        .collect();
     assert!(
         damaged,
-        "no captured ship has taken damage — nothing is shooting"
+        "no captured ship has taken damage — nothing is shooting; acquired={observed:?}"
     );
 }
 
@@ -1609,7 +1654,7 @@ fn stalled_join_timeout_is_the_same_protocol_boundary_at_unequal_render_cadence(
 fn a_record_transfers_between_hosts_and_the_two_agree_after_restore() {
     let mut live = boot();
     step(&mut live, CAPTURE_AT);
-    assert_capture_is_alive(&capture(live.world()));
+    assert_capture_is_alive(&capture(live.world()), live.world());
 
     let (payload, captured_digest, frames) = capture_and_frame(&live, None);
     assert!(
@@ -1839,7 +1884,10 @@ fn the_transfer_carries_every_persisted_dimension() {
         "Comms state crosses the transfer exactly as captured"
     );
     assert!(
-        reassembled.entities.iter().any(|e| e.hull.is_some()),
+        reassembled
+            .entities
+            .iter()
+            .any(|e| e.physical_damage.is_some()),
         "every ship's authoritative state rides the transfer"
     );
 }

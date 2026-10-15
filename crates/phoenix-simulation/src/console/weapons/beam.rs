@@ -1739,7 +1739,11 @@ pub(crate) fn tick_beams_apply_damage(
             continue;
         };
         if slot.impact_sample_target.as_deref() != Some(state.effective_target_uuid.as_str()) {
-            slot.impact_sample_target = Some(state.effective_target_uuid.clone());
+            // A target key belongs to an actual retained physical sample. A
+            // shield-only hit has no sample and must remain the canonical empty
+            // pair that snapshots restore, rather than retaining a redundant
+            // key which makes an otherwise identical continuation fold differ.
+            slot.impact_sample_target = None;
             slot.impact_sample = None;
         }
         let delta = [
@@ -1864,6 +1868,8 @@ pub(crate) fn tick_beams_apply_damage(
                                 rng,
                             ) {
                                 Ok(result) => {
+                                    slot.impact_sample_target =
+                                        Some(state.effective_target_uuid.clone());
                                     slot.impact_sample = Some(result.sample);
                                     (result.structural_loss as f32, damage.catastrophic())
                                 }

@@ -30,6 +30,7 @@ sources:
   - crates/phoenix-sim-gameplay/src/regions/field.rs
   - crates/phoenix-sim-gameplay/src/regions/signal_path.rs
   - crates/phoenix-simulation/src/snapshot/spatial_fields.rs
+  - crates/phoenix-simulation/src/snapshot/sensing_publications.rs
 ---
 
 # Sensing and Spatial Fields
@@ -203,3 +204,15 @@ controller, inventory or observation store is involved.
 
 The broader redesign contract and incomplete work belong in PASM and the
 implementation/acceptance records, rather than this current-owner index.
+
+Restore rebuilds missing derived publications, then `sensing_publications::restore_held`
+retains only a saved radar's `tracks` when they exactly match its canonical paid
+instrument state at the saved counter or preceding fixed-step publication.
+Actual System ownership and publication kind must agree. Forged or missing views
+keep the rebuilt projection; controls, selections, physical routing and acquisition
+clocks are never copied from that held view. Ordinary publication advances its age
+on the next tick.
+
+The Alliance base hulls declare an actual `Target` capability with ship selection
+tags. Display tags alone do not make an entity selectable: the paid radar record
+and the receiving Console's permitted feed still govern target admission.

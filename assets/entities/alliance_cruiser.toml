@@ -6637,3 +6637,8 @@ mismatch_loss = 0.1
 property = { kind = "shield_frequency" }
 normal = true
 step = 0.01
+# Ordinary ships expose an explicit selectable Target capability to paid radar.
+# Faction relations, observed identity and existing command admission still decide use.
+[target]
+tags = ["ship"]
+threat_level = "none"

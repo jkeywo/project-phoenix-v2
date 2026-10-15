@@ -613,3 +613,71 @@ fn actual_opaque_signal_path_prevents_return_despite_healthy_paid_receiver() {
             .is_empty()
     );
 }
+
+#[test]
+fn every_alliance_hull_is_an_actual_selectable_ship_and_missing_target_still_denies() {
+    for hull in ["courier", "destroyer", "cruiser", "battleship"] {
+        let (mut app, observer, old_target, profile) = rig();
+        app.world_mut().despawn(old_target);
+        let config = crate::entities::include_resolve::load_entity_config(&format!(
+            "assets/entities/alliance_{hull}.toml"
+        ))
+        .unwrap();
+        let source = "authored-ship-target";
+        let target = crate::entities::spawner::spawn_entity(
+            &mut app.world_mut().commands(),
+            &config,
+            Vec3::new(10.0, 0.0, 0.0),
+            source.into(),
+            None,
+        );
+        app.world_mut().flush();
+        fund(&mut app, observer, &profile, 1.0);
+        app.update();
+        let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+        let alias = state
+            .contact_for_source(source)
+            .expect("actual paid ship target")
+            .to_owned();
+        let public = state.projection(&profile, 0, 0.5).unwrap();
+        let measured = public
+            .iter()
+            .find(|record| record.contact_id == alias)
+            .unwrap();
+        assert!(measured.selectable && !measured.predicted, "{hull}");
+        assert_ne!(alias, source);
+        assert!(!serde_json::to_string(&public).unwrap().contains(source));
+        // Display/physical ship identity alone cannot grant selection. The
+        // actual capability is removed, not replaced by a broad fallback.
+        app.world_mut()
+            .entity_mut(target)
+            .remove::<crate::entities::spawner::EntityTarget>();
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+        fund(&mut app, observer, &profile, 1.0);
+        app.update();
+        let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+        let public = state.projection(&profile, 1, 0.5).unwrap();
+        assert!(public.iter().all(|record| !record.selectable), "{hull}");
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut()
+            .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+            .unwrap();
+        let world = app.world();
+        assert!(
+            crate::science::contact_routing::resolve(
+                &world
+                    .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+                    .unwrap()
+                    .0,
+                world
+                    .get::<crate::server_app::ShipSystemBlackboards>(observer)
+                    .unwrap(),
+                world.get::<BroadTracks>(observer),
+                &SystemId("sensors".into()),
+                &alias,
+            )
+            .is_none(),
+            "{hull}"
+        );
+    }
+}

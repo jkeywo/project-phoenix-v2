@@ -162,6 +162,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
         );
     }
+    super::sensing_publications::restore_held(world, snapshot);
 
     report
 }
